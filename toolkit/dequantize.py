@@ -6,7 +6,7 @@ import torch
 
 
 def hacked_state_dict(self, *args, **kwargs):
-    orig_state_dict = self.orig_state_dict(*args, **kwargs)
+    orig_state_dict = self._aitk_orig_state_dict(*args, **kwargs)
     new_state_dict = {}
     for key, value in orig_state_dict.items():
         if key.endswith("._scale"):
@@ -46,8 +46,13 @@ def hacked_state_dict(self, *args, **kwargs):
 
 # hacks the state dict so we can dequantize before saving
 def patch_dequantization_on_save(model):
-    model.orig_state_dict = model.state_dict
+    if getattr(model, "_aitk_dequantize_on_save_patched", False):
+        return
+    model._aitk_orig_state_dict = model.state_dict
+    # Keep the old attribute name for any callers that already use it.
+    model.orig_state_dict = model._aitk_orig_state_dict
     model.state_dict = partial(hacked_state_dict, model)
+    model._aitk_dequantize_on_save_patched = True
   
   
 def dequantize_parameter(module: torch.nn.Module, param_name: str) -> bool:

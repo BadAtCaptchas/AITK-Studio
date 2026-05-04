@@ -36,6 +36,8 @@ conda activate ai-toolkit
 
 **2) Install PyTorch**
 
+DGX Spark and other Blackwell systems need CUDA 12.8+ PyTorch wheels. DGX OS should use the CUDA 13.0 wheel index:
+
 ```
 pip3 install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu130
 ```

@@ -17,6 +17,11 @@ from toolkit.dequantize import patch_dequantization_on_save
 from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze, QTensor
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
+from toolkit.quantized_cache import (
+    QuantizedModelCache,
+    is_quanto_qtype,
+    quantized_cache_key,
+)
 
 from transformers import AutoProcessor, Mistral3ForConditionalGeneration
 from .src.model import Flux2, Flux2Params
@@ -91,6 +96,85 @@ class Flux2Model(BaseModel):
     def get_flux2_params(self):
         return Flux2Params()
 
+    def _get_quantized_cache(self):
+        return QuantizedModelCache(self.model_config.quantize_cache_dir)
+
+    def _can_use_quantized_cache(self, qtype: str, component: str) -> bool:
+        if not self.model_config.quantize_cache:
+            return False
+        if not is_quanto_qtype(qtype):
+            self.print_and_status_update(
+                f"Skipping {component} quantized cache for torchao qtype {qtype}"
+            )
+            return False
+        if component == "transformer" and self.model_config.accuracy_recovery_adapter is not None:
+            self.print_and_status_update(
+                "Skipping transformer quantized cache with accuracy recovery adapter"
+            )
+            return False
+        return True
+
+    def _get_transformer_cache_key(self, transformer_path: str):
+        return quantized_cache_key(
+            "flux2_transformer",
+            {
+                "arch": self.arch,
+                "base_model_version": self.get_base_model_version(),
+                "class": self.__class__.__name__,
+                "dtype": str(self.torch_dtype),
+                "filename": self.flux2_te_filename,
+                "model_path": self.model_config.name_or_path,
+                "params": self.get_flux2_params().__class__.__name__,
+                "qtype": self.model_config.qtype,
+                "quantize_kwargs": self.model_config.quantize_kwargs,
+            },
+            sources=[transformer_path],
+        )
+
+    def _load_transformer_quantized_cache(self, transformer, transformer_path: str) -> bool:
+        if not self._can_use_quantized_cache(self.model_config.qtype, "transformer"):
+            return False
+
+        cache_key, _ = self._get_transformer_cache_key(transformer_path)
+        cache = self._get_quantized_cache()
+        if not cache.has_entry("flux2_transformer", cache_key):
+            return False
+
+        try:
+            self.print_and_status_update("Loading transformer quantized cache")
+            cache.load(
+                transformer,
+                "flux2_transformer",
+                cache_key,
+                device=torch.device("cpu"),
+            )
+            patch_dequantization_on_save(transformer)
+            return True
+        except Exception as e:
+            self.print_and_status_update(
+                f"Failed to load transformer quantized cache, rebuilding: {e}"
+            )
+            return False
+
+    def _save_transformer_quantized_cache(self, transformer, transformer_path: str):
+        if not self._can_use_quantized_cache(self.model_config.qtype, "transformer"):
+            return
+
+        cache_key, key_payload = self._get_transformer_cache_key(transformer_path)
+        try:
+            self.print_and_status_update("Saving transformer quantized cache")
+            self._get_quantized_cache().save(
+                transformer,
+                "flux2_transformer",
+                cache_key,
+                key_payload,
+                extra_metadata={"source_path": transformer_path},
+            )
+        except Exception as e:
+            self.print_and_status_update(
+                f"Failed to save transformer quantized cache: {e}"
+            )
+
     def load_te(self):
         dtype = self.torch_dtype
         self.print_and_status_update("Loading Mistral")
@@ -147,24 +231,30 @@ class Flux2Model(BaseModel):
                 token=HF_TOKEN,
             )
 
-        transformer_state_dict = load_file(transformer_path, device="cpu")
-
-        # cast to dtype
-        for key in transformer_state_dict:
-            transformer_state_dict[key] = transformer_state_dict[key].to(dtype)
-
-        transformer.load_state_dict(transformer_state_dict, assign=True)
-
+        loaded_transformer_from_cache = False
         if self.model_config.quantize:
-            # patch the state dict method
-            patch_dequantization_on_save(transformer)
-            # Avoid full-model peak VRAM allocation before quantization.
-            self.print_and_status_update("Keeping transformer on CPU for quantization")
-            self.print_and_status_update("Quantizing Transformer")
-            quantize_model(self, transformer)
-            flush()
-        else:
-            transformer.to(self.device_torch, dtype=dtype)
+            loaded_transformer_from_cache = self._load_transformer_quantized_cache(
+                transformer, transformer_path
+            )
+
+        if not loaded_transformer_from_cache:
+            transformer_state_dict = load_file(transformer_path, device="cpu")
+
+            # cast to dtype
+            for key in transformer_state_dict:
+                transformer_state_dict[key] = transformer_state_dict[key].to(dtype)
+
+            transformer.load_state_dict(transformer_state_dict, assign=True)
+
+            if self.model_config.quantize:
+                # Avoid full-model peak VRAM allocation before quantization.
+                self.print_and_status_update("Keeping transformer on CPU for quantization")
+                self.print_and_status_update("Quantizing Transformer")
+                quantize_model(self, transformer)
+                self._save_transformer_quantized_cache(transformer, transformer_path)
+                flush()
+            else:
+                transformer.to(self.device_torch, dtype=dtype)
         flush()
 
         if (

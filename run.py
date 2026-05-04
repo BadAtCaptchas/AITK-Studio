@@ -21,6 +21,9 @@ os.environ['DISABLE_TELEMETRY'] = 'YES'
 
 # set torch to trace mode
 import torch
+from toolkit.cuda_compat import check_blackwell_cuda_compatibility
+
+check_blackwell_cuda_compatibility(torch)
     
 # check if we have DEBUG_TOOLKIT in env
 if os.environ.get("DEBUG_TOOLKIT", "0") == "1":

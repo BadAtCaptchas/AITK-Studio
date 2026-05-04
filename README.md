@@ -88,6 +88,20 @@ pip install --no-cache-dir torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --
 pip install -r requirements.txt
 ```
 
+### NVIDIA Blackwell / RTX 50-series GPUs
+
+Blackwell GPUs such as the RTX 50-series require a PyTorch build with CUDA 12.8 or newer and `sm_120` kernels. If an older CUDA wheel is installed, PyTorch may still report that CUDA is available, but model loading or training can fail or run poorly once kernels are used.
+
+Use the CUDA 12.8 PyTorch install command above on Windows and standard Linux systems. DGX OS users should use the CUDA 13.0 command in `dgx_instructions.md`.
+
+You can verify the active environment with:
+
+```bash
+python scripts/check_blackwell_cuda.py
+```
+
+AI Toolkit also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
+
 MacOS:
 
 Experimental support for Silicon Macs is available. I do not have a Mac with enough RAM to fully test this

@@ -19,6 +19,7 @@ import {
 } from '@/server/trainingJobTransfer';
 import {
   createTrainingJobExportProgress,
+  isTrainingJobExportCancellationRequested,
   updateTrainingJobExportProgress,
   type TrainingJobExportProgressSnapshot,
 } from '@/server/trainingJobExportProgress';
@@ -62,6 +63,36 @@ type ArchiveJsonEntry = {
   size: number;
 };
 
+type ShouldCancelExport = () => boolean;
+
+class TrainingJobExportCanceledError extends Error {
+  constructor() {
+    super('Training job export canceled');
+    this.name = 'TrainingJobExportCanceledError';
+  }
+}
+
+function isTrainingJobExportCanceledError(error: unknown) {
+  return error instanceof TrainingJobExportCanceledError;
+}
+
+function throwIfExportCanceled(shouldCancel: ShouldCancelExport) {
+  if (shouldCancel()) {
+    throw new TrainingJobExportCanceledError();
+  }
+}
+
+async function unlinkIfExists(filePath: string | null) {
+  if (!filePath) return;
+  try {
+    await fsp.unlink(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn(`Unable to remove canceled export file ${filePath}:`, error);
+    }
+  }
+}
+
 function toArchivePath(...segments: string[]) {
   return path.posix.join(...segments.map(segment => segment.replace(/\\/g, '/')));
 }
@@ -71,24 +102,32 @@ async function collectArchiveFilesForPath(
   archivePath: string,
   isDirectory: boolean,
   filter?: (absolutePath: string, relativePath: string) => boolean,
+  shouldCancel: ShouldCancelExport = () => false,
 ) {
+  throwIfExportCanceled(shouldCancel);
+
   if (!isDirectory) {
     const stat = await fsp.stat(sourcePath);
+    throwIfExportCanceled(shouldCancel);
     return [{ sourcePath, archivePath: archivePath.replace(/\\/g, '/'), size: stat.size }];
   }
 
   const files = await listFilesRecursive(sourcePath, filter || (() => true));
-  return Promise.all(
-    files.map(async relativePath => {
-      const absolutePath = path.join(sourcePath, relativePath);
-      const stat = await fsp.stat(absolutePath);
-      return {
-        sourcePath: absolutePath,
-        archivePath: toArchivePath(archivePath, relativePath),
-        size: stat.size,
-      };
-    }),
-  );
+  const entries: ArchiveFileEntry[] = [];
+
+  for (const relativePath of files) {
+    throwIfExportCanceled(shouldCancel);
+    const absolutePath = path.join(sourcePath, relativePath);
+    const stat = await fsp.stat(absolutePath);
+    entries.push({
+      sourcePath: absolutePath,
+      archivePath: toArchivePath(archivePath, relativePath),
+      size: stat.size,
+    });
+  }
+
+  throwIfExportCanceled(shouldCancel);
+  return entries;
 }
 
 function jsonArchiveEntry(archivePath: string, value: unknown): ArchiveJsonEntry {
@@ -116,10 +155,13 @@ async function performTrainingJobExport(
   jobID: string,
   includeDatasets: boolean,
   onProgress?: (progress: ExportProgressUpdate) => void,
+  shouldCancel: ShouldCancelExport = () => false,
 ) {
   onProgress?.({ status: 'preparing', message: 'Preparing export', percent: 2 });
+  throwIfExportCanceled(shouldCancel);
 
   const job = await prisma.job.findUnique({ where: { id: jobID } });
+  throwIfExportCanceled(shouldCancel);
   if (!job) {
     const error = new Error('Job not found');
     (error as any).status = 404;
@@ -134,6 +176,7 @@ async function performTrainingJobExport(
   const warnings: string[] = [];
   const jobConfig = JSON.parse(job.job_config);
   const trainingRoot = await getTrainingFolder();
+  throwIfExportCanceled(shouldCancel);
   const jobFolder = path.join(trainingRoot, job.name);
   if (!fs.existsSync(jobFolder)) {
     const error = new Error('Training folder not found');
@@ -142,6 +185,7 @@ async function performTrainingJobExport(
   }
 
   const latestCheckpoint = await findLatestCheckpoint(jobFolder, job.step);
+  throwIfExportCanceled(shouldCancel);
   const optimizerIncluded = fs.existsSync(path.join(jobFolder, 'optimizer.pt'));
   if (job.status === 'running') {
     warnings.push('Job is running; export includes only the latest checkpoint and optimizer already saved to disk.');
@@ -160,8 +204,10 @@ async function performTrainingJobExport(
     jobConfig,
     includeDatasets,
   );
+  throwIfExportCanceled(shouldCancel);
   warnings.push(...datasetWarnings);
   onProgress?.({ status: 'preparing', message: 'Scanning files', percent: 5, warnings });
+  throwIfExportCanceled(shouldCancel);
 
   const modelReferences = collectModelReferences(jobConfig);
   const manifest: TrainingJobExportManifest = {
@@ -202,14 +248,23 @@ async function performTrainingJobExport(
     'training',
     true,
     shouldIncludeTrainingExportPath,
+    shouldCancel,
   );
+  throwIfExportCanceled(shouldCancel);
   const datasetFiles = (
     await Promise.all(
       datasetMappings.map(mapping =>
-        collectArchiveFilesForPath(resolveConfigPath(mapping.originalPath), mapping.archivePath, mapping.isDirectory),
+        collectArchiveFilesForPath(
+          resolveConfigPath(mapping.originalPath),
+          mapping.archivePath,
+          mapping.isDirectory,
+          undefined,
+          shouldCancel,
+        ),
       ),
     )
   ).flat();
+  throwIfExportCanceled(shouldCancel);
 
   const jobJson = {
     id: job.id,
@@ -242,90 +297,163 @@ async function performTrainingJobExport(
   const fileName = makeExportFileName(job.name);
   const outputPath = path.join(jobFolder, fileName);
   const tempPath = path.join(jobFolder, `.aitk-export-${Date.now()}.tmp`);
-  if (fs.existsSync(outputPath)) {
-    await fsp.unlink(outputPath);
-  }
+  let outputRenamed = false;
 
-  onProgress?.({
-    status: 'zipping',
-    message: `Zipping 0 / ${totalEntries} files`,
-    percent: totalEntries === 0 ? 95 : 8,
-    entriesProcessed: 0,
-    entriesTotal: totalEntries,
-    bytesProcessed: 0,
-    bytesTotal: totalBytes,
-    warnings,
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    const output = fs.createWriteStream(tempPath);
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    let lastProgressUpdate = 0;
-
-    output.on('close', resolve);
-    output.on('error', reject);
-    archive.on('error', reject);
-    archive.on('progress', progress => {
-      const now = Date.now();
-      if (now - lastProgressUpdate < 250 && progress.entries.processed < totalEntries) return;
-      lastProgressUpdate = now;
-
-      const entriesProcessed = Math.min(progress.entries.processed, totalEntries);
-      const bytesProcessed = Math.min(progress.fs.processedBytes, totalBytes);
-      const ratio =
-        totalBytes > 0
-          ? bytesProcessed / totalBytes
-          : totalEntries > 0
-            ? entriesProcessed / totalEntries
-            : 1;
-      const percent = Math.min(95, Math.max(8, Math.round(8 + ratio * 87)));
-
-      onProgress?.({
-        status: 'zipping',
-        message: `Zipping ${entriesProcessed} / ${totalEntries} files (${formatBytes(bytesProcessed)} / ${formatBytes(totalBytes)})`,
-        percent,
-        entriesProcessed,
-        entriesTotal: totalEntries,
-        bytesProcessed,
-        bytesTotal: totalBytes,
-      });
+  try {
+    throwIfExportCanceled(shouldCancel);
+    onProgress?.({
+      status: 'zipping',
+      message: `Zipping 0 / ${totalEntries} files`,
+      percent: totalEntries === 0 ? 95 : 8,
+      entriesProcessed: 0,
+      entriesTotal: totalEntries,
+      bytesProcessed: 0,
+      bytesTotal: totalBytes,
+      warnings,
     });
-    archive.pipe(output);
 
-    for (const entry of jsonEntries) {
-      archive.append(entry.content, { name: entry.archivePath });
+    await new Promise<void>((resolve, reject) => {
+      const output = fs.createWriteStream(tempPath);
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      let lastProgressUpdate = 0;
+      let settled = false;
+      let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+      const settle = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (cleanupTimer !== null) {
+          clearInterval(cleanupTimer);
+        }
+        callback();
+      };
+      const resolveOnce = () => settle(resolve);
+      const rejectOnce = (error: unknown) => settle(() => reject(error));
+      const cancelArchive = () => {
+        if (settled) return;
+        const error = new TrainingJobExportCanceledError();
+        onProgress?.({ status: 'canceling', message: 'Canceling export...' });
+        archive.abort();
+        output.destroy(error);
+        rejectOnce(error);
+      };
+
+      cleanupTimer = setInterval(() => {
+        if (shouldCancel()) {
+          cancelArchive();
+        }
+      }, 250);
+
+      output.on('close', resolveOnce);
+      output.on('error', rejectOnce);
+      archive.on('error', rejectOnce);
+      archive.on('progress', progress => {
+        if (shouldCancel()) {
+          cancelArchive();
+          return;
+        }
+
+        const now = Date.now();
+        if (now - lastProgressUpdate < 250 && progress.entries.processed < totalEntries) return;
+        lastProgressUpdate = now;
+
+        const entriesProcessed = Math.min(progress.entries.processed, totalEntries);
+        const bytesProcessed = Math.min(progress.fs.processedBytes, totalBytes);
+        const ratio =
+          totalBytes > 0
+            ? bytesProcessed / totalBytes
+            : totalEntries > 0
+              ? entriesProcessed / totalEntries
+              : 1;
+        const percent = Math.min(95, Math.max(8, Math.round(8 + ratio * 87)));
+
+        onProgress?.({
+          status: 'zipping',
+          message: `Zipping ${entriesProcessed} / ${totalEntries} files (${formatBytes(bytesProcessed)} / ${formatBytes(totalBytes)})`,
+          percent,
+          entriesProcessed,
+          entriesTotal: totalEntries,
+          bytesProcessed,
+          bytesTotal: totalBytes,
+        });
+      });
+      archive.pipe(output);
+
+      try {
+        for (const entry of jsonEntries) {
+          throwIfExportCanceled(shouldCancel);
+          archive.append(entry.content, { name: entry.archivePath });
+        }
+        for (const entry of fileEntries) {
+          throwIfExportCanceled(shouldCancel);
+          archive.file(entry.sourcePath, { name: entry.archivePath });
+        }
+
+        throwIfExportCanceled(shouldCancel);
+        archive.finalize().catch(rejectOnce);
+      } catch (error) {
+        archive.abort();
+        output.destroy(error as Error);
+        rejectOnce(error);
+      }
+    });
+
+    throwIfExportCanceled(shouldCancel);
+    onProgress?.({
+      status: 'finalizing',
+      message: 'Finalizing archive',
+      percent: 98,
+      entriesProcessed: totalEntries,
+      entriesTotal: totalEntries,
+      bytesProcessed: totalBytes,
+      bytesTotal: totalBytes,
+    });
+
+    throwIfExportCanceled(shouldCancel);
+    if (fs.existsSync(outputPath)) {
+      await fsp.unlink(outputPath);
     }
-    for (const entry of fileEntries) {
-      archive.file(entry.sourcePath, { name: entry.archivePath });
+    await fsp.rename(tempPath, outputPath);
+    outputRenamed = true;
+    throwIfExportCanceled(shouldCancel);
+
+    return {
+      zipPath: outputPath,
+      fileName,
+      warnings,
+    };
+  } catch (error) {
+    if (isTrainingJobExportCanceledError(error)) {
+      await unlinkIfExists(tempPath);
+      if (outputRenamed) {
+        await unlinkIfExists(outputPath);
+      }
     }
-
-    archive.finalize().catch(reject);
-  });
-
-  onProgress?.({
-    status: 'finalizing',
-    message: 'Finalizing archive',
-    percent: 98,
-    entriesProcessed: totalEntries,
-    entriesTotal: totalEntries,
-    bytesProcessed: totalBytes,
-    bytesTotal: totalBytes,
-  });
-
-  await fsp.rename(tempPath, outputPath);
-
-  return {
-    zipPath: outputPath,
-    fileName,
-    warnings,
-  };
+    throw error;
+  }
 }
 
 async function runBackgroundExport(exportID: string, jobID: string, includeDatasets: boolean) {
   try {
-    const result = await performTrainingJobExport(jobID, includeDatasets, progress =>
-      updateTrainingJobExportProgress(exportID, progress),
+    const result = await performTrainingJobExport(
+      jobID,
+      includeDatasets,
+      progress => updateTrainingJobExportProgress(exportID, progress),
+      () => isTrainingJobExportCancellationRequested(exportID),
     );
+    if (isTrainingJobExportCancellationRequested(exportID)) {
+      await unlinkIfExists(result.zipPath);
+      updateTrainingJobExportProgress(exportID, {
+        status: 'canceled',
+        message: 'Export canceled',
+        zipPath: null,
+        fileName: null,
+        error: null,
+        cancelRequested: true,
+      });
+      return;
+    }
+
     updateTrainingJobExportProgress(exportID, {
       status: 'completed',
       message: 'Export ready',
@@ -335,6 +463,18 @@ async function runBackgroundExport(exportID: string, jobID: string, includeDatas
       warnings: result.warnings,
     });
   } catch (error) {
+    if (isTrainingJobExportCanceledError(error) || isTrainingJobExportCancellationRequested(exportID)) {
+      updateTrainingJobExportProgress(exportID, {
+        status: 'canceled',
+        message: 'Export canceled',
+        zipPath: null,
+        fileName: null,
+        error: null,
+        cancelRequested: true,
+      });
+      return;
+    }
+
     console.error('Background training job export failed:', error);
     updateTrainingJobExportProgress(exportID, {
       status: 'failed',

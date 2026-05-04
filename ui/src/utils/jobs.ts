@@ -6,7 +6,7 @@ export type TrainingJobExportProgress = {
   exportID: string;
   jobID: string;
   includeDatasets: boolean;
-  status: 'queued' | 'preparing' | 'zipping' | 'finalizing' | 'completed' | 'failed';
+  status: 'queued' | 'preparing' | 'zipping' | 'finalizing' | 'completed' | 'failed' | 'canceling' | 'canceled';
   message: string;
   percent: number;
   entriesProcessed: number;
@@ -17,6 +17,7 @@ export type TrainingJobExportProgress = {
   fileName: string | null;
   warnings: string[];
   error: string | null;
+  cancelRequested: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -106,6 +107,12 @@ export const startTrainingJobExport = (jobID: string, includeDatasets: boolean) 
 export const getTrainingJobExportProgress = (jobID: string, exportID: string) => {
   return apiClient
     .get(`/api/jobs/${jobID}/export/${exportID}`)
+    .then(res => res.data as TrainingJobExportProgress);
+};
+
+export const cancelTrainingJobExport = (jobID: string, exportID: string) => {
+  return apiClient
+    .delete(`/api/jobs/${jobID}/export/${exportID}`)
     .then(res => res.data as TrainingJobExportProgress);
 };
 

@@ -12,6 +12,7 @@ import {
   markJobAsStopped,
   startTrainingJobExport,
   getTrainingJobExportProgress,
+  cancelTrainingJobExport,
   downloadServerFile,
   type TrainingJobExportProgress,
 } from '@/utils/jobs';
@@ -30,7 +31,11 @@ interface JobActionBarProps {
 }
 
 type ExportMode = 'state' | 'datasets';
-type ExportStatus = { mode: ExportMode; phase: 'exporting' | 'ready' | 'failed'; progress: TrainingJobExportProgress | null };
+type ExportStatus = {
+  mode: ExportMode;
+  phase: 'exporting' | 'ready' | 'failed' | 'canceled';
+  progress: TrainingJobExportProgress | null;
+};
 
 function sleep(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms));
@@ -51,6 +56,7 @@ function formatBytes(bytes: number) {
 function getExportPhase(progress: TrainingJobExportProgress): ExportStatus['phase'] {
   if (progress.status === 'completed') return 'ready';
   if (progress.status === 'failed') return 'failed';
+  if (progress.status === 'canceled') return 'canceled';
   return 'exporting';
 }
 
@@ -67,6 +73,19 @@ function getExportProgressDetail(progress: TrainingJobExportProgress | null) {
   return [files, bytes].filter(Boolean).join(' · ');
 }
 
+function getExportStatusLabel(exportStatus: ExportStatus | null) {
+  if (!exportStatus) return '';
+  if (exportStatus.phase === 'canceled') return 'Export canceled';
+  if (exportStatus.progress?.status === 'canceling') return 'Canceling export...';
+  if (exportStatus.phase === 'failed') return 'Export failed';
+  if (exportStatus.phase === 'ready') return 'Export ready';
+
+  return (
+    exportStatus.progress?.message ||
+    (exportStatus.mode === 'datasets' ? 'Starting dataset export...' : 'Starting job export...')
+  );
+}
+
 export default function JobActionBar({
   job,
   onRefresh,
@@ -79,6 +98,8 @@ export default function JobActionBar({
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const exportStatusTimeout = useRef<number | null>(null);
   const exportInFlight = useRef(false);
+  const activeExportID = useRef<string | null>(null);
+  const cancelExportInFlight = useRef(false);
   const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
 
@@ -88,6 +109,7 @@ export default function JobActionBar({
       if (exportStatusTimeout.current !== null) {
         window.clearTimeout(exportStatusTimeout.current);
       }
+      activeExportID.current = null;
     };
   }, []);
 
@@ -117,9 +139,26 @@ export default function JobActionBar({
       updateExportStatus(mode, progress);
 
       if (progress.status === 'completed') return progress;
+      if (progress.status === 'canceled') return progress;
       if (progress.status === 'failed') {
         throw new Error(progress.error || 'Failed to export training job');
       }
+    }
+  };
+
+  const handleCancelExport = async () => {
+    const exportID = activeExportID.current || exportStatus?.progress?.exportID;
+    if (!exportID || cancelExportInFlight.current) return;
+
+    cancelExportInFlight.current = true;
+    try {
+      const progress = await cancelTrainingJobExport(job.id, exportID);
+      updateExportStatus(exportStatus?.mode || (progress.includeDatasets ? 'datasets' : 'state'), progress);
+    } catch (error) {
+      console.error('Error canceling export:', error);
+      alert('Failed to cancel export. Please try again.');
+    } finally {
+      cancelExportInFlight.current = false;
     }
   };
 
@@ -135,9 +174,15 @@ export default function JobActionBar({
     setExportStatus({ mode: exportMode, phase: 'exporting', progress: null });
     try {
       const started = await startTrainingJobExport(job.id, includeDatasets);
+      activeExportID.current = started.exportID;
       updateExportStatus(exportMode, started.progress);
 
       const progress = await waitForExport(exportMode, started.exportID);
+      if (progress.status === 'canceled') {
+        setExportStatus({ mode: exportMode, phase: 'canceled', progress });
+        clearExportStatusSoon();
+        return;
+      }
       if (!progress.zipPath || !progress.fileName) {
         throw new Error('Export completed without a downloadable file.');
       }
@@ -155,18 +200,18 @@ export default function JobActionBar({
       clearExportStatusSoon();
     } finally {
       exportInFlight.current = false;
+      activeExportID.current = null;
     }
   };
 
-  const exportStatusLabel =
-    exportStatus?.phase === 'failed'
-      ? 'Export failed'
-      : exportStatus?.phase === 'ready'
-      ? 'Export ready'
-        : exportStatus?.progress?.message ||
-          (exportStatus?.mode === 'datasets' ? 'Starting dataset export...' : 'Starting job export...');
+  const exportStatusLabel = getExportStatusLabel(exportStatus);
   const exportStatusDetail = getExportProgressDetail(exportStatus?.progress || null);
   const exportPercent = Math.round(exportStatus?.progress?.percent || (exportStatus?.phase === 'ready' ? 100 : 0));
+  const canCancelExport =
+    isExporting &&
+    !!(activeExportID.current || exportStatus?.progress?.exportID) &&
+    exportStatus?.progress?.status !== 'canceling' &&
+    exportStatus?.progress?.cancelRequested !== true;
 
   return (
     <div className={`${className}`}>
@@ -348,13 +393,28 @@ export default function JobActionBar({
             <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-green-400" />
           ) : exportStatus.phase === 'failed' ? (
             <X className="mt-0.5 h-4 w-4 flex-none text-red-400" />
+          ) : exportStatus.phase === 'canceled' ? (
+            <X className="mt-0.5 h-4 w-4 flex-none text-gray-400" />
           ) : (
             <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-blue-400" />
           )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-3">
               <span className="truncate">{exportStatusLabel}</span>
-              <span className="flex-none text-xs text-gray-400">{exportPercent}%</span>
+              <div className="flex flex-none items-center gap-2">
+                <span className="text-xs text-gray-400">{exportPercent}%</span>
+                {canCancelExport && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCancelExport()}
+                    title="Cancel export"
+                    aria-label="Cancel export"
+                    className="rounded p-0.5 text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
             {exportStatusDetail && <div className="mt-0.5 truncate text-xs text-gray-400">{exportStatusDetail}</div>}
             {exportStatus.phase === 'exporting' && (

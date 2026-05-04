@@ -43,6 +43,56 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.job-console-tool {
+  display: inline-flex;
+  min-width: 58px;
+  height: 42px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-left: 1px solid rgb(255 255 255 / 0.08);
+  color: rgb(156 163 175);
+  font-size: 11px;
+}
+
+.job-console-tool:hover {
+  color: white;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.console-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.console-actions button,
+.console-actions a,
+.console-actions > div,
+.console-actions [role='button'] {
+  display: inline-flex;
+  min-width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0 !important;
+  color: rgb(156 163 175);
+}
+
+.console-actions svg {
+  width: 16px;
+  height: 16px;
+}
+
+.console-actions button:hover,
+.console-actions a:hover,
+.console-actions > div:hover {
+  color: white;
+  background: rgb(255 255 255 / 0.06);
+}
+
 @layer components {
   /* control */
   .aitk-react-select-container .aitk-react-select__control {

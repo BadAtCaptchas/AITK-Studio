@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { type TrainingJobCheckpointExportMode } from '@/server/trainingJobTransfer';
+import { type TrainingJobCheckpointExportMode } from './trainingJobTransfer';
 
 export type TrainingJobExportStatus =
   | 'queued'

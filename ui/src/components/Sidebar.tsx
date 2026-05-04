@@ -1,87 +1,109 @@
+'use client';
+
 import Link from 'next/link';
-import { Home, Settings, BrainCircuit, Images, Plus } from 'lucide-react';
-import { FaXTwitter, FaDiscord, FaYoutube } from 'react-icons/fa6';
+import { usePathname } from 'next/navigation';
+import {
+  Bell,
+  Boxes,
+  Database,
+  Gauge,
+  Heart,
+  Home,
+  ListTree,
+  Plus,
+  Settings,
+  ShieldCheck,
+} from 'lucide-react';
+import { FaDiscord, FaXTwitter, FaYoutube } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
 
-const Sidebar = () => {
-  const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: Home },
-    { name: 'New Job', href: '/jobs/new', icon: Plus },
-    { name: 'Queue', href: '/jobs', icon: BrainCircuit },
-    { name: 'Datasets', href: '/datasets', icon: Images },
-    { name: 'Settings', href: '/settings', icon: Settings },
-  ];
+const navigation = [
+  { name: 'Dashboard', href: '/dashboard', icon: Home },
+  { name: 'New Job', href: '/jobs/new', icon: Plus },
+  { name: 'Queue', href: '/jobs', icon: ListTree },
+  { name: 'Datasets', href: '/datasets', icon: Database },
+  { name: 'Jobs', href: '/jobs', icon: Gauge },
+  { name: 'Models', href: '/models', icon: Boxes },
+  { name: 'Evaluations', href: '/evaluations', icon: ShieldCheck },
+  { name: 'Alerts', href: '/alerts', icon: Bell },
+  { name: 'Settings', href: '/settings', icon: Settings },
+];
 
-  const socialsBoxClass =
-    'flex flex-col items-center justify-center p-1 hover:bg-gray-800 rounded-lg transition-colors';
-  const socialIconClass = 'w-5 h-5 text-gray-400 hover:text-white';
+function isActive(pathname: string, href: string, name: string) {
+  if (name === 'New Job') return pathname.startsWith('/jobs/new');
+  if (name === 'Jobs') return pathname.startsWith('/jobs/') && !pathname.startsWith('/jobs/new');
+  if (name === 'Queue') return pathname === '/jobs';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+const socialClass = 'flex h-7 w-7 items-center justify-center rounded border border-white/5 text-gray-500 hover:bg-white/5 hover:text-gray-200';
+
+export default function Sidebar() {
+  const pathname = usePathname();
 
   return (
-    <div className="flex flex-col w-59 bg-gray-900 text-gray-100">
-      <div className="px-4 py-3">
-        <h1 className="flex items-center text-sm leading-tight">
-          <ThemeLogo />
-          <span className="flex flex-col uppercase">
-            <span className="font-bold">OstrisAI-Toolkit</span>
-            <span className="text-gray-300">Revamped</span>
-          </span>
-        </h1>
+    <aside className="flex w-14 shrink-0 flex-col border-r border-white/10 bg-black text-gray-200 sm:w-56">
+      <div className="flex h-14 items-center gap-3 border-b border-white/10 px-3">
+        <ThemeLogo />
+        <div className="hidden min-w-0 sm:block">
+          <div className="truncate text-sm font-semibold tracking-wide text-white">OSTRIS</div>
+          <div className="truncate text-[11px] uppercase text-gray-500">AI-Toolkit</div>
+        </div>
       </div>
-      <nav className="flex-1">
-        <ul className="px-2 py-4 space-y-2">
-          {navigation.map(item => (
-            <li key={item.name}>
-              <Link
-                href={item.href}
-                className="flex items-center px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg transition-colors"
-              >
-                <item.icon className="w-5 h-5 mr-3" />
-                {item.name}
-              </Link>
-            </li>
-          ))}
+
+      <nav className="flex-1 py-3">
+        <ul className="space-y-1 px-2">
+          {navigation.map(item => {
+            const active = isActive(pathname, item.href, item.name);
+            return (
+              <li key={`${item.name}-${item.href}`}>
+                <Link
+                  href={item.href}
+                  className={[
+                    'group flex h-10 items-center gap-3 rounded px-3 text-sm transition-colors',
+                    active
+                      ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20'
+                      : 'text-gray-400 hover:bg-white/5 hover:text-gray-100',
+                  ].join(' ')}
+                  title={item.name}
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span className="hidden truncate sm:inline">{item.name}</span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </nav>
-      <a
-        href="https://ostris.com/support"
-        target="_blank"
-        rel="noreferrer"
-        className="flex items-center space-x-2 px-4 py-3"
-      >
-        <div className="min-w-[26px] min-h-[26px]">
-          <svg height="24" version="1.1" width="24" xmlns="http://www.w3.org/2000/svg">
-            <g transform="translate(0 -1028.4)">
-              <path
-                d="m7 1031.4c-1.5355 0-3.0784 0.5-4.25 1.7-2.3431 2.4-2.2788 6.1 0 8.5l9.25 9.8 9.25-9.8c2.279-2.4 2.343-6.1 0-8.5-2.343-2.3-6.157-2.3-8.5 0l-0.75 0.8-0.75-0.8c-1.172-1.2-2.7145-1.7-4.25-1.7z"
-                fill="#c0392b"
-              />
-            </g>
-          </svg>
-        </div>
-        <div className="uppercase text-gray-500 text-sm mb-2 flex-1 pt-2 pl-0">Support Ostris</div>
-      </a>
 
-      {/* Social links grid */}
-      <div className="px-1 py-1 border-t border-gray-800">
-        <div className="grid grid-cols-4 gap-4">
-          <a href="https://discord.gg/VXmU2f5WEU" target="_blank" rel="noreferrer" className={socialsBoxClass}>
-            <FaDiscord className={socialIconClass} />
-            {/* <span className="text-xs text-gray-500 mt-1">Discord</span> */}
+      <div className="space-y-3 border-t border-white/10 p-3">
+        <a
+          href="https://ostris.com/support"
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 text-[11px] uppercase text-gray-500 hover:text-gray-200"
+          title="Support AI-Toolkit"
+        >
+          <Heart className="h-4 w-4 fill-red-500 text-red-500" />
+          <span className="hidden sm:inline">Support AI-Toolkit</span>
+        </a>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+          <a href="https://discord.gg/VXmU2f5WEU" target="_blank" rel="noreferrer" className={socialClass} title="Discord">
+            <FaDiscord className="h-4 w-4" />
           </a>
-          <a href="https://www.youtube.com/@ostrisai" target="_blank" rel="noreferrer" className={socialsBoxClass}>
-            <FaYoutube className={socialIconClass} />
-            {/* <span className="text-xs text-gray-500 mt-1">YouTube</span> */}
+          <a href="https://www.youtube.com/@ostrisai" target="_blank" rel="noreferrer" className={socialClass} title="YouTube">
+            <FaYoutube className="h-4 w-4" />
           </a>
-          <a href="https://x.com/ostrisai" target="_blank" rel="noreferrer" className={socialsBoxClass}>
-            <FaXTwitter className={socialIconClass} />
-            {/* <span className="text-xs text-gray-500 mt-1">X</span> */}
+          <a href="https://x.com/ostrisai" target="_blank" rel="noreferrer" className={socialClass} title="X">
+            <FaXTwitter className="h-4 w-4" />
           </a>
-          <ThemeToggle />
+          <div className={socialClass}>
+            <ThemeToggle />
+          </div>
         </div>
+        <div className="hidden text-[11px] text-gray-600 sm:block">v2.6.0</div>
       </div>
-    </div>
+    </aside>
   );
-};
-
-export default Sidebar;
+}

@@ -53,6 +53,39 @@ try {
       { key: { job_id: 1, key: 1, step: 1 } },
     ]),
     db.collection('metric_keys').createIndexes([{ key: { job_id: 1, key: 1 }, unique: true }]),
+    db.collection('system_metric_samples').createIndexes([
+      { key: { created_at: 1 } },
+      { key: { scope: 1, device_id: 1, metric: 1, created_at: 1 } },
+    ]),
+    db.collection('model_artifacts').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { kind: 1 } },
+      { key: { job_id: 1 } },
+      { key: { source: 1 } },
+      { key: { exists: 1 } },
+    ]),
+    db.collection('evaluation_runs').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { status: 1 } },
+      { key: { created_at: -1 } },
+    ]),
+    db.collection('evaluation_items').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { run_id: 1 } },
+      { key: { status: 1 } },
+    ]),
+    db.collection('alert_rules').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { enabled: 1 } },
+    ]),
+    db.collection('alert_events').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { fingerprint: 1 }, unique: true },
+      { key: { status: 1 } },
+      { key: { severity: 1 } },
+      { key: { resource_type: 1, resource_id: 1 } },
+      { key: { rule_id: 1 } },
+    ]),
   ]);
   console.log('MongoDB indexes are ready.');
 } finally {

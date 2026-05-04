@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download } from 'lucide-react';
+import { useState } from 'react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2 } from 'lucide-react';
 import { Button } from '@headlessui/react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { Job } from '@prisma/client';
@@ -26,6 +27,8 @@ interface JobActionBarProps {
   autoStartQueue?: boolean;
 }
 
+type ExportMode = 'state' | 'datasets';
+
 export default function JobActionBar({
   job,
   onRefresh,
@@ -35,10 +38,16 @@ export default function JobActionBar({
   autoStartQueue = false,
 }: JobActionBarProps) {
   const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
+  const [exporting, setExporting] = useState<ExportMode | null>(null);
+  const isExporting = exporting !== null;
 
   if (!afterDelete) afterDelete = onRefresh;
 
   const handleExport = async (includeDatasets: boolean) => {
+    const exportMode: ExportMode = includeDatasets ? 'datasets' : 'state';
+    if (isExporting) return;
+
+    setExporting(exportMode);
     try {
       const result = await exportTrainingJob(job.id, includeDatasets);
       downloadServerFile(result.zipPath, result.fileName);
@@ -48,6 +57,8 @@ export default function JobActionBar({
     } catch (error) {
       console.error('Error exporting job:', error);
       alert('Failed to export job. Please try again.');
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -157,10 +168,10 @@ export default function JobActionBar({
       </Button>
       <div className="border-r border-1 border-gray-700 ml-2 inline"></div>
       <Menu>
-        <MenuButton className={'ml-2'}>
-          <Cog />
+        <MenuButton className={`ml-2 inline-flex items-center ${isExporting ? 'cursor-wait opacity-80' : ''}`}>
+          {isExporting ? <Loader2 className="animate-spin" /> : <Cog />}
         </MenuButton>
-        <MenuItems anchor="bottom" className="bg-gray-900 border border-gray-700 rounded shadow-lg w-48 px-2 py-2 mt-4">
+        <MenuItems anchor="bottom" className="bg-gray-900 border border-gray-700 rounded shadow-lg w-56 px-2 py-2 mt-4">
           {job.job_type === 'train' && (
             <MenuItem>
               <Link
@@ -174,22 +185,36 @@ export default function JobActionBar({
           {job.job_type === 'train' && (
             <MenuItem>
               <div
-                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
+                className={`px-4 py-1 rounded flex items-center gap-2 ${
+                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+                }`}
+                aria-disabled={isExporting}
                 onClick={() => handleExport(false)}
               >
-                <Download className="w-4 h-4" />
-                Export Job State
+                {exporting === 'state' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {exporting === 'state' ? 'Exporting...' : 'Export Job State'}
               </div>
             </MenuItem>
           )}
           {job.job_type === 'train' && (
             <MenuItem>
               <div
-                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
+                className={`px-4 py-1 rounded flex items-center gap-2 ${
+                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+                }`}
+                aria-disabled={isExporting}
                 onClick={() => handleExport(true)}
               >
-                <Download className="w-4 h-4" />
-                Export With Datasets
+                {exporting === 'datasets' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {exporting === 'datasets' ? 'Exporting...' : 'Export With Datasets'}
               </div>
             </MenuItem>
           )}

@@ -794,6 +794,21 @@ class BaseSDTrainProcess(BaseTrainProcess):
     def hook_after_sd_init_before_load(self):
         pass
 
+    @staticmethod
+    def is_loadable_save_path(path):
+        basename = os.path.basename(path).lower()
+        if basename.endswith(".aitk.zip"):
+            return False
+        if basename.endswith(".tmp"):
+            return False
+        if basename in {"optimizer.pt", "samples.zip"}:
+            return False
+
+        if os.path.isdir(path):
+            return True
+
+        return basename.endswith((".safetensors", ".pt"))
+
     def get_latest_save_path(self, name=None, post=''):
         if name == None:
             name = self.job.name
@@ -813,7 +828,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
             # Filter out non-existent paths and sort by creation time
             if paths:
-                paths = [p for p in paths if os.path.exists(p)]
+                paths = [p for p in paths if os.path.exists(p) and self.is_loadable_save_path(p)]
                 # remove false positives
                 if '_LoRA' not in name:
                     paths = [p for p in paths if '_LoRA' not in p]

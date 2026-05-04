@@ -41,6 +41,7 @@ export default function JobActionBar({
   const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const exportStatusTimeout = useRef<number | null>(null);
+  const exportInFlight = useRef(false);
   const isExporting = exportStatus?.phase === 'exporting';
 
   useEffect(() => {
@@ -65,8 +66,9 @@ export default function JobActionBar({
 
   const handleExport = async (includeDatasets: boolean) => {
     const exportMode: ExportMode = includeDatasets ? 'datasets' : 'state';
-    if (isExporting) return;
+    if (exportInFlight.current) return;
 
+    exportInFlight.current = true;
     if (exportStatusTimeout.current !== null) {
       window.clearTimeout(exportStatusTimeout.current);
       exportStatusTimeout.current = null;
@@ -84,6 +86,8 @@ export default function JobActionBar({
       console.error('Error exporting job:', error);
       alert('Failed to export job. Please try again.');
       setExportStatus(null);
+    } finally {
+      exportInFlight.current = false;
     }
   };
 
@@ -221,7 +225,7 @@ export default function JobActionBar({
                   isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
                 }`}
                 aria-disabled={isExporting}
-                onClick={() => void handleExport(false)}
+                onClickCapture={() => void handleExport(false)}
               >
                 <Download className="w-4 h-4" />
                 Export Job State
@@ -235,7 +239,7 @@ export default function JobActionBar({
                   isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
                 }`}
                 aria-disabled={isExporting}
-                onClick={() => void handleExport(true)}
+                onClickCapture={() => void handleExport(true)}
               >
                 <Download className="w-4 h-4" />
                 Export With Datasets

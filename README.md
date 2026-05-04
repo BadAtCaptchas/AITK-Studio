@@ -1,8 +1,10 @@
-# Ostris AI Toolkit
+# OstrisAI-Toolkit Revamped
 
-AI Toolkit is an easy to use all in one training suite for diffusion models. I try to support all the latest models on consumer grade hardware. Image and video models. It can be run as a GUI or CLI. It is designed to be easy to use but still have every feature imaginable. Free and open source.
+OstrisAI-Toolkit Revamped is a fork of the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit) with substantial changes beyond upstream.
 
+> Disclaimer: This repository is not guaranteed to stay in sync with model support added to the original repo. New upstream model support may arrive here after a delay, or may not be ported at all. This fork is focused on features and larger changes that are unlikely to be added to the main repo.
 
+OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffusion models. It aims to support current models on consumer grade hardware, including image, video, and audio models. It can be run as a GUI or CLI. It is designed to be easy to use but still have every feature imaginable. Free and open source.
 
 ## Supported Models
 
@@ -63,7 +65,7 @@ Requirements:
 
 Linux:
 ```bash
-git clone https://github.com/ostris/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit.git
 cd ai-toolkit
 python3 -m venv venv
 source venv/bin/activate
@@ -80,7 +82,7 @@ Windows:
 If you are having issues with Windows. I recommend using the easy install script at [https://github.com/Tavris1/AI-Toolkit-Easy-Install](https://github.com/Tavris1/AI-Toolkit-Easy-Install)
 
 ```bash
-git clone https://github.com/ostris/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit.git
 cd ai-toolkit
 python -m venv venv
 .\venv\Scripts\activate
@@ -100,7 +102,7 @@ You can verify the active environment with:
 python scripts/check_blackwell_cuda.py
 ```
 
-AI Toolkit also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
+OstrisAI-Toolkit Revamped also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
 
 ### Quantized model cache
 
@@ -126,18 +128,18 @@ locates at `./run_mac.zsh` that will install the dependencies locally and run th
 do the following:
 
 ```bash
-git clone https://github.com/ostris/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit.git
 cd ai-toolkit
 chmod +x run_mac.zsh
 ./run_mac.zsh
 ```
 
 
-# AI Toolkit UI
+# OstrisAI-Toolkit Revamped UI
 
-<img src="https://ostris.com/wp-content/uploads/2025/02/toolkit-ui.jpg" alt="AI Toolkit UI" width="100%">
+<img src="https://ostris.com/wp-content/uploads/2025/02/toolkit-ui.jpg" alt="OstrisAI-Toolkit Revamped UI" width="100%">
 
-The AI Toolkit UI is a web interface for the AI Toolkit. It allows you to easily start, stop, and monitor jobs. It also allows you to easily train models with a few clicks. It also allows you to set a token for the UI to prevent unauthorized access so it is mostly safe to run on an exposed server.
+The OstrisAI-Toolkit Revamped UI is a web interface for OstrisAI-Toolkit Revamped. It allows you to easily start, stop, and monitor jobs. It also allows you to easily train models with a few clicks. It also allows you to set a token for the UI to prevent unauthorized access so it is mostly safe to run on an exposed server.
 
 ## Running the UI
 
@@ -252,14 +254,14 @@ If you would like to use Runpod, but have not signed up yet, please consider usi
 
 I maintain an official Runpod Pod template here which can be accessed [here](https://console.runpod.io/deploy?template=0fqzfjy6f3&ref=h0y9jyr2).
 
-I have also created a short video showing how to get started using AI Toolkit with Runpod [here](https://youtu.be/HBNeS-F6Zz8).
+I have also created a short video showing how to get started using OstrisAI-Toolkit Revamped with Runpod [here](https://youtu.be/HBNeS-F6Zz8).
 
 ## Training in Modal
 
 ### 1. Setup
 #### ai-toolkit:
 ```
-git clone https://github.com/ostris/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit.git
 cd ai-toolkit
 git submodule update --init --recursive
 python -m venv venv

@@ -20,10 +20,12 @@ const Sidebar = () => {
   return (
     <div className="flex flex-col w-59 bg-gray-900 text-gray-100">
       <div className="px-4 py-3">
-        <h1 className="text-l">
+        <h1 className="flex items-center text-sm leading-tight">
           <ThemeLogo />
-          <span className="font-bold uppercase">Ostris</span>
-          <span className="ml-2 uppercase text-gray-300">AI-Toolkit</span>
+          <span className="flex flex-col uppercase">
+            <span className="font-bold">OstrisAI-Toolkit</span>
+            <span className="text-gray-300">Revamped</span>
+          </span>
         </h1>
       </div>
       <nav className="flex-1">
@@ -57,7 +59,7 @@ const Sidebar = () => {
             </g>
           </svg>
         </div>
-        <div className="uppercase text-gray-500 text-sm mb-2 flex-1 pt-2 pl-0">Support AI-Toolkit</div>
+        <div className="uppercase text-gray-500 text-sm mb-2 flex-1 pt-2 pl-0">Support Ostris</div>
       </a>
 
       {/* Social links grid */}

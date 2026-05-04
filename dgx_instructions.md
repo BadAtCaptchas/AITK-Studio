@@ -1,8 +1,8 @@
-# AI Toolkit by Ostris
+# OstrisAI-Toolkit Revamped
 
 ## DGX OS installation instructions
 
-You need to use Python 3.11 to run AI Toolkit on DGX OS. The easiest way to do this without affecting the system installation of Python is to create a virtual environment with **miniconda**, which allows you to specify the version of Python to use in the environment.
+You need to use Python 3.11 to run OstrisAI-Toolkit Revamped on DGX OS. The easiest way to do this without affecting the system installation of Python is to create a virtual environment with **miniconda**, which allows you to specify the version of Python to use in the environment.
 
 This guide will assume you have a fresh installation of DGX OS, and will guide you through the installation of all requirements.
 

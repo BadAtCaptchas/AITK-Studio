@@ -66,5 +66,5 @@ echo "Pod Started"
 
 setup_ssh
 export_env_vars
-echo "Starting AI Toolkit UI..."
+echo "Starting OstrisAI-Toolkit Revamped UI..."
 cd /app/ai-toolkit/ui && npm run update_db && npm run start

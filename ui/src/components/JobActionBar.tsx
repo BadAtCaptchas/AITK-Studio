@@ -215,31 +215,31 @@ export default function JobActionBar({
             </MenuItem>
           )}
           {job.job_type === 'train' && (
-            <MenuItem
-              as="button"
-              type="button"
-              disabled={isExporting}
-              className={`w-full px-4 py-1 rounded flex items-center gap-2 text-left ${
-                isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-              }`}
-              onClick={() => void handleExport(false)}
-            >
-              <Download className="w-4 h-4" />
-              Export Job State
+            <MenuItem>
+              <div
+                className={`px-4 py-1 rounded flex items-center gap-2 ${
+                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+                }`}
+                aria-disabled={isExporting}
+                onClick={() => void handleExport(false)}
+              >
+                <Download className="w-4 h-4" />
+                Export Job State
+              </div>
             </MenuItem>
           )}
           {job.job_type === 'train' && (
-            <MenuItem
-              as="button"
-              type="button"
-              disabled={isExporting}
-              className={`w-full px-4 py-1 rounded flex items-center gap-2 text-left ${
-                isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-              }`}
-              onClick={() => void handleExport(true)}
-            >
-              <Download className="w-4 h-4" />
-              Export With Datasets
+            <MenuItem>
+              <div
+                className={`px-4 py-1 rounded flex items-center gap-2 ${
+                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+                }`}
+                aria-disabled={isExporting}
+                onClick={() => void handleExport(true)}
+              >
+                <Download className="w-4 h-4" />
+                Export With Datasets
+              </div>
             </MenuItem>
           )}
           <MenuItem>

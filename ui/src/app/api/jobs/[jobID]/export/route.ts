@@ -11,10 +11,12 @@ import {
   collectDatasetArchiveMappings,
   collectModelReferences,
   findLatestCheckpoint,
+  isCheckpointExportPath,
   listFilesRecursive,
   makeExportFileName,
   resolveConfigPath,
   shouldIncludeTrainingExportPath,
+  type TrainingJobCheckpointExportMode,
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
 import {
@@ -32,6 +34,7 @@ const prisma = new PrismaClient();
 type ExportBody = {
   includeDatasets?: boolean;
   background?: boolean;
+  checkpointMode?: TrainingJobCheckpointExportMode;
 };
 
 type ExportProgressUpdate = Partial<
@@ -64,6 +67,10 @@ type ArchiveJsonEntry = {
 };
 
 type ShouldCancelExport = () => boolean;
+
+function parseCheckpointMode(value: unknown): TrainingJobCheckpointExportMode {
+  return value === 'all' ? 'all' : 'latest';
+}
 
 class TrainingJobExportCanceledError extends Error {
   constructor() {
@@ -154,6 +161,7 @@ function formatBytes(bytes: number) {
 async function performTrainingJobExport(
   jobID: string,
   includeDatasets: boolean,
+  checkpointMode: TrainingJobCheckpointExportMode = 'latest',
   onProgress?: (progress: ExportProgressUpdate) => void,
   shouldCancel: ShouldCancelExport = () => false,
 ) {
@@ -186,6 +194,7 @@ async function performTrainingJobExport(
 
   const latestCheckpoint = await findLatestCheckpoint(jobFolder, job.step);
   throwIfExportCanceled(shouldCancel);
+  const latestCheckpointRelativePath = latestCheckpoint.relativePath?.replace(/\\/g, '/') ?? null;
   const optimizerIncluded = fs.existsSync(path.join(jobFolder, 'optimizer.pt'));
   if (job.status === 'running') {
     warnings.push('Job is running; export includes only the latest checkpoint and optimizer already saved to disk.');
@@ -222,13 +231,12 @@ async function performTrainingJobExport(
     options: {
       includeDatasets,
       includeBaseModels: false,
+      checkpointMode,
     },
     training: {
       archivePath: 'training',
       dbStep: job.step,
-      latestCheckpointPath: latestCheckpoint.relativePath
-        ? path.posix.join('training', latestCheckpoint.relativePath.replace(/\\/g, '/'))
-        : null,
+      latestCheckpointPath: latestCheckpointRelativePath ? path.posix.join('training', latestCheckpointRelativePath) : null,
       latestCheckpointStep: latestCheckpoint.step,
       optimizerIncluded,
       status: job.status,
@@ -247,7 +255,11 @@ async function performTrainingJobExport(
     jobFolder,
     'training',
     true,
-    shouldIncludeTrainingExportPath,
+    (_absolutePath, relativePath) => {
+      if (!shouldIncludeTrainingExportPath(_absolutePath, relativePath)) return false;
+      if (checkpointMode === 'all' || !isCheckpointExportPath(relativePath)) return true;
+      return relativePath.replace(/\\/g, '/') === latestCheckpointRelativePath;
+    },
     shouldCancel,
   );
   throwIfExportCanceled(shouldCancel);
@@ -433,11 +445,17 @@ async function performTrainingJobExport(
   }
 }
 
-async function runBackgroundExport(exportID: string, jobID: string, includeDatasets: boolean) {
+async function runBackgroundExport(
+  exportID: string,
+  jobID: string,
+  includeDatasets: boolean,
+  checkpointMode: TrainingJobCheckpointExportMode,
+) {
   try {
     const result = await performTrainingJobExport(
       jobID,
       includeDatasets,
+      checkpointMode,
       progress => updateTrainingJobExportProgress(exportID, progress),
       () => isTrainingJobExportCancellationRequested(exportID),
     );
@@ -490,11 +508,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const body = ((await request.json().catch(() => ({}))) || {}) as ExportBody;
     const includeDatasets = body.includeDatasets === true;
+    const checkpointMode = parseCheckpointMode(body.checkpointMode);
     const background = body.background === true;
 
     if (background) {
-      const progress = createTrainingJobExportProgress(jobID, includeDatasets);
-      runBackgroundExport(progress.exportID, jobID, includeDatasets);
+      const progress = createTrainingJobExportProgress(jobID, includeDatasets, checkpointMode);
+      runBackgroundExport(progress.exportID, jobID, includeDatasets, checkpointMode);
       return NextResponse.json(
         {
           exportID: progress.exportID,
@@ -505,7 +524,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       );
     }
 
-    const result = await performTrainingJobExport(jobID, includeDatasets);
+    const result = await performTrainingJobExport(jobID, includeDatasets, checkpointMode);
     return NextResponse.json(result);
   } catch (error) {
     console.error('Training job export failed:', error);

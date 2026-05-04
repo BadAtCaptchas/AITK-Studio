@@ -1,7 +1,17 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2 } from 'lucide-react';
-import { Button } from '@headlessui/react';
+import {
+  Button,
+  Dialog,
+  DialogBackdrop,
+  DialogPanel,
+  DialogTitle,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuItems,
+} from '@headlessui/react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { Job } from '@prisma/client';
 import {
@@ -14,11 +24,10 @@ import {
   getTrainingJobExportProgress,
   cancelTrainingJobExport,
   downloadServerFile,
+  type TrainingJobCheckpointExportMode,
   type TrainingJobExportProgress,
 } from '@/utils/jobs';
 import { startQueue } from '@/utils/queue';
-import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
-import { redirect } from 'next/navigation';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 
 interface JobActionBarProps {
@@ -36,6 +45,7 @@ type ExportStatus = {
   phase: 'exporting' | 'ready' | 'failed' | 'canceled';
   progress: TrainingJobExportProgress | null;
 };
+type ExportDialogState = { includeDatasets: boolean } | null;
 
 function sleep(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms));
@@ -96,6 +106,8 @@ export default function JobActionBar({
 }: JobActionBarProps) {
   const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
+  const [exportDialog, setExportDialog] = useState<ExportDialogState>(null);
+  const [checkpointMode, setCheckpointMode] = useState<TrainingJobCheckpointExportMode>('latest');
   const exportStatusTimeout = useRef<number | null>(null);
   const exportInFlight = useRef(false);
   const activeExportID = useRef<string | null>(null);
@@ -162,7 +174,7 @@ export default function JobActionBar({
     }
   };
 
-  const handleExport = async (includeDatasets: boolean) => {
+  const handleExport = async (includeDatasets: boolean, checkpointMode: TrainingJobCheckpointExportMode) => {
     const exportMode: ExportMode = includeDatasets ? 'datasets' : 'state';
     if (exportInFlight.current) return;
 
@@ -173,7 +185,7 @@ export default function JobActionBar({
     }
     setExportStatus({ mode: exportMode, phase: 'exporting', progress: null });
     try {
-      const started = await startTrainingJobExport(job.id, includeDatasets);
+      const started = await startTrainingJobExport(job.id, includeDatasets, checkpointMode);
       activeExportID.current = started.exportID;
       updateExportStatus(exportMode, started.progress);
 
@@ -202,6 +214,19 @@ export default function JobActionBar({
       exportInFlight.current = false;
       activeExportID.current = null;
     }
+  };
+
+  const openExportDialog = (includeDatasets: boolean) => {
+    if (isExporting) return;
+    setCheckpointMode('latest');
+    setExportDialog({ includeDatasets });
+  };
+
+  const startDialogExport = () => {
+    if (!exportDialog) return;
+    const includeDatasets = exportDialog.includeDatasets;
+    setExportDialog(null);
+    void handleExport(includeDatasets, checkpointMode);
   };
 
   const exportStatusLabel = getExportStatusLabel(exportStatus);
@@ -340,7 +365,7 @@ export default function JobActionBar({
                   isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
                 }`}
                 aria-disabled={isExporting}
-                onClickCapture={() => void handleExport(false)}
+                onClick={() => openExportDialog(false)}
               >
                 <Download className="w-4 h-4" />
                 Export Job State
@@ -354,7 +379,7 @@ export default function JobActionBar({
                   isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
                 }`}
                 aria-disabled={isExporting}
-                onClickCapture={() => void handleExport(true)}
+                onClick={() => openExportDialog(true)}
               >
                 <Download className="w-4 h-4" />
                 Export With Datasets
@@ -383,6 +408,83 @@ export default function JobActionBar({
           </MenuItem>
         </MenuItems>
       </Menu>
+      {exportDialog && (
+        <Dialog open={exportDialog !== null} onClose={() => setExportDialog(null)} className="relative z-40">
+          <DialogBackdrop
+            transition
+            className="fixed inset-0 bg-gray-900/75 transition-opacity data-closed:opacity-0 data-enter:duration-200 data-enter:ease-out data-leave:duration-150 data-leave:ease-in"
+          />
+
+          <div className="fixed inset-0 z-40 w-screen overflow-y-auto">
+            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+              <DialogPanel
+                transition
+                className="relative transform overflow-hidden rounded-lg bg-gray-800 text-left shadow-xl transition-all data-closed:translate-y-4 data-closed:opacity-0 data-enter:duration-200 data-enter:ease-out data-leave:duration-150 data-leave:ease-in sm:my-8 sm:w-full sm:max-w-md data-closed:sm:translate-y-0 data-closed:sm:scale-95"
+              >
+                <div className="bg-gray-800 px-4 pt-5 pb-4 sm:p-6">
+                  <DialogTitle as="h3" className="text-base font-semibold text-gray-100">
+                    {exportDialog.includeDatasets ? 'Export With Datasets' : 'Export Job State'}
+                  </DialogTitle>
+                  <div className="mt-4 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setCheckpointMode('latest')}
+                      aria-pressed={checkpointMode === 'latest'}
+                      className={`w-full rounded-md border px-3 py-3 text-left transition-colors ${
+                        checkpointMode === 'latest'
+                          ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                          : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-gray-500'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">Latest checkpoint</span>
+                        <span className="text-xs text-gray-400">Smaller</span>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Exports the latest checkpoint and skips older checkpoint files.
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCheckpointMode('all')}
+                      aria-pressed={checkpointMode === 'all'}
+                      className={`w-full rounded-md border px-3 py-3 text-left transition-colors ${
+                        checkpointMode === 'all'
+                          ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                          : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-gray-500'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">All checkpoints</span>
+                        <span className="text-xs text-gray-400">Large</span>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Includes every checkpoint file found in the training folder.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+                <div className="bg-gray-700 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                  <button
+                    type="button"
+                    onClick={startDialogExport}
+                    className="inline-flex w-full justify-center rounded-md bg-blue-700 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-blue-500 sm:ml-3 sm:w-auto"
+                  >
+                    Export
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportDialog(null)}
+                    className="mt-3 inline-flex w-full justify-center rounded-md bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-200 hover:bg-gray-900 sm:mt-0 sm:w-auto"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </DialogPanel>
+            </div>
+          </div>
+        </Dialog>
+      )}
       {exportStatus && (
         <div
           role="status"

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { type TrainingJobCheckpointExportMode } from '@/server/trainingJobTransfer';
 
 export type TrainingJobExportStatus =
   | 'queued'
@@ -14,6 +15,7 @@ export type TrainingJobExportProgressSnapshot = {
   exportID: string;
   jobID: string;
   includeDatasets: boolean;
+  checkpointMode: TrainingJobCheckpointExportMode;
   status: TrainingJobExportStatus;
   message: string;
   percent: number;
@@ -74,7 +76,11 @@ function cleanupOldTrainingJobExportProgress() {
   }
 }
 
-export function createTrainingJobExportProgress(jobID: string, includeDatasets: boolean) {
+export function createTrainingJobExportProgress(
+  jobID: string,
+  includeDatasets: boolean,
+  checkpointMode: TrainingJobCheckpointExportMode,
+) {
   cleanupOldTrainingJobExportProgress();
 
   const now = new Date().toISOString();
@@ -82,6 +88,7 @@ export function createTrainingJobExportProgress(jobID: string, includeDatasets: 
     exportID: randomUUID(),
     jobID,
     includeDatasets,
+    checkpointMode,
     status: 'queued',
     message: 'Queued export',
     percent: 0,

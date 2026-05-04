@@ -2,10 +2,13 @@ import { JobConfig } from '@/types';
 import { Job } from '@prisma/client';
 import { apiClient } from '@/utils/api';
 
+export type TrainingJobCheckpointExportMode = 'latest' | 'all';
+
 export type TrainingJobExportProgress = {
   exportID: string;
   jobID: string;
   includeDatasets: boolean;
+  checkpointMode: TrainingJobCheckpointExportMode;
   status: 'queued' | 'preparing' | 'zipping' | 'finalizing' | 'completed' | 'failed' | 'canceling' | 'canceled';
   message: string;
   percent: number;
@@ -92,15 +95,23 @@ export const markJobAsStopped = (jobID: string) => {
   });
 };
 
-export const exportTrainingJob = (jobID: string, includeDatasets: boolean) => {
+export const exportTrainingJob = (
+  jobID: string,
+  includeDatasets: boolean,
+  checkpointMode: TrainingJobCheckpointExportMode = 'latest',
+) => {
   return apiClient
-    .post(`/api/jobs/${jobID}/export`, { includeDatasets })
+    .post(`/api/jobs/${jobID}/export`, { includeDatasets, checkpointMode })
     .then(res => res.data as TrainingJobExportResult);
 };
 
-export const startTrainingJobExport = (jobID: string, includeDatasets: boolean) => {
+export const startTrainingJobExport = (
+  jobID: string,
+  includeDatasets: boolean,
+  checkpointMode: TrainingJobCheckpointExportMode = 'latest',
+) => {
   return apiClient
-    .post(`/api/jobs/${jobID}/export`, { includeDatasets, background: true })
+    .post(`/api/jobs/${jobID}/export`, { includeDatasets, checkpointMode, background: true })
     .then(res => res.data as { exportID: string; statusUrl: string; progress: TrainingJobExportProgress });
 };
 

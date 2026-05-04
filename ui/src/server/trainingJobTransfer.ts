@@ -6,6 +6,8 @@ import { TOOLKIT_ROOT } from '@/paths';
 export const TRAINING_JOB_EXPORT_FORMAT = 'ai-toolkit-training-job-export';
 export const TRAINING_JOB_EXPORT_VERSION = 1;
 
+export type TrainingJobCheckpointExportMode = 'latest' | 'all';
+
 export type DatasetArchiveMapping = {
   archivePath: string;
   originalPath: string;
@@ -32,6 +34,7 @@ export type TrainingJobExportManifest = {
   options: {
     includeDatasets: boolean;
     includeBaseModels: false;
+    checkpointMode: TrainingJobCheckpointExportMode;
   };
   training: {
     archivePath: 'training';
@@ -268,6 +271,11 @@ export function shouldIncludeTrainingExportPath(_absolutePath: string, relativeP
   if (basename === 'samples.zip') return false;
   if (basename.startsWith('.aitk-export-')) return false;
   return true;
+}
+
+export function isCheckpointExportPath(relativePath: string) {
+  const normalized = relativePath.replace(/\\/g, '/');
+  return !normalized.includes('/') && normalized.toLowerCase().endsWith('.safetensors');
 }
 
 export async function findLatestCheckpoint(trainingFolder: string, dbStep: number) {

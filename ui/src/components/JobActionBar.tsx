@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { useState } from 'react';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@headlessui/react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { Job } from '@prisma/client';
@@ -28,6 +28,7 @@ interface JobActionBarProps {
 }
 
 type ExportMode = 'state' | 'datasets';
+type ExportStatus = { mode: ExportMode; phase: 'exporting' | 'ready' };
 
 export default function JobActionBar({
   job,
@@ -38,29 +39,60 @@ export default function JobActionBar({
   autoStartQueue = false,
 }: JobActionBarProps) {
   const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
-  const [exporting, setExporting] = useState<ExportMode | null>(null);
-  const isExporting = exporting !== null;
+  const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
+  const exportStatusTimeout = useRef<number | null>(null);
+  const isExporting = exportStatus?.phase === 'exporting';
+
+  useEffect(() => {
+    return () => {
+      if (exportStatusTimeout.current !== null) {
+        window.clearTimeout(exportStatusTimeout.current);
+      }
+    };
+  }, []);
 
   if (!afterDelete) afterDelete = onRefresh;
+
+  const clearExportStatusSoon = () => {
+    if (exportStatusTimeout.current !== null) {
+      window.clearTimeout(exportStatusTimeout.current);
+    }
+    exportStatusTimeout.current = window.setTimeout(() => {
+      setExportStatus(null);
+      exportStatusTimeout.current = null;
+    }, 2500);
+  };
 
   const handleExport = async (includeDatasets: boolean) => {
     const exportMode: ExportMode = includeDatasets ? 'datasets' : 'state';
     if (isExporting) return;
 
-    setExporting(exportMode);
+    if (exportStatusTimeout.current !== null) {
+      window.clearTimeout(exportStatusTimeout.current);
+      exportStatusTimeout.current = null;
+    }
+    setExportStatus({ mode: exportMode, phase: 'exporting' });
     try {
       const result = await exportTrainingJob(job.id, includeDatasets);
       downloadServerFile(result.zipPath, result.fileName);
+      setExportStatus({ mode: exportMode, phase: 'ready' });
+      clearExportStatusSoon();
       if (result.warnings?.length) {
         alert(`Export completed with warnings:\n\n${result.warnings.join('\n')}`);
       }
     } catch (error) {
       console.error('Error exporting job:', error);
       alert('Failed to export job. Please try again.');
-    } finally {
-      setExporting(null);
+      setExportStatus(null);
     }
   };
+
+  const exportStatusLabel =
+    exportStatus?.phase === 'ready'
+      ? 'Export ready'
+      : exportStatus?.mode === 'datasets'
+        ? 'Exporting with datasets...'
+        : 'Exporting job state...';
 
   return (
     <div className={`${className}`}>
@@ -183,39 +215,31 @@ export default function JobActionBar({
             </MenuItem>
           )}
           {job.job_type === 'train' && (
-            <MenuItem>
-              <div
-                className={`px-4 py-1 rounded flex items-center gap-2 ${
-                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-                }`}
-                aria-disabled={isExporting}
-                onClick={() => handleExport(false)}
-              >
-                {exporting === 'state' ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                {exporting === 'state' ? 'Exporting...' : 'Export Job State'}
-              </div>
+            <MenuItem
+              as="button"
+              type="button"
+              disabled={isExporting}
+              className={`w-full px-4 py-1 rounded flex items-center gap-2 text-left ${
+                isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+              }`}
+              onClick={() => void handleExport(false)}
+            >
+              <Download className="w-4 h-4" />
+              Export Job State
             </MenuItem>
           )}
           {job.job_type === 'train' && (
-            <MenuItem>
-              <div
-                className={`px-4 py-1 rounded flex items-center gap-2 ${
-                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-                }`}
-                aria-disabled={isExporting}
-                onClick={() => handleExport(true)}
-              >
-                {exporting === 'datasets' ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                {exporting === 'datasets' ? 'Exporting...' : 'Export With Datasets'}
-              </div>
+            <MenuItem
+              as="button"
+              type="button"
+              disabled={isExporting}
+              className={`w-full px-4 py-1 rounded flex items-center gap-2 text-left ${
+                isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+              }`}
+              onClick={() => void handleExport(true)}
+            >
+              <Download className="w-4 h-4" />
+              Export With Datasets
             </MenuItem>
           )}
           <MenuItem>
@@ -240,6 +264,20 @@ export default function JobActionBar({
           </MenuItem>
         </MenuItems>
       </Menu>
+      {exportStatus && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 inline-flex items-center gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg"
+        >
+          {exportStatus.phase === 'ready' ? (
+            <CheckCircle2 className="h-4 w-4 text-green-400" />
+          ) : (
+            <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+          )}
+          {exportStatusLabel}
+        </div>
+      )}
     </div>
   );
 }

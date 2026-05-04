@@ -129,6 +129,7 @@ export function isMongoProvider() {
 function getPrisma() {
   if (!globalThis.__aitkPrismaClient) {
     const config = getDatabaseConfig();
+    process.env.DATABASE_URL = process.env.DATABASE_URL || config.sqliteUrl;
     globalThis.__aitkPrismaClient = new PrismaClient({
       datasources: {
         db: {

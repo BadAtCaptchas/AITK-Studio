@@ -3,7 +3,8 @@
     "compilerOptions": {
         "module": "commonjs",
         "target": "es2020",
-        "outDir": "dist/cron",
+        "rootDir": ".",
+        "outDir": "dist",
         "moduleResolution": "node",
         "types": [
             "node"

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -k -n WORKER,UI \"ts-node-dev --project tsconfig.worker.json --respawn --watch cron --transpile-only cron/worker.ts\" \"next dev --turbopack\"",
-    "build": "tsc -p tsconfig.worker.json && next build",
+    "build": "node scripts/clean-worker.mjs && tsc -p tsconfig.worker.json && next build",
     "start": "concurrently -k --restart-tries -1 --restart-after 1000 -n WORKER,UI \"node dist/cron/worker.js\" \"next start --port 8675\"",
     "build_and_start": "npm install && npm run update_db && npm run build && npm run start",
     "lint": "next lint",

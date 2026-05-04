@@ -1,9 +1,17 @@
 import Link from 'next/link';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X } from 'lucide-react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download } from 'lucide-react';
 import { Button } from '@headlessui/react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { Job } from '@prisma/client';
-import { startJob, stopJob, deleteJob, getAvaliableJobActions, markJobAsStopped } from '@/utils/jobs';
+import {
+  startJob,
+  stopJob,
+  deleteJob,
+  getAvaliableJobActions,
+  markJobAsStopped,
+  exportTrainingJob,
+  downloadServerFile,
+} from '@/utils/jobs';
 import { startQueue } from '@/utils/queue';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import { redirect } from 'next/navigation';
@@ -29,6 +37,19 @@ export default function JobActionBar({
   const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
 
   if (!afterDelete) afterDelete = onRefresh;
+
+  const handleExport = async (includeDatasets: boolean) => {
+    try {
+      const result = await exportTrainingJob(job.id, includeDatasets);
+      downloadServerFile(result.zipPath, result.fileName);
+      if (result.warnings?.length) {
+        alert(`Export completed with warnings:\n\n${result.warnings.join('\n')}`);
+      }
+    } catch (error) {
+      console.error('Error exporting job:', error);
+      alert('Failed to export job. Please try again.');
+    }
+  };
 
   return (
     <div className={`${className}`}>
@@ -148,6 +169,28 @@ export default function JobActionBar({
               >
                 Clone Job
               </Link>
+            </MenuItem>
+          )}
+          {job.job_type === 'train' && (
+            <MenuItem>
+              <div
+                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
+                onClick={() => handleExport(false)}
+              >
+                <Download className="w-4 h-4" />
+                Export Job State
+              </div>
+            </MenuItem>
+          )}
+          {job.job_type === 'train' && (
+            <MenuItem>
+              <div
+                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
+                onClick={() => handleExport(true)}
+              >
+                <Download className="w-4 h-4" />
+                Export With Datasets
+              </div>
             </MenuItem>
           )}
           <MenuItem>

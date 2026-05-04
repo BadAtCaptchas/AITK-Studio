@@ -45,9 +45,16 @@ const startAndWatchJob = (job: Job) => {
       console.error('Error moving log file:', e);
     }
 
-    // update the config dataset path
+    // update runtime-local paths before launch. Imported jobs may come from a
+    // different system, and multi-process jobs need every process patched.
     const jobConfig = JSON.parse(job.job_config);
-    jobConfig.config.process[0].sqlite_db_path = path.join(TOOLKIT_ROOT, 'aitk_db.db');
+    jobConfig.config.name = job.name;
+    if (Array.isArray(jobConfig.config?.process)) {
+      jobConfig.config.process.forEach((processConfig: any) => {
+        processConfig.sqlite_db_path = path.join(TOOLKIT_ROOT, 'aitk_db.db');
+        processConfig.training_folder = trainingRoot;
+      });
+    }
 
     // write the config file
     fs.writeFileSync(configPath, JSON.stringify(jobConfig, null, 2));

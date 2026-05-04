@@ -66,6 +66,36 @@ export const markJobAsStopped = (jobID: string) => {
   });
 };
 
+export const exportTrainingJob = (jobID: string, includeDatasets: boolean) => {
+  return apiClient
+    .post(`/api/jobs/${jobID}/export`, { includeDatasets })
+    .then(res => res.data as { zipPath: string; fileName: string; warnings: string[] });
+};
+
+export const importTrainingJob = (file: File, gpuIDs: string | null) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (gpuIDs) {
+    formData.append('gpu_ids', gpuIDs);
+  }
+
+  return apiClient
+    .post('/api/jobs/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    .then(res => res.data as { job: Job; warnings: string[] });
+};
+
+export const downloadServerFile = (filePath: string, fileName?: string) => {
+  const downloadPath = `/api/files/${encodeURIComponent(filePath)}`;
+  const a = document.createElement('a');
+  a.href = downloadPath;
+  a.download = fileName || filePath.split(/[\\/]/).pop() || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+};
+
 export const getJobConfig = (job: Job) => {
   return JSON.parse(job.job_config) as JobConfig;
 };

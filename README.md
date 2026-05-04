@@ -102,6 +102,22 @@ python scripts/check_blackwell_cuda.py
 
 AI Toolkit also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
 
+### Quantized model cache
+
+FLUX.2 quantized transformer loads and FLUX.2 Klein quantized Qwen3 text encoder loads cache supported `optimum.quanto` weights by default. The first quantized load still builds the quantized model, then later runs can reuse the cache instead of quantizing the same component again.
+
+The default cache location is `MODELS_PATH/.aitk_quantized_cache`, which is usually `models/.aitk_quantized_cache` in this repo. The cache is keyed by the source model files, quantization type, dtype, model settings, and package versions so it is rebuilt when the inputs change.
+
+Set `quantize_cache: false` to disable the cache, or set `quantize_cache_dir` to move it:
+
+```yaml
+model:
+  quantize_cache: true
+  quantize_cache_dir: /path/to/cache
+```
+
+The cache is used for `optimum.quanto` qtypes such as `qfloat8`. It is skipped for torchao qtypes and for FLUX.2 transformer loads that use an accuracy recovery adapter.
+
 MacOS:
 
 Experimental support for Silicon Macs is available. I do not have a Mac with enough RAM to fully test this
@@ -137,6 +153,21 @@ npm run build_and_start
 ```
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
+
+## Training job import/export
+
+The UI can export and import training jobs from the queue page. Use the action menu on a training job to export either:
+
+- `Export Job State` for the training folder, job metadata, config, optimizer state when present, and checkpoints.
+- `Export With Datasets` for the same job state plus local dataset paths referenced by the job config.
+
+Exports are saved as `.aitk.zip` archives and include a manifest, `job.json`, and `job_config.json`. Base model files are not bundled; local model paths are recorded and checked on import so missing references can be reported as warnings.
+
+Large exports run in the background with progress for files and bytes, success and failed status handling, warning alerts, and a cancel button. Before each export, you can choose whether to include only the latest checkpoint or all checkpoint files in the training folder.
+
+Use `Import Training Job` on the queue page to upload a `.aitk` or `.zip` export. Imports rewrite runtime-local paths, copy included datasets into the configured datasets root, pick the target GPU, rename the job if there is a name conflict, and add the job back to the queue in a stopped state so it can be resumed.
+
+Jobs launched from the UI are detached from the cron worker process, and the worker now waits for in-flight queue work and disconnects cleanly on shutdown signals.
 
 ## Securing the UI
 

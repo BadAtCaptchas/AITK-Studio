@@ -11,6 +11,13 @@ from toolkit.quantized_cache import quantized_cache_key
 from .src.model import Klein9BParams, Klein4BParams
 
 
+def _qwen3_from_config(config):
+    from_config = getattr(Qwen3ForCausalLM, "from_config", None)
+    if from_config is not None:
+        return from_config(config)
+    return Qwen3ForCausalLM._from_config(config)
+
+
 class Flux2KleinModel(Flux2Model):
     flux2_klein_te_path: str = None
     flux2_te_type: str = "qwen"  # "mistral" or "qwen"
@@ -69,7 +76,7 @@ class Flux2KleinModel(Flux2Model):
                 local_files_only=True,
             )
             with init_empty_weights():
-                text_encoder = Qwen3ForCausalLM.from_config(config)
+                text_encoder = _qwen3_from_config(config)
             cache.load(
                 text_encoder,
                 "flux2_text_encoder",

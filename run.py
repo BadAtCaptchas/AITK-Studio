@@ -41,24 +41,58 @@ import argparse
 from toolkit.job import get_job
 from toolkit.accelerator import get_accelerator
 from toolkit.print import print_acc, setup_log_to_file
+from toolkit.exceptions import JobStopRequested
 
 accelerator = get_accelerator()
 
 
-def print_end_message(jobs_completed, jobs_failed):
+def print_end_message(jobs_completed, jobs_failed, jobs_stopped=0):
     if not accelerator.is_main_process:
         return
     failure_string = f"{jobs_failed} failure{'' if jobs_failed == 1 else 's'}" if jobs_failed > 0 else ""
     completed_string = f"{jobs_completed} completed job{'' if jobs_completed == 1 else 's'}"
+    stopped_string = f"{jobs_stopped} stopped job{'' if jobs_stopped == 1 else 's'}" if jobs_stopped > 0 else ""
 
     print_acc("")
     print_acc("========================================")
     print_acc("Result:")
     if len(completed_string) > 0:
         print_acc(f" - {completed_string}")
+    if len(stopped_string) > 0:
+        print_acc(f" - {stopped_string}")
     if len(failure_string) > 0:
         print_acc(f" - {failure_string}")
     print_acc("========================================")
+
+
+def get_first_process(job):
+    if job is None:
+        return None
+    process_list = getattr(job, "process", None)
+    if not process_list:
+        return None
+    return process_list[0]
+
+
+def mark_process_stopping(process, status=None, info=None):
+    if process is None:
+        return
+    if hasattr(process, "is_stopping"):
+        process.is_stopping = True
+    if status is not None and hasattr(process, "update_status"):
+        try:
+            process.update_status(status, info)
+        except Exception as e:
+            print_acc(f"Error updating stop status: {e}")
+
+
+def run_process_error_handler(process, e):
+    if process is None:
+        return
+    try:
+        process.on_error(e)
+    except Exception as e2:
+        print_acc(f"Error running on_error: {e2}")
 
 
 def main():
@@ -104,34 +138,39 @@ def main():
 
     jobs_completed = 0
     jobs_failed = 0
+    jobs_stopped = 0
 
     if accelerator.is_main_process:
         print_acc(f"Running {len(config_file_list)} job{'' if len(config_file_list) == 1 else 's'}")
 
     for config_file in config_file_list:
+        job = None
         try:
             job = get_job(config_file, args.name)
             job.run()
             job.cleanup()
             jobs_completed += 1
+        except JobStopRequested as e:
+            jobs_stopped += 1
+            process = get_first_process(job)
+            mark_process_stopping(process)
+            run_process_error_handler(process, e)
+            print_end_message(jobs_completed, jobs_failed, jobs_stopped)
+            return
         except Exception as e:
             print_acc(f"Error running job: {e}")
             jobs_failed += 1
-            try:
-                job.process[0].on_error(e)
-            except Exception as e2:
-                print_acc(f"Error running on_error: {e2}")
+            run_process_error_handler(get_first_process(job), e)
             if not args.recover:
-                print_end_message(jobs_completed, jobs_failed)
+                print_end_message(jobs_completed, jobs_failed, jobs_stopped)
                 raise e
         except KeyboardInterrupt as e:
-            try:
-                job.process[0].on_error(e)
-            except Exception as e2:
-                print_acc(f"Error running on_error: {e2}")
-            if not args.recover:
-                print_end_message(jobs_completed, jobs_failed)
-                raise e
+            jobs_stopped += 1
+            process = get_first_process(job)
+            mark_process_stopping(process, "stopped", "Job stopped")
+            run_process_error_handler(process, e)
+            print_end_message(jobs_completed, jobs_failed, jobs_stopped)
+            return
 
 
 if __name__ == '__main__':

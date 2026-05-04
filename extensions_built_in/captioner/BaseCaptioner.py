@@ -13,6 +13,7 @@ import torch
 from jobs.process import BaseExtensionProcess
 import tqdm
 
+from toolkit.exceptions import JobStopRequested
 from toolkit.train_tools import get_torch_dtype
 from toolkit.ui_database import UIJobStore
 
@@ -260,11 +261,11 @@ class BaseCaptioner(BaseExtensionProcess):
         if self.should_stop():
             self._run_async_operation(self._update_status("stopped", "Job stopped"))
             self.is_stopping = True
-            raise Exception("Job stopped")
+            raise JobStopRequested("Job stopped")
         if self.should_return_to_queue():
             self._run_async_operation(self._update_status("queued", "Job queued"))
             self.is_stopping = True
-            raise Exception("Job returning to queue")
+            raise JobStopRequested("Job returning to queue", return_to_queue=True)
 
     async def _update_key(self, key, value):
         def _do_update():

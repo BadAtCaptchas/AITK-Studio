@@ -284,9 +284,30 @@ class BucketsMixin:
                 new_height = bucket_resolution["height"]
 
                 if self.dataset_config.random_crop:
-                    # random crop
-                    crop_x = random.randint(0, file_item.scale_to_width - new_width)
-                    crop_y = random.randint(0, file_item.scale_to_height - new_height)
+                    # Cached latents need stable crop coordinates so the cache key
+                    # survives process restarts.
+                    max_crop_x = file_item.scale_to_width - new_width
+                    max_crop_y = file_item.scale_to_height - new_height
+                    if getattr(self, 'is_caching_latents', False):
+                        crop_seed_info = OrderedDict([
+                            ("path", os.path.abspath(file_item.path)),
+                            ("width", file_item.width),
+                            ("height", file_item.height),
+                            ("resolution", resolution),
+                            ("bucket_tolerance", bucket_tolerance),
+                            ("scale", self.dataset_config.scale),
+                            ("flip_x", file_item.flip_x),
+                            ("flip_y", file_item.flip_y),
+                        ])
+                        crop_seed_input = json.dumps(crop_seed_info, sort_keys=True).encode('utf-8')
+                        crop_seed = int(hashlib.md5(crop_seed_input).hexdigest(), 16) & 0xffffffff
+                        crop_rng = random.Random(crop_seed)
+                        crop_x = crop_rng.randint(0, max_crop_x) if max_crop_x > 0 else 0
+                        crop_y = crop_rng.randint(0, max_crop_y) if max_crop_y > 0 else 0
+                    else:
+                        # random crop
+                        crop_x = random.randint(0, max_crop_x) if max_crop_x > 0 else 0
+                        crop_y = random.randint(0, max_crop_y) if max_crop_y > 0 else 0
                     file_item.crop_x = crop_x
                     file_item.crop_y = crop_y
                 else:
@@ -1884,111 +1905,149 @@ class LatentCachingMixin:
             super().__init__(**kwargs)
         self.latent_cache = {}
 
+    def _assign_latent_state_to_file_items(
+            self: 'AiToolkitDataset',
+            file_items: List['FileItemDTO'],
+            state_dict: OrderedDict,
+    ):
+        latent = state_dict['latent'].to('cpu', dtype=self.sd.torch_dtype)
+        first_frame_latent = None
+        audio_latent = None
+        num_frames = None
+        if 'first_frame_latent' in state_dict:
+            first_frame_latent = state_dict['first_frame_latent'].to('cpu', dtype=self.sd.torch_dtype)
+        if 'audio_latent' in state_dict:
+            audio_latent = state_dict['audio_latent'].to('cpu', dtype=self.sd.torch_dtype)
+        if 'num_frames' in state_dict:
+            num_frames = int(state_dict['num_frames'].item())
+
+        for file_item in file_items:
+            file_item._encoded_latent = latent
+            file_item._cached_first_frame_latent = first_frame_latent
+            file_item._cached_audio_latent = audio_latent
+            if num_frames is not None:
+                file_item.num_frames = num_frames
+
+    def _encode_latent_for_file_item(
+            self: 'AiToolkitDataset',
+            file_item: 'FileItemDTO',
+            latent_path: str,
+            to_disk: bool,
+    ):
+        file_item.load_and_process_image(self.transform, only_load_latents=True)
+        dtype = self.sd.torch_dtype
+        device = self.sd.device_torch
+        state_dict = OrderedDict()
+        frames = None
+
+        # add batch dimension
+        try:
+            imgs = file_item.tensor.unsqueeze(0).to(device, dtype=dtype)
+            latent = self.sd.encode_images(imgs).squeeze(0)
+            state_dict['latent'] = latent.clone().detach().cpu()
+        except Exception as e:
+            print_acc(f"Error processing image: {file_item.path}")
+            print_acc(f"Error: {str(e)}")
+            raise e
+
+        # do first frame
+        is_video = self.dataset_config.auto_frame_count or self.dataset_config.num_frames > 1
+        if is_video and self.dataset_config.do_i2v:
+            frames = file_item.tensor.unsqueeze(0).to(device, dtype=dtype)
+            if len(frames.shape) == 4:
+                first_frames = frames
+            elif len(frames.shape) == 5:
+                first_frames = frames[:, 0]
+            else:
+                raise ValueError(f"Unknown frame shape {frames.shape}")
+            first_frame_latent = self.sd.encode_images(first_frames).squeeze(0)
+            state_dict['first_frame_latent'] = first_frame_latent.clone().detach().cpu()
+            del first_frame_latent
+
+        # audio (video+audio models only - audio-only models already encoded above via encode_images)
+        if not self.is_audio_model and file_item.audio_data is not None:
+            audio_latent = self.sd.encode_audio([file_item.audio_data]).squeeze(0)
+            state_dict['audio_latent'] = audio_latent.clone().detach().cpu()
+            del audio_latent
+
+        if is_video:
+            state_dict['num_frames'] = torch.tensor(file_item.num_frames, dtype=torch.int32)
+
+        if to_disk:
+            meta = get_meta_for_safetensors(file_item.get_latent_info_dict())
+            os.makedirs(os.path.dirname(latent_path), exist_ok=True)
+            save_file(state_dict, latent_path, metadata=meta)
+
+        del imgs
+        del latent
+        del frames
+        del file_item.tensor
+        file_item.cleanup()
+
+        return state_dict
+
     def cache_latents_all_latents(self: 'AiToolkitDataset'):
         with accelerator.main_process_first():
-            print_acc(f"Caching latents for {self.dataset_path}")
             # cache all latents to disk
             to_disk = self.is_caching_latents_to_disk
             to_memory = self.is_caching_latents_to_memory
 
-            if to_disk:
-                print_acc(" - Saving latents to disk")
-            if to_memory:
-                print_acc(" - Keeping latents in memory")
-            # move sd items to cpu except for vae
-            self.sd.set_device_state_preset('cache_latents')
-
-            # use tqdm to show progress
-            i = 0
-            for file_item in tqdm(self.file_list, desc=f'Caching latents{" to disk" if to_disk else ""}'):
+            file_items_by_latent_path = OrderedDict()
+            for file_item in self.file_list:
                 file_item.is_caching_to_disk = to_disk
                 file_item.is_caching_to_memory = to_memory
                 file_item.latent_load_device = self.sd.device
 
                 latent_path = file_item.get_latent_path(recalculate=True)
-                # check if it is saved to disk already
-                if os.path.exists(latent_path):
-                    if to_memory:
-                        # load it into memory
-                        state_dict = load_file(latent_path, device='cpu')
-                        file_item._encoded_latent = state_dict['latent'].to('cpu', dtype=self.sd.torch_dtype)
-                        if 'first_frame_latent' in state_dict:
-                            file_item._cached_first_frame_latent = state_dict['first_frame_latent'].to('cpu', dtype=self.sd.torch_dtype)
-                        if 'audio_latent' in state_dict:
-                            file_item._cached_audio_latent = state_dict['audio_latent'].to('cpu', dtype=self.sd.torch_dtype)
+                if latent_path not in file_items_by_latent_path:
+                    file_items_by_latent_path[latent_path] = []
+                file_items_by_latent_path[latent_path].append(file_item)
+
+            missing_latent_paths = []
+            existing_latent_paths = []
+            for latent_path in file_items_by_latent_path.keys():
+                if (to_disk or to_memory) and os.path.exists(latent_path):
+                    existing_latent_paths.append(latent_path)
                 else:
-                    # not saved to disk, calculate
-                    # load the image first
-                    file_item.load_and_process_image(self.transform, only_load_latents=True)
-                    dtype = self.sd.torch_dtype
-                    device = self.sd.device_torch
-                    state_dict = OrderedDict()
-                    first_frame_latent = None
-                    audio_latent = None
-                    frames = None
-                    # add batch dimension
-                    try:
-                        imgs = file_item.tensor.unsqueeze(0).to(device, dtype=dtype)
-                        latent = self.sd.encode_images(imgs).squeeze(0)
-                        if to_disk:
-                            state_dict['latent'] = latent.clone().detach().cpu()
-                    except Exception as e:
-                        print_acc(f"Error processing image: {file_item.path}")
-                        print_acc(f"Error: {str(e)}")
-                        raise e
-                    # do first frame
-                    is_video = self.dataset_config.auto_frame_count or self.dataset_config.num_frames > 1
-                    if is_video and self.dataset_config.do_i2v:
-                        frames = file_item.tensor.unsqueeze(0).to(device, dtype=dtype)
-                        if len(frames.shape) == 4:
-                            first_frames = frames
-                        elif len(frames.shape) == 5:
-                            first_frames = frames[:, 0]
-                        else:
-                            raise ValueError(f"Unknown frame shape {frames.shape}")
-                        first_frame_latent = self.sd.encode_images(first_frames).squeeze(0)
-                        if to_disk:
-                            state_dict['first_frame_latent'] = first_frame_latent.clone().detach().cpu()
-                    
-                    # audio (video+audio models only — audio-only models already encoded above via encode_images)
-                    if not self.is_audio_model and file_item.audio_data is not None:
-                        audio_latent = self.sd.encode_audio([file_item.audio_data]).squeeze(0)
-                        if to_disk:
-                            state_dict['audio_latent'] = audio_latent.clone().detach().cpu()
-                    
-                    if is_video:
-                        state_dict['num_frames'] = torch.tensor(file_item.num_frames, dtype=torch.int32)
-                    
-                    # save_latent
-                    if to_disk:
-                        # metadata
-                        meta = get_meta_for_safetensors(file_item.get_latent_info_dict())
-                        os.makedirs(os.path.dirname(latent_path), exist_ok=True)
-                        save_file(state_dict, latent_path, metadata=meta)
+                    missing_latent_paths.append(latent_path)
 
-                    if to_memory:
-                        # keep it in memory
-                        file_item._encoded_latent = latent.to('cpu', dtype=self.sd.torch_dtype)
-                        if first_frame_latent is not None:
-                            file_item._cached_first_frame_latent = first_frame_latent.to('cpu', dtype=self.sd.torch_dtype)
-                        if audio_latent is not None:
-                            file_item._cached_audio_latent = audio_latent.to('cpu', dtype=self.sd.torch_dtype)
+            if len(missing_latent_paths) == 0 and len(existing_latent_paths) > 0:
+                print_acc(f"Using existing latent cache for {self.dataset_path}")
+            else:
+                print_acc(f"Caching latents for {self.dataset_path}")
+                if to_disk:
+                    print_acc(" - Saving latents to disk")
+                if len(existing_latent_paths) > 0:
+                    print_acc(f" - Reusing {len(existing_latent_paths)} existing latent files")
+            if to_memory:
+                print_acc(" - Keeping latents in memory")
 
-                    del imgs
-                    del latent
-                    del frames
-                    del file_item.tensor
+            # Load each unique cached latent only once when memory caching is requested.
+            if to_memory and len(existing_latent_paths) > 0:
+                for latent_path in tqdm(existing_latent_paths, desc='Loading latents from disk'):
+                    file_items = file_items_by_latent_path[latent_path]
+                    state_dict = load_file(latent_path, device='cpu')
+                    self._assign_latent_state_to_file_items(file_items, state_dict)
                     del state_dict
-                    del first_frame_latent
-                    del audio_latent
-                    file_item.cleanup()
 
-                file_item.is_latent_cached = True
-                i += 1
+            if len(missing_latent_paths) > 0:
+                # move sd items to cpu except for vae
+                self.sd.set_device_state_preset('cache_latents')
 
-            # restore device state
-            self.sd.restore_device_state()
+                try:
+                    for latent_path in tqdm(missing_latent_paths, desc=f'Caching latents{" to disk" if to_disk else ""}'):
+                        file_items = file_items_by_latent_path[latent_path]
+                        file_item = file_items[0]
+                        state_dict = self._encode_latent_for_file_item(file_item, latent_path, to_disk)
+                        if to_memory:
+                            self._assign_latent_state_to_file_items(file_items, state_dict)
+                        del state_dict
+                finally:
+                    self.sd.restore_device_state()
 
+            for file_items in file_items_by_latent_path.values():
+                for file_item in file_items:
+                    file_item.is_latent_cached = True
 
 class TextEmbeddingFileItemDTOMixin:
     def __init__(self, *args, **kwargs):

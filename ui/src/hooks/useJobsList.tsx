@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Job } from '@prisma/client';
+import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
 type UseJobsListProps = {

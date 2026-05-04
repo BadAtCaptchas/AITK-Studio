@@ -13,7 +13,7 @@ import {
   MenuItems,
 } from '@headlessui/react';
 import { openConfirm } from '@/components/ConfirmModal';
-import { Job } from '@prisma/client';
+import type { Job } from '@/types';
 import {
   startJob,
   stopJob,

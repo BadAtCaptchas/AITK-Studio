@@ -1,6 +1,5 @@
 from collections import OrderedDict
 import os
-import sqlite3
 import asyncio
 import concurrent.futures
 from extensions_built_in.sd_trainer.SDTrainer import SDTrainer
@@ -8,6 +7,7 @@ from typing import Literal, Optional
 import threading
 import time
 import signal
+from toolkit.ui_database import UIJobStore
 
 AITK_Status = Literal["running", "stopped", "error", "completed"]
 
@@ -16,12 +16,12 @@ class UITrainer(SDTrainer):
     def __init__(self, process_id: int, job, config: OrderedDict, **kwargs):
         super(UITrainer, self).__init__(process_id, job, config, **kwargs)
         self.sqlite_db_path = self.config.get("sqlite_db_path", "./aitk_db.db")
-        if not os.path.exists(self.sqlite_db_path):
-            raise Exception(
-                f"SQLite database not found at {self.sqlite_db_path}")
-        print(f"Using SQLite database at {self.sqlite_db_path}")
         self.job_id = os.environ.get("AITK_JOB_ID", None)
         self.job_id = self.job_id.strip() if self.job_id is not None else None
+        self.ui_job_store = UIJobStore(self.job_id, self.sqlite_db_path)
+        if not self.ui_job_store.available:
+            raise Exception("UI database not available for trainer")
+        print(f"Using {self.ui_job_store.description}")
         print(f"Job ID: \"{self.job_id}\"")
         if self.job_id is None:
             raise Exception("AITK_JOB_ID not set")
@@ -99,33 +99,11 @@ class UITrainer(SDTrainer):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.thread_pool, operation_func)
 
-    def _db_connect(self):
-        """Create a new connection for each operation to avoid locking."""
-        conn = sqlite3.connect(self.sqlite_db_path, timeout=10.0)
-        conn.isolation_level = None  # Enable autocommit mode
-        return conn
-
     def should_stop(self):
-        def _check_stop():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT stop FROM Job WHERE id = ?", (self.job_id,))
-                stop = cursor.fetchone()
-                return False if stop is None else stop[0] == 1
-
-        return _check_stop()
+        return self.ui_job_store.should_stop()
     
     def should_return_to_queue(self):
-        def _check_return_to_queue():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT return_to_queue FROM Job WHERE id = ?", (self.job_id,))
-                return_to_queue = cursor.fetchone()
-                return False if return_to_queue is None else return_to_queue[0] == 1
-
-        return _check_return_to_queue()
+        return self.ui_job_store.should_return_to_queue()
 
     def maybe_stop(self):
         if self.should_stop():
@@ -144,22 +122,7 @@ class UITrainer(SDTrainer):
             return
 
         def _do_update():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute("BEGIN IMMEDIATE")
-                try:
-                    # Convert the value to string if it's not already
-                    if isinstance(value, str):
-                        value_to_insert = value
-                    else:
-                        value_to_insert = str(value)
-
-                    # Use parameterized query for both the column name and value
-                    update_query = f"UPDATE Job SET {key} = ? WHERE id = ?"
-                    cursor.execute(
-                        update_query, (value_to_insert, self.job_id))
-                finally:
-                    cursor.execute("COMMIT")
+            self.ui_job_store.update_key(key, value)
 
         await self._execute_db_operation(_do_update)
 
@@ -178,22 +141,7 @@ class UITrainer(SDTrainer):
             return
 
         def _do_update():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute("BEGIN IMMEDIATE")
-                try:
-                    if info is not None:
-                        cursor.execute(
-                            "UPDATE Job SET status = ?, info = ? WHERE id = ?",
-                            (status, info, self.job_id)
-                        )
-                    else:
-                        cursor.execute(
-                            "UPDATE Job SET status = ? WHERE id = ?",
-                            (status, self.job_id)
-                        )
-                finally:
-                    cursor.execute("COMMIT")
+            self.ui_job_store.update_status(status, info)
 
         await self._execute_db_operation(_do_update)
 
@@ -222,6 +170,7 @@ class UITrainer(SDTrainer):
         self.update_db_key("step", self.last_save_step)
         asyncio.run(self.wait_for_all_async())
         self.thread_pool.shutdown(wait=True)
+        self.ui_job_store.close()
 
     def handle_timing_print_hook(self, timing_dict):
         if "train_loop" not in timing_dict:
@@ -242,6 +191,7 @@ class UITrainer(SDTrainer):
         # Wait for all async operations to finish before shutting down
         asyncio.run(self.wait_for_all_async())
         self.thread_pool.shutdown(wait=True)
+        self.ui_job_store.close()
 
     def end_step_hook(self):
         super(UITrainer, self).end_step_hook()

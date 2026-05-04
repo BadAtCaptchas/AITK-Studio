@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -21,11 +20,10 @@ import {
   validateArchiveEntryName,
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
+import { db } from '@/server/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const prisma = new PrismaClient();
 
 async function readJsonFile<T>(filePath: string): Promise<T> {
   return JSON.parse(await fsp.readFile(filePath, 'utf8')) as T;
@@ -135,7 +133,7 @@ async function getAvailableJobName(sourceName: string, trainingRoot: string) {
 
   while (true) {
     const candidate = candidates.shift() || `${baseName}_imported_${suffix++}`;
-    const existingJob = await prisma.job.findUnique({ where: { name: candidate } });
+    const existingJob = await db.jobs.findByName(candidate);
     const candidateFolder = path.join(trainingRoot, candidate);
     if (!existingJob && !fs.existsSync(candidateFolder)) {
       return candidate;
@@ -250,26 +248,21 @@ export async function POST(request: NextRequest) {
       ),
     );
 
-    const highestQueuePosition = await prisma.job.aggregate({
-      _max: { queue_position: true },
-    });
-    const queuePosition = (highestQueuePosition._max.queue_position || 0) + 1000;
+    const queuePosition = (await db.jobs.maxQueuePosition()) + 1000;
     const importedStep = manifest.training.latestCheckpointStep ?? sourceJob?.step ?? manifest.training.dbStep ?? 0;
 
-    const job = await prisma.job.create({
-      data: {
-        name: importedName,
-        gpu_ids: gpuIds,
-        job_config: JSON.stringify(rewrittenConfig),
-        status: 'stopped',
-        stop: false,
-        return_to_queue: false,
-        step: Number(importedStep) || 0,
-        info: `Imported from ${sourceName}`,
-        speed_string: '',
-        queue_position: queuePosition,
-        job_type: 'train',
-      },
+    const job = await db.jobs.create({
+      name: importedName,
+      gpu_ids: gpuIds,
+      job_config: JSON.stringify(rewrittenConfig),
+      status: 'stopped',
+      stop: false,
+      return_to_queue: false,
+      step: Number(importedStep) || 0,
+      info: `Imported from ${sourceName}`,
+      speed_string: '',
+      queue_position: queuePosition,
+      job_type: 'train',
     });
 
     return NextResponse.json({ job, warnings });

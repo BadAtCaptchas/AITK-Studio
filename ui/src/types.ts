@@ -1,3 +1,36 @@
+import type React from 'react';
+
+/**
+ * UI database records
+ */
+
+export type DbDate = string | Date;
+
+export interface Queue {
+  id: number;
+  gpu_ids: string;
+  is_running: boolean;
+}
+
+export interface Job {
+  id: string;
+  name: string;
+  gpu_ids: string;
+  job_config: string;
+  created_at: DbDate;
+  updated_at: DbDate;
+  status: string;
+  stop: boolean;
+  return_to_queue: boolean;
+  step: number;
+  info: string;
+  speed_string: string;
+  queue_position: number;
+  pid: number | null;
+  job_type: string;
+  job_ref: string | null;
+}
+
 /**
  * GPU API response
  */

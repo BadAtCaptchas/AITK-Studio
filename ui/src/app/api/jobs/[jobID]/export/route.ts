@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -25,11 +24,10 @@ import {
   updateTrainingJobExportProgress,
   type TrainingJobExportProgressSnapshot,
 } from '@/server/trainingJobExportProgress';
+import { db } from '@/server/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const prisma = new PrismaClient();
 
 type ExportBody = {
   includeDatasets?: boolean;
@@ -168,7 +166,7 @@ async function performTrainingJobExport(
   onProgress?.({ status: 'preparing', message: 'Preparing export', percent: 2 });
   throwIfExportCanceled(shouldCancel);
 
-  const job = await prisma.job.findUnique({ where: { id: jobID } });
+  const job = await db.jobs.findById(jobID);
   throwIfExportCanceled(shouldCancel);
   if (!job) {
     const error = new Error('Job not found');

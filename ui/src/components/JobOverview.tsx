@@ -1,4 +1,4 @@
-import { Job } from '@prisma/client';
+import type { Job } from '@/types';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import useCPUInfo from '@/hooks/useCPUInfo';
 import GPUWidget from '@/components/GPUWidget';

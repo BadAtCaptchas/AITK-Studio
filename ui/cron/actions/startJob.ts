@@ -1,5 +1,5 @@
-import prisma from '../prisma';
-import { Job } from '@prisma/client';
+import { db, getDatabaseConfig } from '../../src/server/db';
+import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -47,11 +47,12 @@ const startAndWatchJob = (job: Job) => {
 
     // update runtime-local paths before launch. Imported jobs may come from a
     // different system, and multi-process jobs need every process patched.
+    const dbConfig = getDatabaseConfig();
     const jobConfig = JSON.parse(job.job_config);
     jobConfig.config.name = job.name;
     if (Array.isArray(jobConfig.config?.process)) {
       jobConfig.config.process.forEach((processConfig: any) => {
-        processConfig.sqlite_db_path = path.join(TOOLKIT_ROOT, 'aitk_db.db');
+        processConfig.sqlite_db_path = dbConfig.sqlitePath;
         processConfig.training_folder = trainingRoot;
       });
     }
@@ -78,18 +79,19 @@ const startAndWatchJob = (job: Job) => {
     const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
     if (!fs.existsSync(runFilePath)) {
       console.error(`run.py not found at path: ${runFilePath}`);
-      await prisma.job.update({
-        where: { id: jobID },
-        data: {
-          status: 'error',
-          info: `Error launching job: run.py not found`,
-        },
+      await db.jobs.update(jobID, {
+        status: 'error',
+        info: `Error launching job: run.py not found`,
       });
       return;
     }
 
     const additionalEnv: any = {
       AITK_JOB_ID: jobID,
+      AITK_DB_PROVIDER: dbConfig.provider,
+      AITK_SQLITE_PATH: dbConfig.sqlitePath,
+      AITK_MONGODB_URI: dbConfig.mongoUri || '',
+      AITK_MONGODB_DB: dbConfig.mongoDb,
       CUDA_DEVICE_ORDER: 'PCI_BUS_ID',
       CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
       IS_AI_TOOLKIT_UI: '1',
@@ -135,10 +137,7 @@ const startAndWatchJob = (job: Job) => {
       // Save the PID to the database and a file for future management (stop/inspect)
       const pid = subprocess.pid ?? null;
       if (pid != null) {
-        await prisma.job.update({
-          where: { id: jobID },
-          data: { pid },
-        });
+        await db.jobs.update(jobID, { pid });
       }
       try {
         fs.writeFileSync(path.join(trainingFolder, 'pid.txt'), String(pid ?? ''), { flag: 'w' });
@@ -157,12 +156,9 @@ const startAndWatchJob = (job: Job) => {
       // Handle any exceptions during process launch
       console.error('Error launching process:', error);
 
-      await prisma.job.update({
-        where: { id: jobID },
-        data: {
-          status: 'error',
-          info: `Error launching job: ${error?.message || 'Unknown error'}`,
-        },
+      await db.jobs.update(jobID, {
+        status: 'error',
+        info: `Error launching job: ${error?.message || 'Unknown error'}`,
       });
       return;
     }
@@ -172,21 +168,16 @@ const startAndWatchJob = (job: Job) => {
 };
 
 export default async function startJob(jobID: string) {
-  const job: Job | null = await prisma.job.findUnique({
-    where: { id: jobID },
-  });
+  const job: Job | null = await db.jobs.findById(jobID);
   if (!job) {
     console.error(`Job with ID ${jobID} not found`);
     return;
   }
   // update job status to 'running', this will run sync so we don't start multiple jobs.
-  await prisma.job.update({
-    where: { id: jobID },
-    data: {
-      status: 'running',
-      stop: false,
-      info: 'Starting job...',
-    },
+  await db.jobs.update(jobID, {
+    status: 'running',
+    stop: false,
+    info: 'Starting job...',
   });
   // start and watch the job asynchronously so the cron can continue
   startAndWatchJob(job);

@@ -1,26 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { db } from '@/server/db';
 
-const prisma = new PrismaClient();
 const isWindows = process.platform === 'win32';
 
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
   const { jobID } = await params;
 
-  const job = await prisma.job.findUnique({
-    where: { id: jobID },
-  });
+  const job = await db.jobs.findById(jobID);
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
 
-  await prisma.job.update({
-    where: { id: jobID },
-    data: {
-      stop: true,
-      info: 'Stopping job...',
-    },
+  await db.jobs.update(jobID, {
+    stop: true,
+    info: 'Stopping job...',
   });
 
   // Send SIGINT to the process if we have a PID
@@ -36,12 +30,9 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
         process.kill(job.pid, 'SIGINT');
       }
       // if it killed it, mark it stopped in the database
-      await prisma.job.update({
-        where: { id: jobID },
-        data: {
-          status: 'stopped',
-          info: 'Job stopped',
-        },
+      await db.jobs.update(jobID, {
+        status: 'stopped',
+        info: 'Job stopped',
       });
     } catch (e) {
       // Process may have already exited — that's fine

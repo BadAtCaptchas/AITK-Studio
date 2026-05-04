@@ -1,5 +1,5 @@
 import path from 'path';
-import prisma from './prisma';
+import { db } from '../src/server/db';
 
 export const TOOLKIT_ROOT = path.resolve('@', '..', '..');
 export const defaultTrainFolder = path.join(TOOLKIT_ROOT, 'output');
@@ -10,11 +10,7 @@ console.log('TOOLKIT_ROOT:', TOOLKIT_ROOT);
 
 export const getTrainingFolder = async () => {
   const key = 'TRAINING_FOLDER';
-  let row = await prisma.settings.findFirst({
-    where: {
-      key: key,
-    },
-  });
+  let row = await db.settings.get(key);
   let trainingRoot = defaultTrainFolder;
   if (row?.value && row.value !== '') {
     trainingRoot = row.value;
@@ -24,11 +20,7 @@ export const getTrainingFolder = async () => {
 
 export const getHFToken = async () => {
   const key = 'HF_TOKEN';
-  let row = await prisma.settings.findFirst({
-    where: {
-      key: key,
-    },
-  });
+  let row = await db.settings.get(key);
   let token = '';
   if (row?.value && row.value !== '') {
     token = row.value;

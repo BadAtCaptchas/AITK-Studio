@@ -1,5 +1,5 @@
 import processQueue from './actions/processQueue';
-import prisma from './prisma';
+import { disconnectDb } from '../src/server/db';
 
 const SHUTDOWN_TIMEOUT_MS = 3000;
 
@@ -74,7 +74,7 @@ async function shutdown(signal: NodeJS.Signals) {
   console.log(`Cron worker received ${signal}, shutting down...`);
   shutdownPromise = (async () => {
     await waitWithTimeout(cronWorker.stop(), SHUTDOWN_TIMEOUT_MS);
-    await prisma.$disconnect();
+    await disconnectDb();
   })();
 
   try {

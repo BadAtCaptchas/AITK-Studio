@@ -12,7 +12,7 @@ import { redirect } from 'next/navigation';
 import JobActionBar from '@/components/JobActionBar';
 import JobConfigViewer from '@/components/JobConfigViewer';
 import JobLossGraph from '@/components/JobLossGraph';
-import { Job } from '@prisma/client';
+import type { Job } from '@/types';
 
 type PageKey = 'overview' | 'samples' | 'config' | 'loss_log';
 

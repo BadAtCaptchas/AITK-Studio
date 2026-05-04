@@ -1,7 +1,6 @@
 import asyncio
 from collections import OrderedDict
 
-import sqlite3
 import os
 from typing import Literal, Optional
 import threading
@@ -15,6 +14,7 @@ from jobs.process import BaseExtensionProcess
 import tqdm
 
 from toolkit.train_tools import get_torch_dtype
+from toolkit.ui_database import UIJobStore
 
 AITK_Status = Literal["running", "stopped", "error", "completed"]
 
@@ -53,14 +53,10 @@ class BaseCaptioner(BaseExtensionProcess):
         self.sqlite_db_path = self.config.get("sqlite_db_path", "./aitk_db.db")
         self.job_id = os.environ.get("AITK_JOB_ID", None)
         self.job_id = self.job_id.strip() if self.job_id is not None else None
-        self.is_ui_captioner = True
-        if not os.path.exists(self.sqlite_db_path):
-            self.is_ui_captioner = False
-        else:
-            print(f"Using SQLite database at {self.sqlite_db_path}")
-        if self.job_id is None:
-            self.is_ui_captioner = False
-        else:
+        self.ui_job_store = UIJobStore(self.job_id, self.sqlite_db_path)
+        self.is_ui_captioner = self.ui_job_store.available
+        if self.is_ui_captioner:
+            print(f"Using {self.ui_job_store.description}")
             print(f'Job ID: "{self.job_id}"')
 
         self.is_stopping = False
@@ -96,6 +92,10 @@ class BaseCaptioner(BaseExtensionProcess):
             self.update_status("running", f"Captioning {len(self.file_paths)} files")
             self.run_caption_loop()
             self.update_status("completed", "Captioning completed")
+            if self.is_ui_captioner:
+                asyncio.run(self.wait_for_all_async())
+                self.thread_pool.shutdown(wait=True)
+                self.ui_job_store.close()
             print("")
 
             print("****************************************************")
@@ -242,66 +242,17 @@ class BaseCaptioner(BaseExtensionProcess):
     async def _execute_db_operation(self, operation_func):
         """Execute a database operation in a separate thread with retry on lock."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            self.thread_pool, lambda: self._retry_db_operation(operation_func)
-        )
-
-    def _db_connect(self):
-        """Create a new connection for each operation to avoid locking."""
-        conn = sqlite3.connect(self.sqlite_db_path, timeout=30.0)
-        conn.isolation_level = None  # Enable autocommit mode
-        return conn
-
-    def _retry_db_operation(self, operation_func, max_retries=3, base_delay=2.0):
-        """Retry a database operation with exponential backoff on lock errors."""
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                return operation_func()
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e):
-                    last_error = e
-                    if attempt < max_retries:
-                        delay = base_delay * (2**attempt)  # 2s, 4s, 8s
-                        print(
-                            f"[AITK] Database locked (attempt {attempt + 1}/{max_retries + 1}), retrying in {delay:.1f}s..."
-                        )
-                        time.sleep(delay)
-                    else:
-                        print(
-                            f"[AITK] Database locked after {max_retries + 1} attempts, giving up."
-                        )
-                else:
-                    raise
-        raise last_error
+        return await loop.run_in_executor(self.thread_pool, operation_func)
 
     def should_stop(self):
         if not self.is_ui_captioner:
             return False
-
-        def _check_stop():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT stop FROM Job WHERE id = ?", (self.job_id,))
-                stop = cursor.fetchone()
-                return False if stop is None else stop[0] == 1
-
-        return self._retry_db_operation(_check_stop)
+        return self.ui_job_store.should_stop()
 
     def should_return_to_queue(self):
         if not self.is_ui_captioner:
             return False
-
-        def _check_return_to_queue():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT return_to_queue FROM Job WHERE id = ?", (self.job_id,)
-                )
-                return_to_queue = cursor.fetchone()
-                return False if return_to_queue is None else return_to_queue[0] == 1
-
-        return self._retry_db_operation(_check_return_to_queue)
+        return self.ui_job_store.should_return_to_queue()
 
     def maybe_stop(self):
         if not self.is_ui_captioner:
@@ -317,21 +268,7 @@ class BaseCaptioner(BaseExtensionProcess):
 
     async def _update_key(self, key, value):
         def _do_update():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute("BEGIN IMMEDIATE")
-                try:
-                    # Convert the value to string if it's not already
-                    if isinstance(value, str):
-                        value_to_insert = value
-                    else:
-                        value_to_insert = str(value)
-
-                    # Use parameterized query for both the column name and value
-                    update_query = f"UPDATE Job SET {key} = ? WHERE id = ?"
-                    cursor.execute(update_query, (value_to_insert, self.job_id))
-                finally:
-                    cursor.execute("COMMIT")
+            self.ui_job_store.update_key(key, value)
 
         await self._execute_db_operation(_do_update)
 
@@ -350,22 +287,7 @@ class BaseCaptioner(BaseExtensionProcess):
             return
 
         def _do_update():
-            with self._db_connect() as conn:
-                cursor = conn.cursor()
-                cursor.execute("BEGIN IMMEDIATE")
-                try:
-                    if info is not None:
-                        cursor.execute(
-                            "UPDATE Job SET status = ?, info = ? WHERE id = ?",
-                            (status, info, self.job_id),
-                        )
-                    else:
-                        cursor.execute(
-                            "UPDATE Job SET status = ? WHERE id = ?",
-                            (status, self.job_id),
-                        )
-                finally:
-                    cursor.execute("COMMIT")
+            self.ui_job_store.update_status(status, info)
 
         await self._execute_db_operation(_do_update)
 
@@ -387,6 +309,7 @@ class BaseCaptioner(BaseExtensionProcess):
                 )
             finally:
                 self.thread_pool.shutdown(wait=True)
+                self.ui_job_store.close()
 
     async def wait_for_all_async(self):
         """Wait for all tracked async operations to complete."""

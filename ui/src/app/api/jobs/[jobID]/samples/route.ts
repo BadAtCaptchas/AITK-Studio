@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import { getTrainingFolder } from '@/server/settings';
-
-const prisma = new PrismaClient();
+import { db } from '@/server/db';
 
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
   const { jobID } = await params;
 
-  const job = await prisma.job.findUnique({
-    where: { id: jobID },
-  });
+  const job = await db.jobs.findById(jobID);
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });

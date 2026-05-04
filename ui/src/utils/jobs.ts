@@ -1,5 +1,5 @@
 import { JobConfig } from '@/types';
-import { Job } from '@prisma/client';
+import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
 export type TrainingJobCheckpointExportMode = 'latest' | 'all';

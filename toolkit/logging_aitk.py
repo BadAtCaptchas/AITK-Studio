@@ -6,6 +6,7 @@ import os
 import sqlite3
 import time
 from typing import Any, Dict, Tuple, List
+from toolkit.ui_database import get_database_provider, get_mongodb_config
 
 
 # Base logger class
@@ -297,6 +298,123 @@ class UILogger:
         self._last_flush = time.time()
 
 
+class MongoUILogger(UILogger):
+    def __init__(
+        self,
+        log_file: str,
+        flush_every_n: int = 256,
+        flush_every_secs: float = 0.25,
+    ) -> None:
+        super().__init__(log_file, flush_every_n, flush_every_secs)
+        self.job_id = os.environ.get("AITK_JOB_ID", "").strip()
+        self._client = None
+        self._metrics = None
+        self._metric_keys = None
+
+    def start(self):
+        if self._started:
+            return
+        if not self.job_id:
+            raise ValueError("AITK_JOB_ID must be set when using MongoDB UI logging")
+
+        try:
+            from pymongo import MongoClient, ASCENDING
+        except ImportError as exc:
+            raise ImportError(
+                "MongoDB UI logging requires pymongo. Install it with `pip install pymongo`."
+            ) from exc
+
+        uri, db_name = get_mongodb_config()
+        self._client = MongoClient(uri)
+        db = self._client[db_name]
+        self._metrics = db["metrics"]
+        self._metric_keys = db["metric_keys"]
+        self._metrics.create_index(
+            [("job_id", ASCENDING), ("step", ASCENDING), ("key", ASCENDING)],
+            unique=True,
+        )
+        self._metrics.create_index(
+            [("job_id", ASCENDING), ("key", ASCENDING), ("step", ASCENDING)]
+        )
+        self._metric_keys.create_index(
+            [("job_id", ASCENDING), ("key", ASCENDING)], unique=True
+        )
+
+        self._started = True
+        self._last_flush = time.time()
+
+    def finish(self):
+        if not self._started:
+            return
+
+        self._flush()
+        if self._client is not None:
+            self._client.close()
+        self._client = None
+        self._metrics = None
+        self._metric_keys = None
+        self._started = False
+
+    def _flush(self) -> None:
+        if not self._pending_steps and not self._pending_metrics:
+            return
+
+        assert self._metrics is not None
+        assert self._metric_keys is not None
+
+        wall_time_by_step = {step: wall_time for step, wall_time in self._pending_steps}
+
+        if self._pending_key_minmax:
+            from pymongo import UpdateOne
+
+            key_ops = []
+            for key, (lo, hi) in self._pending_key_minmax.items():
+                key_ops.append(
+                    UpdateOne(
+                        {"job_id": self.job_id, "key": key},
+                        {
+                            "$setOnInsert": {
+                                "job_id": self.job_id,
+                                "key": key,
+                            },
+                            "$min": {"first_seen_step": lo},
+                            "$max": {"last_seen_step": hi},
+                        },
+                        upsert=True,
+                    )
+                )
+            if key_ops:
+                self._metric_keys.bulk_write(key_ops, ordered=False)
+
+        if self._pending_metrics:
+            from pymongo import UpdateOne
+
+            metric_ops = []
+            for step, key, value_real, value_text in self._pending_metrics:
+                metric_ops.append(
+                    UpdateOne(
+                        {"job_id": self.job_id, "step": step, "key": key},
+                        {
+                            "$set": {
+                                "job_id": self.job_id,
+                                "step": step,
+                                "key": key,
+                                "wall_time": wall_time_by_step.get(step, time.time()),
+                                "value_real": value_real,
+                                "value_text": value_text,
+                            }
+                        },
+                        upsert=True,
+                    )
+                )
+            self._metrics.bulk_write(metric_ops, ordered=False)
+
+        self._pending_steps.clear()
+        self._pending_metrics.clear()
+        self._pending_key_minmax.clear()
+        self._last_flush = time.time()
+
+
 # create logger based on the logging config
 def create_logger(
     logging_config: LoggingConfig,
@@ -311,6 +429,8 @@ def create_logger(
         if save_root is None:
             raise ValueError("save_root must be provided when using UILogger")
         log_file = os.path.join(save_root, "loss_log.db")
+        if get_database_provider() == "mongodb":
+            return MongoUILogger(log_file=log_file)
         return UILogger(log_file=log_file)
     else:
         return EmptyLogger()

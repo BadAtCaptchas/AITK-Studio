@@ -1,6 +1,6 @@
 'use client';
 
-import { Job } from '@prisma/client';
+import type { Job } from '@/types';
 import useJobLossLog, { LossPoint } from '@/hooks/useJobLossLog';
 import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';

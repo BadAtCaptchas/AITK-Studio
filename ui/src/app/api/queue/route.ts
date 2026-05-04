@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { db } from '@/server/db';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   try {
-    const queues = await prisma.queue.findMany({
-      orderBy: { gpu_ids: 'asc' },
-    });
+    const queues = await db.queues.list('gpu_ids');
     return NextResponse.json({ queues: queues });
   } catch (error) {
     console.error(error);

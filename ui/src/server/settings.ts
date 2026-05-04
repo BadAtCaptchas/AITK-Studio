@@ -1,10 +1,9 @@
-import { PrismaClient } from '@prisma/client';
 import { defaultDatasetsFolder, defaultDataRoot } from '@/paths';
 import { defaultTrainFolder } from '@/paths';
 import NodeCache from 'node-cache';
+import { db } from './db';
 
 const myCache = new NodeCache();
-const prisma = new PrismaClient();
 
 export const flushCache = () => {
   myCache.flushAll();
@@ -16,11 +15,7 @@ export const getDatasetsRoot = async () => {
   if (datasetsPath) {
     return datasetsPath;
   }
-  let row = await prisma.settings.findFirst({
-    where: {
-      key: 'DATASETS_FOLDER',
-    },
-  });
+  let row = await db.settings.get('DATASETS_FOLDER');
   datasetsPath = defaultDatasetsFolder;
   if (row?.value && row.value !== '') {
     datasetsPath = row.value;
@@ -35,11 +30,7 @@ export const getTrainingFolder = async () => {
   if (trainingRoot) {
     return trainingRoot;
   }
-  let row = await prisma.settings.findFirst({
-    where: {
-      key: key,
-    },
-  });
+  let row = await db.settings.get(key);
   trainingRoot = defaultTrainFolder;
   if (row?.value && row.value !== '') {
     trainingRoot = row.value;
@@ -54,11 +45,7 @@ export const getHFToken = async () => {
   if (token) {
     return token;
   }
-  let row = await prisma.settings.findFirst({
-    where: {
-      key: key,
-    },
-  });
+  let row = await db.settings.get(key);
   token = '';
   if (row?.value && row.value !== '') {
     token = row.value;
@@ -73,11 +60,7 @@ export const getDataRoot = async () => {
   if (dataRoot) {
     return dataRoot;
   }
-  let row = await prisma.settings.findFirst({
-    where: {
-      key: key,
-    },
-  });
+  let row = await db.settings.get(key);
   dataRoot = defaultDataRoot;
   if (row?.value && row.value !== '') {
     dataRoot = row.value;

@@ -71,8 +71,8 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt && \
 # Build UI
 WORKDIR /app/ai-toolkit/ui
 RUN npm install && \
-    npm run build && \
-    npm run update_db
+    npm run update_db && \
+    npm run build
 
 # Expose port (assuming the application runs on port 3000)
 EXPOSE 8675

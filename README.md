@@ -154,6 +154,35 @@ npm run build_and_start
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
 
+## UI database
+
+The UI uses SQLite by default and stores its state in `aitk_db.db`. You can switch all UI-backed state to MongoDB at startup:
+
+```bash
+AITK_DB_PROVIDER=mongodb \
+AITK_MONGODB_URI="mongodb://localhost:27017" \
+AITK_MONGODB_DB=ai_toolkit \
+npm run build_and_start
+```
+
+Supported database environment variables:
+
+- `AITK_DB_PROVIDER=sqlite|mongodb` defaults to `sqlite`.
+- `AITK_SQLITE_PATH` defaults to `../aitk_db.db` from the `ui` folder.
+- `AITK_MONGODB_URI` is required when `AITK_DB_PROVIDER=mongodb`.
+- `AITK_MONGODB_DB` defaults to `ai_toolkit`.
+
+Run `npm run update_db` after changing database settings. SQLite mode prepares Prisma and the SQLite schema. MongoDB mode prepares the MongoDB indexes while still generating the Prisma client for SQLite fallback support.
+
+To migrate existing SQLite UI data into MongoDB, leave `aitk_db.db` and the training output folders in place, set the MongoDB variables, then run:
+
+```bash
+cd ui
+AITK_MONGODB_URI="mongodb://localhost:27017" npm run migrate_sqlite_to_mongo
+```
+
+The migration imports jobs, queues, settings, and existing per-job `loss_log.db` metrics. SQLite files are left untouched so you can switch back to SQLite.
+
 ## Training job import/export
 
 The UI can export and import training jobs from the queue page. Use the action menu on a training job to export either:

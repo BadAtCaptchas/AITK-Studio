@@ -14,6 +14,10 @@ services:
       - ./config:/app/ai-toolkit/config
     environment:
       - AI_TOOLKIT_AUTH=${AI_TOOLKIT_AUTH:-password}
+      - AITK_DB_PROVIDER=${AITK_DB_PROVIDER:-sqlite}
+      - AITK_SQLITE_PATH=${AITK_SQLITE_PATH:-/app/ai-toolkit/aitk_db.db}
+      - AITK_MONGODB_URI=${AITK_MONGODB_URI:-}
+      - AITK_MONGODB_DB=${AITK_MONGODB_DB:-ai_toolkit}
       - NODE_ENV=production
       - TZ=UTC
     deploy:

@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { isMac } from '@/helpers/basic';
-
-const prisma = new PrismaClient();
+import { db } from '@/server/db';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,23 +10,15 @@ export async function GET(request: Request) {
 
   try {
     if (id) {
-      const job = await prisma.job.findUnique({
-        where: { id },
-      });
+      const job = await db.jobs.findById(id);
       return NextResponse.json(job);
     }
     if (job_ref) {
-      const job = await prisma.job.findFirst({
-        where: { job_ref },
-        orderBy: { updated_at: 'desc' },
-      });
+      const job = await db.jobs.findLatestByRef(job_ref);
       return NextResponse.json(job);
     }
 
-    const jobs = await prisma.job.findMany({
-      where: job_type ? { job_type } : undefined,
-      orderBy: { created_at: 'desc' },
-    });
+    const jobs = await db.jobs.list({ job_type });
     return NextResponse.json({ jobs: jobs });
   } catch (error) {
     console.error(error);
@@ -57,34 +47,24 @@ export async function POST(request: Request) {
 
     if (id) {
       // Update existing training
-      const training = await prisma.job.update({
-        where: { id },
-        data: {
-          name,
-          gpu_ids,
-          job_config: JSON.stringify(job_config),
-          ...extra,
-        },
+      const training = await db.jobs.update(id, {
+        name,
+        gpu_ids,
+        job_config: JSON.stringify(job_config),
+        ...extra,
       });
       return NextResponse.json(training);
     } else {
       // find the highest queue position and add 1000
-      const highestQueuePosition = await prisma.job.aggregate({
-        _max: {
-          queue_position: true,
-        },
-      });
-      const newQueuePosition = (highestQueuePosition._max.queue_position || 0) + 1000;
+      const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
 
       // Create new training
-      const training = await prisma.job.create({
-        data: {
-          name,
-          gpu_ids,
-          job_config: JSON.stringify(job_config),
-          queue_position: newQueuePosition,
-          ...extra,
-        },
+      const training = await db.jobs.create({
+        name,
+        gpu_ids,
+        job_config: JSON.stringify(job_config),
+        queue_position: newQueuePosition,
+        ...extra,
       });
       return NextResponse.json(training);
     }

@@ -10,8 +10,10 @@ import {
   deleteJob,
   getAvaliableJobActions,
   markJobAsStopped,
-  exportTrainingJob,
+  startTrainingJobExport,
+  getTrainingJobExportProgress,
   downloadServerFile,
+  type TrainingJobExportProgress,
 } from '@/utils/jobs';
 import { startQueue } from '@/utils/queue';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
@@ -28,7 +30,42 @@ interface JobActionBarProps {
 }
 
 type ExportMode = 'state' | 'datasets';
-type ExportStatus = { mode: ExportMode; phase: 'exporting' | 'ready' | 'failed' };
+type ExportStatus = { mode: ExportMode; phase: 'exporting' | 'ready' | 'failed'; progress: TrainingJobExportProgress | null };
+
+function sleep(ms: number) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function getExportPhase(progress: TrainingJobExportProgress): ExportStatus['phase'] {
+  if (progress.status === 'completed') return 'ready';
+  if (progress.status === 'failed') return 'failed';
+  return 'exporting';
+}
+
+function getExportProgressDetail(progress: TrainingJobExportProgress | null) {
+  if (!progress) return null;
+
+  const files =
+    progress.entriesTotal > 0 ? `${progress.entriesProcessed} / ${progress.entriesTotal} files` : null;
+  const bytes =
+    progress.bytesTotal > 0
+      ? `${formatBytes(progress.bytesProcessed)} / ${formatBytes(progress.bytesTotal)}`
+      : null;
+
+  return [files, bytes].filter(Boolean).join(' · ');
+}
 
 export default function JobActionBar({
   job,
@@ -42,10 +79,12 @@ export default function JobActionBar({
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const exportStatusTimeout = useRef<number | null>(null);
   const exportInFlight = useRef(false);
+  const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
 
   useEffect(() => {
     return () => {
+      isMounted.current = false;
       if (exportStatusTimeout.current !== null) {
         window.clearTimeout(exportStatusTimeout.current);
       }
@@ -59,9 +98,29 @@ export default function JobActionBar({
       window.clearTimeout(exportStatusTimeout.current);
     }
     exportStatusTimeout.current = window.setTimeout(() => {
-      setExportStatus(null);
+      if (isMounted.current) {
+        setExportStatus(null);
+      }
       exportStatusTimeout.current = null;
     }, 2500);
+  };
+
+  const updateExportStatus = (mode: ExportMode, progress: TrainingJobExportProgress) => {
+    if (!isMounted.current) return;
+    setExportStatus({ mode, phase: getExportPhase(progress), progress });
+  };
+
+  const waitForExport = async (mode: ExportMode, exportID: string) => {
+    while (true) {
+      await sleep(500);
+      const progress = await getTrainingJobExportProgress(job.id, exportID);
+      updateExportStatus(mode, progress);
+
+      if (progress.status === 'completed') return progress;
+      if (progress.status === 'failed') {
+        throw new Error(progress.error || 'Failed to export training job');
+      }
+    }
   };
 
   const handleExport = async (includeDatasets: boolean) => {
@@ -73,19 +132,26 @@ export default function JobActionBar({
       window.clearTimeout(exportStatusTimeout.current);
       exportStatusTimeout.current = null;
     }
-    setExportStatus({ mode: exportMode, phase: 'exporting' });
+    setExportStatus({ mode: exportMode, phase: 'exporting', progress: null });
     try {
-      const result = await exportTrainingJob(job.id, includeDatasets);
-      downloadServerFile(result.zipPath, result.fileName);
-      setExportStatus({ mode: exportMode, phase: 'ready' });
+      const started = await startTrainingJobExport(job.id, includeDatasets);
+      updateExportStatus(exportMode, started.progress);
+
+      const progress = await waitForExport(exportMode, started.exportID);
+      if (!progress.zipPath || !progress.fileName) {
+        throw new Error('Export completed without a downloadable file.');
+      }
+
+      downloadServerFile(progress.zipPath, progress.fileName);
+      setExportStatus({ mode: exportMode, phase: 'ready', progress });
       clearExportStatusSoon();
-      if (result.warnings?.length) {
-        alert(`Export completed with warnings:\n\n${result.warnings.join('\n')}`);
+      if (progress.warnings?.length) {
+        alert(`Export completed with warnings:\n\n${progress.warnings.join('\n')}`);
       }
     } catch (error) {
       console.error('Error exporting job:', error);
       alert('Failed to export job. Please try again.');
-      setExportStatus({ mode: exportMode, phase: 'failed' });
+      setExportStatus({ mode: exportMode, phase: 'failed', progress: null });
       clearExportStatusSoon();
     } finally {
       exportInFlight.current = false;
@@ -97,9 +163,10 @@ export default function JobActionBar({
       ? 'Export failed'
       : exportStatus?.phase === 'ready'
       ? 'Export ready'
-      : exportStatus?.mode === 'datasets'
-        ? 'Exporting with datasets...'
-        : 'Exporting job state...';
+        : exportStatus?.progress?.message ||
+          (exportStatus?.mode === 'datasets' ? 'Starting dataset export...' : 'Starting job export...');
+  const exportStatusDetail = getExportProgressDetail(exportStatus?.progress || null);
+  const exportPercent = Math.round(exportStatus?.progress?.percent || (exportStatus?.phase === 'ready' ? 100 : 0));
 
   return (
     <div className={`${className}`}>
@@ -275,16 +342,30 @@ export default function JobActionBar({
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-4 right-4 z-50 inline-flex items-center gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg"
+          className="fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg"
         >
           {exportStatus.phase === 'ready' ? (
-            <CheckCircle2 className="h-4 w-4 text-green-400" />
+            <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-green-400" />
           ) : exportStatus.phase === 'failed' ? (
-            <X className="h-4 w-4 text-red-400" />
+            <X className="mt-0.5 h-4 w-4 flex-none text-red-400" />
           ) : (
-            <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-blue-400" />
           )}
-          {exportStatusLabel}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-3">
+              <span className="truncate">{exportStatusLabel}</span>
+              <span className="flex-none text-xs text-gray-400">{exportPercent}%</span>
+            </div>
+            {exportStatusDetail && <div className="mt-0.5 truncate text-xs text-gray-400">{exportStatusDetail}</div>}
+            {exportStatus.phase === 'exporting' && (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-700">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all"
+                  style={{ width: `${Math.max(2, exportPercent)}%` }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

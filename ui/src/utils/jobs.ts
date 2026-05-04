@@ -2,6 +2,31 @@ import { JobConfig } from '@/types';
 import { Job } from '@prisma/client';
 import { apiClient } from '@/utils/api';
 
+export type TrainingJobExportProgress = {
+  exportID: string;
+  jobID: string;
+  includeDatasets: boolean;
+  status: 'queued' | 'preparing' | 'zipping' | 'finalizing' | 'completed' | 'failed';
+  message: string;
+  percent: number;
+  entriesProcessed: number;
+  entriesTotal: number;
+  bytesProcessed: number;
+  bytesTotal: number;
+  zipPath: string | null;
+  fileName: string | null;
+  warnings: string[];
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TrainingJobExportResult = {
+  zipPath: string;
+  fileName: string;
+  warnings: string[];
+};
+
 export const startJob = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
@@ -69,7 +94,19 @@ export const markJobAsStopped = (jobID: string) => {
 export const exportTrainingJob = (jobID: string, includeDatasets: boolean) => {
   return apiClient
     .post(`/api/jobs/${jobID}/export`, { includeDatasets })
-    .then(res => res.data as { zipPath: string; fileName: string; warnings: string[] });
+    .then(res => res.data as TrainingJobExportResult);
+};
+
+export const startTrainingJobExport = (jobID: string, includeDatasets: boolean) => {
+  return apiClient
+    .post(`/api/jobs/${jobID}/export`, { includeDatasets, background: true })
+    .then(res => res.data as { exportID: string; statusUrl: string; progress: TrainingJobExportProgress });
+};
+
+export const getTrainingJobExportProgress = (jobID: string, exportID: string) => {
+  return apiClient
+    .get(`/api/jobs/${jobID}/export/${exportID}`)
+    .then(res => res.data as TrainingJobExportProgress);
 };
 
 export const importTrainingJob = (file: File, gpuIDs: string | null) => {

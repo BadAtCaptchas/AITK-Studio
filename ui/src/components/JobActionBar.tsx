@@ -28,7 +28,7 @@ interface JobActionBarProps {
 }
 
 type ExportMode = 'state' | 'datasets';
-type ExportStatus = { mode: ExportMode; phase: 'exporting' | 'ready' };
+type ExportStatus = { mode: ExportMode; phase: 'exporting' | 'ready' | 'failed' };
 
 export default function JobActionBar({
   job,
@@ -85,14 +85,17 @@ export default function JobActionBar({
     } catch (error) {
       console.error('Error exporting job:', error);
       alert('Failed to export job. Please try again.');
-      setExportStatus(null);
+      setExportStatus({ mode: exportMode, phase: 'failed' });
+      clearExportStatusSoon();
     } finally {
       exportInFlight.current = false;
     }
   };
 
   const exportStatusLabel =
-    exportStatus?.phase === 'ready'
+    exportStatus?.phase === 'failed'
+      ? 'Export failed'
+      : exportStatus?.phase === 'ready'
       ? 'Export ready'
       : exportStatus?.mode === 'datasets'
         ? 'Exporting with datasets...'
@@ -276,6 +279,8 @@ export default function JobActionBar({
         >
           {exportStatus.phase === 'ready' ? (
             <CheckCircle2 className="h-4 w-4 text-green-400" />
+          ) : exportStatus.phase === 'failed' ? (
+            <X className="h-4 w-4 text-red-400" />
           ) : (
             <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
           )}

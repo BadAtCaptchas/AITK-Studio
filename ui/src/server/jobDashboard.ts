@@ -13,6 +13,32 @@ export type CheckpointSummary = {
   is_latest: boolean;
 };
 
+const dashboardCache = new Map<string, any>();
+
+export function isTransientDbError(error: unknown) {
+  const code = typeof error === 'object' && error !== null ? (error as any).code : null;
+  const message = error instanceof Error ? error.message : String(error);
+  return code === 'P1008' || code === 'P2028' || /database is locked|timed out|timeout/i.test(message);
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function withDbRetry<T>(operation: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDbError(error) || i === attempts - 1) break;
+      await sleep(80 * 2 ** i);
+    }
+  }
+  throw lastError;
+}
+
 function safeJsonParse<T>(value: string, fallback: T): T {
   try {
     return JSON.parse(value) as T;
@@ -114,11 +140,15 @@ function getJobTotalSteps(job: Job) {
 
 async function loadLossSeries(job: Job, jobFolder: string) {
   const logPath = path.join(jobFolder, 'loss_log.db');
-  const first = await db.metrics.getLossLog(job.id, logPath, { key: 'loss', limit: 1, sinceStep: null, stride: 1 });
+  const first = await withDbRetry(() =>
+    db.metrics.getLossLog(job.id, logPath, { key: 'loss', limit: 1, sinceStep: null, stride: 1 }),
+  );
   const keys = first.keys.filter(key => /loss/i.test(key));
   const wantedKeys = keys.length ? keys : ['loss'];
   const results = await Promise.all(
-    wantedKeys.map(key => db.metrics.getLossLog(job.id, logPath, { key, limit: 5000, sinceStep: null, stride: 1 })),
+    wantedKeys.map(key =>
+      withDbRetry(() => db.metrics.getLossLog(job.id, logPath, { key, limit: 5000, sinceStep: null, stride: 1 })),
+    ),
   );
   return results.map(result => ({ key: result.key, points: result.points }));
 }
@@ -142,28 +172,39 @@ function deriveTiming(job: Job, lossPoints: LossPoint[], totalSteps: number) {
 }
 
 export async function getJobDashboard(jobID: string) {
-  const job = await db.jobs.findById(jobID);
-  if (!job) return null;
+  try {
+    const job = await withDbRetry(() => db.jobs.findById(jobID));
+    if (!job) return null;
 
-  const trainingFolder = await getTrainingFolder();
-  const jobFolder = path.join(trainingFolder, job.name);
-  const totalSteps = getJobTotalSteps(job);
-  const progress = totalSteps > 0 ? Math.min(100, (job.step / totalSteps) * 100) : 0;
-  const checkpoints = listCheckpoints(jobFolder);
-  const log = readLog(jobFolder);
-  const lossSeries = await loadLossSeries(job, jobFolder);
-  const primaryLoss = lossSeries.find(series => series.key === 'loss')?.points ?? lossSeries[0]?.points ?? [];
-  const timing = deriveTiming(job, primaryLoss, totalSteps);
+    const trainingFolder = await withDbRetry(() => getTrainingFolder());
+    const jobFolder = path.join(trainingFolder, job.name);
+    const totalSteps = getJobTotalSteps(job);
+    const progress = totalSteps > 0 ? Math.min(100, (job.step / totalSteps) * 100) : 0;
+    const checkpoints = listCheckpoints(jobFolder);
+    const log = readLog(jobFolder);
+    const lossSeries = await loadLossSeries(job, jobFolder);
+    const primaryLoss = lossSeries.find(series => series.key === 'loss')?.points ?? lossSeries[0]?.points ?? [];
+    const timing = deriveTiming(job, primaryLoss, totalSteps);
 
-  return {
-    job,
-    progress,
-    totalSteps,
-    timing,
-    log,
-    logLines: splitLog(log),
-    lossSeries,
-    checkpoints,
-    configSummary: summarizeConfig(job),
-  };
+    const dashboard = {
+      job,
+      progress,
+      totalSteps,
+      timing,
+      log,
+      logLines: splitLog(log),
+      lossSeries,
+      checkpoints,
+      configSummary: summarizeConfig(job),
+      stale: false,
+    };
+    dashboardCache.set(jobID, dashboard);
+    return dashboard;
+  } catch (error) {
+    const cached = dashboardCache.get(jobID);
+    if (cached && isTransientDbError(error)) {
+      return { ...cached, stale: true };
+    }
+    throw error;
+  }
 }

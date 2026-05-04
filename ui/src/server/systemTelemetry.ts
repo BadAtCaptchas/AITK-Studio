@@ -10,6 +10,7 @@ export type TelemetryRange = '1h' | '6h' | '24h' | 'all';
 
 const DEFAULT_INTERVAL_SEC = 5;
 const DEFAULT_RETENTION_HOURS = 24;
+let cachedSettings: { value: { intervalSec: number; retentionHours: number }; expiresAt: number } | null = null;
 
 function asNumber(value: unknown, fallback = 0) {
   const n = Number(value);
@@ -17,13 +18,20 @@ function asNumber(value: unknown, fallback = 0) {
 }
 
 export async function getTelemetrySettings() {
+  if (cachedSettings && cachedSettings.expiresAt > Date.now()) {
+    return cachedSettings.value;
+  }
   const [intervalRow, retentionRow] = await Promise.all([
     db.settings.get('SYSTEM_TELEMETRY_INTERVAL_SEC'),
     db.settings.get('SYSTEM_TELEMETRY_RETENTION_HOURS'),
   ]);
   const intervalSec = Math.max(1, asNumber(intervalRow?.value, DEFAULT_INTERVAL_SEC));
   const retentionHours = Math.max(1, asNumber(retentionRow?.value, DEFAULT_RETENTION_HOURS));
-  return { intervalSec, retentionHours };
+  cachedSettings = {
+    value: { intervalSec, retentionHours },
+    expiresAt: Date.now() + 30 * 1000,
+  };
+  return cachedSettings.value;
 }
 
 export function rangeToSince(range: TelemetryRange) {

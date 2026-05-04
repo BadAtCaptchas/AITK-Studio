@@ -31,7 +31,7 @@ export default function JobPage({ params }: { params: { jobID: string } }) {
   const usableParams = use(params as any) as { jobID: string };
   const router = useRouter();
   const { job, status, refreshJob } = useJob(usableParams.jobID, 5000);
-  const { dashboard, status: dashboardStatus } = useJobDashboard(usableParams.jobID, 3000);
+  const { dashboard, status: dashboardStatus } = useJobDashboard(usableParams.jobID, 5000);
   const [pageKey, setPageKey] = useState<PageKey>('console');
   const jobType = job?.job_type || 'unknown';
 

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/utils/api';
 
-export default function useJobDashboard(jobID: string, reloadInterval: number | null = 3000) {
+export default function useJobDashboard(jobID: string, reloadInterval: number | null = 5000) {
   const [dashboard, setDashboard] = useState<any | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>('idle');
 

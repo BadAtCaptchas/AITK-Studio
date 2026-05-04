@@ -1,5 +1,4 @@
 import { db } from './db';
-import { reindexModelArtifacts } from './modelArtifacts';
 
 const DEFAULT_ALERT_RULES = [
   { id: 'gpu-temperature-high', name: 'GPU temperature high', metric: 'temperature', operator: '>=', threshold: 85, duration_seconds: 0, severity: 'critical', config: { scope: 'gpu', unit: 'C' } },
@@ -139,7 +138,6 @@ export async function evaluateAlerts() {
 
   const missingRule = ruleByID.get('missing-artifact');
   if (missingRule) {
-    await reindexModelArtifacts();
     const missing = await db.modelArtifacts.list({ exists: false });
     for (const artifact of missing) {
       const fingerprint = `${missingRule.id}:${artifact.id}`;

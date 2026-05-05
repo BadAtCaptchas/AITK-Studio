@@ -144,21 +144,22 @@ export async function processQueuedEvaluationRuns() {
 
     const result = await runEvaluator(samples);
     const byID = new Map(result.items.map(item => [item.id, item]));
-    for (const item of items) {
-      const evaluated = byID.get(item.id);
-      if (!evaluated) {
-        await db.evaluations.updateItem(item.id, {
-          status: 'unavailable',
-          error: 'Evaluator returned no result for this item.',
+    await Promise.all(
+      items.map(item => {
+        const evaluated = byID.get(item.id);
+        if (!evaluated) {
+          return db.evaluations.updateItem(item.id, {
+            status: 'unavailable',
+            error: 'Evaluator returned no result for this item.',
+          } as any);
+        }
+        return db.evaluations.updateItem(item.id, {
+          status: evaluated.errors.length ? 'completed_with_warnings' : 'completed',
+          metrics: JSON.stringify(evaluated.metrics),
+          error: evaluated.errors.join('\n') || null,
         } as any);
-        continue;
-      }
-      await db.evaluations.updateItem(item.id, {
-        status: evaluated.errors.length ? 'completed_with_warnings' : 'completed',
-        metrics: JSON.stringify(evaluated.metrics),
-        error: evaluated.errors.join('\n') || null,
-      } as any);
-    }
+      }),
+    );
     await db.evaluations.updateRun(run.id, {
       status: 'completed',
       metrics: JSON.stringify(result.summary),

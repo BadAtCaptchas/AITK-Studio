@@ -157,30 +157,6 @@ export class UniqueConstraintError extends Error {
   }
 }
 
-export function isTransientDatabaseError(error: unknown) {
-  const code = typeof error === 'object' && error !== null ? (error as any).code : null;
-  const message = error instanceof Error ? error.message : String(error);
-  return code === 'P1008' || code === 'P2028' || /database is locked|SQLITE_BUSY|timed out|timeout/i.test(message);
-}
-
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function withTransientDatabaseRetry<T>(operation: () => Promise<T>, attempts = 6): Promise<T> {
-  let lastError: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      if (!isTransientDatabaseError(error) || i === attempts - 1) break;
-      await sleep(Math.min(2000, 150 * 2 ** i));
-    }
-  }
-  throw lastError;
-}
-
 function normalizeProvider(rawProvider?: string): DatabaseProvider {
   const provider = (rawProvider || 'sqlite').trim().toLowerCase();
   if (provider === 'sqlite' || provider === 'mongodb') {
@@ -999,13 +975,11 @@ export const db = {
           .toArray();
         return rows.map(normalizeEvaluationRun).filter(Boolean) as EvaluationRun[];
       }
-      const rows = await withTransientDatabaseRetry<any[]>(() =>
-        (getPrisma() as any).evaluationRun.findMany({
-          where: options.status ? { status: options.status } : undefined,
-          orderBy: { created_at: 'desc' },
-          take: limit,
-        }),
-      );
+      const rows = await (getPrisma() as any).evaluationRun.findMany({
+        where: options.status ? { status: options.status } : undefined,
+        orderBy: { created_at: 'desc' },
+        take: limit,
+      });
       return rows.map(normalizeEvaluationRun).filter(Boolean) as EvaluationRun[];
     },
 
@@ -1029,9 +1003,7 @@ export const db = {
         await mongoCollection(mongo, 'evaluation_runs').insertOne(run);
         return normalizeEvaluationRun(run) as EvaluationRun;
       }
-      return normalizeEvaluationRun(
-        await withTransientDatabaseRetry(() => (getPrisma() as any).evaluationRun.create({ data: run })),
-      ) as EvaluationRun;
+      return normalizeEvaluationRun(await (getPrisma() as any).evaluationRun.create({ data: run })) as EvaluationRun;
     },
 
     async updateRun(id: string, data: Partial<EvaluationRun>): Promise<EvaluationRun> {
@@ -1047,7 +1019,7 @@ export const db = {
         return run;
       }
       return normalizeEvaluationRun(
-        await withTransientDatabaseRetry(() => (getPrisma() as any).evaluationRun.update({ where: { id }, data })),
+        await (getPrisma() as any).evaluationRun.update({ where: { id }, data }),
       ) as EvaluationRun;
     },
 
@@ -1060,12 +1032,10 @@ export const db = {
           .toArray();
         return rows.map(normalizeEvaluationItem).filter(Boolean) as EvaluationItem[];
       }
-      const rows = await withTransientDatabaseRetry<any[]>(() =>
-        (getPrisma() as any).evaluationItem.findMany({
-          where: { run_id: runID },
-          orderBy: { created_at: 'asc' },
-        }),
-      );
+      const rows = await (getPrisma() as any).evaluationItem.findMany({
+        where: { run_id: runID },
+        orderBy: { created_at: 'asc' },
+      });
       return rows.map(normalizeEvaluationItem).filter(Boolean) as EvaluationItem[];
     },
 
@@ -1089,7 +1059,7 @@ export const db = {
         await mongoCollection(mongo, 'evaluation_items').insertMany(rows, { ordered: false });
         return;
       }
-      await withTransientDatabaseRetry(() => (getPrisma() as any).evaluationItem.createMany({ data: rows }));
+      await (getPrisma() as any).evaluationItem.createMany({ data: rows });
     },
 
     async updateItem(id: string, data: Partial<EvaluationItem>) {
@@ -1098,7 +1068,7 @@ export const db = {
         await mongoCollection(mongo, 'evaluation_items').updateOne({ id }, { $set: { ...data, updated_at: new Date() } });
         return;
       }
-      await withTransientDatabaseRetry(() => (getPrisma() as any).evaluationItem.update({ where: { id }, data }));
+      await (getPrisma() as any).evaluationItem.update({ where: { id }, data });
     },
   },
 

@@ -131,25 +131,6 @@ function ConsoleLogs({ lines }: { lines: string[] }) {
     if (autoScroll && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [lines, autoScroll]);
 
-  const handleScroll = () => {
-    const el = ref.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setAutoScroll(distanceFromBottom < 24);
-  };
-
-  const toggleAutoScroll = () => {
-    setAutoScroll(value => {
-      const next = !value;
-      if (next && ref.current) {
-        requestAnimationFrame(() => {
-          if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-        });
-      }
-      return next;
-    });
-  };
-
   const shownLines =
     tab === 'logs'
       ? lines
@@ -173,7 +154,7 @@ function ConsoleLogs({ lines }: { lines: string[] }) {
           </button>
         ))}
         <div className="ml-auto flex items-center gap-4 normal-case tracking-normal text-gray-400">
-          <button type="button" onClick={toggleAutoScroll} className="flex items-center gap-2 hover:text-white">
+          <button type="button" onClick={() => setAutoScroll(v => !v)} className="flex items-center gap-2 hover:text-white">
             <span className={autoScroll ? 'h-2 w-2 rounded-full bg-green-500' : 'h-2 w-2 rounded-full bg-gray-600'} />
             Auto-scroll
           </button>
@@ -191,7 +172,7 @@ function ConsoleLogs({ lines }: { lines: string[] }) {
         <span className="h-2 w-2 rounded-full bg-green-500" />
         Streaming live logs...
       </div>
-      <div ref={ref} onScroll={handleScroll} className="min-h-0 flex-1 overflow-auto px-4 pb-4 font-mono text-[12px]">
+      <div ref={ref} className="min-h-0 flex-1 overflow-auto px-4 pb-4 font-mono text-[12px]">
         {shownLines.length ? shownLines.map((line, index) => <LogLine key={`${index}-${line}`} line={line} />) : <div className="text-gray-500">No matching log lines.</div>}
       </div>
       <div className="flex h-10 items-center border-t border-white/10 px-4 text-xs text-gray-500">

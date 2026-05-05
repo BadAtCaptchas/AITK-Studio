@@ -120,7 +120,7 @@ export default function JobPage({ params }: { params: { jobID: string } }) {
         })}
       </div>
 
-      <main className={`absolute inset-x-0 bottom-0 top-24 ${pageKey === 'console' ? 'overflow-hidden' : 'overflow-auto'}`}>
+      <main className="absolute inset-x-0 bottom-0 top-24 overflow-auto">
         {(status === 'loading' || dashboardStatus === 'loading') && !job && <div className="p-6 text-gray-400">Loading...</div>}
         {status === 'error' && !job && <div className="p-6 text-red-400">Error fetching job</div>}
         {job && pageKey === 'console' && dashboard && <JobConsole job={job} dashboard={dashboard} />}

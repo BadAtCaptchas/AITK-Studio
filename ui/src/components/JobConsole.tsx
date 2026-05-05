@@ -141,7 +141,7 @@ function ConsoleLogs({ lines }: { lines: string[] }) {
           : lines.filter(line => /cpu|gpu|vram|ram|cuda|device/i.test(line));
 
   return (
-    <section className="flex h-full min-h-0 flex-col border-r border-white/10">
+    <section className="flex min-h-[520px] flex-col border-r border-white/10">
       <div className="flex h-11 items-center gap-6 border-b border-white/10 px-4 text-xs uppercase tracking-wide">
         {(['logs', 'events', 'metrics', 'system'] as const).map(item => (
           <button
@@ -347,8 +347,8 @@ export default function JobConsole({ job, dashboard }: Props) {
   const speed = numericSpeed(job.speed_string);
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-black text-gray-300">
-      <div className="flex shrink-0 overflow-x-auto border-b border-white/10">
+    <div className="h-full min-h-0 bg-black text-gray-300">
+      <div className="flex overflow-x-auto border-b border-white/10">
         <MetricCard icon={Cpu} label="CPU" value={`${(cpu?.value ?? 0).toFixed(1)}%`} detail={cpu ? JSON.parse(cpu.metadata || '{}').name || 'CPU' : 'No CPU data'} series={metricSeries(samples, 'cpu', 'cpu_utilization')} color="#3b82f6" />
         <MetricCard icon={Activity} label="GPU" value={`${(gpu?.value ?? 0).toFixed(1)}%`} detail={gpu ? JSON.parse(gpu.metadata || '{}').name || `GPU ${gpuID}` : `GPU ${gpuID}`} series={metricSeries(samples, 'gpu', 'gpu_utilization', gpuID)} color="#22c55e" />
         <MetricCard icon={HardDrive} label="VRAM" value={`${formatMB(vram?.value ?? 0)}`} detail={vramTotal ? `/ ${formatMB(vramTotal)}` : 'No VRAM total'} series={metricSeries(samples, 'gpu', 'vram_used_mb', gpuID)} color="#22c55e" />
@@ -358,9 +358,9 @@ export default function JobConsole({ job, dashboard }: Props) {
         <MetricCard icon={ListFilter} label="Training Speed" value={speed == null ? '?' : speed.toFixed(2)} detail={job.speed_string || 'Tokens/sec'} series={speed == null ? [] : [speed * 0.9, speed, speed * 1.02, speed * 0.98, speed]} color="#22c55e" />
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_minmax(420px,40vw)]">
+      <div className="grid min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(420px,40vw)]">
         <ConsoleLogs lines={dashboard.logLines ?? []} />
-        <aside className="min-h-0 min-w-0 overflow-y-auto border-l border-white/10">
+        <aside className="min-w-0 border-l border-white/10">
           <LossPanel dashboard={dashboard} />
           <CheckpointsPanel dashboard={dashboard} />
           <ConfigSummary dashboard={dashboard} />

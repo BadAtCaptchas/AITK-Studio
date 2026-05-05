@@ -18,8 +18,6 @@ export async function GET() {
     if (!settingsObject.DATASETS_FOLDER || settingsObject.DATASETS_FOLDER === '') {
       settingsObject.DATASETS_FOLDER = defaultDatasetsFolder;
     }
-    settingsObject.SYSTEM_TELEMETRY_INTERVAL_SEC = settingsObject.SYSTEM_TELEMETRY_INTERVAL_SEC || '5';
-    settingsObject.SYSTEM_TELEMETRY_RETENTION_HOURS = settingsObject.SYSTEM_TELEMETRY_RETENTION_HOURS || '24';
     return NextResponse.json(settingsObject);
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
@@ -29,14 +27,12 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER, SYSTEM_TELEMETRY_INTERVAL_SEC, SYSTEM_TELEMETRY_RETENTION_HOURS } = body;
+    const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER } = body;
 
     await db.settings.upsertMany({
       HF_TOKEN,
       TRAINING_FOLDER,
       DATASETS_FOLDER,
-      SYSTEM_TELEMETRY_INTERVAL_SEC,
-      SYSTEM_TELEMETRY_RETENTION_HOURS,
     });
 
     flushCache();

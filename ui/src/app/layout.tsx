@@ -44,9 +44,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: `window.server_platform = "${platform}";` }} />
         <ThemeProvider>
           <AuthWrapper authRequired={authRequired}>
-            <div className="flex h-screen bg-black">
+            <div className="flex h-screen bg-gray-950">
               <Sidebar />
-              <main className="flex-1 overflow-auto bg-black text-gray-100 relative">
+              <main className="flex-1 overflow-auto bg-gray-950 text-gray-100 relative">
                 <Suspense>{children}</Suspense>
               </main>
             </div>

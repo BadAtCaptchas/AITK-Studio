@@ -1,7 +1,7 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { TOOLKIT_ROOT } from '../paths';
+import { TOOLKIT_ROOT } from '@/paths';
 
 export const TRAINING_JOB_EXPORT_FORMAT = 'ai-toolkit-training-job-export';
 export const TRAINING_JOB_EXPORT_VERSION = 1;

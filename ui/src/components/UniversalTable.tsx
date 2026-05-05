@@ -28,7 +28,7 @@ export default function UniversalTable({
   onRefresh = () => {},
 }: TableProps) {
   return (
-    <div className="w-full overflow-hidden border border-white/10 bg-black shadow-md">
+    <div className="w-full bg-gray-900 rounded-md shadow-md">
       {isLoading ? (
         <div className="p-4 flex justify-center">
           <Loading />
@@ -58,10 +58,10 @@ export default function UniversalTable({
             <tbody>
               {rows?.map((row, index) => {
                 // Style for alternating rows
-                const rowClass = index % 2 === 0 ? 'bg-black' : 'bg-white/[0.02]';
+                const rowClass = index % 2 === 0 ? 'bg-gray-900' : 'bg-gray-800';
 
                 return (
-                  <tr key={index} className={`${rowClass} border-b border-white/5 hover:bg-white/[0.05]`}>
+                  <tr key={index} className={`${rowClass} border-b border-gray-700 hover:bg-gray-700`}>
                     {columns.map(column => (
                       <td key={column.key} className={classNames('px-3 py-2', column.className)}>
                         {column.render ? column.render(row) : row[column.key]}

@@ -108,39 +108,6 @@ export default function Settings() {
                     placeholder="Enter datasets folder path"
                   />
                 </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="SYSTEM_TELEMETRY_INTERVAL_SEC" className="block text-sm font-medium mb-2">
-                      Telemetry Interval Seconds
-                      <div className="text-gray-500 text-sm ml-1">How often the worker records CPU, GPU, VRAM, power, and RAM samples.</div>
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      id="SYSTEM_TELEMETRY_INTERVAL_SEC"
-                      name="SYSTEM_TELEMETRY_INTERVAL_SEC"
-                      value={settings.SYSTEM_TELEMETRY_INTERVAL_SEC}
-                      onChange={handleChange}
-                      className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="SYSTEM_TELEMETRY_RETENTION_HOURS" className="block text-sm font-medium mb-2">
-                      Telemetry Retention Hours
-                      <div className="text-gray-500 text-sm ml-1">How long system metric history is retained for charts and alerts.</div>
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      id="SYSTEM_TELEMETRY_RETENTION_HOURS"
-                      name="SYSTEM_TELEMETRY_RETENTION_HOURS"
-                      value={settings.SYSTEM_TELEMETRY_RETENTION_HOURS}
-                      onChange={handleChange}
-                      className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
-                    />
-                  </div>
-                </div>
               </div>
             </div>
           </div>

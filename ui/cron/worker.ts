@@ -1,24 +1,7 @@
 import processQueue from './actions/processQueue';
 import { disconnectDb } from '../src/server/db';
-import { evaluateAlerts, ensureDefaultAlertRules } from '../src/server/alerts';
-import { processQueuedEvaluationRuns } from '../src/server/evaluations';
-import { reindexModelArtifacts } from '../src/server/modelArtifacts';
-import { collectSystemTelemetry, getTelemetrySettings, pruneSystemTelemetry } from '../src/server/systemTelemetry';
 
 const SHUTDOWN_TIMEOUT_MS = 3000;
-let lastTelemetryAt = 0;
-let lastTelemetryPruneAt = 0;
-let lastArtifactIndexAt = 0;
-let lastAlertCheckAt = 0;
-let didEnsureAlertRules = false;
-
-async function runSafely(label: string, fn: () => Promise<void>) {
-  try {
-    await fn();
-  } catch (error) {
-    console.error(`Error in ${label}:`, error);
-  }
-}
 
 class CronWorker {
   interval: number;
@@ -55,40 +38,6 @@ class CronWorker {
 
   async loop() {
     await processQueue();
-    if (!didEnsureAlertRules) {
-      await runSafely('alert rule setup', async () => {
-        await ensureDefaultAlertRules();
-      });
-      didEnsureAlertRules = true;
-    }
-
-    const now = Date.now();
-    const { intervalSec } = await getTelemetrySettings();
-    if (now - lastTelemetryAt >= intervalSec * 1000) {
-      lastTelemetryAt = now;
-      await runSafely('system telemetry collection', async () => {
-        await collectSystemTelemetry();
-      });
-    }
-
-    if (now - lastTelemetryPruneAt >= 60 * 60 * 1000) {
-      lastTelemetryPruneAt = now;
-      await runSafely('system telemetry pruning', pruneSystemTelemetry);
-    }
-
-    if (now - lastArtifactIndexAt >= 5 * 60 * 1000) {
-      lastArtifactIndexAt = now;
-      await runSafely('model artifact indexing', async () => {
-        await reindexModelArtifacts();
-      });
-    }
-
-    await runSafely('evaluation processing', processQueuedEvaluationRuns);
-
-    if (now - lastAlertCheckAt >= 30 * 1000) {
-      lastAlertCheckAt = now;
-      await runSafely('alert evaluation', evaluateAlerts);
-    }
   }
 
   async stop() {

@@ -8,6 +8,9 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
+  devIndicators: {
+    buildActivity: false,
+  },
   typescript: {
     // Remove this. Build fails because of route types
     ignoreBuildErrors: true,

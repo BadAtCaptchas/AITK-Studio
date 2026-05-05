@@ -159,38 +159,38 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
             <div key={gpuKey} className="mb-6">
               <div
                 className={classNames(
-                  'text-md flex border border-white/10 border-b-0 bg-black px-4 py-1',
-                  { 'text-green-400': queue?.is_running },
-                  { 'text-red-400': !queue?.is_running },
+                  'text-md flex px-4 py-1 rounded-t-lg',
+                  { 'bg-green-600 dark:bg-green-900': queue?.is_running },
+                  { 'bg-red-600 dark:bg-red-900': !queue?.is_running },
                 )}
               >
                 <div className="flex items-center space-x-2 flex-1 py-2">
                   <h2 className="font-semibold text-white">{jobsDict[gpuKey].name}</h2>
-                  <span className="border border-white/10 px-2 py-0.5 text-xs text-gray-400"># {queue?.gpu_ids}</span>
+                  <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300"># {queue?.gpu_ids}</span>
                 </div>
                 <div className="text-sm text-gray-300 italic flex items-center">
                   {queue?.is_running ? (
                     <>
-                      <span className="mr-2 text-green-400">Queue Running</span>
+                      <span className="text-green-100 dark:text-green-400 mr-2">Queue Running</span>
                       <button
                         onClick={async () => {
                           await stopQueue(queue.gpu_ids as string);
                           refresh();
                         }}
-                        className="ml-4 border border-red-500/40 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10"
+                        className="ml-4 text-xs text-white bg-red-600 hover:bg-red-700 px-2 py-1 rounded"
                       >
                         STOP
                       </button>
                     </>
                   ) : (
                     <>
-                      <span className="mr-2 text-red-400">Queue Stopped</span>
+                      <span className="text-red-100 dark:text-red-400 mr-2">Queue Stopped</span>
                       <button
                         onClick={async () => {
                           await startQueue(gpuKey);
                           refresh();
                         }}
-                        className="ml-4 border border-green-500/40 px-2 py-1 text-xs text-green-300 hover:bg-green-500/10"
+                        className="ml-4 text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded"
                       >
                         START
                       </button>
@@ -205,8 +205,8 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
                 onRefresh={refresh}
                 theadClassName={
                   queue?.is_running
-                    ? 'bg-black text-gray-500 border-y border-white/10'
-                    : 'bg-black text-gray-500 border-y border-white/10'
+                    ? 'bg-green-700 dark:bg-green-950 text-white dark:text-gray-400'
+                    : 'bg-red-700 dark:bg-red-950 text-white dark:text-gray-400'
                 }
               />
             </div>
@@ -214,7 +214,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
         })}
       {!onlyActive && Object.keys(jobsDict).includes('Idle') && (
         <div className="mb-6 opacity-50">
-          <div className="text-md flex border border-white/10 border-b-0 bg-black px-4 py-1">
+          <div className="text-md flex px-4 py-1 rounded-t-lg bg-slate-600">
             <div className="flex items-center space-x-2 flex-1 py-2">
               <h2 className="font-semibold text-gray-100">Idle</h2>
             </div>

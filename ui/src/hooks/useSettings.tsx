@@ -7,8 +7,6 @@ export interface Settings {
   HF_TOKEN: string;
   TRAINING_FOLDER: string;
   DATASETS_FOLDER: string;
-  SYSTEM_TELEMETRY_INTERVAL_SEC: string;
-  SYSTEM_TELEMETRY_RETENTION_HOURS: string;
 }
 
 export default function useSettings() {
@@ -16,8 +14,6 @@ export default function useSettings() {
     HF_TOKEN: '',
     TRAINING_FOLDER: '',
     DATASETS_FOLDER: '',
-    SYSTEM_TELEMETRY_INTERVAL_SEC: '5',
-    SYSTEM_TELEMETRY_RETENTION_HOURS: '24',
   });
   const [isSettingsLoaded, setIsLoaded] = useState(false);
   useEffect(() => {
@@ -30,8 +26,6 @@ export default function useSettings() {
           HF_TOKEN: data.HF_TOKEN || '',
           TRAINING_FOLDER: data.TRAINING_FOLDER || '',
           DATASETS_FOLDER: data.DATASETS_FOLDER || '',
-          SYSTEM_TELEMETRY_INTERVAL_SEC: data.SYSTEM_TELEMETRY_INTERVAL_SEC || '5',
-          SYSTEM_TELEMETRY_RETENTION_HOURS: data.SYSTEM_TELEMETRY_RETENTION_HOURS || '24',
         });
         setIsLoaded(true);
       })

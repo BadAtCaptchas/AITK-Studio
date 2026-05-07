@@ -218,8 +218,11 @@ class NetworkConfig:
         # ramtorch, doesn't work yet
         self.layer_offloading = kwargs.get('layer_offloading', False)
         
-        # start from a pretrained lora
-        self.pretrained_lora_path = kwargs.get('pretrained_lora_path', None)
+        # start from a pretrained lora. `network_weights` is a legacy alias.
+        pretrained_lora_path = kwargs.get('pretrained_lora_path', None)
+        if 'pretrained_lora_path' not in kwargs:
+            pretrained_lora_path = kwargs.get('network_weights', None)
+        self.pretrained_lora_path = pretrained_lora_path
 
 
 AdapterTypes = Literal['t2i', 'ip', 'ip+', 'clip', 'ilora', 'photo_maker', 'control_net', 'control_lora', 'i2v']

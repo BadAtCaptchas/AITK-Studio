@@ -84,6 +84,7 @@ const MODEL_REFERENCE_PATHS = [
   ['model', 'extras_name_or_path'],
   ['model', 'accuracy_recovery_adapter'],
   ['network', 'pretrained_lora_path'],
+  ['network', 'network_weights'],
   ['adapter', 'name_or_path'],
   ['adapter', 'image_encoder_path'],
   ['adapter', 'text_encoder_path'],

@@ -830,11 +830,13 @@ export default function JobLossGraph({ job }: Props) {
           <div className="h-2 w-2 rounded-full bg-blue-400" />
           <h2 className="text-gray-100 text-sm font-medium">Training Monitor</h2>
           <span className="text-xs text-gray-400 truncate">
-            {status === 'loading' && 'Loading metrics...'}
-            {status === 'refreshing' && 'Refreshing...'}
-            {status === 'error' && 'Metrics unavailable'}
-            {status === 'success' && built.hasData && `${built.totalPoints.toLocaleString()} rendered points`}
-            {status === 'success' && !built.hasData && 'No chart data yet'}
+            {built.hasData
+              ? `${built.totalPoints.toLocaleString()} rendered points`
+              : status === 'error'
+                ? 'Metrics unavailable'
+                : status === 'loading' || status === 'refreshing'
+                  ? 'Loading metrics...'
+                  : 'No chart data yet'}
           </span>
         </div>
 

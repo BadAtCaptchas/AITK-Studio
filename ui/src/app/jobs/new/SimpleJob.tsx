@@ -10,7 +10,7 @@ import {
   SampleTags,
 } from './options';
 import { defaultDatasetConfig } from './jobConfig';
-import { GroupedSelectOption, JobConfig, SelectOption } from '@/types';
+import { GroupedSelectOption, JobConfig, SelectOption, TrainingPhaseConfig } from '@/types';
 import { objectCopy, tagsToObj, objToTags } from '@/utils/basic';
 import {
   TextInput,
@@ -29,6 +29,7 @@ import { FlipHorizontal2, FlipVertical2 } from 'lucide-react';
 import { handleModelArchChange } from './utils';
 import { IoFlaskSharp } from 'react-icons/io5';
 import { isMac } from '@/helpers/basic';
+import TrainingPhasesEditor from './TrainingPhasesEditor';
 
 type Props = {
   jobConfig: JobConfig;
@@ -78,6 +79,28 @@ export default function SimpleJob({
 
   const isVideoModel = !!(modelArch?.group === 'video');
   const isAudioModel = !!(modelArch?.group === 'audio');
+
+  const handleTrainingStepsChange = (value: number | null) => {
+    const requestedSteps = Math.max(1, Number(value ?? 1));
+    const phases = jobConfig.config.process[0].train.phases;
+    if (!phases?.length) {
+      setJobConfig(requestedSteps, 'config.process[0].train.steps');
+      return;
+    }
+
+    const nextPhases: TrainingPhaseConfig[] = phases.map(phase => ({
+      ...phase,
+      optimizer_params: phase.optimizer_params ? { ...phase.optimizer_params } : undefined,
+      lr_scheduler_params: phase.lr_scheduler_params ? { ...phase.lr_scheduler_params } : undefined,
+      auto_advance: phase.auto_advance ? { ...phase.auto_advance } : undefined,
+    }));
+    const currentTotal = nextPhases.reduce((sum, phase) => sum + Math.max(1, Number(phase.steps) || 1), 0);
+    const lastPhase = nextPhases[nextPhases.length - 1];
+    lastPhase.steps = Math.max(1, Math.round((Number(lastPhase.steps) || 1) + requestedSteps - currentTotal));
+    const synchronizedTotal = nextPhases.reduce((sum, phase) => sum + Math.max(1, Number(phase.steps) || 1), 0);
+    setJobConfig(nextPhases, 'config.process[0].train.phases');
+    setJobConfig(synchronizedTotal, 'config.process[0].train.steps');
+  };
 
   const taggedSampleArr: Record<string, any>[] | null = useMemo(() => {
     if (!modelArch) return null;
@@ -563,7 +586,7 @@ export default function SimpleJob({
                   label="Steps"
                   className="pt-2"
                   value={jobConfig.config.process[0].train.steps}
-                  onChange={value => setJobConfig(value, 'config.process[0].train.steps')}
+                  onChange={handleTrainingStepsChange}
                   placeholder="eg. 2000"
                   min={1}
                   required
@@ -783,6 +806,11 @@ export default function SimpleJob({
                 )}
               </div>
             </div>
+            <TrainingPhasesEditor
+              train={jobConfig.config.process[0].train}
+              setJobConfig={setJobConfig}
+              disableTimestepType={disableSections.includes('train.timestep_type')}
+            />
           </Card>
         </div>
         <div>

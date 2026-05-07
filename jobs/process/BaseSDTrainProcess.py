@@ -61,6 +61,7 @@ from toolkit.config_modules import SaveConfig, LoggingConfig, SampleConfig, Netw
     GenerateImageConfig, EmbeddingConfig, DatasetConfig, preprocess_dataset_raw_config, AdapterConfig, GuidanceConfig, validate_configs, \
     DecoratorConfig
 from toolkit.logging_aitk import create_logger
+from toolkit.training_phases import TrainingPhaseManager
 from diffusers import FluxTransformer2DModel
 from toolkit.accelerator import get_accelerator, unwrap_model
 from toolkit.print import print_acc
@@ -248,6 +249,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.ema: ExponentialMovingAverage = None
         
         validate_configs(self.train_config, self.model_config, self.save_config, self.dataset_configs)
+        self.phase_manager = TrainingPhaseManager(self.train_config)
+        self.phase_manager.apply(self.train_config, self.step_num)
         
         do_profiler = self.get_conf('torch_profiler', False)
         self.torch_profiler = None if not do_profiler else torch.profiler.profile(
@@ -398,6 +401,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
             'step': self.step_num,
             'epoch': self.epoch_num,
         })
+        if hasattr(self, 'phase_manager'):
+            info.update(self.phase_manager.training_info(self.step_num))
         return info
 
     def clean_up_saves(self):
@@ -874,6 +879,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.step_num = meta['training_info']['step']
             if 'epoch' in meta['training_info']:
                 self.epoch_num = meta['training_info']['epoch']
+            if hasattr(self, 'phase_manager'):
+                self.phase_manager.restore_from_training_info(meta['training_info'])
+                self.phase_manager.apply(self.train_config, self.step_num)
             self.start_step = self.step_num
             print_acc(f"Found step {self.step_num} in metadata, starting from there")
 
@@ -913,6 +921,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 self.step_num = meta['training_info']['step']
                 if 'epoch' in meta['training_info']:
                     self.epoch_num = meta['training_info']['epoch']
+                if hasattr(self, 'phase_manager'):
+                    self.phase_manager.restore_from_training_info(meta['training_info'])
+                    self.phase_manager.apply(self.train_config, self.step_num)
                 self.start_step = self.step_num
                 print_acc(f"Found step {self.step_num} in metadata, starting from there")
 
@@ -1576,6 +1587,112 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # set trainable params
         self.sd.adapter = self.adapter
 
+    def mark_param_group_phase_lr(self, group, lr_key='lr'):
+        if not isinstance(group, dict):
+            return
+        base_lr = float(getattr(self.train_config, lr_key, self.train_config.lr) or 0.0)
+        current_lr = float(group.get('lr', base_lr))
+        group['_phase_lr_key'] = lr_key
+        group['_phase_lr_scale'] = current_lr / base_lr if base_lr != 0.0 else 1.0
+
+    def finalize_phase_param_groups(self):
+        for group in self.params:
+            if isinstance(group, dict) and '_phase_lr_key' not in group:
+                self.mark_param_group_phase_lr(group, 'lr')
+        self.sync_phase_param_group_lrs()
+
+    def sync_phase_param_group_lrs(self):
+        for group in self.params:
+            if not isinstance(group, dict):
+                continue
+            lr_key = group.get('_phase_lr_key', 'lr')
+            scale = float(group.get('_phase_lr_scale', 1.0))
+            base_lr = float(getattr(self.train_config, lr_key, self.train_config.lr) or 0.0)
+            group['lr'] = base_lr * scale
+
+    def setup_optimizer(self, load_existing_state=True):
+        optimizer_type = self.train_config.optimizer.lower()
+        self.sync_phase_param_group_lrs()
+
+        # esure params require grad
+        self.ensure_params_requires_grad(force=True)
+        optimizer = get_optimizer(self.params, optimizer_type, learning_rate=self.train_config.lr,
+                                  optimizer_params=self.train_config.optimizer_params)
+        self.optimizer = optimizer
+
+        # set it to do paramiter swapping
+        if self.train_config.do_paramiter_swapping:
+            # only works for adafactor, but it should have thrown an error prior to this otherwise
+            self.optimizer.enable_paramiter_swapping(self.train_config.paramiter_swapping_factor)
+
+        if load_existing_state:
+            self.load_optimizer_state()
+
+    def load_optimizer_state(self):
+        optimizer_state_filename = f'optimizer.pt'
+        optimizer_state_file_path = os.path.join(self.save_root, optimizer_state_filename)
+        if not os.path.exists(optimizer_state_file_path):
+            return
+
+        previous_lrs = []
+        for group in self.optimizer.param_groups:
+            previous_lrs.append(group['lr'])
+
+        load_optimizer = True
+        if self.network is not None:
+            if self.network.did_change_weights:
+                # do not load optimizer if the network changed, it will result in
+                # a double state that will oom.
+                load_optimizer = False
+
+        if load_optimizer:
+            try:
+                print_acc(f"Loading optimizer state from {optimizer_state_file_path}")
+                optimizer_state_dict = torch.load(optimizer_state_file_path, weights_only=True)
+                self.optimizer.load_state_dict(optimizer_state_dict)
+                del optimizer_state_dict
+                flush()
+            except Exception as e:
+                print_acc(f"Failed to load optimizer state from {optimizer_state_file_path}")
+                print_acc(e)
+
+        # update the optimizer LR from the params
+        print_acc(f"Updating optimizer LR from params")
+        if len(previous_lrs) > 0:
+            for i, group in enumerate(self.optimizer.param_groups):
+                group['lr'] = previous_lrs[i]
+                group['initial_lr'] = previous_lrs[i]
+
+    def setup_lr_scheduler(self):
+        lr_scheduler_params = copy.deepcopy(self.train_config.lr_scheduler_params)
+
+        # make sure it had bare minimum
+        if self.phase_manager.enabled:
+            if 'max_iterations' not in lr_scheduler_params and 'total_iters' not in lr_scheduler_params:
+                phase = self.phase_manager.current_phase
+                lr_scheduler_params['total_iters'] = phase.steps if phase is not None else self.train_config.steps
+        elif 'max_iterations' not in lr_scheduler_params:
+            lr_scheduler_params['total_iters'] = self.train_config.steps
+
+        lr_scheduler = get_lr_scheduler(
+            self.train_config.lr_scheduler,
+            self.optimizer,
+            **lr_scheduler_params
+        )
+        self.lr_scheduler = lr_scheduler
+
+    def apply_active_training_phase(self):
+        self.phase_manager.apply(self.train_config, self.step_num)
+
+    def restart_training_phase_optimizer(self):
+        self.apply_active_training_phase()
+        self.setup_optimizer(load_existing_state=False)
+        self.setup_lr_scheduler()
+        self.optimizer = self.accelerator.prepare(self.optimizer)
+        self.lr_scheduler = self.accelerator.prepare(self.lr_scheduler)
+        self.optimizer.zero_grad(set_to_none=True)
+        self.lr_scheduler.step(0)
+
     def run(self):
         # torch.autograd.set_detect_anomaly(True)
         # run base process run
@@ -1848,8 +1965,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
                 # LyCORIS doesnt have default_lr
                 config = {
-                    'text_encoder_lr': self.train_config.lr,
-                    'unet_lr': self.train_config.lr,
+                    'text_encoder_lr': self.train_config.text_encoder_lr,
+                    'unet_lr': self.train_config.unet_lr,
                 }
                 sig = inspect.signature(self.network.prepare_optimizer_params)
                 if 'default_lr' in sig.parameters:
@@ -1859,6 +1976,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 params_net = self.network.prepare_optimizer_params(
                     **config
                 )
+                text_encoder_group_count = 1 if getattr(self.network, 'text_encoder_loras', None) else 0
+                for group_idx, group in enumerate(params_net):
+                    lr_key = 'text_encoder_lr' if group_idx < text_encoder_group_count else 'unet_lr'
+                    self.mark_param_group_phase_lr(group, lr_key)
 
                 params += params_net
 
@@ -1902,7 +2023,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # self.start_step = self.step_num
                 params.append({
                     'params': list(self.embedding.get_trainable_params()),
-                    'lr': self.train_config.embedding_lr
+                    'lr': self.train_config.embedding_lr,
+                    '_phase_lr_key': 'embedding_lr',
+                    '_phase_lr_scale': 1.0,
                 })
 
                 flush()
@@ -1921,7 +2044,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     
                 params.append({
                     'params': list(self.decorator.parameters()),
-                    'lr': self.train_config.lr
+                    'lr': self.train_config.lr,
+                    '_phase_lr_key': 'lr',
+                    '_phase_lr_scale': 1.0,
                 })
                 
                 # give it to the sd network
@@ -1939,12 +2064,15 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         # we have custom LR groups for IPAdapter
                         adapter_param_groups = self.adapter.get_parameter_groups(self.train_config.adapter_lr)
                         for group in adapter_param_groups:
+                            self.mark_param_group_phase_lr(group, 'adapter_lr')
                             params.append(group)
                     else:
                         # set trainable params
                         params.append({
                             'params': list(self.adapter.parameters()),
-                            'lr': self.train_config.adapter_lr
+                            'lr': self.train_config.adapter_lr,
+                            '_phase_lr_key': 'adapter_lr',
+                            '_phase_lr_scale': 1.0,
                         })
 
                 if self.train_config.gradient_checkpointing:
@@ -1963,12 +2091,21 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 params = self.sd.prepare_optimizer_params(
                     unet=self.train_config.train_unet,
                     text_encoder=self.train_config.train_text_encoder,
-                    text_encoder_lr=self.train_config.lr,
-                    unet_lr=self.train_config.lr,
+                    text_encoder_lr=self.train_config.text_encoder_lr,
+                    unet_lr=self.train_config.unet_lr,
                     default_lr=self.train_config.lr,
                     refiner=self.train_config.train_refiner and self.sd.refiner_unet is not None,
                     refiner_lr=self.train_config.refiner_lr,
                 )
+                param_group_idx = 0
+                if self.train_config.train_unet and param_group_idx < len(params):
+                    self.mark_param_group_phase_lr(params[param_group_idx], 'unet_lr')
+                    param_group_idx += 1
+                if self.train_config.train_text_encoder and param_group_idx < len(params):
+                    self.mark_param_group_phase_lr(params[param_group_idx], 'text_encoder_lr')
+                    param_group_idx += 1
+                if self.train_config.train_refiner and self.sd.refiner_unet is not None and param_group_idx < len(params):
+                    self.mark_param_group_phase_lr(params[param_group_idx], 'refiner_lr')
             # we may be using it for prompt injections
             if self.adapter_config is not None and self.adapter is None:
                 self.setup_adapter()
@@ -1988,71 +2125,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.train_config.start_step is not None:
             self.step_num = self.train_config.start_step
             self.start_step = self.step_num
+            self.phase_manager.apply(self.train_config, self.step_num)
 
-        optimizer_type = self.train_config.optimizer.lower()
-        
-        # esure params require grad
-        self.ensure_params_requires_grad(force=True)
-        optimizer = get_optimizer(self.params, optimizer_type, learning_rate=self.train_config.lr,
-                                  optimizer_params=self.train_config.optimizer_params)
-        self.optimizer = optimizer
-        
-        # set it to do paramiter swapping
-        if self.train_config.do_paramiter_swapping:
-            # only works for adafactor, but it should have thrown an error prior to this otherwise
-            self.optimizer.enable_paramiter_swapping(self.train_config.paramiter_swapping_factor)
-
-        # check if it exists
-        optimizer_state_filename = f'optimizer.pt'
-        optimizer_state_file_path = os.path.join(self.save_root, optimizer_state_filename)
-        if os.path.exists(optimizer_state_file_path):
-            # try to load
-            # previous param groups
-            # previous_params = copy.deepcopy(optimizer.param_groups)
-            previous_lrs = []
-            for group in optimizer.param_groups:
-                previous_lrs.append(group['lr'])
-
-            load_optimizer = True
-            if self.network is not None:
-                if self.network.did_change_weights:
-                    # do not load optimizer if the network changed, it will result in
-                    # a double state that will oom.
-                    load_optimizer = False
-
-            if load_optimizer:
-                try:
-                    print_acc(f"Loading optimizer state from {optimizer_state_file_path}")
-                    optimizer_state_dict = torch.load(optimizer_state_file_path, weights_only=True)
-                    optimizer.load_state_dict(optimizer_state_dict)
-                    del optimizer_state_dict
-                    flush()
-                except Exception as e:
-                    print_acc(f"Failed to load optimizer state from {optimizer_state_file_path}")
-                    print_acc(e)
-
-            # update the optimizer LR from the params
-            print_acc(f"Updating optimizer LR from params")
-            if len(previous_lrs) > 0:
-                for i, group in enumerate(optimizer.param_groups):
-                    group['lr'] = previous_lrs[i]
-                    group['initial_lr'] = previous_lrs[i]
-
-            # Update the learning rates if they changed
-            # optimizer.param_groups = previous_params
-
-        lr_scheduler_params = self.train_config.lr_scheduler_params
-
-        # make sure it had bare minimum
-        if 'max_iterations' not in lr_scheduler_params:
-            lr_scheduler_params['total_iters'] = self.train_config.steps
-
-        lr_scheduler = get_lr_scheduler(
-            self.train_config.lr_scheduler,
-            optimizer,
-            **lr_scheduler_params
-        )
-        self.lr_scheduler = lr_scheduler
+        self.finalize_phase_param_groups()
+        self.setup_optimizer(load_existing_state=True)
+        self.setup_lr_scheduler()
 
         ### HOOk ###
         self.before_dataset_load()
@@ -2117,9 +2194,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
             dataloader_iterator_reg = None
 
         # zero any gradients
-        optimizer.zero_grad()
+        self.optimizer.zero_grad()
 
-        self.lr_scheduler.step(self.step_num)
+        initial_scheduler_step = self.phase_manager.get_phase_local_step(self.step_num) if self.phase_manager.enabled else self.step_num
+        self.lr_scheduler.step(initial_scheduler_step)
 
         self.sd.set_device_state(self.train_device_state_preset)
         flush()
@@ -2248,7 +2326,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 self.num_consecutive_oom += 1
                 if self.num_consecutive_oom > 3:
                     raise RuntimeError("OOM during training step 3 times in a row, aborting training")
-                optimizer.zero_grad(set_to_none=True)
+                self.optimizer.zero_grad(set_to_none=True)
                 flush()
                 torch.cuda.ipc_collect()
                 # skip this step and keep going
@@ -2279,18 +2357,18 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # if optimizer has get_lrs method, then use it
                 learning_rate = 0.0
                 if not did_oom and loss_dict is not None:
-                    if hasattr(optimizer, 'get_avg_learning_rate'):
-                        learning_rate = optimizer.get_avg_learning_rate()
-                    elif hasattr(optimizer, 'get_learning_rates'):
-                        learning_rate = optimizer.get_learning_rates()[0]
+                    if hasattr(self.optimizer, 'get_avg_learning_rate'):
+                        learning_rate = self.optimizer.get_avg_learning_rate()
+                    elif hasattr(self.optimizer, 'get_learning_rates'):
+                        learning_rate = self.optimizer.get_learning_rates()[0]
                     elif self.train_config.optimizer.lower().startswith('dadaptation') or \
                             self.train_config.optimizer.lower().startswith('prodigy'):
                         learning_rate = (
-                                optimizer.param_groups[0]["d"] *
-                                optimizer.param_groups[0]["lr"]
+                                self.optimizer.param_groups[0]["d"] *
+                                self.optimizer.param_groups[0]["lr"]
                         )
                     else:
-                        learning_rate = optimizer.param_groups[0]['lr']
+                        learning_rate = self.optimizer.param_groups[0]['lr']
 
                     prog_bar_string = f"lr: {learning_rate:.1e}"
                     for key, value in loss_dict.items():
@@ -2298,6 +2376,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
                     if self.progress_bar is not None:
                         self.progress_bar.set_postfix_str(prog_bar_string)
+
+                    phase_observed_metrics = {
+                        'learning_rate': learning_rate,
+                    }
+                    for key, value in loss_dict.items():
+                        phase_observed_metrics[f'loss/{key}'] = value
+                        phase_observed_metrics[key] = value
+                    self.phase_manager.observe_metrics(self.step_num, phase_observed_metrics)
 
                 # if the batch is a DataLoaderBatchDTO, then we need to clean it up
                 if isinstance(batch, DataLoaderBatchDTO):
@@ -2318,7 +2404,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.save(self.step_num)
                         self.ensure_params_requires_grad()
                         # clear any grads
-                        optimizer.zero_grad()
+                        self.optimizer.zero_grad()
                         flush()
                         flush_next = True
                         if self.progress_bar is not None:
@@ -2389,6 +2475,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # commit log
                 if self.accelerator.is_main_process:
                     with self.timer('commit_logger'):
+                        if self.phase_manager.enabled:
+                            self.logger.log(self.phase_manager.metrics_for_step(self.step_num))
                         self.logger.commit(step=self.step_num)
 
                 # sets progress bar to match out step
@@ -2402,7 +2490,44 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # update various steps
                 self.step_num = step + 1
                 self.grad_accumulation_step += 1
+                should_stop_training = False
+                if not did_oom and loss_dict is not None and not self.is_grad_accumulation_step:
+                    phase_advance_result = self.phase_manager.maybe_advance_after_step(step)
+                    if phase_advance_result.changed:
+                        self.accelerator.wait_for_everyone()
+                        if self.progress_bar is not None:
+                            self.progress_bar.pause()
+                        phase = self.phase_manager.current_phase
+                        phase_name = phase.name if phase is not None else ""
+                        print_acc(
+                            f"\nSwitching to training phase "
+                            f"{self.phase_manager.current_index + 1}/{len(self.phase_manager.phases)}: "
+                            f"{phase_name} ({phase_advance_result.reason})"
+                        )
+                        self.restart_training_phase_optimizer()
+                        if self.accelerator.is_main_process:
+                            self.logger.log(self.phase_manager.metrics_for_step(self.step_num))
+                            self.logger.commit(step=self.step_num)
+
+                        if self.phase_manager.save_on_phase_change:
+                            print_acc(f"\nSaving at phase change step {self.step_num}")
+                            self.save(self.step_num)
+                            self.ensure_params_requires_grad()
+                            self.optimizer.zero_grad()
+                            flush()
+                            flush_next = True
+                        if self.progress_bar is not None:
+                            self.progress_bar.unpause()
+                    elif phase_advance_result.should_stop:
+                        print_acc(
+                            f"\nStopping training after phase "
+                            f"{self.phase_manager.current_index + 1}/{len(self.phase_manager.phases)} "
+                            f"({phase_advance_result.reason})"
+                        )
+                        should_stop_training = True
                 self.end_step_hook()
+                if should_stop_training:
+                    break
 
 
         ###################################################################
@@ -2435,7 +2560,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.sd,
             unet,
             noise_scheduler,
-            optimizer,
             self.network,
             tokenizer,
             text_encoder,

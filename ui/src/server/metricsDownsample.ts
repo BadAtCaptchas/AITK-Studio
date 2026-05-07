@@ -1,35 +1,37 @@
-/**
- * @typedef {Object} MetricPoint
- * @property {number} step
- * @property {number=} wall_time
- * @property {number|null} value
- * @property {string|null=} value_text
- */
+export type MetricDownsamplePoint = {
+  step: number;
+  wall_time: number;
+  value: number | null;
+  value_text?: string | null;
+};
 
-function clampMaxPoints(maxPoints) {
+export type MetricSeriesPayload<TPoint extends MetricDownsamplePoint = MetricDownsamplePoint> = {
+  key: string;
+  totalCount: number;
+  firstStep: number | null;
+  lastStep: number | null;
+  latest: TPoint | null;
+  downsampled: boolean;
+  points: TPoint[];
+};
+
+function clampMaxPoints(maxPoints: unknown) {
   const n = Number(maxPoints);
   if (!Number.isFinite(n)) return 4000;
   return Math.max(2, Math.min(20000, Math.floor(n)));
 }
 
-/**
- * Downsample time-series points while preserving first/last points and local
- * extrema in each bucket. This keeps spikes visible without sending every raw
- * point to the browser.
- *
- * @param {MetricPoint[]} points
- * @param {number} maxPoints
- * @returns {MetricPoint[]}
- */
-export function downsampleMetricPoints(points, maxPoints = 4000) {
+export function downsampleMetricPoints<TPoint extends MetricDownsamplePoint>(
+  points: TPoint[],
+  maxPoints = 4000,
+): TPoint[] {
   const cap = clampMaxPoints(maxPoints);
   if (!Array.isArray(points) || points.length <= cap) return points.slice();
 
   const lastIndex = points.length - 1;
   const bucketCount = Math.max(1, Math.floor((cap - 2) / 2));
   const bucketSize = Math.ceil((points.length - 2) / bucketCount);
-  /** @type {MetricPoint[]} */
-  const out = [points[0]];
+  const out: TPoint[] = [points[0]];
 
   for (let start = 1; start < lastIndex && out.length < cap - 1; start += bucketSize) {
     const end = Math.min(lastIndex, start + bucketSize);
@@ -39,14 +41,14 @@ export function downsampleMetricPoints(points, maxPoints = 4000) {
     let maxVal = -Infinity;
 
     for (let i = start; i < end; i++) {
-      const v = points[i].value;
-      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-      if (v < minVal) {
-        minVal = v;
+      const value = points[i].value;
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+      if (value < minVal) {
+        minVal = value;
         minIdx = i;
       }
-      if (v > maxVal) {
-        maxVal = v;
+      if (value > maxVal) {
+        maxVal = value;
         maxIdx = i;
       }
     }
@@ -80,11 +82,19 @@ export function downsampleMetricPoints(points, maxPoints = 4000) {
   return out;
 }
 
-export function normalizeMetricMaxPoints(maxPoints, fallback = 4000) {
+export function normalizeMetricMaxPoints(maxPoints: unknown, fallback = 4000) {
   return clampMaxPoints(maxPoints ?? fallback);
 }
 
-export function buildMetricSeriesResult(key, points, totalCount, firstStep, lastStep, latest, maxPoints = 4000) {
+export function buildMetricSeriesResult<TPoint extends MetricDownsamplePoint>(
+  key: string,
+  points: TPoint[],
+  totalCount: number,
+  firstStep: number | null,
+  lastStep: number | null,
+  latest: TPoint | null,
+  maxPoints = 4000,
+): MetricSeriesPayload<TPoint> {
   const sampled = downsampleMetricPoints(points, maxPoints);
   return {
     key,
@@ -97,7 +107,10 @@ export function buildMetricSeriesResult(key, points, totalCount, firstStep, last
   };
 }
 
-export function filterMetricPointsSince(points, sinceStep) {
+export function filterMetricPointsSince<TPoint extends MetricDownsamplePoint>(
+  points: TPoint[],
+  sinceStep: number | null | undefined,
+) {
   const step = Number(sinceStep);
   if (!Number.isFinite(step)) return points.slice();
   return points.filter(point => point.step > step);

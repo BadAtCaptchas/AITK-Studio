@@ -5,7 +5,7 @@ import {
   downsampleMetricPoints,
   filterMetricPointsSince,
   normalizeMetricMaxPoints,
-} from '../src/server/metricsDownsample.js';
+} from '../dist/src/server/metricsDownsample.js';
 
 test('downsampleMetricPoints preserves monotonic ordering and point cap', () => {
   const points = Array.from({ length: 1000 }, (_, step) => ({

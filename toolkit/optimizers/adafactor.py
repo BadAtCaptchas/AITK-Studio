@@ -174,6 +174,43 @@ class Adafactor(torch.optim.Optimizer):
         self._normalize_param_groups()
         self.base_lrs = self._get_base_lrs()
         return result
+
+    @staticmethod
+    def _has_tensor(state, key, shape):
+        value = state.get(key)
+        return isinstance(value, torch.Tensor) and tuple(value.shape) == tuple(shape)
+
+    @staticmethod
+    def _state_zeros(grad, shape):
+        return grad.new_zeros(shape)
+
+    def _ensure_param_state(self, state, grad, factored, use_first_moment):
+        grad_shape = grad.shape
+        state.setdefault("step", 0)
+        state.setdefault("RMS", 0)
+
+        if use_first_moment:
+            if self._has_tensor(state, "exp_avg", grad_shape):
+                state["exp_avg"] = state["exp_avg"].to(grad)
+            else:
+                state["exp_avg"] = torch.zeros_like(grad)
+
+        if factored:
+            row_shape = grad_shape[:-1]
+            col_shape = grad_shape[:-2] + grad_shape[-1:]
+            if self._has_tensor(state, "exp_avg_sq_row", row_shape):
+                state["exp_avg_sq_row"] = state["exp_avg_sq_row"].to(grad)
+            else:
+                state["exp_avg_sq_row"] = self._state_zeros(grad, row_shape)
+            if self._has_tensor(state, "exp_avg_sq_col", col_shape):
+                state["exp_avg_sq_col"] = state["exp_avg_sq_col"].to(grad)
+            else:
+                state["exp_avg_sq_col"] = self._state_zeros(grad, col_shape)
+        else:
+            if self._has_tensor(state, "exp_avg_sq", grad_shape):
+                state["exp_avg_sq"] = state["exp_avg_sq"].to(grad)
+            else:
+                state["exp_avg_sq"] = torch.zeros_like(grad)
     
     def enable_paramiter_swapping(self, paramiter_swapping_factor=0.1):
         self.do_paramiter_swapping = True
@@ -290,32 +327,8 @@ class Adafactor(torch.optim.Optimizer):
 
                 factored, use_first_moment = self._get_options(
                     group, grad_shape)
-                # State Initialization
-                if len(state) == 0:
-                    state["step"] = 0
-
-                    if use_first_moment:
-                        # Exponential moving average of gradient values
-                        state["exp_avg"] = torch.zeros_like(grad)
-                    if factored:
-                        state["exp_avg_sq_row"] = torch.zeros(
-                            grad_shape[:-1]).to(grad)
-                        state["exp_avg_sq_col"] = torch.zeros(
-                            grad_shape[:-2] + grad_shape[-1:]).to(grad)
-                    else:
-                        state["exp_avg_sq"] = torch.zeros_like(grad)
-
-                    state["RMS"] = 0
-                else:
-                    if use_first_moment:
-                        state["exp_avg"] = state["exp_avg"].to(grad)
-                    if factored:
-                        state["exp_avg_sq_row"] = state["exp_avg_sq_row"].to(
-                            grad)
-                        state["exp_avg_sq_col"] = state["exp_avg_sq_col"].to(
-                            grad)
-                    else:
-                        state["exp_avg_sq"] = state["exp_avg_sq"].to(grad)
+                self._ensure_param_state(
+                    state, grad, factored, use_first_moment)
 
                 p_data_fp32 = p
                 

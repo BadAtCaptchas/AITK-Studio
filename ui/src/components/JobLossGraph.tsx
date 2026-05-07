@@ -1,8 +1,29 @@
 'use client';
 
-import type { Job } from '@/types';
-import useJobLossLog, { LossPoint } from '@/hooks/useJobLossLog';
-import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import type { Job, GpuInfo } from '@/types';
+import useJobMetrics, { type MetricPoint } from '@/hooks/useJobMetrics';
+import useGPUInfo from '@/hooks/useGPUInfo';
+import { getTotalSteps } from '@/utils/jobs';
+import {
+  Activity,
+  Clock,
+  Gauge,
+  Image as ImageIcon,
+  RotateCcw,
+  Save,
+  TrendingDown,
+  Zap,
+} from 'lucide-react';
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  startTransition,
+  type ReactNode,
+} from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 
@@ -10,49 +31,102 @@ interface Props {
   job: Job;
 }
 
-function formatNum(v: number) {
-  if (!Number.isFinite(v)) return '';
-  if (Math.abs(v) >= 1000) return v.toFixed(0);
-  if (Math.abs(v) >= 10) return v.toFixed(3);
-  if (Math.abs(v) >= 1) return v.toFixed(4);
-  return v.toPrecision(4);
-}
+type ChartTab = 'loss' | 'learning_rate' | 'throughput';
+type EventKind = 'sample' | 'checkpoint' | 'phase_change';
 
-function clamp01(x: number) {
-  return Math.max(0, Math.min(1, x));
-}
+type PhaseTransition = {
+  step: number;
+  index: number;
+  name?: string | null;
+};
 
-// Fallback canvas height used before the container has been measured.
+type EventMarker = {
+  step: number;
+  key: string;
+  kind: EventKind;
+  label: string;
+};
+
+type HoverItem = {
+  label: string;
+  value: number | null;
+  color: string;
+};
+
+type HoverState = {
+  step: number;
+  items: HoverItem[];
+};
+
 const FALLBACK_CANVAS_HEIGHT = 360;
-const MIN_CANVAS_HEIGHT = 160;
+const MIN_CANVAS_HEIGHT = 220;
+const CHART_MAX_POINTS = 4000;
 
-// Compute canvas size so uPlot's canvas + its HTML legend fit inside `host`.
-// `host` should be a layout-controlled wrapper (NOT the uPlot mount node, since
-// uPlot's stylesheet sets `width: min-content` on its mount node).
-function computeCanvasSize(host: HTMLElement): { width: number; height: number } | null {
-  const { width, height } = host.getBoundingClientRect();
-  if (width <= 0 || height <= 0) return null;
-  const legend = host.querySelector('.u-legend') as HTMLElement | null;
-  const legendH = legend?.getBoundingClientRect().height ?? 0;
-  return { width, height: Math.max(MIN_CANVAS_HEIGHT, height - legendH) };
+const LOSS_COLOR = 'rgba(96,165,250,1)';
+const LOSS_TREND_COLOR = 'rgba(37,99,235,0.95)';
+const LR_COLOR = 'rgba(251,191,36,1)';
+const THROUGHPUT_COLOR = 'rgba(52,211,153,1)';
+const EVENT_STYLE: Record<EventKind, { color: string; label: string }> = {
+  sample: { color: 'rgba(251,191,36,0.9)', label: 'Sample' },
+  checkpoint: { color: 'rgba(52,211,153,0.9)', label: 'Checkpoint' },
+  phase_change: { color: 'rgba(244,114,182,0.9)', label: 'Phase' },
+};
+
+const LOSS_PALETTE = [
+  'rgba(96,165,250,1)',
+  'rgba(34,211,238,1)',
+  'rgba(129,140,248,1)',
+  'rgba(52,211,153,1)',
+  'rgba(251,191,36,1)',
+  'rgba(244,114,182,1)',
+  'rgba(248,113,113,1)',
+];
+
+function formatNum(v: number | null | undefined, digits = 4) {
+  if (v == null || !Number.isFinite(v)) return '--';
+  const abs = Math.abs(v);
+  if (abs >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (abs >= 10) return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (abs >= 1) return v.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  if (abs === 0) return '0';
+  return v.toPrecision(digits);
 }
 
-// EMA over a (number|null)[] series. Nulls are preserved as gaps and do not
-// advance the running average.
-function emaWithNulls(ys: (number | null)[], alpha: number): (number | null)[] {
-  const out: (number | null)[] = new Array(ys.length);
-  let prev: number | null = null;
-  for (let i = 0; i < ys.length; i++) {
-    const v = ys[i];
-    if (v === null || !Number.isFinite(v)) {
-      out[i] = null;
-      continue;
-    }
-    if (prev === null) prev = v as number;
-    else prev = alpha * (v as number) + (1 - alpha) * prev;
-    out[i] = prev;
-  }
-  return out;
+function formatCompact(v: number | null | undefined) {
+  if (v == null || !Number.isFinite(v)) return '--';
+  return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function formatPercent(v: number | null | undefined, digits = 1) {
+  if (v == null || !Number.isFinite(v)) return '--';
+  return `${v.toFixed(digits)}%`;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function formatDuration(seconds: number | null | undefined) {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '--';
+  if (seconds < 60) return `${Math.ceil(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  if (minutes < 60) return `${minutes}m ${secs}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
+}
+
+function formatMemory(mb: number | null | undefined) {
+  if (mb == null || !Number.isFinite(mb)) return '--';
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+
+function cleanLabel(key: string) {
+  return key
+    .replace(/^loss\//, '')
+    .replace(/^train\//, '')
+    .replace(/_/g, ' ');
 }
 
 function hashToIndex(str: string, mod: number) {
@@ -64,174 +138,260 @@ function hashToIndex(str: string, mod: number) {
   return Math.abs(h) % mod;
 }
 
-const PALETTE = [
-  'rgba(96,165,250,1)', // blue-400
-  'rgba(52,211,153,1)', // emerald-400
-  'rgba(167,139,250,1)', // purple-400
-  'rgba(251,191,36,1)', // amber-400
-  'rgba(244,114,182,1)', // pink-400
-  'rgba(248,113,113,1)', // red-400
-  'rgba(34,211,238,1)', // cyan-400
-  'rgba(129,140,248,1)', // indigo-400
-];
-
-type PhaseBoundary = {
-  step: number;
-  index: number;
-};
-
-function strokeForKey(key: string) {
-  return PALETTE[hashToIndex(key, PALETTE.length)];
+function lossColorForKey(key: string) {
+  if (key === 'loss' || key === 'loss/loss') return LOSS_COLOR;
+  return LOSS_PALETTE[hashToIndex(key, LOSS_PALETTE.length)];
 }
 
-function dulledColor(rgba: string): string {
-  const m = rgba.match(/rgba?\((\d+),(\d+),(\d+)/);
-  if (!m) return 'rgba(120,120,120,1)';
-  const r = Math.round(Number(m[1]) * 0.55);
-  const g = Math.round(Number(m[2]) * 0.55);
-  const b = Math.round(Number(m[3]) * 0.55);
-  return `rgba(${r},${g},${b},1)`;
+function colorWithAlpha(rgba: string, alpha: number) {
+  const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return rgba;
+  return `rgba(${match[1]},${match[2]},${match[3]},${alpha})`;
 }
 
-function buildPhaseBoundaries(points: LossPoint[]): PhaseBoundary[] {
-  const sorted = [...points]
-    .filter(point => point.value !== null && Number.isFinite(point.value as number))
-    .sort((a, b) => a.step - b.step);
+function computeCanvasSize(host: HTMLElement): { width: number; height: number } | null {
+  const { width, height } = host.getBoundingClientRect();
+  if (width <= 0 || height <= 0) return null;
+  return { width, height: Math.max(MIN_CANVAS_HEIGHT, height) };
+}
 
-  const boundaries: PhaseBoundary[] = [];
-  let previousIndex: number | null = null;
-  for (const point of sorted) {
-    const phaseIndex = Math.round(point.value as number);
-    if (previousIndex === null) {
-      previousIndex = phaseIndex;
+function emaWithNulls(ys: (number | null)[], alpha: number): (number | null)[] {
+  const out: (number | null)[] = new Array(ys.length);
+  let prev: number | null = null;
+  for (let i = 0; i < ys.length; i++) {
+    const v = ys[i];
+    if (v === null || !Number.isFinite(v)) {
+      out[i] = null;
       continue;
     }
-    if (phaseIndex !== previousIndex) {
-      boundaries.push({ step: point.step, index: phaseIndex });
-      previousIndex = phaseIndex;
-    }
+    prev = prev === null ? v : alpha * v + (1 - alpha) * prev;
+    out[i] = prev;
   }
-  return boundaries;
+  return out;
 }
 
-function drawPhaseBoundaries(u: uPlot, boundaries: PhaseBoundary[]) {
-  if (!boundaries.length) return;
+function sortedNumericPoints(points: MetricPoint[] | undefined, transform?: (value: number) => number | null) {
+  return [...(points ?? [])]
+    .map(point => {
+      if (point.value == null || !Number.isFinite(point.value)) return null;
+      const value = transform ? transform(point.value) : point.value;
+      if (value == null || !Number.isFinite(value)) return null;
+      return { ...point, value };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a as MetricPoint).step - (b as MetricPoint).step) as MetricPoint[];
+}
+
+function latestNumericPoint(points: MetricPoint[] | undefined) {
+  for (let i = (points?.length ?? 0) - 1; i >= 0; i--) {
+    const point = points?.[i];
+    if (point?.value != null && Number.isFinite(point.value)) return point;
+  }
+  return null;
+}
+
+function getGpuIds(job: Job) {
+  if (job.gpu_ids === 'mps') return [0];
+  return job.gpu_ids
+    .split(',')
+    .map(id => Number.parseInt(id.trim(), 10))
+    .filter(id => Number.isFinite(id));
+}
+
+function safeTotalSteps(job: Job) {
+  try {
+    return getTotalSteps(job);
+  } catch {
+    return 0;
+  }
+}
+
+function parseStepsPerSecond(speedString: string | null | undefined) {
+  if (!speedString) return null;
+  const iterPerSec = speedString.match(/([\d.]+)\s*(?:it|iter|steps?)\/s(?:ec)?/i);
+  if (iterPerSec) {
+    const value = Number(iterPerSec[1]);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  const secPerIter = speedString.match(/([\d.]+)\s*s(?:ec)?\/(?:it|iter|steps?)/i);
+  if (secPerIter) {
+    const value = Number(secPerIter[1]);
+    return Number.isFinite(value) && value > 0 ? 1 / value : null;
+  }
+  return null;
+}
+
+function buildPhaseTransitions(points: MetricPoint[], phaseNames: MetricPoint[]): PhaseTransition[] {
+  const nameByStep = new Map<number, string>();
+  for (const point of phaseNames) {
+    if (point.value_text) nameByStep.set(point.step, point.value_text);
+  }
+
+  const sorted = sortedNumericPoints(points);
+  const transitions: PhaseTransition[] = [];
+  let previousIndex: number | null = null;
+  for (const point of sorted) {
+    const index = Math.round(point.value as number);
+    if (previousIndex === null || index !== previousIndex) {
+      transitions.push({ step: point.step, index, name: nameByStep.get(point.step) ?? null });
+      previousIndex = index;
+    }
+  }
+  return transitions;
+}
+
+function buildEventMarkers(series: Record<string, MetricPoint[]>) {
+  const definitions: Array<{ key: string; kind: EventKind }> = [
+    { key: 'event/sample', kind: 'sample' },
+    { key: 'event/checkpoint', kind: 'checkpoint' },
+    { key: 'event/phase_change', kind: 'phase_change' },
+  ];
+
+  const markers: EventMarker[] = [];
+  for (const definition of definitions) {
+    for (const point of series[definition.key] ?? []) {
+      markers.push({
+        step: point.step,
+        key: definition.key,
+        kind: definition.kind,
+        label: EVENT_STYLE[definition.kind].label,
+      });
+    }
+  }
+
+  return markers.sort((a, b) => a.step - b.step);
+}
+
+function drawPhaseBands(u: uPlot, transitions: PhaseTransition[]) {
+  if (!transitions.length) return;
+  const xs = u.data[0] as number[];
+  if (!xs?.length) return;
+
+  const min = u.scales.x.min ?? xs[0];
+  const max = u.scales.x.max ?? xs[xs.length - 1];
+  const { ctx, bbox } = u;
+
+  ctx.save();
+  for (let i = 0; i < transitions.length; i++) {
+    const start = Math.max(min, transitions[i].step);
+    const end = Math.min(max, transitions[i + 1]?.step ?? max);
+    if (end <= min || start >= max || end <= start) continue;
+
+    const x1 = bbox.left + u.valToPos(start, 'x');
+    const x2 = bbox.left + u.valToPos(end, 'x');
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(96,165,250,0.035)' : 'rgba(251,191,36,0.035)';
+    ctx.fillRect(x1, bbox.top, Math.max(1, x2 - x1), bbox.height);
+  }
+  ctx.restore();
+}
+
+function drawEventMarkers(u: uPlot, markers: EventMarker[], transitions: PhaseTransition[]) {
   const { ctx, bbox } = u;
   const min = u.scales.x.min ?? -Infinity;
   const max = u.scales.x.max ?? Infinity;
 
   ctx.save();
-  ctx.strokeStyle = 'rgba(248,250,252,0.28)';
-  ctx.fillStyle = 'rgba(248,250,252,0.72)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
+
   ctx.font = '11px sans-serif';
   ctx.textBaseline = 'top';
+  ctx.lineWidth = 1;
 
-  for (const boundary of boundaries) {
-    if (boundary.step < min || boundary.step > max) continue;
-    const x = bbox.left + u.valToPos(boundary.step, 'x');
+  for (const transition of transitions) {
+    if (transition.step < min || transition.step > max) continue;
+    const x = bbox.left + u.valToPos(transition.step, 'x');
+    ctx.strokeStyle = 'rgba(148,163,184,0.36)';
+    ctx.fillStyle = 'rgba(226,232,240,0.78)';
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(x, bbox.top);
     ctx.lineTo(x, bbox.top + bbox.height);
     ctx.stroke();
-    ctx.fillText(`P${boundary.index + 1}`, x + 4, bbox.top + 6);
+    ctx.setLineDash([]);
+    ctx.fillText(`P${transition.index + 1}`, x + 5, bbox.top + 8);
+  }
+
+  const visibleMarkers = markers.filter(marker => marker.step >= min && marker.step <= max);
+  const showLabels = visibleMarkers.length <= 35;
+  for (const marker of visibleMarkers) {
+    const x = bbox.left + u.valToPos(marker.step, 'x');
+    const style = EVENT_STYLE[marker.kind];
+    ctx.strokeStyle = style.color;
+    ctx.fillStyle = style.color;
+    ctx.globalAlpha = showLabels ? 0.9 : 0.55;
+    ctx.beginPath();
+    ctx.moveTo(x, bbox.top + bbox.height * 0.08);
+    ctx.lineTo(x, bbox.top + bbox.height);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillRect(x - 2, bbox.top + bbox.height - 8, 4, 8);
+    if (showLabels) ctx.fillText(marker.label, x + 5, bbox.top + bbox.height - 20);
   }
 
   ctx.restore();
 }
 
-export default function JobLossGraph({ job }: Props) {
-  const { series, lossKeys, phasePoints, status, refreshLoss } = useJobLossLog(job.id, 2000);
+function getPrimaryGpu(gpus: GpuInfo[]) {
+  return gpus.length ? gpus[0] : null;
+}
 
-  // Controls
-  const [useLogScale, setUseLogScale] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
-  const [showSmoothed, setShowSmoothed] = useState(true);
+function buildChartData({
+  chartTab,
+  series,
+  lossKeys,
+  useLogScale,
+  showRaw,
+  showSmoothed,
+  showTrend,
+  clipOutliers,
+  smoothing,
+}: {
+  chartTab: ChartTab;
+  series: Record<string, MetricPoint[]>;
+  lossKeys: string[];
+  useLogScale: boolean;
+  showRaw: boolean;
+  showSmoothed: boolean;
+  showTrend: boolean;
+  clipOutliers: boolean;
+  smoothing: number;
+}) {
+  const data: (number[] | (number | null)[])[] = [];
+  const seriesConfigs: uPlot.Series[] = [{}];
+  const t = clamp(smoothing / 100, 0, 1);
+  const alpha = 1 - t * 0.98;
+  const trendAlpha = 0.015;
 
-  // 0..100 slider. 100 = no smoothing, 0 = heavy smoothing.
-  const [smoothing, setSmoothing] = useState(80);
-
-  // UI-only downsample for rendering speed
-  const [plotStride, setPlotStride] = useState(1);
-
-  // show only last N points in the chart (0 = all)
-  const [windowSize] = useState<number>(0);
-
-  // quick y clipping for readability
-  const [clipOutliers, setClipOutliers] = useState(false);
-
-  // which loss series are enabled (default: all enabled)
-  const [enabled, setEnabled] = useState<Record<string, boolean>>({});
-
-  const [isZoomed, setIsZoomed] = useState(false);
-
-  // keep enabled map in sync with discovered keys (enable new ones automatically)
-  useEffect(() => {
-    setEnabled(prev => {
-      const next = { ...prev };
-      for (const k of lossKeys) {
-        if (next[k] === undefined) next[k] = true;
-      }
-      for (const k of Object.keys(next)) {
-        if (!lossKeys.includes(k)) delete next[k];
-      }
-      return next;
-    });
-  }, [lossKeys]);
-
-  const activeKeys = useMemo(() => lossKeys.filter(k => enabled[k] !== false), [lossKeys, enabled]);
-  const phaseBoundaries = useMemo(() => buildPhaseBoundaries(phasePoints), [phasePoints]);
-
-  // Build uPlot-aligned data + series configs.
-  const built = useMemo(() => {
-    const stride = Math.max(1, plotStride | 0);
-    const t = clamp01(smoothing / 100);
-    const alpha = 1.0 - t * 0.98; // 1.0 -> 0.02
-    const fullAlpha = 0.005;
-
-    // Union of all steps across active series.
+  if (chartTab === 'loss') {
     const stepSet = new Set<number>();
-    for (const key of activeKeys) {
-      const pts: LossPoint[] = series[key] ?? [];
-      for (const p of pts) {
-        if (p.value === null || !Number.isFinite(p.value as number)) continue;
-        if (useLogScale && (p.value as number) <= 0) continue;
-        stepSet.add(p.step);
+    for (const key of lossKeys) {
+      for (const point of sortedNumericPoints(series[key])) {
+        if (useLogScale && (point.value as number) <= 0) continue;
+        stepSet.add(point.step);
       }
     }
-    let xs = Array.from(stepSet).sort((a, b) => a - b);
-    if (stride > 1) xs = xs.filter((_, i) => i % stride === 0);
-    if (windowSize > 0 && xs.length > windowSize) xs = xs.slice(xs.length - windowSize);
 
+    const xs = Array.from(stepSet).sort((a, b) => a - b);
     const xsSet = new Set(xs);
+    data.push(xs);
 
-    const data: (number[] | (number | null)[])[] = [xs];
-    const seriesConfigs: uPlot.Series[] = [{}]; // x
-
-    for (const key of activeKeys) {
-      const pts: LossPoint[] = series[key] ?? [];
-      const map = new Map<number, number>();
-      for (const p of pts) {
-        if (p.value === null || !Number.isFinite(p.value as number)) continue;
-        if (useLogScale && (p.value as number) <= 0) continue;
-        if (!xsSet.has(p.step)) continue;
-        map.set(p.step, p.value as number);
+    for (const key of lossKeys) {
+      const color = lossColorForKey(key);
+      const values = new Map<number, number>();
+      for (const point of sortedNumericPoints(series[key])) {
+        if (!xsSet.has(point.step)) continue;
+        if (useLogScale && (point.value as number) <= 0) continue;
+        values.set(point.step, point.value as number);
       }
-      const raw: (number | null)[] = xs.map(s => (map.has(s) ? (map.get(s) as number) : null));
+      const raw = xs.map(step => values.get(step) ?? null);
       const smooth = emaWithNulls(raw, alpha);
-      const fullSmooth = emaWithNulls(raw, fullAlpha);
-
-      const color = strokeForKey(key);
-      const colorFaded = color.replace('1)', '0.40)');
-      const colorDull = dulledColor(color);
+      const trend = emaWithNulls(raw, trendAlpha);
 
       if (showRaw) {
         data.push(raw);
         seriesConfigs.push({
-          label: `${key} (raw)`,
-          stroke: colorFaded,
-          width: 1.25,
+          label: `${cleanLabel(key)} raw`,
+          stroke: colorWithAlpha(color, 0.24),
+          width: 1,
           spanGaps: false,
           points: { show: false },
         });
@@ -239,76 +399,263 @@ export default function JobLossGraph({ job }: Props) {
       if (showSmoothed) {
         data.push(smooth);
         seriesConfigs.push({
-          label: key,
+          label: cleanLabel(key),
           stroke: color,
           width: 2,
           spanGaps: false,
           points: { show: false },
         });
       }
-      data.push(fullSmooth);
+      if (showTrend) {
+        data.push(trend);
+        seriesConfigs.push({
+          label: `${cleanLabel(key)} trend`,
+          stroke: key === lossKeys[0] ? LOSS_TREND_COLOR : colorWithAlpha(color, 0.7),
+          width: 2.75,
+          spanGaps: false,
+          points: { show: false },
+        });
+      }
+    }
+  } else if (chartTab === 'learning_rate') {
+    const lrPoints = sortedNumericPoints(series.learning_rate);
+    const xs = lrPoints.map(point => point.step);
+    data.push(xs);
+    data.push(lrPoints.map(point => point.value as number));
+    seriesConfigs.push({
+      label: 'learning rate',
+      stroke: LR_COLOR,
+      width: 2.25,
+      spanGaps: false,
+      points: { show: false },
+    });
+  } else {
+    const spsPoints = sortedNumericPoints(series['train/steps_per_sec']);
+    const stepSecondPoints = sortedNumericPoints(series['train/step_seconds']);
+
+    if (spsPoints.length) {
+      const xs = spsPoints.map(point => point.step);
+      data.push(xs);
+      data.push(spsPoints.map(point => point.value as number));
       seriesConfigs.push({
-        label: `${key} (trend)`,
-        stroke: colorDull,
-        width: 2.5,
+        label: 'steps/sec',
+        stroke: THROUGHPUT_COLOR,
+        width: 2.25,
         spanGaps: false,
         points: { show: false },
       });
+    } else if (stepSecondPoints.length) {
+      const xs = stepSecondPoints.map(point => point.step);
+      data.push(xs);
+      data.push(stepSecondPoints.map(point => 1 / (point.value as number)));
+      seriesConfigs.push({
+        label: 'steps/sec',
+        stroke: THROUGHPUT_COLOR,
+        width: 2.25,
+        spanGaps: false,
+        points: { show: false },
+      });
+    } else {
+      data.push([]);
     }
+  }
 
-    // y-domain clipping (2nd–98th percentile of all visible y values).
-    let yClip: { min: number; max: number } | null = null;
-    if (clipOutliers && xs.length >= 10) {
-      const vals: number[] = [];
-      for (let s = 1; s < data.length; s++) {
-        const arr = data[s] as (number | null)[];
-        for (const v of arr) {
-          if (v !== null && Number.isFinite(v)) vals.push(v as number);
-        }
-      }
-      if (vals.length >= 10) {
-        vals.sort((a, b) => a - b);
-        const lo = vals[Math.floor(vals.length * 0.02)];
-        const hi = vals[Math.ceil(vals.length * 0.98) - 1];
-        if (Number.isFinite(lo) && Number.isFinite(hi) && lo !== hi) {
-          yClip = { min: lo, max: hi };
-        }
+  let yClip: { min: number; max: number } | null = null;
+  const xs = (data[0] ?? []) as number[];
+  if (clipOutliers && xs.length >= 10) {
+    const vals: number[] = [];
+    for (let s = 1; s < data.length; s++) {
+      const arr = data[s] as (number | null)[];
+      for (const value of arr) {
+        if (value != null && Number.isFinite(value)) vals.push(value);
       }
     }
+    if (vals.length >= 10) {
+      vals.sort((a, b) => a - b);
+      const lo = vals[Math.floor(vals.length * 0.02)];
+      const hi = vals[Math.ceil(vals.length * 0.98) - 1];
+      if (Number.isFinite(lo) && Number.isFinite(hi) && lo !== hi) yClip = { min: lo, max: hi };
+    }
+  }
 
-    return { data: data as uPlot.AlignedData, seriesConfigs, yClip };
-  }, [series, activeKeys, smoothing, plotStride, windowSize, useLogScale, showRaw, showSmoothed, clipOutliers]);
+  return {
+    data: data as uPlot.AlignedData,
+    seriesConfigs,
+    yClip,
+    hasData: xs.length > 1 && data.length > 1,
+    totalPoints: xs.length,
+  };
+}
 
-  // Layout wrapper we measure for sizing — uPlot collapses its own mount node
-  // to width:min-content, so we can't read sizes off it.
+export default function JobLossGraph({ job }: Props) {
+  const {
+    series,
+    latest,
+    lossKeys,
+    phasePoints,
+    phaseNamePoints,
+    status,
+    version,
+    refreshMetrics,
+  } = useJobMetrics(job.id, job.stop && job.status === 'running' ? 'stopping' : job.status, CHART_MAX_POINTS);
+
+  const gpuIds = useMemo(() => getGpuIds(job), [job.gpu_ids]);
+  const { gpuList } = useGPUInfo(gpuIds, 5000);
+
+  const [chartTab, setChartTab] = useState<ChartTab>('loss');
+  const [useLogScale, setUseLogScale] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+  const [showSmoothed, setShowSmoothed] = useState(true);
+  const [showTrend, setShowTrend] = useState(true);
+  const [clipOutliers, setClipOutliers] = useState(false);
+  const [smoothing, setSmoothing] = useState(82);
+  const deferredSmoothing = useDeferredValue(smoothing);
+  const [enabledLoss, setEnabledLoss] = useState<Record<string, boolean>>({});
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [hover, setHover] = useState<HoverState | null>(null);
+
+  useEffect(() => {
+    setEnabledLoss(prev => {
+      const next = { ...prev };
+      for (const key of lossKeys) {
+        if (next[key] === undefined) next[key] = true;
+      }
+      for (const key of Object.keys(next)) {
+        if (!lossKeys.includes(key)) delete next[key];
+      }
+      return next;
+    });
+  }, [lossKeys]);
+
+  const activeLossKeys = useMemo(
+    () => lossKeys.filter(key => enabledLoss[key] !== false && (series[key]?.length ?? 0) > 0),
+    [enabledLoss, lossKeys, series],
+  );
+
+  const totalSteps = useMemo(() => safeTotalSteps(job), [job]);
+  const progressPercent = totalSteps > 0 ? clamp((job.step / totalSteps) * 100, 0, 100) : null;
+  const primaryLossKey = activeLossKeys[0] ?? lossKeys.find(key => (series[key]?.length ?? 0) > 0) ?? lossKeys[0];
+
+  const lossSummary = useMemo(() => {
+    const points = sortedNumericPoints(series[primaryLossKey]);
+    if (!points.length) return { current: null as number | null, deltaPct: null as number | null };
+    const alpha = 1 - clamp(deferredSmoothing / 100, 0, 1) * 0.98;
+    const smoothed = emaWithNulls(points.map(point => point.value as number), alpha).filter(
+      value => value != null && Number.isFinite(value),
+    ) as number[];
+    if (!smoothed.length) return { current: null, deltaPct: null };
+    const current = smoothed[smoothed.length - 1];
+    const compareIndex = Math.max(0, smoothed.length - Math.max(20, Math.floor(smoothed.length * 0.12)));
+    const previous = smoothed[compareIndex];
+    const deltaPct =
+      previous != null && previous !== 0 && Number.isFinite(previous) ? ((current - previous) / Math.abs(previous)) * 100 : null;
+    return { current, deltaPct };
+  }, [deferredSmoothing, primaryLossKey, series]);
+
+  const latestLearningRate = latest.learning_rate?.value ?? latestNumericPoint(series.learning_rate)?.value ?? null;
+  const latestStepsPerSec =
+    latest['train/steps_per_sec']?.value ??
+    latestNumericPoint(series['train/steps_per_sec'])?.value ??
+    (() => {
+      const seconds = latest['train/step_seconds']?.value ?? latestNumericPoint(series['train/step_seconds'])?.value;
+      if (seconds != null && Number.isFinite(seconds) && seconds > 0) return 1 / seconds;
+      return parseStepsPerSecond(job.speed_string);
+    })();
+  const etaSeconds =
+    totalSteps > 0 && latestStepsPerSec != null && latestStepsPerSec > 0
+      ? Math.max(0, (totalSteps - job.step) / latestStepsPerSec)
+      : null;
+
+  const primaryGpu = getPrimaryGpu(gpuList);
+  const gpuMemoryPct =
+    primaryGpu && primaryGpu.memory.total > 0 ? (primaryGpu.memory.used / primaryGpu.memory.total) * 100 : null;
+
+  const phaseTransitions = useMemo(
+    () => buildPhaseTransitions(phasePoints, phaseNamePoints),
+    [phaseNamePoints, phasePoints],
+  );
+  const eventMarkers = useMemo(() => buildEventMarkers(series), [series]);
+  const currentPhase = phaseTransitions.length ? phaseTransitions[phaseTransitions.length - 1] : null;
+
+  const built = useMemo(
+    () =>
+      buildChartData({
+        chartTab,
+        series,
+        lossKeys: activeLossKeys,
+        useLogScale,
+        showRaw,
+        showSmoothed,
+        showTrend,
+        clipOutliers,
+        smoothing: deferredSmoothing,
+      }),
+    [
+      activeLossKeys,
+      chartTab,
+      clipOutliers,
+      deferredSmoothing,
+      series,
+      showRaw,
+      showSmoothed,
+      showTrend,
+      useLogScale,
+      version,
+    ],
+  );
+
   const chartHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const uplotRef = useRef<uPlot | null>(null);
-  const phaseBoundariesRef = useRef<PhaseBoundary[]>([]);
-
-  // Latest yClip read by the y-scale range fn — kept current via effect.
+  const phaseTransitionsRef = useRef<PhaseTransition[]>([]);
+  const eventMarkersRef = useRef<EventMarker[]>([]);
   const yClipRef = useRef<{ min: number; max: number } | null>(null);
+  const isZoomedRef = useRef(false);
+  const hoverRafRef = useRef<number | null>(null);
+  const queuedHoverRef = useRef<HoverState | null>(null);
+
+  useEffect(() => {
+    phaseTransitionsRef.current = phaseTransitions;
+    eventMarkersRef.current = eventMarkers;
+    uplotRef.current?.redraw(true, true);
+  }, [eventMarkers, phaseTransitions]);
+
   useEffect(() => {
     yClipRef.current = built.yClip;
   }, [built.yClip]);
 
   useEffect(() => {
-    phaseBoundariesRef.current = phaseBoundaries;
-    uplotRef.current?.redraw(true, true);
-  }, [phaseBoundaries]);
-
-  // Track zoom state via ref so the data-update effect can decide whether to refit scales.
-  const isZoomedRef = useRef(false);
-  useEffect(() => {
     isZoomedRef.current = isZoomed;
   }, [isZoomed]);
 
-  // Structural recreate key — recreate uPlot only when the series shape or
-  // axis distribution changes. Data updates go through setData.
-  const hasData = (built.data[0]?.length ?? 0) > 1;
+  useEffect(() => {
+    return () => {
+      if (hoverRafRef.current != null) cancelAnimationFrame(hoverRafRef.current);
+    };
+  }, []);
+
+  const queueHover = useCallback((next: HoverState | null) => {
+    queuedHoverRef.current = next;
+    if (hoverRafRef.current != null) return;
+    hoverRafRef.current = requestAnimationFrame(() => {
+      hoverRafRef.current = null;
+      setHover(queuedHoverRef.current);
+    });
+  }, []);
+
   const structuralKey = useMemo(
-    () => `${activeKeys.join('|')}|raw=${showRaw}|sm=${showSmoothed}|log=${useLogScale}|has=${hasData}`,
-    [activeKeys, showRaw, showSmoothed, useLogScale, hasData],
+    () =>
+      [
+        chartTab,
+        activeLossKeys.join('|'),
+        `raw=${showRaw}`,
+        `smooth=${showSmoothed}`,
+        `trend=${showTrend}`,
+        `log=${useLogScale}`,
+        `has=${built.hasData}`,
+        `series=${built.seriesConfigs.map(config => config.label).join('|')}`,
+      ].join(';'),
+    [activeLossKeys, built.hasData, built.seriesConfigs, chartTab, showRaw, showSmoothed, showTrend, useLogScale],
   );
 
   useEffect(() => {
@@ -316,14 +663,14 @@ export default function JobLossGraph({ job }: Props) {
       uplotRef.current.destroy();
       uplotRef.current = null;
     }
-    if (!containerRef.current || !chartHostRef.current) return;
-    if (!hasData) return;
+    if (!containerRef.current || !chartHostRef.current || !built.hasData) return;
 
     const host = chartHostRef.current;
     const rect = host.getBoundingClientRect();
-    const initialHeight = rect.height > 0 ? Math.max(MIN_CANVAS_HEIGHT, rect.height - 40) : FALLBACK_CANVAS_HEIGHT;
+    const initialHeight = rect.height > 0 ? Math.max(MIN_CANVAS_HEIGHT, rect.height) : FALLBACK_CANVAS_HEIGHT;
+
     const opts: uPlot.Options = {
-      width: rect.width || 800,
+      width: rect.width || 900,
       height: initialHeight,
       padding: [12, 16, 0, 4],
       series: built.seriesConfigs,
@@ -340,33 +687,67 @@ export default function JobLossGraph({ job }: Props) {
       },
       axes: [
         {
-          stroke: 'rgba(255,255,255,0.55)',
-          grid: { stroke: 'rgba(255,255,255,0.06)' },
-          ticks: { stroke: 'rgba(255,255,255,0.15)' },
+          label: 'Step',
+          stroke: 'rgba(203,213,225,0.62)',
+          grid: { stroke: 'rgba(148,163,184,0.08)' },
+          ticks: { stroke: 'rgba(148,163,184,0.18)' },
+          labelFont: '12px sans-serif',
+          font: '11px sans-serif',
+          values: (_u, ticks) => ticks.map(tick => formatCompact(tick)),
         },
         {
-          stroke: 'rgba(255,255,255,0.55)',
-          grid: { stroke: 'rgba(255,255,255,0.06)' },
-          ticks: { stroke: 'rgba(255,255,255,0.15)' },
-          size: 60,
-          values: (_u, ticks) => ticks.map(tk => formatNum(tk)),
+          label: chartTab === 'learning_rate' ? 'LR' : chartTab === 'throughput' ? 'steps/sec' : 'Loss',
+          stroke: 'rgba(203,213,225,0.62)',
+          grid: { stroke: 'rgba(148,163,184,0.08)' },
+          ticks: { stroke: 'rgba(148,163,184,0.18)' },
+          size: 66,
+          labelFont: '12px sans-serif',
+          font: '11px sans-serif',
+          values: (_u, ticks) => ticks.map(tick => formatNum(tick)),
         },
       ],
       cursor: {
         drag: { x: true, y: false, setScale: true },
-        points: { size: 6 },
+        points: { show: false },
       },
-      legend: { show: true },
+      legend: { show: false },
       hooks: {
-        draw: [u => drawPhaseBoundaries(u, phaseBoundariesRef.current)],
+        drawClear: [u => drawPhaseBands(u, phaseTransitionsRef.current)],
+        draw: [u => drawEventMarkers(u, eventMarkersRef.current, phaseTransitionsRef.current)],
+        setCursor: [
+          u => {
+            const idx = u.cursor.idx;
+            if (idx == null || idx < 0) {
+              queueHover(null);
+              return;
+            }
+            const xs = u.data[0] as number[];
+            const step = xs[idx];
+            if (step == null) {
+              queueHover(null);
+              return;
+            }
+            const items: HoverItem[] = [];
+            for (let i = 1; i < u.data.length; i++) {
+              const value = (u.data[i] as (number | null)[])[idx] ?? null;
+              if (value == null || !Number.isFinite(value)) continue;
+              const config = u.series[i];
+              items.push({
+                label: String(config.label ?? `Series ${i}`),
+                value,
+                color: typeof config.stroke === 'string' ? config.stroke : 'rgba(203,213,225,1)',
+              });
+            }
+            queueHover({ step, items });
+          },
+        ],
         setScale: [
           (u, key) => {
             if (key !== 'x') return;
             const xs = u.data[0] as number[];
-            if (!xs || !xs.length) return;
+            if (!xs?.length) return;
             const sx = u.scales.x;
-            const zoomed = sx.min !== xs[0] || sx.max !== xs[xs.length - 1];
-            setIsZoomed(zoomed);
+            setIsZoomed(sx.min !== xs[0] || sx.max !== xs[xs.length - 1]);
           },
         ],
       },
@@ -374,9 +755,6 @@ export default function JobLossGraph({ job }: Props) {
 
     uplotRef.current = new uPlot(opts, built.data, containerRef.current);
     setIsZoomed(false);
-
-    // After uPlot mounts its legend, right-size the canvas against the actual
-    // legend height so the canvas fills the remaining vertical space.
     const fitted = computeCanvasSize(host);
     if (fitted) uplotRef.current.setSize(fitted);
 
@@ -387,13 +765,9 @@ export default function JobLossGraph({ job }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structuralKey]);
 
-  // Push new data without recreating — preserves zoom & cursor state.
   useEffect(() => {
     const u = uplotRef.current;
     if (!u) return;
-    // When zoomed, pass resetScales=false so the user's view stays put. uPlot
-    // skips its commit() in that branch though, so force a redraw to actually
-    // re-render the new smoothed/strided values within the zoom window.
     if (isZoomedRef.current) {
       u.setData(built.data, false);
       u.redraw(true, true);
@@ -402,11 +776,6 @@ export default function JobLossGraph({ job }: Props) {
     }
   }, [built]);
 
-  // Resize observer — fit canvas to the wrapper's available space minus the
-  // HTML legend uPlot renders below it. Observe the layout wrapper, not the
-  // uPlot mount node (which uPlot pins to width:min-content).
-  // Re-runs on `hasData` because the observed element only exists once data
-  // has loaded (see the `!hasData` branch below).
   useEffect(() => {
     const el = chartHostRef.current;
     if (!el) return;
@@ -418,143 +787,269 @@ export default function JobLossGraph({ job }: Props) {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [hasData]);
+  }, [built.hasData]);
 
   const handleResetZoom = useCallback(() => {
     const u = uplotRef.current;
     if (!u) return;
     const xs = u.data[0] as number[];
-    if (!xs || !xs.length) return;
+    if (!xs?.length) return;
     u.setScale('x', { min: xs[0], max: xs[xs.length - 1] });
   }, []);
 
-  const totalPoints = built.data[0]?.length ?? 0;
+  const recentTimeline = useMemo(() => {
+    const phaseItems = phaseTransitions.map(phase => ({
+      step: phase.step,
+      color: 'bg-slate-300',
+      label: phase.name || `Phase ${phase.index + 1}`,
+      detail: 'phase',
+    }));
+    const eventItems = eventMarkers.map(marker => ({
+      step: marker.step,
+      color:
+        marker.kind === 'sample' ? 'bg-amber-400' : marker.kind === 'checkpoint' ? 'bg-emerald-400' : 'bg-rose-400',
+      label: marker.label,
+      detail: marker.kind.replace('_', ' '),
+    }));
+    return [...phaseItems, ...eventItems].sort((a, b) => b.step - a.step).slice(0, 12);
+  }, [eventMarkers, phaseTransitions]);
+
+  const noDataMessage =
+    status === 'error'
+      ? 'Failed to load training metrics.'
+      : chartTab === 'learning_rate'
+        ? 'No learning-rate points found yet.'
+        : chartTab === 'throughput'
+          ? 'No throughput telemetry found yet.'
+          : 'Waiting for loss points...';
 
   return (
     <div className="bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800 flex flex-col h-full">
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <div className="h-2 w-2 rounded-full bg-blue-400" />
-          <h2 className="text-gray-100 text-sm font-medium">Loss graph</h2>
-          <span className="text-xs text-gray-400">
-            {status === 'loading' && 'Loading...'}
+          <h2 className="text-gray-100 text-sm font-medium">Training Monitor</h2>
+          <span className="text-xs text-gray-400 truncate">
+            {status === 'loading' && 'Loading metrics...'}
             {status === 'refreshing' && 'Refreshing...'}
-            {status === 'error' && 'Error'}
-            {status === 'success' && hasData && `${totalPoints.toLocaleString()} steps`}
-            {status === 'success' && !hasData && 'No data yet'}
+            {status === 'error' && 'Metrics unavailable'}
+            {status === 'success' && built.hasData && `${built.totalPoints.toLocaleString()} rendered points`}
+            {status === 'success' && !built.hasData && 'No chart data yet'}
           </span>
         </div>
 
         <button
           type="button"
-          onClick={refreshLoss}
-          className="px-3 py-1 rounded-md text-xs bg-gray-700/60 hover:bg-gray-700 text-gray-200 border border-gray-700"
+          onClick={refreshMetrics}
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs bg-gray-700/60 hover:bg-gray-700 text-gray-200 border border-gray-700"
         >
+          <RotateCcw className="h-3.5 w-3.5" />
           Refresh
         </button>
       </div>
 
-      {/* Chart */}
-      <div className="px-4 pt-4 pb-4 flex-1 min-h-0 flex flex-col">
-        <div
-          className="bg-gray-950 rounded-lg border border-gray-800 relative select-none flex-1 min-h-0"
-          style={{ minHeight: 240 }}
-        >
-          {!hasData ? (
-            <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
-              {status === 'error' ? 'Failed to load loss logs.' : 'Waiting for loss points...'}
-            </div>
-          ) : (
-            <>
-              {isZoomed && (
-                <button
-                  type="button"
-                  onClick={handleResetZoom}
-                  className="absolute top-2 right-2 z-10 px-2 py-1 rounded text-xs bg-blue-600/80 hover:bg-blue-600 text-white border border-blue-500/50"
-                >
-                  Reset zoom
-                </button>
-              )}
-              <div ref={chartHostRef} className="absolute top-0 left-0 right-0 bottom-2 overflow-hidden">
-                <div ref={containerRef} />
-              </div>
-            </>
-          )}
+      <div className="p-4 space-y-3 flex-1 min-h-0 overflow-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+          <KpiCard
+            icon={<Activity className="h-4 w-4 text-emerald-400" />}
+            label="Progress"
+            value={`${formatCompact(job.step)} / ${totalSteps ? formatCompact(totalSteps) : '--'}`}
+            detail={progressPercent == null ? 'total steps unknown' : `${formatPercent(progressPercent)} complete`}
+            accent="emerald"
+            progress={progressPercent}
+          />
+          <KpiCard
+            icon={<TrendingDown className="h-4 w-4 text-blue-400" />}
+            label="Smoothed loss"
+            value={formatNum(lossSummary.current)}
+            detail={
+              lossSummary.deltaPct == null
+                ? primaryLossKey || 'no loss'
+                : `${lossSummary.deltaPct >= 0 ? '+' : ''}${lossSummary.deltaPct.toFixed(2)}% trend`
+            }
+            accent={lossSummary.deltaPct != null && lossSummary.deltaPct > 0 ? 'rose' : 'blue'}
+          />
+          <KpiCard
+            icon={<Gauge className="h-4 w-4 text-amber-400" />}
+            label="Learning rate"
+            value={formatNum(latestLearningRate, 3)}
+            detail={(series.learning_rate?.length ?? 0) > 0 ? `${series.learning_rate.length.toLocaleString()} points` : 'not logged yet'}
+            accent="amber"
+          />
+          <KpiCard
+            icon={<Clock className="h-4 w-4 text-emerald-400" />}
+            label="Speed / ETA"
+            value={latestStepsPerSec == null ? job.speed_string || '--' : `${formatNum(latestStepsPerSec, 3)} steps/s`}
+            detail={etaSeconds == null ? 'ETA unavailable' : `ETA ${formatDuration(etaSeconds)}`}
+            accent="emerald"
+          />
+          <KpiCard
+            icon={<Zap className="h-4 w-4 text-rose-400" />}
+            label="GPU health"
+            value={
+              primaryGpu
+                ? `${formatMemory(primaryGpu.memory.used)} / ${formatMemory(primaryGpu.memory.total)}`
+                : job.gpu_ids === 'mps'
+                  ? 'MPS'
+                  : '--'
+            }
+            detail={
+              primaryGpu
+                ? `GPU ${primaryGpu.utilization.gpu}% | mem ${formatPercent(gpuMemoryPct)}`
+                : 'live hardware data unavailable'
+            }
+            accent={primaryGpu && (primaryGpu.utilization.gpu > 92 || (gpuMemoryPct ?? 0) > 92) ? 'rose' : 'blue'}
+            progress={gpuMemoryPct}
+          />
         </div>
-      </div>
 
-      {/* Controls */}
-      <div className="px-4 pb-2 shrink-0">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
-            <label className="block text-xs text-gray-400 mb-2">Display</label>
-            <div className="flex flex-wrap gap-2">
-              <ToggleButton checked={showSmoothed} onClick={() => setShowSmoothed(v => !v)} label="Smoothed" />
-              <ToggleButton checked={showRaw} onClick={() => setShowRaw(v => !v)} label="Raw" />
-              <ToggleButton checked={useLogScale} onClick={() => setUseLogScale(v => !v)} label="Log Y" />
-              <ToggleButton checked={clipOutliers} onClick={() => setClipOutliers(v => !v)} label="Clip outliers" />
-            </div>
-          </div>
-
-          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
-            <label className="block text-xs text-gray-400 mb-2">Series</label>
-            {lossKeys.length === 0 ? (
-              <div className="text-sm text-gray-400">No loss keys found yet.</div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {lossKeys.map(k => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setEnabled(prev => ({ ...prev, [k]: !(prev[k] ?? true) }))}
-                    className={[
-                      'px-3 py-1 rounded-md text-xs border transition-colors',
-                      enabled[k] === false
-                        ? 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800/60'
-                        : 'bg-gray-900 text-gray-200 border-gray-800 hover:bg-gray-800/60',
-                    ].join(' ')}
-                    aria-pressed={enabled[k] !== false}
-                    title={k}
-                  >
-                    <span className="inline-block h-2 w-2 rounded-full mr-2" style={{ background: strokeForKey(k) }} />
-                    {k}
-                  </button>
-                ))}
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-3 min-h-[520px]">
+          <div className="bg-gray-950 rounded-lg border border-gray-800 min-h-[420px] flex flex-col overflow-hidden">
+            <div className="px-3 py-2 border-b border-gray-800 flex flex-wrap items-center gap-2 justify-between">
+              <div className="inline-flex rounded-md border border-gray-800 bg-gray-900 p-0.5">
+                <ChartTabButton active={chartTab === 'loss'} onClick={() => setChartTab('loss')} label="Loss" />
+                <ChartTabButton
+                  active={chartTab === 'learning_rate'}
+                  onClick={() => setChartTab('learning_rate')}
+                  label="Learning Rate"
+                />
+                <ChartTabButton
+                  active={chartTab === 'throughput'}
+                  onClick={() => setChartTab('throughput')}
+                  label="Throughput"
+                />
               </div>
-            )}
+
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <span>server cap {CHART_MAX_POINTS.toLocaleString()}</span>
+                {isZoomed && (
+                  <button
+                    type="button"
+                    onClick={handleResetZoom}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-600/80 hover:bg-blue-600 text-white border border-blue-500/50"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Reset zoom
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="relative flex-1 min-h-0">
+              {!built.hasData ? (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
+                  {noDataMessage}
+                </div>
+              ) : (
+                <>
+                  <div ref={chartHostRef} className="absolute inset-0 overflow-hidden">
+                    <div ref={containerRef} />
+                  </div>
+                  <HoverReadout hover={hover} />
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs text-gray-400">Smoothing</label>
-              <span className="text-xs text-gray-300">{smoothing}%</span>
+          <div className="space-y-3">
+            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+              <div className="text-xs text-gray-400 mb-2">Display</div>
+              <div className="flex flex-wrap gap-2">
+                <ToggleButton checked={showSmoothed} onClick={() => setShowSmoothed(v => !v)} label="Smooth" />
+                <ToggleButton checked={showTrend} onClick={() => setShowTrend(v => !v)} label="Trend" />
+                <ToggleButton checked={showRaw} onClick={() => setShowRaw(v => !v)} label="Raw" />
+                <ToggleButton checked={useLogScale} onClick={() => setUseLogScale(v => !v)} label="Log Y" />
+                <ToggleButton checked={clipOutliers} onClick={() => setClipOutliers(v => !v)} label="Clip" />
+              </div>
+
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-gray-400">Smoothing</label>
+                  <span className="text-xs text-gray-300">{smoothing}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={smoothing}
+                  onChange={event => {
+                    const value = Number(event.target.value);
+                    startTransition(() => setSmoothing(value));
+                  }}
+                  className="w-full accent-blue-500"
+                  disabled={!showSmoothed && !showTrend}
+                />
+              </div>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={smoothing}
-              onChange={e => setSmoothing(Number(e.target.value))}
-              className="w-full accent-blue-500"
-              disabled={!showSmoothed}
-            />
+
+            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+              <div className="text-xs text-gray-400 mb-2">Loss Series</div>
+              {lossKeys.length === 0 ? (
+                <div className="text-sm text-gray-500">No loss keys found yet.</div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {lossKeys.map(key => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setEnabledLoss(prev => ({ ...prev, [key]: !(prev[key] ?? true) }))}
+                      className={[
+                        'px-2.5 py-1 rounded-md text-xs border transition-colors max-w-full truncate',
+                        enabledLoss[key] === false
+                          ? 'bg-gray-900 text-gray-500 border-gray-800 hover:bg-gray-800/60'
+                          : 'bg-gray-900 text-gray-200 border-gray-700 hover:bg-gray-800/80',
+                      ].join(' ')}
+                      aria-pressed={enabledLoss[key] !== false}
+                      title={key}
+                    >
+                      <span
+                        className="inline-block h-2 w-2 rounded-full mr-1.5"
+                        style={{ background: lossColorForKey(key) }}
+                      />
+                      {cleanLabel(key)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+              <div className="text-xs text-gray-400 mb-2">Current Phase</div>
+              <div className="text-sm text-gray-100 truncate">
+                {currentPhase ? currentPhase.name || `Phase ${currentPhase.index + 1}` : 'No phase data'}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                {currentPhase ? `started at step ${formatCompact(currentPhase.step)}` : 'Old jobs may not include phases.'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="text-xs text-gray-400">Events & phase timeline</div>
+            <div className="flex items-center gap-3 text-[11px] text-gray-500">
+              <LegendDot className="bg-amber-400" label="samples" icon={<ImageIcon className="h-3 w-3" />} />
+              <LegendDot className="bg-emerald-400" label="checkpoints" icon={<Save className="h-3 w-3" />} />
+              <LegendDot className="bg-rose-400" label="phase changes" />
+            </div>
           </div>
 
-          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs text-gray-400">Plot stride</label>
-              <span className="text-xs text-gray-300">every {plotStride} pt</span>
+          {recentTimeline.length === 0 ? (
+            <div className="text-sm text-gray-500">No samples, checkpoints, or phase changes logged yet.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+              {recentTimeline.map((item, index) => (
+                <div key={`${item.detail}-${item.step}-${index}`} className="flex items-center gap-2 rounded-md bg-gray-900/70 border border-gray-800 px-3 py-2 min-w-0">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${item.color}`} />
+                  <div className="min-w-0">
+                    <div className="text-xs text-gray-200 truncate">{item.label}</div>
+                    <div className="text-[11px] text-gray-500">step {formatCompact(item.step)}</div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <input
-              type="range"
-              min={1}
-              max={20}
-              value={plotStride}
-              onChange={e => setPlotStride(Number(e.target.value))}
-              className="w-full accent-blue-500"
-            />
-            <div className="mt-2 text-[11px] text-gray-500">UI downsample for huge runs.</div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -563,24 +1058,65 @@ export default function JobLossGraph({ job }: Props) {
         .uplot * {
           font-family: inherit;
         }
-        .uplot .u-legend {
-          color: rgba(255, 255, 255, 0.85);
-          font-size: 12px;
-          margin-top: 4px;
-        }
-        .uplot .u-legend th,
-        .uplot .u-legend td {
-          color: rgba(255, 255, 255, 0.85);
-        }
-        .uplot .u-legend .u-marker {
-          border-radius: 2px;
+        .uplot {
+          background: transparent;
         }
         .uplot .u-select {
-          background: rgba(59, 130, 246, 0.15);
-          border: 1px solid rgba(59, 130, 246, 0.4);
+          background: rgba(59, 130, 246, 0.14);
+          border: 1px solid rgba(59, 130, 246, 0.38);
         }
       `}</style>
     </div>
+  );
+}
+
+function KpiCard({
+  icon,
+  label,
+  value,
+  detail,
+  accent,
+  progress,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  detail: string;
+  accent: 'blue' | 'amber' | 'emerald' | 'rose';
+  progress?: number | null;
+}) {
+  const barColor =
+    accent === 'emerald' ? 'bg-emerald-500' : accent === 'amber' ? 'bg-amber-500' : accent === 'rose' ? 'bg-rose-500' : 'bg-blue-500';
+
+  return (
+    <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 min-w-0">
+      <div className="flex items-center gap-2 text-xs text-gray-400">
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className="mt-2 text-lg font-semibold text-gray-100 truncate">{value}</div>
+      <div className="mt-1 text-xs text-gray-500 truncate">{detail}</div>
+      {progress != null && Number.isFinite(progress) && (
+        <div className="mt-3 h-1 rounded-full bg-gray-800 overflow-hidden">
+          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${clamp(progress, 0, 100)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChartTabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        'px-3 py-1.5 rounded text-xs transition-colors',
+        active ? 'bg-blue-500/15 text-blue-200' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800',
+      ].join(' ')}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -590,14 +1126,44 @@ function ToggleButton({ checked, onClick, label }: { checked: boolean; onClick: 
       type="button"
       onClick={onClick}
       className={[
-        'px-3 py-1 rounded-md text-xs border transition-colors',
+        'px-2.5 py-1 rounded-md text-xs border transition-colors',
         checked
           ? 'bg-blue-500/10 text-blue-300 border-blue-500/30 hover:bg-blue-500/15'
-          : 'bg-gray-900 text-gray-300 border-gray-800 hover:bg-gray-800/60',
+          : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800/60',
       ].join(' ')}
       aria-pressed={checked}
     >
       {label}
     </button>
+  );
+}
+
+function HoverReadout({ hover }: { hover: HoverState | null }) {
+  if (!hover || hover.items.length === 0) return null;
+  return (
+    <div className="absolute top-3 left-3 z-10 rounded-md border border-gray-800 bg-gray-950/92 px-3 py-2 shadow-lg max-w-[260px]">
+      <div className="text-[11px] text-gray-500 mb-1">step {formatCompact(hover.step)}</div>
+      <div className="space-y-1">
+        {hover.items.slice(0, 6).map(item => (
+          <div key={item.label} className="flex items-center justify-between gap-3 text-xs">
+            <span className="min-w-0 truncate text-gray-300">
+              <span className="inline-block h-2 w-2 rounded-full mr-1.5" style={{ background: item.color }} />
+              {item.label}
+            </span>
+            <span className="font-medium text-gray-100">{formatNum(item.value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LegendDot({ className, label, icon }: { className: string; label: string; icon?: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {icon}
+      <span className={`h-2 w-2 rounded-full ${className}`} />
+      {label}
+    </span>
   );
 }

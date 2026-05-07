@@ -228,6 +228,66 @@ from the last checkpoint.
 
 IMPORTANT. If you press crtl+c while it is saving, it will likely corrupt that checkpoint. So wait until it is done saving
 
+### Multi-step training phases
+
+Training jobs can split one run into sequential phases with different runtime training settings. This is useful when you want to teach broad structure first, stabilize it, then refine details without rebuilding the model or changing the dataset.
+
+Add `train.phases` to a config. Each phase needs a `name` and `steps`. The top-level `train.steps` value must equal the sum of all phase `steps`. The UI phase editor keeps this synchronized automatically.
+
+```yaml
+train:
+  steps: 3000
+  save_on_phase_change: true
+  phases:
+    - name: anatomy
+      steps: 1200
+      optimizer: adamw
+      lr: 0.00003
+      timestep_type: weighted
+      content_or_style: content
+      loss_type: mse
+      optimizer_params:
+        weight_decay: 0.0001
+      auto_advance:
+        type: loss_plateau
+        min_steps: 500
+
+    - name: stabilize
+      steps: 1000
+      optimizer: adamw
+      lr: 0.00001
+      timestep_type: weighted
+      content_or_style: balanced
+      loss_type: mse
+
+    - name: detail
+      steps: 800
+      optimizer: adamw
+      lr: 0.000005
+      timestep_type: weighted
+      content_or_style: style
+      loss_type: mse
+```
+
+Phase overrides inherit from the top-level `train` block. Supported phase-local overrides include learning rates, optimizer, optimizer params, LR scheduler params, timestep type/bias, loss type, denoising min/max, SNR settings, and prompt/noise multipliers. Model, network, dataset, save, sample, batch size, gradient accumulation, dtype, cache, LoRA rank, and LoKr factor settings stay top-level only for the whole run.
+
+At each phase boundary the trainer saves by default, rebuilds the optimizer and LR scheduler, clears gradients, and continues. Phase changes only happen after a completed optimizer update, so boundaries defer cleanly during gradient accumulation. Checkpoints store the current phase index/name and phase-local step so resumes return to the correct phase.
+
+Phases can also advance early by logged metric plateau:
+
+```yaml
+auto_advance:
+  type: loss_plateau
+  metric: loss/loss
+  mode: min
+  min_steps: 500
+  window: 100
+  patience: 2
+  min_delta_pct: 1.0
+```
+
+Defaults are `metric: loss/loss`, `mode: min`, `window: 100`, `patience: 2`, `min_steps: max(200, window * 2)`, and `min_delta_pct: 1.0`. Generated sample images are not scored directly; future evaluators can feed numeric metrics into the same logging system. The UI loss graph shows phase boundary markers when phase metrics are present.
+
 ### Need help?
 
 Please do not open a bug report unless it is a bug in the code. You are welcome to [Join my Discord](https://discord.gg/VXmU2f5WEU)

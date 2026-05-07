@@ -356,6 +356,8 @@ class TrainConfig:
         self.content_or_style: ContentOrStyleType = kwargs.get('content_or_style', 'balanced')
         self.content_or_style_reg: ContentOrStyleType = kwargs.get('content_or_style', 'balanced')
         self.steps: int = kwargs.get('steps', 1000)
+        self.phases = kwargs.get('phases', None)
+        self.save_on_phase_change: bool = kwargs.get('save_on_phase_change', True)
         self.lr = kwargs.get('lr', 1e-6)
         self.unet_lr = kwargs.get('unet_lr', self.lr)
         self.text_encoder_lr = kwargs.get('text_encoder_lr', self.lr)

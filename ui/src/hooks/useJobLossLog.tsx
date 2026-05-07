@@ -7,6 +7,7 @@ export interface LossPoint {
   step: number;
   wall_time?: number;
   value: number | null;
+  value_text?: string | null;
 }
 
 type SeriesMap = Record<string, LossPoint[]>;
@@ -15,6 +16,10 @@ function isLossKey(key: string) {
   // treat anything containing "loss" as a loss-series
   // (covers loss, train_loss, val_loss, loss/xyz, etc.)
   return /loss/i.test(key);
+}
+
+function isPhaseKey(key: string) {
+  return key === 'phase/index';
 }
 
 export default function useJobLossLog(jobID: string, reloadInterval: null | number = null) {
@@ -55,9 +60,12 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
       setKeys(newKeys);
 
       const wantedLossKeys = (newKeys.filter(isLossKey).length ? newKeys.filter(isLossKey) : ['loss']).sort();
+      const wantedKeys = Array.from(
+        new Set([...wantedLossKeys, ...newKeys.filter(isPhaseKey)]),
+      ).sort();
 
-      // Step 2: fetch each loss key incrementally (since_step per key if polling)
-      const requests = wantedLossKeys.map(k => {
+      // Step 2: fetch each chart key incrementally (since_step per key if polling)
+      const requests = wantedKeys.map(k => {
         const params: Record<string, any> = { key: k };
 
         if (reloadInterval && lastStepByKeyRef.current[k] != null) {
@@ -100,9 +108,9 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
             : (lastStepByKeyRef.current[k] ?? null);
         }
 
-        // remove stale loss keys that no longer exist (rare, but keeps UI clean)
+        // remove stale chart keys that no longer exist (rare, but keeps UI clean)
         for (const existingKey of Object.keys(next)) {
-          if (isLossKey(existingKey) && !wantedLossKeys.includes(existingKey)) {
+          if ((isLossKey(existingKey) || isPhaseKey(existingKey)) && !wantedKeys.includes(existingKey)) {
             delete next[existingKey];
             delete lastStepByKeyRef.current[existingKey];
           }
@@ -140,5 +148,5 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
     }
   }, [jobID, reloadInterval, refreshLoss]);
 
-  return { series, keys, lossKeys, status, refreshLoss, setSeries };
+  return { series, keys, lossKeys, phasePoints: series['phase/index'] ?? [], status, refreshLoss, setSeries };
 }

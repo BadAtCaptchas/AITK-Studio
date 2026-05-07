@@ -54,6 +54,7 @@ export type LossPoint = {
   step: number;
   wall_time: number;
   value: number | null;
+  value_text?: string | null;
 };
 
 export type LossLogResult = {
@@ -61,6 +62,13 @@ export type LossLogResult = {
   keys: string[];
   points: LossPoint[];
 };
+
+function coerceMetricValue(value: number | null | undefined, valueText: string | null | undefined): number | null {
+  if (value != null) return Number(value);
+  if (!valueText) return null;
+  const numericValue = Number(valueText);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
 
 const DEFAULT_MONGODB_DB = 'ai_toolkit';
 
@@ -284,7 +292,8 @@ async function readSqliteLossLog(
       points: points.map(point => ({
         step: point.step,
         wall_time: point.wall_time,
-        value: point.value ?? (point.value_text ? Number(point.value_text) : null),
+        value: coerceMetricValue(point.value, point.value_text),
+        value_text: point.value_text,
       })),
     };
   } finally {
@@ -329,7 +338,8 @@ async function readMongoLossLog(
     points: rows.map(row => ({
       step: Number(row.step ?? 0),
       wall_time: Number(row.wall_time ?? 0),
-      value: row.value_real == null ? (row.value_text ? Number(row.value_text) : null) : Number(row.value_real),
+      value: coerceMetricValue(row.value_real == null ? null : Number(row.value_real), row.value_text),
+      value_text: row.value_text == null ? null : String(row.value_text),
     })),
   };
 }

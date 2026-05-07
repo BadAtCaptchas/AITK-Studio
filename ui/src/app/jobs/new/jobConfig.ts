@@ -155,6 +155,24 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
       use_ui_logger: true,
     };
   }
+
+  const train = jobConfig.config.process[0]?.train;
+  if (train && Array.isArray(train.phases)) {
+    if (train.phases.length === 0) {
+      delete train.phases;
+    } else {
+      train.phases = train.phases.map((phase, index) => ({
+        ...phase,
+        name: phase.name?.trim() || `Phase ${index + 1}`,
+        steps: Math.max(1, Number(phase.steps) || 1),
+      }));
+      train.steps = train.phases.reduce((sum, phase) => sum + phase.steps, 0);
+      if (train.save_on_phase_change === undefined) {
+        train.save_on_phase_change = true;
+      }
+    }
+  }
+
   if (isMac()) {
     jobConfig.config.process[0].device = 'mps';
   }

@@ -75,6 +75,11 @@ const PALETTE = [
   'rgba(129,140,248,1)', // indigo-400
 ];
 
+type PhaseBoundary = {
+  step: number;
+  index: number;
+};
+
 function strokeForKey(key: string) {
   return PALETTE[hashToIndex(key, PALETTE.length)];
 }
@@ -88,8 +93,56 @@ function dulledColor(rgba: string): string {
   return `rgba(${r},${g},${b},1)`;
 }
 
+function buildPhaseBoundaries(points: LossPoint[]): PhaseBoundary[] {
+  const sorted = [...points]
+    .filter(point => point.value !== null && Number.isFinite(point.value as number))
+    .sort((a, b) => a.step - b.step);
+
+  const boundaries: PhaseBoundary[] = [];
+  let previousIndex: number | null = null;
+  for (const point of sorted) {
+    const phaseIndex = Math.round(point.value as number);
+    if (previousIndex === null) {
+      previousIndex = phaseIndex;
+      continue;
+    }
+    if (phaseIndex !== previousIndex) {
+      boundaries.push({ step: point.step, index: phaseIndex });
+      previousIndex = phaseIndex;
+    }
+  }
+  return boundaries;
+}
+
+function drawPhaseBoundaries(u: uPlot, boundaries: PhaseBoundary[]) {
+  if (!boundaries.length) return;
+  const { ctx, bbox } = u;
+  const min = u.scales.x.min ?? -Infinity;
+  const max = u.scales.x.max ?? Infinity;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(248,250,252,0.28)';
+  ctx.fillStyle = 'rgba(248,250,252,0.72)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.font = '11px sans-serif';
+  ctx.textBaseline = 'top';
+
+  for (const boundary of boundaries) {
+    if (boundary.step < min || boundary.step > max) continue;
+    const x = bbox.left + u.valToPos(boundary.step, 'x');
+    ctx.beginPath();
+    ctx.moveTo(x, bbox.top);
+    ctx.lineTo(x, bbox.top + bbox.height);
+    ctx.stroke();
+    ctx.fillText(`P${boundary.index + 1}`, x + 4, bbox.top + 6);
+  }
+
+  ctx.restore();
+}
+
 export default function JobLossGraph({ job }: Props) {
-  const { series, lossKeys, status, refreshLoss } = useJobLossLog(job.id, 2000);
+  const { series, lossKeys, phasePoints, status, refreshLoss } = useJobLossLog(job.id, 2000);
 
   // Controls
   const [useLogScale, setUseLogScale] = useState(false);
@@ -128,6 +181,7 @@ export default function JobLossGraph({ job }: Props) {
   }, [lossKeys]);
 
   const activeKeys = useMemo(() => lossKeys.filter(k => enabled[k] !== false), [lossKeys, enabled]);
+  const phaseBoundaries = useMemo(() => buildPhaseBoundaries(phasePoints), [phasePoints]);
 
   // Build uPlot-aligned data + series configs.
   const built = useMemo(() => {
@@ -230,12 +284,18 @@ export default function JobLossGraph({ job }: Props) {
   const chartHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const uplotRef = useRef<uPlot | null>(null);
+  const phaseBoundariesRef = useRef<PhaseBoundary[]>([]);
 
   // Latest yClip read by the y-scale range fn — kept current via effect.
   const yClipRef = useRef<{ min: number; max: number } | null>(null);
   useEffect(() => {
     yClipRef.current = built.yClip;
   }, [built.yClip]);
+
+  useEffect(() => {
+    phaseBoundariesRef.current = phaseBoundaries;
+    uplotRef.current?.redraw(true, true);
+  }, [phaseBoundaries]);
 
   // Track zoom state via ref so the data-update effect can decide whether to refit scales.
   const isZoomedRef = useRef(false);
@@ -298,6 +358,7 @@ export default function JobLossGraph({ job }: Props) {
       },
       legend: { show: true },
       hooks: {
+        draw: [u => drawPhaseBoundaries(u, phaseBoundariesRef.current)],
         setScale: [
           (u, key) => {
             if (key !== 'x') return;

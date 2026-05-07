@@ -149,10 +149,63 @@ export interface EMAConfig {
   ema_decay: number;
 }
 
+export type TrainLossType = 'mse' | 'mae' | 'wavelet' | 'stepped' | 'pixelspace' | 'mean_flow' | 'pseudo_huber';
+
+export interface PhaseAutoAdvanceConfig {
+  type: 'loss_plateau';
+  metric?: string;
+  mode?: 'min' | 'max';
+  min_steps?: number;
+  window?: number;
+  patience?: number;
+  min_delta_pct?: number;
+}
+
+export interface TrainingPhaseConfig {
+  name: string;
+  steps: number;
+  lr?: number;
+  unet_lr?: number;
+  text_encoder_lr?: number;
+  refiner_lr?: number;
+  embedding_lr?: number;
+  adapter_lr?: number;
+  optimizer?: string;
+  optimizer_params?: {
+    weight_decay?: number;
+    [key: string]: unknown;
+  };
+  lr_scheduler?: string;
+  lr_scheduler_params?: Record<string, unknown>;
+  timestep_type?: string;
+  content_or_style?: string;
+  content_or_style_reg?: string;
+  loss_type?: TrainLossType;
+  min_denoising_steps?: number;
+  max_denoising_steps?: number;
+  min_snr_gamma?: number | null;
+  snr_gamma?: number | null;
+  prompt_dropout_prob?: number;
+  noise_offset?: number;
+  noise_multiplier?: number;
+  target_noise_multiplier?: number;
+  random_noise_multiplier?: number;
+  random_noise_shift?: number;
+  img_multiplier?: number;
+  noisy_latent_multiplier?: number;
+  latent_multiplier?: number;
+  pred_scaler?: number;
+  reg_weight?: number;
+  max_grad_norm?: number;
+  auto_advance?: PhaseAutoAdvanceConfig;
+}
+
 export interface TrainConfig {
   batch_size: number;
   bypass_guidance_embedding?: boolean;
   steps: number;
+  phases?: TrainingPhaseConfig[];
+  save_on_phase_change?: boolean;
   gradient_accumulation: number;
   train_unet: boolean;
   train_text_encoder: boolean;
@@ -168,7 +221,10 @@ export interface TrainConfig {
   cache_text_embeddings: boolean;
   optimizer_params: {
     weight_decay: number;
+    [key: string]: unknown;
   };
+  lr_scheduler?: string;
+  lr_scheduler_params?: Record<string, unknown>;
   skip_first_sample: boolean;
   force_first_sample: boolean;
   disable_sampling: boolean;
@@ -178,7 +234,7 @@ export interface TrainConfig {
   blank_prompt_preservation?: boolean;
   blank_prompt_preservation_multiplier?: number;
   switch_boundary_every: number;
-  loss_type: 'mse' | 'mae' | 'wavelet' | 'stepped';
+  loss_type: TrainLossType;
   do_differential_guidance?: boolean;
   differential_guidance_scale?: number;
   audio_loss_multiplier?: number;

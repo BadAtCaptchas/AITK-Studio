@@ -131,10 +131,9 @@ class Adafactor(torch.optim.Optimizer):
             "warmup_init": warmup_init,
         }
         super().__init__(params, defaults)
+        self._normalize_param_groups()
         
-        self.base_lrs: List[float] = [
-            lr for group in self.param_groups
-        ]
+        self.base_lrs: List[float] = self._get_base_lrs()
 
         self.is_stochastic_rounding_accumulation = False
 
@@ -162,6 +161,19 @@ class Adafactor(torch.optim.Optimizer):
         if self.do_paramiter_swapping:
             self.enable_paramiter_swapping(self.paramiter_swapping_factor)
         
+    def _normalize_param_groups(self):
+        for group in self.param_groups:
+            for key, value in self.defaults.items():
+                group.setdefault(key, value)
+
+    def _get_base_lrs(self):
+        return [group["lr"] for group in self.param_groups]
+
+    def load_state_dict(self, state_dict):
+        result = super().load_state_dict(state_dict)
+        self._normalize_param_groups()
+        self.base_lrs = self._get_base_lrs()
+        return result
     
     def enable_paramiter_swapping(self, paramiter_swapping_factor=0.1):
         self.do_paramiter_swapping = True
@@ -206,7 +218,7 @@ class Adafactor(torch.optim.Optimizer):
     @staticmethod
     def _get_options(param_group, param_shape):
         factored = len(param_shape) >= 2
-        use_first_moment = param_group["beta1"] is not None
+        use_first_moment = param_group.get("beta1") is not None
         return factored, use_first_moment
 
     @staticmethod

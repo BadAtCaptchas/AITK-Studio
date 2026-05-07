@@ -30,7 +30,7 @@ type SeriesMap = Record<string, MetricPoint[]>;
 type LatestMap = Record<string, MetricPoint | null>;
 type Status = 'idle' | 'loading' | 'success' | 'error' | 'refreshing';
 
-const DEFAULT_METRIC_KEYS = ['loss*', 'learning_rate', 'phase/*', 'event/*', 'train/*'];
+const DEFAULT_METRIC_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
 const DEFAULT_MAX_POINTS = 4000;
 const COMPACT_THRESHOLD = 5000;
 

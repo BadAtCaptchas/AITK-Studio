@@ -2344,6 +2344,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 print("\n==== Profile Results ====")
                 print(self.torch_profiler.key_averages().table(sort_by="cpu_time_total", row_limit=1000))
             self.timer.stop('train_loop')
+            train_loop_timings = self.timer.timers.get('train_loop')
+            step_seconds = train_loop_timings[-1] if train_loop_timings else None
             if not did_first_flush:
                 flush()
                 did_first_flush = True
@@ -2396,6 +2398,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.accelerator.wait_for_everyone()
                         
                     if is_save_step:
+                        if self.accelerator.is_main_process:
+                            self.logger.log({'event/checkpoint': 1})
                         self.accelerator
                         # print above the progress bar
                         if self.progress_bar is not None:
@@ -2411,6 +2415,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                             self.progress_bar.unpause()
                             
                     if is_sample_step:
+                        if self.accelerator.is_main_process:
+                            self.logger.log({'event/sample': 1})
                         if self.progress_bar is not None:
                             self.progress_bar.pause()
                         flush()
@@ -2443,9 +2449,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         
                         if self.accelerator.is_main_process:
                             # log to logger
-                            self.logger.log({
+                            telemetry_log = {
                                 'learning_rate': learning_rate,
-                            })
+                            }
+                            if step_seconds is not None and step_seconds > 0:
+                                telemetry_log['train/step_seconds'] = step_seconds
+                                telemetry_log['train/steps_per_sec'] = 1.0 / step_seconds
+                            self.logger.log(telemetry_log)
                             if loss_dict is not None:
                                 for key, value in loss_dict.items():
                                     self.logger.log({
@@ -2454,9 +2464,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     elif self.logging_config.log_every is None:
                         if self.accelerator.is_main_process:
                             # log every step
-                            self.logger.log({
+                            telemetry_log = {
                                 'learning_rate': learning_rate,
-                            })
+                            }
+                            if step_seconds is not None and step_seconds > 0:
+                                telemetry_log['train/step_seconds'] = step_seconds
+                                telemetry_log['train/steps_per_sec'] = 1.0 / step_seconds
+                            self.logger.log(telemetry_log)
                             for key, value in loss_dict.items():
                                 self.logger.log({
                                     f'loss/{key}': value,
@@ -2506,6 +2520,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         )
                         self.restart_training_phase_optimizer()
                         if self.accelerator.is_main_process:
+                            self.logger.log({'event/phase_change': 1})
+                            if self.phase_manager.save_on_phase_change:
+                                self.logger.log({'event/checkpoint': 1})
                             self.logger.log(self.phase_manager.metrics_for_step(self.step_num))
                             self.logger.commit(step=self.step_num)
 
@@ -2540,10 +2557,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.sd.pipeline.disable_freeu()
         if not self.train_config.disable_sampling:
             self.sample(self.step_num)
+            if self.accelerator.is_main_process:
+                self.logger.log({'event/sample': 1})
             self.logger.commit(step=self.step_num)
         print_acc("")
         if self.accelerator.is_main_process:
+            self.logger.log({'event/checkpoint': 1})
             self.save()
+            self.logger.commit(step=self.step_num)
             self.logger.finish()
         self.accelerator.end_training()
 

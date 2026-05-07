@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import sqlite3 from 'sqlite3';
 import { TOOLKIT_ROOT } from '../paths';
 import type { Job, Queue } from '../types';
+import { buildMetricSeriesResult, normalizeMetricMaxPoints } from './metricsDownsample';
 
 export type DatabaseProvider = 'sqlite' | 'mongodb';
 
@@ -61,6 +62,28 @@ export type LossLogResult = {
   key: string;
   keys: string[];
   points: LossPoint[];
+};
+
+export type MetricKeyInfo = {
+  key: string;
+  first_seen_step: number | null;
+  last_seen_step: number | null;
+};
+
+export type MetricSeriesResult = {
+  key: string;
+  totalCount: number;
+  firstStep: number | null;
+  lastStep: number | null;
+  latest: LossPoint | null;
+  downsampled: boolean;
+  points: LossPoint[];
+};
+
+export type MetricsResult = {
+  keys: string[];
+  keyInfo: MetricKeyInfo[];
+  series: Record<string, MetricSeriesResult>;
 };
 
 function coerceMetricValue(value: number | null | undefined, valueText: string | null | undefined): number | null {
@@ -241,6 +264,15 @@ function sqliteAll<T = any>(sqlite: sqlite3.Database, sql: string, params: any[]
   });
 }
 
+function sqliteGet<T = any>(sqlite: sqlite3.Database, sql: string, params: any[] = []) {
+  return new Promise<T | undefined>((resolve, reject) => {
+    sqlite.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row as T | undefined);
+    });
+  });
+}
+
 function closeSqliteDb(sqlite: sqlite3.Database) {
   return new Promise<void>((resolve, reject) => {
     sqlite.close(err => (err ? reject(err) : resolve()));
@@ -342,6 +374,248 @@ async function readMongoLossLog(
       value_text: row.value_text == null ? null : String(row.value_text),
     })),
   };
+}
+
+function expandMetricKeys(allKeys: string[], requestedKeys: string[]): string[] {
+  const out = new Set<string>();
+  const sortedKeys = [...allKeys].sort();
+
+  for (const raw of requestedKeys) {
+    const token = raw.trim();
+    if (!token) continue;
+
+    if (token === '*') {
+      for (const key of sortedKeys) out.add(key);
+      continue;
+    }
+
+    if (token.endsWith('*')) {
+      const prefix = token.slice(0, -1);
+      for (const key of sortedKeys) {
+        if (key.startsWith(prefix)) out.add(key);
+      }
+      continue;
+    }
+
+    out.add(token);
+  }
+
+  return Array.from(out).sort();
+}
+
+function buildMetricSeries(
+  key: string,
+  points: LossPoint[],
+  totalCount: number,
+  firstStep: number | null,
+  lastStep: number | null,
+  latest: LossPoint | null,
+  maxPoints: number,
+): MetricSeriesResult {
+  return buildMetricSeriesResult(key, points, totalCount, firstStep, lastStep, latest, maxPoints);
+}
+
+function parseStepMapValue(value: Record<string, number | null> | undefined, key: string, fallback: number | null) {
+  if (!value) return fallback;
+  const step = value[key];
+  return typeof step === 'number' && Number.isFinite(step) ? step : fallback;
+}
+
+async function readSqliteMetrics(
+  logPath: string,
+  options: {
+    keys: string[];
+    maxPoints: number;
+    sinceStep: number | null;
+    sinceSteps?: Record<string, number | null>;
+  },
+): Promise<MetricsResult> {
+  if (!fs.existsSync(logPath)) {
+    return { keys: [], keyInfo: [], series: {} };
+  }
+
+  const sqlite = openSqliteDb(logPath);
+  try {
+    const keyRows = await sqliteAll<MetricKeyInfo>(
+      sqlite,
+      `SELECT key, first_seen_step, last_seen_step FROM metric_keys ORDER BY key ASC`,
+    );
+    const allKeys = keyRows.map(row => row.key);
+    const requestedKeys = expandMetricKeys(allKeys, options.keys);
+    const maxPoints = normalizeMetricMaxPoints(options.maxPoints);
+    const series: Record<string, MetricSeriesResult> = {};
+
+    for (const key of requestedKeys) {
+      const sinceStep = parseStepMapValue(options.sinceSteps, key, options.sinceStep);
+      const info = keyRows.find(row => row.key === key);
+
+      if (!info) {
+        series[key] = buildMetricSeries(key, [], 0, null, null, null, maxPoints);
+        continue;
+      }
+
+      const total = await sqliteGet<{ count: number }>(
+        sqlite,
+        `SELECT COUNT(*) AS count FROM metrics WHERE key = ?`,
+        [key],
+      );
+      const latestRow = await sqliteGet<{
+        step: number;
+        wall_time: number;
+        value: number | null;
+        value_text: string | null;
+      }>(
+        sqlite,
+        `
+        SELECT
+          m.step AS step,
+          s.wall_time AS wall_time,
+          m.value_real AS value,
+          m.value_text AS value_text
+        FROM metrics m
+        JOIN steps s ON s.step = m.step
+        WHERE m.key = ?
+        ORDER BY m.step DESC
+        LIMIT 1
+        `,
+        [key],
+      );
+      const rows = await sqliteAll<{
+        step: number;
+        wall_time: number;
+        value: number | null;
+        value_text: string | null;
+      }>(
+        sqlite,
+        `
+        SELECT
+          m.step AS step,
+          s.wall_time AS wall_time,
+          m.value_real AS value,
+          m.value_text AS value_text
+        FROM metrics m
+        JOIN steps s ON s.step = m.step
+        WHERE m.key = ?
+          AND (? IS NULL OR m.step > ?)
+        ORDER BY m.step ASC
+        `,
+        [key, sinceStep, sinceStep],
+      );
+      const points = rows.map(point => ({
+        step: point.step,
+        wall_time: point.wall_time,
+        value: coerceMetricValue(point.value, point.value_text),
+        value_text: point.value_text,
+      }));
+      const latest = latestRow
+        ? {
+            step: latestRow.step,
+            wall_time: latestRow.wall_time,
+            value: coerceMetricValue(latestRow.value, latestRow.value_text),
+            value_text: latestRow.value_text,
+          }
+        : null;
+
+      series[key] = buildMetricSeries(
+        key,
+        points,
+        Number(total?.count ?? 0),
+        info.first_seen_step,
+        info.last_seen_step,
+        latest,
+        maxPoints,
+      );
+    }
+
+    return { keys: allKeys, keyInfo: keyRows, series };
+  } finally {
+    await closeSqliteDb(sqlite);
+  }
+}
+
+async function readMongoMetrics(
+  jobID: string,
+  options: {
+    keys: string[];
+    maxPoints: number;
+    sinceStep: number | null;
+    sinceSteps?: Record<string, number | null>;
+  },
+): Promise<MetricsResult> {
+  const mongo = await getMongoDb();
+  const metricKeys = mongoCollection(mongo, 'metric_keys');
+  const metrics = mongoCollection(mongo, 'metrics');
+  const keyRowsRaw = await metricKeys
+    .find({ job_id: jobID }, { projection: { _id: 0, key: 1, first_seen_step: 1, last_seen_step: 1 } })
+    .sort({ key: 1 })
+    .toArray();
+  const keyRows: MetricKeyInfo[] = keyRowsRaw.map(row => ({
+    key: String(row.key),
+    first_seen_step: row.first_seen_step == null ? null : Number(row.first_seen_step),
+    last_seen_step: row.last_seen_step == null ? null : Number(row.last_seen_step),
+  }));
+  const allKeys = keyRows.map(row => row.key);
+  const requestedKeys = expandMetricKeys(allKeys, options.keys);
+  const maxPoints = normalizeMetricMaxPoints(options.maxPoints);
+  const series: Record<string, MetricSeriesResult> = {};
+
+  for (const key of requestedKeys) {
+    const sinceStep = parseStepMapValue(options.sinceSteps, key, options.sinceStep);
+    const info = keyRows.find(row => row.key === key);
+
+    if (!info) {
+      series[key] = buildMetricSeries(key, [], 0, null, null, null, maxPoints);
+      continue;
+    }
+
+    const filter: Document = { job_id: jobID, key };
+    const pointFilter: Document = { ...filter };
+    if (sinceStep !== null) {
+      pointFilter.step = { $gt: sinceStep };
+    }
+
+    const [totalCount, latestRow, rows] = await Promise.all([
+      metrics.countDocuments(filter),
+      metrics
+        .find(filter, { projection: { _id: 0, step: 1, wall_time: 1, value_real: 1, value_text: 1 } })
+        .sort({ step: -1 })
+        .limit(1)
+        .next(),
+      metrics
+        .find(pointFilter, { projection: { _id: 0, step: 1, wall_time: 1, value_real: 1, value_text: 1 } })
+        .sort({ step: 1 })
+        .toArray(),
+    ]);
+    const points = rows.map(row => ({
+      step: Number(row.step ?? 0),
+      wall_time: Number(row.wall_time ?? 0),
+      value: coerceMetricValue(row.value_real == null ? null : Number(row.value_real), row.value_text),
+      value_text: row.value_text == null ? null : String(row.value_text),
+    }));
+    const latest = latestRow
+      ? {
+          step: Number(latestRow.step ?? 0),
+          wall_time: Number(latestRow.wall_time ?? 0),
+          value: coerceMetricValue(
+            latestRow.value_real == null ? null : Number(latestRow.value_real),
+            latestRow.value_text,
+          ),
+          value_text: latestRow.value_text == null ? null : String(latestRow.value_text),
+        }
+      : null;
+
+    series[key] = buildMetricSeries(
+      key,
+      points,
+      totalCount,
+      info.first_seen_step,
+      info.last_seen_step,
+      latest,
+      maxPoints,
+    );
+  }
+
+  return { keys: allKeys, keyInfo: keyRows, series };
 }
 
 async function ensureMongoIndexes() {
@@ -637,6 +911,22 @@ export const db = {
         return readMongoLossLog(jobID, options.key, options.limit, options.sinceStep, options.stride);
       }
       return readSqliteLossLog(logPath, options.key, options.limit, options.sinceStep, options.stride);
+    },
+
+    async getMetrics(
+      jobID: string,
+      logPath: string,
+      options: {
+        keys: string[];
+        maxPoints: number;
+        sinceStep: number | null;
+        sinceSteps?: Record<string, number | null>;
+      },
+    ): Promise<MetricsResult> {
+      if (isMongoProvider()) {
+        return readMongoMetrics(jobID, options);
+      }
+      return readSqliteMetrics(logPath, options);
     },
   },
 

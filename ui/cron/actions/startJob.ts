@@ -4,6 +4,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { TOOLKIT_ROOT, getTrainingFolder, getHFToken } from '../paths';
+import { getTensorBoardLogDir, getToolkitPythonPath, isTensorBoardEnabled } from '../../src/server/tensorboard';
 const isWindows = process.platform === 'win32';
 
 const startAndWatchJob = (job: Job) => {
@@ -13,6 +14,8 @@ const startAndWatchJob = (job: Job) => {
 
     // setup the training
     const trainingRoot = await getTrainingFolder();
+    const tensorBoardEnabled = isTensorBoardEnabled();
+    const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
     const trainingFolder = path.join(trainingRoot, job.name);
     if (!fs.existsSync(trainingFolder)) {
@@ -54,27 +57,16 @@ const startAndWatchJob = (job: Job) => {
       jobConfig.config.process.forEach((processConfig: any) => {
         processConfig.sqlite_db_path = dbConfig.sqlitePath;
         processConfig.training_folder = trainingRoot;
+        if (tensorBoardEnabled && processConfig.log_dir == null) {
+          processConfig.log_dir = tensorBoardLogDir;
+        }
       });
     }
 
     // write the config file
     fs.writeFileSync(configPath, JSON.stringify(jobConfig, null, 2));
 
-    let pythonPath = 'python';
-    // use .venv or venv if it exists
-    if (fs.existsSync(path.join(TOOLKIT_ROOT, '.venv'))) {
-      if (isWindows) {
-        pythonPath = path.join(TOOLKIT_ROOT, '.venv', 'Scripts', 'python.exe');
-      } else {
-        pythonPath = path.join(TOOLKIT_ROOT, '.venv', 'bin', 'python');
-      }
-    } else if (fs.existsSync(path.join(TOOLKIT_ROOT, 'venv'))) {
-      if (isWindows) {
-        pythonPath = path.join(TOOLKIT_ROOT, 'venv', 'Scripts', 'python.exe');
-      } else {
-        pythonPath = path.join(TOOLKIT_ROOT, 'venv', 'bin', 'python');
-      }
-    }
+    const pythonPath = getToolkitPythonPath();
 
     const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
     if (!fs.existsSync(runFilePath)) {

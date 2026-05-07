@@ -4,6 +4,7 @@ import useCPUInfo from '@/hooks/useCPUInfo';
 import GPUWidget from '@/components/GPUWidget';
 import CPUWidget from '@/components/CPUWidget';
 import FilesWidget from '@/components/FilesWidget';
+import TensorBoardLink from '@/components/TensorBoardLink';
 import { getTotalSteps } from '@/utils/jobs';
 import { Cpu, HardDrive, Info, Gauge } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -97,7 +98,10 @@ export default function JobOverview({ job }: JobOverviewProps) {
           <h2 className="text-gray-100">
             <Info className="w-5 h-5 mr-2 -mt-1 text-amber-600 dark:text-amber-400 inline-block" /> {job.info}
           </h2>
-          <span className={`px-3 py-1 rounded-full text-sm ${getStatusColor(job.status)}`}>{job.status}</span>
+          <div className="flex items-center gap-2">
+            {jobType === 'train' && <TensorBoardLink compact />}
+            <span className={`px-3 py-1 rounded-full text-sm ${getStatusColor(job.status)}`}>{job.status}</span>
+          </div>
         </div>
 
         <div className="p-4 space-y-6 flex flex-col flex-grow">

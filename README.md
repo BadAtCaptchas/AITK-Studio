@@ -156,6 +156,41 @@ npm run build_and_start
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
 
+## TensorBoard
+
+TensorBoard is installed with the Python requirements. If `AITK_ENABLE_TENSORBOARD` is not set, the UI tries to auto-enable TensorBoard when the package is available in the active Python environment and silently skips it if the probe or startup fails.
+
+You can force it on or off when starting the UI:
+
+```bash
+# Linux/macOS
+AITK_ENABLE_TENSORBOARD=1 npm run build_and_start
+AITK_ENABLE_TENSORBOARD=0 npm run build_and_start
+
+# Windows Powershell
+$env:AITK_ENABLE_TENSORBOARD="1"; npm run build_and_start
+$env:AITK_ENABLE_TENSORBOARD="0"; npm run build_and_start
+```
+
+When TensorBoard is enabled, the UI starts it on port `6006`, writes a small `aitk_status` run so TensorBoard has data before the first training job, writes UI-launched training events to `<training folder>/.tensorboard`, and shows a TensorBoard link on the dashboard and train job overview.
+
+TensorBoard is a separate service and is not protected by `AI_TOOLKIT_AUTH`; use localhost binding, a firewall, or proxy auth when exposing it outside a trusted network.
+
+Optional environment variables:
+
+- `AITK_TENSORBOARD_PORT=6006` changes the TensorBoard port.
+- `AITK_TENSORBOARD_HOST=0.0.0.0` changes the bind host.
+- `AITK_TENSORBOARD_LOG_DIR=/path/to/logs` changes the event log directory.
+- `AITK_TENSORBOARD_PUBLIC_URL=http://host:6006` changes the link shown in the UI, useful behind proxies or custom Docker port mappings.
+- `AITK_TENSORBOARD_STATUS_RUN=0` removes and stops writing the synthetic `aitk_status` run. Without another run, TensorBoard may show an empty dashboard until training writes events.
+
+For Docker Compose, leave `AITK_ENABLE_TENSORBOARD` unset for auto-detection, or set it explicitly:
+
+```bash
+AITK_ENABLE_TENSORBOARD=1 docker compose up
+AITK_ENABLE_TENSORBOARD=0 docker compose up
+```
+
 ## UI database
 
 The UI uses SQLite by default and stores its state in `aitk_db.db`. You can switch all UI-backed state to MongoDB at startup:

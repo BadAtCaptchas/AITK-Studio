@@ -74,8 +74,8 @@ RUN npm install && \
     npm run update_db && \
     npm run build
 
-# Expose port (assuming the application runs on port 3000)
-EXPOSE 8675
+# Expose UI and optional TensorBoard ports.
+EXPOSE 8675 6006
 
 WORKDIR /
 

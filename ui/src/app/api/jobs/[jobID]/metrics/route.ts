@@ -5,7 +5,7 @@ import { db } from '@/server/db';
 
 export const runtime = 'nodejs';
 
-const DEFAULT_KEYS = ['loss*', 'learning_rate', 'phase/*', 'event/*', 'train/*'];
+const DEFAULT_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
 
 function parseKeys(value: string | null) {
   if (!value) return DEFAULT_KEYS;

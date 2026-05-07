@@ -190,6 +190,33 @@ function latestNumericPoint(points: MetricPoint[] | undefined) {
   return null;
 }
 
+function isLearningRateKey(key: string) {
+  return /(^|\/)(learning_rate|lr)(\/|$)/i.test(key);
+}
+
+function paddedRange(dataMin: number, dataMax: number, chartTab: ChartTab, useLogScale: boolean) {
+  if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax)) return [0, 1] as [number, number];
+
+  if (useLogScale) {
+    const safeMin = dataMin > 0 ? dataMin : 1e-12;
+    const safeMax = dataMax > 0 ? dataMax : safeMin * 10;
+    if (safeMin === safeMax) return [safeMin / 1.5, safeMax * 1.5] as [number, number];
+    return [safeMin, safeMax] as [number, number];
+  }
+
+  const span = dataMax - dataMin;
+  if (span === 0) {
+    const fallback = chartTab === 'learning_rate' ? 1e-8 : 1;
+    const pad = Math.max(Math.abs(dataMin) * 0.25, fallback);
+    const min = chartTab === 'learning_rate' && dataMin >= 0 ? Math.max(0, dataMin - pad) : dataMin - pad;
+    return [min, dataMax + pad] as [number, number];
+  }
+
+  const pad = span * 0.05;
+  const min = chartTab === 'learning_rate' && dataMin >= 0 ? Math.max(0, dataMin - pad) : dataMin - pad;
+  return [min, dataMax + pad] as [number, number];
+}
+
 function getGpuIds(job: Job) {
   if (job.gpu_ids === 'mps') return [0];
   return job.gpu_ids
@@ -338,6 +365,7 @@ function buildChartData({
   chartTab,
   series,
   lossKeys,
+  learningRateKeys,
   useLogScale,
   showRaw,
   showSmoothed,
@@ -348,6 +376,7 @@ function buildChartData({
   chartTab: ChartTab;
   series: Record<string, MetricPoint[]>;
   lossKeys: string[];
+  learningRateKeys: string[];
   useLogScale: boolean;
   showRaw: boolean;
   showSmoothed: boolean;
@@ -418,17 +447,31 @@ function buildChartData({
       }
     }
   } else if (chartTab === 'learning_rate') {
-    const lrPoints = sortedNumericPoints(series.learning_rate);
-    const xs = lrPoints.map(point => point.step);
+    const stepSet = new Set<number>();
+    for (const key of learningRateKeys) {
+      for (const point of sortedNumericPoints(series[key])) {
+        if (useLogScale && (point.value as number) <= 0) continue;
+        stepSet.add(point.step);
+      }
+    }
+
+    const xs = Array.from(stepSet).sort((a, b) => a - b);
+    const xsSet = new Set(xs);
     data.push(xs);
-    data.push(lrPoints.map(point => point.value as number));
-    seriesConfigs.push({
-      label: 'learning rate',
-      stroke: LR_COLOR,
-      width: 2.25,
-      spanGaps: false,
-      points: { show: false },
-    });
+
+    for (const key of learningRateKeys) {
+      const points = sortedNumericPoints(series[key]).filter(point => xsSet.has(point.step));
+      const values = new Map(points.map(point => [point.step, point.value as number]));
+      const color = key === learningRateKeys[0] ? LR_COLOR : lossColorForKey(key);
+      data.push(xs.map(step => values.get(step) ?? null));
+      seriesConfigs.push({
+        label: cleanLabel(key),
+        stroke: color,
+        width: 2.25,
+        spanGaps: false,
+        points: { show: false },
+      });
+    }
   } else {
     const spsPoints = sortedNumericPoints(series['train/steps_per_sec']);
     const stepSecondPoints = sortedNumericPoints(series['train/step_seconds']);
@@ -531,6 +574,10 @@ export default function JobLossGraph({ job }: Props) {
     () => lossKeys.filter(key => enabledLoss[key] !== false && (series[key]?.length ?? 0) > 0),
     [enabledLoss, lossKeys, series],
   );
+  const learningRateKeys = useMemo(
+    () => Object.keys(series).filter(key => isLearningRateKey(key) && (series[key]?.length ?? 0) > 0).sort(),
+    [series],
+  );
 
   const totalSteps = useMemo(() => safeTotalSteps(job), [job]);
   const progressPercent = totalSteps > 0 ? clamp((job.step / totalSteps) * 100, 0, 100) : null;
@@ -552,7 +599,12 @@ export default function JobLossGraph({ job }: Props) {
     return { current, deltaPct };
   }, [deferredSmoothing, primaryLossKey, series]);
 
-  const latestLearningRate = latest.learning_rate?.value ?? latestNumericPoint(series.learning_rate)?.value ?? null;
+  const latestLearningRateKey = learningRateKeys[0];
+  const latestLearningRate =
+    (latestLearningRateKey ? latest[latestLearningRateKey]?.value : null) ??
+    latestNumericPoint(latestLearningRateKey ? series[latestLearningRateKey] : undefined)?.value ??
+    null;
+  const learningRatePointCount = learningRateKeys.reduce((sum, key) => sum + (series[key]?.length ?? 0), 0);
   const latestStepsPerSec =
     latest['train/steps_per_sec']?.value ??
     latestNumericPoint(series['train/steps_per_sec'])?.value ??
@@ -583,6 +635,7 @@ export default function JobLossGraph({ job }: Props) {
         chartTab,
         series,
         lossKeys: activeLossKeys,
+        learningRateKeys,
         useLogScale,
         showRaw,
         showSmoothed,
@@ -595,6 +648,7 @@ export default function JobLossGraph({ job }: Props) {
       chartTab,
       clipOutliers,
       deferredSmoothing,
+      learningRateKeys,
       series,
       showRaw,
       showSmoothed,
@@ -680,8 +734,8 @@ export default function JobLossGraph({ job }: Props) {
           distr: useLogScale ? 3 : 1,
           range: (_u, dataMin, dataMax) => {
             const c = yClipRef.current;
-            if (c) return [c.min, c.max];
-            return [dataMin, dataMax];
+            if (c) return paddedRange(c.min, c.max, chartTab, useLogScale);
+            return paddedRange(dataMin, dataMax, chartTab, useLogScale);
           },
         },
       },
@@ -875,7 +929,7 @@ export default function JobLossGraph({ job }: Props) {
             icon={<Gauge className="h-4 w-4 text-amber-400" />}
             label="Learning rate"
             value={formatNum(latestLearningRate, 3)}
-            detail={(series.learning_rate?.length ?? 0) > 0 ? `${series.learning_rate.length.toLocaleString()} points` : 'not logged yet'}
+            detail={learningRatePointCount > 0 ? `${learningRatePointCount.toLocaleString()} points` : 'not logged yet'}
             accent="amber"
           />
           <KpiCard

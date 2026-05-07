@@ -2,6 +2,7 @@
 
 import GpuMonitor from '@/components/GPUMonitor';
 import JobsTable from '@/components/JobsTable';
+import TensorBoardLink from '@/components/TensorBoardLink';
 import { TopBar, MainContent } from '@/components/layout';
 import Link from 'next/link';
 
@@ -13,6 +14,7 @@ export default function Dashboard() {
           <h1 className="text-lg">Dashboard</h1>
         </div>
         <div className="flex-1"></div>
+        <TensorBoardLink />
       </TopBar>
       <MainContent>
         <GpuMonitor />

@@ -1,5 +1,7 @@
 import processQueue from './actions/processQueue';
 import { disconnectDb } from '../src/server/db';
+import { startTensorBoard } from '../src/server/tensorboard';
+import { getTrainingFolder } from './paths';
 
 const SHUTDOWN_TIMEOUT_MS = 3000;
 
@@ -53,6 +55,24 @@ class CronWorker {
 // it automatically starts the loop
 const cronWorker = new CronWorker();
 console.log('Cron worker started with interval:', cronWorker.interval, 'ms');
+
+async function startOptionalTensorBoard() {
+  const trainingRoot = await getTrainingFolder();
+  const status = await startTensorBoard(trainingRoot);
+  if (!status.enabled) {
+    return;
+  }
+
+  if (status.running) {
+    console.log(`TensorBoard available at ${status.url}`);
+  } else {
+    console.error(`TensorBoard is enabled but did not start on port ${status.port}`);
+  }
+}
+
+void startOptionalTensorBoard().catch(error => {
+  console.error('Error starting TensorBoard:', error);
+});
 
 let shutdownPromise: Promise<void> | null = null;
 

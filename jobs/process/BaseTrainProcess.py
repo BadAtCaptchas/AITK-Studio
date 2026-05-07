@@ -70,7 +70,20 @@ class BaseTrainProcess(BaseProcess):
             time_str = now.strftime('%Y%m%d-%H%M%S')
             summary_name = f"{self.name}_{time_str}"
             summary_dir = os.path.join(self.log_dir, summary_name)
-            self.writer = SummaryWriter(summary_dir)
+            self.writer = SummaryWriter(summary_dir, flush_secs=10)
+            self.writer.add_scalar("aitk/job_started", 1, 0)
+            self.writer.add_text(
+                "aitk/job",
+                f"name: {self.name}\nprocess_id: {self.process_id}",
+                0,
+            )
+            self.writer.flush()
+
+    def cleanup(self):
+        if self.writer is not None:
+            self.writer.flush()
+            self.writer.close()
+            self.writer = None
 
     def save_training_config(self):
         os.makedirs(self.save_root, exist_ok=True)

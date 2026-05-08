@@ -387,6 +387,7 @@ class StableDiffusion:
                 transformer_path,
                 subfolder=subfolder,
                 torch_dtype=dtype,
+                use_safetensors=True,
             )
             if not self.low_vram:
                 # for low v ram, we leave it on the cpu. Quantizes slower, but allows training on primary gpu
@@ -407,7 +408,7 @@ class StableDiffusion:
                 
             scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(base_model_path, subfolder="scheduler")
             print_acc("Loading vae")
-            vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae", torch_dtype=dtype)
+            vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae", torch_dtype=dtype, use_safetensors=True)
             flush()
             
             print_acc("Loading t5")
@@ -415,7 +416,8 @@ class StableDiffusion:
             text_encoder_3 = T5EncoderModel.from_pretrained(
                 base_model_path, 
                 subfolder="text_encoder_3", 
-                torch_dtype=dtype
+                torch_dtype=dtype,
+                use_safetensors=True,
             )
             
             text_encoder_3.to(self.device_torch, dtype=dtype)
@@ -783,7 +785,7 @@ class StableDiffusion:
             if self.model_config.vae_path is not None:
                 vae = load_vae(self.model_config.vae_path, dtype)
             else:
-                vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae", torch_dtype=dtype)
+                vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae", torch_dtype=dtype, use_safetensors=True)
             flush()
             
             self.print_and_status_update("Loading T5")
@@ -887,7 +889,7 @@ class StableDiffusion:
 
             scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(base_model_path, subfolder="scheduler")
             self.print_and_status_update("Loading vae")
-            vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae", torch_dtype=dtype)
+            vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae", torch_dtype=dtype, use_safetensors=True)
             flush()
             
             if self.model_config.te_name_or_path is not None:

@@ -1,8 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 
+function ensureApiAccess(request: NextRequest): NextResponse | null {
+  const tokenToUse = process.env.AI_TOOLKIT_AUTH;
+  if (!tokenToUse) {
+    return null;
+  }
+
+  const token = request.headers.get('authorization')?.split(' ')[1];
+  if (token !== tokenToUse) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  return null;
+}
+
+function isValidJobId(jobID: string) {
+  return /^[a-zA-Z0-9_-]+$/.test(jobID);
+}
+
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
+  const accessResponse = ensureApiAccess(request);
+  if (accessResponse) {
+    return accessResponse;
+  }
+
   const { jobID } = await params;
+
+  if (!isValidJobId(jobID)) {
+    return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
+  }
 
   const job = await db.jobs.findById(jobID);
 

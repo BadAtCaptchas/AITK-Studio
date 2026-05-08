@@ -50,6 +50,19 @@ setup_ssh() {
     fi
 }
 
+
+require_auth_secret() {
+    if [[ -z "${AI_TOOLKIT_AUTH:-}" ]]; then
+        echo "ERROR: AI_TOOLKIT_AUTH is required and must be a strong bearer token." >&2
+        exit 1
+    fi
+
+    if [[ "${AI_TOOLKIT_AUTH}" == "password" ]]; then
+        echo "ERROR: AI_TOOLKIT_AUTH must not use the insecure default value: password" >&2
+        exit 1
+    fi
+}
+
 # Export env vars
 export_env_vars() {
     echo "Exporting environment variables..."
@@ -66,5 +79,6 @@ echo "Pod Started"
 
 setup_ssh
 export_env_vars
+require_auth_secret
 echo "Starting OstrisAI-Toolkit Revamped UI..."
 cd /app/ai-toolkit/ui && npm run update_db && npm run start

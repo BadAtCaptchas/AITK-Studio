@@ -162,7 +162,7 @@ export function collectDatasetReferences(jobConfig: any): DatasetReference[] {
   return refs;
 }
 
-export async function collectDatasetArchiveMappings(jobConfig: any, includeDatasets: boolean) {
+export async function collectDatasetArchiveMappings(jobConfig: any, includeDatasets: boolean, datasetsRoot: string) {
   const warnings: string[] = [];
   const mappings: DatasetArchiveMapping[] = [];
   if (!includeDatasets) {
@@ -183,6 +183,11 @@ export async function collectDatasetArchiveMappings(jobConfig: any, includeDatas
     }
 
     const realPath = await fsp.realpath(absolutePath);
+    if (!isPathInside(datasetsRoot, realPath)) {
+      warnings.push(`Dataset path is outside the datasets folder and was not included: ${ref.value}`);
+      continue;
+    }
+
     const existing = grouped.get(realPath);
     if (existing) {
       existing.refs.push(ref);

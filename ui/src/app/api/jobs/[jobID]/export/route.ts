@@ -3,7 +3,7 @@ import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { getTrainingFolder } from '@/server/settings';
+import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
   TRAINING_JOB_EXPORT_VERSION,
@@ -207,9 +207,11 @@ async function performTrainingJobExport(
     warnings.push('No optimizer.pt file was found; the imported job may resume without optimizer state.');
   }
 
+  const datasetsRoot = await getDatasetsRoot();
   const { mappings: datasetMappings, warnings: datasetWarnings } = await collectDatasetArchiveMappings(
     jobConfig,
     includeDatasets,
+    datasetsRoot,
   );
   throwIfExportCanceled(shouldCancel);
   warnings.push(...datasetWarnings);

@@ -78,6 +78,7 @@ class FLiteModel(BaseModel):
             model_path,
             subfolder="dit_model",
             torch_dtype=dtype,
+            use_safetensors=True,
         )
         
         transformer.to(self.quantize_device, dtype=dtype)
@@ -98,10 +99,10 @@ class FLiteModel(BaseModel):
 
         self.print_and_status_update("Loading T5")
         tokenizer = T5TokenizerFast.from_pretrained(
-            extras_path, subfolder="tokenizer", torch_dtype=dtype
+            extras_path, subfolder="tokenizer", torch_dtype=dtype, use_safetensors=True
         )
         text_encoder = T5EncoderModel.from_pretrained(
-            extras_path, subfolder="text_encoder", torch_dtype=dtype
+            extras_path, subfolder="text_encoder", torch_dtype=dtype, use_safetensors=True
         )
         text_encoder.to(self.device_torch, dtype=dtype)
         flush()
@@ -119,7 +120,8 @@ class FLiteModel(BaseModel):
         vae = AutoencoderKL.from_pretrained(
             extras_path,
             subfolder="vae",
-            torch_dtype=dtype
+            torch_dtype=dtype,
+            use_safetensors=True
         )
         vae = vae.to(self.device_torch, dtype=dtype)
 

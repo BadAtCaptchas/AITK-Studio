@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder } from '@/paths';
 import { flushCache } from '@/server/settings';
 import { db } from '@/server/db';
+import path from 'path';
 
 function isLocalRequest(request: NextRequest): boolean {
   const forwardedFor = request.headers.get('x-forwarded-for');
@@ -77,10 +78,19 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER } = body;
 
+    let normalizedDatasetsFolder = DATASETS_FOLDER;
+    if (typeof DATASETS_FOLDER === 'string' && DATASETS_FOLDER !== '') {
+      const resolvedDatasetsFolder = path.resolve(DATASETS_FOLDER);
+      if (resolvedDatasetsFolder === path.parse(resolvedDatasetsFolder).root) {
+        return NextResponse.json({ error: 'DATASETS_FOLDER cannot be filesystem root' }, { status: 400 });
+      }
+      normalizedDatasetsFolder = resolvedDatasetsFolder;
+    }
+
     await db.settings.upsertMany({
       HF_TOKEN,
       TRAINING_FOLDER,
-      DATASETS_FOLDER,
+      DATASETS_FOLDER: normalizedDatasetsFolder,
     });
 
     flushCache();

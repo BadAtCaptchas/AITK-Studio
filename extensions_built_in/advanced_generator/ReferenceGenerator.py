@@ -106,7 +106,10 @@ class ReferenceGenerator(BaseExtensionProcess):
             ).to(device)
 
         midas_depth = MidasDetector.from_pretrained(
-            "valhalla/t2iadapter-aux-models", filename="dpt_large_384.pt", model_type="dpt_large"
+            "valhalla/t2iadapter-aux-models",
+            filename="dpt_large_384.pt",
+            model_type="dpt_large",
+            revision="9f7f54b84a83ae8f152a4fe8d852a4d6bf58f5e2",
         ).to(device)
 
         if self.model_config.is_xl:

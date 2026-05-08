@@ -399,7 +399,8 @@ class IPAdapter(torch.nn.Module):
                 self.clip_image_processor = SiglipImageProcessor()
             self.image_encoder = SiglipVisionModel.from_pretrained(
                 adapter_config.image_encoder_path,
-                ignore_mismatched_sizes=True).to(self.device, dtype=get_torch_dtype(self.sd_ref().dtype))
+                ignore_mismatched_sizes=True,
+                use_safetensors=True).to(self.device, dtype=get_torch_dtype(self.sd_ref().dtype))
         elif self.config.image_encoder_arch == 'safe':
             try:
                 self.clip_image_processor = SAFEImageProcessor.from_pretrained(adapter_config.image_encoder_path)

@@ -2,6 +2,47 @@ import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
 
+
+function ensureApiAccess(request: Request): NextResponse | null {
+  const tokenToUse = process.env.AI_TOOLKIT_AUTH;
+  if (!tokenToUse) {
+    return null;
+  }
+
+  const token = request.headers.get('authorization')?.split(' ')[1];
+  if (token !== tokenToUse) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  return null;
+}
+
+function isSafeJobConfig(jobConfig: unknown) {
+  if (!jobConfig || typeof jobConfig !== 'object') {
+    return false;
+  }
+
+  const config = (jobConfig as Record<string, unknown>).config;
+  if (!config || typeof config !== 'object') {
+    return false;
+  }
+
+  const processList = (config as Record<string, unknown>).process;
+  return Array.isArray(processList) && processList.length > 0;
+}
+
+function isValidGpuIds(gpuIds: unknown) {
+  if (typeof gpuIds !== 'string' || gpuIds.trim().length === 0) {
+    return false;
+  }
+
+  if (gpuIds === 'mps') {
+    return true;
+  }
+
+  return /^\d+(,\d+)*$/.test(gpuIds);
+}
+
 function isValidJobName(name: unknown) {
   if (typeof name !== 'string' || name.trim().length === 0) {
     return false;
@@ -16,6 +57,11 @@ function isValidJobName(name: unknown) {
 
 
 export async function GET(request: Request) {
+  const accessResponse = ensureApiAccess(request);
+  if (accessResponse) {
+    return accessResponse;
+  }
+
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
   const job_ref = searchParams.get('job_ref');
@@ -40,6 +86,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const accessResponse = ensureApiAccess(request);
+  if (accessResponse) {
+    return accessResponse;
+  }
+
   try {
     const body = await request.json();
     const { id, name, job_config } = body;
@@ -50,7 +101,15 @@ export async function POST(request: Request) {
     let gpu_ids: string = body.gpu_ids;
 
     if (isMac()) {
-      gpu_ids = "mps";
+      gpu_ids = 'mps';
+    }
+
+    if (!isValidGpuIds(gpu_ids)) {
+      return NextResponse.json({ error: 'Invalid gpu_ids value' }, { status: 400 });
+    }
+
+    if (!isSafeJobConfig(job_config)) {
+      return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
     }
 
     const extra: any = {};

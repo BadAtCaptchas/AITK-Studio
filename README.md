@@ -298,9 +298,11 @@ Jobs launched from the UI are detached from the cron worker process, and the wor
 
 ## Securing the UI
 
-If you are hosting the UI on a cloud provider or any network that is not secure, I highly recommend securing it with an auth token. 
-You can do this by setting the environment variable `AI_TOOLKIT_AUTH` to super secure password. This token will be required to access
-the UI. You can set this when starting the UI like so:
+If you are hosting the UI on a cloud provider or any network that is not secure, set `AI_TOOLKIT_AUTH` before starting the UI.
+When this variable is set, API routes require a matching bearer token and unauthenticated calls are rejected with `401 Unauthorized`.
+This includes job creation and job queue/start endpoints, which should never be exposed without authentication.
+
+You can set the environment variable `AI_TOOLKIT_AUTH` to a strong secret token when starting the UI:
 
 ```bash
 # Linux

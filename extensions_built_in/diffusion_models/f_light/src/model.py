@@ -377,7 +377,7 @@ class DiT(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin):  #
 
     def load_lora_weights(self, load_directory):
         """Load LoRA weights from a file"""
-        lora_state_dict = torch.load(f"{load_directory}/lora_weights.pt")
+        lora_state_dict = torch.load(f"{load_directory}/lora_weights.pt", weights_only=True)
         set_peft_model_state_dict(self, lora_state_dict)
 
     @apply_forward_hook

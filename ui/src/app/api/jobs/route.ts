@@ -7,7 +7,7 @@ function isValidJobName(name: unknown) {
     return false;
   }
 
-  if (name.includes('..')) {
+  if (name === '.' || name.includes('..')) {
     return false;
   }
 

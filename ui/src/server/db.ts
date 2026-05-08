@@ -443,6 +443,7 @@ async function readSqliteMetrics(
     const allKeys = keyRows.map(row => row.key);
     const requestedKeys = expandMetricKeys(allKeys, options.keys);
     const maxPoints = normalizeMetricMaxPoints(options.maxPoints);
+    const fetchLimit = maxPoints;
     const series: Record<string, MetricSeriesResult> = {};
 
     for (const key of requestedKeys) {
@@ -488,18 +489,23 @@ async function readSqliteMetrics(
       }>(
         sqlite,
         `
-        SELECT
-          m.step AS step,
-          s.wall_time AS wall_time,
-          m.value_real AS value,
-          m.value_text AS value_text
-        FROM metrics m
-        JOIN steps s ON s.step = m.step
-        WHERE m.key = ?
-          AND (? IS NULL OR m.step > ?)
-        ORDER BY m.step ASC
+        SELECT *
+        FROM (
+          SELECT
+            m.step AS step,
+            s.wall_time AS wall_time,
+            m.value_real AS value,
+            m.value_text AS value_text
+          FROM metrics m
+          JOIN steps s ON s.step = m.step
+          WHERE m.key = ?
+            AND (? IS NULL OR m.step > ?)
+          ORDER BY m.step DESC
+          LIMIT ?
+        ) AS bounded
+        ORDER BY bounded.step ASC
         `,
-        [key, sinceStep, sinceStep],
+        [key, sinceStep, sinceStep, fetchLimit],
       );
       const points = rows.map(point => ({
         step: point.step,
@@ -557,6 +563,7 @@ async function readMongoMetrics(
   const allKeys = keyRows.map(row => row.key);
   const requestedKeys = expandMetricKeys(allKeys, options.keys);
   const maxPoints = normalizeMetricMaxPoints(options.maxPoints);
+  const fetchLimit = maxPoints;
   const series: Record<string, MetricSeriesResult> = {};
 
   for (const key of requestedKeys) {
@@ -583,10 +590,11 @@ async function readMongoMetrics(
         .next(),
       metrics
         .find(pointFilter, { projection: { _id: 0, step: 1, wall_time: 1, value_real: 1, value_text: 1 } })
-        .sort({ step: 1 })
+        .sort({ step: -1 })
+        .limit(fetchLimit)
         .toArray(),
     ]);
-    const points = rows.map(row => ({
+    const points = rows.reverse().map(row => ({
       step: Number(row.step ?? 0),
       wall_time: Number(row.wall_time ?? 0),
       value: coerceMetricValue(row.value_real == null ? null : Number(row.value_real), row.value_text),

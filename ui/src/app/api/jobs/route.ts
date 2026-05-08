@@ -2,6 +2,19 @@ import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
 
+function isValidJobName(name: unknown) {
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    return false;
+  }
+
+  if (name.includes('..')) {
+    return false;
+  }
+
+  return name === name.split('/').pop() && name === name.split('\\').pop();
+}
+
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
@@ -30,6 +43,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { id, name, job_config } = body;
+
+    if (!isValidJobName(name)) {
+      return NextResponse.json({ error: 'Invalid job name' }, { status: 400 });
+    }
     let gpu_ids: string = body.gpu_ids;
 
     if (isMac()) {

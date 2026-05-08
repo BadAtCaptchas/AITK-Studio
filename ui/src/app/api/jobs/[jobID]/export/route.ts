@@ -19,7 +19,9 @@ import {
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
 import {
+  countActiveTrainingJobExports,
   createTrainingJobExportProgress,
+  hasActiveTrainingJobExportForJob,
   isTrainingJobExportCancellationRequested,
   updateTrainingJobExportProgress,
   type TrainingJobExportProgressSnapshot,
@@ -28,6 +30,8 @@ import { db } from '@/server/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const MAX_CONCURRENT_BACKGROUND_EXPORTS = 2;
 
 type ExportBody = {
   includeDatasets?: boolean;
@@ -512,6 +516,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const background = body.background === true;
 
     if (background) {
+      const job = await db.jobs.findById(jobID);
+      if (!job) {
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      }
+      if (job.job_type !== 'train') {
+        return NextResponse.json({ error: 'Only training jobs can be exported' }, { status: 400 });
+      }
+      if (hasActiveTrainingJobExportForJob(jobID)) {
+        return NextResponse.json({ error: 'An export is already running for this job' }, { status: 409 });
+      }
+      if (countActiveTrainingJobExports() >= MAX_CONCURRENT_BACKGROUND_EXPORTS) {
+        return NextResponse.json(
+          { error: 'Too many background exports are running. Please try again shortly.' },
+          { status: 429 },
+        );
+      }
+
       const progress = createTrainingJobExportProgress(jobID, includeDatasets, checkpointMode);
       runBackgroundExport(progress.exportID, jobID, includeDatasets, checkpointMode);
       return NextResponse.json(

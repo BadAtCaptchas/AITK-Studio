@@ -55,6 +55,8 @@ type ExportProgressStore = Map<string, TrainingJobExportProgressSnapshot>;
 const EXPORT_PROGRESS_MAX_AGE_MS = 60 * 60 * 1000;
 const TERMINAL_EXPORT_STATUSES = new Set<TrainingJobExportStatus>(['completed', 'failed', 'canceled']);
 
+const ACTIVE_EXPORT_STATUSES = new Set<TrainingJobExportStatus>(['queued', 'preparing', 'zipping', 'finalizing', 'canceling']);
+
 declare global {
   // eslint-disable-next-line no-var
   var __trainingJobExportProgressStore: ExportProgressStore | undefined;
@@ -156,4 +158,25 @@ export function requestTrainingJobExportCancellation(exportID: string) {
 export function isTrainingJobExportCancellationRequested(exportID: string) {
   const progress = exportProgressStore.get(exportID);
   return progress?.cancelRequested === true;
+}
+
+export function countActiveTrainingJobExports() {
+  cleanupOldTrainingJobExportProgress();
+  let active = 0;
+  for (const progress of exportProgressStore.values()) {
+    if (ACTIVE_EXPORT_STATUSES.has(progress.status)) {
+      active += 1;
+    }
+  }
+  return active;
+}
+
+export function hasActiveTrainingJobExportForJob(jobID: string) {
+  cleanupOldTrainingJobExportProgress();
+  for (const progress of exportProgressStore.values()) {
+    if (progress.jobID === jobID && ACTIVE_EXPORT_STATUSES.has(progress.status)) {
+      return true;
+    }
+  }
+  return false;
 }

@@ -5,7 +5,7 @@ import path from 'path';
 
 const TOOLKIT_ROOT = path.resolve('@', '..', '..');
 const DEFAULT_TENSORBOARD_PORT = 6006;
-const DEFAULT_TENSORBOARD_HOST = '0.0.0.0';
+const DEFAULT_TENSORBOARD_HOST = '127.0.0.1';
 const TENSORBOARD_STATUS_RUN_NAME = 'aitk_status';
 
 let managedTensorBoard: ChildProcess | null = null;
@@ -59,10 +59,13 @@ export function isTensorBoardEnabled() {
   if (explicitEnabled !== null) {
     return explicitEnabled;
   }
+
   if (autoDisabledReason !== null) {
     return false;
   }
-  return isTensorBoardPackageInstalled();
+
+  isTensorBoardPackageInstalled();
+  return false;
 }
 
 export function getTensorBoardPort() {

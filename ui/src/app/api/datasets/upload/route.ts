@@ -1,7 +1,7 @@
 // src/app/api/datasets/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
-import { join, resolve, relative, sep } from 'path';
+import { isAbsolute, join, resolve, relative, sep } from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 
 export async function POST(request: NextRequest) {
@@ -31,7 +31,8 @@ export async function POST(request: NextRequest) {
       uploadDirRelative === '' ||
       uploadDirRelative === '.' ||
       uploadDirRelative.startsWith('..') ||
-      uploadDirRelative.includes(`..${sep}`)
+      uploadDirRelative.includes(`..${sep}`) ||
+      isAbsolute(uploadDirRelative)
     ) {
       return NextResponse.json({ error: 'Invalid dataset name' }, { status: 400 });
     }

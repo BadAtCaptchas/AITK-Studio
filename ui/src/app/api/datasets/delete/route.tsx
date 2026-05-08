@@ -3,12 +3,16 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 
-function resolveWithinRoot(root: string, target: string) {
+function resolveWithinRoot(root: string, target: unknown) {
+  if (typeof target !== 'string' || target.trim().length === 0) {
+    return null;
+  }
+
   const resolvedRoot = path.resolve(root);
   const resolvedPath = path.resolve(resolvedRoot, target);
   const relativePath = path.relative(resolvedRoot, resolvedPath);
 
-  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+  if (relativePath === '' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
     return null;
   }
 

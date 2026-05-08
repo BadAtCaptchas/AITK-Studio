@@ -2,9 +2,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// if route starts with these, approve
-// NOTE: uploads are intentionally excluded from public routes.
-const publicRoutes = ['/api/files/'];
+// Direct media/download URLs are loaded by <img>, <audio>, <video>, and links,
+// so they cannot attach the localStorage bearer token used by apiClient.
+const publicReadRoutePrefixes = ['/api/img/', '/api/files/'];
+const publicReadMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export function middleware(request: NextRequest) {
   // check env var for AI_TOOLKIT_AUTH, if not set, approve all requests
@@ -17,16 +18,16 @@ export function middleware(request: NextRequest) {
   // Get the token from the headers
   const token = request.headers.get('Authorization')?.split(' ')[1];
 
-  // allow public routes to pass through, except state-changing upload endpoint
-  const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route));
-  const isImageUploadRoute = request.nextUrl.pathname === '/api/img/upload';
-  if (isPublicRoute && !isImageUploadRoute) {
+  const { pathname } = request.nextUrl;
+
+  // allow public read routes to pass through
+  if (publicReadMethods.has(request.method) && publicReadRoutePrefixes.some(route => pathname.startsWith(route))) {
     return NextResponse.next();
   }
 
   // Check if the route should be protected
   // This will apply to all API routes that start with /api/
-  if (request.nextUrl.pathname.startsWith('/api/')) {
+  if (pathname.startsWith('/api/')) {
     if (!token || token !== tokenToUse) {
       // Return a JSON response with 401 Unauthorized
       return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), {

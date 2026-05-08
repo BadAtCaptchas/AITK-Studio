@@ -698,9 +698,11 @@ class StableDiffusion:
                     # quantized weights so it had to process unmerged (slow). Since schnell samples in just 4 steps
                     # it is better to merge it in now, and sample slowly later, otherwise training is slowed in half
                     # so we will merge in now and sample with -1 weight later
+                    if not load_lora_path.endswith(".safetensors"):
+                        raise ValueError("Assistant LoRA must be a .safetensors file")
                     self.invert_assistant_lora = True
                     # trigger it to get merged in
-                    self.model_config.lora_path = self.model_config.assistant_lora_path
+                    self.model_config.lora_path = load_lora_path
 
             if self.model_config.lora_path is not None:
                 print_acc("Fusing in LoRA")

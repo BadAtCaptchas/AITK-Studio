@@ -5,7 +5,7 @@ services:
     image: ostris/aitoolkit:latest
     restart: unless-stopped
     ports:
-      - "8675:8675"
+      - "127.0.0.1:8675:8675"
       - "${AITK_TENSORBOARD_PORT:-6006}:${AITK_TENSORBOARD_PORT:-6006}"
     volumes:
       - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
@@ -14,7 +14,7 @@ services:
       - ./output:/app/ai-toolkit/output
       - ./config:/app/ai-toolkit/config
     environment:
-      - AI_TOOLKIT_AUTH=${AI_TOOLKIT_AUTH:-password}
+      - AI_TOOLKIT_AUTH=${AI_TOOLKIT_AUTH:?Set AI_TOOLKIT_AUTH to a strong bearer token before starting}
       - AITK_DB_PROVIDER=${AITK_DB_PROVIDER:-sqlite}
       - AITK_SQLITE_PATH=${AITK_SQLITE_PATH:-/app/ai-toolkit/aitk_db.db}
       - AITK_MONGODB_URI=${AITK_MONGODB_URI:-}

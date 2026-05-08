@@ -1,9 +1,52 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder } from '@/paths';
 import { flushCache } from '@/server/settings';
 import { db } from '@/server/db';
 
-export async function GET() {
+function isLocalRequest(request: NextRequest): boolean {
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    const ips = forwardedFor
+      .split(',')
+      .map(ip => ip.trim())
+      .filter(Boolean);
+    if (ips.some(ip => ip !== '127.0.0.1' && ip !== '::1')) {
+      return false;
+    }
+  }
+
+  const host = request.headers.get('host')?.split(':')[0];
+  if (!host) {
+    return true;
+  }
+
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function ensureSettingsAccess(request: NextRequest): NextResponse | null {
+  const tokenToUse = process.env.AI_TOOLKIT_AUTH;
+  const token = request.headers.get('authorization')?.split(' ')[1];
+
+  if (tokenToUse) {
+    if (token !== tokenToUse) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    return null;
+  }
+
+  if (!isLocalRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  return null;
+}
+
+export async function GET(request: NextRequest) {
+  const unauthorizedResponse = ensureSettingsAccess(request);
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
   try {
     const settings = await db.settings.list();
     const settingsObject = settings.reduce((acc: any, setting) => {
@@ -24,7 +67,12 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const unauthorizedResponse = ensureSettingsAccess(request);
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
   try {
     const body = await request.json();
     const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER } = body;

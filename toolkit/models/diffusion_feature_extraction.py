@@ -1205,13 +1205,12 @@ def load_dfe(model_path, vae=None, sd: 'BaseModel' = None) -> DiffusionFeatureEx
         return dfe
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
-    # if it ende with safetensors
-    if model_path.endswith('.safetensors'):
-        state_dict = load_file(model_path)
-    else:
-        state_dict = torch.load(model_path, weights_only=True)
-        if 'model_state_dict' in state_dict:
-            state_dict = state_dict['model_state_dict']
+    # Only safetensors checkpoints are accepted to avoid unsafe pickle-based deserialization.
+    if not model_path.lower().endswith('.safetensors'):
+        raise ValueError(
+            f"Unsupported DFE checkpoint format for '{model_path}'. Only .safetensors files are allowed."
+        )
+    state_dict = load_file(model_path)
 
     if 'conv_in.weight' in state_dict:
         # determine num out channels

@@ -34,6 +34,8 @@ function readNullTerminated(buf: Buffer, start: number, wide: boolean): { text: 
   return { text: buf.slice(start, i).toString('latin1'), next: i + 1 };
 }
 
+const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp']);
+
 type ArtResult = { mime: string; data: Buffer } | null;
 
 function extractArtFromTag(buf: Buffer): ArtResult {
@@ -108,7 +110,8 @@ function extractArtFromTag(buf: Buffer): ArtResult {
         const enc = frame[0];
         // mime type: null-terminated latin1
         const mimeZ = readNullTerminated(frame as any, 1, false);
-        const mime = mimeZ.text || 'image/jpeg';
+        const rawMime = (mimeZ.text || '').toLowerCase().trim();
+        const mime = ALLOWED_IMAGE_MIMES.has(rawMime) ? rawMime : 'image/jpeg';
         let p = mimeZ.next;
         if (p < frame.length) p += 1; // picture type byte
         const wide = enc === 1 || enc === 2;
@@ -128,26 +131,41 @@ function extractArtFromTag(buf: Buffer): ArtResult {
 export async function GET(request: NextRequest, { params }: { params: { audioPath: string } }) {
   const { audioPath } = await params;
   try {
-    const filepath = decodeURIComponent(audioPath);
+    const filepath = path.resolve(decodeURIComponent(audioPath));
 
     // Security check
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();
     const dataRoot = await getDataRoot();
-    const allowedDirs = [datasetRoot, trainingRoot, dataRoot];
-    const isAllowed = allowedDirs.some(d => filepath.startsWith(d)) && !filepath.includes('..');
+    const allowedRoots = [datasetRoot, trainingRoot, dataRoot];
+
+    const resolvedFile = await fs.promises.realpath(filepath).catch(() => null);
+    if (!resolvedFile) {
+      return new NextResponse('File not found', { status: 404 });
+    }
+
+    const resolvedRoots = await Promise.all(
+      allowedRoots.map(async root => fs.promises.realpath(path.resolve(root)).catch(() => null)),
+    );
+
+    const isAllowed = resolvedRoots.some(root => {
+      if (!root) return false;
+      const rel = path.relative(root, resolvedFile);
+      return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+    });
+
     if (!isAllowed) {
       return new NextResponse('Access denied', { status: 403 });
     }
 
-    const stat = await fs.promises.stat(filepath).catch(() => null);
+    const stat = await fs.promises.stat(resolvedFile).catch(() => null);
     if (!stat || !stat.isFile()) {
       return new NextResponse('File not found', { status: 404 });
     }
 
     // Read only the ID3 tag (first min(tagSize, 4MB) bytes).
     // First read 10 bytes to get tag size, then read the full tag.
-    const fd = await fs.promises.open(filepath, 'r');
+    const fd = await fs.promises.open(resolvedFile, 'r');
     try {
       const headerBuf = Buffer.alloc(10);
       await fd.read(headerBuf, 0, 10, 0);
@@ -172,6 +190,7 @@ export async function GET(request: NextRequest, { params }: { params: { audioPat
           'Content-Type': art.mime,
           'Content-Length': String(art.data.length),
           'Cache-Control': 'public, max-age=604800, immutable',
+          'X-Content-Type-Options': 'nosniff',
         },
       });
     } finally {

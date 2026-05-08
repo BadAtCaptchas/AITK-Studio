@@ -6,6 +6,66 @@ OstrisAI-Toolkit Revamped is a fork of the original [Ostris AI Toolkit](https://
 
 OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffusion models. It aims to support current models on consumer grade hardware, including image, video, and audio models. It can be run as a GUI or CLI. It is designed to be easy to use but still have every feature imaginable. Free and open source.
 
+## Security Improvements Compared With Upstream
+
+Compared with the latest upstream merge recorded in this repository (`b69bdc9`, `Merge ostris main`), the current `main` branch includes fixes for **32 security issues**.
+
+This count is based on Git history, not an external advisory database:
+
+- Baseline: `b69bdc9`, the most recent commit in this checkout that merged `ostris` upstream into this fork.
+- Compared range: `b69bdc9..main`.
+- Counted: security-focused non-merge commits whose subjects describe vulnerability fixes, hardening, access-control fixes, path traversal fixes, unsafe model-loading/deserialization fixes, token exposure fixes, input validation, or resource-abuse protections.
+- Excluded: merge commits, upstream sync commits, metrics/TensorBoard/training-phase feature work, and general bug fixes that were not security-focused.
+
+Because this is a commit-derived count, one corrected issue below maps to one security-focused non-merge commit, even when a consolidation commit touches several related routes.
+
+| Area | Issues corrected |
+| --- | ---: |
+| Unsafe model, adapter, checkpoint, and remote-code loading | 16 |
+| Path traversal, file disclosure, and unsafe file serving | 8 |
+| Authentication, authorization, public UI exposure, and secret disclosure | 6 |
+| Input validation and upload/resource-abuse protections | 2 |
+| **Total** | **32** |
+
+Commit-derived issue list:
+
+- Authentication, authorization, public UI exposure, and secret disclosure:
+  - `b2add5e` Remove default password disclosure from login hint.
+  - `e469fae` Harden Docker auth defaults for UI API.
+  - `09cad2a` Harden Gradio training UI launch defaults.
+  - `c7852a4` Protect `/api/img/upload` behind API auth middleware.
+  - `269b463` Harden settings API access controls.
+  - `695fd2c` Fix HF token exposure to spawned training jobs.
+- Path traversal, file disclosure, and unsafe file serving:
+  - `9abf688` Restrict exported datasets to the datasets root.
+  - `b4d2344` Harden `/api/img/delete` auth and path validation.
+  - `1fabbbe` Fix path traversal in dataset and job deletion routes.
+  - `eff78fe` Harden file download path validation.
+  - `931926d` Fix dataset upload path traversal validation.
+  - `1d2ce3b` Fix image API path traversal and dataset root validation.
+  - `4fb3a1c` Harden album art API path and MIME handling.
+  - `204514b` Consolidate blocked security PR fixes for dataset/job deletion, zip downloads, job update validation, and API middleware hardening.
+- Unsafe model, adapter, checkpoint, and remote-code loading:
+  - `50cbd3f` Enforce safetensors for SD3 component model loads.
+  - `f6cda8c` Harden automatic mask/inpaint control loading.
+  - `8ea08b7` Harden pretrained LoRA path loading to safetensors.
+  - `8ceb5bf` Auto-convert non-safetensors adapter weights before loading.
+  - `848e065` Enforce safetensors for config-driven LoRA loading.
+  - `d5ae03b` Harden Flux component loading against unsafe local checkpoints.
+  - `e029963` Harden Flux assistant LoRA loading to safetensors.
+  - `396f44f` Harden Lumina2 loaders to require safetensors.
+  - `e0251ad` Harden DFE loading to safetensors-only.
+  - `1f5806b` Harden f-lite model loading against unsafe weight formats.
+  - `d3580b8` Harden CogView4 model loading sources.
+  - `93d4c5f` Pin MiDaS model download to an immutable revision.
+  - `8f94499` Harden CLIP adapter encoder loading.
+  - `1e7a862` Require safetensors for SigLIP image encoder loading.
+  - `8cc100f` Harden LoRA auto-resume to safetensors-only checkpoints.
+  - `e58b993` Harden DFE v7 model loading against remote code execution.
+- Input validation and upload/resource-abuse protections:
+  - `3704c80` Harden image upload limits and require auth.
+  - `ca99b26` Validate jobs `POST` id type before update.
+
 ## Supported Models
 
 ### Image

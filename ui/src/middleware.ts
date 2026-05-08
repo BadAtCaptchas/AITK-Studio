@@ -17,8 +17,10 @@ export function middleware(request: NextRequest) {
   // Get the token from the headers
   const token = request.headers.get('Authorization')?.split(' ')[1];
 
-  // allow public routes to pass through
-  if (publicRoutes.some(route => request.nextUrl.pathname.startsWith(route))) {
+  // allow public routes to pass through, except state-changing upload endpoint
+  const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route));
+  const isImageUploadRoute = request.nextUrl.pathname === '/api/img/upload';
+  if (isPublicRoute && !isImageUploadRoute) {
     return NextResponse.next();
   }
 

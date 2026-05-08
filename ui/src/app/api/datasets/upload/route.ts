@@ -1,7 +1,7 @@
 // src/app/api/datasets/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { join, resolve, relative, sep } from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 
 export async function POST(request: NextRequest) {
@@ -12,14 +12,30 @@ export async function POST(request: NextRequest) {
     }
     const formData = await request.formData();
     const files = formData.getAll('files');
-    const datasetName = formData.get('datasetName') as string;
+    const datasetName = (formData.get('datasetName') as string)?.trim();
 
     if (!files || files.length === 0) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
     }
 
+    if (!datasetName) {
+      return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
+    }
+
     // Create upload directory if it doesn't exist
-    const uploadDir = join(datasetsPath, datasetName);
+    const datasetsRoot = resolve(datasetsPath);
+    const uploadDir = resolve(datasetsRoot, datasetName);
+    const uploadDirRelative = relative(datasetsRoot, uploadDir);
+
+    if (
+      uploadDirRelative === '' ||
+      uploadDirRelative === '.' ||
+      uploadDirRelative.startsWith('..') ||
+      uploadDirRelative.includes(`..${sep}`)
+    ) {
+      return NextResponse.json({ error: 'Invalid dataset name' }, { status: 400 });
+    }
+
     await mkdir(uploadDir, { recursive: true });
 
     const savedFiles: string[] = [];

@@ -761,7 +761,7 @@ class StableDiffusion:
                 else:
                     # need the pipe to do this unfortunately for now
                     # we have to fuse in the weights before quantizing
-                    pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1")
+                    pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1", use_safetensors=True)
                     pipe.fuse_lora()
                     # unfortunately, not an easier way with peft
                     pipe.unload_lora_weights()
@@ -1022,7 +1022,7 @@ class StableDiffusion:
 
         # load any loras we have
         if self.model_config.lora_path is not None and not self.is_flux and not self.is_lumina2:
-            pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1")
+            pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1", use_safetensors=True)
             pipe.fuse_lora()
             # unfortunately, not an easier way with peft
             pipe.unload_lora_weights()

@@ -3,7 +3,7 @@ import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { TOOLKIT_ROOT, getTrainingFolder, getHFToken } from '../paths';
+import { TOOLKIT_ROOT, getTrainingFolder } from '../paths';
 import { getTensorBoardLogDir, getToolkitPythonPath, isTensorBoardEnabled } from '../../src/server/tensorboard';
 const isWindows = process.platform === 'win32';
 
@@ -88,12 +88,6 @@ const startAndWatchJob = (job: Job) => {
       CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
       IS_AI_TOOLKIT_UI: '1',
     };
-
-    // HF_TOKEN
-    const hfToken = await getHFToken();
-    if (hfToken && hfToken.trim() !== '') {
-      additionalEnv.HF_TOKEN = hfToken;
-    }
 
     // Add the --log argument to the command
     const args = [runFilePath, configPath, '--log', logPath];

@@ -636,6 +636,31 @@ export const modelArchs: ModelArch[] = [
     additionalSections: ['model.low_vram', 'model.layer_offloading'],
   },
   {
+    name: 'zimage:juggernaut_z',
+    label: 'Juggernaut Z',
+    group: 'image',
+    defaults: {
+      // default updates when [selected, unselected] in the UI
+      'config.process[0].model.name_or_path': [
+        'RunDiffusion/Juggernaut-Z-Image/Juggernaut_Z_V1_by_RunDiffusion.safetensors',
+        defaultNameOrPath,
+      ],
+      'config.process[0].model.extras_name_or_path': ['Tongyi-MAI/Z-Image', undefined],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].train.unload_text_encoder': [false, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
+      'config.process[0].model.qtype': ['qfloat8', 'qfloat8'],
+      'config.process[0].sample.guidance_scale': [6, 4],
+      'config.process[0].sample.sample_steps': [35, 25],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: ['model.low_vram', 'model.layer_offloading'],
+  },
+  {
     name: 'zimage:deturbo',
     label: 'Z-Image De-Turbo (De-Distilled)',
     group: 'image',

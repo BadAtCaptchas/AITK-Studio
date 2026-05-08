@@ -17,6 +17,7 @@ from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
 from toolkit.memory_management import MemoryManager
 from safetensors.torch import load_file
+from .paths import resolve_single_file_model_path
 
 from transformers import AutoTokenizer, Qwen3ForCausalLM
 from diffusers import AutoencoderKL
@@ -155,20 +156,32 @@ class ZImageModel(BaseModel):
 
         self.print_and_status_update("Loading transformer")
 
-        transformer_path = model_path
-        transformer_subfolder = "transformer"
-        if os.path.exists(transformer_path):
-            transformer_subfolder = None
-            transformer_path = os.path.join(transformer_path, "transformer")
-            # check if the path is a full checkpoint.
-            te_folder_path = os.path.join(model_path, "text_encoder")
-            # if we have the te, this folder is a full checkpoint, use it as the base
-            if os.path.exists(te_folder_path):
-                base_model_path = model_path
+        if model_path.endswith(".safetensors"):
+            if base_model_path.endswith(".safetensors"):
+                base_model_path = "Tongyi-MAI/Z-Image"
+            transformer_path = resolve_single_file_model_path(model_path)
+            transformer = ZImageTransformer2DModel.from_single_file(
+                transformer_path,
+                config=base_model_path,
+                subfolder="transformer",
+                torch_dtype=dtype,
+            )
+            transformer.to(dtype)
+        else:
+            transformer_path = model_path
+            transformer_subfolder = "transformer"
+            if os.path.exists(transformer_path):
+                transformer_subfolder = None
+                transformer_path = os.path.join(transformer_path, "transformer")
+                # check if the path is a full checkpoint.
+                te_folder_path = os.path.join(model_path, "text_encoder")
+                # if we have the te, this folder is a full checkpoint, use it as the base
+                if os.path.exists(te_folder_path):
+                    base_model_path = model_path
 
-        transformer = ZImageTransformer2DModel.from_pretrained(
-            transformer_path, subfolder=transformer_subfolder, torch_dtype=dtype
-        )
+            transformer = ZImageTransformer2DModel.from_pretrained(
+                transformer_path, subfolder=transformer_subfolder, torch_dtype=dtype
+            )
 
         # load assistant lora if specified
         if self.model_config.assistant_lora_path is not None:

@@ -14,7 +14,13 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
   }
 
   const trainingRoot = await getTrainingFolder();
-  const trainingFolder = path.join(trainingRoot, job.name);
+  const trainingRootResolved = path.resolve(trainingRoot);
+  const trainingFolder = path.resolve(trainingRootResolved, job.name);
+  const relativePath = path.relative(trainingRootResolved, trainingFolder);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
+  }
 
   if (fs.existsSync(trainingFolder)) {
     fs.rmSync(trainingFolder, { recursive: true, force: true });

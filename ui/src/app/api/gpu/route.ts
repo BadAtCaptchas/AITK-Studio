@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { exec, execSync } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import os from 'os';
@@ -23,10 +23,10 @@ async function getMacGpuInfo(): Promise<MacGpuResult | null> {
     // Get GPU name and core count from system_profiler
     let gpuName = 'Apple GPU';
     try {
-      const spOut = execSync(
-        'system_profiler SPDisplaysDataType 2>/dev/null | grep -E "Chipset Model|Total Number of Cores"',
-        { encoding: 'utf-8', timeout: 5000 },
-      );
+      const { stdout: spOut } = await execAsync('system_profiler SPDisplaysDataType', {
+        timeout: 2000,
+        maxBuffer: 1024 * 1024,
+      });
       const nameMatch = spOut.match(/Chipset Model:\s*(.+)/);
       const coresMatch = spOut.match(/Total Number of Cores:\s*(\d+)/);
       if (nameMatch) {

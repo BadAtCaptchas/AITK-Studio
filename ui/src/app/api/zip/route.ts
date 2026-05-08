@@ -14,6 +14,11 @@ type PostBody = {
   jobName: string;
 };
 
+function isPathWithin(basePath: string, targetPath: string) {
+  const rel = path.relative(basePath, targetPath);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
 async function resolveSafe(p: string) {
   // resolve symlinks + normalize
   return await fsp.realpath(p);
@@ -26,9 +31,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'jobName is required' }, { status: 400 });
     }
 
+    if (body.jobName !== path.basename(body.jobName)) {
+      return NextResponse.json({ error: 'Invalid jobName' }, { status: 400 });
+    }
+
     const trainingRoot = await resolveSafe(await getTrainingFolder());
     const folderPath = await resolveSafe(path.join(trainingRoot, body.jobName, 'samples'));
     const outputPath = path.resolve(trainingRoot, body.jobName, 'samples.zip');
+
+    if (!isPathWithin(trainingRoot, folderPath) || !isPathWithin(trainingRoot, outputPath)) {
+      return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
+    }
 
     // Must be a directory
     let stat: fs.Stats;

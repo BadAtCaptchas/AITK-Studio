@@ -21,7 +21,7 @@ from toolkit.models.te_aug_adapter import TEAugAdapter
 from toolkit.models.vd_adapter import VisionDirectAdapter
 from toolkit.models.redux import ReduxImageEncoder
 from toolkit.photomaker import PhotoMakerIDEncoder, FuseModule, PhotoMakerCLIPEncoder
-from toolkit.saving import load_ip_adapter_model, load_custom_adapter_model
+from toolkit.saving import load_ip_adapter_model, load_custom_adapter_model, convert_checkpoint_to_safetensors
 from toolkit.train_tools import get_torch_dtype
 from toolkit.models.pixtral_vision import PixtralVisionEncoderCompatible, PixtralVisionImagePreprocessorCompatible
 import random
@@ -104,7 +104,13 @@ class CustomAdapter(torch.nn.Module):
         if self.adapter_type == 'photo_maker':
             # try to load from our name_or_path
             if self.config.name_or_path is not None and self.config.name_or_path.endswith('.bin'):
-                self.load_state_dict(torch.load(self.config.name_or_path, map_location=self.device), strict=False)
+                safetensor_path = convert_checkpoint_to_safetensors(self.config.name_or_path)
+                loaded_state_dict = load_custom_adapter_model(
+                    safetensor_path,
+                    self.sd_ref().device,
+                    dtype=self.sd_ref().dtype,
+                )
+                self.load_state_dict(loaded_state_dict, strict=False)
             # add the trigger word to the tokenizer
             if isinstance(self.sd_ref().tokenizer, list):
                 for tokenizer in self.sd_ref().tokenizer:

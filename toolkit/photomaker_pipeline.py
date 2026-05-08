@@ -19,6 +19,7 @@ from diffusers.utils import (
 )
 
 from .photomaker import PhotoMakerIDEncoder
+from .saving import convert_checkpoint_to_safetensors
 
 PipelineImageInput = Union[
     PIL.Image.Image,
@@ -99,7 +100,14 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
                         elif key.startswith("lora_weights."):
                             state_dict["lora_weights"][key.replace("lora_weights.", "")] = f.get_tensor(key)
             else:
-                state_dict = torch.load(model_file, map_location="cpu")
+                converted_model_file = convert_checkpoint_to_safetensors(model_file)
+                state_dict = {"id_encoder": {}, "lora_weights": {}}
+                with safe_open(converted_model_file, framework="pt", device="cpu") as f:
+                    for key in f.keys():
+                        if key.startswith("id_encoder."):
+                            state_dict["id_encoder"][key.replace("id_encoder.", "")] = f.get_tensor(key)
+                        elif key.startswith("lora_weights."):
+                            state_dict["lora_weights"][key.replace("lora_weights.", "")] = f.get_tensor(key)
         else:
             state_dict = pretrained_model_name_or_path_or_dict
 

@@ -13,6 +13,45 @@ if TYPE_CHECKING:
     from toolkit.stable_diffusion_model import StableDiffusion
 
 
+def _torch_load_weights(path_to_file: str, map_location: Union[str, torch.device] = 'cpu'):
+    """Load checkpoint with weights_only when available, fallback for older torch."""
+    try:
+        return torch.load(path_to_file, map_location=map_location, weights_only=True)
+    except TypeError:
+        return torch.load(path_to_file, map_location=map_location)
+
+
+def _extract_state_dict(checkpoint_obj):
+    if isinstance(checkpoint_obj, OrderedDict):
+        return checkpoint_obj
+    if isinstance(checkpoint_obj, dict):
+        if "state_dict" in checkpoint_obj and isinstance(checkpoint_obj["state_dict"], (dict, OrderedDict)):
+            return checkpoint_obj["state_dict"]
+        return checkpoint_obj
+    raise ValueError(f"Unsupported checkpoint format: {type(checkpoint_obj)}")
+
+
+def convert_checkpoint_to_safetensors(path_to_file: str, output_path: Optional[str] = None) -> str:
+    if output_path is None:
+        base_name, _ = os.path.splitext(path_to_file)
+        output_path = f"{base_name}.safetensors"
+
+    if os.path.exists(output_path):
+        return output_path
+
+    print(f"Converting checkpoint to safetensors: {path_to_file} -> {output_path}")
+    checkpoint_obj = _torch_load_weights(path_to_file, map_location='cpu')
+    state_dict = _extract_state_dict(checkpoint_obj)
+    tensor_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        if torch.is_tensor(value):
+            tensor_state_dict[key] = value.detach().cpu()
+    if len(tensor_state_dict) == 0:
+        raise ValueError(f"No tensors found while converting checkpoint: {path_to_file}")
+    save_file(tensor_state_dict, output_path, metadata={"source": os.path.basename(path_to_file)})
+    return output_path
+
+
 def get_slices_from_string(s: str) -> tuple:
     slice_strings = s.split(',')
     slices = [eval(f"slice({component.strip()})") for component in slice_strings]
@@ -273,7 +312,18 @@ def load_custom_adapter_model(
             combined_state_dict[module_name]['.'.join(key_split)] = value.detach().to(device, dtype=dtype)
         return combined_state_dict
     else:
-        return torch.load(path_to_file, map_location=device)
+        safetensor_path = convert_checkpoint_to_safetensors(path_to_file)
+        raw_state_dict = load_file(safetensor_path, device)
+        combined_state_dict = OrderedDict()
+        device = device if isinstance(device, torch.device) else torch.device(device)
+        dtype = dtype if isinstance(dtype, torch.dtype) else get_torch_dtype(dtype)
+        for combo_key, value in raw_state_dict.items():
+            key_split = combo_key.split('.')
+            module_name = key_split.pop(0)
+            if module_name not in combined_state_dict:
+                combined_state_dict[module_name] = OrderedDict()
+            combined_state_dict[module_name]['.'.join(key_split)] = value.detach().to(device, dtype=dtype)
+        return combined_state_dict
 
 
 def get_lora_keymap_from_model_keymap(model_keymap: 'OrderedDict') -> 'OrderedDict':

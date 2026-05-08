@@ -834,7 +834,7 @@ class DiffusionFeatureExtractor7(nn.Module):
             pretrained_model_name, 
             device_map=device,
             dtype=torch.float32,
-            trust_remote_code=True
+            trust_remote_code=False
         ).to(device)
 
         self.losses = {}

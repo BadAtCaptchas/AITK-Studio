@@ -411,4 +411,4 @@ with gr.Blocks(theme=theme, css=css) as demo:
     do_captioning.click(fn=run_captioning, inputs=[images, concept_sentence] + caption_list, outputs=caption_list)
 
 if __name__ == "__main__":
-    demo.launch(share=True, show_error=True)
+    demo.launch(server_name="127.0.0.1", share=False, show_error=True)

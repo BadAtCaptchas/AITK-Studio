@@ -135,7 +135,7 @@ export default function AuthWrapper({ authRequired, children }: AuthWrapperProps
                 placeholder="Enter your password"
               />
               <div className='text-gray-500 text-xs mt-2'>
-                The password is set with the environment variable AI_TOOLKIT_AUTH, the default is the super secure secret word "password"
+                The password is configured with the environment variable AI_TOOLKIT_AUTH.
               </div>
             </div>
 

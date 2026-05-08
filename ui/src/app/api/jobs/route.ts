@@ -62,6 +62,10 @@ export async function POST(request: Request) {
       extra["job_type"] = body.job_type;
     }
 
+    if (id && typeof id !== 'string') {
+      return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });
+    }
+
     if (id) {
       // Update existing training
       const training = await db.jobs.update(id, {

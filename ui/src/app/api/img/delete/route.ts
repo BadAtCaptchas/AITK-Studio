@@ -1,16 +1,23 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
+import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { imgPath } = body;
-    let datasetsPath = await getDatasetsRoot();
-    const trainingPath = await getTrainingFolder();
+    const datasetsPath = fs.realpathSync(await getDatasetsRoot());
+    const trainingPath = fs.realpathSync(await getTrainingFolder());
 
-    // make sure the dataset path is in the image path
-    if (!imgPath.startsWith(datasetsPath) && !imgPath.startsWith(trainingPath)) {
+    const normalizedInputPath = path.resolve(imgPath);
+    const isWithin = (rootPath: string, targetPath: string) => {
+      const relativePath = path.relative(rootPath, targetPath);
+      return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+    };
+
+    // make sure the requested file is under dataset or training roots
+    if (!isWithin(datasetsPath, normalizedInputPath) && !isWithin(trainingPath, normalizedInputPath)) {
       return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
     }
 
@@ -20,15 +27,20 @@ export async function POST(request: Request) {
     }
 
     // if img doesnt exist, ignore
-    if (!fs.existsSync(imgPath)) {
+    if (!fs.existsSync(normalizedInputPath)) {
       return NextResponse.json({ success: true });
     }
 
+    const realImagePath = fs.realpathSync(normalizedInputPath);
+    if (!isWithin(datasetsPath, realImagePath) && !isWithin(trainingPath, realImagePath)) {
+      return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
+    }
+
     // delete it and return success
-    fs.unlinkSync(imgPath);
+    fs.unlinkSync(realImagePath);
 
     // check for caption
-    const captionPath = imgPath.replace(/\.[^/.]+$/, '') + '.txt';
+    const captionPath = realImagePath.replace(/\.[^/.]+$/, '') + '.txt';
     if (fs.existsSync(captionPath)) {
       // delete caption file
       fs.unlinkSync(captionPath);

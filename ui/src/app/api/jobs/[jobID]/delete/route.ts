@@ -4,6 +4,18 @@ import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
 
+function resolveWithinRoot(root: string, target: string) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(resolvedRoot, target);
+  const relativePath = path.relative(resolvedRoot, resolvedPath);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return null;
+  }
+
+  return resolvedPath;
+}
+
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
   const { jobID } = await params;
 
@@ -14,7 +26,11 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
   }
 
   const trainingRoot = await getTrainingFolder();
-  const trainingFolder = path.join(trainingRoot, job.name);
+  const trainingFolder = resolveWithinRoot(trainingRoot, job.name);
+
+  if (!trainingFolder) {
+    return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
+  }
 
   if (fs.existsSync(trainingFolder)) {
     fs.rmSync(trainingFolder, { recursive: true, force: true });

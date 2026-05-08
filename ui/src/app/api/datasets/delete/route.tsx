@@ -3,12 +3,28 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 
+function resolveWithinRoot(root: string, target: string) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(resolvedRoot, target);
+  const relativePath = path.relative(resolvedRoot, resolvedPath);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return null;
+  }
+
+  return resolvedPath;
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { name } = body;
-    let datasetsPath = await getDatasetsRoot();
-    let datasetPath = path.join(datasetsPath, name);
+    const datasetsPath = await getDatasetsRoot();
+    const datasetPath = resolveWithinRoot(datasetsPath, name);
+
+    if (!datasetPath) {
+      return NextResponse.json({ error: 'Invalid dataset path' }, { status: 400 });
+    }
 
     // if folder doesnt exist, ignore
     if (!fs.existsSync(datasetPath)) {

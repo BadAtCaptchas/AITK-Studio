@@ -863,6 +863,7 @@ class StableDiffusion:
                 transformer_path,
                 subfolder=subfolder,
                 torch_dtype=dtype,
+                use_safetensors=True,
             )
             
             if self.model_config.split_model_over_gpus:
@@ -900,11 +901,11 @@ class StableDiffusion:
             if self.model_config.te_name_or_path is not None:
                 self.print_and_status_update("Loading TE")
                 tokenizer = AutoTokenizer.from_pretrained(self.model_config.te_name_or_path, torch_dtype=dtype)
-                text_encoder = AutoModel.from_pretrained(self.model_config.te_name_or_path, torch_dtype=dtype)
+                text_encoder = AutoModel.from_pretrained(self.model_config.te_name_or_path, torch_dtype=dtype, use_safetensors=True)
             else:
                 self.print_and_status_update("Loading Gemma2")
                 tokenizer = AutoTokenizer.from_pretrained(base_model_path, subfolder="tokenizer", torch_dtype=dtype)
-                text_encoder = AutoModel.from_pretrained(base_model_path, subfolder="text_encoder", torch_dtype=dtype)
+                text_encoder = AutoModel.from_pretrained(base_model_path, subfolder="text_encoder", torch_dtype=dtype, use_safetensors=True)
 
             text_encoder.to(self.device_torch, dtype=dtype)
             flush()

@@ -39,10 +39,13 @@ export async function GET(request: NextRequest, { params }: { params: { imagePat
     const trainingRoot = await getTrainingFolder();
     const dataRoot = await getDataRoot();
 
-    const allowedDirs = [datasetRoot, trainingRoot, dataRoot];
+    const allowedDirs = await Promise.all([datasetRoot, trainingRoot, dataRoot].map(dir => fs.promises.realpath(dir)));
 
-    // Security check: Ensure path is in allowed directory
-    const isAllowed = allowedDirs.some(allowedDir => filepath.startsWith(allowedDir)) && !filepath.includes('..');
+    // Security check: Ensure path is in allowed directory using canonical paths
+    const canonicalPath = await fs.promises.realpath(filepath).catch(() => null);
+    const isAllowed =
+      canonicalPath !== null &&
+      allowedDirs.some(allowedDir => canonicalPath === allowedDir || canonicalPath.startsWith(`${allowedDir}${path.sep}`));
 
     if (!isAllowed) {
       console.warn(`Access denied: ${filepath} not in ${allowedDirs.join(', ')}`);
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest, { params }: { params: { imagePat
     }
 
     // Stat file (async)
-    const stat = await fs.promises.stat(filepath).catch(() => null);
+    const stat = await fs.promises.stat(canonicalPath).catch(() => null);
     if (!stat || !stat.isFile()) {
       return new NextResponse('File not found', { status: 404 });
     }
@@ -66,7 +69,7 @@ export async function GET(request: NextRequest, { params }: { params: { imagePat
       const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
       const chunkSize = end - start + 1;
 
-      const stream = fs.createReadStream(filepath, { start, end });
+      const stream = fs.createReadStream(canonicalPath, { start, end });
       const readable = new ReadableStream({
         start(controller) {
           stream.on('data', chunk => controller.enqueue(chunk));
@@ -91,7 +94,7 @@ export async function GET(request: NextRequest, { params }: { params: { imagePat
     }
 
     // Stream the file instead of buffering it entirely
-    const stream = fs.createReadStream(filepath);
+    const stream = fs.createReadStream(canonicalPath);
     const readable = new ReadableStream({
       start(controller) {
         stream.on('data', chunk => controller.enqueue(chunk));

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder } from '@/paths';
 import { flushCache } from '@/server/settings';
 import { db } from '@/server/db';
+import path from 'path';
 
 export async function GET() {
   try {
@@ -29,10 +30,19 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER } = body;
 
+    let normalizedDatasetsFolder = DATASETS_FOLDER;
+    if (typeof DATASETS_FOLDER === 'string' && DATASETS_FOLDER !== '') {
+      const resolvedDatasetsFolder = path.resolve(DATASETS_FOLDER);
+      if (resolvedDatasetsFolder === path.parse(resolvedDatasetsFolder).root) {
+        return NextResponse.json({ error: 'DATASETS_FOLDER cannot be filesystem root' }, { status: 400 });
+      }
+      normalizedDatasetsFolder = resolvedDatasetsFolder;
+    }
+
     await db.settings.upsertMany({
       HF_TOKEN,
       TRAINING_FOLDER,
-      DATASETS_FOLDER,
+      DATASETS_FOLDER: normalizedDatasetsFolder,
     });
 
     flushCache();

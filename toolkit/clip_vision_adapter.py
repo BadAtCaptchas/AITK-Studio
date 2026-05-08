@@ -143,13 +143,18 @@ class ClipVisionAdapter(torch.nn.Module):
         self.orig_embeds_params = [x.get_input_embeddings().weight.data.clone() for x in self.text_encoder_list]
 
         try:
-            self.clip_image_processor = CLIPImageProcessor.from_pretrained(self.config.image_encoder_path)
+            self.clip_image_processor = CLIPImageProcessor.from_pretrained(
+                self.config.image_encoder_path,
+                local_files_only=True
+            )
         except EnvironmentError:
             self.clip_image_processor = CLIPImageProcessor()
         self.device = self.sd_ref().unet.device
         self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
             self.config.image_encoder_path,
-            ignore_mismatched_sizes=True
+            ignore_mismatched_sizes=True,
+            local_files_only=True,
+            use_safetensors=True,
         ).to(self.device, dtype=get_torch_dtype(self.sd_ref().dtype))
         if self.config.train_image_encoder:
             self.image_encoder.train()

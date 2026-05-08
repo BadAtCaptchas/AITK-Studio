@@ -28,24 +28,52 @@ const contentTypeMap: { [key: string]: string } = {
   '.ogg': 'audio/ogg',
 };
 
-export async function GET(request: NextRequest, { params }: { params: { imagePath: string } }) {
+type ImageRouteParams = {
+  imagePath: string | string[];
+};
+
+function getRequestedPath(request: NextRequest, imagePath: string | string[]) {
+  const pathname = request.nextUrl?.pathname;
+  const routePrefix = '/api/img/';
+  const rawPath =
+    pathname && pathname.startsWith(routePrefix)
+      ? pathname.slice(routePrefix.length)
+      : Array.isArray(imagePath)
+        ? imagePath.join('/')
+        : imagePath;
+
+  return path.resolve(decodeURIComponent(rawPath));
+}
+
+async function resolveExistingDir(dir: string) {
+  if (!dir) return null;
+  return fs.promises.realpath(path.resolve(dir)).catch(() => null);
+}
+
+function isPathInsideRoot(root: string, filepath: string) {
+  const relativePath = path.relative(root, filepath);
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+export async function GET(request: NextRequest, { params }: { params: ImageRouteParams }) {
   const { imagePath } = await params;
   try {
     // Decode the path
-    const filepath = decodeURIComponent(imagePath);
+    const filepath = getRequestedPath(request, imagePath);
 
     // Get allowed directories
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();
     const dataRoot = await getDataRoot();
 
-    const allowedDirs = await Promise.all([datasetRoot, trainingRoot, dataRoot].map(dir => fs.promises.realpath(dir)));
+    const allowedDirs = (
+      await Promise.all([datasetRoot, trainingRoot, dataRoot].map(dir => resolveExistingDir(dir)))
+    ).filter((dir): dir is string => dir !== null);
 
     // Security check: Ensure path is in allowed directory using canonical paths
     const canonicalPath = await fs.promises.realpath(filepath).catch(() => null);
     const isAllowed =
-      canonicalPath !== null &&
-      allowedDirs.some(allowedDir => canonicalPath === allowedDir || canonicalPath.startsWith(`${allowedDir}${path.sep}`));
+      canonicalPath !== null && allowedDirs.some(allowedDir => isPathInsideRoot(allowedDir, canonicalPath));
 
     if (!isAllowed) {
       console.warn(`Access denied: ${filepath} not in ${allowedDirs.join(', ')}`);

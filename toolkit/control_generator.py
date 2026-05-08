@@ -152,6 +152,13 @@ class ControlGenerator:
             self.debug_print("Generating inpaint/mask control")
             img = image.copy()
             if self.control_bg_remover is None:
+                allow_remote_code = os.getenv("AITK_ALLOW_UNSAFE_HF_REMOTE_CODE", "").lower() in ("1", "true", "yes")
+                if not allow_remote_code:
+                    raise RuntimeError(
+                        "Automatic 'mask'/'inpaint' control generation is disabled by default because it requires "
+                        "executing remote Hugging Face model code. To proceed in a trusted environment, set "
+                        "AITK_ALLOW_UNSAFE_HF_REMOTE_CODE=1."
+                    )
                 from transformers import AutoModelForImageSegmentation
                 self.control_bg_remover = AutoModelForImageSegmentation.from_pretrained(
                     'ZhengPeng7/BiRefNet_HR',

@@ -61,6 +61,7 @@ scheduler_config = {
 
 class CogView4(BaseModel):
     arch = 'cogview4'
+    TRUSTED_REMOTE_MODELS = {"THUDM/CogView4-6B"}
     def __init__(
             self,
             device,
@@ -93,6 +94,19 @@ class CogView4(BaseModel):
         self.print_and_status_update("Loading CogView4 model")
         # base_model_path = "black-forest-labs/FLUX.1-schnell"
         base_model_path = self.model_config.name_or_path_original
+
+        # Only allow known-safe remote model repos; local paths remain supported.
+        if not os.path.exists(model_path) and model_path not in self.TRUSTED_REMOTE_MODELS:
+            raise ValueError(
+                f"Untrusted remote CogView4 model source: {model_path}. "
+                f"Allowed remote sources: {sorted(self.TRUSTED_REMOTE_MODELS)}"
+            )
+        if not os.path.exists(base_model_path) and base_model_path not in self.TRUSTED_REMOTE_MODELS:
+            raise ValueError(
+                f"Untrusted remote CogView4 base model source: {base_model_path}. "
+                f"Allowed remote sources: {sorted(self.TRUSTED_REMOTE_MODELS)}"
+            )
+
         subfolder = 'transformer'
         transformer_path = model_path
         if os.path.exists(transformer_path):
@@ -108,7 +122,7 @@ class CogView4(BaseModel):
         tokenizer = AutoTokenizer.from_pretrained(
             base_model_path, subfolder="tokenizer", torch_dtype=dtype)
         text_encoder = GlmModel.from_pretrained(
-            base_model_path, subfolder="text_encoder", torch_dtype=dtype)
+            base_model_path, subfolder="text_encoder", torch_dtype=dtype, use_safetensors=True)
 
         text_encoder.to(self.device_torch, dtype=dtype)
         flush()
@@ -127,6 +141,7 @@ class CogView4(BaseModel):
             transformer_path,
             subfolder=subfolder,
             torch_dtype=dtype,
+            use_safetensors=True,
         )
 
         if self.model_config.split_model_over_gpus:
@@ -180,7 +195,7 @@ class CogView4(BaseModel):
         scheduler = CogView4.get_train_scheduler()
         self.print_and_status_update("Loading VAE")
         vae = AutoencoderKL.from_pretrained(
-            base_model_path, subfolder="vae", torch_dtype=dtype)
+            base_model_path, subfolder="vae", torch_dtype=dtype, use_safetensors=True)
         flush()
 
         self.print_and_status_update("Making pipe")

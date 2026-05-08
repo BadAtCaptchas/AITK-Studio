@@ -849,12 +849,17 @@ class BaseSDTrainProcess(BaseTrainProcess):
         
         if latest_path is None and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
             # set pretrained lora path as load path if we do not have a checkpoint to resume from
-            if os.path.exists(self.network_config.pretrained_lora_path):
-                latest_path = self.network_config.pretrained_lora_path
+            pretrained_path = self.network_config.pretrained_lora_path
+            if not str(pretrained_path).lower().endswith(".safetensors"):
+                print_acc(
+                    f"Pretrained lora path from config must be a .safetensors file: {pretrained_path}"
+                )
+            elif os.path.exists(pretrained_path):
+                latest_path = pretrained_path
                 print_acc(f"Using pretrained lora path from config: {latest_path}")
             else:
                 # no pretrained lora found
-                print_acc(f"Pretrained lora path from config does not exist: {self.network_config.pretrained_lora_path}")
+                print_acc(f"Pretrained lora path from config does not exist: {pretrained_path}")
 
         return latest_path
 

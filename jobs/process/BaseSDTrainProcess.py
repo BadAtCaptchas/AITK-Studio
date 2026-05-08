@@ -812,7 +812,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if os.path.isdir(path):
             return True
 
-        return basename.endswith((".safetensors", ".pt"))
+        return basename.endswith(".safetensors")
 
     def get_latest_save_path(self, name=None, post=''):
         if name == None:
@@ -823,7 +823,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # Define patterns for both files and directories
             patterns = [
                 f"{name}*{post}.safetensors",
-                f"{name}*{post}.pt",
                 f"{name}*{post}"
             ]
             # Search for both files and directories

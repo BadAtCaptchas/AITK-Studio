@@ -4,28 +4,33 @@ import { flushCache } from '@/server/settings';
 import { db } from '@/server/db';
 import path from 'path';
 
-function ensureSettingsAccess(request: NextRequest): NextResponse | null {
+type SettingsAccess = {
+  authenticated: boolean;
+  response: NextResponse | null;
+};
+
+function ensureSettingsAccess(request: NextRequest): SettingsAccess {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   const token = request.headers.get('authorization')?.split(' ')[1];
 
   if (!tokenToUse) {
-    return NextResponse.json(
-      { error: 'Settings API requires AI_TOOLKIT_AUTH to be configured' },
-      { status: 503 }
-    );
+    return { authenticated: false, response: null };
   }
 
   if (token !== tokenToUse) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return {
+      authenticated: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
   }
 
-  return null;
+  return { authenticated: true, response: null };
 }
 
 export async function GET(request: NextRequest) {
-  const unauthorizedResponse = ensureSettingsAccess(request);
-  if (unauthorizedResponse) {
-    return unauthorizedResponse;
+  const access = ensureSettingsAccess(request);
+  if (access.response) {
+    return access.response;
   }
 
   try {
@@ -42,6 +47,10 @@ export async function GET(request: NextRequest) {
     if (!settingsObject.DATASETS_FOLDER || settingsObject.DATASETS_FOLDER === '') {
       settingsObject.DATASETS_FOLDER = defaultDatasetsFolder;
     }
+    if (!access.authenticated) {
+      settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
+      settingsObject.HF_TOKEN = '';
+    }
     return NextResponse.json(settingsObject);
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
@@ -49,9 +58,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const unauthorizedResponse = ensureSettingsAccess(request);
-  if (unauthorizedResponse) {
-    return unauthorizedResponse;
+  const access = ensureSettingsAccess(request);
+  if (access.response) {
+    return access.response;
   }
 
   try {
@@ -67,11 +76,16 @@ export async function POST(request: NextRequest) {
       normalizedDatasetsFolder = resolvedDatasetsFolder;
     }
 
-    await db.settings.upsertMany({
-      HF_TOKEN,
+    const settingsToUpdate: Record<string, string> = {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
-    });
+    };
+
+    if (typeof HF_TOKEN === 'string' && (access.authenticated || HF_TOKEN !== '')) {
+      settingsToUpdate.HF_TOKEN = HF_TOKEN;
+    }
+
+    await db.settings.upsertMany(settingsToUpdate);
 
     flushCache();
 

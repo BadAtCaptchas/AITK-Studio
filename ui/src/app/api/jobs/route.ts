@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
+import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
 
 
 function ensureApiAccess(request: Request): NextResponse | null {
@@ -70,15 +71,15 @@ export async function GET(request: Request) {
   try {
     if (id) {
       const job = await db.jobs.findById(id);
-      return NextResponse.json(job);
+      return NextResponse.json(job ? await withHFDownloadProgress(job) : job);
     }
     if (job_ref) {
       const job = await db.jobs.findLatestByRef(job_ref);
-      return NextResponse.json(job);
+      return NextResponse.json(job ? await withHFDownloadProgress(job) : job);
     }
 
     const jobs = await db.jobs.list({ job_type });
-    return NextResponse.json({ jobs: jobs });
+    return NextResponse.json({ jobs: await Promise.all(jobs.map(job => withHFDownloadProgress(job))) });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: 'Failed to fetch training data' }, { status: 500 });

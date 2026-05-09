@@ -27,6 +27,7 @@ const startAndWatchJob = (job: Job) => {
 
     //log to path
     const logPath = path.join(trainingFolder, 'log.txt');
+    const hfDownloadProgressPath = path.join(trainingFolder, '.hf_download_progress.json');
 
     try {
       // if the log path exists, move it to a folder called logs and rename it {num}_log.txt, looking for the highest num
@@ -65,6 +66,11 @@ const startAndWatchJob = (job: Job) => {
 
     // write the config file
     fs.writeFileSync(configPath, JSON.stringify(jobConfig, null, 2));
+    try {
+      fs.rmSync(hfDownloadProgressPath, { force: true });
+    } catch (e) {
+      console.error('Error clearing Hugging Face download progress file:', e);
+    }
 
     const pythonPath = getToolkitPythonPath();
 
@@ -87,6 +93,7 @@ const startAndWatchJob = (job: Job) => {
       CUDA_DEVICE_ORDER: 'PCI_BUS_ID',
       CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
       IS_AI_TOOLKIT_UI: '1',
+      AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
     };
 
     // Add the --log argument to the command

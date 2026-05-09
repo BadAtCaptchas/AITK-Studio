@@ -9,6 +9,7 @@ import classNames from 'classnames';
 import { startQueue, stopQueue } from '@/utils/queue';
 import { CgSpinner } from 'react-icons/cg';
 import useGPUInfo from '@/hooks/useGPUInfo';
+import { HFDownloadProgressInline } from '@/components/HFDownloadProgress';
 
 interface JobsTableProps {
   autoStartQueue?: boolean;
@@ -97,6 +98,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
       title: 'Info',
       key: 'info',
       className: 'truncate max-w-xs',
+      render: row => <HFDownloadProgressInline progress={row.hf_download_progress} fallback={row.info} />,
     },
     {
       title: 'Actions',

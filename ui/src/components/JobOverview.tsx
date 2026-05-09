@@ -9,6 +9,8 @@ import { getTotalSteps } from '@/utils/jobs';
 import { Cpu, HardDrive, Info, Gauge } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useJobLog from '@/hooks/useJobLog';
+import useJobDownloadProgress from '@/hooks/useJobDownloadProgress';
+import { HFDownloadProgressBand } from '@/components/HFDownloadProgress';
 
 interface JobOverviewProps {
   job: Job;
@@ -22,6 +24,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
     return job.gpu_ids.split(',').map(id => parseInt(id));
   }, [job.gpu_ids]);
   const { log, setLog, status: statusLog, refresh: refreshLog } = useJobLog(job.id, 2000);
+  const { progress: hfDownloadProgress } = useJobDownloadProgress(job.id, job.hf_download_progress || null, 1000);
   const logRef = useRef<HTMLDivElement>(null);
   // Track whether we should auto-scroll to bottom
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
@@ -105,6 +108,8 @@ export default function JobOverview({ job }: JobOverviewProps) {
         </div>
 
         <div className="p-4 space-y-6 flex flex-col flex-grow">
+          <HFDownloadProgressBand progress={hfDownloadProgress} />
+
           {/* Progress Bar */}
           {job.job_type === 'train' && (
             <div className="space-y-2">

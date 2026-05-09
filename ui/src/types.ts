@@ -29,6 +29,33 @@ export interface Job {
   pid: number | null;
   job_type: string;
   job_ref: string | null;
+  hf_download_progress?: HFDownloadProgress | null;
+}
+
+export type HFDownloadStatus = 'idle' | 'downloading' | 'completed' | 'failed';
+
+export interface HFDownloadItem {
+  id: number;
+  fileName: string;
+  source?: string;
+  bytesDownloaded: number;
+  bytesTotal: number | null;
+  startedAt: string;
+  updatedAt: string;
+}
+
+export interface HFDownloadProgress {
+  version: number;
+  status: HFDownloadStatus;
+  message: string;
+  fileName: string | null;
+  activeCount: number;
+  bytesDownloaded: number;
+  bytesTotal: number | null;
+  percent: number | null;
+  downloads: HFDownloadItem[];
+  error: string | null;
+  updatedAt: string;
 }
 
 /**

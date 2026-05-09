@@ -245,7 +245,7 @@ Optional environment variables:
 - `AITK_TENSORBOARD_PUBLIC_URL=http://host:6006` changes the link shown in the UI, useful behind proxies or custom Docker port mappings.
 - `AITK_TENSORBOARD_STATUS_RUN=0` removes and stops writing the synthetic `aitk_status` run. Without another run, TensorBoard may show an empty dashboard until training writes events.
 
-For Docker Compose, leave `AITK_ENABLE_TENSORBOARD` unset for auto-detection, or set it explicitly:
+For Docker Compose, leave `AITK_ENABLE_TENSORBOARD` unset for auto-detection, or set it explicitly. The Compose file binds the published TensorBoard port to host `127.0.0.1` by default, even though TensorBoard listens on `0.0.0.0` inside the container so Docker port forwarding can reach it:
 
 ```bash
 AITK_ENABLE_TENSORBOARD=1 docker compose up

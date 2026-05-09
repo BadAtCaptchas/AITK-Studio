@@ -64,8 +64,7 @@ export function isTensorBoardEnabled() {
     return false;
   }
 
-  isTensorBoardPackageInstalled();
-  return false;
+  return isTensorBoardPackageInstalled();
 }
 
 export function getTensorBoardPort() {

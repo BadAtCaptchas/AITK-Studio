@@ -10,6 +10,7 @@
     "lint": "next lint",
     "update_db": "node scripts/prepare-db.mjs",
     "test:metrics": "tsc -p tsconfig.worker.json && node --test scripts/metricsDownsample.test.mjs",
+    "test:tensorboard": "tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
     "migrate_sqlite_to_mongo": "node scripts/migrate-sqlite-to-mongo.mjs",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,css,scss}\""
   },

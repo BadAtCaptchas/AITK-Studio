@@ -12,6 +12,10 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
 
+  if (job.status !== 'running') {
+    return NextResponse.json({ error: 'Job is not running' }, { status: 409 });
+  }
+
   await db.jobs.update(jobID, {
     stop: true,
     info: 'Stopping job...',
@@ -24,8 +28,8 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
       if (isWindows) {
         // Windows doesn't support SIGINT for arbitrary processes.
         // Use taskkill with /T (tree) to send a CTRL+C-like termination.
-        const { execSync } = require('child_process');
-        execSync(`taskkill /PID ${job.pid} /T /F`, { stdio: 'ignore' });
+        const { execFileSync } = require('child_process');
+        execFileSync('taskkill', ['/PID', String(job.pid), '/T', '/F'], { stdio: 'ignore' });
       } else {
         process.kill(job.pid, 'SIGINT');
       }
@@ -33,6 +37,7 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
       await db.jobs.update(jobID, {
         status: 'stopped',
         info: 'Job stopped',
+        pid: null,
       });
     } catch (e) {
       // Process may have already exited — that's fine

@@ -198,6 +198,8 @@ class UIJobStore:
             patch = {"status": status}
             if info is not None:
                 patch["info"] = info
+            if status in {"stopped", "error", "completed"}:
+                patch["pid"] = None
             self._jobs.update_one(
                 {"id": self.job_id},
                 {"$set": patch, "$currentDate": {"updated_at": True}},
@@ -209,16 +211,29 @@ class UIJobStore:
                 cursor = conn.cursor()
                 cursor.execute("BEGIN IMMEDIATE")
                 try:
+                    clear_pid = status in {"stopped", "error", "completed"}
                     if info is not None:
-                        cursor.execute(
-                            "UPDATE Job SET status = ?, info = ? WHERE id = ?",
-                            (status, info, self.job_id),
-                        )
+                        if clear_pid:
+                            cursor.execute(
+                                "UPDATE Job SET status = ?, info = ?, pid = NULL WHERE id = ?",
+                                (status, info, self.job_id),
+                            )
+                        else:
+                            cursor.execute(
+                                "UPDATE Job SET status = ?, info = ? WHERE id = ?",
+                                (status, info, self.job_id),
+                            )
                     else:
-                        cursor.execute(
-                            "UPDATE Job SET status = ? WHERE id = ?",
-                            (status, self.job_id),
-                        )
+                        if clear_pid:
+                            cursor.execute(
+                                "UPDATE Job SET status = ?, pid = NULL WHERE id = ?",
+                                (status, self.job_id),
+                            )
+                        else:
+                            cursor.execute(
+                                "UPDATE Job SET status = ? WHERE id = ?",
+                                (status, self.job_id),
+                            )
                 finally:
                     cursor.execute("COMMIT")
 

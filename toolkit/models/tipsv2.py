@@ -1,12 +1,33 @@
-"""Local implementation of google/tipsv2-b14-dpt.
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Audited local implementation of ``google/tipsv2-b14-dpt``.
 
-Self-contained port of the remote `trust_remote_code=True` model into ai-toolkit.
-Includes vision encoder + DPT depth/normals/segmentation heads, with optional
-gradient checkpointing on the vision transformer blocks. The text encoder is
-intentionally not included — only the dense-prediction stack is used here.
+This is a self-contained port of the Hugging Face custom-code model used by
+``google/tipsv2-b14-dpt`` and its ``google/tipsv2-b14`` backbone. ai-toolkit
+uses this file instead of ``trust_remote_code=True`` so training does not
+download or execute Hub Python at runtime.
 
-Original remote code: https://huggingface.co/google/tipsv2-b14-dpt
-                      https://huggingface.co/google/tipsv2-b14
+Vendored source snapshots:
+    DPT heads repo: google/tipsv2-b14-dpt
+    DPT heads revision: 272325b4a469e9f5142dc7f40ec8f61abc4ae3ce
+    Backbone repo: google/tipsv2-b14
+    Backbone revision: 245de45054528d86029a06375bd7ba12a93f5b20
+
+Intentionally omitted:
+    text encoder, tokenizer, AutoClass registration, dynamic sibling module
+    loading, and demo/pipeline helpers. Only the ViT vision encoder plus DPT
+    depth, normals, and segmentation heads are needed by DFE v7/v8.
 """
 
 import functools
@@ -18,6 +39,13 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
+
+
+TIPS2_DPT_REPO = "google/tipsv2-b14-dpt"
+TIPS2_DPT_REVISION = "272325b4a469e9f5142dc7f40ec8f61abc4ae3ce"
+TIPS2_BACKBONE_REPO = "google/tipsv2-b14"
+TIPS2_BACKBONE_REVISION = "245de45054528d86029a06375bd7ba12a93f5b20"
+TIPS2_WEIGHT_FILENAME = "model.safetensors"
 
 
 # ───────────────────────── Vision Transformer ──────────────────────────────
@@ -450,6 +478,9 @@ def _vit_base(patch_size: int = 14, **kwargs) -> VisionTransformer:
     )
 
 
+_VISION_BUILDERS = {"vit_base": _vit_base}
+
+
 # ───────────────────────────── DPT heads ───────────────────────────────────
 
 
@@ -680,9 +711,9 @@ class TIPSv2DPTOutput:
     segmentation: Optional[torch.Tensor] = None
 
 
-# Hard-coded config for the b14-dpt variant — matches config.json on the hub.
+# Hard-coded config for the b14-dpt variant at TIPS2_DPT_REVISION.
 _B14_DPT_CONFIG = dict(
-    backbone_repo="google/tipsv2-b14",
+    backbone_repo=TIPS2_BACKBONE_REPO,
     embed_dim=768,
     channels=256,
     post_process_channels=(96, 192, 384, 768),
@@ -715,11 +746,10 @@ class TIPSv2DPTModel(nn.Module):
             cfg.update(config)
         self.config = cfg
 
-        builders = {"vit_base": _vit_base}
-        if cfg["vision_fn"] not in builders:
+        if cfg["vision_fn"] not in _VISION_BUILDERS:
             raise NotImplementedError(f"vision_fn={cfg['vision_fn']!r} not supported")
 
-        self.vision_encoder = builders[cfg["vision_fn"]](
+        self.vision_encoder = _VISION_BUILDERS[cfg["vision_fn"]](
             img_size=cfg["img_size"],
             patch_size=cfg["patch_size"],
             ffn_layer=cfg["ffn_layer"],
@@ -817,33 +847,38 @@ class TIPSv2DPTModel(nn.Module):
     @classmethod
     def from_pretrained(
         cls,
-        model_id: str = "google/tipsv2-b14-dpt",
+        model_id: str = TIPS2_DPT_REPO,
         device: Union[str, torch.device] = "cpu",
         dtype: torch.dtype = torch.float32,
         cache_dir: Optional[str] = None,
     ) -> "TIPSv2DPTModel":
         """Build the model and load weights from the hub.
 
-        Pulls the DPT head weights from ``model_id`` (default
-        ``google/tipsv2-b14-dpt``) and the vision-encoder weights from the
-        backbone repo specified in the DPT config.
+        Downloads only pinned ``model.safetensors`` files. This loader must not
+        download or execute Hub Python.
         """
         from huggingface_hub import hf_hub_download
         from safetensors.torch import load_file
 
-        if model_id != "google/tipsv2-b14-dpt":
+        if model_id != TIPS2_DPT_REPO:
             raise NotImplementedError(
-                f"Local TIPSv2DPTModel only supports 'google/tipsv2-b14-dpt'; got {model_id!r}"
+                f"Local TIPSv2DPTModel only supports {TIPS2_DPT_REPO!r}; got {model_id!r}"
             )
 
         model = cls()
 
-        dpt_ckpt = hf_hub_download(model_id, "model.safetensors", cache_dir=cache_dir)
+        dpt_ckpt = hf_hub_download(
+            TIPS2_DPT_REPO,
+            TIPS2_WEIGHT_FILENAME,
+            revision=TIPS2_DPT_REVISION,
+            cache_dir=cache_dir,
+        )
         dpt_state = load_file(dpt_ckpt)
 
         backbone_ckpt = hf_hub_download(
-            model.config["backbone_repo"],
-            "model.safetensors",
+            TIPS2_BACKBONE_REPO,
+            TIPS2_WEIGHT_FILENAME,
+            revision=TIPS2_BACKBONE_REVISION,
             cache_dir=cache_dir,
         )
         backbone_state = load_file(backbone_ckpt)

@@ -125,7 +125,7 @@ def quantize(
                     )
         except Exception as e:
             print(f"Failed to quantize {name}: {e}")
-            # raise e
+            raise
 
 
 def quantize_model(

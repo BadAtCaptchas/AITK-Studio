@@ -1,6 +1,7 @@
 import math
 import os
 import random
+import re
 from collections import OrderedDict
 from typing import List
 
@@ -45,7 +46,13 @@ class GenerateConfig:
         self.guidance_scale = kwargs.get('guidance_scale', 7)
         self.sample_steps = kwargs.get('sample_steps', 20)
         self.guidance_rescale = kwargs.get('guidance_rescale', 0.0)
-        self.ext = kwargs.get('ext', 'png')
+        ext = kwargs.get('ext', 'png')
+        if not isinstance(ext, str):
+            raise ValueError('generate.ext must be a string')
+        ext = ext.lower().lstrip('.')
+        if not re.fullmatch(r'[a-z0-9]+', ext):
+            raise ValueError('generate.ext must be alphanumeric characters only')
+        self.ext = ext
         self.denoise_strength = kwargs.get('denoise_strength', 0.5)
         self.trigger_word = kwargs.get('trigger_word', None)
 

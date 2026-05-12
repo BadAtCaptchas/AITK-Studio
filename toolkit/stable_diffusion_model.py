@@ -2654,7 +2654,8 @@ class StableDiffusion:
                     new_key = k if k.startswith(f"{SD_PREFIX_TEXT_ENCODER}_") else f"{SD_PREFIX_TEXT_ENCODER}_{k}"
                     state_dict[new_key] = v
         if unet:
-            for k, v in self.unet.state_dict().items():
+            unet_model = unwrap_model(self.unet)
+            for k, v in unet_model.state_dict().items():
                 new_key = k if k.startswith(f"{SD_PREFIX_UNET}_") else f"{SD_PREFIX_UNET}_{k}"
                 state_dict[new_key] = v
         return state_dict
@@ -2682,11 +2683,12 @@ class StableDiffusion:
                 for name, param in self.text_encoder.named_parameters(recurse=True, prefix=f"{SD_PREFIX_TEXT_ENCODER}"):
                     named_params[name] = param
         if unet:
+            unet_model = unwrap_model(self.unet)
             if self.is_flux or self.is_lumina2:
-                for name, param in self.unet.named_parameters(recurse=True, prefix="transformer"):
+                for name, param in unet_model.named_parameters(recurse=True, prefix="transformer"):
                     named_params[name] = param
             else:
-                for name, param in self.unet.named_parameters(recurse=True, prefix=f"{SD_PREFIX_UNET}"):
+                for name, param in unet_model.named_parameters(recurse=True, prefix=f"{SD_PREFIX_UNET}"):
                     named_params[name] = param
             
             if self.model_config.ignore_if_contains is not None:

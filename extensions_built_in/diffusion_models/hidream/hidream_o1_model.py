@@ -530,7 +530,6 @@ class HidreamO1Model(BaseModel):
         new_sd = {}
         for key, value in state_dict.items():
             new_key = key.replace("transformer.", "diffusion_model.")
-            new_key = new_key.replace(".model.", ".")
             new_sd[new_key] = value
         return new_sd
 

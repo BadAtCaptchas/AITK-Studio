@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import { MongoClient } from 'mongodb';
 
@@ -7,7 +8,8 @@ const toolkitRoot = path.resolve(process.cwd(), '..');
 const sqlitePath = path.resolve(process.env.AITK_SQLITE_PATH || path.join(toolkitRoot, 'aitk_db.db'));
 const mongoUri = process.env.AITK_MONGODB_URI?.trim();
 const mongoDbName = process.env.AITK_MONGODB_DB?.trim() || 'ai_toolkit';
-const prismaCli = path.join(process.cwd(), 'node_modules', 'prisma', 'build', 'index.js');
+const prismaCli = path.join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma');
+const prismaExecOptions = { stdio: 'inherit', shell: process.platform === 'win32' };
 
 if (!['sqlite', 'mongodb'].includes(provider)) {
   throw new Error(`Invalid AITK_DB_PROVIDER "${provider}". Expected "sqlite" or "mongodb".`);
@@ -16,11 +18,13 @@ if (!['sqlite', 'mongodb'].includes(provider)) {
 process.env.DATABASE_URL = `file:${sqlitePath.replace(/\\/g, '/')}`;
 
 console.log(`Generating Prisma client for SQLite fallback (${process.env.DATABASE_URL})...`);
-execFileSync(process.execPath, [prismaCli, 'generate'], { stdio: 'inherit' });
+execFileSync(prismaCli, ['generate'], prismaExecOptions);
 
 if (provider === 'sqlite') {
   console.log('Preparing SQLite database...');
-  execFileSync(process.execPath, [prismaCli, 'db', 'push'], { stdio: 'inherit' });
+  fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
+  fs.closeSync(fs.openSync(sqlitePath, 'a'));
+  execFileSync(prismaCli, ['db', 'push'], prismaExecOptions);
   process.exit(0);
 }
 

@@ -205,7 +205,7 @@ The OstrisAI-Toolkit Revamped UI is a web interface for OstrisAI-Toolkit Revampe
 ## Running the UI
 
 Requirements:
-- Node.js > 20
+- Node.js >=20.19.0
 
 The UI does not need to be kept running for the jobs to run. It is only needed to start/stop/monitor jobs. The commands below
 will install / update the UI and it's dependencies and start the UI. 

@@ -2,7 +2,8 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { MongoClient, type Collection, type Db, type Document } from 'mongodb';
-import { PrismaClient } from '@prisma/client';
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { PrismaClient } from '../generated/prisma/client';
 import sqlite3 from 'sqlite3';
 import { TOOLKIT_ROOT } from '../paths';
 import type { Job, Queue } from '../types';
@@ -161,13 +162,11 @@ function getPrisma() {
   if (!globalThis.__aitkPrismaClient) {
     const config = getDatabaseConfig();
     process.env.DATABASE_URL = process.env.DATABASE_URL || config.sqliteUrl;
-    globalThis.__aitkPrismaClient = new PrismaClient({
-      datasources: {
-        db: {
-          url: config.sqliteUrl,
-        },
-      },
-    });
+    const adapter = new PrismaBetterSqlite3(
+      { url: config.sqliteUrl },
+      { timestampFormat: 'unixepoch-ms' },
+    );
+    globalThis.__aitkPrismaClient = new PrismaClient({ adapter });
   }
   return globalThis.__aitkPrismaClient;
 }

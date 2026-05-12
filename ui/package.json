@@ -17,7 +17,8 @@
   "dependencies": {
     "@headlessui/react": "^2.2.0",
     "@monaco-editor/react": "^4.7.0",
-    "@prisma/client": "^6.3.1",
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "archiver": "^7.0.1",
     "axios": "^1.7.9",
     "classnames": "^2.5.1",
@@ -25,7 +26,7 @@
     "mongodb": "^6.20.0",
     "next": "^15.5.9",
     "node-cache": "^5.1.2",
-    "prisma": "^6.3.1",
+    "prisma": "^7.8.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-dropzone": "^14.3.5",

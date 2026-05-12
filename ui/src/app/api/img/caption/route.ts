@@ -1,24 +1,29 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
+import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { imgPath, caption } = body;
-    let datasetsPath = await getDatasetsRoot();
-    // make sure the dataset path is in the image path
-    if (!imgPath.startsWith(datasetsPath)) {
+    const datasetsPath = await getDatasetsRoot();
+    const datasetsRoot = path.resolve(datasetsPath);
+    const resolvedImagePath = path.resolve(imgPath);
+    const relativeImagePath = path.relative(datasetsRoot, resolvedImagePath);
+
+    // make sure the resolved image path is in the dataset path
+    if (relativeImagePath.startsWith('..') || path.isAbsolute(relativeImagePath)) {
       return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
     }
 
     // if img doesnt exist, ignore
-    if (!fs.existsSync(imgPath)) {
+    if (!fs.existsSync(resolvedImagePath)) {
       return NextResponse.json({ error: 'Image does not exist' }, { status: 404 });
     }
 
     // check for caption
-    const captionPath = imgPath.replace(/\.[^/.]+$/, '') + '.txt';
+    const captionPath = resolvedImagePath.replace(/\.[^/.]+$/, '') + '.txt';
     // save caption to file
     fs.writeFileSync(captionPath, caption);
 

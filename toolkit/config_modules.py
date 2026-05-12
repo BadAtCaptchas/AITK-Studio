@@ -1124,6 +1124,11 @@ class GenerateImageConfig:
 
         # prompt string will override any settings above
         self._process_prompt_string()
+        
+        if self.num_frames < 1:
+            raise ValueError(f"num_frames must be >= 1, got {self.num_frames}")
+        if self.fps < 1:
+            raise ValueError(f"fps must be >= 1, got {self.fps}")
 
         # handle dual text encoder prompts if nothing passed
         if negative_prompt_2 is None:
@@ -1197,6 +1202,8 @@ class GenerateImageConfig:
                 self.output_ext = 'webp'
             if self.output_ext == 'webp':
                 # save as animated webp
+                if self.fps < 1:
+                    raise ValueError(f"fps must be >= 1 for animated webp output, got {self.fps}")
                 duration = 1000 // self.fps  # Convert fps to milliseconds per frame
                 image[0].save(
                     self.get_image_path(count, max_count),

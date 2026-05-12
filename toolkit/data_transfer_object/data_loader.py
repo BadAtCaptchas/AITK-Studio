@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from toolkit.config_modules import DatasetConfig
 
 printed_messages = []
+MAX_IMAGE_DIMENSION = 100_000
 
 
 def print_once(msg):
@@ -54,6 +55,10 @@ class FileItemDTO(
     PoiFileItemDTOMixin,
     ArgBreakMixin,
 ):
+    @staticmethod
+    def _is_valid_dimension(value) -> bool:
+        return isinstance(value, int) and value > 0 and value <= MAX_IMAGE_DIMENSION
+
     def __init__(self, *args, **kwargs):
         self.path = kwargs.get("path", "")
         self.dataset_config: "DatasetConfig" = kwargs.get("dataset_config", None)
@@ -86,6 +91,8 @@ class FileItemDTO(
             if (
                 db_entry is not None
                 and len(db_entry) >= 3
+                and self._is_valid_dimension(db_entry[0])
+                and self._is_valid_dimension(db_entry[1])
                 and db_entry[2] == file_signature
             ):
                 use_db_entry = True

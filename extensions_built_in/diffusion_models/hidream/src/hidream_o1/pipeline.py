@@ -192,6 +192,17 @@ def _validate_t2i_conditioning_inputs(
             f"vision start token IDs; got {formatted}."
         )
 
+    if (
+        input_ids.dtype == torch.bool
+        or torch.is_floating_point(input_ids)
+        or torch.is_complex(input_ids)
+    ):
+        raise ValueError(
+            "HiDream-O1 t2i conditioning requires integer token IDs; "
+            f"got dtype {input_ids.dtype}. Ensure prompt token IDs are not "
+            "converted to the model training dtype."
+        )
+
     if input_ids.dim() == 1:
         input_ids = input_ids.unsqueeze(0)
     elif input_ids.dim() != 2:
@@ -258,7 +269,7 @@ def _validate_t2i_conditioning_inputs(
                 f"{tuple(input_ids.shape)}."
             )
 
-    return input_ids, attention_mask, image_len
+    return input_ids.to(dtype=torch.long), attention_mask, image_len
 
 
 def _build_t2i_sample_from_input_ids(
@@ -294,7 +305,7 @@ def _build_t2i_sample_from_input_ids(
     ).unsqueeze(0)
 
     vision_tokens = (
-        torch.zeros((1, image_len), dtype=input_ids_cpu.dtype)
+        torch.zeros((1, image_len), dtype=torch.long)
         + image_token_id
     )
     vision_tokens[0, 0] = vision_start_token_id

@@ -92,18 +92,20 @@ class AdvancedPromptEmbeds:
 
     def to(self, *args, **kwargs):
         frozen = set(self._frozen_dtype_keys)
-        if frozen:
-            no_dtype_args = [a for a in args if not isinstance(a, torch.dtype)]
-            no_dtype_kwargs = {k: v for k, v in kwargs.items() if k != "dtype"}
+        no_dtype_args = [a for a in args if not isinstance(a, torch.dtype)]
+        no_dtype_kwargs = {k: v for k, v in kwargs.items() if k != "dtype"}
+
+        def _to_tensor(v, freeze_dtype=False):
+            if freeze_dtype or not (v.is_floating_point() or v.is_complex()):
+                return v.to(*no_dtype_args, **no_dtype_kwargs)
+            return v.to(*args, **kwargs)
+
         new_pe = AdvancedPromptEmbeds()
         new_pe._frozen_dtype_keys = list(self._frozen_dtype_keys)
         for key, value in self._store.items():
-            if key in frozen:
-                new_pe._store[key] = [
-                    v.to(*no_dtype_args, **no_dtype_kwargs) for v in value
-                ]
-            else:
-                new_pe._store[key] = [v.to(*args, **kwargs) for v in value]
+            new_pe._store[key] = [
+                _to_tensor(v, freeze_dtype=key in frozen) for v in value
+            ]
         return new_pe
 
     def detach(self):

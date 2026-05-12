@@ -147,6 +147,84 @@ def _get_rope_index_t2i(
     return position_ids
 
 
+def _validate_t2i_conditioning_inputs(
+    input_ids: torch.Tensor,
+    height: int,
+    width: int,
+    image_token_id: int,
+    video_token_id: int,
+    vision_start_token_id: int,
+    attention_mask: Optional[torch.Tensor] = None,
+):
+    if input_ids.dim() == 1:
+        input_ids = input_ids.unsqueeze(0)
+    elif input_ids.dim() != 2:
+        raise ValueError(
+            "HiDream-O1 t2i conditioning expects `input_ids` with shape "
+            "(seq_len,) or (1, seq_len)."
+        )
+
+    if input_ids.shape[0] != 1:
+        raise ValueError(
+            "HiDream-O1 t2i conditioning supports one prompt at a time; "
+            f"got batch size {input_ids.shape[0]}."
+        )
+    if input_ids.shape[-1] < TIMESTEP_TOKEN_NUM:
+        raise ValueError("HiDream-O1 t2i conditioning requires non-empty input IDs.")
+
+    if height <= 0 or width <= 0:
+        raise ValueError(
+            "HiDream-O1 t2i conditioning requires positive dimensions; "
+            f"got {width}x{height}."
+        )
+    if height % PATCH_SIZE != 0 or width % PATCH_SIZE != 0:
+        raise ValueError(
+            f"HiDream-O1 t2i conditioning requires patch-aligned dimensions "
+            f"divisible by {PATCH_SIZE}; got {width}x{height}."
+        )
+
+    image_len = (height // PATCH_SIZE) * (width // PATCH_SIZE)
+    if image_len < 2:
+        raise ValueError(
+            "HiDream-O1 t2i conditioning needs at least two image patch tokens "
+            f"for the <vision_start> + image-token suffix; got {image_len}."
+        )
+
+    reserved_tokens = {
+        vision_start_token_id: "vision start",
+        image_token_id: "image",
+        video_token_id: "video",
+    }
+    input_tokens = input_ids[0].tolist()
+    unexpected = [
+        token_name
+        for token_id, token_name in reserved_tokens.items()
+        if token_id in input_tokens
+    ]
+    if unexpected:
+        raise ValueError(
+            "HiDream-O1 t2i prompt input IDs must not contain vision layout tokens "
+            f"before the generated image suffix; found {', '.join(unexpected)} token(s)."
+        )
+
+    if attention_mask is not None:
+        if attention_mask.dim() == 1:
+            attention_mask = attention_mask.unsqueeze(0)
+        elif attention_mask.dim() != 2:
+            raise ValueError(
+                "HiDream-O1 t2i conditioning expects `attention_mask` with shape "
+                "(seq_len,) or (1, seq_len)."
+            )
+        if attention_mask.shape != input_ids.shape:
+            raise ValueError(
+                "HiDream-O1 t2i conditioning requires `attention_mask` to match "
+                f"`input_ids` shape; got {tuple(attention_mask.shape)} and "
+                f"{tuple(input_ids.shape)}."
+            )
+
+    return input_ids, attention_mask, image_len
+
+
 def _build_t2i_sample_from_input_ids(
     input_ids: torch.Tensor,
     height: int,
@@ -159,21 +237,32 @@ def _build_t2i_sample_from_input_ids(
     image_token_id = model_config.image_token_id
     video_token_id = model_config.video_token_id
     vision_start_token_id = model_config.vision_start_token_id
-    image_len = (height // PATCH_SIZE) * (width // PATCH_SIZE)
+    original_device = input_ids.device
+    input_ids_cpu = input_ids.to("cpu")
+    attention_mask_cpu = (
+        attention_mask.to("cpu") if attention_mask is not None else None
+    )
 
-    if input_ids.dim() == 1:
-        input_ids = input_ids.unsqueeze(0)
+    input_ids_cpu, attention_mask_cpu, image_len = _validate_t2i_conditioning_inputs(
+        input_ids=input_ids_cpu,
+        height=height,
+        width=width,
+        image_token_id=image_token_id,
+        video_token_id=video_token_id,
+        vision_start_token_id=vision_start_token_id,
+        attention_mask=attention_mask_cpu,
+    )
 
     image_grid_thw = torch.tensor(
         [1, height // PATCH_SIZE, width // PATCH_SIZE], dtype=torch.int64
     ).unsqueeze(0)
 
     vision_tokens = (
-        torch.zeros((1, image_len), dtype=input_ids.dtype, device=input_ids.device)
+        torch.zeros((1, image_len), dtype=input_ids_cpu.dtype)
         + image_token_id
     )
     vision_tokens[0, 0] = vision_start_token_id
-    input_ids_pad = torch.cat([input_ids, vision_tokens], dim=-1)
+    input_ids_pad = torch.cat([input_ids_cpu, vision_tokens], dim=-1)
 
     position_ids = _get_rope_index_t2i(
         spatial_merge_size=1,
@@ -185,10 +274,10 @@ def _build_t2i_sample_from_input_ids(
         skip_vision_start_token=[1],
     )
 
-    txt_seq_len = input_ids.shape[-1]
+    txt_seq_len = input_ids_cpu.shape[-1]
     all_seq_len = position_ids.shape[-1]
 
-    token_types = torch.zeros((1, all_seq_len), dtype=input_ids.dtype)
+    token_types = torch.zeros((1, all_seq_len), dtype=input_ids_cpu.dtype)
     bgn = txt_seq_len - TIMESTEP_TOKEN_NUM
     token_types[0, bgn : bgn + image_len + TIMESTEP_TOKEN_NUM] = 1
     token_types[0, txt_seq_len - TIMESTEP_TOKEN_NUM : txt_seq_len] = 3
@@ -197,15 +286,13 @@ def _build_t2i_sample_from_input_ids(
     token_types_bin = (token_types > 0).to(token_types.dtype)
 
     sample = {
-        "input_ids": input_ids,
-        "position_ids": position_ids,
-        "token_types": token_types_bin,
-        "vinput_mask": vinput_mask,
+        "input_ids": input_ids_cpu.to(original_device),
+        "position_ids": position_ids.to(original_device),
+        "token_types": token_types_bin.to(original_device),
+        "vinput_mask": vinput_mask.to(original_device),
     }
-    if attention_mask is not None:
-        if attention_mask.dim() == 1:
-            attention_mask = attention_mask.unsqueeze(0)
-        sample["attention_mask"] = attention_mask
+    if attention_mask_cpu is not None:
+        sample["attention_mask"] = attention_mask_cpu.to(original_device)
     return sample
 
 

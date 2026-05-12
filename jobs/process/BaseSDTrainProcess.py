@@ -106,8 +106,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.network_config = NetworkConfig(**network_config)
         else:
             self.network_config = None
-        self.train_config = TrainConfig(**self.get_conf('train', {}))
+        raw_train_config = copy.deepcopy(self.get_conf('train', {}))
         model_config = self.get_conf('model', {})
+        if model_config.get('arch') == 'hidream_o1' and 't0_loss_target' not in raw_train_config:
+            raw_train_config['t0_loss_target'] = True
+        self.train_config = TrainConfig(**raw_train_config)
         self.modules_being_trained: List[torch.nn.Module] = []
 
         # update modelconfig dtype to match train

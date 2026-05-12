@@ -959,6 +959,7 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.timestep_type': ['linear', 'sigmoid'],
       'config.process[0].network.conv': [undefined, 16],
       'config.process[0].network.conv_alpha': [undefined, 16],
+      'config.process[0].train.t0_loss_target': [true, undefined],
       'config.process[0].train.max_loss': [1.0, undefined],
       'config.process[0].network.network_kwargs.ignore_if_contains': [['lm_head','patch_embed', 'visual'], []],
       'config.process[0].network.transformer_only': [false, undefined],

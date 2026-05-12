@@ -1,5 +1,6 @@
 import os
 import time
+import math
 from typing import List, Optional, Literal, Tuple, Union, TYPE_CHECKING, Dict
 import random
 
@@ -1003,7 +1004,13 @@ class DatasetConfig:
         # it will select a random start frame and pull the frames at the given fps
         # this could have various issues with shorter videos and videos with variable fps
         # I recommend trimming your videos to the desired length and using shrink_video_to_frames(default)
-        self.fps: int = kwargs.get('fps', 24)
+        raw_fps = kwargs.get('fps', 24)
+        try:
+            self.fps: float = float(raw_fps)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid dataset fps '{raw_fps}'. fps must be a number >= 1.") from exc
+        if not math.isfinite(self.fps) or self.fps < 1:
+            raise ValueError(f"Invalid dataset fps '{raw_fps}'. fps must be a finite number >= 1.")
         
         # auto_frame_count pull as many frames as in the video at given fps
         # Important, make sure fps for dataset is set correctly.

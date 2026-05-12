@@ -531,6 +531,7 @@ class ImageProcessingDTOMixin:
             raise Exception('Buckets required for video processing')
         
         do_audio = self.dataset_config.do_audio
+        cap = None
         
         try:
             # Use OpenCV to capture video frames
@@ -701,6 +702,7 @@ class ImageProcessingDTOMixin:
             
             # Release the video capture
             cap.release()
+            cap = None
             
             # Stack frames into tensor [frames, channels, height, width]
             self.tensor = torch.stack(frames)
@@ -817,6 +819,7 @@ class ImageProcessingDTOMixin:
                     
                     # Close the cap if it's still open
                     cap.release()
+                    cap = None
             except Exception as debug_err:
                 print_acc(f"Error during error diagnosis: {debug_err}")
             
@@ -825,6 +828,9 @@ class ImageProcessingDTOMixin:
             
             # Re-raise with more detailed information
             raise Exception(f"Video loading error ({self.path}): {error_msg}") from e
+        finally:
+            if cap is not None:
+                cap.release()
         
     def load_and_process_image(
             self: 'FileItemDTO',

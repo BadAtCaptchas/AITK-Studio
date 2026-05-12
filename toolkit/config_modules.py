@@ -89,7 +89,10 @@ class SampleConfig:
         self.sample_steps = kwargs.get('sample_steps', 20)
         self.network_multiplier = kwargs.get('network_multiplier', 1)
         self.guidance_rescale = kwargs.get('guidance_rescale', 0.0)
-        self.ext: ImgExt = kwargs.get('format', 'jpg')
+        raw_ext = str(kwargs.get('format', 'jpg')).lower().lstrip('.')
+        if raw_ext not in ['jpg', 'png', 'webp']:
+            raise ValueError(f"sample format must be one of ['jpg', 'png', 'webp'], got {raw_ext}")
+        self.ext: ImgExt = raw_ext
         self.adapter_conditioning_scale = kwargs.get('adapter_conditioning_scale', 1.0)
         self.refiner_start_at = kwargs.get('refiner_start_at',
                                            0.5)  # step to start using refiner on sample if it exists

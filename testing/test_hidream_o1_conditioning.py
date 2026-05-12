@@ -86,6 +86,17 @@ class HidreamO1ConditioningTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least two image patch tokens"):
             self.build_sample(input_ids, 32, 32, self.config)
 
+    def test_rejects_duplicate_special_token_ids_before_rope_indexing(self):
+        bad_config = SimpleNamespace(
+            image_token_id=VISION_START_TOKEN_ID,
+            video_token_id=VIDEO_TOKEN_ID,
+            vision_start_token_id=VISION_START_TOKEN_ID,
+        )
+        input_ids = torch.tensor([101, 102, 103], dtype=torch.long)
+
+        with self.assertRaisesRegex(ValueError, "requires distinct"):
+            self.build_sample(input_ids, 64, 64, bad_config)
+
     def test_rejects_prompt_vision_tokens_before_rope_indexing(self):
         def fail_if_called(*args, **kwargs):
             raise AssertionError("rope indexing should not run for malformed input")
@@ -95,6 +106,22 @@ class HidreamO1ConditioningTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "vision layout tokens"):
             self.build_sample(input_ids, 64, 64, self.config)
+
+    def test_rope_index_rejects_dangling_vision_start(self):
+        rope_index = self.namespace["_get_rope_index_t2i"]
+        input_ids = torch.tensor([[101, VISION_START_TOKEN_ID]], dtype=torch.long)
+        image_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+
+        with self.assertRaisesRegex(ValueError, "without a following image/video token"):
+            rope_index(
+                spatial_merge_size=1,
+                image_token_id=IMAGE_TOKEN_ID,
+                video_token_id=VIDEO_TOKEN_ID,
+                vision_start_token_id=VISION_START_TOKEN_ID,
+                input_ids=input_ids,
+                image_grid_thw=image_grid_thw,
+                skip_vision_start_token=[1],
+            )
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is not available")
     def test_cuda_input_builds_rope_index_on_cpu_and_returns_cuda_tensors(self):

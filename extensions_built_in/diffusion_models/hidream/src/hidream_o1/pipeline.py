@@ -54,7 +54,29 @@ def _get_rope_index_t2i(
         vision_start_indices = torch.argwhere(ids_row == vision_start_token_id).squeeze(
             1
         )
+        dangling_vision_starts = vision_start_indices[
+            vision_start_indices + 1 >= ids_row.shape[0]
+        ]
+        if dangling_vision_starts.numel() > 0:
+            positions = dangling_vision_starts.tolist()
+            raise ValueError(
+                "HiDream-O1 t2i conditioning found a vision start token without "
+                f"a following image/video token at sequence position(s) {positions}. "
+                "Check that output dimensions produce at least two patch tokens "
+                "and that model special token IDs are distinct."
+            )
+
         vision_tokens = ids_row[vision_start_indices + 1]
+        invalid_vision_tokens = torch.logical_and(
+            vision_tokens != image_token_id,
+            vision_tokens != video_token_id,
+        )
+        if invalid_vision_tokens.any():
+            bad_tokens = vision_tokens[invalid_vision_tokens].tolist()
+            raise ValueError(
+                "HiDream-O1 t2i conditioning found vision start token(s) followed "
+                f"by non-vision token ID(s): {bad_tokens}."
+            )
         image_nums = (vision_tokens == image_token_id).sum().item()
         video_nums = (vision_tokens == video_token_id).sum().item()
         input_tokens = ids_row.tolist()
@@ -156,6 +178,20 @@ def _validate_t2i_conditioning_inputs(
     vision_start_token_id: int,
     attention_mask: Optional[torch.Tensor] = None,
 ):
+    special_token_ids = {
+        "image": image_token_id,
+        "video": video_token_id,
+        "vision start": vision_start_token_id,
+    }
+    if len(set(special_token_ids.values())) != len(special_token_ids):
+        formatted = ", ".join(
+            f"{name}={token_id}" for name, token_id in special_token_ids.items()
+        )
+        raise ValueError(
+            "HiDream-O1 t2i conditioning requires distinct image, video, and "
+            f"vision start token IDs; got {formatted}."
+        )
+
     if input_ids.dim() == 1:
         input_ids = input_ids.unsqueeze(0)
     elif input_ids.dim() != 2:

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
+import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
 
 const isWindows = process.platform === 'win32';
 
@@ -14,6 +15,22 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
 
   if (job.status !== 'running') {
     return NextResponse.json({ error: 'Job is not running' }, { status: 409 });
+  }
+
+  if (!isLocalWorker(job.worker_id)) {
+    if (!job.remote_job_id) {
+      return NextResponse.json({ error: 'Remote job has not been uploaded yet' }, { status: 409 });
+    }
+    try {
+      const worker = await getRemoteWorker(job.worker_id);
+      await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/stop`);
+      const synced = await syncRemoteJob(job);
+      return NextResponse.json(synced);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to stop remote job';
+      await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
   }
 
   await db.jobs.update(jobID, {

@@ -6,7 +6,7 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import { PrismaClient } from '../generated/prisma/client';
 import sqlite3 from 'sqlite3';
 import { TOOLKIT_ROOT } from '../paths';
-import type { Job, Queue } from '../types';
+import type { Job, Queue, WorkerNode } from '../types';
 import { buildMetricSeriesResult, normalizeMetricMaxPoints } from './metricsDownsample';
 
 export type DatabaseProvider = 'sqlite' | 'mongodb';
@@ -28,6 +28,10 @@ export type SettingRecord = {
 export type JobCreateInput = {
   id?: string;
   name: string;
+  worker_id?: string;
+  remote_job_id?: string | null;
+  remote_sync_at?: Date | string | null;
+  remote_error?: string | null;
   gpu_ids: string;
   job_config: string;
   status?: string;
@@ -46,11 +50,31 @@ export type JobUpdateInput = Partial<Omit<JobCreateInput, 'id'>>;
 
 export type QueueCreateInput = {
   id?: number;
+  worker_id?: string;
   gpu_ids: string;
   is_running?: boolean;
 };
 
-export type QueueUpdateInput = Partial<Pick<Queue, 'gpu_ids' | 'is_running'>>;
+export type QueueUpdateInput = Partial<Pick<Queue, 'worker_id' | 'gpu_ids' | 'is_running'>>;
+
+export type WorkerNodeRecord = WorkerNode & {
+  api_token: string;
+};
+
+export type WorkerNodeCreateInput = {
+  id?: string;
+  name: string;
+  base_url: string;
+  api_token: string;
+  enabled?: boolean;
+  last_status?: string;
+  last_error?: string | null;
+  last_checked_at?: Date | string | null;
+  capabilities?: string;
+  gpus?: string;
+};
+
+export type WorkerNodeUpdateInput = Partial<Omit<WorkerNodeCreateInput, 'id'>>;
 
 export type LossPoint = {
   step: number;
@@ -209,6 +233,10 @@ function normalizeJob(raw: any): Job | null {
   return {
     id: String(raw.id),
     name: String(raw.name ?? ''),
+    worker_id: String(raw.worker_id ?? 'local'),
+    remote_job_id: raw.remote_job_id == null ? null : String(raw.remote_job_id),
+    remote_sync_at: raw.remote_sync_at == null ? null : parseDate(raw.remote_sync_at),
+    remote_error: raw.remote_error == null ? null : String(raw.remote_error),
     gpu_ids: String(raw.gpu_ids ?? ''),
     job_config: String(raw.job_config ?? ''),
     created_at: parseDate(raw.created_at),
@@ -230,8 +258,27 @@ function normalizeQueue(raw: any): Queue | null {
   if (!raw) return null;
   return {
     id: Number(raw.id ?? 0),
+    worker_id: String(raw.worker_id ?? 'local'),
     gpu_ids: String(raw.gpu_ids ?? ''),
     is_running: Boolean(raw.is_running),
+  };
+}
+
+function normalizeWorkerNode(raw: any): WorkerNodeRecord | null {
+  if (!raw) return null;
+  return {
+    id: String(raw.id),
+    name: String(raw.name ?? ''),
+    base_url: String(raw.base_url ?? ''),
+    api_token: String(raw.api_token ?? ''),
+    enabled: Boolean(raw.enabled ?? true),
+    last_status: String(raw.last_status ?? 'unknown'),
+    last_error: raw.last_error == null ? null : String(raw.last_error),
+    last_checked_at: raw.last_checked_at == null ? null : parseDate(raw.last_checked_at),
+    capabilities: String(raw.capabilities ?? '{}'),
+    gpus: String(raw.gpus ?? '[]'),
+    created_at: parseDate(raw.created_at),
+    updated_at: parseDate(raw.updated_at),
   };
 }
 
@@ -632,6 +679,8 @@ async function ensureMongoIndexes() {
       { key: { id: 1 }, unique: true },
       { key: { name: 1 }, unique: true },
       { key: { status: 1 } },
+      { key: { worker_id: 1 } },
+      { key: { remote_job_id: 1 } },
       { key: { gpu_ids: 1 } },
       { key: { job_type: 1 } },
       { key: { job_ref: 1 } },
@@ -639,7 +688,14 @@ async function ensureMongoIndexes() {
     ]),
     mongoCollection(mongo, 'queues').createIndexes([
       { key: { id: 1 }, unique: true },
-      { key: { gpu_ids: 1 }, unique: true },
+      { key: { worker_id: 1, gpu_ids: 1 }, unique: true },
+      { key: { worker_id: 1 } },
+      { key: { gpu_ids: 1 } },
+    ]),
+    mongoCollection(mongo, 'worker_nodes').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { name: 1 }, unique: true },
+      { key: { enabled: 1 } },
     ]),
     mongoCollection(mongo, 'settings').createIndexes([{ key: { key: 1 }, unique: true }]),
     mongoCollection(mongo, 'metrics').createIndexes([
@@ -731,12 +787,21 @@ export const db = {
       });
     },
 
-    async list(options: { job_type?: string | null; status?: string | string[]; gpu_ids?: string; order?: 'created_desc' | 'queue_asc' } = {}) {
+    async list(
+      options: {
+        job_type?: string | null;
+        status?: string | string[];
+        gpu_ids?: string;
+        worker_id?: string;
+        order?: 'created_desc' | 'queue_asc';
+      } = {},
+    ) {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
         const filter: Document = {};
         if (options.job_type) filter.job_type = options.job_type;
         if (options.gpu_ids) filter.gpu_ids = options.gpu_ids;
+        if (options.worker_id) filter.worker_id = options.worker_id;
         if (Array.isArray(options.status)) filter.status = { $in: options.status };
         else if (options.status) filter.status = options.status;
         const sort: Record<string, 1 | -1> = options.order === 'queue_asc' ? { queue_position: 1 } : { created_at: -1 };
@@ -750,6 +815,7 @@ export const db = {
       const where: any = {};
       if (options.job_type) where.job_type = options.job_type;
       if (options.gpu_ids) where.gpu_ids = options.gpu_ids;
+      if (options.worker_id) where.worker_id = options.worker_id;
       if (Array.isArray(options.status)) where.status = { in: options.status };
       else if (options.status) where.status = options.status;
       return getPrisma().job.findMany({
@@ -758,9 +824,25 @@ export const db = {
       });
     },
 
-    async findFirst(options: { status?: string | string[]; gpu_ids?: string; order?: 'queue_asc' } = {}) {
+    async findFirst(
+      options: { status?: string | string[]; gpu_ids?: string; worker_id?: string; order?: 'queue_asc' } = {},
+    ) {
       const rows = await db.jobs.list(options);
       return rows[0] ?? null;
+    },
+
+    async findByRemoteId(workerId: string, remoteJobId: string): Promise<Job | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'jobs').findOne(
+          { worker_id: workerId, remote_job_id: remoteJobId },
+          { projection: { _id: 0 } },
+        );
+        return normalizeJob(row);
+      }
+      return getPrisma().job.findFirst({
+        where: { worker_id: workerId, remote_job_id: remoteJobId },
+      });
     },
 
     async maxQueuePosition() {
@@ -787,6 +869,10 @@ export const db = {
         const job = normalizeJob({
           id: input.id || randomUUID(),
           name: input.name,
+          worker_id: input.worker_id ?? 'local',
+          remote_job_id: input.remote_job_id ?? null,
+          remote_sync_at: input.remote_sync_at ?? null,
+          remote_error: input.remote_error ?? null,
           gpu_ids: input.gpu_ids,
           job_config: input.job_config,
           created_at: now,
@@ -850,27 +936,33 @@ export const db = {
   },
 
   queues: {
-    async list(order: 'id' | 'gpu_ids' = 'id'): Promise<Queue[]> {
+    async list(order: 'id' | 'gpu_ids' = 'id', options: { worker_id?: string } = {}): Promise<Queue[]> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
+        const filter: Document = {};
+        if (options.worker_id) filter.worker_id = options.worker_id;
         const rows = await mongoCollection(mongo, 'queues')
-          .find({}, { projection: { _id: 0 } })
+          .find(filter, { projection: { _id: 0 } })
           .sort({ [order]: 1 })
           .toArray();
         return rows.map(normalizeQueue).filter(Boolean) as Queue[];
       }
       return getPrisma().queue.findMany({
+        where: options.worker_id ? { worker_id: options.worker_id } : undefined,
         orderBy: { [order]: 'asc' },
       });
     },
 
-    async findByGpuIds(gpuIds: string): Promise<Queue | null> {
+    async findByGpuIds(gpuIds: string, workerId = 'local'): Promise<Queue | null> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
-        const row = await mongoCollection(mongo, 'queues').findOne({ gpu_ids: gpuIds }, { projection: { _id: 0 } });
+        const row = await mongoCollection(mongo, 'queues').findOne(
+          { worker_id: workerId, gpu_ids: gpuIds },
+          { projection: { _id: 0 } },
+        );
         return normalizeQueue(row);
       }
-      return getPrisma().queue.findUnique({ where: { gpu_ids: gpuIds } });
+      return getPrisma().queue.findUnique({ where: { worker_id_gpu_ids: { worker_id: workerId, gpu_ids: gpuIds } } });
     },
 
     async create(input: QueueCreateInput): Promise<Queue> {
@@ -879,6 +971,7 @@ export const db = {
         const queues = mongoCollection(mongo, 'queues');
         const queue = normalizeQueue({
           id: input.id ?? (await nextMongoQueueId(queues)),
+          worker_id: input.worker_id ?? 'local',
           gpu_ids: input.gpu_ids,
           is_running: input.is_running ?? false,
         }) as Queue;
@@ -905,6 +998,91 @@ export const db = {
         return queue;
       }
       return getPrisma().queue.update({ where: { id }, data });
+    },
+  },
+
+  workerNodes: {
+    async list(options: { enabled?: boolean } = {}): Promise<WorkerNodeRecord[]> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const filter: Document = {};
+        if (typeof options.enabled === 'boolean') filter.enabled = options.enabled;
+        const rows = await mongoCollection(mongo, 'worker_nodes')
+          .find(filter, { projection: { _id: 0 } })
+          .sort({ name: 1 })
+          .toArray();
+        return rows.map(normalizeWorkerNode).filter(Boolean) as WorkerNodeRecord[];
+      }
+      return getPrisma().workerNode.findMany({
+        where: typeof options.enabled === 'boolean' ? { enabled: options.enabled } : undefined,
+        orderBy: { name: 'asc' },
+      }) as Promise<WorkerNodeRecord[]>;
+    },
+
+    async findById(id: string): Promise<WorkerNodeRecord | null> {
+      if (id === 'local') return null;
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'worker_nodes').findOne({ id }, { projection: { _id: 0 } });
+        return normalizeWorkerNode(row);
+      }
+      return getPrisma().workerNode.findUnique({ where: { id } }) as Promise<WorkerNodeRecord | null>;
+    },
+
+    async create(input: WorkerNodeCreateInput): Promise<WorkerNodeRecord> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const now = new Date();
+        const worker = normalizeWorkerNode({
+          id: input.id || randomUUID(),
+          name: input.name,
+          base_url: input.base_url,
+          api_token: input.api_token,
+          enabled: input.enabled ?? true,
+          last_status: input.last_status ?? 'unknown',
+          last_error: input.last_error ?? null,
+          last_checked_at: input.last_checked_at ?? null,
+          capabilities: input.capabilities ?? '{}',
+          gpus: input.gpus ?? '[]',
+          created_at: now,
+          updated_at: now,
+        }) as WorkerNodeRecord;
+        try {
+          await mongoCollection(mongo, 'worker_nodes').insertOne(worker);
+        } catch (error) {
+          duplicateKeyToUniqueError(error);
+        }
+        return worker;
+      }
+      return getPrisma().workerNode.create({ data: input }) as Promise<WorkerNodeRecord>;
+    },
+
+    async update(id: string, data: WorkerNodeUpdateInput): Promise<WorkerNodeRecord> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        try {
+          const result = await mongoCollection(mongo, 'worker_nodes').findOneAndUpdate(
+            { id },
+            { $set: { ...data, updated_at: new Date() } },
+            { returnDocument: 'after', projection: { _id: 0 } },
+          );
+          const worker = normalizeWorkerNode(result);
+          if (!worker) throw new Error(`Worker node not found: ${id}`);
+          return worker;
+        } catch (error) {
+          duplicateKeyToUniqueError(error);
+        }
+      }
+      return getPrisma().workerNode.update({ where: { id }, data }) as Promise<WorkerNodeRecord>;
+    },
+
+    async delete(id: string): Promise<WorkerNodeRecord | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const result = await mongoCollection(mongo, 'worker_nodes').findOneAndDelete({ id }, { projection: { _id: 0 } });
+        return normalizeWorkerNode(result);
+      }
+      return getPrisma().workerNode.delete({ where: { id } }) as Promise<WorkerNodeRecord | null>;
     },
   },
 

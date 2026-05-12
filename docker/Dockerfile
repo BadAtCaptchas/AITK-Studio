@@ -43,6 +43,14 @@ RUN curl -sL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install cloudflared for optional managed Cloudflare Tunnel support.
+RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb && \
+    apt-get update && \
+    apt-get install -y /tmp/cloudflared.deb && \
+    rm -f /tmp/cloudflared.deb && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Set aliases for python and pip

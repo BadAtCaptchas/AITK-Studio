@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
 const MAX_LOG_BYTES = 200 * 1024;
 
@@ -13,6 +14,19 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  }
+
+  if (!isLocalWorker(job.worker_id)) {
+    if (!job.remote_job_id) {
+      return NextResponse.json({ log: '' });
+    }
+    try {
+      const worker = await getRemoteWorker(job.worker_id);
+      return NextResponse.json(await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/log`));
+    } catch (error) {
+      console.error('Error reading remote log file:', error);
+      return NextResponse.json({ error: 'Error reading remote log file' }, { status: 502 });
+    }
   }
 
   try {

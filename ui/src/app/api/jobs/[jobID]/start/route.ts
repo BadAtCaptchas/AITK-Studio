@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
+import fsp from 'fs/promises';
+import { createRemoteTrainingJobBundle } from '@/server/trainingJobBundle';
+import {
+  getRemoteWorker,
+  isLocalWorker,
+  remoteJson,
+  syncRemoteJob,
+  uploadBundleToWorker,
+} from '@/server/remoteClient';
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -35,6 +44,50 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  }
+
+  if (!isLocalWorker(job.worker_id)) {
+    try {
+      const worker = await getRemoteWorker(job.worker_id);
+      let remoteJobId = job.remote_job_id;
+
+      if (!remoteJobId) {
+        const bundle = await createRemoteTrainingJobBundle(jobID, { includeDatasets: true, checkpointMode: 'all' });
+        try {
+          const imported = await uploadBundleToWorker(worker, bundle.zipPath, job.gpu_ids);
+          remoteJobId = imported.job.id;
+          await db.jobs.update(jobID, {
+            name: imported.job.name,
+            gpu_ids: imported.job.gpu_ids,
+            job_config: imported.job.job_config,
+            remote_job_id: imported.job.id,
+            remote_error: [...bundle.warnings, ...(imported.warnings || [])].join('\n') || null,
+            remote_sync_at: new Date(),
+          });
+        } finally {
+          await fsp.rm(bundle.zipPath, { force: true }).catch(() => undefined);
+        }
+      }
+
+      await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobId)}/start`);
+      await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`);
+      await db.queues
+        .findByGpuIds(job.gpu_ids, job.worker_id)
+        .then(queue =>
+          queue
+            ? db.queues.update(queue.id, { is_running: true })
+            : db.queues.create({ worker_id: job.worker_id, gpu_ids: job.gpu_ids, is_running: true }),
+        );
+      const synced = await syncRemoteJob({
+        ...(await db.jobs.findById(jobID))!,
+        remote_job_id: remoteJobId,
+      });
+      return NextResponse.json(synced);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start remote job';
+      await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
   }
 
   // get highest queue position

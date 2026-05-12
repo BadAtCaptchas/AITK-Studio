@@ -247,7 +247,7 @@ export default function JobActionBar({
             await startJob(job.id);
             // start the queue as well
             if (autoStartQueue) {
-              await startQueue(job.gpu_ids);
+              await startQueue(job.gpu_ids, job.worker_id);
             }
             if (onRefresh) onRefresh();
           }}

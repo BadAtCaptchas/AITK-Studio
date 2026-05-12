@@ -4,7 +4,11 @@ import { GPUApiResponse, GpuInfo } from '@/types';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/utils/api';
 
-export default function useGPUInfo(gpuIds: null | number[] = null, reloadInterval: null | number = null) {
+export default function useGPUInfo(
+  gpuIds: null | number[] = null,
+  reloadInterval: null | number = null,
+  workerID = 'local',
+) {
   const [gpuList, setGpuList] = useState<GpuInfo[]>([]);
   const [isGPUInfoLoaded, setIsLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -12,7 +16,7 @@ export default function useGPUInfo(gpuIds: null | number[] = null, reloadInterva
   const fetchGpuInfo = async () => {
     setStatus('loading');
     try {
-      const data: GPUApiResponse = await apiClient.get('/api/gpu').then(res => res.data);
+      const data: GPUApiResponse = await apiClient.get('/api/gpu', { params: { worker_id: workerID } }).then(res => res.data);
       let gpus = data.gpus.sort((a, b) => a.index - b.index);
       if (gpuIds) {
         gpus = gpus.filter(gpu => gpuIds.includes(gpu.index));
@@ -42,7 +46,7 @@ export default function useGPUInfo(gpuIds: null | number[] = null, reloadInterva
         clearInterval(interval);
       };
     }
-  }, [gpuIds, reloadInterval]); // Added dependencies
+  }, [gpuIds, reloadInterval, workerID]); // Added dependencies
 
   return { gpuList, setGpuList, isGPUInfoLoaded, status, refreshGpuInfo: fetchGpuInfo };
 }

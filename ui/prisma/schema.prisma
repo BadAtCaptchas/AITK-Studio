@@ -16,15 +16,39 @@ model Settings {
 
 model Queue {
   id         Int     @id @default(autoincrement())
-  gpu_ids    String  @unique
+  worker_id  String  @default("local")
+  gpu_ids    String
   is_running Boolean @default(false)
 
+  @@unique([worker_id, gpu_ids])
+  @@index([worker_id])
   @@index([gpu_ids])
+}
+
+model WorkerNode {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  base_url        String
+  api_token       String
+  enabled         Boolean  @default(true)
+  last_status     String   @default("unknown")
+  last_error      String?
+  last_checked_at DateTime?
+  capabilities    String   @default("{}") // JSON string
+  gpus            String   @default("[]") // JSON string
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@index([enabled])
 }
 
 model Job {
   id              String   @id @default(uuid())
   name            String   @unique
+  worker_id       String   @default("local")
+  remote_job_id   String?
+  remote_sync_at  DateTime?
+  remote_error    String?
   gpu_ids         String
   job_config      String // JSON string
   created_at      DateTime @default(now())
@@ -41,6 +65,8 @@ model Job {
   job_ref         String? // can be used for anything for special jobs, like dataset path for caption jobs
 
   @@index([status])
+  @@index([worker_id])
+  @@index([remote_job_id])
   @@index([gpu_ids])
   @@index([job_type])
   @@index([job_ref])

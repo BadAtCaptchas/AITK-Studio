@@ -8,13 +8,32 @@ export type DbDate = string | Date;
 
 export interface Queue {
   id: number;
+  worker_id: string;
   gpu_ids: string;
   is_running: boolean;
+}
+
+export interface WorkerNode {
+  id: string;
+  name: string;
+  base_url: string;
+  enabled: boolean;
+  last_status: string;
+  last_error: string | null;
+  last_checked_at: DbDate | null;
+  capabilities: string;
+  gpus: string;
+  created_at: DbDate;
+  updated_at: DbDate;
 }
 
 export interface Job {
   id: string;
   name: string;
+  worker_id: string;
+  remote_job_id: string | null;
+  remote_sync_at: DbDate | null;
+  remote_error: string | null;
   gpu_ids: string;
   job_config: string;
   created_at: DbDate;

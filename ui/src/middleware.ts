@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 
 // Direct media/download URLs are loaded by <img>, <audio>, <video>, and links,
 // so they cannot attach the localStorage bearer token used by apiClient.
-const publicReadRoutePrefixes = ['/api/img/', '/api/files/'];
+const publicReadRoutePrefixes = ['/api/img/', '/api/files/', '/api/remote-assets'];
 const publicReadMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export function middleware(request: NextRequest) {

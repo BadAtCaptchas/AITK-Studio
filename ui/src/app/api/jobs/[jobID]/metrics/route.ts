@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
 export const runtime = 'nodejs';
 
@@ -35,11 +36,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const job = await db.jobs.findById(jobID);
   if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
 
+  const url = new URL(request.url);
+
+  if (!isLocalWorker(job.worker_id)) {
+    if (!job.remote_job_id) {
+      return NextResponse.json({ keys: [], keyInfo: [], series: {} });
+    }
+    try {
+      const worker = await getRemoteWorker(job.worker_id);
+      return NextResponse.json(
+        await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`),
+      );
+    } catch (error) {
+      console.error('Error reading remote metrics:', error);
+      return NextResponse.json({ error: 'Error reading remote metrics' }, { status: 502 });
+    }
+  }
+
   const trainingFolder = await getTrainingFolder();
   const jobFolder = path.join(trainingFolder, job.name);
   const logPath = path.join(jobFolder, 'loss_log.db');
-
-  const url = new URL(request.url);
   const sinceStepParam = url.searchParams.get('since_step');
   const sinceStep = sinceStepParam != null ? Number(sinceStepParam) : null;
   const maxPoints = Math.min(Math.max(Number(url.searchParams.get('max_points') ?? 4000), 2), 20000);

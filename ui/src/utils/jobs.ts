@@ -1,6 +1,7 @@
 import { JobConfig } from '@/types';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
+import { getDisplayPath, getDownloadUrl } from '@/utils/media';
 
 export type TrainingJobCheckpointExportMode = 'latest' | 'all';
 
@@ -142,10 +143,9 @@ export const importTrainingJob = (file: File, gpuIDs: string | null) => {
 };
 
 export const downloadServerFile = (filePath: string, fileName?: string) => {
-  const downloadPath = `/api/files/${encodeURIComponent(filePath)}`;
   const a = document.createElement('a');
-  a.href = downloadPath;
-  a.download = fileName || filePath.split(/[\\/]/).pop() || 'download';
+  a.href = getDownloadUrl(filePath);
+  a.download = fileName || getDisplayPath(filePath).split(/[\\/]/).pop() || 'download';
   document.body.appendChild(a);
   a.click();
   a.remove();

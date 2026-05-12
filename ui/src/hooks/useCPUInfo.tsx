@@ -4,7 +4,7 @@ import { CpuInfo } from '@/types';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/utils/api';
 
-export default function useCPUInfo(reloadInterval: null | number = null) {
+export default function useCPUInfo(reloadInterval: null | number = null, workerID = 'local') {
   const [cpuInfo, setCpuInfo] = useState<CpuInfo | null>(null);
   const [isCPUInfoLoaded, setIsLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -12,7 +12,7 @@ export default function useCPUInfo(reloadInterval: null | number = null) {
   const fetchCpuInfo = async () => {
     setStatus('loading');
     try {
-      const data: CpuInfo = await apiClient.get('/api/cpu').then(res => res.data);
+      const data: CpuInfo = await apiClient.get('/api/cpu', { params: { worker_id: workerID } }).then(res => res.data);
       setCpuInfo(data);
       setStatus('success');
     } catch (err) {
@@ -38,7 +38,7 @@ export default function useCPUInfo(reloadInterval: null | number = null) {
         clearInterval(interval);
       };
     }
-  }, [reloadInterval]); // Added dependencies
+  }, [reloadInterval, workerID]); // Added dependencies
 
   return { cpuInfo, isCPUInfoLoaded, status, refreshCpuInfo: fetchCpuInfo };
 }

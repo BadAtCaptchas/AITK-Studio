@@ -3,11 +3,18 @@ import si from 'systeminformation';
 import { createRequire } from 'module';
 import os from 'os';
 import { CpuInfo } from '@/types';
+import { fetchWorkerCpu, getRemoteWorker, isLocalWorker } from '@/server/remoteClient';
 
 const isMac = os.platform() === 'darwin';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const workerID = new URL(request.url).searchParams.get('worker_id') || 'local';
+    if (!isLocalWorker(workerID)) {
+      const worker = await getRemoteWorker(workerID);
+      return NextResponse.json(await fetchWorkerCpu(worker));
+    }
+
     const cpuInfoRaw = await si.cpu();
     let cpuInfo: CpuInfo;
 

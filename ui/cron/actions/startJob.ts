@@ -166,6 +166,10 @@ export default async function startJob(jobID: string) {
     console.error(`Job with ID ${jobID} not found`);
     return;
   }
+  if (job.worker_id && job.worker_id !== 'local') {
+    console.error(`Job ${jobID} belongs to remote worker ${job.worker_id}; local cron will not start it.`);
+    return;
+  }
   // update job status to 'running', this will run sync so we don't start multiple jobs.
   await db.jobs.update(jobID, {
     status: 'running',

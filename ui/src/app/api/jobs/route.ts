@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
 import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
+import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob, syncRemoteJobs } from '@/server/remoteClient';
 
 
 function ensureApiAccess(request: Request): NextResponse | null {
@@ -44,6 +45,10 @@ function isValidGpuIds(gpuIds: unknown) {
   return /^\d+(,\d+)*$/.test(gpuIds);
 }
 
+function normalizeWorkerId(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : 'local';
+}
+
 function isValidJobName(name: unknown) {
   if (typeof name !== 'string' || name.trim().length === 0) {
     return false;
@@ -71,6 +76,10 @@ export async function GET(request: Request) {
   try {
     if (id) {
       const job = await db.jobs.findById(id);
+      if (job && !isLocalWorker(job.worker_id)) {
+        const synced = await syncRemoteJob(job);
+        return NextResponse.json(await withHFDownloadProgress(synced));
+      }
       return NextResponse.json(job ? await withHFDownloadProgress(job) : job);
     }
     if (job_ref) {
@@ -78,7 +87,7 @@ export async function GET(request: Request) {
       return NextResponse.json(job ? await withHFDownloadProgress(job) : job);
     }
 
-    const jobs = await db.jobs.list({ job_type });
+    const jobs = await syncRemoteJobs(await db.jobs.list({ job_type }));
     return NextResponse.json({ jobs: await Promise.all(jobs.map(job => withHFDownloadProgress(job))) });
   } catch (error) {
     console.error(error);
@@ -95,6 +104,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { id, name, job_config } = body;
+    const worker_id = normalizeWorkerId(body.worker_id);
 
     if (!isValidJobName(name)) {
       return NextResponse.json({ error: 'Invalid job name' }, { status: 400 });
@@ -107,6 +117,16 @@ export async function POST(request: Request) {
 
     if (!isValidGpuIds(gpu_ids)) {
       return NextResponse.json({ error: 'Invalid gpu_ids value' }, { status: 400 });
+    }
+
+    if (!isLocalWorker(worker_id)) {
+      const worker = await db.workerNodes.findById(worker_id);
+      if (!worker) {
+        return NextResponse.json({ error: 'Worker not found' }, { status: 400 });
+      }
+      if (!worker.enabled) {
+        return NextResponse.json({ error: 'Worker is disabled' }, { status: 400 });
+      }
     }
 
     if (!isSafeJobConfig(job_config)) {
@@ -128,11 +148,43 @@ export async function POST(request: Request) {
 
     if (id) {
       // Update existing training
+      const existing = await db.jobs.findById(id);
+      if (!existing) {
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      }
+
+      const workerChanged = existing.worker_id !== worker_id;
+      let remotePatch: any = {};
+      if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
+        const worker = await getRemoteWorker(worker_id);
+        const remoteJob = await remoteJson<any>(worker, '/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: existing.remote_job_id,
+            name,
+            gpu_ids,
+            job_config,
+            ...extra,
+          }),
+        });
+        remotePatch = {
+          name: remoteJob.name,
+          gpu_ids: remoteJob.gpu_ids,
+          job_config: remoteJob.job_config,
+          remote_sync_at: new Date(),
+          remote_error: null,
+        };
+      }
+
       const training = await db.jobs.update(id, {
         name,
+        worker_id,
+        remote_job_id: workerChanged ? null : existing.remote_job_id,
+        remote_error: workerChanged ? null : existing.remote_error,
         gpu_ids,
         job_config: JSON.stringify(job_config),
         ...extra,
+        ...remotePatch,
       });
       return NextResponse.json(training);
     } else {
@@ -142,6 +194,7 @@ export async function POST(request: Request) {
       // Create new training
       const training = await db.jobs.create({
         name,
+        worker_id,
         gpu_ids,
         job_config: JSON.stringify(job_config),
         queue_position: newQueuePosition,

@@ -2,6 +2,7 @@ import processQueue from './actions/processQueue';
 import { disconnectDb } from '../src/server/db';
 import { startTensorBoard } from '../src/server/tensorboard';
 import { getTrainingFolder } from './paths';
+import { getCloudflaredConfig, startCloudflared } from '../src/server/cloudflared';
 
 const SHUTDOWN_TIMEOUT_MS = 3000;
 
@@ -72,6 +73,20 @@ async function startOptionalTensorBoard() {
 
 void startOptionalTensorBoard().catch(error => {
   console.error('Error starting TensorBoard:', error);
+});
+
+async function startOptionalCloudflared() {
+  if (!getCloudflaredConfig().enabled) return;
+  const status = await startCloudflared();
+  if (status.running) {
+    console.log(`cloudflared tunnel started for ${status.publicUrl}`);
+  } else if (status.error) {
+    console.error(`cloudflared did not start: ${status.error}`);
+  }
+}
+
+void startOptionalCloudflared().catch(error => {
+  console.error('Error starting cloudflared:', error);
 });
 
 let shutdownPromise: Promise<void> | null = null;

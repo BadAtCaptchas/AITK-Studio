@@ -6,6 +6,8 @@ from typing import List, Optional
 
 import torch
 
+from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HIDREAM_O1_PIPELINE_PATH = (
@@ -86,6 +88,12 @@ class HidreamO1ConditioningTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least two image patch tokens"):
             self.build_sample(input_ids, 32, 32, self.config)
 
+    def test_rejects_non_integer_prompt_ids(self):
+        input_ids = torch.tensor([101, 102, 103], dtype=torch.bfloat16)
+
+        with self.assertRaisesRegex(ValueError, "requires integer token IDs"):
+            self.build_sample(input_ids, 64, 64, self.config)
+
     def test_rejects_duplicate_special_token_ids_before_rope_indexing(self):
         bad_config = SimpleNamespace(
             image_token_id=VISION_START_TOKEN_ID,
@@ -122,6 +130,18 @@ class HidreamO1ConditioningTest(unittest.TestCase):
                 image_grid_thw=image_grid_thw,
                 skip_vision_start_token=[1],
             )
+
+    def test_advanced_prompt_embeds_to_preserves_integer_token_dtype(self):
+        token_ids = torch.tensor([[101, 102, 103]], dtype=torch.long)
+        prompt_embeds = AdvancedPromptEmbeds(
+            text_embeds=[token_ids],
+            pooled_embeds=[torch.ones((1, 2), dtype=torch.float32)],
+        )
+
+        converted = prompt_embeds.to("cpu", dtype=torch.bfloat16)
+
+        self.assertEqual(converted.text_embeds[0].dtype, torch.long)
+        self.assertEqual(converted.pooled_embeds[0].dtype, torch.bfloat16)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is not available")
     def test_cuda_input_builds_rope_index_on_cpu_and_returns_cuda_tensors(self):

@@ -21,7 +21,7 @@ from toolkit.memory_management import MemoryManager
 from transformers import AutoProcessor
 from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
 from .src.hidream_o1.qwen3_vl_transformers import Qwen3VLForConditionalGeneration
-from .src.hidream_o1.pipeline import HiDreamO1Pipeline, DEFAULT_NOISE_SCALE
+from .src.hidream_o1.pipeline import HiDreamO1Pipeline, DEFAULT_NOISE_SCALE, T_EPS
 from toolkit.models.FakeVAE import FakeVAE
 from typing import TYPE_CHECKING
 from .src.hidream_o1.model_config import model_config
@@ -519,6 +519,15 @@ class HidreamO1Model(BaseModel):
         batch = kwargs.get("batch")
         noise_scale = self.noise_scale
         return (noise * noise_scale - batch.latents).detach()
+
+    def get_loss_weight(self, timesteps: torch.Tensor, loss: torch.Tensor, **kwargs):
+        if kwargs.get("t0_loss_target", False):
+            return None
+        if kwargs.get("loss_target") in ("source", "unaugmented"):
+            return None
+
+        sigma = (timesteps.float() / 1000.0).clamp_min(T_EPS)
+        return sigma.pow(2)
 
     def get_base_model_version(self):
         return self.arch

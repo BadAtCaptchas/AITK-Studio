@@ -109,6 +109,45 @@ class SDTrainer(BaseSDTrainProcess):
         else:
             raise ValueError(f"Unknown guidance loss target type {type(self.train_config.guidance_loss_target)}")
 
+    def apply_model_loss_weight(
+        self,
+        loss: torch.Tensor,
+        timesteps: torch.Tensor,
+        noise_pred: torch.Tensor,
+        target: torch.Tensor,
+        noisy_latents: torch.Tensor,
+        noise: torch.Tensor,
+        batch: 'DataLoaderBatchDTO',
+        loss_target: str,
+    ) -> torch.Tensor:
+        get_loss_weight = getattr(self.sd, "get_loss_weight", None)
+        if get_loss_weight is None:
+            return loss
+
+        loss_weight = get_loss_weight(
+            timesteps=timesteps,
+            loss=loss,
+            noise_pred=noise_pred,
+            target=target,
+            noisy_latents=noisy_latents,
+            noise=noise,
+            batch=batch,
+            loss_target=loss_target,
+            t0_loss_target=self.train_config.t0_loss_target,
+        )
+        if loss_weight is None:
+            return loss
+
+        if not torch.is_tensor(loss_weight):
+            loss_weight = torch.tensor(loss_weight, device=loss.device, dtype=loss.dtype)
+        else:
+            loss_weight = loss_weight.to(device=loss.device, dtype=loss.dtype)
+
+        while loss_weight.dim() < loss.dim():
+            loss_weight = loss_weight.unsqueeze(-1)
+
+        return loss * loss_weight.detach()
+
 
     def before_model_load(self):
         pass
@@ -830,6 +869,17 @@ class SDTrainer(BaseSDTrainProcess):
         if self.train_config.do_prior_divergence and prior_pred is not None:
             loss = loss + (torch.nn.functional.mse_loss(pred.float(), prior_pred.float(), reduction="none") * -1.0)
 
+        loss = self.apply_model_loss_weight(
+            loss=loss,
+            timesteps=timesteps,
+            noise_pred=noise_pred,
+            target=target,
+            noisy_latents=noisy_latents,
+            noise=noise,
+            batch=batch,
+            loss_target=loss_target,
+        )
+
         if self.train_config.train_turbo:
             mask_multiplier = mask_multiplier[:, 3:, :, :]
             # resize to the size of the loss
@@ -857,6 +907,16 @@ class SDTrainer(BaseSDTrainProcess):
                 prior_loss = torch.nn.functional.mse_loss(pred.float(), prior_pred.float(), reduction="none")
 
             prior_loss = prior_loss * prior_mask_multiplier * self.train_config.inverted_mask_prior_multiplier
+            prior_loss = self.apply_model_loss_weight(
+                loss=prior_loss,
+                timesteps=timesteps,
+                noise_pred=noise_pred,
+                target=prior_pred,
+                noisy_latents=noisy_latents,
+                noise=noise,
+                batch=batch,
+                loss_target=loss_target,
+            )
             if torch.isnan(prior_loss).any():
                 print_acc("Prior loss is nan")
                 prior_loss = None

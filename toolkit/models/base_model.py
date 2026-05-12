@@ -303,6 +303,14 @@ class BaseModel:
         raise NotImplementedError(
             "get_noise_prediction must be implemented in child classes")
 
+    def get_loss_weight(
+        self,
+        timesteps: torch.Tensor,
+        loss: torch.Tensor,
+        **kwargs,
+    ) -> Optional[torch.Tensor]:
+        return None
+
     def get_prompt_embeds(self, prompt: str, control_images=None) -> PromptEmbeds:
         raise NotImplementedError(
             "get_prompt_embeds must be implemented in child classes")

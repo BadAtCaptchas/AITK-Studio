@@ -17,6 +17,10 @@ interface SampleImagesMenuProps {
 export const SampleImagesMenu = ({ job }: SampleImagesMenuProps) => {
   const [isZipping, setIsZipping] = useState(false);
 
+  if (job?.worker_id && job.worker_id !== 'local') {
+    return null;
+  }
+
   const downloadZip = async () => {
     if (isZipping) return;
     setIsZipping(true);

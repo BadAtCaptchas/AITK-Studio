@@ -1,9 +1,9 @@
 import { apiClient } from '@/utils/api';
 
-export const startQueue = (queueID: string) => {
+export const startQueue = (queueID: string, workerID = 'local') => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/queue/${queueID}/start`)
+      .get(`/api/queue/${queueID}/start`, { params: { worker_id: workerID } })
       .then(res => res.data)
       .then(data => {
         console.log('Queue started:', data);
@@ -15,10 +15,10 @@ export const startQueue = (queueID: string) => {
       });
   });
 };
-export const stopQueue = (queueID: string) => {
+export const stopQueue = (queueID: string, workerID = 'local') => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/queue/${queueID}/stop`)
+      .get(`/api/queue/${queueID}/stop`, { params: { worker_id: workerID } })
       .then(res => res.data)
       .then(data => {
         console.log('Queue stopped:', data);

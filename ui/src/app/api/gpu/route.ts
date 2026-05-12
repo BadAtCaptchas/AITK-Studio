@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import os from 'os';
+import { getRemoteWorker, isLocalWorker, fetchWorkerGpu } from '@/server/remoteClient';
 
 const execAsync = promisify(exec);
 
@@ -93,8 +94,14 @@ async function getMacGpuInfo(): Promise<MacGpuResult | null> {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const workerID = new URL(request.url).searchParams.get('worker_id') || 'local';
+    if (!isLocalWorker(workerID)) {
+      const worker = await getRemoteWorker(workerID);
+      return NextResponse.json(await fetchWorkerGpu(worker));
+    }
+
     // Get platform
     const platform = os.platform();
     const isWindows = platform === 'win32';

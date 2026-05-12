@@ -3,6 +3,7 @@ import { getTrainingFolder } from '@/server/settings';
 import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
 function resolveWithinRoot(root: string, target: unknown) {
   if (typeof target !== 'string' || target.trim().length === 0) {
@@ -27,6 +28,19 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  }
+
+  if (!isLocalWorker(job.worker_id)) {
+    if (job.remote_job_id) {
+      try {
+        const worker = await getRemoteWorker(job.worker_id);
+        await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/delete`);
+      } catch (error) {
+        console.error('Error deleting remote job before removing local mirror:', error);
+      }
+    }
+    await db.jobs.delete(jobID);
+    return NextResponse.json(job);
   }
 
   const trainingRoot = await getTrainingFolder();

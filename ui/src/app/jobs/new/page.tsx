@@ -11,6 +11,7 @@ import { SelectInput } from '@/components/formInputs';
 import useSettings from '@/hooks/useSettings';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import useDatasetList from '@/hooks/useDatasetList';
+import useWorkers from '@/hooks/useWorkers';
 import YAML from 'yaml';
 import path from 'path';
 import { TopBar, MainContent } from '@/components/layout';
@@ -29,8 +30,10 @@ export default function TrainingForm() {
   const runId = searchParams.get('id');
   const cloneId = searchParams.get('cloneId');
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
+  const [workerID, setWorkerID] = useState('local');
   const { settings, isSettingsLoaded } = useSettings();
-  const { gpuList, isGPUInfoLoaded } = useGPUInfo();
+  const { workers, status: workerStatus } = useWorkers();
+  const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus } = useDatasetList();
   const [datasetOptions, setDatasetOptions] = useState<{ value: string; label: string }[]>([]);
   const [showAdvancedView, setShowAdvancedView] = useState(false);
@@ -112,6 +115,7 @@ export default function TrainingForm() {
         .then(data => {
           console.log('Clone Training:', data);
           setGpuIDs(data.gpu_ids);
+          setWorkerID(data.worker_id || 'local');
           const newJobConfig = migrateJobConfig(JSON.parse(data.job_config));
           newJobConfig.config.name = `${newJobConfig.config.name}_copy`;
           setJobConfig(newJobConfig);
@@ -128,6 +132,7 @@ export default function TrainingForm() {
         .then(data => {
           console.log('Training:', data);
           setGpuIDs(data.gpu_ids);
+          setWorkerID(data.worker_id || 'local');
           setJobConfig(migrateJobConfig(JSON.parse(data.job_config)));
         })
         .catch(error => console.error('Error fetching training:', error));
@@ -136,8 +141,8 @@ export default function TrainingForm() {
 
   useEffect(() => {
     if (isGPUInfoLoaded) {
-      if (gpuIDs === null && gpuList.length > 0) {
-        setGpuIDs(`${gpuList[0].index}`);
+      if (gpuIDs === null) {
+        setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
       }
     }
   }, [gpuList, isGPUInfoLoaded]);
@@ -156,6 +161,7 @@ export default function TrainingForm() {
       .post('/api/jobs', {
         id: runId,
         name: jobConfig.config.name,
+        worker_id: workerID,
         gpu_ids: gpuIDs,
         job_config: jobConfig,
       })
@@ -203,6 +209,20 @@ export default function TrainingForm() {
           <>
             <div>
               <SelectInput
+                value={workerID}
+                onChange={value => {
+                  setWorkerID(value);
+                  setGpuIDs(null);
+                }}
+                options={[
+                  { value: 'local', label: 'Local worker' },
+                  ...workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
+                ]}
+              />
+            </div>
+            <div className="mx-4 bg-gray-200 dark:bg-gray-800 w-1 h-6"></div>
+            <div>
+              <SelectInput
                 value={`${gpuIDs}`}
                 onChange={value => setGpuIDs(value)}
                 options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
@@ -219,6 +239,20 @@ export default function TrainingForm() {
         )}
         {!showAdvancedView && (
           <>
+            <div>
+              <SelectInput
+                value={workerID}
+                onChange={value => {
+                  setWorkerID(value);
+                  setGpuIDs(null);
+                }}
+                options={[
+                  { value: 'local', label: 'Local worker' },
+                  ...workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
+                ]}
+              />
+            </div>
+            <div className="mx-4 bg-gray-200 dark:bg-gray-800 w-1 h-6"></div>
             <div>
               <SelectInput
                 value={`${jobConfig?.config.process[0].type}`}
@@ -314,7 +348,9 @@ export default function TrainingForm() {
               setGpuIDs={setGpuIDs}
               gpuList={gpuList}
               datasetOptions={datasetOptions}
-              isLoading={!isSettingsLoaded || !isGPUInfoLoaded || datasetFetchStatus !== 'success'}
+              isLoading={
+                !isSettingsLoaded || !isGPUInfoLoaded || workerStatus === 'loading' || datasetFetchStatus !== 'success'
+              }
             />
           </ErrorBoundary>
 

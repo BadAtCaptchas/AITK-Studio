@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, ReactNode } from 'react';
 import { isVideo, isAudio } from '@/utils/basic';
+import { getMediaUrl } from '@/utils/media';
 
 interface SampleImageCardProps {
   imageUrl: string;
@@ -66,7 +67,7 @@ const SampleImageCard: React.FC<SampleImageCardProps> = ({
             isAudio(imageUrl) ? (
               <div className="w-full h-full flex items-center justify-center bg-gray-900">
                 <img
-                  src={`/api/audio/art/${encodeURIComponent(imageUrl)}`}
+                  src={getMediaUrl(imageUrl, 'audio-art')}
                   alt={alt}
                   className="w-full h-full object-cover"
                   onError={e => {
@@ -77,7 +78,7 @@ const SampleImageCard: React.FC<SampleImageCardProps> = ({
             ) : isVideo(imageUrl) ? (
               <video
                 ref={videoRef}
-                src={`/api/img/${encodeURIComponent(imageUrl)}`}
+                src={getMediaUrl(imageUrl)}
                 className="w-full h-full object-cover"
                 preload="none"
                 onLoad={handleLoad}
@@ -89,7 +90,7 @@ const SampleImageCard: React.FC<SampleImageCardProps> = ({
               />
             ) : (
               <img
-                src={`/api/img/${encodeURIComponent(imageUrl)}`}
+                src={getMediaUrl(imageUrl)}
                 alt={alt}
                 onLoad={handleLoad}
                 loading="lazy"

@@ -21,12 +21,15 @@ import {
 import {
   countActiveTrainingJobExports,
   createTrainingJobExportProgress,
+  getTrainingJobExportProgress,
   hasActiveTrainingJobExportForJob,
   isTrainingJobExportCancellationRequested,
   updateTrainingJobExportProgress,
   type TrainingJobExportProgressSnapshot,
 } from '@/server/trainingJobExportProgress';
 import { db } from '@/server/db';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { registerRemoteTrainingJobExport } from '@/server/remoteExportProgress';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -514,9 +517,58 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const includeDatasets = body.includeDatasets === true;
     const checkpointMode = parseCheckpointMode(body.checkpointMode);
     const background = body.background === true;
+    const currentJob = await db.jobs.findById(jobID);
+
+    if (currentJob && !isLocalWorker(currentJob.worker_id)) {
+      if (!currentJob.remote_job_id) {
+        return NextResponse.json({ error: 'Remote job has not been uploaded yet' }, { status: 409 });
+      }
+
+      const worker = await getRemoteWorker(currentJob.worker_id);
+      if (!background) {
+        const remoteResult = await remoteJson<any>(worker, `/api/jobs/${encodeURIComponent(currentJob.remote_job_id)}/export`, {
+          method: 'POST',
+          body: JSON.stringify({ includeDatasets, checkpointMode }),
+        });
+        return NextResponse.json({
+          ...remoteResult,
+          zipPath: remoteResult.zipPath
+            ? `remote://${jobID}/file/${encodeURIComponent(remoteResult.zipPath)}/${encodeURIComponent(remoteResult.fileName || 'export.aitk.zip')}`
+            : remoteResult.zipPath,
+        });
+      }
+
+      if (hasActiveTrainingJobExportForJob(jobID)) {
+        return NextResponse.json({ error: 'An export is already running for this job' }, { status: 409 });
+      }
+      const localProgress = createTrainingJobExportProgress(jobID, includeDatasets, checkpointMode);
+      const remoteStarted = await remoteJson<any>(worker, `/api/jobs/${encodeURIComponent(currentJob.remote_job_id)}/export`, {
+        method: 'POST',
+        body: JSON.stringify({ includeDatasets, checkpointMode, background: true }),
+      });
+      registerRemoteTrainingJobExport(localProgress.exportID, {
+        jobID,
+        workerID: currentJob.worker_id,
+        remoteJobID: currentJob.remote_job_id,
+        remoteExportID: remoteStarted.exportID,
+      });
+      updateTrainingJobExportProgress(localProgress.exportID, {
+        status: remoteStarted.progress?.status || 'preparing',
+        message: remoteStarted.progress?.message || 'Remote export started',
+        percent: remoteStarted.progress?.percent || 0,
+      });
+      return NextResponse.json(
+        {
+          exportID: localProgress.exportID,
+          statusUrl: `/api/jobs/${jobID}/export/${localProgress.exportID}`,
+          progress: getTrainingJobExportProgress(localProgress.exportID),
+        },
+        { status: 202 },
+      );
+    }
 
     if (background) {
-      const job = await db.jobs.findById(jobID);
+      const job = currentJob;
       if (!job) {
         return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }

@@ -48,6 +48,10 @@ function normalizeJob(row) {
   return {
     id: String(row.id),
     name: String(row.name || ''),
+    worker_id: String(row.worker_id || 'local'),
+    remote_job_id: row.remote_job_id == null ? null : String(row.remote_job_id),
+    remote_sync_at: row.remote_sync_at == null ? null : asDate(row.remote_sync_at, null),
+    remote_error: row.remote_error == null ? null : String(row.remote_error),
     gpu_ids: String(row.gpu_ids || ''),
     job_config: String(row.job_config || ''),
     created_at: asDate(row.created_at, now),
@@ -71,6 +75,8 @@ async function ensureIndexes(db) {
       { key: { id: 1 }, unique: true },
       { key: { name: 1 }, unique: true },
       { key: { status: 1 } },
+      { key: { worker_id: 1 } },
+      { key: { remote_job_id: 1 } },
       { key: { gpu_ids: 1 } },
       { key: { job_type: 1 } },
       { key: { job_ref: 1 } },
@@ -78,7 +84,14 @@ async function ensureIndexes(db) {
     ]),
     db.collection('queues').createIndexes([
       { key: { id: 1 }, unique: true },
-      { key: { gpu_ids: 1 }, unique: true },
+      { key: { worker_id: 1, gpu_ids: 1 }, unique: true },
+      { key: { worker_id: 1 } },
+      { key: { gpu_ids: 1 } },
+    ]),
+    db.collection('worker_nodes').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { name: 1 }, unique: true },
+      { key: { enabled: 1 } },
     ]),
     db.collection('settings').createIndexes([{ key: { key: 1 }, unique: true }]),
     db.collection('metrics').createIndexes([
@@ -167,7 +180,7 @@ const client = new MongoClient(mongoUri);
 try {
   const [settingsRows, queueRows, jobRows] = await Promise.all([
     all(sqlite, 'SELECT key, value FROM Settings'),
-    all(sqlite, 'SELECT id, gpu_ids, is_running FROM Queue'),
+    all(sqlite, 'SELECT * FROM Queue'),
     all(sqlite, 'SELECT * FROM Job'),
   ]);
 
@@ -195,10 +208,11 @@ try {
     await mongo.collection('queues').bulkWrite(
       queueRows.map(row => ({
         updateOne: {
-          filter: { gpu_ids: String(row.gpu_ids) },
+          filter: { worker_id: String(row.worker_id || 'local'), gpu_ids: String(row.gpu_ids) },
           update: {
             $set: {
               id: Number(row.id),
+              worker_id: String(row.worker_id || 'local'),
               gpu_ids: String(row.gpu_ids),
               is_running: Boolean(row.is_running),
             },

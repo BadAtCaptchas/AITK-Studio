@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import useJobsList from '@/hooks/useJobsList';
 import Link from 'next/link';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
-import type { GpuInfo, Job, JobConfig, Queue } from '@/types';
+import type { Job, JobConfig, Queue } from '@/types';
 import JobActionBar from './JobActionBar';
 import useQueueList from '@/hooks/useQueueList';
 import classNames from 'classnames';
@@ -10,6 +10,7 @@ import { startQueue, stopQueue } from '@/utils/queue';
 import { CgSpinner } from 'react-icons/cg';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { HFDownloadProgressInline } from '@/components/HFDownloadProgress';
+import useWorkers from '@/hooks/useWorkers';
 
 interface JobsTableProps {
   autoStartQueue?: boolean;
@@ -21,6 +22,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
   const { jobs, status, refreshJobs } = useJobsList({ onlyActive, reloadInterval: 5000, job_type });
   const { queues, status: queueStatus, refreshQueues } = useQueueList();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
+  const { workers, status: workerStatus } = useWorkers();
 
   const refresh = () => {
     refreshJobs();
@@ -79,6 +81,14 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
       },
     },
     {
+      title: 'Worker',
+      key: 'worker_id',
+      render: row => {
+        if (row.worker_id === 'local') return <span>Local</span>;
+        return <span>{workers.find(worker => worker.id === row.worker_id)?.name || 'Remote'}</span>;
+      },
+    },
+    {
       title: 'GPU',
       key: 'gpu_ids',
     },
@@ -113,23 +123,55 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
   const jobsDict = useMemo(() => {
     if (!isGPUInfoLoaded) return {};
     if (jobs.length === 0) return {};
-    let jd: { [key: string]: { name: string; jobs: Job[] } } = {};
+    let jd: { [key: string]: { name: string; jobs: Job[]; workerID: string; gpuIDs: string | null } } = {};
+    const workerName = (workerID: string) => {
+      if (workerID === 'local') return 'Local';
+      return workers.find(worker => worker.id === workerID)?.name || 'Remote';
+    };
+    const gpuName = (workerID: string, gpuID: string) => {
+      if (workerID === 'local') {
+        return gpuList.find(gpu => `${gpu.index}` === gpuID)?.name || `GPU #${gpuID}`;
+      }
+      const worker = workers.find(worker => worker.id === workerID);
+      try {
+        const gpus = JSON.parse(worker?.gpus || '[]') as Array<{ index: number; name: string }>;
+        return gpus.find(gpu => `${gpu.index}` === gpuID)?.name || `GPU #${gpuID}`;
+      } catch {
+        return `GPU #${gpuID}`;
+      }
+    };
+
     gpuList.forEach(gpu => {
-      jd[`${gpu.index}`] = { name: `${gpu.name}`, jobs: [] };
+      jd[`local:${gpu.index}`] = {
+        name: `Local / ${gpu.name}`,
+        jobs: [],
+        workerID: 'local',
+        gpuIDs: `${gpu.index}`,
+      };
     });
-    jd['Idle'] = { name: 'Idle', jobs: [] };
+    queues.forEach(queue => {
+      const key = `${queue.worker_id}:${queue.gpu_ids}`;
+      if (!jd[key]) {
+        jd[key] = {
+          name: `${workerName(queue.worker_id)} / ${gpuName(queue.worker_id, queue.gpu_ids)}`,
+          jobs: [],
+          workerID: queue.worker_id,
+          gpuIDs: queue.gpu_ids,
+        };
+      }
+    });
+    jd['idle'] = { name: 'Idle', jobs: [], workerID: 'local', gpuIDs: null };
     jobs.forEach(job => {
-      const gpu = gpuList.find(gpu => job.gpu_ids?.split(',').includes(gpu.index.toString())) as GpuInfo;
-      const key = `${gpu?.index || '0'}`;
+      const key = `${job.worker_id || 'local'}:${job.gpu_ids || '0'}`;
       if (['queued', 'running', 'stopping'].includes(job.status) && key in jd) {
         jd[key].jobs.push(job);
       } else {
-        jd['Idle'].jobs.push(job);
+        jd['idle'].jobs.push(job);
       }
     });
     // sort the queued/running jobs by queue position
     Object.keys(jd).forEach(key => {
-      if (key === 'Idle') {
+      if (key === 'idle') {
         jd[key].jobs.sort((a, b) => {
           // sort by updated_at, newest first
           return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
@@ -143,9 +185,9 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
       }
     });
     return jd;
-  }, [jobs, queues, isGPUInfoLoaded]);
+  }, [jobs, queues, workers, gpuList, isGPUInfoLoaded]);
 
-  let isLoading = status === 'loading' || queueStatus === 'loading' || !isGPUInfoLoaded;
+  let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading' || !isGPUInfoLoaded;
 
   // if job dict is populated, we are always loaded
   if (Object.keys(jobsDict).length > 0) isLoading = false;
@@ -154,11 +196,12 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
     <div>
       {Object.keys(jobsDict)
         .sort()
-        .filter(key => key !== 'Idle')
-        .map(gpuKey => {
-          const queue = queues.find(q => `${q.gpu_ids}` === gpuKey) as Queue;
+        .filter(key => key !== 'idle')
+        .map(groupKey => {
+          const group = jobsDict[groupKey];
+          const queue = queues.find(q => q.worker_id === group.workerID && q.gpu_ids === group.gpuIDs) as Queue;
           return (
-            <div key={gpuKey} className="mb-6">
+            <div key={groupKey} className="mb-6">
               <div
                 className={classNames(
                   'text-md flex px-4 py-1 rounded-t-lg',
@@ -167,7 +210,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
                 )}
               >
                 <div className="flex items-center space-x-2 flex-1 py-2">
-                  <h2 className="font-semibold text-white">{jobsDict[gpuKey].name}</h2>
+                  <h2 className="font-semibold text-white">{group.name}</h2>
                   <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300"># {queue?.gpu_ids}</span>
                 </div>
                 <div className="text-sm text-gray-300 italic flex items-center">
@@ -176,7 +219,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
                       <span className="text-green-100 dark:text-green-400 mr-2">Queue Running</span>
                       <button
                         onClick={async () => {
-                          await stopQueue(queue.gpu_ids as string);
+                          await stopQueue(queue.gpu_ids as string, queue.worker_id);
                           refresh();
                         }}
                         className="ml-4 text-xs text-white bg-red-600 hover:bg-red-700 px-2 py-1 rounded"
@@ -189,7 +232,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
                       <span className="text-red-100 dark:text-red-400 mr-2">Queue Stopped</span>
                       <button
                         onClick={async () => {
-                          await startQueue(gpuKey);
+                          await startQueue(group.gpuIDs as string, group.workerID);
                           refresh();
                         }}
                         className="ml-4 text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded"
@@ -202,7 +245,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
               </div>
               <UniversalTable
                 columns={columns}
-                rows={jobsDict[gpuKey].jobs}
+                rows={group.jobs}
                 isLoading={isLoading}
                 onRefresh={refresh}
                 theadClassName={
@@ -214,14 +257,14 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
             </div>
           );
         })}
-      {!onlyActive && Object.keys(jobsDict).includes('Idle') && (
+      {!onlyActive && Object.keys(jobsDict).includes('idle') && (
         <div className="mb-6 opacity-50">
           <div className="text-md flex px-4 py-1 rounded-t-lg bg-slate-600">
             <div className="flex items-center space-x-2 flex-1 py-2">
               <h2 className="font-semibold text-gray-100">Idle</h2>
             </div>
           </div>
-          <UniversalTable columns={columns} rows={jobsDict['Idle'].jobs} isLoading={isLoading} onRefresh={refresh} />
+          <UniversalTable columns={columns} rows={jobsDict['idle'].jobs} isLoading={isLoading} onRefresh={refresh} />
         </div>
       )}
     </div>

@@ -42,6 +42,8 @@ try {
       { key: { id: 1 }, unique: true },
       { key: { name: 1 }, unique: true },
       { key: { status: 1 } },
+      { key: { worker_id: 1 } },
+      { key: { remote_job_id: 1 } },
       { key: { gpu_ids: 1 } },
       { key: { job_type: 1 } },
       { key: { job_ref: 1 } },
@@ -49,7 +51,14 @@ try {
     ]),
     db.collection('queues').createIndexes([
       { key: { id: 1 }, unique: true },
-      { key: { gpu_ids: 1 }, unique: true },
+      { key: { worker_id: 1, gpu_ids: 1 }, unique: true },
+      { key: { worker_id: 1 } },
+      { key: { gpu_ids: 1 } },
+    ]),
+    db.collection('worker_nodes').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { name: 1 }, unique: true },
+      { key: { enabled: 1 } },
     ]),
     db.collection('settings').createIndexes([{ key: { key: 1 }, unique: true }]),
     db.collection('metrics').createIndexes([

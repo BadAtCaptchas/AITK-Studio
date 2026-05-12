@@ -3,7 +3,7 @@ import type { Job, Queue } from '../../src/types';
 import startJob from './startJob';
 
 export default async function processQueue() {
-  const queues: Queue[] = await db.queues.list('id');
+  const queues: Queue[] = await db.queues.list('id', { worker_id: 'local' });
 
   for (const queue of queues) {
     if (!queue.is_running) {
@@ -11,6 +11,7 @@ export default async function processQueue() {
       const runningJobs: Job[] = await db.jobs.list({
         status: 'running',
         gpu_ids: queue.gpu_ids,
+        worker_id: 'local',
       });
 
       for (const job of runningJobs) {
@@ -26,6 +27,7 @@ export default async function processQueue() {
       const runningJob: Job | null = await db.jobs.findFirst({
         status: ['running', 'stopping'],
         gpu_ids: queue.gpu_ids,
+        worker_id: 'local',
       });
 
       if (runningJob) {
@@ -36,6 +38,7 @@ export default async function processQueue() {
         const nextJob: Job | null = await db.jobs.findFirst({
           status: 'queued',
           gpu_ids: queue.gpu_ids,
+          worker_id: 'local',
           order: 'queue_asc',
         });
         if (nextJob) {

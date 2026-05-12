@@ -43,6 +43,29 @@ require_auth_secret() {
     fi
 }
 
+validate_cloudflared_config() {
+    if [[ "${AITK_CLOUDFLARED_ENABLED:-}" != "1" ]]; then
+        return
+    fi
+
+    require_auth_secret
+
+    if ! command -v "${AITK_CLOUDFLARED_BIN:-cloudflared}" >/dev/null 2>&1; then
+        echo "ERROR: cloudflared is enabled but the cloudflared binary was not found." >&2
+        exit 1
+    fi
+
+    if [[ -z "${AITK_CLOUDFLARED_PUBLIC_URL:-}" ]]; then
+        echo "ERROR: AITK_CLOUDFLARED_PUBLIC_URL is required when cloudflared is enabled." >&2
+        exit 1
+    fi
+
+    if [[ -z "${AITK_CLOUDFLARED_TOKEN_FILE:-}" || ! -f "${AITK_CLOUDFLARED_TOKEN_FILE}" ]]; then
+        echo "ERROR: AITK_CLOUDFLARED_TOKEN_FILE must point to an existing tunnel token file." >&2
+        exit 1
+    fi
+}
+
 # Export env vars
 export_env_vars() {
     echo "Exporting environment variables..."
@@ -60,5 +83,6 @@ echo "Pod Started"
 setup_ssh
 export_env_vars
 require_auth_secret
+validate_cloudflared_config
 echo "Starting OstrisAI-Toolkit Revamped UI..."
 cd /app/ai-toolkit/ui && npm run update_db && npm run start

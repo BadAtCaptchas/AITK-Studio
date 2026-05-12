@@ -281,6 +281,24 @@ AITK_MONGODB_URI="mongodb://localhost:27017" npm run migrate_sqlite_to_mongo
 
 The migration imports jobs, queues, settings, and existing per-job `loss_log.db` metrics. SQLite files are left untouched so you can switch back to SQLite.
 
+## Remote workers and Cloudflare Tunnel
+
+The UI can control remote AI Toolkit worker instances. Each worker runs the same UI/cron app with `AI_TOOLKIT_AUTH` set. Add the worker from **Settings > Remote Workers** using its public URL and bearer token. When you start a job assigned to a remote worker, the central UI creates a `.aitk.zip` job bundle with datasets, uploads it to the worker, starts the worker queue, and then proxies logs, metrics, samples, checkpoints, and exports back through the central UI.
+
+Remote workers are authoritative after upload. The central UI mirrors status, step, speed, config, and error text from the worker. Base model files are not bundled; they must exist on the worker or the import will report warnings.
+
+Optional managed `cloudflared` support is configured with environment variables on any instance you want to expose through Cloudflare Tunnel:
+
+```bash
+AITK_CLOUDFLARED_ENABLED=1
+AITK_CLOUDFLARED_PUBLIC_URL=https://your-worker.example.com
+AITK_CLOUDFLARED_TOKEN_FILE=/path/to/cloudflared-token
+AITK_CLOUDFLARED_METRICS_ADDR=127.0.0.1:60123
+AITK_CLOUDFLARED_LOG_LEVEL=info
+```
+
+`AI_TOOLKIT_AUTH` is required when `AITK_CLOUDFLARED_ENABLED=1`. Tunnel tokens are read from a token file and are not exposed through the browser. The app can start, stop, and show tunnel status from the Settings page; Docker images include `cloudflared` for this workflow.
+
 ## Training job import/export
 
 The UI can export and import training jobs from the queue page. Use the action menu on a training job to export either:

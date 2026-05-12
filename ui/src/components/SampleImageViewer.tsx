@@ -9,6 +9,7 @@ import { openConfirm } from './ConfirmModal';
 import { apiClient } from '@/utils/api';
 import { isVideo, isAudio } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
+import { getDisplayPath, getMediaUrl, parseRemoteAssetRef } from '@/utils/media';
 
 interface Props {
   imgPath: string | null; // current image path
@@ -55,13 +56,14 @@ export default function SampleImageViewer({
     // handle windows C:\\Apps\\AI-Toolkit\\AI-Toolkit\\output\\LoRA-Name\\samples\\1763563000704__000004000_0.jpg
     const ii = { filename: '', step: 0, promptIdx: 0 };
     if (imgPath) {
+      const displayPath = getDisplayPath(imgPath);
       // handle windows
       let filename: string | null = null;
-      if (imgPath.includes('\\')) {
-        const parts = imgPath.split('\\');
+      if (displayPath.includes('\\')) {
+        const parts = displayPath.split('\\');
         filename = parts[parts.length - 1];
       } else {
-        filename = imgPath.split('/').pop() || null;
+        filename = displayPath.split('/').pop() || null;
       }
       if (!filename) {
         console.error('Filename could not be determined from imgPath:', imgPath);
@@ -218,14 +220,14 @@ export default function SampleImageViewer({
                 (isAudio(displayedImgPath) ? (
                   <div className="w-[500px] h-[500px] max-w-[95vw] max-h-[82vh]">
                     <AudioPlayer
-                      src={`/api/img/${encodeURIComponent(displayedImgPath)}`}
-                      title={displayedImgPath.replace(/^.*[\\/]/, '')}
+                      src={getMediaUrl(displayedImgPath)}
+                      title={getDisplayPath(displayedImgPath).replace(/^.*[\\/]/, '')}
                       autoPlay
                     />
                   </div>
                 ) : isVideo(displayedImgPath) ? (
                   <video
-                    src={`/api/img/${encodeURIComponent(displayedImgPath)}`}
+                    src={getMediaUrl(displayedImgPath)}
                     className="w-auto h-auto max-w-[95vw] max-h-[82vh] object-contain"
                     preload="none"
                     playsInline
@@ -235,7 +237,7 @@ export default function SampleImageViewer({
                   />
                 ) : (
                   <img
-                    src={`/api/img/${encodeURIComponent(displayedImgPath)}`}
+                    src={getMediaUrl(displayedImgPath)}
                     alt="Sample Image"
                     className="w-auto h-auto max-w-[95vw] max-h-[82vh] object-contain"
                   />
@@ -257,7 +259,7 @@ export default function SampleImageViewer({
                 <div key={imgPath} className="flex space-x-2 mr-4">
                   {showingControlIdx !== null && (
                     <img
-                      src={`/api/img/${encodeURIComponent(imgPath!)}`}
+                      src={getMediaUrl(imgPath!)}
                       alt="Main"
                       className="max-h-12 max-w-12 object-contain bg-black border-2 border-gray-700 hover:border-gray-500 rounded cursor-pointer"
                       onClick={() => setShowingControlIdx(null)}
@@ -267,7 +269,7 @@ export default function SampleImageViewer({
                   {controlImages.map((ci, idx) => (
                     <img
                       key={idx}
-                      src={`/api/img/${encodeURIComponent(ci)}`}
+                      src={getMediaUrl(ci)}
                       alt={`Control ${idx + 1}`}
                       className={`max-h-12 max-w-12 object-contain bg-black border-2 rounded cursor-pointer ${
                         showingControlIdx === idx ? 'border-blue-500' : 'border-gray-700 hover:border-gray-500'
@@ -304,43 +306,45 @@ export default function SampleImageViewer({
                     <MenuItem>
                       <a
                         className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
-                        href={`/api/img/${encodeURIComponent(imgPath)}`}
-                        download={imgPath.replace(/^.*[\\/]/, '')}
+                        href={getMediaUrl(imgPath)}
+                        download={getDisplayPath(imgPath).replace(/^.*[\\/]/, '')}
                       >
                         Download
                       </a>
                     </MenuItem>
                   )}
-                  <MenuItem>
-                    <div
-                      className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded"
-                      onClick={() => {
-                        let message = `Are you sure you want to delete this sample? This action cannot be undone.`;
-                        openConfirm({
-                          title: 'Delete Sample',
-                          message: message,
-                          type: 'warning',
-                          confirmText: 'Delete',
-                          onConfirm: () => {
-                            apiClient
-                              .post('/api/img/delete', { imgPath: imgPath })
-                              .then(() => {
-                                console.log('Image deleted:', imgPath);
-                                onChange(null);
-                                if (refreshSampleImages) {
-                                  refreshSampleImages();
-                                }
-                              })
-                              .catch(error => {
-                                console.error('Error deleting image:', error);
-                              });
-                          },
-                        });
-                      }}
-                    >
-                      Delete Sample
-                    </div>
-                  </MenuItem>
+                  {imgPath && !parseRemoteAssetRef(imgPath) && (
+                    <MenuItem>
+                      <div
+                        className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded"
+                        onClick={() => {
+                          let message = `Are you sure you want to delete this sample? This action cannot be undone.`;
+                          openConfirm({
+                            title: 'Delete Sample',
+                            message: message,
+                            type: 'warning',
+                            confirmText: 'Delete',
+                            onConfirm: () => {
+                              apiClient
+                                .post('/api/img/delete', { imgPath: imgPath })
+                                .then(() => {
+                                  console.log('Image deleted:', imgPath);
+                                  onChange(null);
+                                  if (refreshSampleImages) {
+                                    refreshSampleImages();
+                                  }
+                                })
+                                .catch(error => {
+                                  console.error('Error deleting image:', error);
+                                });
+                            },
+                          });
+                        }}
+                      >
+                        Delete Sample
+                      </div>
+                    </MenuItem>
+                  )}
                 </MenuItems>
               </Menu>
             </div>

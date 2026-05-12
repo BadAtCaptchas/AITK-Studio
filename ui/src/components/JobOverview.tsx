@@ -29,8 +29,8 @@ export default function JobOverview({ job }: JobOverviewProps) {
   // Track whether we should auto-scroll to bottom
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   console.log('job.gpu_ids', job.gpu_ids);
-  const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, 5000);
-  const { cpuInfo, isCPUInfoLoaded } = useCPUInfo(5000);
+  const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, 5000, job.worker_id);
+  const { cpuInfo, isCPUInfoLoaded } = useCPUInfo(5000, job.worker_id);
   const totalSteps = getTotalSteps(job);
   const progress = (job.step / totalSteps) * 100;
   const isStopping = job.stop && job.status === 'running';
@@ -109,6 +109,11 @@ export default function JobOverview({ job }: JobOverviewProps) {
 
         <div className="p-4 space-y-6 flex flex-col flex-grow">
           <HFDownloadProgressBand progress={hfDownloadProgress} />
+          {job.remote_error && (
+            <div className="rounded-lg border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+              {job.remote_error}
+            </div>
+          )}
 
           {/* Progress Bar */}
           {job.job_type === 'train' && (
@@ -139,7 +144,9 @@ export default function JobOverview({ job }: JobOverviewProps) {
               <Cpu className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               <div>
                 <p className="text-xs text-gray-400">Assigned GPUs</p>
-                <p className="text-sm font-medium text-gray-200">GPUs: {job.gpu_ids}</p>
+                <p className="text-sm font-medium text-gray-200">
+                  {job.worker_id === 'local' ? 'Local' : 'Remote'} GPUs: {job.gpu_ids}
+                </p>
               </div>
             </div>
 

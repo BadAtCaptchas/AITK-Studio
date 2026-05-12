@@ -20,6 +20,8 @@ SD_TRAINER_PATH = (
     / "sd_trainer"
     / "SDTrainer.py"
 )
+BASE_SD_TRAIN_PROCESS_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
+UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
 
 
 def load_class_with_methods(source_path: Path, source_class_name: str, method_names: set[str], output_class_name: str):
@@ -60,7 +62,7 @@ class HidreamO1LossWeightTest(unittest.TestCase):
         )
         self.model = model_cls()
 
-    def test_sigma_squared_weights_shrink_low_timestep_spikes(self):
+    def test_velocity_fallback_sigma_squared_weights_shrink_low_timestep_spikes(self):
         timesteps = torch.tensor([1.0, 1000.0])
         weights = self.model.get_loss_weight(
             timesteps=timesteps,
@@ -83,6 +85,34 @@ class HidreamO1LossWeightTest(unittest.TestCase):
 
         self.assertIsNone(self.model.get_loss_weight(timesteps, loss, t0_loss_target=True))
         self.assertIsNone(self.model.get_loss_weight(timesteps, loss, loss_target="source"))
+
+    def test_t0_loss_formula_recovers_o1_x0_prediction(self):
+        latents = torch.arange(24, dtype=torch.float32).view(2, 3, 2, 2) / 24.0
+        noise = torch.linspace(-1.0, 1.0, 24, dtype=torch.float32).view(2, 3, 2, 2)
+        x0_pred = latents + torch.tensor([0.25, -0.125]).view(2, 1, 1, 1)
+        sigma = (torch.tensor([1.0, 500.0]) / 1000.0).clamp_min(0.001).view(2, 1, 1, 1)
+        noisy_latents = (1.0 - sigma) * latents + sigma * (noise * 8.0)
+
+        velocity_pred = (noisy_latents - x0_pred) / sigma
+        reconstructed_t0 = noisy_latents - sigma * velocity_pred
+
+        self.assertTrue(torch.allclose(reconstructed_t0, x0_pred))
+
+
+class HidreamO1DefaultConfigTest(unittest.TestCase):
+    def test_backend_defaults_o1_to_t0_loss_when_omitted(self):
+        source = BASE_SD_TRAIN_PROCESS_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("model_config.get('arch') == 'hidream_o1'", source)
+        self.assertIn("raw_train_config['t0_loss_target'] = True", source)
+
+    def test_ui_preset_defaults_o1_to_t0_loss(self):
+        source = UI_OPTIONS_PATH.read_text(encoding="utf-8")
+        start = source.index("name: 'hidream_o1'")
+        end = source.index("disableSections", start)
+        hidream_o1_block = source[start:end]
+
+        self.assertIn("'config.process[0].train.t0_loss_target': [true, undefined]", hidream_o1_block)
 
 
 class TrainerLossWeightBroadcastTest(unittest.TestCase):

@@ -104,6 +104,12 @@ class HidreamO1DefaultConfigTest(unittest.TestCase):
         source = BASE_SD_TRAIN_PROCESS_PATH.read_text(encoding="utf-8")
 
         self.assertIn("model_config.get('arch') == 'hidream_o1'", source)
+        self.assertIn("raw_train_config.setdefault('batch_size', 2)", source)
+        self.assertIn("raw_train_config.setdefault('steps', 8000)", source)
+        self.assertIn("raw_train_config.setdefault('optimizer', 'adamw8bit')", source)
+        self.assertIn("raw_train_config.setdefault('lr', 0.00003)", source)
+        self.assertIn("raw_train_config.setdefault('timestep_type', 'sigmoid')", source)
+        self.assertIn("optimizer_params.setdefault('weight_decay', 0.0001)", source)
         self.assertIn("raw_train_config['t0_loss_target'] = True", source)
 
     def test_ui_preset_defaults_o1_to_t0_loss(self):
@@ -112,6 +118,14 @@ class HidreamO1DefaultConfigTest(unittest.TestCase):
         end = source.index("disableSections", start)
         hidream_o1_block = source[start:end]
 
+        self.assertIn("'config.process[0].train.batch_size': [2, 1]", hidream_o1_block)
+        self.assertIn("'config.process[0].train.steps': [8000, 3000]", hidream_o1_block)
+        self.assertIn("'config.process[0].train.optimizer': ['adamw8bit', 'adamw8bit']", hidream_o1_block)
+        self.assertIn("'config.process[0].train.lr': [0.00003, 0.0001]", hidream_o1_block)
+        self.assertIn("'config.process[0].train.optimizer_params.weight_decay': [0.0001, 0.0001]", hidream_o1_block)
+        self.assertIn("'config.process[0].train.timestep_type': ['sigmoid', 'sigmoid']", hidream_o1_block)
+        self.assertIn("'config.process[0].train.content_or_style': ['balanced', 'balanced']", hidream_o1_block)
+        self.assertIn("'config.process[0].train.loss_type': ['mse', 'mse']", hidream_o1_block)
         self.assertIn("'config.process[0].train.t0_loss_target': [true, undefined]", hidream_o1_block)
 
 

@@ -108,8 +108,23 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.network_config = None
         raw_train_config = copy.deepcopy(self.get_conf('train', {}))
         model_config = self.get_conf('model', {})
-        if model_config.get('arch') == 'hidream_o1' and 't0_loss_target' not in raw_train_config:
-            raw_train_config['t0_loss_target'] = True
+        if model_config.get('arch') == 'hidream_o1':
+            raw_train_config.setdefault('batch_size', 2)
+            raw_train_config.setdefault('gradient_accumulation', 1)
+            raw_train_config.setdefault('steps', 8000)
+            raw_train_config.setdefault('optimizer', 'adamw8bit')
+            raw_train_config.setdefault('lr', 0.00003)
+            raw_train_config.setdefault('timestep_type', 'sigmoid')
+            raw_train_config.setdefault('content_or_style', 'balanced')
+            raw_train_config.setdefault('loss_type', 'mse')
+            optimizer_params = raw_train_config.get('optimizer_params')
+            if optimizer_params is None:
+                optimizer_params = {}
+                raw_train_config['optimizer_params'] = optimizer_params
+            if isinstance(optimizer_params, dict):
+                optimizer_params.setdefault('weight_decay', 0.0001)
+            if 't0_loss_target' not in raw_train_config:
+                raw_train_config['t0_loss_target'] = True
         self.train_config = TrainConfig(**raw_train_config)
         self.modules_being_trained: List[torch.nn.Module] = []
 

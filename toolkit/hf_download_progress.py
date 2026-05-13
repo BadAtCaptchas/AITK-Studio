@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional
 
 PROGRESS_PATH_ENV = "AITK_HF_DOWNLOAD_PROGRESS_PATH"
 WRITE_INTERVAL_SECONDS = 0.25
+REPLACE_RETRY_COUNT = 5
+REPLACE_RETRY_DELAY_SECONDS = 0.05
 
 _installed = False
 
@@ -26,6 +28,14 @@ def _coerce_number(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return number if number >= 0 else None
+
+
+def _safe_unlink(path: str):
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass
 
 
 class HFDownloadProgressReporter:
@@ -142,17 +152,31 @@ class HFDownloadProgressReporter:
 
         payload = self.snapshot(status=status, message=message)
         directory = os.path.dirname(self.progress_path)
-        fd, tmp_path = tempfile.mkstemp(prefix=".hf_download_progress.", suffix=".tmp", dir=directory)
+        tmp_path = None
         try:
+            fd, tmp_path = tempfile.mkstemp(prefix=".hf_download_progress.", suffix=".tmp", dir=directory)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, separators=(",", ":"))
-            os.replace(tmp_path, self.progress_path)
-        finally:
-            if os.path.exists(tmp_path):
+
+            last_error = None
+            for attempt in range(REPLACE_RETRY_COUNT):
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+                    os.replace(tmp_path, self.progress_path)
+                    tmp_path = None
+                    return
+                except PermissionError as exc:
+                    last_error = exc
+                    time.sleep(REPLACE_RETRY_DELAY_SECONDS * (attempt + 1))
+
+            if last_error is not None:
+                print(
+                    f"[AITK] Warning: could not update Hugging Face download progress: {last_error}"
+                )
+        except OSError as exc:
+            print(f"[AITK] Warning: could not write Hugging Face download progress: {exc}")
+        finally:
+            if tmp_path is not None:
+                _safe_unlink(tmp_path)
 
 
 class _TrackedProgress:

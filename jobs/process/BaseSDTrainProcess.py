@@ -1848,6 +1848,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.hook_after_sd_init_before_load()
         # run base sd process run
         self.sd.load_model()
+        if hasattr(self.sd, 'set_moe_aux_loss_alpha'):
+            self.sd.set_moe_aux_loss_alpha(self.train_config.moe_aux_loss_alpha)
         
         self.sd.add_after_sample_image_hook(self.sample_step_hook)
 

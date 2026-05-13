@@ -601,6 +601,8 @@ class TrainConfig:
         self.max_loss_debug: bool = kwargs.get("max_loss_debug", False)
         # will clip the loss to this amount to prevent wild outliers
         self.max_loss: Optional[float] = kwargs.get("max_loss", None)
+        # HiDream-I1/E1 MoE router load-balancing loss. Other model families ignore it.
+        self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
 ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21']

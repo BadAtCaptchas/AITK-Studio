@@ -73,8 +73,8 @@ git clone https://github.com/rmcc3/ai-toolkit.git
 cd ai-toolkit
 python3 -m venv venv
 source venv/bin/activate
-# install torch first
-pip3 install --no-cache-dir torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
+# install the older-GPU Torch stack first
+pip3 install -r requirements_torch_legacy_cu128.txt
 pip3 install -r requirements.txt
 ```
 
@@ -90,7 +90,7 @@ git clone https://github.com/rmcc3/ai-toolkit.git
 cd ai-toolkit
 python -m venv venv
 .\venv\Scripts\activate
-pip install --no-cache-dir torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements_torch_legacy_cu128.txt
 pip install -r requirements.txt
 ```
 
@@ -98,7 +98,13 @@ pip install -r requirements.txt
 
 Blackwell GPUs such as the RTX 50-series require a PyTorch build with CUDA 12.8 or newer and `sm_120` kernels. If an older CUDA wheel is installed, PyTorch may still report that CUDA is available, but model loading or training can fail or run poorly once kernels are used.
 
-Use the CUDA 12.8 PyTorch install command above on Windows and standard Linux systems. DGX OS users should use the CUDA 13.0 command in `dgx_instructions.md`.
+Use the Blackwell Torch stack on Windows and standard Linux systems:
+
+```bash
+pip install -r requirements_torch_blackwell_cu128.txt
+```
+
+DGX OS users should use the CUDA 13.0 stack in `dgx_instructions.md`.
 
 You can verify the active environment with:
 
@@ -106,7 +112,11 @@ You can verify the active environment with:
 python scripts/check_blackwell_cuda.py
 ```
 
-OstrisAI-Toolkit Revamped also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
+OstrisAI-Toolkit Revamped also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Non-Blackwell GPUs continue with a warning if the active Torch version is outside the older-GPU known-good stack. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
+
+### HiDream-O1 PyTorch note
+
+The HiDream-O1 model card currently warns against PyTorch 2.9.x. For older GPUs such as L40, use `requirements_torch_legacy_cu128.txt` (`torch==2.8.0`, `torchcodec==0.7.0`). For Blackwell, use `requirements_torch_blackwell_cu128.txt` or the DGX CUDA 13.0 stack (`torch==2.10.0`, `torchcodec==0.10.0`). AI Toolkit warns at runtime when HiDream-O1 is started on PyTorch 2.9.x.
 
 ### Quantized model cache
 
@@ -385,7 +395,7 @@ cd ai-toolkit
 git submodule update --init --recursive
 python -m venv venv
 source venv/bin/activate
-pip install torch
+pip install -r requirements_torch_legacy_cu128.txt
 pip install -r requirements.txt
 pip install --upgrade accelerate transformers diffusers huggingface_hub #Optional, run it if you run into issues
 ```

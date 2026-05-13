@@ -1,12 +1,24 @@
 import os
 import re
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 BLACKWELL_MIN_CUDA = (12, 8)
+OLDER_GPU_RECOMMENDED_TORCH = (2, 8)
+BLACKWELL_RECOMMENDED_TORCH = (2, 10)
+HIDREAM_O1_NOT_RECOMMENDED_TORCH = (2, 9)
+OLDER_GPU_INSTALL_COMMAND = (
+    "pip install --no-cache-dir torch==2.8.0 torchvision==0.23.0 "
+    "torchaudio==2.8.0 torchcodec==0.7.0 "
+    "--index-url https://download.pytorch.org/whl/cu128 "
+    "--extra-index-url https://pypi.org/simple"
+)
 BLACKWELL_INSTALL_COMMAND = (
-    "pip install --no-cache-dir torch==2.9.1 torchvision==0.24.1 "
-    "torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128"
+    "pip install --no-cache-dir torch==2.10.0 torchvision==0.25.0 "
+    "torchaudio==2.10.0 torchcodec==0.10.0 "
+    "--index-url https://download.pytorch.org/whl/cu128 "
+    "--extra-index-url https://pypi.org/simple"
 )
 
 
@@ -17,6 +29,34 @@ def parse_cuda_version(version: Optional[str]) -> Optional[Tuple[int, int]]:
     if not match:
         return None
     return int(match.group(1)), int(match.group(2) or 0)
+
+
+def parse_torch_version(version: Optional[str]) -> Optional[Tuple[int, int]]:
+    if not version:
+        return None
+    match = re.match(r"^\s*(\d+)\.(\d+)", version)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def is_hidream_o1_torch_not_recommended(torch_module: Any = None) -> bool:
+    if torch_module is None:
+        import torch as torch_module
+    torch_version = parse_torch_version(getattr(torch_module, "__version__", None))
+    return torch_version == HIDREAM_O1_NOT_RECOMMENDED_TORCH
+
+
+def format_hidream_o1_torch_warning(torch_module: Any = None) -> str:
+    if torch_module is None:
+        import torch as torch_module
+    torch_version = getattr(torch_module, "__version__", "unknown")
+    return (
+        "HiDream-O1-Image does not recommend PyTorch 2.9.x. "
+        f"Installed torch: {torch_version}. "
+        "Use the older-GPU stack with torch==2.8.0, or the Blackwell stack "
+        "with torch==2.10.0 when your GPU requires Blackwell CUDA kernels."
+    )
 
 
 def _format_capability(capability: Sequence[int]) -> str:
@@ -47,6 +87,7 @@ def get_cuda_compatibility_report(torch_module: Any = None) -> Dict[str, Any]:
         "arch_list": [],
         "devices": [],
         "problems": [],
+        "warnings": [],
     }
 
     cuda = getattr(torch_module, "cuda", None)
@@ -55,7 +96,9 @@ def get_cuda_compatibility_report(torch_module: Any = None) -> Dict[str, Any]:
 
     report["arch_list"] = _get_supported_arch_list(torch_module)
     cuda_version = parse_cuda_version(report["torch_cuda"])
+    torch_version = parse_torch_version(report["torch_version"])
     device_count = cuda.device_count()
+    has_blackwell = False
 
     for device_idx in range(device_count):
         name = cuda.get_device_name(device_idx)
@@ -71,6 +114,7 @@ def get_cuda_compatibility_report(torch_module: Any = None) -> Dict[str, Any]:
 
         if not _is_blackwell_capability(capability):
             continue
+        has_blackwell = True
 
         cuda_too_old = cuda_version is None or cuda_version < BLACKWELL_MIN_CUDA
         arch_missing = bool(report["arch_list"]) and arch_name not in report["arch_list"]
@@ -82,6 +126,19 @@ def get_cuda_compatibility_report(torch_module: Any = None) -> Dict[str, Any]:
                     "arch_missing": arch_missing,
                 }
             )
+
+    if (
+        not has_blackwell
+        and torch_version is not None
+        and torch_version != OLDER_GPU_RECOMMENDED_TORCH
+    ):
+        report["warnings"].append(
+            {
+                "type": "older_gpu_alternate_torch",
+                "installed_torch": report["torch_version"],
+                "recommended_torch": "2.8.x",
+            }
+        )
 
     return report
 
@@ -110,12 +167,28 @@ def format_cuda_compatibility_error(report: Dict[str, Any]) -> str:
     )
 
 
-def check_blackwell_cuda_compatibility(torch_module: Any = None):
+def format_cuda_compatibility_warnings(report: Dict[str, Any]) -> List[str]:
+    messages = []
+    for warning in report.get("warnings", []):
+        if warning.get("type") == "older_gpu_alternate_torch":
+            messages.append(
+                "AI Toolkit detected a non-Blackwell NVIDIA GPU with a PyTorch "
+                f"version outside the older-GPU recommendation. Installed torch: "
+                f"{warning.get('installed_torch')}. The older-GPU known-good stack is:\n"
+                f"{OLDER_GPU_INSTALL_COMMAND}\n"
+                "Continuing without blocking training."
+            )
+    return messages
+
+
+def check_blackwell_cuda_compatibility(torch_module: Any = None, warn: bool = True):
     if os.environ.get("AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK", "0") == "1":
         return None
 
     report = get_cuda_compatibility_report(torch_module)
     if report["problems"]:
         raise RuntimeError(format_cuda_compatibility_error(report))
+    if warn:
+        for message in format_cuda_compatibility_warnings(report):
+            warnings.warn(message, RuntimeWarning, stacklevel=2)
     return report
-

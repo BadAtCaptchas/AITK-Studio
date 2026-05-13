@@ -432,6 +432,44 @@ class HidreamModel(BaseModel):
     def get_transformer_block_names(self) -> Optional[List[str]]:
         return ['double_stream_blocks', 'single_stream_blocks']
 
+    def set_moe_aux_loss_alpha(self, alpha: float):
+        count = 0
+        for module in self.model.modules():
+            gate = getattr(module, 'gate', None)
+            if gate is not None and hasattr(gate, 'alpha'):
+                gate.alpha = float(alpha)
+                count += 1
+        if count > 0:
+            self.print_and_status_update(
+                f"Set HiDream MoE aux loss alpha to {float(alpha):g} on {count} gates"
+            )
+
+    def get_moe_routing_stats(self):
+        stats = []
+        for module in self.model.modules():
+            gate = getattr(module, 'gate', None)
+            gate_stats = getattr(gate, 'last_routing_stats', None)
+            if gate_stats:
+                stats.append(gate_stats)
+        if not stats:
+            return {}
+
+        summary = {'moe_layers': float(len(stats))}
+        keys = [
+            'aux_loss',
+            'expert_usage_min',
+            'expert_usage_max',
+            'expert_usage_std',
+            'router_prob_min',
+            'router_prob_max',
+            'router_prob_std',
+        ]
+        for key in keys:
+            values = [entry[key].detach().float().cpu() for entry in stats if key in entry]
+            if values:
+                summary[f'moe_{key}'] = torch.stack(values).mean()
+        return summary
+
     def convert_lora_weights_before_save(self, state_dict):
         # currently starte with transformer. but needs to start with diffusion_model. for comfyui
         new_sd = {}

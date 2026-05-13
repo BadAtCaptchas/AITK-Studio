@@ -22,6 +22,7 @@ SD_TRAINER_PATH = (
 )
 BASE_SD_TRAIN_PROCESS_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
 UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
+HIDREAM_O1_EXAMPLE_PATH = PROJECT_ROOT / "config" / "examples" / "train_lora_hidream_o1_48gb.yaml"
 
 
 def load_class_with_methods(source_path: Path, source_class_name: str, method_names: set[str], output_class_name: str):
@@ -99,11 +100,36 @@ class HidreamO1LossWeightTest(unittest.TestCase):
         self.assertTrue(torch.allclose(reconstructed_t0, x0_pred))
 
 
+class HidreamO1SchedulerBroadcastTest(unittest.TestCase):
+    def setUp(self):
+        scheduler_cls = load_class_with_methods(
+            HIDREAM_O1_MODEL_PATH,
+            "HidreamO1FlowmatchScheduler",
+            {"add_noise"},
+            "HidreamO1FlowmatchSchedulerForTest",
+        )
+        self.scheduler = scheduler_cls()
+        self.scheduler.noise_scale = 8.0
+
+    def test_add_noise_broadcasts_timesteps_over_batch_not_width(self):
+        original = torch.zeros((2, 3, 4, 5), dtype=torch.float32)
+        noise = torch.ones_like(original)
+        timesteps = torch.tensor([250.0, 750.0])
+
+        noisy = self.scheduler.add_noise(original, noise, timesteps)
+
+        self.assertEqual(noisy.shape, original.shape)
+        self.assertTrue(torch.allclose(noisy[0], torch.full_like(noisy[0], 2.0)))
+        self.assertTrue(torch.allclose(noisy[1], torch.full_like(noisy[1], 6.0)))
+
+
 class HidreamO1DefaultConfigTest(unittest.TestCase):
     def test_backend_defaults_o1_to_t0_loss_when_omitted(self):
         source = BASE_SD_TRAIN_PROCESS_PATH.read_text(encoding="utf-8")
 
         self.assertIn("model_config.get('arch') == 'hidream_o1'", source)
+        self.assertIn("raw_train_config.setdefault('noise_scheduler', 'flowmatch')", source)
+        self.assertIn("raw_train_config.setdefault('dtype', 'bf16')", source)
         self.assertIn("raw_train_config.setdefault('batch_size', 2)", source)
         self.assertIn("raw_train_config.setdefault('steps', 8000)", source)
         self.assertIn("raw_train_config.setdefault('optimizer', 'adamw8bit')", source)
@@ -118,6 +144,8 @@ class HidreamO1DefaultConfigTest(unittest.TestCase):
         end = source.index("disableSections", start)
         hidream_o1_block = source[start:end]
 
+        self.assertIn("'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch']", hidream_o1_block)
+        self.assertIn("'config.process[0].train.dtype': ['bf16', 'bf16']", hidream_o1_block)
         self.assertIn("'config.process[0].train.batch_size': [2, 1]", hidream_o1_block)
         self.assertIn("'config.process[0].train.steps': [8000, 3000]", hidream_o1_block)
         self.assertIn("'config.process[0].train.optimizer': ['adamw8bit', 'adamw8bit']", hidream_o1_block)
@@ -127,6 +155,16 @@ class HidreamO1DefaultConfigTest(unittest.TestCase):
         self.assertIn("'config.process[0].train.content_or_style': ['balanced', 'balanced']", hidream_o1_block)
         self.assertIn("'config.process[0].train.loss_type': ['mse', 'mse']", hidream_o1_block)
         self.assertIn("'config.process[0].train.t0_loss_target': [true, undefined]", hidream_o1_block)
+        self.assertIn("'config.process[0].logging.monitor_every': [1, 10]", hidream_o1_block)
+
+    def test_example_config_targets_hidream_o1_image(self):
+        source = HIDREAM_O1_EXAMPLE_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('arch: "hidream_o1"', source)
+        self.assertIn('name_or_path: "HiDream-ai/HiDream-O1-Image"', source)
+        self.assertIn('noise_scheduler: "flowmatch"', source)
+        self.assertIn('t0_loss_target: true', source)
+        self.assertIn('monitor_every: 1', source)
 
 
 class TrainerLossWeightBroadcastTest(unittest.TestCase):

@@ -35,12 +35,22 @@ class SaveConfig:
 
 class LoggingConfig:
     def __init__(self, **kwargs):
-        self.log_every: int = kwargs.get('log_every', 100)
+        self.log_every: Optional[int] = kwargs.get('log_every', 100)
         self.verbose: bool = kwargs.get('verbose', False)
         self.use_wandb: bool = kwargs.get('use_wandb', False)
         self.use_ui_logger: bool = kwargs.get('use_ui_logger', False)
         self.project_name: str = kwargs.get('project_name', 'ai-toolkit')
         self.run_name: str = kwargs.get('run_name', None)
+
+        # Extra telemetry for the UI training monitor. Set monitor_every to 1
+        # for per-step diagnostics, or 0/None to disable the extra diagnostic
+        # stream while leaving ordinary loss logging untouched.
+        self.monitor_every: Optional[int] = kwargs.get('monitor_every', self.log_every)
+        if self.monitor_every is not None:
+            self.monitor_every = int(self.monitor_every)
+        self.monitor_tensor_stats: bool = kwargs.get('monitor_tensor_stats', True)
+        self.monitor_gpu_stats: bool = kwargs.get('monitor_gpu_stats', True)
+        self.monitor_grad_stats: bool = kwargs.get('monitor_grad_stats', True)
 
 class SampleItem:
     def __init__(

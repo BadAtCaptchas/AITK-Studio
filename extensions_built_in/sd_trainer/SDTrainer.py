@@ -109,6 +109,61 @@ class SDTrainer(BaseSDTrainProcess):
         else:
             raise ValueError(f"Unknown guidance loss target type {type(self.train_config.guidance_loss_target)}")
 
+        self._monitor_metrics = OrderedDict()
+
+    def _should_record_monitor_metrics(self) -> bool:
+        logging_config = getattr(self, 'logging_config', None)
+        monitor_every = getattr(logging_config, 'monitor_every', None)
+        if monitor_every is None:
+            return True
+        if monitor_every <= 0:
+            return False
+        return self.step_num == self.start_step or self.step_num % monitor_every == 0
+
+    def _record_monitor_metric(self, key: str, value):
+        if not self._should_record_monitor_metrics():
+            return
+        try:
+            if torch.is_tensor(value):
+                value = value.detach().float().item()
+            value = float(value)
+            if math.isfinite(value):
+                self._monitor_metrics[key] = value
+        except Exception:
+            pass
+
+    def _record_tensor_stats(self, prefix: str, tensor: Optional[torch.Tensor]):
+        logging_config = getattr(self, 'logging_config', None)
+        if not getattr(logging_config, 'monitor_tensor_stats', True):
+            return
+        if tensor is None or not torch.is_tensor(tensor) or tensor.numel() == 0:
+            return
+        if not self._should_record_monitor_metrics():
+            return
+        try:
+            with torch.no_grad():
+                values = tensor.detach()
+                if not torch.is_floating_point(values):
+                    values = values.float()
+                else:
+                    values = values.float()
+                finite_mask = torch.isfinite(values)
+                if not finite_mask.all():
+                    values = values[finite_mask]
+                if values.numel() == 0:
+                    return
+                self._record_monitor_metric(f'{prefix}_mean', values.mean())
+                self._record_monitor_metric(f'{prefix}_std', values.std(unbiased=False) if values.numel() > 1 else 0.0)
+                self._record_monitor_metric(f'{prefix}_min', values.amin())
+                self._record_monitor_metric(f'{prefix}_max', values.amax())
+        except Exception:
+            pass
+
+    def consume_monitor_metrics(self):
+        metrics = OrderedDict(getattr(self, '_monitor_metrics', OrderedDict()))
+        self._monitor_metrics = OrderedDict()
+        return metrics
+
     def apply_model_loss_weight(
         self,
         loss: torch.Tensor,
@@ -869,6 +924,9 @@ class SDTrainer(BaseSDTrainProcess):
         if self.train_config.do_prior_divergence and prior_pred is not None:
             loss = loss + (torch.nn.functional.mse_loss(pred.float(), prior_pred.float(), reduction="none") * -1.0)
 
+        self._record_tensor_stats('train/noise_pred', noise_pred)
+        self._record_tensor_stats('train/target', target)
+
         loss = self.apply_model_loss_weight(
             loss=loss,
             timesteps=timesteps,
@@ -879,6 +937,8 @@ class SDTrainer(BaseSDTrainProcess):
             batch=batch,
             loss_target=loss_target,
         )
+
+        self._record_tensor_stats('train/loss_element', loss)
 
         if self.train_config.train_turbo:
             mask_multiplier = mask_multiplier[:, 3:, :, :]
@@ -933,6 +993,7 @@ class SDTrainer(BaseSDTrainProcess):
             loss = loss.mean([1, 2, 3, 4])
         else:
             loss = loss.mean([1, 2, 3])
+        self._record_tensor_stats('train/loss_per_item', loss)
         # apply loss multiplier before prior loss
         # multiply by our mask
         try:
@@ -983,8 +1044,13 @@ class SDTrainer(BaseSDTrainProcess):
                 print_acc(f"Loss {loss.item()} is greater than max loss {self.train_config.max_loss}. Clipping to max loss.")
                 print_acc(f"timesteps: {timesteps}")
 
+        self._record_monitor_metric('train/loss_unclipped', loss)
+
         if self.train_config.max_loss is not None:
+            self._record_monitor_metric('train/loss_clipped', 1.0 if loss.detach().float().item() > self.train_config.max_loss else 0.0)
             loss = torch.clamp(loss, max=self.train_config.max_loss)
+
+        self._record_monitor_metric('train/loss_final', loss)
         
         return loss
 
@@ -2073,6 +2139,7 @@ class SDTrainer(BaseSDTrainProcess):
                             **pred_kwargs
                         )
                     self.after_unet_predict()
+                    self._record_tensor_stats('train/noise_pred', noise_pred)
 
                     with self.timer('calculate_loss'):
                         noise = noise.to(self.device_torch, dtype=dtype).detach()
@@ -2148,10 +2215,13 @@ class SDTrainer(BaseSDTrainProcess):
         # flush()
 
     def hook_train_loop(self, batch: Union[DataLoaderBatchDTO, List[DataLoaderBatchDTO]]):
+        self._monitor_metrics = OrderedDict()
         if isinstance(batch, list):
             batch_list = batch
         else:
             batch_list = [batch]
+        self._record_monitor_metric('train/accumulation_batches', len(batch_list))
+        self._record_monitor_metric('train/optimizer_step', 0.0 if self.is_grad_accumulation_step else 1.0)
         total_loss = None
         self.optimizer.zero_grad()
         for batch in batch_list:
@@ -2180,11 +2250,21 @@ class SDTrainer(BaseSDTrainProcess):
         if not self.is_grad_accumulation_step:
             # fix this for multi params
             if self.train_config.optimizer != 'adafactor':
+                grad_norm_values = []
                 if isinstance(self.params[0], dict):
                     for i in range(len(self.params)):
-                        self.accelerator.clip_grad_norm_(self.params[i]['params'], self.train_config.max_grad_norm)
+                        grad_norm = self.accelerator.clip_grad_norm_(self.params[i]['params'], self.train_config.max_grad_norm)
+                        if grad_norm is not None:
+                            grad_norm_values.append(grad_norm)
                 else:
-                    self.accelerator.clip_grad_norm_(self.params, self.train_config.max_grad_norm)
+                    grad_norm = self.accelerator.clip_grad_norm_(self.params, self.train_config.max_grad_norm)
+                    if grad_norm is not None:
+                        grad_norm_values.append(grad_norm)
+                if getattr(self.logging_config, 'monitor_grad_stats', True) and grad_norm_values:
+                    grad_norm_tensor = torch.stack([g.detach().float() if torch.is_tensor(g) else torch.tensor(float(g), device=self.device_torch) for g in grad_norm_values])
+                    self._record_monitor_metric('train/grad_norm', grad_norm_tensor.max())
+                    self._record_monitor_metric('train/grad_norm_mean', grad_norm_tensor.mean())
+                    self._record_monitor_metric('train/grad_norm_limit', self.train_config.max_grad_norm)
             # only step if we are not accumulating
             with self.timer('optimizer_step'):
                 self.optimizer.step()

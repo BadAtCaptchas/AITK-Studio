@@ -31,7 +31,7 @@ interface Props {
   job: Job;
 }
 
-type ChartTab = 'loss' | 'learning_rate' | 'throughput';
+type ChartTab = 'loss' | 'learning_rate' | 'throughput' | 'timesteps' | 'gradients' | 'memory';
 type EventKind = 'sample' | 'checkpoint' | 'phase_change';
 
 type PhaseTransition = {
@@ -66,6 +66,13 @@ const LOSS_COLOR = 'rgba(96,165,250,1)';
 const LOSS_TREND_COLOR = 'rgba(37,99,235,0.95)';
 const LR_COLOR = 'rgba(251,191,36,1)';
 const THROUGHPUT_COLOR = 'rgba(52,211,153,1)';
+const DIAGNOSTIC_PALETTE = [
+  'rgba(96,165,250,1)',
+  'rgba(52,211,153,1)',
+  'rgba(251,191,36,1)',
+  'rgba(244,114,182,1)',
+  'rgba(34,211,238,1)',
+];
 const EVENT_STYLE: Record<EventKind, { color: string; label: string }> = {
   sample: { color: 'rgba(251,191,36,0.9)', label: 'Sample' },
   checkpoint: { color: 'rgba(52,211,153,0.9)', label: 'Checkpoint' },
@@ -188,6 +195,23 @@ function latestNumericPoint(points: MetricPoint[] | undefined) {
     if (point?.value != null && Number.isFinite(point.value)) return point;
   }
   return null;
+}
+
+function latestMetricValue(
+  latest: Record<string, MetricPoint | null>,
+  series: Record<string, MetricPoint[]>,
+  key: string,
+) {
+  return latest[key]?.value ?? latestNumericPoint(series[key])?.value ?? null;
+}
+
+function chartYAxisLabel(chartTab: ChartTab) {
+  if (chartTab === 'learning_rate') return 'LR';
+  if (chartTab === 'throughput') return 'steps/sec';
+  if (chartTab === 'timesteps') return 'timestep / sigma';
+  if (chartTab === 'gradients') return 'grad norm';
+  if (chartTab === 'memory') return 'GB / percent';
+  return 'Loss';
 }
 
 function isLearningRateKey(key: string) {
@@ -472,7 +496,7 @@ function buildChartData({
         points: { show: false },
       });
     }
-  } else {
+  } else if (chartTab === 'throughput') {
     const spsPoints = sortedNumericPoints(series['train/steps_per_sec']);
     const stepSecondPoints = sortedNumericPoints(series['train/step_seconds']);
 
@@ -501,6 +525,39 @@ function buildChartData({
     } else {
       data.push([]);
     }
+  } else {
+    const metricKeys =
+      chartTab === 'timesteps'
+        ? ['train/timestep_mean', 'train/timestep_min', 'train/timestep_max', 'train/sigma_mean']
+        : chartTab === 'gradients'
+          ? ['train/grad_norm', 'train/grad_norm_mean', 'train/grad_norm_limit']
+          : [
+              'train/gpu_mem_allocated_gb',
+              'train/gpu_mem_reserved_gb',
+              'train/gpu_mem_max_allocated_gb',
+              'train/gpu_mem_used_pct',
+            ];
+    const presentKeys = metricKeys.filter(key => (series[key]?.length ?? 0) > 0);
+    const stepSet = new Set<number>();
+    for (const key of presentKeys) {
+      for (const point of sortedNumericPoints(series[key])) stepSet.add(point.step);
+    }
+    const xs = Array.from(stepSet).sort((a, b) => a - b);
+    const xsSet = new Set(xs);
+    data.push(xs);
+
+    presentKeys.forEach((key, index) => {
+      const points = sortedNumericPoints(series[key]).filter(point => xsSet.has(point.step));
+      const values = new Map(points.map(point => [point.step, point.value as number]));
+      data.push(xs.map(step => values.get(step) ?? null));
+      seriesConfigs.push({
+        label: cleanLabel(key),
+        stroke: DIAGNOSTIC_PALETTE[index % DIAGNOSTIC_PALETTE.length],
+        width: 2.25,
+        spanGaps: false,
+        points: { show: false },
+      });
+    });
   }
 
   let yClip: { min: number; max: number } | null = null;
@@ -621,6 +678,19 @@ export default function JobLossGraph({ job }: Props) {
   const primaryGpu = getPrimaryGpu(gpuList);
   const gpuMemoryPct =
     primaryGpu && primaryGpu.memory.total > 0 ? (primaryGpu.memory.used / primaryGpu.memory.total) * 100 : null;
+  const latestTimestepMean = latestMetricValue(latest, series, 'train/timestep_mean');
+  const latestSigmaMean = latestMetricValue(latest, series, 'train/sigma_mean');
+  const latestGradNorm = latestMetricValue(latest, series, 'train/grad_norm');
+  const latestGradLimit = latestMetricValue(latest, series, 'train/grad_norm_limit');
+  const latestTrainVramGb =
+    latestMetricValue(latest, series, 'train/gpu_mem_allocated_gb') ?? latestMetricValue(latest, series, 'train/gpu_mem_reserved_gb');
+  const latestTrainReservedGb = latestMetricValue(latest, series, 'train/gpu_mem_reserved_gb');
+  const latestLossFinal = latestMetricValue(latest, series, 'train/loss_final');
+  const latestLossUnclipped = latestMetricValue(latest, series, 'train/loss_unclipped');
+  const latestBatchSize = latestMetricValue(latest, series, 'train/batch_size');
+  const latestEffectiveBatch = latestMetricValue(latest, series, 'train/effective_batch_size');
+  const latestNoisePredStd = latestMetricValue(latest, series, 'train/noise_pred_std');
+  const latestTargetStd = latestMetricValue(latest, series, 'train/target_std');
 
   const phaseTransitions = useMemo(
     () => buildPhaseTransitions(phasePoints, phaseNamePoints),
@@ -750,7 +820,7 @@ export default function JobLossGraph({ job }: Props) {
           values: (_u, ticks) => ticks.map(tick => formatCompact(tick)),
         },
         {
-          label: chartTab === 'learning_rate' ? 'LR' : chartTab === 'throughput' ? 'steps/sec' : 'Loss',
+          label: chartYAxisLabel(chartTab),
           stroke: 'rgba(203,213,225,0.62)',
           grid: { stroke: 'rgba(148,163,184,0.08)' },
           ticks: { stroke: 'rgba(148,163,184,0.18)' },
@@ -875,7 +945,13 @@ export default function JobLossGraph({ job }: Props) {
         ? 'No learning-rate points found yet.'
         : chartTab === 'throughput'
           ? 'No throughput telemetry found yet.'
-          : 'Waiting for loss points...';
+          : chartTab === 'timesteps'
+            ? 'No timestep diagnostics found yet.'
+            : chartTab === 'gradients'
+              ? 'No gradient diagnostics found yet.'
+              : chartTab === 'memory'
+                ? 'No memory diagnostics found yet.'
+                : 'Waiting for loss points...';
 
   return (
     <div className="bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800 flex flex-col h-full">
@@ -905,7 +981,7 @@ export default function JobLossGraph({ job }: Props) {
       </div>
 
       <div className="p-4 space-y-3 flex-1 min-h-0 overflow-auto">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-3">
           <KpiCard
             icon={<Activity className="h-4 w-4 text-emerald-400" />}
             label="Progress"
@@ -957,6 +1033,27 @@ export default function JobLossGraph({ job }: Props) {
             accent={primaryGpu && (primaryGpu.utilization.gpu > 92 || (gpuMemoryPct ?? 0) > 92) ? 'rose' : 'blue'}
             progress={gpuMemoryPct}
           />
+          <KpiCard
+            icon={<Gauge className="h-4 w-4 text-blue-400" />}
+            label="Timestep"
+            value={formatNum(latestTimestepMean, 3)}
+            detail={latestSigmaMean == null ? 'sigma not logged yet' : `sigma ${formatNum(latestSigmaMean, 3)}`}
+            accent="blue"
+          />
+          <KpiCard
+            icon={<Activity className="h-4 w-4 text-emerald-400" />}
+            label="Grad norm"
+            value={formatNum(latestGradNorm, 3)}
+            detail={latestGradLimit == null ? 'clip limit unknown' : `clip ${formatNum(latestGradLimit, 3)}`}
+            accent={latestGradNorm != null && latestGradLimit != null && latestGradNorm > latestGradLimit ? 'rose' : 'emerald'}
+          />
+          <KpiCard
+            icon={<Zap className="h-4 w-4 text-amber-400" />}
+            label="Train VRAM"
+            value={latestTrainVramGb == null ? '--' : `${formatNum(latestTrainVramGb, 3)} GB`}
+            detail={latestTrainReservedGb == null ? 'backend memory not logged yet' : `reserved ${formatNum(latestTrainReservedGb, 3)} GB`}
+            accent="amber"
+          />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-3 min-h-[520px]">
@@ -973,6 +1070,21 @@ export default function JobLossGraph({ job }: Props) {
                   active={chartTab === 'throughput'}
                   onClick={() => setChartTab('throughput')}
                   label="Throughput"
+                />
+                <ChartTabButton
+                  active={chartTab === 'timesteps'}
+                  onClick={() => setChartTab('timesteps')}
+                  label="Timesteps"
+                />
+                <ChartTabButton
+                  active={chartTab === 'gradients'}
+                  onClick={() => setChartTab('gradients')}
+                  label="Gradients"
+                />
+                <ChartTabButton
+                  active={chartTab === 'memory'}
+                  onClick={() => setChartTab('memory')}
+                  label="Memory"
                 />
               </div>
 
@@ -1067,6 +1179,18 @@ export default function JobLossGraph({ job }: Props) {
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+              <div className="text-xs text-gray-400 mb-2">Latest training stats</div>
+              <div className="space-y-1.5">
+                <StatRow label="loss final" value={formatNum(latestLossFinal)} />
+                <StatRow label="loss unclipped" value={formatNum(latestLossUnclipped)} />
+                <StatRow label="batch" value={`${formatNum(latestBatchSize, 3)} / eff ${formatNum(latestEffectiveBatch, 3)}`} />
+                <StatRow label="pred std" value={formatNum(latestNoisePredStd, 3)} />
+                <StatRow label="target std" value={formatNum(latestTargetStd, 3)} />
+                <StatRow label="sigma" value={formatNum(latestSigmaMean, 3)} />
+              </div>
             </div>
 
             <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
@@ -1191,6 +1315,15 @@ function ToggleButton({ checked, onClick, label }: { checked: boolean; onClick: 
     >
       {label}
     </button>
+  );
+}
+
+function StatRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-xs">
+      <span className="text-gray-500 truncate">{label}</span>
+      <span className="text-gray-200 font-medium truncate">{value}</span>
+    </div>
   );
 }
 

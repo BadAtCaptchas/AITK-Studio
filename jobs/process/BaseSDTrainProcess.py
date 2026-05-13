@@ -2,6 +2,7 @@ import copy
 import glob
 import inspect
 import json
+import math
 import random
 import shutil
 from collections import OrderedDict
@@ -109,6 +110,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         raw_train_config = copy.deepcopy(self.get_conf('train', {}))
         model_config = self.get_conf('model', {})
         if model_config.get('arch') == 'hidream_o1':
+            raw_train_config.setdefault('noise_scheduler', 'flowmatch')
+            raw_train_config.setdefault('dtype', 'bf16')
             raw_train_config.setdefault('batch_size', 2)
             raw_train_config.setdefault('gradient_accumulation', 1)
             raw_train_config.setdefault('steps', 8000)
@@ -117,6 +120,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
             raw_train_config.setdefault('timestep_type', 'sigmoid')
             raw_train_config.setdefault('content_or_style', 'balanced')
             raw_train_config.setdefault('loss_type', 'mse')
+            raw_train_config.setdefault('max_grad_norm', 1.0)
+            raw_train_config.setdefault('max_loss', 1.0)
+            raw_train_config.setdefault('standardize_images', False)
+            raw_train_config.setdefault('standardize_latents', False)
+            raw_train_config.setdefault('latent_multiplier', 1.0)
             optimizer_params = raw_train_config.get('optimizer_params')
             if optimizer_params is None:
                 optimizer_params = {}
@@ -810,6 +818,52 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # otherwise params will be gathered through normal means
         return None
 
+    def _collect_runtime_monitor_metrics(self, learning_rate: float = 0.0, step_seconds: Optional[float] = None, did_oom: bool = False):
+        metrics = OrderedDict()
+        logging_config = getattr(self, 'logging_config', None)
+        monitor_every = getattr(logging_config, 'monitor_every', None)
+        if monitor_every is not None:
+            if monitor_every <= 0 or (self.step_num != self.start_step and self.step_num % monitor_every != 0):
+                return metrics
+
+        def add(key, value):
+            try:
+                if torch.is_tensor(value):
+                    value = value.detach().float().item()
+                value = float(value)
+                if math.isfinite(value):
+                    metrics[key] = value
+            except Exception:
+                pass
+
+        add('train/epoch', self.epoch_num)
+        add('train/gradient_accumulation', self.train_config.gradient_accumulation)
+        add('train/gradient_accumulation_steps', self.train_config.gradient_accumulation_steps)
+        add('train/is_optimizer_step', 0.0 if self.is_grad_accumulation_step else 1.0)
+        add('train/learning_rate', learning_rate)
+        add('train/oom_skipped', 1.0 if did_oom else 0.0)
+        if step_seconds is not None and step_seconds > 0:
+            add('train/step_seconds', step_seconds)
+            add('train/steps_per_sec', 1.0 / step_seconds)
+
+        if getattr(logging_config, 'monitor_gpu_stats', True) and torch.cuda.is_available():
+            try:
+                device = self.device_torch
+                if not isinstance(device, torch.device):
+                    device = torch.device(device)
+                if device.type == 'cuda':
+                    add('train/gpu_mem_allocated_gb', torch.cuda.memory_allocated(device) / (1024 ** 3))
+                    add('train/gpu_mem_reserved_gb', torch.cuda.memory_reserved(device) / (1024 ** 3))
+                    add('train/gpu_mem_max_allocated_gb', torch.cuda.max_memory_allocated(device) / (1024 ** 3))
+                    free_bytes, total_bytes = torch.cuda.mem_get_info(device)
+                    add('train/gpu_mem_free_gb', free_bytes / (1024 ** 3))
+                    add('train/gpu_mem_total_gb', total_bytes / (1024 ** 3))
+                    add('train/gpu_mem_used_pct', (1.0 - (free_bytes / total_bytes)) * 100.0 if total_bytes else 0.0)
+            except Exception:
+                pass
+
+        return metrics
+
     def hook_train_loop(self, batch):
         # return loss
         return 0.0
@@ -1343,6 +1397,19 @@ class BaseSDTrainProcess(BaseTrainProcess):
             with self.timer('convert_timestep_indices_to_timesteps'):
                 # convert the timestep_indices to a timestep
                 timesteps = self.sd.noise_scheduler.timesteps[timestep_indices.long()]
+                record_metric = getattr(self, '_record_monitor_metric', None)
+                if callable(record_metric):
+                    record_metric('train/batch_size', batch_size)
+                    record_metric('train/effective_batch_size', batch_size * max(1, int(self.train_config.gradient_accumulation)))
+                    record_metric('train/timestep_index_mean', timestep_indices.float().mean())
+                    record_metric('train/timestep_index_min', timestep_indices.float().min())
+                    record_metric('train/timestep_index_max', timestep_indices.float().max())
+                    record_metric('train/timestep_mean', timesteps.float().mean())
+                    record_metric('train/timestep_min', timesteps.float().min())
+                    record_metric('train/timestep_max', timesteps.float().max())
+                    record_metric('train/sigma_mean', (timesteps.float() / 1000.0).mean())
+                    record_metric('train/sigma_min', (timesteps.float() / 1000.0).min())
+                    record_metric('train/sigma_max', (timesteps.float() / 1000.0).max())
                 
             with self.timer('prepare_noise'):
                 # get noise
@@ -1441,6 +1508,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
 
                 noisy_latents = self.sd.add_noise(latents, noise, timesteps)
+
+                record_tensor_stats = getattr(self, '_record_tensor_stats', None)
+                if callable(record_tensor_stats):
+                    record_tensor_stats('train/latents', latents)
+                    record_tensor_stats('train/noise', noise)
+                    record_tensor_stats('train/noisy_latents', noisy_latents)
 
                 # determine scaled noise
                 # todo do we need to scale this or does it always predict full intensity
@@ -2380,6 +2453,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # torch.cuda.empty_cache()
                 # if optimizer has get_lrs method, then use it
                 learning_rate = 0.0
+                extra_step_metrics = OrderedDict()
                 if not did_oom and loss_dict is not None:
                     if hasattr(self.optimizer, 'get_avg_learning_rate'):
                         learning_rate = self.optimizer.get_avg_learning_rate()
@@ -2394,9 +2468,25 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     else:
                         learning_rate = self.optimizer.param_groups[0]['lr']
 
+                    extra_step_metrics = OrderedDict()
+                    consume_monitor_metrics = getattr(self, 'consume_monitor_metrics', None)
+                    if callable(consume_monitor_metrics):
+                        extra_step_metrics = consume_monitor_metrics()
+
+                    runtime_metrics = self._collect_runtime_monitor_metrics(
+                        learning_rate=learning_rate,
+                        step_seconds=step_seconds,
+                        did_oom=did_oom,
+                    )
+                    extra_step_metrics.update(runtime_metrics)
+
                     prog_bar_string = f"lr: {learning_rate:.1e}"
                     for key, value in loss_dict.items():
                         prog_bar_string += f" {key}: {value:.3e}"
+                    for key in ('train/timestep_mean', 'train/grad_norm', 'train/gpu_mem_allocated_gb'):
+                        value = extra_step_metrics.get(key)
+                        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                            prog_bar_string += f" {key.replace('train/', '')}: {float(value):.3e}"
 
                     if self.progress_bar is not None:
                         self.progress_bar.set_postfix_str(prog_bar_string)
@@ -2407,6 +2497,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     for key, value in loss_dict.items():
                         phase_observed_metrics[f'loss/{key}'] = value
                         phase_observed_metrics[key] = value
+                    phase_observed_metrics.update(extra_step_metrics)
                     self.phase_manager.observe_metrics(self.step_num, phase_observed_metrics)
 
                 # if the batch is a DataLoaderBatchDTO, then we need to clean it up
@@ -2455,6 +2546,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         if self.progress_bar is not None:
                             self.progress_bar.unpause()
 
+                    periodic_log_due = (
+                        (self.logging_config.log_every and self.step_num % self.logging_config.log_every == 0)
+                        or self.logging_config.log_every is None
+                    )
+                    if extra_step_metrics and not periodic_log_due and self.accelerator.is_main_process:
+                        self.logger.log(extra_step_metrics)
+
                     if self.logging_config.log_every and self.step_num % self.logging_config.log_every == 0:
                         if self.progress_bar is not None:
                             self.progress_bar.pause()
@@ -2477,6 +2575,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                             if step_seconds is not None and step_seconds > 0:
                                 telemetry_log['train/step_seconds'] = step_seconds
                                 telemetry_log['train/steps_per_sec'] = 1.0 / step_seconds
+                            telemetry_log.update(extra_step_metrics)
                             self.logger.log(telemetry_log)
                             if loss_dict is not None:
                                 for key, value in loss_dict.items():
@@ -2492,11 +2591,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
                             if step_seconds is not None and step_seconds > 0:
                                 telemetry_log['train/step_seconds'] = step_seconds
                                 telemetry_log['train/steps_per_sec'] = 1.0 / step_seconds
+                            telemetry_log.update(extra_step_metrics)
                             self.logger.log(telemetry_log)
-                            for key, value in loss_dict.items():
-                                self.logger.log({
-                                    f'loss/{key}': value,
-                                })
+                            if loss_dict is not None:
+                                for key, value in loss_dict.items():
+                                    self.logger.log({
+                                        f'loss/{key}': value,
+                                    })
 
 
                     if self.performance_log_every > 0 and self.step_num % self.performance_log_every == 0:

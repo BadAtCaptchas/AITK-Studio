@@ -1,4 +1,5 @@
 import os
+import warnings
 from typing import List, Optional
 
 import torch
@@ -17,6 +18,10 @@ from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
 from toolkit.memory_management import MemoryManager
+from toolkit.cuda_compat import (
+    format_hidream_o1_torch_warning,
+    is_hidream_o1_torch_not_recommended,
+)
 
 from transformers import AutoProcessor
 from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
@@ -131,6 +136,8 @@ class HidreamO1Model(BaseModel):
         super().__init__(
             device, model_config, dtype, custom_pipeline, noise_scheduler, **kwargs
         )
+        if is_hidream_o1_torch_not_recommended(torch):
+            warnings.warn(format_hidream_o1_torch_warning(torch), RuntimeWarning, stacklevel=2)
         self.is_flow_matching = True
         self.is_transformer = True
         self.target_lora_modules = ["Qwen3VLForConditionalGeneration"]

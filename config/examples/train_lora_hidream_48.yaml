@@ -1,10 +1,10 @@
-# HiDream training is still highly experimental. The settings here will take ~35.2GB of vram to train.
+# HiDream training is still experimental. The settings here will take ~35.2GB of vram to train.
 # It is not possible to train on a single 24GB card yet, but I am working on it. If you have more VRAM
 # I highly recommend first disabling quantization on the model itself if you can. You can leave the TEs quantized.
-# HiDream has a mixture of experts that may take special training considerations that I do not
-# have implemented properly. The current implementation seems to work well for LoRA training, but
-# may not be effective for longer training runs. The implementation could change in future updates
-# so your results may vary when this happens.
+# HiDream's image feed-forward blocks use a mixture-of-experts path. Expert LoRA is enabled by
+# default and the trainer adds a small router load-balancing loss while reporting route-balance
+# metrics. The raw gate parameter is kept frozen for normal LoRA training. To use the previous
+# expert-free behavior, add "ff_i.experts" to network.network_kwargs.ignore_if_contains.
 
 ---
 job: extension
@@ -26,10 +26,8 @@ config:
         linear: 32
         linear_alpha: 32
         network_kwargs:
-          # it is probably best to ignore the mixture of experts since only 2 are active each block. It works activating it, but I wouldnt.
-          # proper training of it is not fully implemented
+          # The gate is a raw router parameter, not a Linear module. Keep it frozen for normal LoRA.
           ignore_if_contains:
-            - "ff_i.experts"
             - "ff_i.gate"
       save:
         dtype: bfloat16 # precision to save
@@ -56,6 +54,7 @@ config:
         timestep_type: shift # sigmoid, shift, linear
         optimizer: "adamw8bit"
         lr: 2e-4
+        moe_aux_loss_alpha: 0.01
         # uncomment this to skip the pre training sample
 #        skip_first_sample: true
         # uncomment to completely disable sampling

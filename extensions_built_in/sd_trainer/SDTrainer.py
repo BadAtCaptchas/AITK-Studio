@@ -1345,7 +1345,11 @@ class SDTrainer(BaseSDTrainProcess):
         pass
 
     def after_unet_predict(self):
-        pass
+        if not self._should_record_monitor_metrics():
+            return
+        if hasattr(self.sd, 'get_moe_routing_stats'):
+            for key, value in self.sd.get_moe_routing_stats().items():
+                self._record_monitor_metric(f'train/{key}', value)
 
     def end_of_training_loop(self):
         pass

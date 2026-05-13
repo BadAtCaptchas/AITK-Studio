@@ -21,6 +21,7 @@ import SimpleJob from './SimpleJob';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { apiClient } from '@/utils/api';
+import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -331,6 +332,9 @@ export default function TrainingForm() {
         </div>
       ) : (
         <MainContent>
+          <div className="mb-6">
+            <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} />
+          </div>
           <ErrorBoundary
             fallback={
               <div className="flex items-center justify-center h-64 text-lg text-red-600 font-medium bg-red-100 dark:bg-red-900/20 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg">

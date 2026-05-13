@@ -18,6 +18,7 @@
         }
     },
     "include": [
-        "cron/**/*.ts"
+        "cron/**/*.ts",
+        "src/server/trainingAdvisor.ts"
     ]
 }

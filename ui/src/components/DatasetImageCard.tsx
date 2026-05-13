@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, ReactNode, KeyboardEvent } from 'react';
+import React, { useRef, useEffect, useState, ReactNode, KeyboardEvent, useCallback } from 'react';
 import { FaTrashAlt, FaEye, FaEyeSlash } from 'react-icons/fa';
 import { openConfirm } from './ConfirmModal';
 import classNames from 'classnames';
@@ -32,8 +32,8 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   const [savedCaption, setSavedCaption] = useState<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const fetchCaption = async () => {
-    if (isCaptionLoaded) return;
+  const fetchCaption = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    if (isCaptionLoaded && !force) return;
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -58,7 +58,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
           abortControllerRef.current = null;
         }
       });
-  };
+  }, [imageUrl, isCaptionLoaded]);
 
   const saveCaption = () => {
     const trimmedCaption = caption.trim();
@@ -78,19 +78,26 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   // Only fetch caption when the component is both in viewport and visible
   useEffect(() => {
     if (inViewport && isVisible) {
-      fetchCaption();
+      void fetchCaption();
     }
-  }, [inViewport, isVisible, isCaptionLoaded]);
+  }, [inViewport, isVisible, fetchCaption]);
 
-  // Poll for caption updates every 5 seconds while auto-captioning
+  // Poll only unresolved captions while auto-captioning. Captioned cards should not keep
+  // hitting /api/caption/get every interval once a caption has been written.
   useEffect(() => {
     if (!isAutoCaptioning || !inViewport || !isVisible) return;
+    if (caption.trim()) return;
     const interval = setInterval(() => {
-      // Reset so fetchCaption will re-fetch
-      setIsCaptionLoaded(false);
+      void fetchCaption({ force: true });
     }, 5000);
     return () => clearInterval(interval);
-  }, [isAutoCaptioning, inViewport, isVisible]);
+  }, [isAutoCaptioning, inViewport, isVisible, caption, fetchCaption]);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     // Create intersection observer to check viewport visibility
@@ -123,7 +130,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   const toggleVisibility = (): void => {
     setIsVisible(prev => !prev);
     if (!isVisible && !isCaptionLoaded) {
-      fetchCaption();
+      void fetchCaption();
     }
   };
 

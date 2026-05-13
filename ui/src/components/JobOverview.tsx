@@ -5,6 +5,7 @@ import GPUWidget from '@/components/GPUWidget';
 import CPUWidget from '@/components/CPUWidget';
 import FilesWidget from '@/components/FilesWidget';
 import TensorBoardLink from '@/components/TensorBoardLink';
+import { JobAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import { getTotalSteps } from '@/utils/jobs';
 import { Cpu, HardDrive, Info, Gauge } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -114,6 +115,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
               {job.remote_error}
             </div>
           )}
+          {jobType === 'train' && <JobAdvisorPanel job={job} />}
 
           {/* Progress Bar */}
           {job.job_type === 'train' && (

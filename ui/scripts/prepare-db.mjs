@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { MongoClient } from 'mongodb';
+import sqlite3 from 'sqlite3';
 
 const provider = (process.env.AITK_DB_PROVIDER || 'sqlite').trim().toLowerCase();
 const toolkitRoot = path.resolve(process.cwd(), '..');
@@ -10,6 +11,137 @@ const mongoUri = process.env.AITK_MONGODB_URI?.trim();
 const mongoDbName = process.env.AITK_MONGODB_DB?.trim() || 'ai_toolkit';
 const prismaCli = path.join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma');
 const prismaExecOptions = { stdio: 'inherit', shell: process.platform === 'win32' };
+
+function sqliteAll(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (error, rows) => {
+      if (error) reject(error);
+      else resolve(rows);
+    });
+  });
+}
+
+function sqliteRun(db, sql) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, error => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+async function ensureColumn(db, table, name, definition) {
+  const columns = await sqliteAll(db, `PRAGMA table_info(${table})`);
+  if (!columns.some(column => column.name === name)) {
+    await sqliteRun(db, `ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+  }
+}
+
+async function applySqliteCompatibilitySchema(filename) {
+  const db = new sqlite3.Database(filename);
+  try {
+    await sqliteRun(db, 'PRAGMA busy_timeout=30000;');
+
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS Settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL UNIQUE,
+        value TEXT NOT NULL
+      );
+      `,
+    );
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS Queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker_id TEXT NOT NULL DEFAULT 'local',
+        gpu_ids TEXT NOT NULL,
+        is_running BOOLEAN NOT NULL DEFAULT false
+      );
+      `,
+    );
+    await ensureColumn(db, 'Queue', 'worker_id', "TEXT NOT NULL DEFAULT 'local'");
+
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS Job (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL UNIQUE,
+        worker_id TEXT NOT NULL DEFAULT 'local',
+        remote_job_id TEXT,
+        remote_sync_at DATETIME,
+        remote_error TEXT,
+        gpu_ids TEXT NOT NULL,
+        job_config TEXT NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        status TEXT NOT NULL DEFAULT 'stopped',
+        stop BOOLEAN NOT NULL DEFAULT false,
+        return_to_queue BOOLEAN NOT NULL DEFAULT false,
+        step INTEGER NOT NULL DEFAULT 0,
+        info TEXT NOT NULL DEFAULT '',
+        speed_string TEXT NOT NULL DEFAULT '',
+        queue_position INTEGER NOT NULL DEFAULT 0,
+        pid INTEGER,
+        job_type TEXT NOT NULL DEFAULT 'train',
+        job_ref TEXT
+      );
+      `,
+    );
+    await ensureColumn(db, 'Job', 'worker_id', "TEXT NOT NULL DEFAULT 'local'");
+    await ensureColumn(db, 'Job', 'remote_job_id', 'TEXT');
+    await ensureColumn(db, 'Job', 'remote_sync_at', 'DATETIME');
+    await ensureColumn(db, 'Job', 'remote_error', 'TEXT');
+
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS WorkerNode (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL UNIQUE,
+        base_url TEXT NOT NULL,
+        api_token TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        last_status TEXT NOT NULL DEFAULT 'unknown',
+        last_error TEXT,
+        last_checked_at DATETIME,
+        capabilities TEXT NOT NULL DEFAULT '{}',
+        gpus TEXT NOT NULL DEFAULT '[]',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      `,
+    );
+
+    await sqliteRun(db, 'CREATE UNIQUE INDEX IF NOT EXISTS Queue_worker_id_gpu_ids_key ON Queue(worker_id, gpu_ids);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Queue_worker_id_idx ON Queue(worker_id);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Queue_gpu_ids_idx ON Queue(gpu_ids);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_status_idx ON Job(status);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_worker_id_idx ON Job(worker_id);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_remote_job_id_idx ON Job(remote_job_id);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_gpu_ids_idx ON Job(gpu_ids);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_job_type_idx ON Job(job_type);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_job_ref_idx ON Job(job_ref);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS WorkerNode_enabled_idx ON WorkerNode(enabled);');
+  } finally {
+    await new Promise(resolve => db.close(resolve));
+  }
+}
+
+async function hasLegacySqliteTables(filename) {
+  const currentSchemaTables = new Set(['Settings', 'Queue', 'WorkerNode', 'Job', 'sqlite_sequence']);
+  const db = new sqlite3.Database(filename);
+  try {
+    const tables = await sqliteAll(db, "SELECT name FROM sqlite_master WHERE type = 'table'");
+    return tables.some(table => !currentSchemaTables.has(table.name));
+  } finally {
+    await new Promise(resolve => db.close(resolve));
+  }
+}
 
 if (!['sqlite', 'mongodb'].includes(provider)) {
   throw new Error(`Invalid AITK_DB_PROVIDER "${provider}". Expected "sqlite" or "mongodb".`);
@@ -24,7 +156,18 @@ if (provider === 'sqlite') {
   console.log('Preparing SQLite database...');
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
   fs.closeSync(fs.openSync(sqlitePath, 'a'));
-  execFileSync(prismaCli, ['db', 'push'], prismaExecOptions);
+  if (await hasLegacySqliteTables(sqlitePath)) {
+    console.warn('Legacy SQLite tables detected; preserving them with additive compatibility changes.');
+    await applySqliteCompatibilitySchema(sqlitePath);
+  } else {
+    try {
+      execFileSync(prismaCli, ['db', 'push'], prismaExecOptions);
+    } catch (error) {
+      console.warn('Prisma db push could not apply the schema without dropping legacy tables.');
+      console.warn('Applying additive SQLite compatibility changes instead.');
+      await applySqliteCompatibilitySchema(sqlitePath);
+    }
+  }
   process.exit(0);
 }
 

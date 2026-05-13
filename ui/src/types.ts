@@ -78,6 +78,58 @@ export interface HFDownloadProgress {
 }
 
 /**
+ * Training advisor
+ */
+
+export type AdvisorSeverity = 'critical' | 'warning' | 'info';
+export type AdvisorStage = 'preflight' | 'live';
+export type AdvisorCategory =
+  | 'dataset'
+  | 'config'
+  | 'sampling'
+  | 'stability'
+  | 'performance'
+  | 'phases'
+  | 'metrics';
+
+export interface AdvisorFinding {
+  id: string;
+  severity: AdvisorSeverity;
+  stage: AdvisorStage;
+  category: AdvisorCategory;
+  title: string;
+  message: string;
+  recommendation: string;
+  evidence?: string[];
+  relatedConfigPaths?: string[];
+}
+
+export interface AdvisorDatasetStats {
+  datasetCount: number;
+  scannedFiles: number;
+  mediaFiles: number;
+  captionFiles: number;
+  missingCaptions: number;
+  emptyCaptions: number;
+  captionExtensionMismatches: number;
+  inaccessibleDatasets: number;
+  placeholderDatasets: number;
+  truncated: boolean;
+}
+
+export interface AdvisorResult {
+  summary: {
+    critical: number;
+    warning: number;
+    info: number;
+    text: string;
+  };
+  findings: AdvisorFinding[];
+  scannedAt: string;
+  datasetStats?: AdvisorDatasetStats;
+}
+
+/**
  * GPU API response
  */
 
@@ -347,6 +399,9 @@ export interface SampleConfig {
 export interface LoggingConfig {
   log_every: number;
   use_ui_logger: boolean;
+  monitor_every?: number | null;
+  monitor_tensor_stats?: boolean;
+  monitor_gpu_stats?: boolean;
 }
 
 export interface SliderConfig {

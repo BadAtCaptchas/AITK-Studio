@@ -17,6 +17,10 @@ interface JobOverviewProps {
   job: Job;
 }
 
+function isLiveJob(job: Job) {
+  return job.status === 'queued' || job.status === 'running' || job.status === 'stopping';
+}
+
 export default function JobOverview({ job }: JobOverviewProps) {
   const gpuIds = useMemo(() => {
     if (job.gpu_ids === 'mps') {
@@ -24,17 +28,24 @@ export default function JobOverview({ job }: JobOverviewProps) {
     }
     return job.gpu_ids.split(',').map(id => parseInt(id));
   }, [job.gpu_ids]);
-  const { log, setLog, status: statusLog, refresh: refreshLog } = useJobLog(job.id, 2000);
-  const { progress: hfDownloadProgress } = useJobDownloadProgress(job.id, job.hf_download_progress || null, 1000);
+  const isStopping = job.stop && job.status === 'running';
+  const shouldPoll = isLiveJob(job) || isStopping;
+  const logPollInterval = shouldPoll ? 5000 : null;
+  const downloadPollInterval = shouldPoll ? 2000 : null;
+  const systemPollInterval = shouldPoll ? 10000 : null;
+  const { log, status: statusLog } = useJobLog(job.id, logPollInterval);
+  const { progress: hfDownloadProgress } = useJobDownloadProgress(
+    job.id,
+    job.hf_download_progress || null,
+    downloadPollInterval,
+  );
   const logRef = useRef<HTMLDivElement>(null);
   // Track whether we should auto-scroll to bottom
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
-  console.log('job.gpu_ids', job.gpu_ids);
-  const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, 5000, job.worker_id);
-  const { cpuInfo, isCPUInfoLoaded } = useCPUInfo(5000, job.worker_id);
+  const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, systemPollInterval, job.worker_id);
+  const { cpuInfo, isCPUInfoLoaded } = useCPUInfo(systemPollInterval, job.worker_id);
   const totalSteps = getTotalSteps(job);
   const progress = (job.step / totalSteps) * 100;
-  const isStopping = job.stop && job.status === 'running';
 
   const logLines: string[] = useMemo(() => {
     // split at line breaks on \n or \r\n but not \r

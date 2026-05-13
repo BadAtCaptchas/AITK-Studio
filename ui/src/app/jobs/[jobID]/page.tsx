@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, use } from 'react';
+import { useEffect, useState, use } from 'react';
 import { FaChevronLeft } from 'react-icons/fa';
 import { MdDashboard, MdImage, MdShowChart, MdCode } from 'react-icons/md';
 import { Button } from '@headlessui/react';
@@ -60,11 +60,22 @@ const pages: Page[] = [
   },
 ];
 
+function shouldPollJob(job: Job | null) {
+  if (!job) return true;
+  return job.status === 'queued' || job.status === 'running' || job.status === 'stopping';
+}
+
 export default function JobPage({ params }: { params: Promise<{ jobID: string }> }) {
   const usableParams = use(params);
   const jobID = usableParams.jobID;
-  const { job, status, refreshJob } = useJob(jobID, 5000);
+  const [jobReloadInterval, setJobReloadInterval] = useState<number | null>(5000);
+  const { job, status, refreshJob } = useJob(jobID, jobReloadInterval);
   const [pageKey, setPageKey] = useState<PageKey>('overview');
+
+  useEffect(() => {
+    const nextInterval = shouldPollJob(job) ? 5000 : null;
+    setJobReloadInterval(currentInterval => (currentInterval === nextInterval ? currentInterval : nextInterval));
+  }, [job?.status]);
 
   const page = pages.find(p => p.value === pageKey);
 

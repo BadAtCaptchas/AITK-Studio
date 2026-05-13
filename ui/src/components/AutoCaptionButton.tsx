@@ -1,4 +1,4 @@
-import React, {use, useEffect} from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@headlessui/react';
 import { CaptionDatasetModal, openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import useJobByRef from '@/hooks/useJobByRef';
@@ -11,14 +11,21 @@ type AutoCaptionButtonProps = {
 };
 
 export default function AutoCaptionButton({ datasetPath, setIsAutoCaptioning }: AutoCaptionButtonProps) {
-  const { job, status, refreshJob } = useJobByRef(datasetPath, 5000);
+  const [reloadInterval, setReloadInterval] = useState<number | null>(null);
+  const { job, refreshJob } = useJobByRef(datasetPath, reloadInterval);
+  const isCaptioning = !!job && (job.status === 'running' || job.status === 'queued' || job.status === 'stopping');
+
+  useEffect(() => {
+    setReloadInterval(isCaptioning ? 5000 : null);
+  }, [isCaptioning]);
+
   useEffect(() => {
     if (setIsAutoCaptioning) {
-      setIsAutoCaptioning(!!(job && (job.status === 'running')));
+      setIsAutoCaptioning(isCaptioning);
     }
-  }, [job, setIsAutoCaptioning]);
+  }, [isCaptioning, setIsAutoCaptioning]);
   
-  if (job && (job.status === 'running' || job.status === 'queued')) {
+  if (isCaptioning && job) {
     return (
       <Link href={`/jobs/${job.id}`} className="text-white bg-gray-400 px-3 py-1 rounded-md mr-2 inline-flex items-center gap-1.5">
         <Loader2 className="w-4 h-4 animate-spin" />

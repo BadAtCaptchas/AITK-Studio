@@ -600,7 +600,11 @@ export default function JobLossGraph({ job }: Props) {
   } = useJobMetrics(job.id, job.stop && job.status === 'running' ? 'stopping' : job.status, CHART_MAX_POINTS);
 
   const gpuIds = useMemo(() => getGpuIds(job), [job.gpu_ids]);
-  const { gpuList } = useGPUInfo(gpuIds, 5000);
+  const gpuPollInterval =
+    job.status === 'queued' || job.status === 'running' || job.status === 'stopping' || (job.stop && job.status === 'running')
+      ? 5000
+      : null;
+  const { gpuList } = useGPUInfo(gpuIds, gpuPollInterval);
 
   const [chartTab, setChartTab] = useState<ChartTab>('loss');
   const [useLogScale, setUseLogScale] = useState(false);

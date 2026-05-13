@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
@@ -8,13 +8,12 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
   const [job, setJob] = useState<Job | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-  const refreshJob = () => {
+  const refreshJob = useCallback(() => {
     setStatus('loading');
     apiClient
       .get(`/api/jobs?id=${jobID}`)
       .then(res => res.data)
       .then(data => {
-        console.log('Job:', data);
         setJob(data);
         setStatus('success');
       })
@@ -22,21 +21,19 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
         console.error('Error fetching datasets:', error);
         setStatus('error');
       });
-  };
+  }, [jobID]);
 
   useEffect(() => {
     refreshJob();
 
     if (reloadInterval) {
-      const interval = setInterval(() => {
-        refreshJob();
-      }, reloadInterval);
+      const interval = setInterval(refreshJob, reloadInterval);
 
       return () => {
         clearInterval(interval);
       };
     }
-  }, [jobID]);
+  }, [refreshJob, reloadInterval]);
 
   return { job, setJob, status, refreshJob };
 }

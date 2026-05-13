@@ -1,49 +1,18 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { GPUApiResponse } from '@/types';
+import React, { useState, useEffect, useMemo } from 'react';
 import Loading from '@/components/Loading';
 import GPUWidget from '@/components/GPUWidget';
-import { apiClient } from '@/utils/api';
+import useGPUInfo from '@/hooks/useGPUInfo';
+import { RotateCcw } from 'lucide-react';
 
 const GpuMonitor: React.FC = () => {
-  const [gpuData, setGpuData] = useState<GPUApiResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const { gpuData, gpuList, isGPUInfoLoaded, status, refreshGpuInfo } = useGPUInfo();
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const isFetchingGpuRef = useRef(false);
 
   useEffect(() => {
-    const fetchGpuInfo = async () => {
-      if (isFetchingGpuRef.current) {
-        return;
-      }
-      setLoading(true);
-      isFetchingGpuRef.current = true;
-      apiClient
-        .get('/api/gpu')
-        .then(res => res.data)
-        .then(data => {
-          setGpuData(data);
-          setLastUpdated(new Date());
-          setError(null);
-        })
-        .catch(err => {
-          setError(`Failed to fetch GPU data: ${err instanceof Error ? err.message : String(err)}`);
-        })
-        .finally(() => {
-          isFetchingGpuRef.current = false;
-          setLoading(false);
-        });
-    };
-
-    // Fetch immediately on component mount
-    fetchGpuInfo();
-
-    // Set up interval to fetch every 1 seconds
-    const intervalId = setInterval(fetchGpuInfo, 1000);
-
-    // Clean up interval on component unmount
-    return () => clearInterval(intervalId);
-  }, []);
+    if (status === 'success') {
+      setLastUpdated(new Date());
+    }
+  }, [gpuList, status]);
 
   const getGridClasses = (gpuCount: number): string => {
     switch (gpuCount) {
@@ -69,23 +38,16 @@ const GpuMonitor: React.FC = () => {
     }
   };
 
-  console.log('state', {
-    loading,
-    gpuData,
-    error,
-    lastUpdated,
-  });
-
   const content = useMemo(() => {
-    if (loading && !gpuData) {
+    if (!isGPUInfoLoaded && !gpuData) {
       return <Loading />;
     }
 
-    if (error) {
+    if (status === 'error') {
       return (
         <div className="bg-red-900 border border-red-600 text-red-200 px-4 py-3 rounded relative" role="alert">
           <strong className="font-bold">Error!</strong>
-          <span className="block sm:inline"> {error}</span>
+          <span className="block sm:inline"> Failed to fetch GPU data.</span>
         </div>
       );
     }
@@ -108,7 +70,7 @@ const GpuMonitor: React.FC = () => {
       );
     }
 
-    if (gpuData.gpus.length === 0) {
+    if (gpuList.length === 0) {
       return (
         <div className="bg-yellow-900 border border-yellow-700 text-yellow-300 px-4 py-3 rounded relative" role="alert">
           <span className="block sm:inline">No GPUs found, but nvidia-smi is available.</span>
@@ -116,22 +78,33 @@ const GpuMonitor: React.FC = () => {
       );
     }
 
-    const gridClass = getGridClasses(gpuData?.gpus?.length || 1);
+    const gridClass = getGridClasses(gpuList.length || 1);
 
     return (
       <div className={`grid ${gridClass} gap-3`}>
-        {gpuData.gpus.map((gpu, idx) => (
-          <GPUWidget key={idx} gpu={gpu} />
+        {gpuList.map(gpu => (
+          <GPUWidget key={gpu.index} gpu={gpu} />
         ))}
       </div>
     );
-  }, [loading, gpuData, error]);
+  }, [gpuData, gpuList, isGPUInfoLoaded, status]);
 
   return (
     <div className="w-full">
       <div className="flex justify-between items-center mb-2">
         <h1 className="text-md">GPU Monitor</h1>
-        <div className="text-xs text-gray-500">Last updated: {lastUpdated?.toLocaleTimeString()}</div>
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-gray-500">Last updated: {lastUpdated?.toLocaleTimeString() || '--'}</div>
+          <button
+            type="button"
+            onClick={refreshGpuInfo}
+            disabled={status === 'loading'}
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-60"
+          >
+            <RotateCcw className={`h-3.5 w-3.5 ${status === 'loading' ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
       {content}
     </div>

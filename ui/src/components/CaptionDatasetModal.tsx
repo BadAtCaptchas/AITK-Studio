@@ -46,9 +46,9 @@ export const CaptionDatasetModal: React.FC = () => {
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [existingJobName, setExistingJobName] = useState<string | null>(null);
   const [hasLoadedExistingJob, setHasLoadedExistingJob] = useState(false);
-  const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>('simple');
   const open = modalInfo !== null;
+  const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local', { enabled: open });
   const isSavingRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const showGPUSelect = !isMac();

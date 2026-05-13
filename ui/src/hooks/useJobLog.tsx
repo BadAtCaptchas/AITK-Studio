@@ -1,12 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { apiClient } from '@/utils/api';
-
-interface FileObject {
-  path: string;
-  size: number;
-}
 
 const clean = (text: string): string => {
   // remove \x1B[A\x1B[A
@@ -19,7 +14,7 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
   const didInitialLoadRef = useRef(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>('idle');
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     let loadStatus: 'loading' | 'refreshing' = 'loading';
     if (didInitialLoadRef.current) {
       loadStatus = 'refreshing';
@@ -40,21 +35,20 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
         console.error('Error fetching log:', error);
         setStatus('error');
       });
-  };
+  }, [jobID]);
 
   useEffect(() => {
+    didInitialLoadRef.current = false;
     refresh();
 
     if (reloadInterval) {
-      const interval = setInterval(() => {
-        refresh();
-      }, reloadInterval);
+      const interval = setInterval(refresh, reloadInterval);
 
       return () => {
         clearInterval(interval);
       };
     }
-  }, [jobID]);
+  }, [jobID, reloadInterval, refresh]);
 
   return { log, setLog, status, refresh };
 }

@@ -1,16 +1,22 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
+import { createRequire } from 'module';
 import path from 'path';
 import { MongoClient } from 'mongodb';
 import sqlite3 from 'sqlite3';
 
+const require = createRequire(import.meta.url);
 const provider = (process.env.AITK_DB_PROVIDER || 'sqlite').trim().toLowerCase();
 const toolkitRoot = path.resolve(process.cwd(), '..');
 const sqlitePath = path.resolve(process.env.AITK_SQLITE_PATH || path.join(toolkitRoot, 'aitk_db.db'));
 const mongoUri = process.env.AITK_MONGODB_URI?.trim();
 const mongoDbName = process.env.AITK_MONGODB_DB?.trim() || 'ai_toolkit';
-const prismaCli = path.join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma');
-const prismaExecOptions = { stdio: 'inherit', shell: process.platform === 'win32' };
+const prismaCli = require.resolve('prisma/build/index.js');
+const prismaExecOptions = { stdio: 'inherit' };
+
+function runPrisma(args) {
+  execFileSync(process.execPath, [prismaCli, ...args], prismaExecOptions);
+}
 
 function sqliteAll(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -150,18 +156,18 @@ if (!['sqlite', 'mongodb'].includes(provider)) {
 process.env.DATABASE_URL = `file:${sqlitePath.replace(/\\/g, '/')}`;
 
 console.log(`Generating Prisma client for SQLite fallback (${process.env.DATABASE_URL})...`);
-execFileSync(prismaCli, ['generate'], prismaExecOptions);
+runPrisma(['generate']);
 
 if (provider === 'sqlite') {
   console.log('Preparing SQLite database...');
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
   fs.closeSync(fs.openSync(sqlitePath, 'a'));
   if (await hasLegacySqliteTables(sqlitePath)) {
-    console.warn('Legacy SQLite tables detected; preserving them with additive compatibility changes.');
+    console.log('Additional SQLite tables detected; preserving them with additive compatibility changes.');
     await applySqliteCompatibilitySchema(sqlitePath);
   } else {
     try {
-      execFileSync(prismaCli, ['db', 'push'], prismaExecOptions);
+      runPrisma(['db', 'push']);
     } catch (error) {
       console.warn('Prisma db push could not apply the schema without dropping legacy tables.');
       console.warn('Applying additive SQLite compatibility changes instead.');

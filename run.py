@@ -3,7 +3,8 @@ import sys
 from dotenv import load_dotenv
 # Load the .env file if it exists
 load_dotenv()
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = os.getenv("HF_HUB_ENABLE_HF_TRANSFER", "1")
+default_hf_transfer = "0" if os.name == "nt" else "1"
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = os.getenv("HF_HUB_ENABLE_HF_TRANSFER", default_hf_transfer)
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 seed = None
 if "SEED" in os.environ:

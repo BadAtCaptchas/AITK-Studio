@@ -112,6 +112,7 @@ const startAndWatchJob = (job: Job) => {
         IS_AI_TOOLKIT_UI: '1',
         AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
         PYTHONUNBUFFERED: '1',
+        HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
       };
 
       const args = [runFilePath, configPath, '--log', logPath];

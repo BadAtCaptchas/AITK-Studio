@@ -6,6 +6,25 @@ import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
 const MAX_LOG_BYTES = 200 * 1024;
+const LAUNCH_LOG_FILE = 'launch.log';
+
+async function readTail(logPath: string) {
+  const { size } = await fs.promises.stat(logPath);
+  const bytesToRead = Math.min(size, MAX_LOG_BYTES);
+  const buffer = Buffer.alloc(bytesToRead);
+  const start = Math.max(0, size - bytesToRead);
+  let fileHandle: fs.promises.FileHandle | undefined;
+  let bytesRead = 0;
+  try {
+    fileHandle = await fs.promises.open(logPath, 'r');
+    const readResult = await fileHandle.read(buffer, 0, bytesToRead, start);
+    bytesRead = readResult.bytesRead;
+  } finally {
+    await fileHandle?.close();
+  }
+
+  return buffer.subarray(0, bytesRead).toString('utf-8');
+}
 
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
   const { jobID } = await params;
@@ -32,33 +51,22 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
   try {
     const trainingFolder = await getTrainingFolder();
     const trainingFolderRealPath = await fs.promises.realpath(trainingFolder);
-    const logPath = path.resolve(trainingFolderRealPath, job.name, 'log.txt');
-    const relativePath = path.relative(trainingFolderRealPath, logPath);
+    const jobFolder = path.resolve(trainingFolderRealPath, job.name);
+    const logPath = path.join(jobFolder, 'log.txt');
+    const launchLogPath = path.join(jobFolder, LAUNCH_LOG_FILE);
+    const relativePath = path.relative(trainingFolderRealPath, jobFolder);
     const isPathOutsideTrainingFolder = relativePath.startsWith('..') || path.isAbsolute(relativePath);
 
     if (isPathOutsideTrainingFolder) {
       return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
     }
 
-    if (!fs.existsSync(logPath)) {
+    const readableLogPath = fs.existsSync(logPath) ? logPath : fs.existsSync(launchLogPath) ? launchLogPath : null;
+    if (!readableLogPath) {
       return NextResponse.json({ log: '' });
     }
 
-    const { size } = await fs.promises.stat(logPath);
-    const bytesToRead = Math.min(size, MAX_LOG_BYTES);
-    const buffer = Buffer.alloc(bytesToRead);
-    const start = Math.max(0, size - bytesToRead);
-    let fileHandle: fs.promises.FileHandle | undefined;
-    let bytesRead = 0;
-    try {
-      fileHandle = await fs.promises.open(logPath, 'r');
-      const readResult = await fileHandle.read(buffer, 0, bytesToRead, start);
-      bytesRead = readResult.bytesRead;
-    } finally {
-      await fileHandle?.close();
-    }
-
-    const log = buffer.subarray(0, bytesRead).toString('utf-8');
+    const log = await readTail(readableLogPath);
     return NextResponse.json({ log });
   } catch (error) {
     console.error('Error reading log file:', error);

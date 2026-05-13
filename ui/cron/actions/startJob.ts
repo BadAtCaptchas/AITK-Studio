@@ -5,157 +5,203 @@ import path from 'path';
 import fs from 'fs';
 import { TOOLKIT_ROOT, getTrainingFolder } from '../paths';
 import { getTensorBoardLogDir, getToolkitPythonPath, isTensorBoardEnabled } from '../../src/server/tensorboard';
+
 const isWindows = process.platform === 'win32';
+const LAUNCH_LOG_FILE = 'launch.log';
+
+function appendLaunchLog(launchLogPath: string, message: string) {
+  try {
+    fs.appendFileSync(launchLogPath, `${message}\n`);
+  } catch (error) {
+    console.error('Error writing launch log:', error);
+  }
+}
+
+function archiveExistingLog(filePath: string, logsFolder: string, suffix: string) {
+  if (!fs.existsSync(filePath)) return;
+  if (!fs.existsSync(logsFolder)) {
+    fs.mkdirSync(logsFolder, { recursive: true });
+  }
+
+  let num = 0;
+  while (fs.existsSync(path.join(logsFolder, `${num}_${suffix}`))) {
+    num++;
+  }
+
+  fs.renameSync(filePath, path.join(logsFolder, `${num}_${suffix}`));
+}
 
 const startAndWatchJob = (job: Job) => {
-  // starts and watches the job asynchronously
-  return new Promise<void>(async (resolve, reject) => {
+  return new Promise<void>(async resolve => {
     const jobID = job.id;
+    let launchLogPath = '';
+    let launchLogFd: number | null = null;
 
-    // setup the training
-    const trainingRoot = await getTrainingFolder();
-    const tensorBoardEnabled = isTensorBoardEnabled();
-    const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
-
-    const trainingFolder = path.join(trainingRoot, job.name);
-    if (!fs.existsSync(trainingFolder)) {
-      fs.mkdirSync(trainingFolder, { recursive: true });
-    }
-
-    // make the config file
-    const configPath = path.join(trainingFolder, '.job_config.json');
-
-    //log to path
-    const logPath = path.join(trainingFolder, 'log.txt');
-    const hfDownloadProgressPath = path.join(trainingFolder, '.hf_download_progress.json');
-
-    try {
-      // if the log path exists, move it to a folder called logs and rename it {num}_log.txt, looking for the highest num
-      // if the log path does not exist, create it
-      if (fs.existsSync(logPath)) {
-        const logsFolder = path.join(trainingFolder, 'logs');
-        if (!fs.existsSync(logsFolder)) {
-          fs.mkdirSync(logsFolder, { recursive: true });
-        }
-
-        let num = 0;
-        while (fs.existsSync(path.join(logsFolder, `${num}_log.txt`))) {
-          num++;
-        }
-
-        fs.renameSync(logPath, path.join(logsFolder, `${num}_log.txt`));
+    const closeLaunchLog = () => {
+      if (launchLogFd == null) return;
+      try {
+        fs.closeSync(launchLogFd);
+      } catch {
+        // The descriptor may already be closed if spawn failed early.
+      } finally {
+        launchLogFd = null;
       }
-    } catch (e) {
-      console.error('Error moving log file:', e);
-    }
-
-    // update runtime-local paths before launch. Imported jobs may come from a
-    // different system, and multi-process jobs need every process patched.
-    const dbConfig = getDatabaseConfig();
-    const jobConfig = JSON.parse(job.job_config);
-    jobConfig.config.name = job.name;
-    if (Array.isArray(jobConfig.config?.process)) {
-      jobConfig.config.process.forEach((processConfig: any) => {
-        processConfig.sqlite_db_path = dbConfig.sqlitePath;
-        processConfig.training_folder = trainingRoot;
-        if (tensorBoardEnabled && processConfig.log_dir == null) {
-          processConfig.log_dir = tensorBoardLogDir;
-        }
-      });
-    }
-
-    // write the config file
-    fs.writeFileSync(configPath, JSON.stringify(jobConfig, null, 2));
-    try {
-      fs.rmSync(hfDownloadProgressPath, { force: true });
-    } catch (e) {
-      console.error('Error clearing Hugging Face download progress file:', e);
-    }
-
-    const pythonPath = getToolkitPythonPath();
-
-    const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
-    if (!fs.existsSync(runFilePath)) {
-      console.error(`run.py not found at path: ${runFilePath}`);
-      await db.jobs.update(jobID, {
-        status: 'error',
-        info: `Error launching job: run.py not found`,
-      });
-      return;
-    }
-
-    const additionalEnv: any = {
-      AITK_JOB_ID: jobID,
-      AITK_DB_PROVIDER: dbConfig.provider,
-      AITK_SQLITE_PATH: dbConfig.sqlitePath,
-      AITK_MONGODB_URI: dbConfig.mongoUri || '',
-      AITK_MONGODB_DB: dbConfig.mongoDb,
-      CUDA_DEVICE_ORDER: 'PCI_BUS_ID',
-      CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
-      IS_AI_TOOLKIT_UI: '1',
-      AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
     };
 
-    // Add the --log argument to the command
-    const args = [runFilePath, configPath, '--log', logPath];
-
     try {
-      let subprocess;
+      const trainingRoot = await getTrainingFolder();
+      const tensorBoardEnabled = isTensorBoardEnabled();
+      const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
-      if (isWindows) {
-        // Spawn Python directly on Windows so the process can survive parent exit
-        subprocess = spawn(pythonPath, args, {
-          env: {
-            ...process.env,
-            ...additionalEnv,
-          },
-          cwd: TOOLKIT_ROOT,
-          detached: true,
-          windowsHide: true,
-          stdio: 'ignore', // don't tie stdio to parent
-        });
-      } else {
-        // For non-Windows platforms, fully detach and ignore stdio so it survives daemon-like
-        subprocess = spawn(pythonPath, args, {
-          detached: true,
-          stdio: 'ignore',
-          env: {
-            ...process.env,
-            ...additionalEnv,
-          },
-          cwd: TOOLKIT_ROOT,
+      const trainingFolder = path.join(trainingRoot, job.name);
+      if (!fs.existsSync(trainingFolder)) {
+        fs.mkdirSync(trainingFolder, { recursive: true });
+      }
+
+      const configPath = path.join(trainingFolder, '.job_config.json');
+      const logPath = path.join(trainingFolder, 'log.txt');
+      launchLogPath = path.join(trainingFolder, LAUNCH_LOG_FILE);
+      const hfDownloadProgressPath = path.join(trainingFolder, '.hf_download_progress.json');
+
+      try {
+        const logsFolder = path.join(trainingFolder, 'logs');
+        archiveExistingLog(logPath, logsFolder, 'log.txt');
+        archiveExistingLog(launchLogPath, logsFolder, LAUNCH_LOG_FILE);
+      } catch (error) {
+        console.error('Error moving log file:', error);
+      }
+
+      const dbConfig = getDatabaseConfig();
+      const jobConfig = JSON.parse(job.job_config);
+      jobConfig.config.name = job.name;
+      if (Array.isArray(jobConfig.config?.process)) {
+        jobConfig.config.process.forEach((processConfig: any) => {
+          processConfig.sqlite_db_path = dbConfig.sqlitePath;
+          processConfig.training_folder = trainingRoot;
+          if (tensorBoardEnabled && processConfig.log_dir == null) {
+            processConfig.log_dir = tensorBoardLogDir;
+          }
         });
       }
 
-      // Save the PID to the database and a file for future management (stop/inspect)
+      fs.writeFileSync(configPath, JSON.stringify(jobConfig, null, 2));
+      try {
+        fs.rmSync(hfDownloadProgressPath, { force: true });
+      } catch (error) {
+        console.error('Error clearing Hugging Face download progress file:', error);
+      }
+
+      const pythonPath = getToolkitPythonPath();
+      const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
+      if (!fs.existsSync(runFilePath)) {
+        const message = `Error launching job: run.py not found`;
+        appendLaunchLog(launchLogPath, `[launcher] run.py not found at path: ${runFilePath}`);
+        await db.jobs.update(jobID, { status: 'error', pid: null, info: message });
+        resolve();
+        return;
+      }
+
+      const additionalEnv: Record<string, string> = {
+        AITK_JOB_ID: jobID,
+        AITK_DB_PROVIDER: dbConfig.provider,
+        AITK_SQLITE_PATH: dbConfig.sqlitePath,
+        AITK_MONGODB_URI: dbConfig.mongoUri || '',
+        AITK_MONGODB_DB: dbConfig.mongoDb,
+        CUDA_DEVICE_ORDER: 'PCI_BUS_ID',
+        CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
+        IS_AI_TOOLKIT_UI: '1',
+        AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
+        PYTHONUNBUFFERED: '1',
+      };
+
+      const args = [runFilePath, configPath, '--log', logPath];
+      launchLogFd = fs.openSync(launchLogPath, 'a');
+      appendLaunchLog(launchLogPath, `[launcher] ${new Date().toISOString()} starting job ${jobID}`);
+      appendLaunchLog(launchLogPath, `[launcher] cwd: ${TOOLKIT_ROOT}`);
+      appendLaunchLog(
+        launchLogPath,
+        `[launcher] command: ${pythonPath} ${args.map(arg => JSON.stringify(arg)).join(' ')}`,
+      );
+
+      const subprocess = spawn(pythonPath, args, {
+        env: {
+          ...process.env,
+          ...additionalEnv,
+        },
+        cwd: TOOLKIT_ROOT,
+        detached: true,
+        windowsHide: isWindows,
+        stdio: ['ignore', launchLogFd, launchLogFd] as any,
+      });
+
       const pid = subprocess.pid ?? null;
+      const handleLaunchFailure = async (message: string) => {
+        appendLaunchLog(launchLogPath, `[launcher] ${message}`);
+        const currentJob = await db.jobs.findById(jobID).catch(() => null);
+        if (currentJob?.status === 'running' && (pid == null || currentJob.pid == null || currentJob.pid === pid)) {
+          await db.jobs
+            .update(jobID, {
+              status: 'error',
+              pid: null,
+              info: message,
+            })
+            .catch(error => console.error('Error updating failed job status:', error));
+        }
+      };
+
+      subprocess.once('error', error => {
+        closeLaunchLog();
+        void handleLaunchFailure(`Error launching job: ${error.message}`);
+      });
+
+      subprocess.once('exit', (code, signal) => {
+        closeLaunchLog();
+        if (code === 0 && signal == null) {
+          void db.jobs
+            .findById(jobID)
+            .then(currentJob => {
+              if (currentJob?.status === 'running' && (pid == null || currentJob.pid == null || currentJob.pid === pid)) {
+                return db.jobs.update(jobID, {
+                  status: 'completed',
+                  pid: null,
+                  info: 'Job completed',
+                });
+              }
+              return null;
+            })
+            .catch(error => console.error('Error reconciling completed job process:', error));
+          return;
+        }
+
+        const reason = signal ? `signal ${signal}` : `exit code ${code ?? 'unknown'}`;
+        void handleLaunchFailure(`Job process exited with ${reason}. Check the job log for details.`);
+      });
+
       if (pid != null) {
         await db.jobs.update(jobID, { pid });
       }
       try {
         fs.writeFileSync(path.join(trainingFolder, 'pid.txt'), String(pid ?? ''), { flag: 'w' });
-      } catch (e) {
-        console.error('Error writing pid file:', e);
+      } catch (error) {
+        console.error('Error writing pid file:', error);
       }
 
-      // Important: let the child run independently of this Node process.
-      if (subprocess.unref) {
-        subprocess.unref();
-      }
-
-      // (No stdout/stderr listeners — logging should go to --log handled by your Python)
-      // (No monitoring loop — the whole point is to let it live past this worker)
+      subprocess.unref?.();
     } catch (error: any) {
-      // Handle any exceptions during process launch
+      closeLaunchLog();
       console.error('Error launching process:', error);
-
-      await db.jobs.update(jobID, {
-        status: 'error',
-        info: `Error launching job: ${error?.message || 'Unknown error'}`,
-      });
-      return;
+      if (launchLogPath) {
+        appendLaunchLog(launchLogPath, `[launcher] Error launching process: ${error?.stack || error?.message || error}`);
+      }
+      await db.jobs
+        .update(jobID, {
+          status: 'error',
+          pid: null,
+          info: `Error launching job: ${error?.message || 'Unknown error'}`,
+        })
+        .catch(updateError => console.error('Error updating failed job status:', updateError));
     }
-    // Resolve the promise immediately after starting the process
+
     resolve();
   });
 };
@@ -170,12 +216,21 @@ export default async function startJob(jobID: string) {
     console.error(`Job ${jobID} belongs to remote worker ${job.worker_id}; local cron will not start it.`);
     return;
   }
-  // update job status to 'running', this will run sync so we don't start multiple jobs.
+
   await db.jobs.update(jobID, {
     status: 'running',
     stop: false,
     info: 'Starting job...',
   });
-  // start and watch the job asynchronously so the cron can continue
-  startAndWatchJob(job);
+
+  startAndWatchJob(job).catch(async (error: any) => {
+    console.error('Error preparing job launch:', error);
+    await db.jobs
+      .update(jobID, {
+        status: 'error',
+        pid: null,
+        info: `Error launching job: ${error?.message || 'Unknown error'}`,
+      })
+      .catch(updateError => console.error('Error updating failed job status:', updateError));
+  });
 }

@@ -956,21 +956,37 @@ class DiffusionFeatureExtractor7(nn.Module):
         pred_images = pred_images.to(device, dtype=dtype)
         pred = self.get_pred(pred_images)
         
+        if not self.do_partial_step:
+            velocity_equiv_weight = 1.0 / torch.clamp(tv, min=0.1)
+            velocity_equiv_weight_mse = velocity_equiv_weight ** 2
+
         head_loss = torch.nn.functional.mse_loss(
-            pred.head.float(), target.head.float()
+            pred.head.float(), target.head.float(), reduction="none"
         )
+        if not self.do_partial_step:
+            head_loss = head_loss * velocity_equiv_weight_mse
+        head_loss = head_loss.mean()
         
         depth_loss = torch.nn.functional.l1_loss(
-            pred.depth.float(), target.depth.float()
+            pred.depth.float(), target.depth.float(), reduction="none"
         )
+        if not self.do_partial_step:
+            depth_loss = depth_loss * velocity_equiv_weight
+        depth_loss = depth_loss.mean()
         
         normals_loss = torch.nn.functional.l1_loss(
-            pred.normals.float(), target.normals.float()
+            pred.normals.float(), target.normals.float(), reduction="none"
         )
+        if not self.do_partial_step:
+            normals_loss = normals_loss * velocity_equiv_weight
+        normals_loss = normals_loss.mean()
         
         segmentation_loss = torch.nn.functional.l1_loss(
-            pred.segmentation.float(), target.segmentation.float()
+            pred.segmentation.float(), target.segmentation.float(), reduction="none"
         )
+        if not self.do_partial_step:
+            segmentation_loss = segmentation_loss * velocity_equiv_weight
+        segmentation_loss = segmentation_loss.mean()
         
         total_loss = (head_loss + depth_loss + normals_loss + segmentation_loss) / 4.0
         

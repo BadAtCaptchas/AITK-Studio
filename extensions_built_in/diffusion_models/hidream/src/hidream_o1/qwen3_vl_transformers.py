@@ -13,6 +13,7 @@
 # limitations under the License.
 import os
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Callable, Optional, Union
 import math
 
@@ -38,7 +39,69 @@ from transformers.utils import (
     is_torchdynamo_compiling,
 )
 from transformers.utils.deprecation import deprecate_kwarg
-from transformers.utils.generic import merge_with_config_defaults
+try:
+    from transformers.utils.generic import merge_with_config_defaults
+except ImportError:
+    def merge_with_config_defaults(func):
+        """Compatibility fallback for transformers releases without this decorator."""
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            args_with_config_defaults = [
+                "use_cache",
+                "vision_feature_layer",
+                "vision_feature_select_strategy",
+                "vision_aspect_ratio",
+            ]
+
+            for arg_name in args_with_config_defaults:
+                arg_index = None
+                if arg_name in func.__code__.co_varnames:
+                    arg_index = func.__code__.co_varnames.index(arg_name) - 1
+
+                if arg_index is not None and len(args) > arg_index and args[arg_index] is not None:
+                    arg_value = args[arg_index]
+                elif kwargs.get(arg_name) is not None:
+                    arg_value = kwargs[arg_name]
+                else:
+                    arg_value = getattr(self.config, arg_name, None)
+
+                if arg_value is None:
+                    continue
+
+                if arg_name == "use_cache" and getattr(self, "gradient_checkpointing", False) and self.training and arg_value:
+                    arg_value = False
+                elif arg_name == "vision_feature_select_strategy":
+                    valid_strategies = ["default", "full"]
+                    if arg_value not in valid_strategies:
+                        raise ValueError(
+                            f"`Unexpected select feature strategy: {arg_value}. Please select from {valid_strategies}."
+                        )
+
+                if arg_index is not None and len(args) > arg_index:
+                    args = list(args)
+                    args[arg_index] = arg_value
+                    args = tuple(args)
+                else:
+                    kwargs[arg_name] = arg_value
+
+            is_causal = kwargs.get("is_causal", getattr(self.config, "is_causal", None))
+            if is_causal is None:
+                return func(self, *args, **kwargs)
+
+            is_causal_in_config = hasattr(self.config, "is_causal")
+            if is_causal_in_config:
+                is_causal_original_value = self.config.is_causal
+            self.config.is_causal = is_causal
+            kwargs["is_causal"] = is_causal
+            try:
+                return func(self, *args, **kwargs)
+            finally:
+                if is_causal_in_config:
+                    self.config.is_causal = is_causal_original_value
+                else:
+                    del self.config.is_causal
+
+        return wrapper
 from transformers.models.qwen3_vl.configuration_qwen3_vl import (
     Qwen3VLConfig,
     Qwen3VLTextConfig,

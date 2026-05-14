@@ -38,8 +38,8 @@ function severityIcon(severity: AdvisorSeverity) {
   return <Info className="h-4 w-4" />;
 }
 
-function isTerminalStatus(status?: string) {
-  return status === 'completed' || status === 'error' || status === 'stopped';
+function isLiveStatus(status?: string) {
+  return status === 'queued' || status === 'running' || status === 'stopping';
 }
 
 function FindingCard({ finding }: { finding: AdvisorFinding }) {
@@ -270,40 +270,40 @@ export function JobAdvisorPanel({ job }: { job: Job }) {
   const [result, setResult] = useState<AdvisorResult | null>(null);
   const [status, setStatus] = useState<AdvisorStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const isLive = isLiveStatus(job.status);
 
   useEffect(() => {
-    let stopped = false;
-    let controller: AbortController | null = null;
-
-    const loadAdvisor = () => {
-      controller?.abort();
-      controller = new AbortController();
-      setStatus(current => (current === 'success' ? 'refreshing' : 'loading'));
+    if (isLive) {
+      setResult(null);
+      setStatus('idle');
       setError(null);
-      apiClient
-        .get(`/api/jobs/${job.id}/advisor`, { signal: controller.signal })
-        .then(res => {
-          if (stopped) return;
-          setResult(res.data as AdvisorResult);
-          setStatus('success');
-        })
-        .catch(error => {
-          if (stopped || controller?.signal.aborted || error?.code === 'ERR_CANCELED') return;
-          console.error('Error loading job advisor:', error);
-          setError('Failed to load training advisor.');
-          setStatus('error');
-        });
-    };
+      return;
+    }
 
-    loadAdvisor();
-    const interval = isTerminalStatus(job.status) ? null : window.setInterval(loadAdvisor, 10000);
+    let stopped = false;
+    const controller = new AbortController();
+    setStatus(current => (current === 'success' ? 'refreshing' : 'loading'));
+    setError(null);
+    apiClient
+      .get(`/api/jobs/${job.id}/advisor`, { signal: controller.signal })
+      .then(res => {
+        if (stopped) return;
+        setResult(res.data as AdvisorResult);
+        setStatus('success');
+      })
+      .catch(error => {
+        if (stopped || controller.signal.aborted || error?.code === 'ERR_CANCELED') return;
+        console.error('Error loading job advisor:', error);
+        setError('Failed to load training advisor.');
+        setStatus('error');
+      });
 
     return () => {
       stopped = true;
-      if (interval !== null) window.clearInterval(interval);
-      controller?.abort();
+      controller.abort();
     };
-  }, [job.id, job.status]);
+  }, [job.id, isLive]);
 
+  if (isLive) return null;
   return <AdvisorResultPanel result={result} status={status} error={error} variant="inline" />;
 }

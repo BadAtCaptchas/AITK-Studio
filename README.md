@@ -1,8 +1,8 @@
 # OstrisAI-Toolkit Revamped
 
-OstrisAI-Toolkit Revamped is a fork of the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit) with substantial changes beyond upstream.
+**Experimental fork notice:** OstrisAI-Toolkit Revamped is an experimental fork of the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit), not the upstream project. It contains fast-moving model integrations, UI changes, remote-worker support, and other changes that may be unstable or diverge from upstream behavior.
 
-> Disclaimer: This repository is not guaranteed to stay in sync with model support added to the original repo. New upstream model support may arrive here after a delay, or may not be ported at all. This fork is focused on features and larger changes that are unlikely to be added to the main repo.
+> This fork is not guaranteed to stay in sync with upstream. New upstream model support may arrive here after a delay, may be changed substantially, or may not be ported at all. Use the upstream repo if you need the canonical AI Toolkit release.
 
 OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffusion models. It aims to support current models on consumer grade hardware, including image, video, and audio models. It can be run as a GUI or CLI. It is designed to be easy to use but still have every feature imaginable. Free and open source.
 
@@ -13,6 +13,7 @@ OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffus
 - [black-forest-labs/FLUX.2-dev](https://huggingface.co/black-forest-labs/FLUX.2-dev) (FLUX.2)
 - [black-forest-labs/FLUX.2-klein-base-4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) (FLUX.2-klein-base-4B)
 - [black-forest-labs/FLUX.2-klein-base-9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B) (FLUX.2-klein-base-9B)
+- [Lakonik/AsymFLUX.2-klein-9B](https://huggingface.co/Lakonik/AsymFLUX.2-klein-9B) (AsymFLUX.2-klein-9B, experimental)
 - [ostris/Flex.1-alpha](https://huggingface.co/ostris/Flex.1-alpha) (Flex.1)
 - [ostris/Flex.2-preview](https://huggingface.co/ostris/Flex.2-preview) (Flex.2)
 - [lodestones/Chroma1-Base](https://huggingface.co/lodestones/Chroma1-Base) (Chroma)

@@ -46,6 +46,22 @@ class OklabColorEncoderTest(unittest.TestCase):
         self.assertEqual(decoded.shape, image.shape)
         self.assertLess(torch.mean(torch.abs(decoded - image)).item(), 1e-4)
 
+    def test_encode_accepts_float_images_when_encoder_buffers_are_bfloat16(self):
+        encoder = OklabColorEncoder(
+            use_affine_norm=True,
+            mean=(0.56, 0.0, 0.01),
+            std=0.16,
+        ).to(dtype=torch.bfloat16)
+        image = torch.rand(1, 3, 8, 8, dtype=torch.float32) * 2 - 1
+
+        latents = encoder.encode(image)
+        decoded = encoder.decode(latents)
+
+        self.assertEqual(latents.dtype, image.dtype)
+        self.assertEqual(decoded.dtype, image.dtype)
+        self.assertEqual(latents.shape, image.shape)
+        self.assertEqual(decoded.shape, image.shape)
+
 
 class FlowAdapterSchedulerTest(unittest.TestCase):
     def make_scheduler(self):
@@ -86,6 +102,21 @@ class FlowAdapterSchedulerTest(unittest.TestCase):
 
         self.assertTrue(torch.allclose(noisy[0], original[0]))
         self.assertTrue(torch.allclose(noisy[1], torch.full_like(original[1], 0.5)))
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for scheduler device regression")
+    def test_unipc_inference_steps_keep_scheduler_state_on_cuda(self):
+        scheduler = self.make_scheduler()
+        device = torch.device("cuda")
+        latents = torch.randn(1, 3, 4, 4, device=device)
+
+        scheduler.set_timesteps(4, seq_len=latents.shape[2:].numel(), device=device)
+        for timestep in scheduler.timesteps[:2]:
+            model_output = torch.randn_like(latents)
+            latents = scheduler.step(model_output, timestep, latents, return_dict=False)[0]
+
+        self.assertEqual(latents.device.type, "cuda")
+        self.assertEqual(scheduler.sigmas.device.type, "cuda")
+        self.assertEqual(scheduler.base_scheduler.sigmas.device.type, "cuda")
 
 
 class AsymFlux2KleinModelTest(unittest.TestCase):

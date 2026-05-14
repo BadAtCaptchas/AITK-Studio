@@ -110,6 +110,9 @@ class OklabColorEncoder(ModelMixin, ConfigMixin):
     def dtype(self):
         return self.lrgb_to_lms.dtype
 
+    def _buffer_like(self, name: str, reference: torch.Tensor):
+        return getattr(self, name).to(device=reference.device, dtype=reference.dtype)
+
     @staticmethod
     def srgb_to_lrgb(srgb):
         a = 0.055
@@ -122,12 +125,12 @@ class OklabColorEncoder(ModelMixin, ConfigMixin):
         return torch.where(lrgb <= 0.0031308, lrgb * 12.92, (1 + a) * (lrgb ** (1 / 2.4)) - a)
 
     def lrgb_to_oklab(self, lrgb):
-        lms = torch.einsum("ij,bj...->bi...", self.lrgb_to_lms, lrgb).clamp(min=0)
-        return torch.einsum("ij,bj...->bi...", self.lms_to_oklab, lms.pow(1 / 3))
+        lms = torch.einsum("ij,bj...->bi...", self._buffer_like("lrgb_to_lms", lrgb), lrgb).clamp(min=0)
+        return torch.einsum("ij,bj...->bi...", self._buffer_like("lms_to_oklab", lms), lms.pow(1 / 3))
 
     def oklab_to_lrgb(self, oklab):
-        lms = torch.einsum("ij,bj...->bi...", self.oklab_to_lms, oklab).pow(3)
-        lrgb = torch.einsum("ij,bj...->bi...", self.lms_to_lrgb, lms)
+        lms = torch.einsum("ij,bj...->bi...", self._buffer_like("oklab_to_lms", oklab), oklab).pow(3)
+        lrgb = torch.einsum("ij,bj...->bi...", self._buffer_like("lms_to_lrgb", lms), lms)
         return lrgb.clamp(0, 1)
 
     def encode(self, img):
@@ -136,16 +139,16 @@ class OklabColorEncoder(ModelMixin, ConfigMixin):
         oklab = self.lrgb_to_oklab(lrgb)
         if self.use_affine_norm:
             n_dim = img.dim() - 2
-            mean = self.affine_mean.reshape(-1, *([1] * n_dim))
-            std = self.affine_std.reshape(-1, *([1] * n_dim))
+            mean = self._buffer_like("affine_mean", oklab).reshape(-1, *([1] * n_dim))
+            std = self._buffer_like("affine_std", oklab).reshape(-1, *([1] * n_dim))
             oklab = (oklab - mean) / std
         return oklab
 
     def decode(self, oklab):
         if self.use_affine_norm:
             n_dim = oklab.dim() - 2
-            mean = self.affine_mean.reshape(-1, *([1] * n_dim))
-            std = self.affine_std.reshape(-1, *([1] * n_dim))
+            mean = self._buffer_like("affine_mean", oklab).reshape(-1, *([1] * n_dim))
+            std = self._buffer_like("affine_std", oklab).reshape(-1, *([1] * n_dim))
             oklab = oklab * std + mean
         lrgb = self.oklab_to_lrgb(oklab)
         rgb = self.lrgb_to_srgb(lrgb)
@@ -588,14 +591,16 @@ class FlowAdapterScheduler(SchedulerMixin, ConfigMixin):
             sigmas = np.array(sigmas, dtype=np.float32)
 
         sigmas = self._shift_sigmas(torch.from_numpy(sigmas), seq_len=seq_len)
-        self.timesteps = (sigmas * self.config.num_train_timesteps).to(device)
+        target_device = torch.device(device) if device is not None else sigmas.device
+        sigmas = sigmas.to(device=target_device, dtype=torch.float32)
+        self.timesteps = (sigmas * self.config.num_train_timesteps).to(device=target_device, dtype=torch.float32)
         if self.config.base_scheduler in ["DEISMultistep", "SASolver"]:
-            self.sigmas = torch.cat([sigmas, torch.tensor([self.config.eps], dtype=torch.float32, device=sigmas.device)])
+            self.sigmas = torch.cat([sigmas, torch.tensor([self.config.eps], dtype=sigmas.dtype, device=sigmas.device)])
         else:
-            self.sigmas = torch.cat([sigmas, torch.zeros(1, device=sigmas.device)])
+            self.sigmas = torch.cat([sigmas, torch.zeros(1, dtype=sigmas.dtype, device=sigmas.device)])
         alphas = 1 - self.sigmas
 
-        self.base_scheduler.set_timesteps(num_inference_steps, device=device)
+        self.base_scheduler.set_timesteps(num_inference_steps, device=target_device)
         self.base_scheduler.timesteps = self.timesteps
         if self.config.base_scheduler in ["EulerDiscrete", "EulerAncestralDiscrete"]:
             self.base_scheduler.sigmas = self.sigmas / alphas.clamp(min=self.config.eps)

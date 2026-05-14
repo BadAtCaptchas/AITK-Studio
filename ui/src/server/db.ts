@@ -119,6 +119,7 @@ function coerceMetricValue(value: number | null | undefined, valueText: string |
 }
 
 const DEFAULT_MONGODB_DB = 'ai_toolkit';
+const SQLITE_BUSY_TIMEOUT_MS = 30_000;
 
 declare global {
   // eslint-disable-next-line no-var
@@ -187,7 +188,7 @@ function getPrisma() {
     const config = getDatabaseConfig();
     process.env.DATABASE_URL = process.env.DATABASE_URL || config.sqliteUrl;
     const adapter = new PrismaBetterSqlite3(
-      { url: config.sqliteUrl },
+      { url: config.sqliteUrl, timeout: SQLITE_BUSY_TIMEOUT_MS },
       { timestampFormat: 'unixepoch-ms' },
     );
     globalThis.__aitkPrismaClient = new PrismaClient({ adapter });
@@ -297,7 +298,7 @@ function mongoCollection<T extends Document = Document>(db: Db, name: string): C
 
 function openSqliteDb(filename: string) {
   const sqlite = new sqlite3.Database(filename);
-  sqlite.configure('busyTimeout', 30_000);
+  sqlite.configure('busyTimeout', SQLITE_BUSY_TIMEOUT_MS);
   return sqlite;
 }
 

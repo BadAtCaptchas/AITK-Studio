@@ -13,6 +13,7 @@ const mongoUri = process.env.AITK_MONGODB_URI?.trim();
 const mongoDbName = process.env.AITK_MONGODB_DB?.trim() || 'ai_toolkit';
 const prismaCli = require.resolve('prisma/build/index.js');
 const prismaExecOptions = { stdio: 'inherit' };
+const SQLITE_BUSY_TIMEOUT_MS = 30000;
 
 function runPrisma(args) {
   execFileSync(process.execPath, [prismaCli, ...args], prismaExecOptions);
@@ -36,6 +37,21 @@ function sqliteRun(db, sql) {
   });
 }
 
+async function configureSqliteConnection(db) {
+  await sqliteRun(db, `PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
+  await sqliteRun(db, 'PRAGMA journal_mode=WAL;');
+  await sqliteRun(db, 'PRAGMA synchronous=NORMAL;');
+}
+
+async function configureSqliteDatabase(filename) {
+  const db = new sqlite3.Database(filename);
+  try {
+    await configureSqliteConnection(db);
+  } finally {
+    await new Promise(resolve => db.close(resolve));
+  }
+}
+
 async function ensureColumn(db, table, name, definition) {
   const columns = await sqliteAll(db, `PRAGMA table_info(${table})`);
   if (!columns.some(column => column.name === name)) {
@@ -46,7 +62,7 @@ async function ensureColumn(db, table, name, definition) {
 async function applySqliteCompatibilitySchema(filename) {
   const db = new sqlite3.Database(filename);
   try {
-    await sqliteRun(db, 'PRAGMA busy_timeout=30000;');
+    await configureSqliteConnection(db);
 
     await sqliteRun(
       db,
@@ -162,6 +178,7 @@ if (provider === 'sqlite') {
   console.log('Preparing SQLite database...');
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
   fs.closeSync(fs.openSync(sqlitePath, 'a'));
+  await configureSqliteDatabase(sqlitePath);
   if (await hasLegacySqliteTables(sqlitePath)) {
     console.log('Additional SQLite tables detected; preserving them with additive compatibility changes.');
     await applySqliteCompatibilitySchema(sqlitePath);
@@ -174,6 +191,7 @@ if (provider === 'sqlite') {
       await applySqliteCompatibilitySchema(sqlitePath);
     }
   }
+  await configureSqliteDatabase(sqlitePath);
   process.exit(0);
 }
 

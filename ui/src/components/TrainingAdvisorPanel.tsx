@@ -98,6 +98,7 @@ function AdvisorResultPanel({
   }, [result]);
 
   const loading = status === 'loading' || status === 'refreshing';
+  const initialLoading = status === 'loading' && !result;
   const hasFindings = !!result?.findings.length;
   const stats = result?.datasetStats;
 
@@ -112,7 +113,7 @@ function AdvisorResultPanel({
         <div>
           <h2 className="text-sm font-semibold uppercase text-gray-400">Training Advisor</h2>
           <p className="mt-1 text-sm text-gray-300">
-            {result?.summary.text ?? (loading ? 'Analyzing training setup...' : 'Warn-only quality checks')}
+            {result?.summary.text ?? (initialLoading ? 'Analyzing training setup...' : 'Warn-only quality checks')}
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs">
@@ -156,7 +157,7 @@ function AdvisorResultPanel({
         </div>
       )}
 
-      {!loading && result && !hasFindings && (
+      {!initialLoading && result && !hasFindings && (
         <div className="mt-3 flex items-center gap-2 rounded-sm border border-emerald-800 bg-emerald-950/25 px-3 py-2 text-sm text-emerald-100">
           <CheckCircle2 className="h-4 w-4" />
           No training quality issues found.

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Info, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Info, Loader2, RefreshCw } from 'lucide-react';
 import classNames from 'classnames';
 import type { AdvisorFinding, AdvisorResult, AdvisorSeverity, Job, JobConfig } from '@/types';
 import { apiClient } from '@/utils/api';
@@ -26,6 +26,12 @@ const severityBadgeClasses: Record<AdvisorSeverity, string> = {
   warning: 'bg-amber-500/15 text-amber-200',
   info: 'bg-sky-500/15 text-sky-200',
 };
+
+function isEditableElement(element: Element | null) {
+  if (!(element instanceof HTMLElement)) return false;
+  if (element.isContentEditable) return true;
+  return element.matches('input, textarea, select, [role="textbox"], [contenteditable="true"]');
+}
 
 function severityIcon(severity: AdvisorSeverity) {
   if (severity === 'critical' || severity === 'warning') return <AlertTriangle className="h-4 w-4" />;
@@ -71,11 +77,13 @@ function AdvisorResultPanel({
   status,
   error,
   variant = 'card',
+  onRefresh,
 }: {
   result: AdvisorResult | null;
   status: AdvisorStatus;
   error: string | null;
   variant?: Variant;
+  onRefresh?: () => void;
 }) {
   const groupedFindings = useMemo(() => {
     const grouped: Record<AdvisorSeverity, AdvisorFinding[]> = {
@@ -122,6 +130,18 @@ function AdvisorResultPanel({
               </span>
             </>
           )}
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              className="rounded-sm border border-gray-700 p-1 text-gray-300 hover:bg-gray-800 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Run training advisor checks"
+              aria-label="Run training advisor checks"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -167,34 +187,83 @@ export function TrainingAdvisorPanel({ jobConfig, gpuIDs }: { jobConfig: JobConf
   const [result, setResult] = useState<AdvisorResult | null>(null);
   const [status, setStatus] = useState<AdvisorStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const requestIdRef = useRef(0);
+  const lastCompletedPayloadRef = useRef<string | null>(null);
   const payload = useMemo(() => JSON.stringify({ job_config: jobConfig, gpu_ids: gpuIDs }), [jobConfig, gpuIDs]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const runPreflight = useCallback(
+    (payloadSnapshot = payload, options: { force?: boolean } = {}) => {
+      if (!options.force && lastCompletedPayloadRef.current === payloadSnapshot) return;
+
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+
       setStatus(current => (current === 'success' ? 'refreshing' : 'loading'));
       setError(null);
       apiClient
-        .post('/api/training-advisor/preflight', JSON.parse(payload), { signal: controller.signal })
+        .post('/api/training-advisor/preflight', JSON.parse(payloadSnapshot))
         .then(res => {
+          if (!mountedRef.current || requestId !== requestIdRef.current) return;
+          lastCompletedPayloadRef.current = payloadSnapshot;
           setResult(res.data as AdvisorResult);
           setStatus('success');
         })
         .catch(error => {
-          if (controller.signal.aborted || error?.code === 'ERR_CANCELED') return;
+          if (!mountedRef.current || requestId !== requestIdRef.current || error?.code === 'ERR_CANCELED') return;
           console.error('Error loading training advisor:', error);
           setError('Failed to run training advisor.');
           setStatus('error');
         });
+    },
+    [payload],
+  );
+
+  useEffect(() => {
+    let focusOutHandler: (() => void) | null = null;
+    let focusOutDelay: number | null = null;
+    let didRun = false;
+
+    const timeout = window.setTimeout(() => {
+      if (isEditableElement(document.activeElement)) {
+        focusOutHandler = () => {
+          if (focusOutDelay !== null) window.clearTimeout(focusOutDelay);
+          focusOutDelay = window.setTimeout(() => {
+            if (!didRun && !isEditableElement(document.activeElement)) {
+              didRun = true;
+              if (focusOutHandler) document.removeEventListener('focusout', focusOutHandler);
+              runPreflight(payload);
+            }
+          }, 250);
+        };
+        document.addEventListener('focusout', focusOutHandler);
+        return;
+      }
+
+      runPreflight(payload);
     }, 700);
 
     return () => {
       window.clearTimeout(timeout);
-      controller.abort();
+      if (focusOutDelay !== null) window.clearTimeout(focusOutDelay);
+      if (focusOutHandler) document.removeEventListener('focusout', focusOutHandler);
     };
-  }, [payload]);
+  }, [payload, runPreflight]);
 
-  return <AdvisorResultPanel result={result} status={status} error={error} />;
+  return (
+    <AdvisorResultPanel
+      result={result}
+      status={status}
+      error={error}
+      onRefresh={() => runPreflight(payload, { force: true })}
+    />
+  );
 }
 
 export function JobAdvisorPanel({ job }: { job: Job }) {

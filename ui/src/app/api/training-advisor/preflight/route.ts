@@ -23,12 +23,28 @@ function isSafeJobConfig(jobConfig: unknown): jobConfig is JobConfig {
   return Array.isArray(processList) && processList.length > 0;
 }
 
+async function readJsonBody(request: NextRequest) {
+  const rawBody = await request.text();
+  if (!rawBody.trim()) return null;
+  return JSON.parse(rawBody);
+}
+
 export async function POST(request: NextRequest) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
 
+  let body: any;
   try {
-    const body = await request.json();
+    body = await readJsonBody(request);
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  if (!body) {
+    return NextResponse.json({ error: 'Missing request body' }, { status: 400 });
+  }
+
+  try {
     const jobConfig = body.job_config ?? body.jobConfig;
     if (!isSafeJobConfig(jobConfig)) {
       return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });

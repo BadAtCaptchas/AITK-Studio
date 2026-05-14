@@ -1,0 +1,36 @@
+---
+job: generate
+config:
+  name: "generate_asymflux2_klein_9b"
+  process:
+    - type: to_folder
+      output_folder: "output/asymflux2_klein_9b"
+      device: cuda:0
+      generate:
+        sampler: "flowmatch"
+        width: 1024
+        height: 1024
+        neg: "cartoon, drawing, illustration, cgi, low quality"
+        seed: -1
+        guidance_scale: 4
+        sample_steps: 25
+        ext: ".png"
+        prompt_file: true
+        prompts:
+          - "a cinematic portrait of a designer in a sunlit concrete studio, medium format photo"
+          - "a rain-soaked city street at night, realistic reflections, detailed storefronts"
+
+      model:
+        arch: "asymflux2_klein_9b"
+        name_or_path: "Lakonik/AsymFLUX.2-klein-9B"
+        dtype: bf16
+        quantize: true
+        quantize_te: true
+        model_kwargs:
+          base_model_name_or_path: "black-forest-labs/FLUX.2-klein-base-9B"
+          oklab_mean: [0.56, 0.0, 0.01]
+          oklab_std: 0.16
+          asymflow_shift: 17.0
+          asymflow_max_shift: 34.0
+          asymflow_base_scheduler: "UniPCMultistep"
+

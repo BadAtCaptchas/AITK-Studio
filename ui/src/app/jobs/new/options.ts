@@ -825,6 +825,43 @@ export const modelArchs: ModelArch[] = [
     ],
   },
   {
+    name: 'asymflux2_klein_9b',
+    label: 'AsymFLUX.2-klein-9B',
+    group: 'image',
+    defaults: {
+      // default updates when [selected, unselected] in the UI
+      'config.process[0].model.name_or_path': ['Lakonik/AsymFLUX.2-klein-9B', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].train.unload_text_encoder': [false, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.guidance_scale': [4, 4],
+      'config.process[0].sample.sample_steps': [25, 25],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+      'config.process[0].model.qtype': ['qfloat8', 'qfloat8'],
+      'config.process[0].model.model_kwargs': [
+        {
+          base_model_name_or_path: 'black-forest-labs/FLUX.2-klein-base-9B',
+          oklab_mean: [0.56, 0.0, 0.01],
+          oklab_std: 0.16,
+          asymflow_shift: 17.0,
+          asymflow_max_shift: 34.0,
+          asymflow_base_scheduler: 'UniPCMultistep',
+        },
+        {},
+      ],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: [
+      'datasets.multi_control_paths',
+      'sample.multi_ctrl_imgs',
+      'model.low_vram',
+      'model.layer_offloading',
+    ],
+  },
+  {
     name: 'ace_step_15_xl',
     label: 'ACE-Step 1.5 XL',
     group: 'audio',

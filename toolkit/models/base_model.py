@@ -420,7 +420,7 @@ class BaseModel:
         if pipeline is None:
             pipeline = self.get_generation_pipeline()
             try:
-                pipeline.set_progress_bar_config(disable=True)
+                pipeline.set_progress_bar_config(disable=os.environ.get("IS_AI_TOOLKIT_UI") != "1")
             except:
                 pass
 

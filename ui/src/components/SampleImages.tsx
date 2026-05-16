@@ -14,6 +14,40 @@ interface SampleImagesMenuProps {
   job?: Job | null;
 }
 
+function getSampleConfigFromJob(job: Job) {
+  const jobConfig = JSON.parse(job.job_config) as JobConfig;
+  const processConfig: any = jobConfig.config.process[0];
+  if (processConfig.sample) {
+    return processConfig.sample;
+  }
+  if (processConfig.generate) {
+    const prompts = Array.isArray(processConfig.generate.prompts) ? processConfig.generate.prompts : [];
+    return {
+      sampler: processConfig.generate.sampler || 'flowmatch',
+      sample_every: 1,
+      width: processConfig.generate.width || 512,
+      height: processConfig.generate.height || 512,
+      samples: prompts.map((prompt: string) => ({
+        prompt,
+        width: processConfig.generate.width,
+        height: processConfig.generate.height,
+        neg: processConfig.generate.neg || '',
+        seed: processConfig.generate.seed,
+        guidance_scale: processConfig.generate.guidance_scale,
+        sample_steps: processConfig.generate.sample_steps,
+      })),
+      neg: processConfig.generate.neg || '',
+      seed: processConfig.generate.seed ?? -1,
+      walk_seed: false,
+      guidance_scale: processConfig.generate.guidance_scale || 4,
+      sample_steps: processConfig.generate.sample_steps || 20,
+      num_frames: 1,
+      fps: 16,
+    };
+  }
+  return null;
+}
+
 export const SampleImagesMenu = ({ job }: SampleImagesMenuProps) => {
   const [isZipping, setIsZipping] = useState(false);
 
@@ -76,10 +110,10 @@ export default function SampleImages({ job }: SampleImagesProps) {
   const didFirstScroll = useRef(false);
   const numSamples = useMemo(() => {
     if (job?.job_config) {
-      const jobConfig = JSON.parse(job.job_config) as JobConfig;
-      const sampleConfig = jobConfig.config.process[0].sample;
+      const sampleConfig = getSampleConfigFromJob(job);
+      if (!sampleConfig) return 1;
       const numPrompts = sampleConfig.prompts ? sampleConfig.prompts.length : 0;
-      const numSamples = sampleConfig.samples.length;
+      const numSamples = sampleConfig.samples?.length || 0;
       return Math.max(numPrompts, numSamples, 1);
     }
     return 10;
@@ -241,8 +275,7 @@ export default function SampleImages({ job }: SampleImagesProps) {
 
   const sampleConfig = useMemo(() => {
     if (job?.job_config) {
-      const jobConfig = JSON.parse(job.job_config) as JobConfig;
-      return jobConfig.config.process[0].sample;
+      return getSampleConfigFromJob(job);
     }
     return null;
   }, [job]);

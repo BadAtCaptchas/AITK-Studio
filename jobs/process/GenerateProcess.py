@@ -102,7 +102,7 @@ class GenerateProcess(BaseProcess):
             if self.model_config.is_lumina2:
                 arch = 'lumina2'
             sampler = get_sampler(
-                self.train_config.noise_scheduler,
+                self.generate_config.sampler,
                 {
                     "prediction_type": "v_prediction" if self.model_config.is_v_pred else "epsilon",
                 },
@@ -136,10 +136,10 @@ class GenerateProcess(BaseProcess):
             print(f"Generating {len(self.generate_config.prompts)} images")
             # build prompt image configs
             prompt_image_configs = []
+            output_ext = str(self.generate_config.ext).lstrip('.')
             for _ in range(self.generate_config.num_repeats):
-                for prompt in self.generate_config.prompts:
-                    # remove --
-                    prompt = prompt.replace('--', '').strip()
+                for prompt_idx, prompt in enumerate(self.generate_config.prompts):
+                    prompt = prompt.strip()
                     width = self.generate_config.width
                     height = self.generate_config.height
                     # prompt = self.clean_prompt(prompt)
@@ -147,6 +147,11 @@ class GenerateProcess(BaseProcess):
                     if self.generate_config.size_list is not None:
                         # randomly select a size
                         width, height = random.choice(self.generate_config.size_list)
+
+                    output_path = os.path.join(
+                        self.output_folder,
+                        f"[time]_000000000_{prompt_idx}.{output_ext}"
+                    )
 
                     prompt_image_configs.append(GenerateImageConfig(
                         prompt=prompt,
@@ -159,7 +164,8 @@ class GenerateProcess(BaseProcess):
                         negative_prompt_2=self.generate_config.neg_2,
                         seed=self.generate_config.seed,
                         guidance_rescale=self.generate_config.guidance_rescale,
-                        output_ext=self.generate_config.ext,
+                        output_path=output_path,
+                        output_ext=output_ext,
                         output_folder=self.output_folder,
                         add_prompt_file=self.generate_config.prompt_file
                     ))

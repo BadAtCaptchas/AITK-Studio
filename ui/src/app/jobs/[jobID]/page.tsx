@@ -41,7 +41,7 @@ const pages: Page[] = [
     component: SampleImages,
     menuItem: SampleImagesMenu,
     mainCss: 'pt-24',
-    jobTypes: ['train'],
+    jobTypes: ['train', 'generate'],
   },
   {
     name: 'Training Monitor',
@@ -84,6 +84,8 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
   let title = `Job: ${job?.name || 'Loading...'}`;
   if (jobType === 'caption') {
     title = `Captioning: ${job?.job_ref || 'Loading...'}`;
+  } else if (jobType === 'generate') {
+    title = `Generate: ${job?.name || 'Loading...'}`;
   }
 
   return (

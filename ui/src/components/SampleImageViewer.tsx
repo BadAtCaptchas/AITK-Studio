@@ -78,11 +78,17 @@ export default function SampleImageViewer({
         ii.step = parseInt(parts[1]);
         ii.promptIdx = parseInt(parts[2]);
       } else {
-        console.error('Unexpected filename format for sample image:', filename);
+        const currentIndex = sampleImages.findIndex(img => img === imgPath);
+        if (currentIndex >= 0) {
+          ii.step = Math.floor(currentIndex / Math.max(numSamples, 1));
+          ii.promptIdx = currentIndex % Math.max(numSamples, 1);
+        } else {
+          console.error('Unexpected filename format for sample image:', filename);
+        }
       }
     }
     return ii;
-  }, [imgPath]);
+  }, [imgPath, numSamples, sampleImages]);
 
   const setImageAtIndex = useCallback(
     (idx: number) => {

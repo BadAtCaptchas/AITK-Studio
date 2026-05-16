@@ -347,6 +347,7 @@ export interface QuantizeKwargsConfig {
 
 export interface ModelConfig {
   name_or_path: string;
+  dtype?: string;
   quantize: boolean;
   quantize_te: boolean;
   qtype: string;
@@ -354,6 +355,11 @@ export interface ModelConfig {
   quantize_kwargs?: QuantizeKwargsConfig;
   arch: string;
   extras_name_or_path?: string;
+  vae_path?: string;
+  refiner_name_or_path?: string;
+  te_name_or_path?: string;
+  lora_path?: string;
+  inference_lora_path?: string;
   low_vram: boolean;
   model_kwargs: { [key: string]: any };
   layer_offloading?: boolean;

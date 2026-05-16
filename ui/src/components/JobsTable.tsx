@@ -45,6 +45,13 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
             </>
           );
         }
+        if (row.job_type === 'generate') {
+          title = (
+            <>
+              <small className="opacity-50">GENERATE: </small> {title}
+            </>
+          );
+        }
         return (
           <Link href={`/jobs/${row.id}`} className="font-medium whitespace-nowrap">
             {['running', 'stopping'].includes(row.status) ? (

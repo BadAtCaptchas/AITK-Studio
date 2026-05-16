@@ -141,11 +141,10 @@ class AggressiveWanUnloadPipeline(WanPipeline):
         if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
-        # unload vae and transformer
+        # Offload inactive modules, but keep execution on the configured GPU.
         vae_device = self.vae.device
         transformer_device = self.transformer.device
-        text_encoder_device = self.text_encoder.device
-        device = self.transformer.device
+        device = self._exec_device
         
         print("Unloading vae")
         self.vae.to("cpu")
@@ -276,10 +275,13 @@ class AggressiveWanUnloadPipeline(WanPipeline):
 
         self._current_timestep = None
 
-        # unload transformer
+        # Unload the transformer before VAE decode when it was previously offloaded.
+        if transformer_device != device:
+            self.transformer.to(transformer_device)
+
         # load vae
         print("Loading Vae")
-        self.vae.to(vae_device)
+        self.vae.to(device)
 
         if not output_type == "latent":
             latents = latents.to(self.vae.dtype)
@@ -297,6 +299,9 @@ class AggressiveWanUnloadPipeline(WanPipeline):
                 video, output_type=output_type)
         else:
             video = latents
+
+        if vae_device != device:
+            self.vae.to(vae_device)
 
         # Offload all models
         self.maybe_free_model_hooks()
@@ -516,7 +521,8 @@ class Wan21(BaseModel):
                 scheduler=scheduler,
             )
 
-        pipeline = pipeline.to(self.device_torch)
+        if not self.model_config.low_vram:
+            pipeline = pipeline.to(self.device_torch)
 
         return pipeline
 
@@ -531,7 +537,8 @@ class Wan21(BaseModel):
     ):
         # reactivate progress bar since this is slooooow
         pipeline.set_progress_bar_config(disable=False)
-        pipeline = pipeline.to(self.device_torch)
+        if not self.model_config.low_vram:
+            pipeline = pipeline.to(self.device_torch)
         # todo, figure out how to do video
         output = pipeline(
             prompt_embeds=conditional_embeds.text_embeds.to(

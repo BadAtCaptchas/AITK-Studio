@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -13,6 +13,17 @@ export const dynamic = 'force-dynamic';
 
 const isWindows = process.platform === 'win32';
 const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+
+class InlineGenerationCanceledError extends Error {
+  constructor() {
+    super('Generation canceled.');
+    this.name = 'InlineGenerationCanceledError';
+  }
+}
+
+function isInlineGenerationCanceledError(error: unknown) {
+  return error instanceof InlineGenerationCanceledError;
+}
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -98,16 +109,61 @@ function readLogTail(logPath: string, maxChars = 8000) {
   }
 }
 
+function terminateInlineProcess(subprocess: ChildProcess) {
+  const pid = subprocess.pid;
+  if (!pid) return null;
+
+  if (isWindows) {
+    const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+
+    killer.once('error', error => {
+      console.warn(`Unable to terminate inline generation process tree ${pid}:`, error);
+      try {
+        subprocess.kill();
+      } catch {
+        // The process may already be gone by the time the fallback runs.
+      }
+    });
+    return null;
+  }
+
+  try {
+    subprocess.kill('SIGTERM');
+  } catch {
+    return null;
+  }
+
+  return setTimeout(() => {
+    if (subprocess.exitCode === null && subprocess.signalCode === null) {
+      try {
+        subprocess.kill('SIGKILL');
+      } catch {
+        // The process may already have exited after SIGTERM.
+      }
+    }
+  }, 3000);
+}
+
 function runInlineGenerate(
   pythonPath: string,
   args: string[],
   env: NodeJS.ProcessEnv,
   launchLogPath: string,
   logPath: string,
+  abortSignal?: AbortSignal,
 ) {
   return new Promise<void>((resolve, reject) => {
     const logFd = fs.openSync(launchLogPath, 'a');
+    let settled = false;
+    let logClosed = false;
+    let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+
     const closeLog = () => {
+      if (logClosed) return;
+      logClosed = true;
       try {
         fs.closeSync(logFd);
       } catch {
@@ -121,19 +177,45 @@ function runInlineGenerate(
       stdio: ['ignore', logFd, logFd],
     });
 
-    subprocess.once('error', error => {
+    const cleanup = (keepForceKillTimer = false) => {
+      abortSignal?.removeEventListener('abort', onAbort);
       closeLog();
-      reject(error);
+      if (forceKillTimer && !keepForceKillTimer) {
+        clearTimeout(forceKillTimer);
+        forceKillTimer = null;
+      }
+    };
+
+    const finish = (callback: () => void, keepForceKillTimer = false) => {
+      if (settled) return;
+      settled = true;
+      cleanup(keepForceKillTimer);
+      callback();
+    };
+
+    const onAbort = () => {
+      forceKillTimer = terminateInlineProcess(subprocess);
+      finish(() => reject(new InlineGenerationCanceledError()), true);
+    };
+
+    if (abortSignal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+
+    subprocess.once('error', error => {
+      finish(() => reject(error));
     });
     subprocess.once('exit', (code, signal) => {
-      closeLog();
       if (code === 0 && signal == null) {
-        resolve();
+        finish(resolve);
         return;
       }
       const reason = signal ? `signal ${signal}` : `exit code ${code ?? 'unknown'}`;
       const logTail = readLogTail(logPath) || readLogTail(launchLogPath);
-      reject(new Error(`Inline generation failed with ${reason}.${logTail ? `\n${logTail}` : ''}`));
+      finish(() => reject(new Error(`Inline generation failed with ${reason}.${logTail ? `\n${logTail}` : ''}`)));
     });
   });
 }
@@ -175,7 +257,9 @@ export async function POST(request: NextRequest) {
     await fsp.mkdir(outputFolder, { recursive: true });
 
     jobConfig.config.name = runName;
+    jobConfig.config.device = jobConfig.config.device || generateContext.processConfig.device || 'cuda';
     for (const processConfig of jobConfig.config.process) {
+      processConfig.device = processConfig.device || jobConfig.config.device;
       processConfig.output_folder = outputFolder;
       processConfig.sqlite_db_path = dbConfig.sqlitePath;
       processConfig.training_folder = trainingRoot;
@@ -210,6 +294,7 @@ export async function POST(request: NextRequest) {
       additionalEnv,
       launchLogPath,
       logPath,
+      request.signal,
     );
     const imagePath = await findNewestGeneratedImage(outputFolder);
     if (!imagePath) {
@@ -226,6 +311,9 @@ export async function POST(request: NextRequest) {
       log_path: logPath,
     });
   } catch (error: any) {
+    if (isInlineGenerationCanceledError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 499 });
+    }
     console.error('Inline generation failed:', error);
     return NextResponse.json({ error: error?.message || 'Inline generation failed.' }, { status: 500 });
   }

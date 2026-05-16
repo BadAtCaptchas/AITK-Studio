@@ -212,7 +212,10 @@ class GenerateProcess(BaseProcess):
             super().run()
             print("Loading model...")
             self.sd.load_model()
-            self.sd.pipeline.to(self.device, self.torch_dtype)
+            if self.model_config.low_vram or self.model_config.layer_offloading:
+                print("Using offload-aware generation; skipping full pipeline move")
+            else:
+                self.sd.pipeline.to(self.device, self.torch_dtype)
 
             print("Compiling model...")
             # self.sd.unet = torch.compile(self.sd.unet, mode="reduce-overhead", fullgraph=True)

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@headlessui/react';
-import { ArrowRight, FileJson, ImagePlus, Layers, Loader2, Upload, Wand2 } from 'lucide-react';
+import { ArrowRight, FileJson, ImagePlus, Layers, Loader2, Upload, Wand2, X } from 'lucide-react';
 import { TopBar, MainContent } from '@/components/layout';
 import {
   Checkbox,
@@ -11,6 +11,7 @@ import {
   FormGroup,
   NumberInput,
   SelectInput,
+  SliderInput,
   TextAreaInput,
   TextInput,
 } from '@/components/formInputs';
@@ -98,6 +99,16 @@ function getArchDefault(archName: string, key: string, fallback: unknown) {
   return value ?? fallback;
 }
 
+function getArchNumberDefault(archName: string, key: string, fallback: number) {
+  const value = getArchDefault(archName, key, fallback);
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function archSupportsSection(archName: string, section: 'model.layer_offloading') {
+  return Boolean(modelArchs.find(item => item.name === archName)?.additionalSections?.includes(section));
+}
+
 function getDefaultModelConfig(archName: string): GeneratorModelConfig {
   return {
     name_or_path: String(getArchDefault(archName, 'config.process[0].model.name_or_path', '')),
@@ -110,6 +121,17 @@ function getDefaultModelConfig(archName: string): GeneratorModelConfig {
     model_kwargs:
       (getArchDefault(archName, 'config.process[0].model.model_kwargs', {}) as Record<string, unknown>) || {},
     dtype: String(getArchDefault(archName, 'config.process[0].train.dtype', 'bf16')),
+    layer_offloading: Boolean(getArchDefault(archName, 'config.process[0].model.layer_offloading', false)),
+    layer_offloading_transformer_percent: getArchNumberDefault(
+      archName,
+      'config.process[0].model.layer_offloading_transformer_percent',
+      1.0,
+    ),
+    layer_offloading_text_encoder_percent: getArchNumberDefault(
+      archName,
+      'config.process[0].model.layer_offloading_text_encoder_percent',
+      1.0,
+    ),
   };
 }
 
@@ -253,6 +275,8 @@ function cleanModelConfig(modelConfig: GeneratorModelConfig, useLora: boolean, l
 export default function GeneratePage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const inlineAbortControllerRef = useRef<AbortController | null>(null);
+  const statusResetTimeoutRef = useRef<number | null>(null);
   const { settings, isSettingsLoaded } = useSettings();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
@@ -279,6 +303,8 @@ export default function GeneratePage() {
   const [status, setStatus] = useState<'idle' | 'saving' | 'generating' | 'error'>('idle');
   const [inlineImagePath, setInlineImagePath] = useState('');
   const [inlineError, setInlineError] = useState('');
+  const [inlineMessage, setInlineMessage] = useState('');
+  const [cancelRequested, setCancelRequested] = useState(false);
 
   useEffect(() => {
     if (isGPUInfoLoaded && gpuIDs === null) {
@@ -300,6 +326,16 @@ export default function GeneratePage() {
       });
   }, []);
 
+  useEffect(() => {
+    return () => {
+      inlineAbortControllerRef.current?.abort();
+      inlineAbortControllerRef.current = null;
+      if (statusResetTimeoutRef.current !== null) {
+        window.clearTimeout(statusResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const loraOptions = useMemo<SelectOption[]>(
     () => loras.map(lora => ({ value: lora.path, label: lora.label })),
     [loras],
@@ -313,6 +349,10 @@ export default function GeneratePage() {
     const repeats = Math.max(1, Math.floor(numRepeats || 1));
     return currentPromptItems.length * repeats;
   }, [currentPromptItems, numRepeats]);
+  const supportsLayerOffloading = useMemo(
+    () => archSupportsSection(modelConfig.arch, 'model.layer_offloading') || Boolean(modelConfig.layer_offloading),
+    [modelConfig.arch, modelConfig.layer_offloading],
+  );
 
   const isBusy = status === 'saving' || status === 'generating';
   const primaryButtonLabel =
@@ -323,6 +363,20 @@ export default function GeneratePage() {
         : imageCount === 1
           ? 'Generate Image'
           : 'Create Job';
+
+  const clearStatusResetTimeout = () => {
+    if (statusResetTimeoutRef.current === null) return;
+    window.clearTimeout(statusResetTimeoutRef.current);
+    statusResetTimeoutRef.current = null;
+  };
+
+  const scheduleStatusIdle = () => {
+    clearStatusResetTimeout();
+    statusResetTimeoutRef.current = window.setTimeout(() => {
+      setStatus('idle');
+      statusResetTimeoutRef.current = null;
+    }, 1500);
+  };
 
   const applyLoraModelDefaults = (lora: GeneratedLora) => {
     if (!lora.model) return;
@@ -360,10 +414,31 @@ export default function GeneratePage() {
     setSampler(getDefaultSampler(archName));
   };
 
+  const handleLayerOffloadingChange = (checked: boolean) => {
+    setModelConfig(current => ({
+      ...current,
+      layer_offloading: checked,
+      layer_offloading_transformer_percent: current.layer_offloading_transformer_percent ?? 1.0,
+      layer_offloading_text_encoder_percent: current.layer_offloading_text_encoder_percent ?? 1.0,
+    }));
+  };
+
+  const handleLayerOffloadingPercentChange = (
+    key: 'layer_offloading_transformer_percent' | 'layer_offloading_text_encoder_percent',
+    value: number,
+  ) => {
+    setModelConfig(current => ({
+      ...current,
+      [key]: Math.max(0, Math.min(1, value * 0.01)),
+    }));
+  };
+
   const handlePromptTextChange = (value: string) => {
     setPrompts(value);
     setJsonPromptItems(null);
     setImportSummary('');
+    setInlineError('');
+    setInlineMessage('');
   };
 
   const handlePromptFileImport = async (file: File) => {
@@ -391,6 +466,7 @@ export default function GeneratePage() {
       }
       setInlineImagePath('');
       setInlineError('');
+      setInlineMessage('');
     } catch (error) {
       console.error('Error importing prompt file:', error);
       alert('Failed to import prompt file.');
@@ -447,6 +523,7 @@ export default function GeneratePage() {
       job: 'generate',
       config: {
         name: normalizedJobName,
+        device: 'cuda',
         process: [
           {
             type: 'to_folder',
@@ -503,6 +580,7 @@ export default function GeneratePage() {
 
     const jobConfig = buildGenerateJobConfig(promptItems, normalizedJobName, model);
 
+    clearStatusResetTimeout();
     setStatus('saving');
     try {
       const res = await apiClient.post('/api/jobs', {
@@ -528,8 +606,14 @@ export default function GeneratePage() {
       }
       setStatus('error');
     } finally {
-      setTimeout(() => setStatus('idle'), 1500);
+      scheduleStatusIdle();
     }
+  };
+
+  const cancelInlineGeneration = () => {
+    if (status !== 'generating' || cancelRequested) return;
+    setCancelRequested(true);
+    inlineAbortControllerRef.current?.abort();
   };
 
   const generateInline = async (promptItems = currentPromptItems) => {
@@ -546,22 +630,46 @@ export default function GeneratePage() {
     }
 
     const jobConfig = buildGenerateJobConfig(promptItems, normalizedJobName, model);
+    const abortController = new AbortController();
+    let generationCanceled = false;
+    inlineAbortControllerRef.current = abortController;
+    clearStatusResetTimeout();
+    setCancelRequested(false);
     setStatus('generating');
     setInlineImagePath('');
     setInlineError('');
+    setInlineMessage('');
     try {
-      const res = await apiClient.post('/api/generate/inline', {
-        gpu_ids: selectedGpuIDs,
-        job_config: jobConfig,
-      });
+      const res = await apiClient.post(
+        '/api/generate/inline',
+        {
+          gpu_ids: selectedGpuIDs,
+          job_config: jobConfig,
+        },
+        { signal: abortController.signal },
+      );
       setInlineImagePath(res.data.imagePath || res.data.image_path || '');
     } catch (error: any) {
+      if (abortController.signal.aborted || error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') {
+        generationCanceled = true;
+        setInlineMessage('Generation canceled.');
+        setStatus('idle');
+        return;
+      }
       console.error('Error generating inline image:', error);
       const message = error.response?.data?.error || 'Failed to generate image.';
       setInlineError(message);
       setStatus('error');
     } finally {
-      setTimeout(() => setStatus('idle'), 1500);
+      if (inlineAbortControllerRef.current === abortController) {
+        inlineAbortControllerRef.current = null;
+      }
+      setCancelRequested(false);
+      if (generationCanceled) {
+        setStatus('idle');
+      } else {
+        scheduleStatusIdle();
+      }
     }
   };
 
@@ -790,6 +898,43 @@ export default function GeneratePage() {
                       onChange={value => setModelConfig(current => ({ ...current, low_vram: value }))}
                     />
                   </div>
+                  {supportsLayerOffloading && (
+                    <div className="col-span-2 rounded-md border border-gray-800 bg-gray-950 px-3 py-3">
+                      <Checkbox
+                        label="Layer Offloading"
+                        checked={Boolean(modelConfig.layer_offloading)}
+                        onChange={handleLayerOffloadingChange}
+                      />
+                      {modelConfig.layer_offloading && (
+                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <SliderInput
+                            label="Transformer Offload %"
+                            value={Math.round(
+                              toFiniteNumber(modelConfig.layer_offloading_transformer_percent, 1.0) * 100,
+                            )}
+                            onChange={value =>
+                              handleLayerOffloadingPercentChange('layer_offloading_transformer_percent', value)
+                            }
+                            min={0}
+                            max={100}
+                            step={1}
+                          />
+                          <SliderInput
+                            label="Text Encoder Offload %"
+                            value={Math.round(
+                              toFiniteNumber(modelConfig.layer_offloading_text_encoder_percent, 1.0) * 100,
+                            )}
+                            onChange={value =>
+                              handleLayerOffloadingPercentChange('layer_offloading_text_encoder_percent', value)
+                            }
+                            min={0}
+                            max={100}
+                            step={1}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end pt-2">
@@ -813,9 +958,20 @@ export default function GeneratePage() {
               </div>
 
               {status === 'generating' && (
-                <div className="flex min-h-64 items-center justify-center rounded-md border border-gray-800 bg-gray-950 text-sm text-gray-300">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating image
+                <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-md border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
+                  <div className="flex items-center">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {cancelRequested ? 'Canceling generation' : 'Generating image'}
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={cancelInlineGeneration}
+                    disabled={cancelRequested}
+                    className="inline-flex items-center gap-2 rounded-md border border-red-800 bg-red-950 px-3 py-1.5 text-xs text-red-100 hover:bg-red-900 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    {cancelRequested ? 'Canceling...' : 'Cancel'}
+                  </Button>
                 </div>
               )}
 
@@ -832,9 +988,15 @@ export default function GeneratePage() {
                 </div>
               )}
 
-              {status !== 'generating' && !inlineImagePath && !inlineError && (
+              {status !== 'generating' && !inlineImagePath && !inlineError && !inlineMessage && (
                 <div className="flex min-h-64 items-center justify-center rounded-md border border-dashed border-gray-800 bg-gray-950 px-4 text-center text-sm text-gray-500">
                   Single-image generations appear here. Multiple prompts or repeats create a generate job.
+                </div>
+              )}
+
+              {inlineMessage && status !== 'generating' && (
+                <div className="mt-3 rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                  {inlineMessage}
                 </div>
               )}
 

@@ -171,6 +171,44 @@ npm run build_and_start
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
 
+## Image generation UI
+
+The **Generate** page can run image generation from a base model or a locally trained LoRA without creating a training job. A single requested image is generated inline and displayed on the same page by default. If the request would create more than one image, for example multiple prompts or `Images per Prompt` greater than `1`, the UI creates a normal `generate` job instead so it can run through the queue and be tracked from the jobs page.
+
+Prompts can be typed directly, one prompt per line, or imported from a text file:
+
+```txt
+photo of a cinematic portrait, detailed lighting
+wide shot of a futuristic city at sunrise
+```
+
+Prompt JSON files are also supported for per-image settings. The JSON can be an array, or an object with an `images`, `prompts`, or `samples` array. String entries use the page defaults; object entries can override settings for that image:
+
+```json
+{
+  "images": [
+    {
+      "prompt": "photo of a cinematic portrait, detailed lighting",
+      "width": 1024,
+      "height": 1024,
+      "seed": 1234,
+      "guidance_scale": 4,
+      "sample_steps": 20,
+      "negative_prompt": "blurry, low quality"
+    },
+    {
+      "prompt": "wide shot of a futuristic city at sunrise",
+      "width": 1344,
+      "height": 768,
+      "sampler": "flowmatch",
+      "format": "webp"
+    }
+  ]
+}
+```
+
+Common per-image keys include `prompt`, `negative_prompt` or `neg`, `width`, `height`, `seed`, `guidance_scale`, `sample_steps`, `sampler`, `format` or `ext`, and `network_multiplier`.
+
 ## TensorBoard
 
 TensorBoard is installed with the Python requirements. If `AITK_ENABLE_TENSORBOARD` is not set, the UI tries to auto-enable TensorBoard when the package is available in the active Python environment and silently skips it if the probe or startup fails.

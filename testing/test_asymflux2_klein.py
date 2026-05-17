@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 
@@ -142,6 +143,39 @@ class AsymFlux2KleinModelTest(unittest.TestCase):
         )
 
         self.assertIs(get_model_class(config), AsymFlux2Klein9BModel)
+
+
+    def test_adapter_loading_enforces_safetensors(self):
+        model = object.__new__(AsymFlux2Klein9BModel)
+        model.torch_dtype = torch.float32
+        model.model_config = type("ModelConfigStub", (), {"model_kwargs": {}})()
+        model.print_and_status_update = lambda *_args, **_kwargs: None
+        model._make_oklab_encoder = lambda: object()
+        model.make_asymflow_scheduler = lambda _kwargs: object()
+
+        transformer_stub = object()
+        bridge_instance = mock.Mock()
+        bridge_instance.transformer = transformer_stub
+
+        with (
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.asymflux2_klein_model.Flux2Transformer2DModel.from_pretrained",
+                return_value=transformer_stub,
+            ),
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.asymflux2_klein_model.LakonLabPixelFlux2KleinPipeline",
+                return_value=bridge_instance,
+            ),
+            mock.patch.dict(os.environ, {"HF_TOKEN": "token"}, clear=False),
+        ):
+            model._load_adapter_transformer("base-model", "adapter-path")
+
+        bridge_instance.load_lakonlab_adapter.assert_called_once_with(
+            "adapter-path",
+            target_module_name="transformer",
+            token="token",
+            use_safetensors=True,
+        )
 
     def test_full_finetune_folder_detection(self):
         with tempfile.TemporaryDirectory() as tmpdir:

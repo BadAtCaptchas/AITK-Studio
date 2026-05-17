@@ -231,6 +231,7 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
             adapter_path,
             target_module_name="transformer",
             token=os.getenv("HF_TOKEN", None),
+            use_safetensors=True,
         )
         return bridge.transformer
 

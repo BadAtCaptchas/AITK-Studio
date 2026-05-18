@@ -70,7 +70,7 @@ DO_NOT_TRAIN_WEIGHTS = [
     "refiner_unet_time_embedding.linear_2.weight",
 ]
 
-DeviceStatePreset = Literal['cache_latents', 'generate']
+DeviceStatePreset = Literal['cache_latents', 'cache_clip', 'cache_text_encoder', 'unload', 'generate']
 
 
 class BlankNetwork:
@@ -1513,6 +1513,10 @@ class BaseModel:
     def set_device_state_preset(self, device_state_preset: DeviceStatePreset):
         # sets a preset for device state
 
+        valid_presets = {'cache_latents', 'cache_clip', 'cache_text_encoder', 'unload', 'generate'}
+        if device_state_preset not in valid_presets:
+            raise ValueError(f"Unknown device state preset: {device_state_preset}")
+
         # save current state first
         self.save_device_state()
 
@@ -1522,6 +1526,10 @@ class BaseModel:
             active_modules = ['vae']
         if device_state_preset in ['cache_clip']:
             active_modules = ['clip']
+        if device_state_preset in ['cache_text_encoder']:
+            active_modules = ['text_encoder']
+        if device_state_preset in ['unload']:
+            active_modules = []
         if device_state_preset in ['generate']:
             active_modules = ['vae', 'unet',
                               'text_encoder', 'adapter', 'refiner_unet']

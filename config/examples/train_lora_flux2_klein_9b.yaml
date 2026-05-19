@@ -1,0 +1,67 @@
+---
+job: extension
+config:
+  name: "my_flux2_klein_9b_lora_v1"
+  process:
+    - type: "sd_trainer"
+      training_folder: "output"
+      device: cuda:0
+      trigger_word: "TRIGGER"
+      network:
+        type: "lora"
+        linear: 32
+        linear_alpha: 32
+        network_kwargs:
+          only_if_contains:
+            - "img_attn.qkv"
+            - "img_attn.proj"
+            - "transformer.single_blocks."
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 4
+        push_to_hub: false
+      datasets:
+        - folder_path: "/path/to/images/folder"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [512, 768, 1024]
+      train:
+        batch_size: 1
+        steps: 3000
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        timestep_type: "weighted"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+        dtype: bf16
+      model:
+        arch: "flux2_klein_9b"
+        name_or_path: "black-forest-labs/FLUX.2-klein-base-9B"
+        quantize: true
+        quantize_te: true
+        low_vram: true
+        qtype: "qfloat8"
+        model_kwargs:
+          match_target_res: false
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 1024
+        height: 1024
+        prompts:
+          - "a studio portrait of [trigger], natural light, detailed texture"
+          - "[trigger] in an editorial fashion photo, clean background, detailed fabric"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 25
+meta:
+  name: "[name]"
+  version: "1.0"

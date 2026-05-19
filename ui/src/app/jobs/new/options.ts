@@ -755,6 +755,10 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
       'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
       'config.process[0].model.qtype': ['qfloat8', 'qfloat8'],
+      'config.process[0].network.network_kwargs.only_if_contains': [
+        ['img_attn.qkv', 'img_attn.proj', 'transformer.single_blocks.'],
+        [],
+      ],
       'config.process[0].model.model_kwargs': [
         {
           match_target_res: false,
@@ -808,6 +812,10 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
       'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
       'config.process[0].model.qtype': ['qfloat8', 'qfloat8'],
+      'config.process[0].network.network_kwargs.only_if_contains': [
+        ['img_attn.qkv', 'img_attn.proj', 'transformer.single_blocks.'],
+        [],
+      ],
       'config.process[0].model.model_kwargs': [
         {
           match_target_res: false,

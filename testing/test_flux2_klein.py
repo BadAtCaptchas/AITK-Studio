@@ -67,6 +67,7 @@ class Flux2KleinCompatibilityTest(unittest.TestCase):
                 "extensions_built_in.diffusion_models.flux2.flux2_klein_model.Qwen2TokenizerFast.from_pretrained",
                 return_value=tokenizer,
             ) as tokenizer_from_pretrained,
+            mock.patch.dict(os.environ, {}, clear=True),
         ):
             loaded_text_encoder, loaded_tokenizer = model.load_te()
 
@@ -74,14 +75,39 @@ class Flux2KleinCompatibilityTest(unittest.TestCase):
         self.assertIs(loaded_tokenizer, tokenizer)
         text_encoder_from_pretrained.assert_called_once_with(
             "black-forest-labs/FLUX.2-klein-base-4B",
+            token=None,
             torch_dtype=torch.float32,
             subfolder="text_encoder",
         )
         tokenizer_from_pretrained.assert_called_once_with(
             "black-forest-labs/FLUX.2-klein-base-4B",
             local_files_only=False,
+            token=None,
             subfolder="tokenizer",
         )
+
+    def test_load_te_passes_hf_token_to_bfl_subfolders(self):
+        model = make_klein_model()
+        text_encoder = mock.Mock()
+        tokenizer = object()
+
+        with (
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.flux2_klein_model.Qwen3ForCausalLM.from_pretrained",
+                return_value=text_encoder,
+            ) as text_encoder_from_pretrained,
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.flux2_klein_model.Qwen2TokenizerFast.from_pretrained",
+                return_value=tokenizer,
+            ) as tokenizer_from_pretrained,
+            mock.patch.dict(os.environ, {"HF_TOKEN": "hf_test_token"}, clear=False),
+        ):
+            loaded_text_encoder, loaded_tokenizer = model.load_te()
+
+        self.assertIs(loaded_text_encoder, text_encoder)
+        self.assertIs(loaded_tokenizer, tokenizer)
+        self.assertEqual(text_encoder_from_pretrained.call_args.kwargs["token"], "hf_test_token")
+        self.assertEqual(tokenizer_from_pretrained.call_args.kwargs["token"], "hf_test_token")
 
     def test_load_te_falls_back_to_standalone_qwen_repo(self):
         model = make_klein_model()
@@ -97,6 +123,7 @@ class Flux2KleinCompatibilityTest(unittest.TestCase):
                 "extensions_built_in.diffusion_models.flux2.flux2_klein_model.Qwen2TokenizerFast.from_pretrained",
                 return_value=tokenizer,
             ) as tokenizer_from_pretrained,
+            mock.patch.dict(os.environ, {}, clear=True),
         ):
             loaded_text_encoder, loaded_tokenizer = model.load_te()
 
@@ -106,17 +133,19 @@ class Flux2KleinCompatibilityTest(unittest.TestCase):
             text_encoder_from_pretrained.call_args_list[0],
             mock.call(
                 "black-forest-labs/FLUX.2-klein-base-4B",
+                token=None,
                 torch_dtype=torch.float32,
                 subfolder="text_encoder",
             ),
         )
         self.assertEqual(
             text_encoder_from_pretrained.call_args_list[1],
-            mock.call("Qwen/Qwen3-4B", torch_dtype=torch.float32),
+            mock.call("Qwen/Qwen3-4B", token=None, torch_dtype=torch.float32),
         )
         tokenizer_from_pretrained.assert_called_once_with(
             "Qwen/Qwen3-4B",
             local_files_only=False,
+            token=None,
         )
         status_messages = [
             call.args[0] for call in model.print_and_status_update.call_args_list

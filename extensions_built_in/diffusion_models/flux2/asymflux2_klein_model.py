@@ -6,7 +6,7 @@ import torch
 import yaml
 from diffusers.models import Flux2Transformer2DModel
 from optimum.quanto import QTensor, freeze
-from transformers import Qwen2TokenizerFast, Qwen3ForCausalLM
+from transformers import Qwen3ForCausalLM
 
 from toolkit.accelerator import unwrap_model
 from toolkit.basic import flush
@@ -23,7 +23,7 @@ from .asymflux2_components import (
     OklabColorEncoder,
     PixelFlux2KleinPipeline,
 )
-from .flux2_klein_model import Flux2KleinModel
+from .flux2_klein_model import Flux2KleinModel, _hf_token
 
 if TYPE_CHECKING:
     from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
@@ -168,22 +168,27 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
         if self.flux2_klein_te_path is None:
             raise ValueError("flux2_klein_te_path must be set for AsymFlux2Klein9BModel")
         dtype = self.torch_dtype
+        source = {
+            "text_encoder_path": self.flux2_klein_te_path,
+            "text_encoder_subfolder": None,
+            "tokenizer_path": self.flux2_klein_te_path,
+            "tokenizer_subfolder": None,
+            "label": self.flux2_klein_te_path,
+            "is_fallback": True,
+        }
         text_encoder = None
         if self.model_config.quantize_te:
-            text_encoder = self._load_qwen_quantized_cache()
+            text_encoder = self._load_qwen_quantized_cache(source)
 
         if text_encoder is None:
             self.print_and_status_update("Loading Qwen3")
-            text_encoder: Qwen3ForCausalLM = Qwen3ForCausalLM.from_pretrained(
-                self.flux2_klein_te_path,
-                torch_dtype=dtype,
-            )
+            text_encoder: Qwen3ForCausalLM = self._load_qwen_text_encoder(source, dtype)
         if self.model_config.quantize_te:
             if not getattr(text_encoder, "_aitk_loaded_from_quantized_cache", False):
                 self.print_and_status_update("Quantizing Qwen3")
                 quantize(text_encoder, weights=get_qtype(self.model_config.qtype_te))
                 freeze(text_encoder)
-                self._save_qwen_quantized_cache(text_encoder)
+                self._save_qwen_quantized_cache(text_encoder, source)
             flush()
         elif not self.model_config.low_vram:
             text_encoder.to(self.device_torch, dtype=dtype)
@@ -200,15 +205,10 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
             )
 
         tokenizer_from_cache = getattr(text_encoder, "_aitk_loaded_from_quantized_cache", False)
-        try:
-            tokenizer = Qwen2TokenizerFast.from_pretrained(
-                self.flux2_klein_te_path,
-                local_files_only=tokenizer_from_cache,
-            )
-        except Exception:
-            if not tokenizer_from_cache:
-                raise
-            tokenizer = Qwen2TokenizerFast.from_pretrained(self.flux2_klein_te_path)
+        tokenizer = self._load_qwen_tokenizer(
+            source,
+            local_files_only=tokenizer_from_cache,
+        )
         return text_encoder, tokenizer
 
     def _load_adapter_transformer(self, base_model_name_or_path: str, adapter_path: str):
@@ -216,6 +216,7 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
         transformer = Flux2Transformer2DModel.from_pretrained(
             base_model_name_or_path,
             subfolder="transformer",
+            token=_hf_token(),
             torch_dtype=self.torch_dtype,
         )
         bridge = LakonLabPixelFlux2KleinPipeline(
@@ -240,6 +241,7 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
         return AsymFlux2Transformer2DModel.from_pretrained(
             model_path,
             subfolder="transformer",
+            token=_hf_token(),
             torch_dtype=self.torch_dtype,
         )
 

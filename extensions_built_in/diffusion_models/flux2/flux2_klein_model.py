@@ -13,6 +13,10 @@ from .flux2_model import Flux2Model
 from .src.model import Klein9BParams, Klein4BParams
 
 
+def _hf_token():
+    return os.getenv("HF_TOKEN") or None
+
+
 def _qwen3_from_config(config):
     from_config = getattr(Qwen3ForCausalLM, "from_config", None)
     if from_config is not None:
@@ -135,6 +139,7 @@ class Flux2KleinModel(Flux2Model):
                 config_kwargs["subfolder"] = source["text_encoder_subfolder"]
             config = AutoConfig.from_pretrained(
                 source["text_encoder_path"],
+                token=_hf_token(),
                 **config_kwargs,
             )
             with init_empty_weights():
@@ -184,6 +189,7 @@ class Flux2KleinModel(Flux2Model):
             text_encoder_kwargs["subfolder"] = source["text_encoder_subfolder"]
         return Qwen3ForCausalLM.from_pretrained(
             source["text_encoder_path"],
+            token=_hf_token(),
             **text_encoder_kwargs,
         )
 
@@ -195,6 +201,7 @@ class Flux2KleinModel(Flux2Model):
             return Qwen2TokenizerFast.from_pretrained(
                 source["tokenizer_path"],
                 local_files_only=local_files_only,
+                token=_hf_token(),
                 **tokenizer_kwargs,
             )
         except Exception:
@@ -202,6 +209,7 @@ class Flux2KleinModel(Flux2Model):
                 raise
             return Qwen2TokenizerFast.from_pretrained(
                 source["tokenizer_path"],
+                token=_hf_token(),
                 **tokenizer_kwargs,
             )
 

@@ -5,7 +5,7 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getDatabaseConfig } from '@/server/db';
-import { getTrainingFolder } from '@/server/settings';
+import { getHFToken, getTrainingFolder } from '@/server/settings';
 import { getToolkitPythonPath } from '@/server/tensorboard';
 
 export const runtime = 'nodejs';
@@ -244,6 +244,7 @@ export async function POST(request: NextRequest) {
 
     const gpuIds = typeof body.gpu_ids === 'string' && body.gpu_ids.trim() ? body.gpu_ids.trim() : '0';
     const trainingRoot = await getTrainingFolder();
+    const hfToken = await getHFToken();
     const dbConfig = getDatabaseConfig();
     const baseName = sanitizeName(jobConfig.config?.name);
     const runName = `${baseName}_${Date.now()}`;
@@ -287,6 +288,9 @@ export async function POST(request: NextRequest) {
       PYTHONUNBUFFERED: '1',
       HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
     };
+    if (hfToken) {
+      additionalEnv.HF_TOKEN = hfToken;
+    }
 
     await runInlineGenerate(
       pythonPath,

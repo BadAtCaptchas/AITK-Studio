@@ -161,7 +161,7 @@ class AsymFlux2KleinModelTest(unittest.TestCase):
             mock.patch(
                 "extensions_built_in.diffusion_models.flux2.asymflux2_klein_model.Flux2Transformer2DModel.from_pretrained",
                 return_value=transformer_stub,
-            ),
+            ) as transformer_from_pretrained,
             mock.patch(
                 "extensions_built_in.diffusion_models.flux2.asymflux2_klein_model.LakonLabPixelFlux2KleinPipeline",
                 return_value=bridge_instance,
@@ -170,11 +170,52 @@ class AsymFlux2KleinModelTest(unittest.TestCase):
         ):
             model._load_adapter_transformer("base-model", "adapter-path")
 
+        transformer_from_pretrained.assert_called_once_with(
+            "base-model",
+            subfolder="transformer",
+            token="token",
+            torch_dtype=torch.float32,
+        )
         bridge_instance.load_lakonlab_adapter.assert_called_once_with(
             "adapter-path",
             target_module_name="transformer",
             token="token",
             use_safetensors=True,
+        )
+
+    def test_load_te_uses_shared_qwen_cache_source(self):
+        model = object.__new__(AsymFlux2Klein9BModel)
+        model.torch_dtype = torch.float32
+        model.device_torch = torch.device("cpu")
+        model.model_config = type(
+            "ModelConfigStub",
+            (),
+            {
+                "quantize_te": True,
+                "qtype_te": "qint8",
+                "low_vram": True,
+                "layer_offloading": False,
+                "layer_offloading_text_encoder_percent": 0,
+            },
+        )()
+        model.print_and_status_update = lambda *_args, **_kwargs: None
+
+        text_encoder = mock.Mock()
+        text_encoder._aitk_loaded_from_quantized_cache = True
+        tokenizer = object()
+        model._load_qwen_quantized_cache = mock.Mock(return_value=text_encoder)
+        model._load_qwen_tokenizer = mock.Mock(return_value=tokenizer)
+
+        loaded_text_encoder, loaded_tokenizer = model.load_te()
+
+        self.assertIs(loaded_text_encoder, text_encoder)
+        self.assertIs(loaded_tokenizer, tokenizer)
+        source = model._load_qwen_quantized_cache.call_args.args[0]
+        self.assertEqual(source["text_encoder_path"], "Qwen/Qwen3-8B")
+        self.assertIsNone(source["text_encoder_subfolder"])
+        model._load_qwen_tokenizer.assert_called_once_with(
+            source,
+            local_files_only=True,
         )
 
     def test_full_finetune_folder_detection(self):

@@ -3,7 +3,7 @@ import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { TOOLKIT_ROOT, getTrainingFolder } from '../paths';
+import { TOOLKIT_ROOT, getHFToken, getTrainingFolder } from '../paths';
 import { getTensorBoardLogDir, getToolkitPythonPath, isTensorBoardEnabled } from '../../src/server/tensorboard';
 
 const isWindows = process.platform === 'win32';
@@ -50,6 +50,7 @@ const startAndWatchJob = (job: Job) => {
 
     try {
       const trainingRoot = await getTrainingFolder();
+      const hfToken = await getHFToken();
       const tensorBoardEnabled = isTensorBoardEnabled();
       const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
@@ -114,6 +115,9 @@ const startAndWatchJob = (job: Job) => {
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
       };
+      if (hfToken) {
+        additionalEnv.HF_TOKEN = hfToken;
+      }
 
       const args = [runFilePath, configPath, '--log', logPath];
       launchLogFd = fs.openSync(launchLogPath, 'a');

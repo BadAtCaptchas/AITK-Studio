@@ -72,6 +72,11 @@ export interface EncryptedDatasetStartKey {
   keyB64: string;
 }
 
+export interface JobStartRequest {
+  encryptedDatasetKeys?: EncryptedDatasetStartKey[];
+  durableEncryptedDatasetKeys?: boolean;
+}
+
 export interface WorkerNode {
   id: string;
   name: string;

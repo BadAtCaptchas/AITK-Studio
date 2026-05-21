@@ -279,7 +279,7 @@ The UI can control remote AI Toolkit worker instances. Each worker runs the same
 
 Remote workers are authoritative after upload. The central UI mirrors status, step, speed, config, and error text from the worker. Base model files are not bundled; they must exist on the worker or the import will report warnings.
 
-Encrypted dataset bundles include only ciphertext dataset folders. Starting an encrypted job on a remote worker requires supplying the dataset secret again at start time, and remote encrypted starts require an `https://` worker URL unless `AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS=1` is set explicitly.
+Encrypted dataset bundles include only ciphertext dataset folders. Starting an encrypted job on a remote worker requires supplying the dataset secret at start time unless durable encrypted resume was enabled for that job. Remote encrypted starts require an `https://` worker URL unless `AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS=1` is set explicitly.
 
 Optional managed `cloudflared` support is configured with environment variables on any instance you want to expose through Cloudflare Tunnel:
 
@@ -550,11 +550,13 @@ Encrypted upload happens before files leave the browser. The dataset folder stor
 
 Original filenames, captions, media metadata, and logical paths live inside the encrypted catalog. The server never receives plaintext media or captions during encrypted upload, preview, caption editing, auto-caption saves, training, import, or export.
 
-To preview, edit, upload more files, auto-caption, or train with an encrypted dataset, open the dataset page and unlock it with the password or key file. The browser keeps the raw key in page memory only. Training and caption jobs require the secret again when they start; secrets are sent with the start request, are not written into job configs, database rows, logs, or export bundles, and are removed from the Python environment after launch.
+To preview, edit, upload more files, auto-caption, or train with an encrypted dataset, open the dataset page and unlock it with the password or key file. The browser keeps the raw key in page memory only. Training and caption jobs require the secret again when they start; by default, secrets are sent with the start request, are not written into job configs, database rows, logs, or export bundles, and are removed from the Python environment after launch.
+
+For queue durability, enable **Allow durable encrypted resume** when starting an encrypted train or caption job. This stores the raw dataset key material in the UI database so the cron launcher can start or resume the queued job after the app restarts. This is a deliberate security tradeoff: anyone with server or database access can recover that job's dataset key. Durable keys are cleared when the job completes successfully or is deleted, and are retained after stop/error states so the job can resume. They are not written into job configs, launch logs, Python logs, or export bundles.
 
 Threat model limit: encrypted datasets protect against plaintext at rest on disk and accidental dataset export. A compromised training host can still read the key or plaintext from browser, Node, or Python process memory while the dataset is unlocked or training is running. File count and ciphertext sizes are also visible.
 
-Disk caches and plaintext sidecars are disabled for encrypted datasets. Generated controls, external control/mask/inpaint paths, and durable resume without re-supplying the secret are not supported for encrypted datasets yet.
+Disk caches and plaintext sidecars are disabled for encrypted datasets. Generated controls and external control/mask/inpaint paths are not supported for encrypted datasets yet.
 
 
 ## Training Specific Layers

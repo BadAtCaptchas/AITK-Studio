@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { db, type WorkerNodeRecord } from './db';
+import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '@/types';
 
 export class RemoteClientError extends Error {
@@ -102,7 +103,7 @@ export async function syncRemoteJob(localJob: Job) {
       });
     }
 
-    return db.jobs.update(localJob.id, {
+    const synced = await db.jobs.update(localJob.id, {
       name: remoteJob.name,
       gpu_ids: remoteJob.gpu_ids,
       job_config: remoteJob.job_config,
@@ -119,6 +120,12 @@ export async function syncRemoteJob(localJob: Job) {
       remote_sync_at: new Date(),
       remote_error: null,
     });
+    if (remoteJob.status === 'completed') {
+      await clearDurableEncryptedDatasetKeys(localJob.id).catch(error =>
+        console.error('Error clearing durable encrypted dataset keys:', error),
+      );
+    }
+    return synced;
   } catch (error) {
     return db.jobs.update(localJob.id, {
       remote_sync_at: new Date(),

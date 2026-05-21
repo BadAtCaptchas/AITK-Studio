@@ -826,6 +826,7 @@ export default function SimpleJob({
             <TrainingPhasesEditor
               train={jobConfig.config.process[0].train}
               network={jobConfig.config.process[0].network}
+              currentArch={jobConfig.config.process[0].model.arch}
               setJobConfig={setJobConfig}
               disableTimestepType={disableSections.includes('train.timestep_type')}
             />

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
+import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 
 const contentTypeMap: { [key: string]: string } = {
   // Images
@@ -78,6 +79,10 @@ export async function GET(request: NextRequest, { params }: { params: ImageRoute
     if (!isAllowed) {
       console.warn(`Access denied: ${filepath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
+    }
+
+    if (canonicalPath && findEncryptedDatasetRoot(canonicalPath, datasetRoot)) {
+      return new NextResponse('Encrypted dataset objects are not served through this route', { status: 403 });
     }
 
     // Stat file (async)

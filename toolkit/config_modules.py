@@ -897,6 +897,7 @@ class DatasetConfig:
         self.folder_path: str = kwargs.get('folder_path', None)
         # can be json or folder path
         self.dataset_path: str = kwargs.get('dataset_path', None)
+        self.encrypted: bool = kwargs.get('encrypted', False)
 
         self.default_caption: str = kwargs.get('default_caption', None)
         # trigger word for just this dataset

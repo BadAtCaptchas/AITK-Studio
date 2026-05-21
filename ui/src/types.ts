@@ -13,6 +13,65 @@ export interface Queue {
   is_running: boolean;
 }
 
+export type DatasetEncryptionKdf =
+  | {
+      type: 'PBKDF2-SHA256';
+      salt: string;
+      iterations: number;
+      keyLength: 32;
+    }
+  | {
+      type: 'KEYFILE-SHA256';
+      keyLength: 32;
+    };
+
+export type EncryptedDatasetManifest = {
+  format: 'aitk-encrypted-dataset';
+  version: 1;
+  crypto: {
+    algorithm: 'AES-256-GCM';
+    kdf: DatasetEncryptionKdf;
+  };
+  catalog: {
+    nonce: string;
+    data: string;
+  };
+};
+
+export type EncryptedDatasetMediaKind = 'image' | 'video' | 'audio';
+
+export interface EncryptedDatasetItem {
+  id: string;
+  name: string;
+  extension: string;
+  mimeType: string;
+  mediaKind: EncryptedDatasetMediaKind;
+  objectPath: string;
+  size: number;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  captionObjectPath?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EncryptedDatasetCatalog {
+  version: 1;
+  items: EncryptedDatasetItem[];
+}
+
+export interface DatasetSummary {
+  name: string;
+  encrypted: boolean;
+  itemCount?: number | null;
+}
+
+export interface EncryptedDatasetStartKey {
+  datasetPath: string;
+  keyB64: string;
+}
+
 export interface WorkerNode {
   id: string;
   name: string;
@@ -216,6 +275,7 @@ export interface SaveConfig {
 
 export interface DatasetConfig {
   folder_path: string;
+  encrypted?: boolean;
   mask_path: string | null;
   mask_min_value: number;
   default_caption: string;

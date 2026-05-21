@@ -244,12 +244,16 @@ export default function JobActionBar({
         <Button
           onClick={async () => {
             if (!canStart) return;
-            await startJob(job.id);
-            // start the queue as well
-            if (autoStartQueue) {
-              await startQueue(job.gpu_ids, job.worker_id);
+            try {
+              await startJob(job.id);
+              // start the queue as well
+              if (autoStartQueue) {
+                await startQueue(job.gpu_ids, job.worker_id);
+              }
+              if (onRefresh) onRefresh();
+            } catch (error) {
+              alert(error instanceof Error ? error.message : 'Failed to start job.');
             }
-            if (onRefresh) onRefresh();
           }}
           className={`ml-2 opacity-100`}
         >

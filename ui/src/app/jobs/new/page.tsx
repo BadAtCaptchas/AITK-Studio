@@ -89,7 +89,10 @@ export default function TrainingForm() {
     if (!isSettingsLoaded) return;
     if (datasetFetchStatus !== 'success') return;
 
-    const datasetOptions = datasets.map(name => ({ value: path.join(settings.DATASETS_FOLDER, name), label: name }));
+    const datasetOptions = datasets.map(dataset => ({
+      value: path.join(settings.DATASETS_FOLDER, dataset.name),
+      label: dataset.encrypted ? `${dataset.name} (encrypted)` : dataset.name,
+    }));
     setDatasetOptions(datasetOptions);
 
     if (datasetOptions.length > 0) {

@@ -352,6 +352,13 @@ class CaptionProcessingDTOMixin:
         if self.raw_caption is not None:
             # we already loaded it
             pass
+        elif getattr(self, 'is_encrypted', False):
+            prompt = self.encrypted_reader.get_caption(self.encrypted_item) or ''
+            short_caption = None
+            if prompt.strip() == '' and self.dataset_config.default_caption is not None:
+                prompt = self.dataset_config.default_caption
+            self.raw_caption = clean_caption(prompt)
+            self.raw_caption_short = short_caption if short_caption is not None else self.dataset_config.default_caption
         elif caption_dict is not None and self.path in caption_dict and "caption" in caption_dict[self.path]:
             self.raw_caption = caption_dict[self.path]["caption"]
             if 'caption_short' in caption_dict[self.path]:
@@ -501,7 +508,10 @@ class AudioProcessingDTOMixin:
         try:
             import torchaudio
 
-            waveform, sample_rate = torchaudio.load(self.path)  # [channels, samples]
+            if getattr(self, 'is_encrypted', False):
+                waveform, sample_rate = self.encrypted_reader.load_audio_waveform(self.encrypted_item)
+            else:
+                waveform, sample_rate = torchaudio.load(self.path)  # [channels, samples]
             waveform = waveform_to_stereo(waveform)  # Convert to stereo if not already
             if sample_rate != self.sample_rate:
                 waveform = torchaudio.functional.resample(waveform, sample_rate, self.sample_rate)
@@ -531,6 +541,81 @@ class ImageProcessingDTOMixin:
             raise Exception('Buckets required for video processing')
         
         do_audio = self.dataset_config.do_audio
+        if getattr(self, 'is_encrypted', False):
+            try:
+                selected_frames, video_fps, frames_to_extract, selected_num_frames = self.encrypted_reader.load_video_frames(
+                    self.encrypted_item,
+                    self.num_frames,
+                    self.dataset_config.fps,
+                    self.dataset_config.shrink_video_to_frames,
+                    self.dataset_config.auto_frame_count,
+                    self.temporal_compression,
+                )
+                self.num_frames = selected_num_frames
+                frames = []
+                for img in selected_frames:
+                    img = img.convert('RGB')
+                    if self.flip_x:
+                        img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                    if self.flip_y:
+                        img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                    img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+                    img = img.crop((
+                        self.crop_x,
+                        self.crop_y,
+                        self.crop_x + self.crop_width,
+                        self.crop_y + self.crop_height
+                    ))
+                    if transform:
+                        img = transform(img)
+                    frames.append(img)
+                self.tensor = torch.stack(frames)
+
+                if do_audio:
+                    import torch.nn.functional as F
+
+                    self.audio_data = None
+                    self.audio_tensor = None
+                    waveform, sample_rate = self.encrypted_reader.load_audio_waveform(self.encrypted_item)
+                    waveform = waveform_to_stereo(waveform)
+                    if self.dataset_config.audio_normalize:
+                        peak = waveform.abs().amax()
+                        waveform = waveform * (0.999 / (peak + 1e-9))
+
+                    if video_fps and video_fps > 0 and len(frames_to_extract) > 0:
+                        clip_start_time = int(frames_to_extract[0]) / float(video_fps)
+                        clip_end_time = (int(frames_to_extract[-1]) + 1) / float(video_fps)
+                        source_duration = max(0.0, clip_end_time - clip_start_time)
+                    else:
+                        clip_start_time = 0.0
+                        source_duration = 0.0
+
+                    target_duration = float(self.num_frames) / float(self.dataset_config.fps) if self.dataset_config.fps else source_duration
+                    if source_duration > 0.0:
+                        start_sample = int(round(clip_start_time * sample_rate))
+                        end_sample = int(round((clip_start_time + source_duration) * sample_rate))
+                        start_sample = max(0, min(start_sample, waveform.shape[-1]))
+                        end_sample = max(0, min(end_sample, waveform.shape[-1]))
+                        waveform = waveform[..., start_sample:end_sample] if end_sample > start_sample else None
+                    else:
+                        waveform = None
+
+                    if waveform is not None and waveform.numel() > 0:
+                        target_samples = int(round(target_duration * sample_rate))
+                        if target_samples > 0 and waveform.shape[-1] != target_samples:
+                            if self.dataset_config.audio_preserve_pitch:
+                                waveform = time_stretch_preserve_pitch(waveform, sample_rate, target_samples)
+                            else:
+                                waveform = F.interpolate(
+                                    waveform.unsqueeze(0), size=target_samples, mode="linear", align_corners=False
+                                ).squeeze(0)
+                        self.audio_tensor = waveform
+                        self.audio_data = {"waveform": waveform, "sample_rate": int(sample_rate)}
+                return
+            except Exception as e:
+                traceback.print_exc()
+                raise Exception(f"Encrypted video loading error ({self.path}): {e}") from e
+
         cap = None
         
         try:
@@ -861,7 +946,10 @@ class ImageProcessingDTOMixin:
             self.load_and_process_video(transform, only_load_latents)
             return
         try:
-            img = Image.open(self.path)
+            if getattr(self, 'is_encrypted', False):
+                img = self.encrypted_reader.open_image(self.encrypted_item)
+            else:
+                img = Image.open(self.path)
             img = exif_transpose(img)
         except Exception as e:
             print_acc(f"Error: {e}")

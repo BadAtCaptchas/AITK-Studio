@@ -61,6 +61,9 @@ class FileItemDTO(
 
     def __init__(self, *args, **kwargs):
         self.path = kwargs.get("path", "")
+        self.encrypted_reader = kwargs.get("encrypted_reader", None)
+        self.encrypted_item = kwargs.get("encrypted_item", None)
+        self.is_encrypted = self.encrypted_reader is not None and self.encrypted_item is not None
         self.dataset_config: "DatasetConfig" = kwargs.get("dataset_config", None)
         self.is_video = self.dataset_config.num_frames > 1 or self.dataset_config.auto_frame_count
         self.is_audio_model = kwargs.get("is_audio_model", False)
@@ -75,13 +78,15 @@ class FileItemDTO(
         self.te_padding_side = kwargs.get("te_padding_side", "right")
         self.latent_space_version = kwargs.get("latent_space_version", "sd1")
         self.text_embedding_space_version = kwargs.get("text_embedding_space_version", "sd1")
-        if dataset_root is not None:
+        if self.is_encrypted:
+            file_key = self.encrypted_item.id
+        elif dataset_root is not None:
             # remove dataset root from path
             file_key = self.path.replace(dataset_root, "")
         else:
             file_key = os.path.basename(self.path)
 
-        file_signature = get_quick_signature_string(self.path)
+        file_signature = self.encrypted_reader.item_signature(self.encrypted_item) if self.is_encrypted else get_quick_signature_string(self.path)
         if file_signature is None:
             raise Exception("Error: Could not get file signature for {self.path}")
 
@@ -96,7 +101,24 @@ class FileItemDTO(
                 and db_entry[2] == file_signature
             ):
                 use_db_entry = True
-        if self.is_audio_model:
+        if self.is_encrypted:
+            if self.is_audio_model:
+                w = int(self.encrypted_item.durationMs or 0)
+                h = 1
+                if w <= 0:
+                    waveform, sample_rate = self.encrypted_reader.load_audio_waveform(self.encrypted_item)
+                    w = int((waveform.shape[-1] / sample_rate) * 1000)
+            elif self.is_video:
+                w = int(self.encrypted_item.width or 0)
+                h = int(self.encrypted_item.height or 0)
+            else:
+                w = int(self.encrypted_item.width or 0)
+                h = int(self.encrypted_item.height or 0)
+                if not self._is_valid_dimension(w) or not self._is_valid_dimension(h):
+                    img = self.encrypted_reader.open_image(self.encrypted_item)
+                    w, h = img.size
+            size_database[file_key] = (w, h, file_signature)
+        elif self.is_audio_model:
             # get the length of the audio file in ms
             with av.open(self.path) as c:
                 if c.duration is not None:

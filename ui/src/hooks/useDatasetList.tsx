@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/utils/api';
+import type { DatasetSummary } from '@/types';
 
 export default function useDatasetList() {
-  const [datasets, setDatasets] = useState<string[]>([]);
+  const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
   const refreshDatasets = () => {
@@ -14,9 +15,11 @@ export default function useDatasetList() {
       .then(res => res.data)
       .then(data => {
         console.log('Datasets:', data);
-        // sort
-        data.sort((a: string, b: string) => a.localeCompare(b));
-        setDatasets(data);
+        const normalized: DatasetSummary[] = (Array.isArray(data) ? data : []).map(item =>
+          typeof item === 'string' ? { name: item, encrypted: false } : item,
+        );
+        normalized.sort((a, b) => a.name.localeCompare(b.name));
+        setDatasets(normalized);
         setStatus('success');
       })
       .catch(error => {

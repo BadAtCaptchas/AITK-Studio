@@ -2,17 +2,31 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
+import { isEncryptedDatasetFolder, readEncryptedManifest, resolveDatasetFolder } from '@/server/encryptedDatasets';
 
 export async function POST(request: Request) {
   const datasetsPath = await getDatasetsRoot();
   const body = await request.json();
   const { datasetName } = body;
-  const datasetFolder = path.join(datasetsPath, datasetName);
+  let datasetFolder: string;
+  try {
+    datasetFolder = resolveDatasetFolder(datasetsPath, datasetName);
+  } catch {
+    return NextResponse.json({ error: 'Invalid dataset name' }, { status: 400 });
+  }
 
   try {
     // Check if folder exists
     if (!fs.existsSync(datasetFolder)) {
       return NextResponse.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
+    }
+
+    if (isEncryptedDatasetFolder(datasetFolder)) {
+      return NextResponse.json({
+        encrypted: true,
+        manifest: await readEncryptedManifest(datasetFolder),
+        images: [],
+      });
     }
 
     // Find all images recursively

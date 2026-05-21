@@ -13,6 +13,7 @@ def make_train_config(**overrides):
     lr = overrides.pop("lr", 1e-4)
     values = {
         "steps": 10,
+        "auto_train": False,
         "phases": None,
         "save_on_phase_change": True,
         "lr": lr,
@@ -199,6 +200,57 @@ class TrainingPhaseManagerTest(unittest.TestCase):
         self.assertEqual(auto_advance.patience, 2)
         self.assertEqual(auto_advance.min_steps, 200)
         self.assertEqual(auto_advance.min_delta_pct, 1.0)
+
+    def test_auto_train_allows_step_less_phases_and_stops_on_final_plateau(self):
+        config = make_train_config(
+            steps=10,
+            auto_train=True,
+            phases=[
+                {
+                    "name": "shape",
+                    "lr": 3e-5,
+                    "auto_advance": {
+                        "type": "loss_plateau",
+                        "window": 2,
+                        "patience": 1,
+                        "min_steps": 4,
+                        "min_delta_pct": 1.0,
+                    },
+                },
+                {
+                    "name": "detail",
+                    "lr": 5e-6,
+                    "auto_advance": {
+                        "type": "loss_plateau",
+                        "window": 2,
+                        "patience": 1,
+                        "min_steps": 4,
+                        "min_delta_pct": 1.0,
+                    },
+                },
+            ],
+        )
+        manager = TrainingPhaseManager(config)
+
+        manager.apply(config, 0)
+        self.assertIsNone(manager.current_phase.steps)
+        self.assertEqual(config.lr, 3e-5)
+
+        for step, loss in enumerate([1.0, 1.0, 1.01, 1.01]):
+            manager.observe_metrics(step, {"loss/loss": loss})
+            result = manager.maybe_advance_after_step(step)
+
+        self.assertTrue(result.changed)
+        self.assertEqual(result.reason, "loss_plateau")
+        manager.apply(config, 4)
+        self.assertEqual(config.lr, 5e-6)
+
+        for step, loss in enumerate([0.9, 0.9, 0.91, 0.91], start=4):
+            manager.observe_metrics(step, {"loss/loss": loss})
+            result = manager.maybe_advance_after_step(step)
+
+        self.assertTrue(result.should_stop)
+        self.assertEqual(result.reason, "loss_plateau")
 
 
 if __name__ == "__main__":

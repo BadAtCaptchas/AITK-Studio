@@ -249,11 +249,11 @@ function getGpuIds(job: Job) {
     .filter(id => Number.isFinite(id));
 }
 
-function safeTotalSteps(job: Job) {
+function safeTotalSteps(job: Job): number | null {
   try {
     return getTotalSteps(job);
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -641,7 +641,7 @@ export default function JobLossGraph({ job }: Props) {
   );
 
   const totalSteps = useMemo(() => safeTotalSteps(job), [job]);
-  const progressPercent = totalSteps > 0 ? clamp((job.step / totalSteps) * 100, 0, 100) : null;
+  const progressPercent = totalSteps != null && totalSteps > 0 ? clamp((job.step / totalSteps) * 100, 0, 100) : null;
   const primaryLossKey = activeLossKeys[0] ?? lossKeys.find(key => (series[key]?.length ?? 0) > 0) ?? lossKeys[0];
 
   const lossSummary = useMemo(() => {
@@ -675,7 +675,7 @@ export default function JobLossGraph({ job }: Props) {
       return parseStepsPerSecond(job.speed_string);
     })();
   const etaSeconds =
-    totalSteps > 0 && latestStepsPerSec != null && latestStepsPerSec > 0
+    totalSteps != null && totalSteps > 0 && latestStepsPerSec != null && latestStepsPerSec > 0
       ? Math.max(0, (totalSteps - job.step) / latestStepsPerSec)
       : null;
 
@@ -989,7 +989,7 @@ export default function JobLossGraph({ job }: Props) {
           <KpiCard
             icon={<Activity className="h-4 w-4 text-emerald-400" />}
             label="Progress"
-            value={`${formatCompact(job.step)} / ${totalSteps ? formatCompact(totalSteps) : '--'}`}
+            value={totalSteps ? `${formatCompact(job.step)} / ${formatCompact(totalSteps)}` : `Step ${formatCompact(job.step)}`}
             detail={progressPercent == null ? 'total steps unknown' : `${formatPercent(progressPercent)} complete`}
             accent="emerald"
             progress={progressPercent}

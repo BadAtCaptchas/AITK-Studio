@@ -66,6 +66,7 @@ export const defaultJobConfig: JobConfig = {
         train: {
           batch_size: 1,
           bypass_guidance_embedding: true,
+          auto_train: false,
           steps: 3000,
           gradient_accumulation: 1,
           train_unet: true,
@@ -157,16 +158,28 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   }
 
   const train = jobConfig.config.process[0]?.train;
+  if (train && train.auto_train === undefined) {
+    train.auto_train = false;
+  }
   if (train && Array.isArray(train.phases)) {
     if (train.phases.length === 0) {
       delete train.phases;
     } else {
-      train.phases = train.phases.map((phase, index) => ({
-        ...phase,
-        name: phase.name?.trim() || `Phase ${index + 1}`,
-        steps: Math.max(1, Number(phase.steps) || 1),
-      }));
-      train.steps = train.phases.reduce((sum, phase) => sum + phase.steps, 0);
+      train.phases = train.phases.map((phase, index) => {
+        const normalized = {
+          ...phase,
+          name: phase.name?.trim() || `Phase ${index + 1}`,
+        };
+        if (train.auto_train) {
+          delete normalized.steps;
+        } else {
+          normalized.steps = Math.max(1, Number(phase.steps) || 1);
+        }
+        return normalized;
+      });
+      if (!train.auto_train) {
+        train.steps = train.phases.reduce((sum, phase) => sum + Math.max(1, Number(phase.steps) || 1), 0);
+      }
       if (train.save_on_phase_change === undefined) {
         train.save_on_phase_change = true;
       }

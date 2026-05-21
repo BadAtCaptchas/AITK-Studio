@@ -9,6 +9,11 @@ from collections import OrderedDict
 from toolkit.paths import TOOLKIT_ROOT
 
 possible_extensions = ['.json', '.jsonc', '.yaml', '.yml']
+BLOCKED_CONFIG_ENV_VARS = {
+    "HF_TOKEN",
+    "HUGGING_FACE_HUB_TOKEN",
+    "HF_TOKEN_PATH",
+}
 
 
 def get_cwd_abs_path(path):
@@ -25,6 +30,9 @@ def replace_env_vars_in_string(s: str) -> str:
 
     def replacer(match):
         var_name = match.group(1)
+        if var_name.upper() in BLOCKED_CONFIG_ENV_VARS:
+            raise ValueError(f"Environment variable {var_name} is not allowed in config interpolation.")
+
         value = os.environ.get(var_name)
 
         if value is None:

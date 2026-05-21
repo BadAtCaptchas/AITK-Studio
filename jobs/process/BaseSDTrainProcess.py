@@ -20,7 +20,7 @@ from safetensors.torch import save_file, load_file
 from torch.utils.data import DataLoader
 import torch
 import torch.backends.cuda
-from huggingface_hub import HfApi, interpreter_login
+from huggingface_hub import HfApi, get_token, interpreter_login
 from toolkit.memory_management import MemoryManager
 
 from toolkit.basic import value_map
@@ -2701,7 +2701,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.accelerator.is_main_process:
             # push to hub
             if self.save_config.push_to_hub:
-                if("HF_TOKEN" not in os.environ):
+                if get_token() is None:
                     interpreter_login(new_session=False, write_permission=True)
                 self.push_to_hub(
                     repo_id=self.save_config.hf_repo_id,

@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Info, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, EyeOff, Info, Loader2, RefreshCw } from 'lucide-react';
 import classNames from 'classnames';
 import type { AdvisorFinding, AdvisorResult, AdvisorSeverity, Job, JobConfig } from '@/types';
 import { apiClient } from '@/utils/api';
+import useSettings from '@/hooks/useSettings';
 
 type AdvisorStatus = 'idle' | 'loading' | 'success' | 'error' | 'refreshing';
 type Variant = 'card' | 'inline';
@@ -40,6 +41,39 @@ function severityIcon(severity: AdvisorSeverity) {
 
 function isLiveStatus(status?: string) {
   return status === 'queued' || status === 'running' || status === 'stopping';
+}
+
+function isAdvisorEnabled(value: unknown) {
+  return value === 'true';
+}
+
+function useTrainingAdvisorVisibility() {
+  const { settings, setSettings, isSettingsLoaded } = useSettings();
+  const [saving, setSaving] = useState(false);
+  const enabled = isAdvisorEnabled(settings.TRAINING_ADVISOR_ENABLED);
+
+  const setEnabled = useCallback(
+    (nextEnabled: boolean) => {
+      const previousSettings = settings;
+      const nextSettings = {
+        ...settings,
+        TRAINING_ADVISOR_ENABLED: nextEnabled ? 'true' : 'false',
+      };
+
+      setSettings(nextSettings);
+      setSaving(true);
+      apiClient
+        .post('/api/settings', nextSettings)
+        .catch(error => {
+          console.error('Error saving training advisor setting:', error);
+          setSettings(previousSettings);
+        })
+        .finally(() => setSaving(false));
+    },
+    [settings, setSettings],
+  );
+
+  return { enabled, loaded: isSettingsLoaded, saving, setEnabled };
 }
 
 function FindingCard({ finding }: { finding: AdvisorFinding }) {
@@ -78,12 +112,16 @@ function AdvisorResultPanel({
   error,
   variant = 'card',
   onRefresh,
+  onHide,
+  hideDisabled,
 }: {
   result: AdvisorResult | null;
   status: AdvisorStatus;
   error: string | null;
   variant?: Variant;
   onRefresh?: () => void;
+  onHide?: () => void;
+  hideDisabled?: boolean;
 }) {
   const groupedFindings = useMemo(() => {
     const grouped: Record<AdvisorSeverity, AdvisorFinding[]> = {
@@ -143,6 +181,18 @@ function AdvisorResultPanel({
               <RefreshCw className="h-4 w-4" />
             </button>
           )}
+          {onHide && (
+            <button
+              type="button"
+              onClick={onHide}
+              disabled={hideDisabled}
+              className="rounded-sm border border-gray-700 p-1 text-gray-300 hover:bg-gray-800 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Hide training advisor"
+              aria-label="Hide training advisor"
+            >
+              <EyeOff className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -188,6 +238,7 @@ export function TrainingAdvisorPanel({ jobConfig, gpuIDs }: { jobConfig: JobConf
   const [result, setResult] = useState<AdvisorResult | null>(null);
   const [status, setStatus] = useState<AdvisorStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const advisorVisibility = useTrainingAdvisorVisibility();
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
   const lastCompletedPayloadRef = useRef<string | null>(null);
@@ -227,6 +278,8 @@ export function TrainingAdvisorPanel({ jobConfig, gpuIDs }: { jobConfig: JobConf
   );
 
   useEffect(() => {
+    if (!advisorVisibility.loaded || !advisorVisibility.enabled) return;
+
     let focusOutHandler: (() => void) | null = null;
     let focusOutDelay: number | null = null;
     let didRun = false;
@@ -255,7 +308,9 @@ export function TrainingAdvisorPanel({ jobConfig, gpuIDs }: { jobConfig: JobConf
       if (focusOutDelay !== null) window.clearTimeout(focusOutDelay);
       if (focusOutHandler) document.removeEventListener('focusout', focusOutHandler);
     };
-  }, [payload, runPreflight]);
+  }, [advisorVisibility.enabled, advisorVisibility.loaded, payload, runPreflight]);
+
+  if (!advisorVisibility.loaded || !advisorVisibility.enabled) return null;
 
   return (
     <AdvisorResultPanel
@@ -263,6 +318,8 @@ export function TrainingAdvisorPanel({ jobConfig, gpuIDs }: { jobConfig: JobConf
       status={status}
       error={error}
       onRefresh={() => runPreflight(payload, { force: true })}
+      onHide={() => advisorVisibility.setEnabled(false)}
+      hideDisabled={advisorVisibility.saving}
     />
   );
 }
@@ -271,6 +328,7 @@ export function JobAdvisorPanel({ job }: { job: Job }) {
   const [result, setResult] = useState<AdvisorResult | null>(null);
   const [status, setStatus] = useState<AdvisorStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const advisorVisibility = useTrainingAdvisorVisibility();
   const isLive = isLiveStatus(job.status);
 
   useEffect(() => {
@@ -280,6 +338,7 @@ export function JobAdvisorPanel({ job }: { job: Job }) {
       setError(null);
       return;
     }
+    if (!advisorVisibility.loaded || !advisorVisibility.enabled) return;
 
     let stopped = false;
     const controller = new AbortController();
@@ -303,8 +362,18 @@ export function JobAdvisorPanel({ job }: { job: Job }) {
       stopped = true;
       controller.abort();
     };
-  }, [job.id, isLive]);
+  }, [advisorVisibility.enabled, advisorVisibility.loaded, job.id, isLive]);
 
   if (isLive) return null;
-  return <AdvisorResultPanel result={result} status={status} error={error} variant="inline" />;
+  if (!advisorVisibility.loaded || !advisorVisibility.enabled) return null;
+  return (
+    <AdvisorResultPanel
+      result={result}
+      status={status}
+      error={error}
+      variant="inline"
+      onHide={() => advisorVisibility.setEnabled(false)}
+      hideDisabled={advisorVisibility.saving}
+    />
+  );
 }

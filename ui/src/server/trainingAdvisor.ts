@@ -52,6 +52,7 @@ type DatasetScanSummary = {
   missingCaptions: number;
   emptyCaptions: number;
   captionExtensionMismatches: number;
+  alternateCaptionExtensionCounts: Record<string, number>;
   truncated: boolean;
   inaccessible: boolean;
   placeholder: boolean;
@@ -77,7 +78,9 @@ const MEDIA_EXTENSIONS = new Set([
   '.flac',
   '.ogg',
 ]);
-const CAPTION_EXTENSIONS = ['.txt', '.caption', '.md'];
+const CAPTION_EXTENSIONS = ['.txt', '.caption', '.json', '.sdxl', '.md'];
+const CAPTION_MISMATCH_LOW_COVERAGE_RATIO = 0.5;
+const CAPTION_MISMATCH_DOMINANT_ALT_RATIO = 0.8;
 const PLACEHOLDER_PATHS = new Set(['/path/to/images/folder', 'path/to/images/folder']);
 
 function addFinding(
@@ -174,6 +177,7 @@ function scanDataset(dataset: DatasetConfig, index: number, limit: number): Data
     missingCaptions: 0,
     emptyCaptions: 0,
     captionExtensionMismatches: 0,
+    alternateCaptionExtensionCounts: {},
     truncated: false,
     inaccessible: false,
     placeholder: isPlaceholderPath(folderPath),
@@ -207,6 +211,7 @@ function scanDataset(dataset: DatasetConfig, index: number, limit: number): Data
       if (altExt === captionExt) continue;
       if (safeStat(path.join(parsed.dir, `${parsed.name}${altExt}`))?.isFile()) {
         summary.captionExtensionMismatches += 1;
+        summary.alternateCaptionExtensionCounts[altExt] = (summary.alternateCaptionExtensionCounts[altExt] ?? 0) + 1;
         break;
       }
     }
@@ -243,6 +248,21 @@ function summarizeDatasets(scans: DatasetScanSummary[]): AdvisorDatasetStats {
       truncated: false,
     },
   );
+}
+
+function getDominantAlternateCaptionExtension(scan: DatasetScanSummary) {
+  let extension = '';
+  let count = 0;
+
+  for (const [candidateExtension, candidateCount] of Object.entries(scan.alternateCaptionExtensionCounts)) {
+    if (candidateCount > count) {
+      extension = candidateExtension;
+      count = candidateCount;
+    }
+  }
+
+  if (!extension || count === 0) return null;
+  return { extension, count };
 }
 
 function analyzeDatasets(findings: AdvisorFinding[], processConfig: ProcessConfig, scanFileLimit: number) {
@@ -356,7 +376,18 @@ function analyzeDatasets(findings: AdvisorFinding[], processConfig: ProcessConfi
       );
     }
 
-    if (scan.captionExtensionMismatches > 0) {
+    const configuredCaptionCoverage = scan.mediaFiles > 0 ? scan.captionFiles / scan.mediaFiles : 0;
+    const dominantAlternate = getDominantAlternateCaptionExtension(scan);
+    const dominantAlternateRatio =
+      dominantAlternate && scan.captionExtensionMismatches > 0
+        ? dominantAlternate.count / scan.captionExtensionMismatches
+        : 0;
+    if (
+      scan.captionExtensionMismatches > 0 &&
+      configuredCaptionCoverage < CAPTION_MISMATCH_LOW_COVERAGE_RATIO &&
+      dominantAlternate &&
+      dominantAlternateRatio >= CAPTION_MISMATCH_DOMINANT_ALT_RATIO
+    ) {
       addFinding(
         findings,
         'warning',
@@ -364,9 +395,12 @@ function analyzeDatasets(findings: AdvisorFinding[], processConfig: ProcessConfi
         'dataset',
         `dataset.${scan.index}.caption_ext_mismatch`,
         'Caption extension may be wrong',
-        `${scan.captionExtensionMismatches} files had captions with a different common extension than ${scan.captionExt}.`,
+        `${dominantAlternate.count} files had ${dominantAlternate.extension} captions while only ${scan.captionFiles} of ${scan.mediaFiles} scanned media files had ${scan.captionExt} captions.`,
         'Set the dataset caption extension to match the caption files you intend to use.',
-        undefined,
+        [
+          `${Math.round(configuredCaptionCoverage * 100)}% ${scan.captionExt} coverage`,
+          `${Math.round(dominantAlternateRatio * 100)}% of alternate captions use ${dominantAlternate.extension}`,
+        ],
         [`${prefix}.caption_ext`],
       );
     }
@@ -481,11 +515,13 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   }
 
   const lr = Number(train?.lr ?? 0);
+  const optimizer = String(train?.optimizer ?? '').toLowerCase();
+  const usesAdaptiveProdigyLr = optimizer.startsWith('prodigy');
   const arch = String(processConfig.model?.arch ?? '');
   const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx/i.test(arch);
   const warnLr = sensitiveArch ? 1e-4 : 3e-4;
   const criticalLr = sensitiveArch ? 3e-4 : 1e-3;
-  if (lr > criticalLr) {
+  if (!usesAdaptiveProdigyLr && lr > criticalLr) {
     addFinding(
       findings,
       'critical',
@@ -498,7 +534,7 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
       undefined,
       ['config.process[0].train.lr'],
     );
-  } else if (lr > warnLr) {
+  } else if (!usesAdaptiveProdigyLr && lr > warnLr) {
     addFinding(
       findings,
       'warning',

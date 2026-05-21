@@ -6,6 +6,7 @@ import useWorkers from '@/hooks/useWorkers';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import type { WorkerNode } from '@/types';
+import { Checkbox } from '@/components/formInputs';
 
 type CloudflaredStatus = {
   configured: boolean;
@@ -180,6 +181,23 @@ export default function Settings() {
                     onChange={handleChange}
                     className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
                     placeholder="Enter datasets folder path"
+                  />
+                </div>
+
+                <div className="rounded-lg border border-gray-800 bg-gray-900/70 p-4">
+                  <Checkbox
+                    checked={settings.TRAINING_ADVISOR_ENABLED === 'true'}
+                    onChange={checked =>
+                      setSettings(prev => ({ ...prev, TRAINING_ADVISOR_ENABLED: checked ? 'true' : 'false' }))
+                    }
+                    label={
+                      <span>
+                        Training Advisor (experimental)
+                        <span className="mt-1 block text-xs font-normal text-gray-500">
+                          Enable advisor checks on training forms and completed job pages.
+                        </span>
+                      </span>
+                    }
                   />
                 </div>
               </div>

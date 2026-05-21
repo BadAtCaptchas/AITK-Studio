@@ -128,21 +128,55 @@ function findingIds(result) {
   return new Set(result.findings.map(finding => finding.id));
 }
 
-test('preflight reports missing and mismatched captions', () => {
+test('preflight reports missing and empty captions', () => {
   const dataset = makeDataset({
     'one.jpg': 'image',
     'one.txt': '',
     'two.png': 'image',
-    'two.caption': 'caption with wrong extension',
   });
 
   const result = analyzeTrainingAdvisor(baseConfig(dataset), { scanFileLimit: 20 });
   const ids = findingIds(result);
 
   assert.ok(ids.has('dataset.0.captions.empty'));
-  assert.ok(ids.has('dataset.0.caption_ext_mismatch'));
+  assert.ok(ids.has('dataset.0.captions.some_missing'));
   assert.equal(result.datasetStats?.mediaFiles, 2);
   assert.equal(result.datasetStats?.emptyCaptions, 1);
+});
+
+test('preflight reports dominant alternate caption extension', () => {
+  const files = {};
+  for (let index = 0; index < 10; index += 1) {
+    files[`image_${index}.jpg`] = 'image';
+    files[`image_${index}.sdxl`] = 'sdxl caption';
+  }
+  const dataset = makeDataset(files);
+
+  const result = analyzeTrainingAdvisor(baseConfig(dataset), { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('dataset.0.caption_ext_mismatch'));
+  assert.equal(result.datasetStats?.captionExtensionMismatches, 10);
+});
+
+test('preflight ignores mixed sidecar captions when configured extension has reasonable coverage', () => {
+  const files = {};
+  for (let index = 0; index < 10; index += 1) {
+    files[`image_${index}.jpg`] = 'image';
+    files[`image_${index}.json`] = 'json caption';
+    files[`image_${index}.sdxl`] = 'sdxl caption';
+  }
+  for (let index = 0; index < 6; index += 1) {
+    files[`image_${index}.txt`] = 'txt caption';
+  }
+  const dataset = makeDataset(files);
+
+  const result = analyzeTrainingAdvisor(baseConfig(dataset), { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(!ids.has('dataset.0.caption_ext_mismatch'));
+  assert.equal(result.datasetStats?.mediaFiles, 10);
+  assert.equal(result.datasetStats?.captionFiles, 6);
 });
 
 test('preflight reports placeholder and inaccessible datasets', () => {
@@ -168,6 +202,33 @@ test('preflight reports phase step mismatches and risky learning rates', () => {
 
   assert.ok(ids.has('train.lr.critical'));
   assert.ok(ids.has('phases.steps.mismatch'));
+});
+
+test('preflight skips generic learning rate warning for Prodigy optimizers', () => {
+  const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.optimizer = 'prodigyopt';
+  processConfig.train.lr = 1;
+
+  const result = analyzeTrainingAdvisor(config);
+  const ids = findingIds(result);
+
+  assert.ok(!ids.has('train.lr.warning'));
+  assert.ok(!ids.has('train.lr.critical'));
+});
+
+test('preflight keeps generic learning rate warning for non-Prodigy optimizers', () => {
+  const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.optimizer = 'adamw8bit';
+  processConfig.train.lr = 0.002;
+
+  const result = analyzeTrainingAdvisor(config);
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.lr.critical'));
 });
 
 test('preflight accepts auto training phases without fixed steps', () => {

@@ -4,7 +4,8 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { TOOLKIT_ROOT, getHFToken, getTrainingFolder } from '../paths';
-import { getTensorBoardLogDir, getToolkitPythonPath, isTensorBoardEnabled } from '../../src/server/tensorboard';
+import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
+import { getToolkitPythonPath } from '../../src/server/pythonPath';
 
 const isWindows = process.platform === 'win32';
 const LAUNCH_LOG_FILE = 'launch.log';

@@ -2,6 +2,9 @@ import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
+import { getToolkitPythonPath } from './pythonPath';
+
+export { getToolkitPythonPath };
 
 const TOOLKIT_ROOT = path.resolve('@', '..', '..');
 const DEFAULT_TENSORBOARD_PORT = 6006;
@@ -95,21 +98,6 @@ export function getTensorBoardLogDir(trainingRoot: string) {
     return path.isAbsolute(configuredLogDir) ? configuredLogDir : path.join(TOOLKIT_ROOT, configuredLogDir);
   }
   return path.join(trainingRoot, '.tensorboard');
-}
-
-export function getToolkitPythonPath() {
-  const isWindows = process.platform === 'win32';
-  const venvDir = fs.existsSync(path.join(TOOLKIT_ROOT, '.venv')) ? '.venv' : fs.existsSync(path.join(TOOLKIT_ROOT, 'venv')) ? 'venv' : null;
-
-  if (!venvDir) {
-    return 'python';
-  }
-
-  if (isWindows) {
-    return path.join(TOOLKIT_ROOT, venvDir, 'Scripts', 'python.exe');
-  }
-
-  return path.join(TOOLKIT_ROOT, venvDir, 'bin', 'python');
 }
 
 export function getTensorBoardPublicUrl(port = getTensorBoardPort(), requestUrl?: string) {

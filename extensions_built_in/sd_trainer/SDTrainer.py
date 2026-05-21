@@ -460,9 +460,12 @@ class SDTrainer(BaseSDTrainProcess):
                 self.dfe.vision_encoder.train()
                 self.dfe.vision_encoder.gradient_checkpointing = True
             elif hasattr(self.dfe, 'model') and self.train_config.gradient_checkpointing:
-                if hasattr(self.dfe.model, 'enable_gradient_checkpointing'): 
+                if hasattr(self.dfe.model, 'enable_gradient_checkpointing'):
                     self.dfe.model.train()
                     self.dfe.model.enable_gradient_checkpointing()
+                elif hasattr(self.dfe.model, 'gradient_checkpointing_enable'):
+                    self.dfe.model.train()
+                    self.dfe.model.gradient_checkpointing_enable()
                 elif hasattr(self.dfe.model, 'gradient_checkpointing'):
                     self.dfe.model.train()
                     self.dfe.model.gradient_checkpointing = True

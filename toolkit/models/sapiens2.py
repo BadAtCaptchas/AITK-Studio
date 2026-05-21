@@ -7,6 +7,7 @@
 # https://raw.githubusercontent.com/facebookresearch/sapiens2/refs/heads/main/sapiens/backbones/standalone/sapiens2.py
 
 import math
+import os
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import torch
@@ -15,6 +16,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.init import trunc_normal_
 from torch.utils.checkpoint import checkpoint
+from toolkit.paths import MODELS_PATH
 
 
 # ----------------------------------------------------------------------------
@@ -942,3 +944,180 @@ def imagenet_normalize(tensors_0_1: torch.Tensor) -> torch.Tensor:
         _IMAGENET_STD, dtype=tensors_0_1.dtype, device=tensors_0_1.device
     ).view(1, 3, 1, 1)
     return (tensors_0_1 - mean) / std
+
+
+# ----------------------------------------------------------------------------
+class MattingHead(nn.Module):
+    """Sapiens2 matting decode head.
+
+    Predicts pre-multiplied foreground RGB plus an alpha matte. The control
+    generator uses only the alpha channel as a mask.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 1536,
+        upsample_channels: Sequence[int] = (768, 512, 256, 128),
+        conv_out_channels: Optional[Sequence[int]] = (64, 32, 16),
+        conv_kernel_sizes: Optional[Sequence[int]] = (3, 3, 3),
+        out_channels: int = 4,
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.input_conv = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),
+            nn.InstanceNorm2d(in_channels),
+            nn.SiLU(inplace=True),
+        )
+
+        up_blocks = []
+        cur_ch = in_channels
+        for out_ch in upsample_channels:
+            up_blocks.append(
+                nn.Sequential(
+                    nn.Conv2d(cur_ch, out_ch * 4, kernel_size=3, padding=1),
+                    nn.PixelShuffle(2),
+                    nn.InstanceNorm2d(out_ch),
+                    nn.SiLU(inplace=True),
+                )
+            )
+            cur_ch = out_ch
+        self.upsample_blocks = nn.Sequential(*up_blocks)
+
+        conv_layers = []
+        if conv_out_channels and conv_kernel_sizes:
+            for out_ch, k in zip(conv_out_channels, conv_kernel_sizes):
+                conv_layers.extend(
+                    [
+                        nn.Conv2d(cur_ch, out_ch, k, padding=(k - 1) // 2),
+                        nn.InstanceNorm2d(out_ch),
+                        nn.SiLU(inplace=True),
+                    ]
+                )
+                cur_ch = out_ch
+        self.conv_layers = nn.Sequential(*conv_layers)
+
+        self.conv_matting = nn.Conv2d(cur_ch, out_channels, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.input_conv(x)
+        x = self.upsample_blocks(x)
+        x = self.conv_layers(x)
+        return self.conv_matting(x).sigmoid()
+
+
+# ----------------------------------------------------------------------------
+class Sapiens2Matting(nn.Module):
+    """Sapiens2 backbone plus matting head for human-image masks."""
+
+    _ARCH_TO_EMBED_DIM = {
+        "sapiens2_0.1b": 768,
+        "sapiens2_0.4b": 1024,
+        "sapiens2_0.8b": 1280,
+        "sapiens2_1b": 1536,
+        "sapiens2_5b": 2432,
+    }
+
+    def __init__(
+        self,
+        arch: str = "sapiens2_1b",
+        img_size: Tuple[int, int] = (1024, 768),
+        patch_size: int = 16,
+    ):
+        super().__init__()
+        arch = arch.lower()
+        if arch not in self._ARCH_TO_EMBED_DIM:
+            raise ValueError(f"Unsupported arch {arch}")
+
+        self.arch = arch
+        self.img_size = to_2tuple(img_size)
+        self.patch_size = patch_size
+
+        self.backbone = Sapiens2(
+            arch=arch,
+            img_size=img_size,
+            patch_size=patch_size,
+            final_norm=True,
+            use_tokenizer=False,
+            with_cls_token=True,
+            out_type="featmap",
+        )
+        self.decode_head = MattingHead(
+            in_channels=self._ARCH_TO_EMBED_DIM[arch],
+            upsample_channels=(768, 512, 256, 128),
+            conv_out_channels=(64, 32, 16),
+            conv_kernel_sizes=(3, 3, 3),
+            out_channels=4,
+        )
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        repo_id: str = "facebook/sapiens2-matting-1b",
+        filename: str = "sapiens2_1b_matting.safetensors",
+        arch: str = "sapiens2_1b",
+        img_size: Tuple[int, int] = (1024, 768),
+        patch_size: int = 16,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> "Sapiens2Matting":
+        import huggingface_hub
+        from safetensors.torch import load_file
+
+        local_dir = os.path.join(MODELS_PATH, "sapiens2")
+        safetensors_path = os.path.join(local_dir, filename)
+        if not os.path.exists(safetensors_path):
+            print(f"Downloading pretrained weights from Hugging Face Hub: {repo_id}/{filename}...")
+            os.makedirs(local_dir, exist_ok=True)
+            safetensors_path = huggingface_hub.hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                local_dir=local_dir,
+            )
+
+        model = cls(arch=arch, img_size=img_size, patch_size=patch_size)
+        state_dict = load_file(safetensors_path)
+        model.load_state_dict(state_dict)
+        model.eval()
+        if device is not None or dtype is not None:
+            model.to(device=device, dtype=dtype)
+        return model
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    @property
+    def dtype(self):
+        return next(self.parameters()).dtype
+
+    @torch.no_grad()
+    def forward(self, image, max_res: int = 1024):
+        from torchvision import transforms
+
+        patch_size = self.patch_size
+        width, height = image.size
+        target_h, target_w = height, width
+        if target_h * target_w > max_res * max_res:
+            scale = math.sqrt((max_res * max_res) / (target_h * target_w))
+            target_h = int(target_h * scale)
+            target_w = int(target_w * scale)
+        target_h = max(patch_size, (target_h // patch_size) * patch_size)
+        target_w = max(patch_size, (target_w // patch_size) * patch_size)
+
+        transform_image = transforms.Compose(
+            [
+                transforms.Resize((target_h, target_w)),
+                transforms.ToTensor(),
+                transforms.Normalize(_IMAGENET_MEAN, _IMAGENET_STD),
+            ]
+        )
+        input_images = transform_image(image).unsqueeze(0).to(self.device, dtype=self.dtype)
+
+        feat = self.backbone(input_images)[0]
+        out = self.decode_head(feat)
+        alpha = out[0, 3].float().cpu()
+
+        mask = transforms.ToPILImage()(alpha)
+        return mask.resize(image.size).convert("RGB")

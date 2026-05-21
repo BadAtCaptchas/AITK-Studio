@@ -8,9 +8,16 @@ export const imgExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', 
 export const videoExtensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv'];
 export const audioExtensions = ['.mp3', '.wav', '.flac', '.ogg'];
 
-export const isVideo = (filePath: string) => videoExtensions.includes(filePath.toLowerCase().slice(-4));
-export const isImage = (filePath: string) => imgExtensions.includes(filePath.toLowerCase().slice(-4));
-export const isAudio = (filePath: string) => audioExtensions.includes(filePath.toLowerCase().slice(-4));
+export const getFileExtension = (filePath: string) => {
+  const cleanPath = filePath.split(/[?#]/, 1)[0];
+  const fileName = cleanPath.split(/[\\/]/).pop() || cleanPath;
+  const dotIndex = fileName.lastIndexOf('.');
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
+};
+
+export const isVideo = (filePath: string) => videoExtensions.includes(getFileExtension(filePath));
+export const isImage = (filePath: string) => imgExtensions.includes(getFileExtension(filePath));
+export const isAudio = (filePath: string) => audioExtensions.includes(getFileExtension(filePath));
 
 export const tagsToObj = (tagStr: string): Record<string, any> => {
   const result: Record<string, any> = {};

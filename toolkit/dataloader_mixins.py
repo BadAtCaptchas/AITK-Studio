@@ -17,6 +17,7 @@ from tqdm import tqdm
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection, SiglipImageProcessor
 
 from toolkit.audio.preserve_pitch import time_stretch_preserve_pitch
+from toolkit import image_utils
 from toolkit.basic import flush, value_map
 from toolkit.buckets import get_bucket_for_image_size, get_resolution
 from toolkit.config_modules import ControlTypes
@@ -26,7 +27,6 @@ from toolkit.models.pixtral_vision import PixtralVisionImagePreprocessorCompatib
 from toolkit.prompt_utils import inject_trigger_into_prompt
 from torchvision import transforms
 from PIL import Image, ImageFilter, ImageOps
-from PIL.ImageOps import exif_transpose
 import albumentations as A
 from toolkit.print import print_acc
 from toolkit.accelerator import get_accelerator
@@ -947,13 +947,21 @@ class ImageProcessingDTOMixin:
             return
         try:
             if getattr(self, 'is_encrypted', False):
-                img = self.encrypted_reader.open_image(self.encrypted_item)
+                img = self.encrypted_reader.open_image(
+                    self.encrypted_item,
+                    mode='RGBA' if self.use_alpha_as_mask else None,
+                    require_alpha=self.use_alpha_as_mask,
+                )
             else:
-                img = Image.open(self.path)
-            img = exif_transpose(img)
+                img = image_utils.open_static_image(
+                    self.path,
+                    mode='RGBA' if self.use_alpha_as_mask else None,
+                    require_alpha=self.use_alpha_as_mask,
+                )
         except Exception as e:
             print_acc(f"Error: {e}")
             print_acc(f"Error loading image: {self.path}")
+            raise Exception(f"Image loading error ({self.path}): {e}") from e
 
         if self.use_alpha_as_mask:
             # we do this to make sure it does not replace the alpha with another color
@@ -1072,11 +1080,7 @@ class InpaintControlFileItemDTOMixin:
     def load_inpaint_image(self: 'FileItemDTO'):
         try:
             # image must have alpha channel for inpaint
-            img = Image.open(self.inpaint_path)
-            # make sure has aplha
-            if img.mode != 'RGBA':
-                return
-            img = exif_transpose(img)
+            img = image_utils.open_static_image(self.inpaint_path, mode='RGBA', require_alpha=True)
         
             w, h = img.size
             if w > h and self.scale_to_width < self.scale_to_height:
@@ -1123,6 +1127,7 @@ class InpaintControlFileItemDTOMixin:
         except Exception as e:
             print_acc(f"Error: {e}")
             print_acc(f"Error loading image: {self.inpaint_path}")
+            raise Exception(f"Inpaint image loading error ({self.inpaint_path}): {e}") from e
 
     
     def cleanup_inpaint(self: 'FileItemDTO'):
@@ -1173,10 +1178,10 @@ class ControlFileItemDTOMixin:
         
         for control_path in control_path_list:
             try:
-                img = Image.open(control_path)
-                img = exif_transpose(img)
+                img = image_utils.open_static_image(control_path)
 
-                if img.mode in ("RGBA", "LA"):
+                if image_utils.image_has_alpha(img):
+                    img = img.convert("RGBA")
                     # Create a background with the specified transparent color
                     transparent_color = tuple(self.dataset_config.control_transparent_color)
                     background = Image.new("RGB", img.size, transparent_color)
@@ -1400,8 +1405,7 @@ class ClipImageFileItemDTOMixin:
             return
         clip_image_path = self.get_new_clip_image_path()
         try:
-            img = Image.open(clip_image_path).convert('RGB')
-            img = exif_transpose(img)
+            img = image_utils.open_static_image(clip_image_path, mode='RGB')
         except Exception as e:
             # make a random noise image
             img = Image.new('RGB', (self.dataset_config.resolution, self.dataset_config.resolution))
@@ -1600,15 +1604,19 @@ class MaskFileItemDTOMixin:
 
     def load_mask_image(self: 'FileItemDTO'):
         try:
-            img = Image.open(self.mask_path)
-            img = exif_transpose(img)
+            img = image_utils.open_static_image(
+                self.mask_path,
+                mode='RGBA' if self.use_alpha_as_mask else None,
+                require_alpha=self.use_alpha_as_mask,
+            )
         except Exception as e:
             print_acc(f"Error: {e}")
             print_acc(f"Error loading image: {self.mask_path}")
+            raise Exception(f"Mask image loading error ({self.mask_path}): {e}") from e
 
-        if self.use_alpha_as_mask:
+        if self.use_alpha_as_mask or image_utils.image_has_alpha(img):
             # pipeline expectws an rgb image so we need to put alpha in all channels
-            np_img = np.array(img)
+            np_img = np.array(img.convert("RGBA"))
             np_img[:, :, :3] = np_img[:, :, 3:]
 
             np_img = np_img[:, :, :3]
@@ -1703,11 +1711,11 @@ class UnconditionalFileItemDTOMixin:
 
     def load_unconditional_image(self: 'FileItemDTO'):
         try:
-            img = Image.open(self.unconditional_path)
-            img = exif_transpose(img)
+            img = image_utils.open_static_image(self.unconditional_path, mode='RGB')
         except Exception as e:
             print_acc(f"Error: {e}")
             print_acc(f"Error loading image: {self.mask_path}")
+            raise Exception(f"Unconditional image loading error ({self.unconditional_path}): {e}") from e
 
         img = img.convert('RGB')
         w, h = img.size
@@ -2262,8 +2270,7 @@ class TextEmbeddingCachingMixin:
                             control_path_list = [control_path_list]
                         for i in range(len(control_path_list)):
                             try:
-                                img = Image.open(control_path_list[i]).convert("RGB")
-                                img = exif_transpose(img)
+                                img = image_utils.open_static_image(control_path_list[i], mode="RGB")
                                 # convert to 0 to 1 tensor
                                 img = (
                                     TF.to_tensor(img)

@@ -396,6 +396,58 @@ auto_advance:
 
 Defaults are `metric: loss/loss`, `mode: min`, `window: 100`, `patience: 2`, `min_steps: max(200, window * 2)`, and `min_delta_pct: 1.0`. Generated sample images are not scored directly; future evaluators can feed numeric metrics into the same logging system. The UI loss graph shows phase boundary markers when phase metrics are present.
 
+### Auto learn / auto training
+
+Auto learn lets a training job keep running until the configured metric stops improving, then move to the next training phase. When the final phase plateaus, the trainer stops the job. This is useful when the correct number of steps is not known up front.
+
+In the UI, open `New Job`, go to `Training Phases`, and enable `Auto learn`. Fixed step inputs are hidden because auto learn does not know the total step count ahead of time. The profile dropdown includes an `Anatomy LoKr` preset with three open-ended stages:
+
+- Teach: AdamW, `lr: 0.00002`, weighted high-noise timesteps, MSE loss, `dropout: 0.05`, `weight_decay: 0.0001`, LoKr factor 8.
+- Stabilize: AdamW, `lr: 0.00001`, weighted balanced timesteps, MSE loss.
+- Fine detail cleanup: AdamW, `lr: 0.000005`, weighted low-noise timesteps, MSE loss.
+
+You can also save the current auto-learn settings as a custom profile from the same editor. Custom profiles are stored in the browser's local storage.
+
+For CLI configs, set `train.auto_train: true` and omit phase `steps`. Each phase must have plateau auto-advance settings, either explicitly or by relying on the defaults:
+
+```yaml
+train:
+  auto_train: true
+  save_on_phase_change: true
+  optimizer: adamw
+  lr: 0.00002
+  timestep_type: weighted
+  content_or_style: content
+  loss_type: mse
+  optimizer_params:
+    weight_decay: 0.0001
+  phases:
+    - name: teach anatomy
+      lr: 0.00002
+      content_or_style: content
+      auto_advance:
+        type: loss_plateau
+        metric: loss/loss
+        mode: min
+        window: 100
+        patience: 2
+        min_delta_pct: 1.0
+
+    - name: stabilize
+      lr: 0.00001
+      content_or_style: balanced
+      auto_advance:
+        type: loss_plateau
+
+    - name: fine detail cleanup
+      lr: 0.000005
+      content_or_style: style
+      auto_advance:
+        type: loss_plateau
+```
+
+Progress displays use the current step without a percentage bar while auto learn is active, because there is no planned final step. Resuming a checkpoint restores the current phase and continues plateau tracking from the saved training state.
+
 ### Need help?
 
 Please do not open a bug report unless it is a bug in the code. You are welcome to [Join my Discord](https://discord.gg/VXmU2f5WEU)

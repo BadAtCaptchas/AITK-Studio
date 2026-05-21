@@ -527,9 +527,11 @@ pip install --upgrade accelerate transformers diffusers huggingface_hub #Optiona
 
 ## Dataset Preparation
 
-Datasets generally need to be a folder containing images and associated text files. Currently, the only supported
-formats are jpg, jpeg, and png. Webp currently has issues. The text files should be named the same as the images
-but with a `.txt` extension. For example `image2.jpg` and `image2.txt`. The text file should contain only the caption.
+Datasets generally need to be a folder containing images and associated text files. Supported static image formats
+are jpg, jpeg, png, and webp. Animated WebP files are not supported as image dataset inputs; use a video dataset
+format or convert them to static WebP, PNG, or JPEG first. WebP transparency is supported for alpha mask and inpaint
+workflows, while normal training images are loaded as RGB. The text files should be named the same as the images
+but with a `.txt` extension. For example `image2.webp` and `image2.txt`. The text file should contain only the caption.
 You can add the word `[trigger]` in the caption file and if you have `trigger_word` in your config, it will be automatically
 replaced. 
 

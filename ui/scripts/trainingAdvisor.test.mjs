@@ -170,6 +170,36 @@ test('preflight reports phase step mismatches and risky learning rates', () => {
   assert.ok(ids.has('phases.steps.mismatch'));
 });
 
+test('preflight accepts auto training phases without fixed steps', () => {
+  const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.auto_train = true;
+  processConfig.train.phases = [
+    { name: 'Shape', lr: 0.00002, auto_advance: { type: 'loss_plateau' } },
+    { name: 'Detail', lr: 0.000005, auto_advance: { type: 'loss_plateau' } },
+  ];
+
+  const result = analyzeTrainingAdvisor(config);
+  const ids = findingIds(result);
+
+  assert.ok(!ids.has('phases.steps.mismatch'));
+  assert.equal(result.findings.length, 0);
+});
+
+test('preflight reports auto training phases that cannot advance', () => {
+  const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.auto_train = true;
+  processConfig.train.phases = [{ name: 'Shape', lr: 0.00002 }];
+
+  const result = analyzeTrainingAdvisor(config);
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('phases.0.auto_train.no_auto_advance'));
+});
+
 test('live advisor reports OOM, memory pressure, and plateau signals', () => {
   const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
   const config = baseConfig(dataset);

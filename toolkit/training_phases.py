@@ -99,11 +99,11 @@ class AutoAdvanceConfig:
 @dataclass
 class TrainingPhase:
     name: str
-    steps: int
+    steps: Optional[int]
     overrides: Dict[str, Any]
     auto_advance: Optional[AutoAdvanceConfig]
     planned_start_step: int
-    planned_end_step: int
+    planned_end_step: Optional[int]
 
 
 @dataclass
@@ -116,6 +116,10 @@ class PhaseAdvanceResult:
 class TrainingPhaseManager:
     def __init__(self, train_config: Any):
         self.base_config = copy.deepcopy(train_config)
+        self.auto_train = bool(
+            getattr(train_config, "auto_train", False)
+            or getattr(train_config, "auto_learn", False)
+        )
         raw_phases = copy.deepcopy(getattr(train_config, "phases", None) or [])
         self.phases = self._parse_phases(raw_phases)
         self.enabled = len(self.phases) > 0
@@ -127,9 +131,12 @@ class TrainingPhaseManager:
         self.metric_history: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
         self.plateau_state: Dict[int, PlateauState] = defaultdict(PlateauState)
 
+        if self.auto_train and not self.enabled:
+            raise ValueError("train.auto_train requires train.phases")
+
         if self.enabled:
-            total_phase_steps = sum(phase.steps for phase in self.phases)
-            if int(getattr(train_config, "steps", 0)) != total_phase_steps:
+            total_phase_steps = sum(int(phase.steps or 0) for phase in self.phases)
+            if not self.auto_train and int(getattr(train_config, "steps", 0)) != total_phase_steps:
                 raise ValueError(
                     f"train.steps must equal the sum of train.phases[].steps "
                     f"({getattr(train_config, 'steps', None)} != {total_phase_steps})"
@@ -151,10 +158,10 @@ class TrainingPhaseManager:
                     f"Unsupported train.phases[{idx}] fields: {', '.join(unknown_fields)}"
                 )
 
-            if "steps" not in raw_phase:
+            if "steps" not in raw_phase and not self.auto_train:
                 raise ValueError(f"train.phases[{idx}].steps is required")
-            steps = int(raw_phase["steps"])
-            if steps < 1:
+            steps = int(raw_phase["steps"]) if "steps" in raw_phase else None
+            if steps is not None and steps < 1:
                 raise ValueError(f"train.phases[{idx}].steps must be at least 1")
 
             name = str(raw_phase.get("name") or f"Phase {idx + 1}")
@@ -167,17 +174,22 @@ class TrainingPhaseManager:
                 if merge_key in overrides and not isinstance(overrides[merge_key], dict):
                     raise ValueError(f"train.phases[{idx}].{merge_key} must be an object")
 
+            raw_auto_advance = raw_phase.get("auto_advance")
+            if self.auto_train and raw_auto_advance is None:
+                raw_auto_advance = {}
+            planned_end_step = cursor + steps if steps is not None else None
             phases.append(
                 TrainingPhase(
                     name=name,
                     steps=steps,
                     overrides=overrides,
-                    auto_advance=AutoAdvanceConfig.from_raw(raw_phase.get("auto_advance")),
+                    auto_advance=AutoAdvanceConfig.from_raw(raw_auto_advance),
                     planned_start_step=cursor,
-                    planned_end_step=cursor + steps,
+                    planned_end_step=planned_end_step,
                 )
             )
-            cursor += steps
+            if steps is not None:
+                cursor += steps
 
         return phases
 
@@ -190,10 +202,15 @@ class TrainingPhaseManager:
     def index_for_step(self, step: int) -> int:
         if not self.enabled:
             return 0
-        if step >= self.phases[-1].planned_end_step:
+        if self.auto_train:
+            for idx, phase in enumerate(self.phases):
+                if phase.planned_end_step is not None and step < phase.planned_end_step:
+                    return idx
+            return min(self.current_index, len(self.phases) - 1)
+        if step >= int(self.phases[-1].planned_end_step or 0):
             return len(self.phases) - 1
         for idx, phase in enumerate(self.phases):
-            if step < phase.planned_end_step:
+            if phase.planned_end_step is not None and step < phase.planned_end_step:
                 return idx
         return len(self.phases) - 1
 
@@ -296,7 +313,7 @@ class TrainingPhaseManager:
 
         elapsed = next_step - self.current_phase_start_step
         reason = ""
-        if elapsed >= phase.steps:
+        if phase.steps is not None and elapsed >= phase.steps:
             reason = "steps"
         elif self._has_plateaued(next_step):
             reason = "loss_plateau"
@@ -366,3 +383,15 @@ class TrainingPhaseManager:
         if config.mode == "min":
             return value < best_value - min_delta
         return value > best_value + min_delta
+
+    def current_phase_scheduler_steps(self, fallback_steps: int) -> int:
+        phase = self.current_phase
+        if phase is None:
+            return max(1, int(fallback_steps or 1))
+        if phase.steps is not None:
+            return phase.steps
+        if phase.auto_advance is not None:
+            config = phase.auto_advance
+            observed_window_steps = config.window * (config.patience + 1)
+            return max(1, int(fallback_steps or 1), int(config.min_steps or 1), observed_window_steps)
+        return max(1, int(fallback_steps or 1))

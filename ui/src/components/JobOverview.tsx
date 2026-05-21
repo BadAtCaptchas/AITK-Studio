@@ -45,7 +45,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, systemPollInterval, job.worker_id);
   const { cpuInfo, isCPUInfoLoaded } = useCPUInfo(systemPollInterval, job.worker_id);
   const totalSteps = getTotalSteps(job);
-  const progress = (job.step / totalSteps) * 100;
+  const progress = totalSteps && totalSteps > 0 ? (job.step / totalSteps) * 100 : null;
 
   const logLines: string[] = useMemo(() => {
     // split at line breaks on \n or \r\n but not \r
@@ -134,12 +134,14 @@ export default function JobOverview({ job }: JobOverviewProps) {
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-400">Progress</span>
                 <span className="text-gray-200">
-                  Step {job.step} of {totalSteps}
+                  {totalSteps ? `Step ${job.step} of ${totalSteps}` : `Step ${job.step}`}
                 </span>
               </div>
-              <div className="w-full bg-gray-800 rounded-full h-2">
-                <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
-              </div>
+              {progress !== null && (
+                <div className="w-full bg-gray-800 rounded-full h-2">
+                  <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+                </div>
+              )}
             </div>
           )}
 

@@ -1764,8 +1764,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # make sure it had bare minimum
         if self.phase_manager.enabled:
             if 'max_iterations' not in lr_scheduler_params and 'total_iters' not in lr_scheduler_params:
-                phase = self.phase_manager.current_phase
-                lr_scheduler_params['total_iters'] = phase.steps if phase is not None else self.train_config.steps
+                lr_scheduler_params['total_iters'] = self.phase_manager.current_phase_scheduler_steps(
+                    self.train_config.steps
+                )
         elif 'max_iterations' not in lr_scheduler_params:
             lr_scheduler_params['total_iters'] = self.train_config.steps
 
@@ -2265,12 +2266,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.sample(self.step_num)
         
         if self.accelerator.is_local_main_process:
+            progress_total = None if self.train_config.auto_train else self.train_config.steps
+            progress_iterable = None if self.train_config.auto_train else range(0, self.train_config.steps)
             self.progress_bar = ToolkitProgressBar(
-                total=self.train_config.steps,
+                total=progress_total,
                 desc=self.job.name,
                 leave=True,
                 initial=self.step_num,
-                iterable=range(0, self.train_config.steps),
+                iterable=progress_iterable,
             )
             self.progress_bar.pause()
         else:
@@ -2315,7 +2318,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         start_step_num = self.step_num
         did_first_flush = False
         flush_next = False
-        for step in range(start_step_num, self.train_config.steps):
+        step = start_step_num
+        while self.train_config.auto_train or step < self.train_config.steps:
             if self.train_config.do_paramiter_swapping:
                 self.optimizer.optimizer.swap_paramiters()
             self.timer.start('train_loop')
@@ -2670,6 +2674,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 self.end_step_hook()
                 if should_stop_training:
                     break
+                step += 1
 
 
         ###################################################################
@@ -2789,7 +2794,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if match:
                     steps, index = int(match.group(1)), int(match.group(2))
                     #Here we only care about uploading the latest samples, the match with the # of steps
-                    if steps == self.train_config.steps:
+                    target_sample_step = self.step_num if self.train_config.auto_train else self.train_config.steps
+                    if steps == target_sample_step:
                         sample_image_paths.append((index, f"samples/{filename}"))
 
             # Sort by numeric index

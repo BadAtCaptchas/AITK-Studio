@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import useJobsList from '@/hooks/useJobsList';
 import Link from 'next/link';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
-import type { Job, JobConfig, Queue } from '@/types';
+import type { Job, Queue } from '@/types';
 import JobActionBar from './JobActionBar';
 import useQueueList from '@/hooks/useQueueList';
 import classNames from 'classnames';
@@ -11,6 +11,7 @@ import { CgSpinner } from 'react-icons/cg';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { HFDownloadProgressInline } from '@/components/HFDownloadProgress';
 import useWorkers from '@/hooks/useWorkers';
+import { getTotalSteps } from '@/utils/jobs';
 
 interface JobsTableProps {
   autoStartQueue?: boolean;
@@ -66,23 +67,24 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
       title: 'Steps',
       key: 'steps',
       render: row => {
-        const jobConfig: JobConfig = JSON.parse(row.job_config);
         if (row.job_type !== 'train') {
           return <></>;
         }
-        const totalSteps = jobConfig.config.process[0].train?.steps;
+        const totalSteps = getTotalSteps(row);
 
         return (
           <div>
             <div className="text-xs text-gray-400">
-              {row.step} / {totalSteps}
+              {totalSteps ? `${row.step} / ${totalSteps}` : `Step ${row.step}`}
             </div>
-            <div className="bg-gray-700 rounded-full h-1.5">
-              <div
-                className="bg-blue-500 h-1.5 rounded-full"
-                style={{ width: `${(row.step / totalSteps) * 100}%` }}
-              ></div>
-            </div>
+            {totalSteps ? (
+              <div className="bg-gray-700 rounded-full h-1.5">
+                <div
+                  className="bg-blue-500 h-1.5 rounded-full"
+                  style={{ width: `${(row.step / totalSteps) * 100}%` }}
+                ></div>
+              </div>
+            ) : null}
           </div>
         );
       },

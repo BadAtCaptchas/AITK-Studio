@@ -197,6 +197,7 @@ export interface NetworkConfig {
   linear_alpha: number;
   conv: number;
   conv_alpha: number;
+  dropout?: number;
   lokr_full_rank: boolean;
   lokr_factor: number;
   network_kwargs: {
@@ -262,7 +263,7 @@ export interface PhaseAutoAdvanceConfig {
 
 export interface TrainingPhaseConfig {
   name: string;
-  steps: number;
+  steps?: number;
   lr?: number;
   unet_lr?: number;
   text_encoder_lr?: number;
@@ -303,6 +304,7 @@ export interface TrainConfig {
   batch_size: number;
   bypass_guidance_embedding?: boolean;
   steps: number;
+  auto_train?: boolean;
   phases?: TrainingPhaseConfig[];
   save_on_phase_change?: boolean;
   gradient_accumulation: number;

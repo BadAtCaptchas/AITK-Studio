@@ -79,8 +79,10 @@ export default function SimpleJob({
 
   const isVideoModel = !!(modelArch?.group === 'video');
   const isAudioModel = !!(modelArch?.group === 'audio');
+  const autoTrain = !!jobConfig.config.process[0].train.auto_train;
 
   const handleTrainingStepsChange = (value: number | null) => {
+    if (autoTrain) return;
     const requestedSteps = Math.max(1, Number(value ?? 1));
     const phases = jobConfig.config.process[0].train.phases;
     if (!phases?.length) {
@@ -503,6 +505,15 @@ export default function SimpleJob({
                 )}
               </>
             )}
+            <NumberInput
+              label="Network Dropout"
+              className="pt-2"
+              value={jobConfig.config.process[0].network?.dropout ?? null}
+              onChange={value => setJobConfig(value ?? undefined, 'config.process[0].network.dropout')}
+              placeholder="eg. 0.05"
+              min={0}
+              max={1}
+            />
           </Card>
           {!disableSections.includes('slider') && (
             <Card title="Slider">
@@ -586,15 +597,17 @@ export default function SimpleJob({
                   min={1}
                   required
                 />
-                <NumberInput
-                  label="Steps"
-                  className="pt-2"
-                  value={jobConfig.config.process[0].train.steps}
-                  onChange={handleTrainingStepsChange}
-                  placeholder="eg. 2000"
-                  min={1}
-                  required
-                />
+                {!autoTrain && (
+                  <NumberInput
+                    label="Steps"
+                    className="pt-2"
+                    value={jobConfig.config.process[0].train.steps}
+                    onChange={handleTrainingStepsChange}
+                    placeholder="eg. 2000"
+                    min={1}
+                    required
+                  />
+                )}
               </div>
               <div>
                 <SelectInput
@@ -812,6 +825,7 @@ export default function SimpleJob({
             </div>
             <TrainingPhasesEditor
               train={jobConfig.config.process[0].train}
+              network={jobConfig.config.process[0].network}
               setJobConfig={setJobConfig}
               disableTimestepType={disableSections.includes('train.timestep_type')}
             />

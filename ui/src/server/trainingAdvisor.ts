@@ -448,7 +448,8 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const sample = processConfig.sample;
   const save = processConfig.save;
   const logging = processConfig.logging;
-  const steps = Math.max(0, Number(train?.steps ?? 0));
+  const isAutoTrain = !!train?.auto_train;
+  const steps = isAutoTrain ? 0 : Math.max(0, Number(train?.steps ?? 0));
 
   if (gpuIds != null && String(gpuIds).trim().length === 0) {
     addFinding(
@@ -593,6 +594,26 @@ function analyzePhases(findings: AdvisorFinding[], processConfig: ProcessConfig)
   const train = processConfig.train;
   const phases = train?.phases ?? [];
   if (!phases.length) return;
+
+  if (train.auto_train) {
+    for (const [index, phase] of phases.entries()) {
+      if (!phase.auto_advance) {
+        addFinding(
+          findings,
+          'critical',
+          'preflight',
+          'phases',
+          `phases.${index}.auto_train.no_auto_advance`,
+          'Auto-learn phase cannot advance',
+          `Phase ${index + 1} does not have plateau detection configured.`,
+          'Enable auto-advance for every auto-learn phase.',
+          undefined,
+          [`config.process[0].train.phases[${index}].auto_advance`],
+        );
+      }
+    }
+    return;
+  }
 
   const trainSteps = Math.max(0, Number(train.steps ?? 0));
   const phaseSteps = phases.reduce((sum, phase) => sum + Math.max(1, Number(phase.steps) || 1), 0);

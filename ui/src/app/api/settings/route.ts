@@ -9,6 +9,16 @@ type SettingsAccess = {
   response: NextResponse | null;
 };
 
+function normalizeBooleanSetting(value: unknown, defaultValue: boolean) {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['false', '0', 'off', 'disabled'].includes(normalized)) return 'false';
+    if (['true', '1', 'on', 'enabled'].includes(normalized)) return 'true';
+  }
+  return defaultValue ? 'true' : 'false';
+}
+
 function ensureSettingsAccess(request: NextRequest): SettingsAccess {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   const token = request.headers.get('authorization')?.split(' ')[1];
@@ -47,6 +57,10 @@ export async function GET(request: NextRequest) {
     if (!settingsObject.DATASETS_FOLDER || settingsObject.DATASETS_FOLDER === '') {
       settingsObject.DATASETS_FOLDER = defaultDatasetsFolder;
     }
+    settingsObject.TRAINING_ADVISOR_ENABLED = normalizeBooleanSetting(
+      settingsObject.TRAINING_ADVISOR_ENABLED,
+      false,
+    );
     if (!access.authenticated) {
       settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
       settingsObject.HF_TOKEN = '';
@@ -65,7 +79,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER } = body;
+    const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER, TRAINING_ADVISOR_ENABLED } = body;
 
     let normalizedDatasetsFolder = DATASETS_FOLDER;
     if (typeof DATASETS_FOLDER === 'string' && DATASETS_FOLDER !== '') {
@@ -79,6 +93,7 @@ export async function POST(request: NextRequest) {
     const settingsToUpdate: Record<string, string> = {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
+      TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
     };
 
     if (typeof HF_TOKEN === 'string' && (access.authenticated || HF_TOKEN !== '')) {

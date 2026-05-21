@@ -64,6 +64,15 @@ const wanCommonArchs = ['wan21*', 'wan22_5b'];
 const wan22A14BArchs = ['wan22_14b:*', 'wan22_14b_i2v'];
 const ltxArchs = ['ltx2', 'ltx2.3'];
 const aceArchs = ['ace_step_15', 'ace_step_15_xl'];
+const anatomyRealismArchs = [
+  ...flowImageArchs,
+  ...sdArchs,
+  ...qwenImageArchs,
+  'flux2',
+  'flux2_klein_4b',
+  'flux2_klein_9b',
+  'asymflux2_klein_9b',
+];
 
 function autoAdvance(preset: PlateauPreset): PhaseAutoAdvanceConfig {
   return { ...plateauDefaults[preset] };
@@ -244,6 +253,111 @@ export const builtInAutoTrainingProfiles: AutoTrainingProfile[] = [
         },
         auto_advance: autoAdvance('standard'),
       },
+    ],
+  },
+  {
+    id: 'anatomy-realism-lora',
+    name: 'Anatomy Realism LoRA',
+    description: 'Photoreal anatomy profile for body proportions, pose stability, and natural skin detail.',
+    compatibleArchs: anatomyRealismArchs,
+    network: loraNetwork(32, { dropout: 0.03 }),
+    train: trainDefaults(0.000075, { content_or_style: 'content' }),
+    phases: [
+      phase('Learn body proportions', 0.000075, 'content', 'long'),
+      phase('Stabilize pose and skin', 0.000035, 'balanced', 'long'),
+      phase('Photoreal detail cleanup', 0.000012, 'style', 'long'),
+    ],
+  },
+  {
+    id: 'anatomy-realism-high-rank',
+    name: 'Anatomy Realism High Rank',
+    description: 'Higher-capacity anatomy realism profile for larger datasets or stubborn body-detail concepts.',
+    compatibleArchs: anatomyRealismArchs,
+    network: loraNetwork(64, { dropout: 0.05 }),
+    train: trainDefaults(0.00005, { content_or_style: 'content' }),
+    phases: [
+      phase('Map realistic structure', 0.00005, 'content', 'long'),
+      phase('Balance form and pose', 0.000025, 'balanced', 'long'),
+      phase('Preserve skin texture', 0.00001, 'style', 'long'),
+    ],
+  },
+  {
+    id: 'anatomy-realism-lokr',
+    name: 'Anatomy Realism LoKr',
+    description: 'Lower-LR LoKr realism profile for anatomy datasets that need shape control without harsh style drift.',
+    compatibleArchs: [...anatomyRealismArchs, 'hidream'],
+    network: {
+      type: 'lokr',
+      dropout: 0.03,
+      lokr_factor: 8,
+      lokr_full_rank: false,
+    },
+    train: {
+      optimizer: 'adamw',
+      lr: 0.000025,
+      content_or_style: 'content',
+      loss_type: 'mse',
+      optimizer_params: {
+        weight_decay: 0.0001,
+      },
+    },
+    phases: [
+      {
+        name: 'Teach realistic proportions',
+        optimizer: 'adamw',
+        lr: 0.000025,
+        content_or_style: 'content',
+        loss_type: 'mse',
+        optimizer_params: {
+          weight_decay: 0.0001,
+        },
+        auto_advance: autoAdvance('long'),
+      },
+      {
+        name: 'Stabilize realistic form',
+        optimizer: 'adamw',
+        lr: 0.000012,
+        content_or_style: 'balanced',
+        loss_type: 'mse',
+        optimizer_params: {
+          weight_decay: 0.0001,
+        },
+        auto_advance: autoAdvance('long'),
+      },
+      {
+        name: 'Clean skin detail',
+        optimizer: 'adamw',
+        lr: 0.000005,
+        content_or_style: 'style',
+        loss_type: 'mse',
+        optimizer_params: {
+          weight_decay: 0.0001,
+        },
+        auto_advance: autoAdvance('long'),
+      },
+    ],
+  },
+  {
+    id: 'anatomy-realism-o1',
+    name: 'Anatomy Realism O1',
+    description: 'HiDream-O1 anatomy realism profile that keeps O1 in its x0-target loss space.',
+    compatibleArchs: ['hidream_o1'],
+    network: loraNetwork(32, {
+      conv: undefined,
+      conv_alpha: undefined,
+    }),
+    train: trainDefaults(0.000025, {
+      batch_size: 2,
+      gradient_accumulation: 1,
+      timestep_type: 'sigmoid',
+      content_or_style: 'balanced',
+      t0_loss_target: true,
+      max_loss: 1.0,
+    }),
+    phases: [
+      phase('Learn realistic anatomy', 0.000025, 'balanced', 'long', { timestep_type: 'sigmoid' }),
+      phase('Stabilize body detail', 0.000015, 'balanced', 'long', { timestep_type: 'sigmoid' }),
+      phase('Clean photoreal texture', 0.000008, 'balanced', 'long', { timestep_type: 'sigmoid' }),
     ],
   },
   {

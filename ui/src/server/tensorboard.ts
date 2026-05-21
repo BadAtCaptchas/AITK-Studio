@@ -100,6 +100,27 @@ export function getTensorBoardLogDir(trainingRoot: string) {
   return path.join(trainingRoot, '.tensorboard');
 }
 
+export function getTensorBoardLaunchPythonPath(
+  pythonPath = getToolkitPythonPath(),
+  platform: NodeJS.Platform = process.platform,
+) {
+  if (platform !== 'win32') {
+    return pythonPath;
+  }
+
+  const parsed = path.win32.parse(pythonPath);
+  if (parsed.base.toLowerCase() !== 'python.exe') {
+    return pythonPath;
+  }
+
+  if (!parsed.dir) {
+    return 'pythonw.exe';
+  }
+
+  const pythonwPath = path.win32.join(parsed.dir, 'pythonw.exe');
+  return fs.existsSync(pythonwPath) ? pythonwPath : pythonPath;
+}
+
 export function getTensorBoardPublicUrl(port = getTensorBoardPort(), requestUrl?: string) {
   const configuredUrl = process.env.AITK_TENSORBOARD_PUBLIC_URL?.trim();
   if (configuredUrl) {
@@ -257,6 +278,7 @@ async function startTensorBoardInternal(trainingRoot: string): Promise<TensorBoa
   const port = getTensorBoardPort();
   const logDir = getTensorBoardLogDir(trainingRoot);
   const pythonPath = getToolkitPythonPath();
+  const launchPythonPath = getTensorBoardLaunchPythonPath(pythonPath);
   if (isManagedTensorBoardRunning() || (await isPortListening(port))) {
     try {
       fs.mkdirSync(logDir, { recursive: true });
@@ -286,7 +308,7 @@ async function startTensorBoardInternal(trainingRoot: string): Promise<TensorBoa
       return getTensorBoardStatus(trainingRoot);
     }
 
-    managedTensorBoard = spawn(pythonPath, args, {
+    managedTensorBoard = spawn(launchPythonPath, args, {
       cwd: TOOLKIT_ROOT,
       detached: true,
       stdio: 'ignore',

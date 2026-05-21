@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getDatabaseConfig } from '@/server/db';
 import { getHFToken, getTrainingFolder } from '@/server/settings';
+import { prepareHfTokenEnv } from '@/server/hfTokenEnv';
 import { getToolkitPythonPath } from '@/server/tensorboard';
 
 export const runtime = 'nodejs';
@@ -152,7 +153,6 @@ function runInlineGenerate(
   args: string[],
   env: NodeJS.ProcessEnv,
   launchLogPath: string,
-  logPath: string,
   abortSignal?: AbortSignal,
 ) {
   return new Promise<void>((resolve, reject) => {
@@ -214,8 +214,7 @@ function runInlineGenerate(
         return;
       }
       const reason = signal ? `signal ${signal}` : `exit code ${code ?? 'unknown'}`;
-      const logTail = readLogTail(logPath) || readLogTail(launchLogPath);
-      finish(() => reject(new Error(`Inline generation failed with ${reason}.${logTail ? `\n${logTail}` : ''}`)));
+      finish(() => reject(new Error(`Inline generation failed with ${reason}. Check the generation log for details.`)));
     });
   });
 }
@@ -288,18 +287,23 @@ export async function POST(request: NextRequest) {
       PYTHONUNBUFFERED: '1',
       HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
     };
-    if (hfToken) {
-      additionalEnv.HF_TOKEN = hfToken;
-    }
 
-    await runInlineGenerate(
-      pythonPath,
-      [runFilePath, configPath, '--log', logPath],
-      additionalEnv,
-      launchLogPath,
-      logPath,
-      request.signal,
-    );
+    const preparedHfEnv = await prepareHfTokenEnv({
+      env: additionalEnv,
+      token: hfToken,
+      tokenFilePrefix: `inline-${runName}`,
+    });
+    try {
+      await runInlineGenerate(
+        pythonPath,
+        [runFilePath, configPath, '--log', logPath],
+        preparedHfEnv.env,
+        launchLogPath,
+        request.signal,
+      );
+    } finally {
+      await preparedHfEnv.cleanup().catch(error => console.error('Error cleaning Hugging Face token file:', error));
+    }
     const imagePath = await findNewestGeneratedImage(outputFolder);
     if (!imagePath) {
       return NextResponse.json(

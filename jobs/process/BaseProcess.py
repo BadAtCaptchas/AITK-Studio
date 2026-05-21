@@ -2,6 +2,7 @@ import copy
 import json
 from collections import OrderedDict
 
+from toolkit.secrets import redact_secrets
 from toolkit.timer import Timer
 
 
@@ -23,7 +24,7 @@ class BaseProcess(object):
         self.timer: Timer = Timer(f'{self.name} Timer')
         self.performance_log_every = self.get_conf('performance_log_every', 0)
 
-        print(json.dumps(self.config, indent=4))
+        print(json.dumps(redact_secrets(self.config), indent=4))
         
     def on_error(self, e: Exception):
         pass

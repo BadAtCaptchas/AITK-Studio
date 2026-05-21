@@ -6,6 +6,7 @@ import fs from 'fs';
 import { TOOLKIT_ROOT, getHFToken, getTrainingFolder } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
+import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
 
 const isWindows = process.platform === 'win32';
 const LAUNCH_LOG_FILE = 'launch.log';
@@ -37,6 +38,7 @@ const startAndWatchJob = (job: Job) => {
     const jobID = job.id;
     let launchLogPath = '';
     let launchLogFd: number | null = null;
+    let cleanupHfTokenEnv: (() => Promise<void>) | null = null;
 
     const closeLaunchLog = () => {
       if (launchLogFd == null) return;
@@ -47,6 +49,12 @@ const startAndWatchJob = (job: Job) => {
       } finally {
         launchLogFd = null;
       }
+    };
+    const cleanupSensitiveEnv = () => {
+      if (!cleanupHfTokenEnv) return;
+      const cleanup = cleanupHfTokenEnv;
+      cleanupHfTokenEnv = null;
+      void cleanup().catch(error => console.error('Error cleaning Hugging Face token file:', error));
     };
 
     try {
@@ -116,9 +124,6 @@ const startAndWatchJob = (job: Job) => {
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
       };
-      if (hfToken) {
-        additionalEnv.HF_TOKEN = hfToken;
-      }
 
       const args = [runFilePath, configPath, '--log', logPath];
       launchLogFd = fs.openSync(launchLogPath, 'a');
@@ -129,11 +134,18 @@ const startAndWatchJob = (job: Job) => {
         `[launcher] command: ${pythonPath} ${args.map(arg => JSON.stringify(arg)).join(' ')}`,
       );
 
-      const subprocess = spawn(pythonPath, args, {
+      const preparedHfEnv = await prepareHfTokenEnv({
         env: {
           ...process.env,
           ...additionalEnv,
         },
+        token: hfToken,
+        tokenFilePrefix: `job-${jobID}`,
+      });
+      cleanupHfTokenEnv = preparedHfEnv.cleanup;
+
+      const subprocess = spawn(pythonPath, args, {
+        env: preparedHfEnv.env,
         cwd: TOOLKIT_ROOT,
         detached: true,
         windowsHide: isWindows,
@@ -157,11 +169,13 @@ const startAndWatchJob = (job: Job) => {
 
       subprocess.once('error', error => {
         closeLaunchLog();
+        cleanupSensitiveEnv();
         void handleLaunchFailure(`Error launching job: ${error.message}`);
       });
 
       subprocess.once('exit', (code, signal) => {
         closeLaunchLog();
+        cleanupSensitiveEnv();
         if (code === 0 && signal == null) {
           void db.jobs
             .findById(jobID)
@@ -195,6 +209,7 @@ const startAndWatchJob = (job: Job) => {
       subprocess.unref?.();
     } catch (error: any) {
       closeLaunchLog();
+      cleanupSensitiveEnv();
       console.error('Error launching process:', error);
       if (launchLogPath) {
         appendLaunchLog(launchLogPath, `[launcher] Error launching process: ${error?.stack || error?.message || error}`);

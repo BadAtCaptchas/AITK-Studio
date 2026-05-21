@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder } from '@/paths';
 import { flushCache } from '@/server/settings';
 import { db } from '@/server/db';
+import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import path from 'path';
 
 type SettingsAccess = {
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
   try {
     const settings = await db.settings.list();
     const settingsObject = settings.reduce((acc: any, setting) => {
+      if (isEncryptedDatasetSecretSettingKey(setting.key)) return acc;
       acc[setting.key] = setting.value;
       return acc;
     }, {});

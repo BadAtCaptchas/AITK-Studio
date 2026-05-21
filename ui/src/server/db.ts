@@ -751,6 +751,20 @@ export const db = {
     async upsertMany(settings: Record<string, string>) {
       await Promise.all(Object.entries(settings).map(([key, value]) => db.settings.upsert(key, value ?? '')));
     },
+
+    async delete(key: string): Promise<void> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        await mongoCollection(mongo, 'settings').deleteOne({ key });
+        return;
+      }
+
+      try {
+        await getPrisma().settings.delete({ where: { key } });
+      } catch (error: any) {
+        if (error?.code !== 'P2025') throw error;
+      }
+    },
   },
 
   jobs: {

@@ -49,6 +49,7 @@ export const CaptionDatasetModal: React.FC = () => {
   const [existingJobName, setExistingJobName] = useState<string | null>(null);
   const [hasLoadedExistingJob, setHasLoadedExistingJob] = useState(false);
   const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>('simple');
+  const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useState(false);
   const open = modalInfo !== null;
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local', { enabled: open });
   const isSavingRef = useRef(false);
@@ -62,6 +63,7 @@ export const CaptionDatasetModal: React.FC = () => {
     setJobConfig(objectCopy(defaultCaptionJobConfig));
     setActiveTab('simple');
     setExistingJobName(null);
+    setAllowDurableEncryptedResume(false);
     // set the path_to_caption
     if (modalInfo?.datasetPath) {
       setJobConfig(modalInfo.datasetPath, 'config.process[0].caption.path_to_caption');
@@ -144,6 +146,7 @@ export const CaptionDatasetModal: React.FC = () => {
           modalInfo.encryptedDatasetKeyB64
             ? [{ datasetPath: modalInfo.datasetPath, keyB64: modalInfo.encryptedDatasetKeyB64 }]
             : undefined,
+          { durableEncryptedDatasetKeys: allowDurableEncryptedResume },
         );
         // start the queue as well
         await startQueue(gpuIDs || '');
@@ -218,6 +221,22 @@ export const CaptionDatasetModal: React.FC = () => {
           )}
 
           <div className="mt-6 flex justify-end space-x-3">
+            {modalInfo?.encryptedDatasetKeyB64 && (
+              <label className="mr-auto flex max-w-md items-start gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={allowDurableEncryptedResume}
+                  onChange={e => setAllowDurableEncryptedResume(e.target.checked)}
+                />
+                <span>
+                  Allow durable encrypted resume
+                  <span className="block text-xs text-gray-500">
+                    Stores this dataset key on the server until the job completes or is deleted.
+                  </span>
+                </span>
+              </label>
+            )}
             <button
               type="button"
               className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"

@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { clearDurableEncryptedDatasetKeys } from '@/server/encryptedDatasetSecrets';
 
 function resolveWithinRoot(root: string, target: unknown) {
   if (typeof target !== 'string' || target.trim().length === 0) {
@@ -39,6 +40,9 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
         console.error('Error deleting remote job before removing local mirror:', error);
       }
     }
+    await clearDurableEncryptedDatasetKeys(jobID).catch(error =>
+      console.error('Error clearing durable encrypted dataset keys:', error),
+    );
     await db.jobs.delete(jobID);
     return NextResponse.json(job);
   }
@@ -54,6 +58,9 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
     fs.rmSync(trainingFolder, { recursive: true, force: true });
   }
 
+  await clearDurableEncryptedDatasetKeys(jobID).catch(error =>
+    console.error('Error clearing durable encrypted dataset keys:', error),
+  );
   await db.jobs.delete(jobID);
 
   return NextResponse.json(job);

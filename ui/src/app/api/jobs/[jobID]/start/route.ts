@@ -11,11 +11,13 @@ import {
 } from '@/server/remoteClient';
 import {
   getEncryptedDatasetsForJobConfig,
-  getKeyForRequiredDataset,
-  normalizeEncryptedKeyMap,
 } from '@/server/encryptedDatasets';
+import {
+  getEncryptedKeyCoverage,
+  storeDurableEncryptedDatasetKeys,
+} from '@/server/encryptedDatasetSecrets';
 import { startJobNow } from '../../../../../../cron/actions/startJob';
-import type { EncryptedDatasetStartKey } from '@/types';
+import type { EncryptedDatasetStartKey, JobStartRequest } from '@/types';
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -39,6 +41,7 @@ async function handleStart(
   request: NextRequest,
   { params }: { params: { jobID: string } },
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
+  durableEncryptedDatasetKeys = false,
 ) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) {
@@ -65,18 +68,23 @@ async function handleStart(
   }
 
   const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
-  const encryptedKeyMap = normalizeEncryptedKeyMap(encryptedDatasetKeys);
-  const missingEncryptedDatasets = requiredEncryptedDatasets.filter(
-    dataset => !getKeyForRequiredDataset(encryptedKeyMap, dataset),
-  );
-  if (missingEncryptedDatasets.length > 0) {
+  let encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedDatasetKeys);
+  if (encryptedKeyCoverage.missingDatasets.length > 0) {
     return NextResponse.json(
       {
         error: 'decryption key required',
-        encryptedDatasets: missingEncryptedDatasets,
+        encryptedDatasets: encryptedKeyCoverage.missingDatasets,
       },
       { status: 409 },
     );
+  }
+  let encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
+  let useDurableEncryptedKeys = requiredEncryptedDatasets.length > 0 && encryptedKeyCoverage.durableKeys.length > 0;
+  if (durableEncryptedDatasetKeys && requiredEncryptedDatasets.length > 0) {
+    await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
+    encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedKeysForLaunch);
+    encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
+    useDurableEncryptedKeys = true;
   }
 
   if (!isLocalWorker(job.worker_id)) {
@@ -114,7 +122,10 @@ async function handleStart(
 
       await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobId)}/start`, {
         method: 'POST',
-        body: JSON.stringify({ encryptedDatasetKeys }),
+        body: JSON.stringify({
+          encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
+          durableEncryptedDatasetKeys: useDurableEncryptedKeys,
+        }),
       });
       await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`);
       await db.queues
@@ -136,6 +147,34 @@ async function handleStart(
     }
   }
 
+  const queueLocalJob = async () => {
+    const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
+
+    await db.jobs.update(jobID, { queue_position: newQueuePosition });
+
+    const queue = await db.queues.findByGpuIds(job.gpu_ids);
+
+    if (!queue) {
+      await db.queues.create({
+        gpu_ids: job.gpu_ids,
+        is_running: false,
+      });
+    }
+
+    await db.jobs.update(jobID, {
+      status: 'queued',
+      stop: false,
+      return_to_queue: false,
+      info: 'Job queued',
+    });
+
+    return (await db.jobs.findById(jobID)) || job;
+  };
+
+  if (requiredEncryptedDatasets.length > 0 && useDurableEncryptedKeys) {
+    return NextResponse.json(await queueLocalJob());
+  }
+
   if (requiredEncryptedDatasets.length > 0) {
     const runningJob = await db.jobs.findFirst({
       status: ['running', 'stopping'],
@@ -149,35 +188,11 @@ async function handleStart(
       );
     }
 
-    await startJobNow(jobID, { encryptedDatasetKeys });
+    await startJobNow(jobID, { encryptedDatasetKeys: encryptedKeysForLaunch });
     return NextResponse.json((await db.jobs.findById(jobID)) || job);
   }
 
-  // get highest queue position
-  const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
-
-  await db.jobs.update(jobID, { queue_position: newQueuePosition });
-
-  // make sure the queue is running
-  const queue = await db.queues.findByGpuIds(job.gpu_ids);
-
-  // if queue doesn't exist, create it
-  if (!queue) {
-    await db.queues.create({
-      gpu_ids: job.gpu_ids,
-      is_running: false,
-    });
-  }
-
-  await db.jobs.update(jobID, {
-    status: 'queued',
-    stop: false,
-    return_to_queue: false,
-    info: 'Job queued',
-  });
-
-  // Return the response immediately
-  return NextResponse.json(job);
+  return NextResponse.json(await queueLocalJob());
 }
 
 export async function GET(request: NextRequest, context: { params: { jobID: string } }) {
@@ -185,11 +200,11 @@ export async function GET(request: NextRequest, context: { params: { jobID: stri
 }
 
 export async function POST(request: NextRequest, context: { params: { jobID: string } }) {
-  let body: any = {};
+  let body: JobStartRequest = {};
   try {
     body = await request.json();
   } catch {
     body = {};
   }
-  return handleStart(request, context, body.encryptedDatasetKeys);
+  return handleStart(request, context, body.encryptedDatasetKeys, body.durableEncryptedDatasetKeys === true);
 }

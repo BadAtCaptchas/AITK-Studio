@@ -39,8 +39,19 @@ export type TrainingJobExportResult = {
   warnings: string[];
 };
 
+export type StartJobOptions = {
+  durableEncryptedDatasetKeys?: boolean;
+};
+
 function basenameFromPath(value: string) {
   return value.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || value;
+}
+
+function promptForDurableEncryptedResume() {
+  if (typeof window === 'undefined') return false;
+  return window.confirm(
+    'Store this encrypted dataset key on the server so the job can resume from the queue after an app restart? This weakens security: server or database access can recover the key for this job.',
+  );
 }
 
 async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: string }) {
@@ -67,10 +78,17 @@ async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: st
   return { datasetPath: dataset.path, keyB64 };
 }
 
-export const startJob = (jobID: string, encryptedDatasetKeys?: EncryptedDatasetStartKey[]) => {
+export const startJob = (
+  jobID: string,
+  encryptedDatasetKeys?: EncryptedDatasetStartKey[],
+  options: StartJobOptions = {},
+) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .post(`/api/jobs/${jobID}/start`, { encryptedDatasetKeys })
+      .post(`/api/jobs/${jobID}/start`, {
+        encryptedDatasetKeys,
+        durableEncryptedDatasetKeys: options.durableEncryptedDatasetKeys === true,
+      })
       .then(res => res.data)
       .then(data => {
         console.log('Job started:', data);
@@ -82,8 +100,11 @@ export const startJob = (jobID: string, encryptedDatasetKeys?: EncryptedDatasetS
           try {
             const supplied = encryptedDatasetKeys || [];
             const additional = await Promise.all(requiredDatasets.map(resolveEncryptedDatasetStartKey));
+            const durableEncryptedDatasetKeys =
+              options.durableEncryptedDatasetKeys ?? promptForDurableEncryptedResume();
             await apiClient.post(`/api/jobs/${jobID}/start`, {
               encryptedDatasetKeys: [...supplied, ...additional],
+              durableEncryptedDatasetKeys,
             });
             resolve();
             return;

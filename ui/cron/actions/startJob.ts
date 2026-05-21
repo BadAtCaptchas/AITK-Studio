@@ -12,6 +12,10 @@ import {
   getKeyForRequiredDataset,
   normalizeEncryptedKeyMap,
 } from '../../src/server/encryptedDatasets';
+import {
+  clearDurableEncryptedDatasetKeys,
+  getDurableEncryptedDatasetKeys,
+} from '../../src/server/encryptedDatasetSecrets';
 import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
@@ -94,7 +98,11 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const dbConfig = getDatabaseConfig();
       const jobConfig = JSON.parse(job.job_config);
       const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
-      const encryptedKeyMap = normalizeEncryptedKeyMap(options.encryptedDatasetKeys);
+      const durableEncryptedDatasetKeys = await getDurableEncryptedDatasetKeys(jobID);
+      const encryptedKeyMap = normalizeEncryptedKeyMap([
+        ...durableEncryptedDatasetKeys,
+        ...(options.encryptedDatasetKeys || []),
+      ]);
       const encryptedDatasetKeys = requiredEncryptedDatasets.map(dataset => {
         const keyB64 = getKeyForRequiredDataset(encryptedKeyMap, dataset);
         if (!keyB64) {
@@ -210,7 +218,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
                   status: 'completed',
                   pid: null,
                   info: 'Job completed',
-                });
+                }).then(() => clearDurableEncryptedDatasetKeys(jobID));
               }
               return null;
             })

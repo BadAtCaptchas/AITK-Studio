@@ -2,6 +2,13 @@ import { JobConfig } from '@/types';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import { getDisplayPath, getDownloadUrl } from '@/utils/media';
+import type { EncryptedDatasetStartKey } from '@/types';
+import {
+  derivePasswordKey,
+  exportRawAesKey,
+  getRememberedEncryptedDatasetKey,
+  rememberEncryptedDatasetKey,
+} from '@/utils/encryptedDatasets';
 
 export type TrainingJobCheckpointExportMode = 'latest' | 'all';
 
@@ -32,16 +39,59 @@ export type TrainingJobExportResult = {
   warnings: string[];
 };
 
-export const startJob = (jobID: string) => {
+function basenameFromPath(value: string) {
+  return value.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || value;
+}
+
+async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: string }) {
+  const remembered =
+    getRememberedEncryptedDatasetKey(dataset.path) || getRememberedEncryptedDatasetKey(dataset.name);
+  if (remembered) {
+    return { datasetPath: dataset.path, keyB64: remembered };
+  }
+
+  const datasetName = dataset.name || basenameFromPath(dataset.path);
+  const res = await apiClient.post('/api/datasets/listImages', { datasetName });
+  const manifest = res.data?.manifest;
+  if (!manifest) throw new Error(`Encrypted dataset key required for ${datasetName}`);
+  if (manifest.crypto?.kdf?.type !== 'PBKDF2-SHA256') {
+    throw new Error(`Encrypted dataset ${datasetName} requires its key file. Unlock the dataset page first.`);
+  }
+
+  const password = window.prompt(`Password for encrypted dataset "${datasetName}"`);
+  if (!password) throw new Error(`Encrypted dataset key required for ${datasetName}`);
+  const key = await derivePasswordKey(password, manifest);
+  const keyB64 = await exportRawAesKey(key);
+  rememberEncryptedDatasetKey(dataset.path, keyB64);
+  rememberEncryptedDatasetKey(datasetName, keyB64);
+  return { datasetPath: dataset.path, keyB64 };
+}
+
+export const startJob = (jobID: string, encryptedDatasetKeys?: EncryptedDatasetStartKey[]) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/jobs/${jobID}/start`)
+      .post(`/api/jobs/${jobID}/start`, { encryptedDatasetKeys })
       .then(res => res.data)
       .then(data => {
         console.log('Job started:', data);
         resolve();
       })
-      .catch(error => {
+      .catch(async error => {
+        const requiredDatasets = error.response?.status === 409 ? error.response?.data?.encryptedDatasets : null;
+        if (Array.isArray(requiredDatasets)) {
+          try {
+            const supplied = encryptedDatasetKeys || [];
+            const additional = await Promise.all(requiredDatasets.map(resolveEncryptedDatasetStartKey));
+            await apiClient.post(`/api/jobs/${jobID}/start`, {
+              encryptedDatasetKeys: [...supplied, ...additional],
+            });
+            resolve();
+            return;
+          } catch (keyError) {
+            reject(keyError);
+            return;
+          }
+        }
         console.error('Error starting job:', error);
         reject(error);
       });

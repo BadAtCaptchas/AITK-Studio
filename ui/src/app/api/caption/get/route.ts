@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
+import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -24,19 +25,25 @@ export async function POST(request: NextRequest) {
     const filepath = imgPath;
     console.log('Decoded image path:', filepath);
 
-    // caption name is the filepath without extension but with .txt
-    const captionPath = filepath.replace(/\.[^/.]+$/, '') + '.txt';
-
     // Get allowed directories
     const allowedDir = await getDatasetsRoot();
 
-    // Security check: Ensure path is in allowed directory
-    const isAllowed = filepath.startsWith(allowedDir) && !filepath.includes('..');
+    const resolvedFilePath = path.resolve(filepath);
+    const allowedRoot = path.resolve(allowedDir);
+    const relativeFilePath = path.relative(allowedRoot, resolvedFilePath);
+    const isAllowed = relativeFilePath !== '' && !relativeFilePath.startsWith('..') && !path.isAbsolute(relativeFilePath);
 
     if (!isAllowed) {
       console.warn(`Access denied: ${filepath} not in ${allowedDir}`);
       return new NextResponse('Access denied', { status: 403 });
     }
+
+    if (findEncryptedDatasetRoot(resolvedFilePath, allowedRoot)) {
+      return new NextResponse('Encrypted captions are not served through this route', { status: 403 });
+    }
+
+    // caption name is the filepath without extension but with .txt
+    const captionPath = resolvedFilePath.replace(/\.[^/.]+$/, '') + '.txt';
 
     // Check if file exists
     if (!fs.existsSync(captionPath)) {

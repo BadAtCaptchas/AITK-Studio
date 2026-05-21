@@ -39,9 +39,8 @@ KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def analyze_audio(audio_path):
-    """Extract BPM, key, and time signature from audio using librosa."""
-    y, sr = librosa.load(audio_path, sr=22050, mono=True)
+def analyze_audio_array(y, sr):
+    """Extract BPM, key, and time signature from mono audio samples."""
     duration = librosa.get_duration(y=y, sr=sr)
 
     # BPM
@@ -95,6 +94,12 @@ def analyze_audio(audio_path):
         "timesignature": timesig,
         "duration": int(round(duration)),
     }
+
+
+def analyze_audio(audio_path):
+    """Extract BPM, key, and time signature from audio using librosa."""
+    y, sr = librosa.load(audio_path, sr=22050, mono=True)
+    return analyze_audio_array(y, sr)
 
 
 class AceStepCaptionConfig(CaptionConfig):
@@ -217,11 +222,18 @@ class AceStepCaptioner(BaseCaptioner):
 
     def get_caption_for_file(self, file_path: str) -> str:
         try:
-            # analyze audio with librosa
-            analysis = analyze_audio(file_path)
-
             # load audio with torchaudio for transcription
-            waveform, sr = torchaudio.load(file_path)
+            waveform, sr = self.load_audio_tensor_for_caption(file_path)
+            analysis_waveform = waveform
+            if analysis_waveform.shape[0] > 1:
+                analysis_waveform = analysis_waveform.mean(dim=0, keepdim=True)
+            analysis_samples = analysis_waveform.squeeze(0).cpu().numpy()
+            analysis_sr = sr
+            if analysis_sr != 22050:
+                analysis_samples = librosa.resample(analysis_samples, orig_sr=analysis_sr, target_sr=22050)
+                analysis_sr = 22050
+            analysis = analyze_audio_array(analysis_samples, analysis_sr)
+
             waveform = waveform.to(self.device_torch)
             if waveform.shape[0] > 1:
                 waveform = waveform.mean(dim=0, keepdim=True)

@@ -7,9 +7,19 @@ import { TOOLKIT_ROOT, getHFToken, getTrainingFolder } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
+import {
+  getEncryptedDatasetsForJobConfig,
+  getKeyForRequiredDataset,
+  normalizeEncryptedKeyMap,
+} from '../../src/server/encryptedDatasets';
+import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
 const LAUNCH_LOG_FILE = 'launch.log';
+
+type StartJobOptions = {
+  encryptedDatasetKeys?: EncryptedDatasetStartKey[];
+};
 
 function appendLaunchLog(launchLogPath: string, message: string) {
   try {
@@ -33,7 +43,7 @@ function archiveExistingLog(filePath: string, logsFolder: string, suffix: string
   fs.renameSync(filePath, path.join(logsFolder, `${num}_${suffix}`));
 }
 
-const startAndWatchJob = (job: Job) => {
+const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
   return new Promise<void>(async resolve => {
     const jobID = job.id;
     let launchLogPath = '';
@@ -83,6 +93,15 @@ const startAndWatchJob = (job: Job) => {
 
       const dbConfig = getDatabaseConfig();
       const jobConfig = JSON.parse(job.job_config);
+      const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
+      const encryptedKeyMap = normalizeEncryptedKeyMap(options.encryptedDatasetKeys);
+      const encryptedDatasetKeys = requiredEncryptedDatasets.map(dataset => {
+        const keyB64 = getKeyForRequiredDataset(encryptedKeyMap, dataset);
+        if (!keyB64) {
+          throw new Error(`decryption key required for encrypted dataset: ${dataset.name}`);
+        }
+        return { datasetPath: dataset.path, keyB64 };
+      });
       jobConfig.config.name = job.name;
       if (Array.isArray(jobConfig.config?.process)) {
         jobConfig.config.process.forEach((processConfig: any) => {
@@ -124,6 +143,12 @@ const startAndWatchJob = (job: Job) => {
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
       };
+      if (encryptedDatasetKeys.length > 0) {
+        additionalEnv.AITK_ENCRYPTED_DATASET_KEYS_B64 = Buffer.from(
+          JSON.stringify(encryptedDatasetKeys),
+          'utf-8',
+        ).toString('base64');
+      }
 
       const args = [runFilePath, configPath, '--log', logPath];
       launchLogFd = fs.openSync(launchLogPath, 'a');
@@ -227,7 +252,7 @@ const startAndWatchJob = (job: Job) => {
   });
 };
 
-export default async function startJob(jobID: string) {
+export async function startJobNow(jobID: string, options: StartJobOptions = {}) {
   const job: Job | null = await db.jobs.findById(jobID);
   if (!job) {
     console.error(`Job with ID ${jobID} not found`);
@@ -244,7 +269,7 @@ export default async function startJob(jobID: string) {
     info: 'Starting job...',
   });
 
-  startAndWatchJob(job).catch(async (error: any) => {
+  startAndWatchJob(job, options).catch(async (error: any) => {
     console.error('Error preparing job launch:', error);
     await db.jobs
       .update(jobID, {
@@ -254,4 +279,8 @@ export default async function startJob(jobID: string) {
       })
       .catch(updateError => console.error('Error updating failed job status:', updateError));
   });
+}
+
+export default async function startJob(jobID: string) {
+  await startJobNow(jobID);
 }

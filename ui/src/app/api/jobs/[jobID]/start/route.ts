@@ -9,6 +9,13 @@ import {
   syncRemoteJob,
   uploadBundleToWorker,
 } from '@/server/remoteClient';
+import {
+  getEncryptedDatasetsForJobConfig,
+  getKeyForRequiredDataset,
+  normalizeEncryptedKeyMap,
+} from '@/server/encryptedDatasets';
+import { startJobNow } from '../../../../../../cron/actions/startJob';
+import type { EncryptedDatasetStartKey } from '@/types';
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -28,7 +35,11 @@ function isValidJobId(jobID: string) {
   return /^[a-zA-Z0-9_-]+$/.test(jobID);
 }
 
-export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
+async function handleStart(
+  request: NextRequest,
+  { params }: { params: { jobID: string } },
+  encryptedDatasetKeys?: EncryptedDatasetStartKey[],
+) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
@@ -46,9 +57,41 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
 
+  let jobConfig: any;
+  try {
+    jobConfig = JSON.parse(job.job_config);
+  } catch {
+    return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
+  }
+
+  const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
+  const encryptedKeyMap = normalizeEncryptedKeyMap(encryptedDatasetKeys);
+  const missingEncryptedDatasets = requiredEncryptedDatasets.filter(
+    dataset => !getKeyForRequiredDataset(encryptedKeyMap, dataset),
+  );
+  if (missingEncryptedDatasets.length > 0) {
+    return NextResponse.json(
+      {
+        error: 'decryption key required',
+        encryptedDatasets: missingEncryptedDatasets,
+      },
+      { status: 409 },
+    );
+  }
+
   if (!isLocalWorker(job.worker_id)) {
     try {
       const worker = await getRemoteWorker(job.worker_id);
+      if (
+        requiredEncryptedDatasets.length > 0 &&
+        !worker.base_url.toLowerCase().startsWith('https://') &&
+        process.env.AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS !== '1'
+      ) {
+        return NextResponse.json(
+          { error: 'Remote encrypted training requires an HTTPS worker URL.' },
+          { status: 400 },
+        );
+      }
       let remoteJobId = job.remote_job_id;
 
       if (!remoteJobId) {
@@ -69,7 +112,10 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
         }
       }
 
-      await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobId)}/start`);
+      await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobId)}/start`, {
+        method: 'POST',
+        body: JSON.stringify({ encryptedDatasetKeys }),
+      });
       await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`);
       await db.queues
         .findByGpuIds(job.gpu_ids, job.worker_id)
@@ -88,6 +134,23 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
       await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
       return NextResponse.json({ error: message }, { status: 502 });
     }
+  }
+
+  if (requiredEncryptedDatasets.length > 0) {
+    const runningJob = await db.jobs.findFirst({
+      status: ['running', 'stopping'],
+      gpu_ids: job.gpu_ids,
+      worker_id: 'local',
+    });
+    if (runningJob && runningJob.id !== job.id) {
+      return NextResponse.json(
+        { error: 'Encrypted jobs must start immediately; the selected local GPU is busy.' },
+        { status: 409 },
+      );
+    }
+
+    await startJobNow(jobID, { encryptedDatasetKeys });
+    return NextResponse.json((await db.jobs.findById(jobID)) || job);
   }
 
   // get highest queue position
@@ -115,4 +178,18 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
 
   // Return the response immediately
   return NextResponse.json(job);
+}
+
+export async function GET(request: NextRequest, context: { params: { jobID: string } }) {
+  return handleStart(request, context);
+}
+
+export async function POST(request: NextRequest, context: { params: { jobID: string } }) {
+  let body: any = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  return handleStart(request, context, body.encryptedDatasetKeys);
 }

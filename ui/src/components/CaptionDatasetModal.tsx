@@ -22,6 +22,7 @@ export interface CaptionDatasetModalState {
   datasetPath: string;
   jobId?: string | null;
   cloneId?: string | null;
+  encryptedDatasetKeyB64?: string | null;
   onClose?: () => void;
 }
 
@@ -30,13 +31,14 @@ export const captionDatasetModalState = createGlobalState<CaptionDatasetModalSta
 export const openCaptionDatasetModal = (
   datasetPath: string,
   onClose?: () => void,
-  options?: { jobId?: string | null; cloneId?: string | null },
+  options?: { jobId?: string | null; cloneId?: string | null; encryptedDatasetKeyB64?: string | null },
 ) => {
   captionDatasetModalState.set({
     datasetPath,
     onClose,
     jobId: options?.jobId ?? null,
     cloneId: options?.cloneId ?? null,
+    encryptedDatasetKeyB64: options?.encryptedDatasetKeyB64 ?? null,
   });
 };
 
@@ -137,7 +139,12 @@ export const CaptionDatasetModal: React.FC = () => {
       })
       .then(async res => {
         const jobId = res.data.id;
-        await startJob(jobId);
+        await startJob(
+          jobId,
+          modalInfo.encryptedDatasetKeyB64
+            ? [{ datasetPath: modalInfo.datasetPath, keyB64: modalInfo.encryptedDatasetKeyB64 }]
+            : undefined,
+        );
         // start the queue as well
         await startQueue(gpuIDs || '');
         isSavingRef.current = false;

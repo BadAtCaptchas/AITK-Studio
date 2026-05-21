@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
+import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 
 export async function POST(request: Request) {
   try {
@@ -15,6 +16,10 @@ export async function POST(request: Request) {
     // make sure the resolved image path is in the dataset path
     if (relativeImagePath.startsWith('..') || path.isAbsolute(relativeImagePath)) {
       return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
+    }
+
+    if (findEncryptedDatasetRoot(resolvedImagePath, datasetsRoot)) {
+      return NextResponse.json({ error: 'Encrypted captions must be saved through the encrypted dataset API' }, { status: 403 });
     }
 
     // if img doesnt exist, ignore

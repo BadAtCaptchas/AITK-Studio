@@ -12,17 +12,28 @@ import { TopBar, MainContent } from '@/components/layout';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
 import { apiClient } from '@/utils/api';
 import { useRouter } from 'next/navigation';
+import {
+  createEmptyEncryptedManifest,
+  rememberEncryptedDatasetKey,
+} from '@/utils/encryptedDatasets';
 
 export default function Datasets() {
   const router = useRouter();
   const { datasets, status, refreshDatasets } = useDatasetList();
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
+  const [newDatasetMode, setNewDatasetMode] = useState<'plain' | 'encrypted'>('plain');
+  const [credentialMode, setCredentialMode] = useState<'password' | 'keyFile'>('password');
+  const [datasetPassword, setDatasetPassword] = useState('');
+  const [datasetPasswordConfirm, setDatasetPasswordConfirm] = useState('');
+  const [datasetKeyFile, setDatasetKeyFile] = useState<File | null>(null);
+  const [isCreatingDataset, setIsCreatingDataset] = useState(false);
 
   // Transform datasets array into rows with objects
   const tableRows = datasets.map(dataset => ({
-    name: dataset,
-    actions: dataset, // Pass full dataset name for actions
+    name: dataset.name,
+    encrypted: dataset.encrypted,
+    actions: dataset.name, // Pass full dataset name for actions
   }));
 
   const columns: TableColumn[] = [
@@ -33,6 +44,16 @@ export default function Datasets() {
         <Link href={`/datasets/${row.name}`} className="text-gray-200 hover:text-gray-100">
           {row.name}
         </Link>
+      ),
+    },
+    {
+      title: 'Type',
+      key: 'encrypted',
+      className: 'w-32',
+      render: row => (
+        <span className={row.encrypted ? 'text-blue-300' : 'text-gray-400'}>
+          {row.encrypted ? 'Encrypted' : 'Plain'}
+        </span>
       ),
     },
     {
@@ -72,42 +93,58 @@ export default function Datasets() {
 
   const handleCreateDataset = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isCreatingDataset) return;
     try {
-      const data = await apiClient.post('/api/datasets/create', { name: newDatasetName }).then(res => res.data);
+      setIsCreatingDataset(true);
+      let encryptedManifest = null;
+      let rawKeyB64: string | null = null;
+      if (newDatasetMode === 'encrypted') {
+        if (credentialMode === 'password') {
+          if (!datasetPassword || datasetPassword !== datasetPasswordConfirm) {
+            alert('Password and confirmation must match.');
+            return;
+          }
+          const result = await createEmptyEncryptedManifest('password', datasetPassword);
+          encryptedManifest = result.manifest;
+          rawKeyB64 = result.rawKeyB64;
+        } else {
+          if (!datasetKeyFile) {
+            alert('Select a key file.');
+            return;
+          }
+          const result = await createEmptyEncryptedManifest('keyFile', datasetKeyFile);
+          encryptedManifest = result.manifest;
+          rawKeyB64 = result.rawKeyB64;
+        }
+      }
+
+      const data = await apiClient
+        .post('/api/datasets/create', {
+          name: newDatasetName,
+          encrypted: newDatasetMode === 'encrypted',
+          encryptedManifest,
+        })
+        .then(res => res.data);
       console.log('New dataset created:', data);
+      if (rawKeyB64 && data.name) {
+        rememberEncryptedDatasetKey(data.name, rawKeyB64);
+      }
       refreshDatasets();
       setNewDatasetName('');
+      setDatasetPassword('');
+      setDatasetPasswordConfirm('');
+      setDatasetKeyFile(null);
       setIsNewDatasetModalOpen(false);
+      if (data.name) router.push(`/datasets/${data.name}`);
     } catch (error) {
       console.error('Error creating new dataset:', error);
+    } finally {
+      setIsCreatingDataset(false);
     }
   };
 
   const openNewDatasetModal = () => {
-    openConfirm({
-      title: 'New Dataset',
-      message: 'Enter the name of the new dataset:',
-      type: 'info',
-      confirmText: 'Create',
-      inputTitle: 'Dataset Name',
-      onConfirm: async (name?: string) => {
-        if (!name) {
-          console.error('Dataset name is required.');
-          return;
-        }
-        try {
-          const data = await apiClient.post('/api/datasets/create', { name }).then(res => res.data);
-          console.log('New dataset created:', data);
-          if (data.name) {
-            router.push(`/datasets/${data.name}`);
-          } else {
-            refreshDatasets();
-          }
-        } catch (error) {
-          console.error('Error creating new dataset:', error);
-        }
-      },
-    });
+    setIsNewDatasetModalOpen(true);
   };
 
   return (
@@ -144,12 +181,82 @@ export default function Datasets() {
       >
         <div className="space-y-4 text-gray-200">
           <form onSubmit={handleCreateDataset}>
-            <div className="text-sm text-gray-400">
-              This will create a new folder with the name below in your dataset folder.
-            </div>
             <div className="mt-4">
               <TextInput label="Dataset Name" value={newDatasetName} onChange={value => setNewDatasetName(value)} />
             </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setNewDatasetMode('plain')}
+                className={`rounded-md border px-3 py-2 text-left ${
+                  newDatasetMode === 'plain'
+                    ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                    : 'border-gray-700 bg-gray-900 text-gray-300'
+                }`}
+              >
+                Plain
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewDatasetMode('encrypted')}
+                className={`rounded-md border px-3 py-2 text-left ${
+                  newDatasetMode === 'encrypted'
+                    ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                    : 'border-gray-700 bg-gray-900 text-gray-300'
+                }`}
+              >
+                Encrypted
+              </button>
+            </div>
+
+            {newDatasetMode === 'encrypted' && (
+              <div className="mt-4 space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCredentialMode('password')}
+                    className={`rounded-md px-3 py-2 text-sm ${
+                      credentialMode === 'password' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                    }`}
+                  >
+                    Password
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCredentialMode('keyFile')}
+                    className={`rounded-md px-3 py-2 text-sm ${
+                      credentialMode === 'keyFile' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                    }`}
+                  >
+                    Key File
+                  </button>
+                </div>
+                {credentialMode === 'password' ? (
+                  <div className="space-y-3">
+                    <input
+                      type="password"
+                      value={datasetPassword}
+                      onChange={e => setDatasetPassword(e.target.value)}
+                      placeholder="Password"
+                      className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                    />
+                    <input
+                      type="password"
+                      value={datasetPasswordConfirm}
+                      onChange={e => setDatasetPasswordConfirm(e.target.value)}
+                      placeholder="Confirm password"
+                      className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="file"
+                    onChange={e => setDatasetKeyFile(e.target.files?.[0] || null)}
+                    className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
+                  />
+                )}
+              </div>
+            )}
 
             <div className="mt-6 flex justify-end space-x-3">
               <button
@@ -161,9 +268,10 @@ export default function Datasets() {
               </button>
               <button
                 type="submit"
+                disabled={isCreatingDataset}
                 className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                Confirm
+                {isCreatingDataset ? 'Creating...' : 'Confirm'}
               </button>
             </div>
           </form>

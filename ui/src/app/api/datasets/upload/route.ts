@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
 import { isAbsolute, join, resolve, relative, sep } from 'path';
 import { getDatasetsRoot } from '@/server/settings';
+import {
+  isEncryptedDatasetFolder,
+  resolveEncryptedObjectPath,
+  validateEncryptedManifest,
+  writeEncryptedManifest,
+} from '@/server/encryptedDatasets';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,6 +19,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const files = formData.getAll('files');
     const datasetName = (formData.get('datasetName') as string)?.trim();
+    const encrypted = formData.get('encrypted') === '1';
 
     if (!files || files.length === 0) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
@@ -38,6 +45,45 @@ export async function POST(request: NextRequest) {
     }
 
     await mkdir(uploadDir, { recursive: true });
+
+    if (encrypted) {
+      if (!isEncryptedDatasetFolder(uploadDir)) {
+        return NextResponse.json({ error: 'Encrypted dataset not found' }, { status: 404 });
+      }
+      const manifestText = formData.get('manifest');
+      const objectPathsText = formData.get('objectPaths');
+      if (typeof manifestText !== 'string' || typeof objectPathsText !== 'string') {
+        return NextResponse.json({ error: 'Encrypted upload requires a manifest and object paths' }, { status: 400 });
+      }
+      const manifest = validateEncryptedManifest(JSON.parse(manifestText));
+      const objectPaths = JSON.parse(objectPathsText);
+      if (!Array.isArray(objectPaths) || objectPaths.length !== files.length) {
+        return NextResponse.json({ error: 'Object path count does not match uploaded files' }, { status: 400 });
+      }
+
+      await mkdir(join(uploadDir, 'objects'), { recursive: true });
+      const savedObjects: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i] as any;
+        const objectPath = objectPaths[i];
+        if (typeof objectPath !== 'string') {
+          return NextResponse.json({ error: 'Invalid encrypted object path' }, { status: 400 });
+        }
+        const resolvedObjectPath = resolveEncryptedObjectPath(uploadDir, objectPath);
+        const bytes = await file.arrayBuffer();
+        await writeFile(resolvedObjectPath, Buffer.from(bytes));
+        savedObjects.push(objectPath);
+      }
+      await writeEncryptedManifest(uploadDir, manifest);
+      return NextResponse.json({
+        message: 'Encrypted files uploaded successfully',
+        objects: savedObjects,
+      });
+    }
+
+    if (isEncryptedDatasetFolder(uploadDir)) {
+      return NextResponse.json({ error: 'Plain uploads are not allowed for encrypted datasets' }, { status: 400 });
+    }
 
     const savedFiles: string[] = [];
     

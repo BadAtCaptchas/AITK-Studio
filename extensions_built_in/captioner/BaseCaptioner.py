@@ -10,10 +10,12 @@ import concurrent.futures
 from PIL import Image
 
 import torch
+import torchaudio
 from jobs.process import BaseExtensionProcess
 import tqdm
 
 from toolkit.exceptions import JobStopRequested
+from toolkit.encrypted_dataset import EncryptedDatasetReader, is_encrypted_dataset_path
 from toolkit.train_tools import get_torch_dtype
 from toolkit.ui_database import UIJobStore
 
@@ -74,6 +76,10 @@ class BaseCaptioner(BaseExtensionProcess):
             # self.start_stop_watcher(interval_sec=2.0)
 
         self.caption_config = self.caption_config_class(**self.get_conf("caption", {}))
+        self.encrypted_reader = None
+        self.encrypted_items_by_path = {}
+        if os.path.isdir(self.caption_config.path_to_caption) and is_encrypted_dataset_path(self.caption_config.path_to_caption):
+            self.encrypted_reader = EncryptedDatasetReader(self.caption_config.path_to_caption)
         self.model = None
         self.processor = None
         self.model2 = None
@@ -120,7 +126,10 @@ class BaseCaptioner(BaseExtensionProcess):
                 continue
 
     def load_pil_image(self, file_path: str, max_res: Optional[int] = None) -> Image:
-        image = Image.open(file_path).convert("RGB")
+        if self.encrypted_reader is not None:
+            image = self.encrypted_reader.open_image(self.encrypted_items_by_path[file_path]).convert("RGB")
+        else:
+            image = Image.open(file_path).convert("RGB")
         if max_res is not None:
             max_pixels = max_res * max_res
             image_pixels = image.width * image.height
@@ -132,6 +141,9 @@ class BaseCaptioner(BaseExtensionProcess):
         return image
 
     def save_caption_for_file(self, file_path: str, caption: str):
+        if self.encrypted_reader is not None:
+            self.encrypted_reader.save_caption(self.encrypted_items_by_path[file_path], caption)
+            return
         filename_no_ext = os.path.splitext(file_path)[0]
         caption_file_path = f"{filename_no_ext}.{self.caption_config.caption_extension}"
         # delete it if it already exists
@@ -148,6 +160,14 @@ class BaseCaptioner(BaseExtensionProcess):
         self.update_status("running", status)
 
     def find_files(self):
+        if self.encrypted_reader is not None:
+            items = self.encrypted_reader.list_items(extensions=self.caption_config.extensions)
+            if not self.caption_config.recaption:
+                items = [item for item in items if not item.captionObjectPath]
+            self.encrypted_items_by_path = {self.encrypted_reader.virtual_path(item): item for item in items}
+            self.file_paths = sorted(self.encrypted_items_by_path.keys())
+            print(f"Found {len(self.file_paths)} encrypted files to caption")
+            return
         # recursivly find all the files in the path_to_caption with the specified extensions and save the paths to self.file_paths
         for root, dirs, files in os.walk(self.caption_config.path_to_caption):
             dirs[:] = [d for d in dirs if d != "_controls"]
@@ -179,6 +199,11 @@ class BaseCaptioner(BaseExtensionProcess):
 
     def load_model(self):
         raise NotImplementedError("Model loading not implemented for this captioner")
+
+    def load_audio_tensor_for_caption(self, file_path: str):
+        if self.encrypted_reader is not None:
+            return self.encrypted_reader.load_audio_waveform(self.encrypted_items_by_path[file_path])
+        return torchaudio.load(file_path)
 
     def start_stop_watcher(self, interval_sec: float = 5.0):
         """

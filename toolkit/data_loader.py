@@ -23,6 +23,7 @@ from toolkit.dataloader_mixins import CaptionMixin, BucketsMixin, LatentCachingM
 from toolkit.data_transfer_object.data_loader import FileItemDTO, DataLoaderBatchDTO
 from toolkit.print import print_acc
 from toolkit.accelerator import get_accelerator
+from toolkit.encrypted_dataset import EncryptedDatasetReader, is_encrypted_dataset_path
 
 import platform
 
@@ -400,6 +401,37 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         self.dataset_path = dataset_config.dataset_path
         if self.dataset_path is None:
             self.dataset_path = folder_path
+        self.encrypted_reader = None
+        self.is_encrypted_dataset = bool(
+            self.dataset_path and os.path.isdir(self.dataset_path) and is_encrypted_dataset_path(self.dataset_path)
+        )
+        if self.is_encrypted_dataset:
+            self.dataset_config.encrypted = True
+            if self.dataset_config.cache_latents_to_disk:
+                print_acc("  -  Disabling disk latent cache for encrypted dataset")
+            if self.dataset_config.cache_latents:
+                print_acc("  -  Disabling latent cache for encrypted dataset")
+            if self.dataset_config.cache_clip_vision_to_disk:
+                print_acc("  -  Disabling disk clip vision cache for encrypted dataset")
+            if self.dataset_config.cache_text_embeddings:
+                print_acc("  -  Disabling disk text embedding cache for encrypted dataset")
+            self.dataset_config.cache_latents = False
+            self.dataset_config.cache_latents_to_disk = False
+            self.dataset_config.cache_clip_vision_to_disk = False
+            self.dataset_config.cache_text_embeddings = False
+            if hasattr(self, "is_caching_text_embeddings"):
+                self.is_caching_text_embeddings = False
+            if len(self.dataset_config.controls) > 0:
+                raise ValueError("Generated controls are disabled for encrypted datasets to avoid plaintext sidecars")
+            if (
+                self.dataset_config.control_path
+                or self.dataset_config.mask_path
+                or self.dataset_config.inpaint_path
+                or self.dataset_config.clip_image_path
+                or self.dataset_config.unconditional_path
+            ):
+                raise ValueError("External control, mask, inpaint, clip, and unconditional paths are not supported for encrypted datasets yet")
+            self.encrypted_reader = EncryptedDatasetReader(self.dataset_path)
 
         self.is_caching_latents = dataset_config.cache_latents or dataset_config.cache_latents_to_disk
         self.is_caching_latents_to_memory = dataset_config.cache_latents
@@ -425,7 +457,14 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         self.file_list: List['FileItemDTO'] = []
 
         # check if dataset_path is a folder or json
-        if os.path.isdir(self.dataset_path):
+        if self.is_encrypted_dataset and self.encrypted_reader is not None:
+            if self.is_audio_model:
+                file_list = self.encrypted_reader.list_items(media_kinds=["audio"])
+            elif self.is_video:
+                file_list = self.encrypted_reader.list_items(media_kinds=["video"])
+            else:
+                file_list = self.encrypted_reader.list_items(media_kinds=["image"])
+        elif os.path.isdir(self.dataset_path):
             extensions = image_extensions
             if self.is_audio_model:
                 # only look for audio files
@@ -442,7 +481,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 file_list = list(self.caption_dict.keys())
                 
         # remove items in the _controls_ folder
-        file_list = [x for x in file_list if not os.path.basename(os.path.dirname(x)) == "_controls"]
+        if not self.is_encrypted_dataset:
+            file_list = [x for x in file_list if not os.path.basename(os.path.dirname(x)) == "_controls"]
 
         if self.dataset_config.num_repeats > 1:
             # repeat the list
@@ -477,7 +517,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         
         dataset_size_file = os.path.join(dataset_folder, '.aitk_size.json')
         dataloader_version = "0.1.2"
-        if os.path.exists(dataset_size_file):
+        if self.is_encrypted_dataset:
+            self.size_database = {"__version__": dataloader_version}
+        elif os.path.exists(dataset_size_file):
             try:
                 with open(dataset_size_file, 'r') as f:
                     self.size_database = json.load(f)
@@ -524,14 +566,18 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         bad_count = 0
         for file in tqdm(file_list):
             try:
+                encrypted_item = file if self.is_encrypted_dataset else None
+                file_path = self.encrypted_reader.virtual_path(file) if encrypted_item is not None else file
                 file_item = FileItemDTO(
                     sd=self.sd,
-                    path=file,
+                    path=file_path,
                     is_audio_model=self.is_audio_model,
                     dataset_config=dataset_config,
                     dataloader_transforms=self.transform,
                     size_database=self.size_database,
                     dataset_root=dataset_folder,
+                    encrypted_reader=self.encrypted_reader,
+                    encrypted_item=encrypted_item,
                     encode_control_in_text_embeddings=self.sd.encode_control_in_text_embeddings if self.sd else False,
                     text_embedding_space_version=self.sd.model_config.arch if self.sd else "sd1",
                     te_padding_side=self.sd.te_padding_side if self.sd else "right",
@@ -550,8 +596,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 bad_count += 1
 
         # save the size database
-        with open(dataset_size_file, 'w') as f:
-            json.dump(self.size_database, f)
+        if not self.is_encrypted_dataset:
+            with open(dataset_size_file, 'w') as f:
+                json.dump(self.size_database, f)
         
         if self.is_video:
             print_acc(f"  -  Found {len(self.file_list)} videos")

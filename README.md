@@ -279,6 +279,8 @@ The UI can control remote AI Toolkit worker instances. Each worker runs the same
 
 Remote workers are authoritative after upload. The central UI mirrors status, step, speed, config, and error text from the worker. Base model files are not bundled; they must exist on the worker or the import will report warnings.
 
+Encrypted dataset bundles include only ciphertext dataset folders. Starting an encrypted job on a remote worker requires supplying the dataset secret again at start time, and remote encrypted starts require an `https://` worker URL unless `AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS=1` is set explicitly.
+
 Optional managed `cloudflared` support is configured with environment variables on any instance you want to expose through Cloudflare Tunnel:
 
 ```bash
@@ -303,6 +305,8 @@ Exports are saved as `.aitk.zip` archives and include a manifest, `job.json`, an
 Large exports run in the background with progress for files and bytes, success and failed status handling, warning alerts, and a cancel button. Before each export, you can choose whether to include only the latest checkpoint or all checkpoint files in the training folder.
 
 Use `Import Training Job` on the queue page to upload a `.aitk` or `.zip` export. Imports rewrite runtime-local paths, copy included datasets into the configured datasets root, pick the target GPU, rename the job if there is a name conflict, and add the job back to the queue in a stopped state so it can be resumed.
+
+Encrypted dataset exports do not decrypt files. Import/export copies encrypted manifests and `objects/*.bin` files as-is. There is no plaintext or decrypt-export mode.
 
 Jobs launched from the UI are detached from the cron worker process, and the worker now waits for in-flight queue work and disconnects cleanly on shutdown signals.
 
@@ -531,6 +535,26 @@ replaced.
 
 Images are never upscaled but they are downscaled and placed in buckets for batching. **You do not need to crop/resize your images**.
 The loader will automatically resize them and can handle varying aspect ratios. 
+
+### Encrypted datasets
+
+The UI can create encrypted datasets for images, video, audio, and captions. Choose **Encrypted** when creating a dataset, then select either:
+
+- `Password`: the browser derives an AES-256-GCM key with WebCrypto PBKDF2-SHA256 and a random salt.
+- `Key File`: the browser hashes the selected key file and uses the resulting raw key material.
+
+Encrypted upload happens before files leave the browser. The dataset folder stores:
+
+- `.aitk_encrypted_dataset.json`: clear crypto headers plus an encrypted catalog.
+- `objects/<random-id>.bin`: AES-GCM encrypted media and caption payloads.
+
+Original filenames, captions, media metadata, and logical paths live inside the encrypted catalog. The server never receives plaintext media or captions during encrypted upload, preview, caption editing, auto-caption saves, training, import, or export.
+
+To preview, edit, upload more files, auto-caption, or train with an encrypted dataset, open the dataset page and unlock it with the password or key file. The browser keeps the raw key in page memory only. Training and caption jobs require the secret again when they start; secrets are sent with the start request, are not written into job configs, database rows, logs, or export bundles, and are removed from the Python environment after launch.
+
+Threat model limit: encrypted datasets protect against plaintext at rest on disk and accidental dataset export. A compromised training host can still read the key or plaintext from browser, Node, or Python process memory while the dataset is unlocked or training is running. File count and ciphertext sizes are also visible.
+
+Disk caches and plaintext sidecars are disabled for encrypted datasets. Generated controls, external control/mask/inpaint paths, and durable resume without re-supplying the secret are not supported for encrypted datasets yet.
 
 
 ## Training Specific Layers

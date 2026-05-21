@@ -5,21 +5,43 @@ import { FaUpload, FaTimesCircle, FaSpinner } from 'react-icons/fa';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { apiClient } from '@/utils/api';
+import type { EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
+import type { EncryptedDatasetItem } from '@/types';
+import {
+  buildEncryptedDatasetItem,
+  encryptCatalog,
+  pairMediaAndCaptionFiles,
+  readTextFile,
+} from '@/utils/encryptedDatasets';
 
 export interface AddImagesModalState {
   datasetName: string;
   onComplete?: () => void;
   openedByDrag?: boolean;
+  encrypted?: {
+    manifest: EncryptedDatasetManifest;
+    catalog: EncryptedDatasetCatalog;
+    cryptoKey: CryptoKey;
+    onUpdate: (manifest: EncryptedDatasetManifest, catalog: EncryptedDatasetCatalog) => void;
+  };
 }
 
 export const addImagesModalState = createGlobalState<AddImagesModalState | null>(null);
 
-export const openImagesModal = (datasetName: string, onComplete: () => void) => {
-  addImagesModalState.set({ datasetName, onComplete });
+export const openImagesModal = (
+  datasetName: string,
+  onComplete: () => void,
+  options?: Pick<AddImagesModalState, 'encrypted'>,
+) => {
+  addImagesModalState.set({ datasetName, onComplete, encrypted: options?.encrypted });
 };
 
 /** Call on a page that knows its datasetName — auto-opens the modal when files are dragged onto the page. */
-export function useOpenImagesModalOnDrag(datasetName: string, onComplete: () => void) {
+export function useOpenImagesModalOnDrag(
+  datasetName: string,
+  onComplete: () => void,
+  options?: Pick<AddImagesModalState, 'encrypted'>,
+) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
@@ -37,7 +59,12 @@ export function useOpenImagesModalOnDrag(datasetName: string, onComplete: () => 
       depth += 1;
       if (depth === 1) {
         if (!addImagesModalState.get()) {
-          addImagesModalState.set({ datasetName, onComplete: onCompleteRef.current, openedByDrag: true });
+          addImagesModalState.set({
+            datasetName,
+            onComplete: onCompleteRef.current,
+            openedByDrag: true,
+            encrypted: options?.encrypted,
+          });
         }
       }
       e.preventDefault();
@@ -70,7 +97,7 @@ export function useOpenImagesModalOnDrag(datasetName: string, onComplete: () => 
       window.removeEventListener('dragleave', onDragLeave);
       window.removeEventListener('drop', onDrop);
     };
-  }, [datasetName]);
+  }, [datasetName, options?.encrypted]);
 }
 
 type AcceptMap = { [mime: string]: string[] };
@@ -104,6 +131,7 @@ export default function AddImagesModal() {
   modalInfoRef.current = modalInfo;
 
   const datasetName = modalInfo?.datasetName ?? '';
+  const encrypted = modalInfo?.encrypted ?? null;
 
   const uploadSingleFile = useCallback(
     async (entry: FileEntry): Promise<'done' | 'error'> => {
@@ -153,6 +181,88 @@ export default function AddImagesModal() {
     setErrorCount(0);
   }, []);
 
+  const uploadEncryptedFiles = useCallback(
+    async (acceptedFiles: File[]) => {
+      if (!encrypted || acceptedFiles.length === 0) return;
+      const pairs = pairMediaAndCaptionFiles(acceptedFiles);
+      if (pairs.length === 0) return;
+
+      const entries: FileEntry[] = pairs.map(({ file }) => ({
+        id: nextId++,
+        file,
+        status: 'pending',
+        progress: 0,
+      }));
+      setFileEntries(entries);
+      setTotalCount(entries.length);
+      setDoneCount(0);
+      setErrorCount(0);
+      setIsUploading(true);
+      abortRef.current = false;
+
+      try {
+        const encryptedObjects: Array<{ objectPath: string; blob: Blob }> = [];
+        const newItems: EncryptedDatasetItem[] = [];
+
+        for (let i = 0; i < pairs.length; i += 1) {
+          if (abortRef.current) return;
+          const entryId = entries[i].id;
+          setFileEntries(prev =>
+            prev.map(entry => (entry.id === entryId ? { ...entry, status: 'uploading', progress: 10 } : entry)),
+          );
+          const { file, captionFile } = pairs[i];
+          const caption = captionFile ? await readTextFile(captionFile) : null;
+          const built = await buildEncryptedDatasetItem(file, encrypted.cryptoKey, caption);
+          newItems.push(built.item);
+          encryptedObjects.push(...built.encryptedObjects);
+          setFileEntries(prev =>
+            prev.map(entry => (entry.id === entryId ? { ...entry, progress: 75 } : entry)),
+          );
+        }
+
+        const nextCatalog: EncryptedDatasetCatalog = {
+          ...encrypted.catalog,
+          items: [...encrypted.catalog.items, ...newItems],
+        };
+        const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encrypted.cryptoKey, encrypted.manifest);
+
+        const formData = new FormData();
+        formData.append('datasetName', datasetName);
+        formData.append('encrypted', '1');
+        formData.append('manifest', JSON.stringify(nextManifest));
+        formData.append('objectPaths', JSON.stringify(encryptedObjects.map(object => object.objectPath)));
+        encryptedObjects.forEach(object => {
+          formData.append('files', object.blob, object.objectPath.replace(/^objects\//, ''));
+        });
+
+        await apiClient.post('/api/datasets/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 0,
+        });
+
+        encrypted.onUpdate(nextManifest, nextCatalog);
+        setDoneCount(entries.length);
+        setFileEntries([]);
+        modalInfoRef.current?.onComplete?.();
+        setModalInfo(null);
+        resetState();
+      } catch (err) {
+        console.error('Encrypted upload failed:', err);
+        setErrorCount(prev => prev + 1);
+        setFileEntries(prev =>
+          prev.map(entry =>
+            entry.status === 'uploading' || entry.status === 'pending'
+              ? { ...entry, status: 'error', error: err instanceof Error ? err.message : 'Upload failed' }
+              : entry,
+          ),
+        );
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [datasetName, encrypted, resetState, setModalInfo],
+  );
+
   const processQueue = useCallback(
     async (entries: FileEntry[]) => {
       setIsUploading(true);
@@ -183,6 +293,10 @@ export default function AddImagesModal() {
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return;
+      if (encrypted) {
+        void uploadEncryptedFiles(acceptedFiles);
+        return;
+      }
 
       const entries: FileEntry[] = acceptedFiles.map(file => ({
         id: nextId++,
@@ -196,7 +310,7 @@ export default function AddImagesModal() {
       setErrorCount(0);
       processQueue(entries);
     },
-    [processQueue],
+    [encrypted, processQueue, uploadEncryptedFiles],
   );
 
   const handleCancel = useCallback(() => {
@@ -210,7 +324,7 @@ export default function AddImagesModal() {
     () => ({
       'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'],
       'video/*': ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv'],
-      'audio/*': ['.mp3', '.wav', '.flac', '.ogg'],
+      'audio/*': ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac'],
       'text/*': ['.txt'],
     }),
     [],
@@ -255,6 +369,11 @@ export default function AddImagesModal() {
                 <DialogTitle as="h3" className="text-base font-semibold text-gray-200 mb-4">
                   Add Images to: {datasetName}
                 </DialogTitle>
+                {encrypted && (
+                  <p className="mb-3 text-xs text-blue-300">
+                    Files and captions are encrypted in this browser before upload.
+                  </p>
+                )}
 
                 {/* Drop zone + click to select */}
                 <div {...getRootProps()} className="w-full">
@@ -270,7 +389,9 @@ export default function AddImagesModal() {
                     {!isUploading ? (
                       <>
                         <p className="text-sm text-gray-200 text-center">Drag & drop files here or click to select</p>
-                        <p className="text-xs text-gray-400 mt-1">Images, videos, or .txt supported</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Images, videos, audio, or matching .txt captions supported
+                        </p>
                       </>
                     ) : (
                       <p className="text-sm text-gray-200 text-center">Drop more files to add to queue</p>

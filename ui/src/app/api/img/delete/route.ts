@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
+import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 
 export async function POST(request: Request) {
   try {
@@ -22,12 +23,19 @@ export async function POST(request: Request) {
     const datasetsPath = await getDatasetsRoot();
     const trainingPath = await getTrainingFolder();
     const normalizedImgPath = path.resolve(imgPath);
-    const allowedRoots = [datasetsPath, trainingPath].map((root) => path.resolve(root) + path.sep);
-    const isWithinAllowedRoot = allowedRoots.some((root) => normalizedImgPath.startsWith(root));
+    const allowedRoots = [datasetsPath, trainingPath].map((root) => path.resolve(root));
+    const isWithinAllowedRoot = allowedRoots.some((root) => {
+      const rel = path.relative(root, normalizedImgPath);
+      return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    });
 
     // make sure the dataset path is in the image path
     if (!isWithinAllowedRoot) {
       return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
+    }
+
+    if (findEncryptedDatasetRoot(normalizedImgPath, datasetsPath)) {
+      return NextResponse.json({ error: 'Encrypted dataset objects must be deleted through the encrypted dataset API' }, { status: 403 });
     }
 
     // make sure it is an image

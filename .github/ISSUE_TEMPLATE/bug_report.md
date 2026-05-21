@@ -1,19 +1,39 @@
 ---
 name: Bug Report
-about: For bugs only. Not for feature requests or questions.
-title: ''
-labels: ''
+about: Report reproducible bugs in this fork only. Not for upstream bugs, feature requests, or questions.
+title: '[Bug]: '
+labels: bug
 assignees: ''
 ---
 
-## This is for bugs only
+## Scope check
 
-Did you already ask [in the discord](https://discord.gg/VXmU2f5WEU)?
-
-Yes/No
-
-You verified that this is a bug and not a feature request or question by asking [in the discord](https://discord.gg/VXmU2f5WEU)?
-
-Yes/No
+- [ ] I can reproduce this on the latest `rmcc3/ai-toolkit` code.
+- [ ] This report is for this fork, not the upstream `ostris/ai-toolkit` repository.
+- [ ] This is a code bug, not a setup question, usage question, or feature request.
 
 ## Describe the bug
+
+What happened?
+
+## Steps to reproduce
+
+1.
+2.
+3.
+
+## Expected behavior
+
+What did you expect to happen?
+
+## Environment
+
+- OS:
+- GPU:
+- Python version:
+- PyTorch version:
+- Commit or version:
+
+## Logs or screenshots
+
+Paste the relevant error output, logs, or screenshots here.

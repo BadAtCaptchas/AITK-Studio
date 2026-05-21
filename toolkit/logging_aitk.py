@@ -1,12 +1,15 @@
-from typing import OrderedDict, Optional
+from typing import Any, Dict, List, OrderedDict, Optional, Tuple, TYPE_CHECKING
 from PIL import Image
 
-from toolkit.config_modules import LoggingConfig
 import os
 import sqlite3
 import time
-from typing import Any, Dict, Tuple, List
 from toolkit.ui_database import get_database_provider, get_mongodb_config
+
+if TYPE_CHECKING:
+    from toolkit.config_modules import LoggingConfig
+else:
+    LoggingConfig = Any
 
 
 # Base logger class
@@ -109,6 +112,7 @@ class UILogger:
         self._flush_every_n = int(flush_every_n)
         self._flush_every_secs = float(flush_every_secs)
         self._last_flush = time.time()
+        self._first_commit_done = False
 
     # start logging the training
     def start(self):
@@ -153,6 +157,12 @@ class UILogger:
             step = int(step)
             if step >= self._step_counter:
                 self._step_counter = step + 1
+
+        # When resuming from an earlier step, remove stale metrics from a
+        # previous longer run before writing new points.
+        if not self._first_commit_done:
+            self._prune_future_steps(step)
+            self._first_commit_done = True
 
         wall_time = time.time()
 
@@ -254,6 +264,24 @@ class UILogger:
         except Exception:
             return None, str(v)
 
+    def _prune_future_steps(self, current_step: int) -> None:
+        assert self._con is not None
+        con = self._con
+
+        con.execute("BEGIN;")
+        con.execute("DELETE FROM steps WHERE step > ?;", (current_step,))
+        con.execute(
+            "DELETE FROM metric_keys "
+            "WHERE NOT EXISTS (SELECT 1 FROM metrics WHERE metrics.key = metric_keys.key);"
+        )
+        con.execute(
+            "UPDATE metric_keys "
+            "SET first_seen_step = (SELECT MIN(step) FROM metrics WHERE metrics.key = metric_keys.key), "
+            "last_seen_step = (SELECT MAX(step) FROM metrics WHERE metrics.key = metric_keys.key) "
+            "WHERE EXISTS (SELECT 1 FROM metrics WHERE metrics.key = metric_keys.key);"
+        )
+        con.execute("COMMIT;")
+
     def _flush(self) -> None:
         if not self._pending_steps and not self._pending_metrics:
             return
@@ -354,6 +382,46 @@ class MongoUILogger(UILogger):
         self._metrics = None
         self._metric_keys = None
         self._started = False
+
+    def _prune_future_steps(self, current_step: int) -> None:
+        assert self._metrics is not None
+        assert self._metric_keys is not None
+
+        self._metrics.delete_many({"job_id": self.job_id, "step": {"$gt": current_step}})
+        remaining = list(
+            self._metrics.aggregate(
+                [
+                    {"$match": {"job_id": self.job_id}},
+                    {
+                        "$group": {
+                            "_id": "$key",
+                            "first_seen_step": {"$min": "$step"},
+                            "last_seen_step": {"$max": "$step"},
+                        }
+                    },
+                ]
+            )
+        )
+
+        if not remaining:
+            self._metric_keys.delete_many({"job_id": self.job_id})
+            return
+
+        remaining_keys = [item["_id"] for item in remaining]
+        for item in remaining:
+            self._metric_keys.replace_one(
+                {"job_id": self.job_id, "key": item["_id"]},
+                {
+                    "job_id": self.job_id,
+                    "key": item["_id"],
+                    "first_seen_step": item["first_seen_step"],
+                    "last_seen_step": item["last_seen_step"],
+                },
+                upsert=True,
+            )
+        self._metric_keys.delete_many(
+            {"job_id": self.job_id, "key": {"$nin": remaining_keys}}
+        )
 
     def _flush(self) -> None:
         if not self._pending_steps and not self._pending_metrics:

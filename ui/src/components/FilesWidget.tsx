@@ -1,10 +1,15 @@
 import React from 'react';
 import useFilesList from '@/hooks/useFilesList';
 import { Loader2, AlertCircle, Download, Box, Brain } from 'lucide-react';
-import { getDisplayPath, getDownloadUrl } from '@/utils/media';
+import { openMergeLoRAsModal } from './MergeLoRAsModal';
+import { getDisplayPath, getDownloadUrl, parseRemoteAssetRef } from '@/utils/media';
 
-export default function FilesWidget({ jobID }: { jobID: string }) {
+const getFilename = (filePath: string) => getDisplayPath(filePath).split(/[\\/]/).pop() || '';
+const getFoldername = (filePath: string) => filePath.replace(/[\\/][^\\/]*$/, '');
+
+export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName?: string }) {
   const { files, status, refreshFiles } = useFilesList(jobID, 5000);
+  const localFiles = files.filter(file => !parseRemoteAssetRef(file.path));
 
   const cleanSize = (size: number) => {
     if (size < 1024) {
@@ -26,6 +31,23 @@ export default function FilesWidget({ jobID }: { jobID: string }) {
           <h2 className="font-semibold text-gray-100">Checkpoints</h2>
           <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300">{files.length}</span>
         </div>
+        {localFiles.length > 0 && (
+          <button
+            type="button"
+            className="rounded-full bg-purple-500/10 px-3 py-1 text-xs font-medium uppercase text-purple-300 hover:bg-purple-500/20"
+            onClick={() => {
+              const firstPath = localFiles[0].path;
+              openMergeLoRAsModal(
+                getFoldername(firstPath),
+                `${jobName || 'job'}_merged`,
+                localFiles.map(file => ({ path: file.path, label: getFilename(file.path).replace(/\.safetensors$/i, '') })),
+                refreshFiles,
+              );
+            }}
+          >
+            Merge
+          </button>
+        )}
       </div>
 
       <div className="p-2">
@@ -45,8 +67,7 @@ export default function FilesWidget({ jobID }: { jobID: string }) {
         {['success', 'refreshing'].includes(status) && (
           <div className="space-y-1">
             {files.map((file, index) => {
-              const displayPath = getDisplayPath(file.path);
-              const fileName = displayPath.split(/[\\/]/).pop() || '';
+              const fileName = getFilename(file.path);
               const nameWithoutExt = fileName.replace('.safetensors', '');
               return (
                 <a

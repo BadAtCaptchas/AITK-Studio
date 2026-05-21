@@ -19,6 +19,9 @@
     },
     "include": [
         "cron/**/*.ts",
+        "src/paths.ts",
+        "src/server/pythonPath.ts",
+        "src/server/scriptRunner.ts",
         "src/server/trainingAdvisor.ts"
     ]
 }

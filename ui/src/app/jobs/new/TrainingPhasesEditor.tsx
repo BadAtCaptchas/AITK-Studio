@@ -10,11 +10,16 @@ import type {
   TrainLossType,
 } from '@/types';
 import { Copy, Plus, Save, Trash2 } from 'lucide-react';
-import { builtInAutoTrainingProfiles, type AutoTrainingProfile } from './autoTrainingProfiles';
+import {
+  builtInAutoTrainingProfiles,
+  isAutoTrainingProfileCompatible,
+  type AutoTrainingProfile,
+} from './autoTrainingProfiles';
 
 type Props = {
   train: TrainConfig;
   network?: NetworkConfig;
+  currentArch?: string;
   setJobConfig: (value: any, key: string) => void;
   disableTimestepType?: boolean;
 };
@@ -84,6 +89,20 @@ function clonePhase(phase: TrainingPhaseConfig): TrainingPhaseConfig {
   };
 }
 
+function clonePlainValue<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(item => clonePlainValue(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    const clone: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      clone[key] = clonePlainValue(nestedValue);
+    }
+    return clone as T;
+  }
+  return value;
+}
+
 function normalizePhase(phase: TrainingPhaseConfig, index: number, autoTrain: boolean): TrainingPhaseConfig {
   const normalized: TrainingPhaseConfig = {
     ...phase,
@@ -103,13 +122,9 @@ function normalizePhase(phase: TrainingPhaseConfig, index: number, autoTrain: bo
 function cloneProfile(profile: AutoTrainingProfile): AutoTrainingProfile {
   return {
     ...profile,
-    train: profile.train
-      ? {
-          ...profile.train,
-          optimizer_params: profile.train.optimizer_params ? { ...profile.train.optimizer_params } : undefined,
-        }
-      : undefined,
-    network: profile.network ? { ...profile.network } : undefined,
+    compatibleArchs: profile.compatibleArchs ? [...profile.compatibleArchs] : undefined,
+    train: profile.train ? clonePlainValue(profile.train) : undefined,
+    network: profile.network ? clonePlainValue(profile.network) : undefined,
     phases: profile.phases.map(clonePhase),
   };
 }
@@ -132,6 +147,7 @@ function sanitizeStoredProfiles(raw: unknown): AutoTrainingProfile[] {
 export default function TrainingPhasesEditor({
   train,
   network,
+  currentArch,
   setJobConfig,
   disableTimestepType = false,
 }: Props) {
@@ -151,23 +167,41 @@ export default function TrainingPhasesEditor({
     }
   }, []);
 
-  const allProfiles = useMemo(
-    () => [...builtInAutoTrainingProfiles, ...customProfiles],
-    [customProfiles],
+  const availableBuiltInProfiles = useMemo(
+    () => builtInAutoTrainingProfiles.filter(profile => isAutoTrainingProfileCompatible(profile, currentArch)),
+    [currentArch],
   );
+
+  const availableCustomProfiles = useMemo(
+    () => customProfiles.filter(profile => isAutoTrainingProfileCompatible(profile, currentArch)),
+    [customProfiles, currentArch],
+  );
+
+  const allProfiles = useMemo(
+    () => [...availableBuiltInProfiles, ...availableCustomProfiles],
+    [availableBuiltInProfiles, availableCustomProfiles],
+  );
+
+  const fallbackProfileID = allProfiles[0]?.id ?? '';
+
+  useEffect(() => {
+    if (fallbackProfileID && !allProfiles.some(profile => profile.id === selectedProfileID)) {
+      setSelectedProfileID(fallbackProfileID);
+    }
+  }, [allProfiles, fallbackProfileID, selectedProfileID]);
 
   const profileOptions = useMemo(
     () => [
       {
         label: 'Built in',
-        options: builtInAutoTrainingProfiles.map(profile => ({ value: profile.id, label: profile.name })),
+        options: availableBuiltInProfiles.map(profile => ({ value: profile.id, label: profile.name })),
       },
       {
         label: 'Custom',
-        options: customProfiles.map(profile => ({ value: profile.id, label: profile.name })),
+        options: availableCustomProfiles.map(profile => ({ value: profile.id, label: profile.name })),
       },
     ],
-    [customProfiles],
+    [availableBuiltInProfiles, availableCustomProfiles],
   );
 
   const persistCustomProfiles = (profiles: AutoTrainingProfile[]) => {
@@ -236,7 +270,7 @@ export default function TrainingPhasesEditor({
     }
 
     for (const [key, value] of Object.entries(nextProfile.network ?? {})) {
-      if (value !== undefined) setJobConfig(value, `config.process[0].network.${key}`);
+      setJobConfig(value, `config.process[0].network.${key}`);
     }
 
     const nextPhases = nextProfile.phases.map((phase, index) => {
@@ -263,7 +297,7 @@ export default function TrainingPhasesEditor({
       return;
     }
 
-    const profile = allProfiles.find(candidate => candidate.id === selectedProfileID) ?? builtInAutoTrainingProfiles[0];
+    const profile = allProfiles.find(candidate => candidate.id === selectedProfileID) ?? allProfiles[0];
     if (profile) {
       applyAutoProfile(profile);
     } else {
@@ -278,20 +312,34 @@ export default function TrainingPhasesEditor({
     const profile: AutoTrainingProfile = {
       id: `custom:${Date.now()}`,
       name,
+      compatibleArchs: currentArch ? [currentArch] : undefined,
       train: {
         optimizer: train.optimizer,
         lr: train.lr,
         timestep_type: train.timestep_type,
         content_or_style: train.content_or_style,
         loss_type: train.loss_type,
-        optimizer_params: train.optimizer_params ? { ...train.optimizer_params } : undefined,
+        optimizer_params: train.optimizer_params ? clonePlainValue(train.optimizer_params) : undefined,
+        lr_scheduler: train.lr_scheduler,
+        lr_scheduler_params: train.lr_scheduler_params ? clonePlainValue(train.lr_scheduler_params) : undefined,
+        audio_loss_multiplier: train.audio_loss_multiplier,
+        batch_size: train.batch_size,
+        gradient_accumulation: train.gradient_accumulation,
+        t0_loss_target: train.t0_loss_target,
+        max_loss: train.max_loss,
       },
       network: network
         ? {
             type: network.type,
+            linear: network.linear,
+            linear_alpha: network.linear_alpha,
+            conv: network.conv,
+            conv_alpha: network.conv_alpha,
             dropout: network.dropout,
             lokr_factor: network.lokr_factor,
             lokr_full_rank: network.lokr_full_rank,
+            network_kwargs: network.network_kwargs ? clonePlainValue(network.network_kwargs) : undefined,
+            transformer_only: network.transformer_only,
           }
         : undefined,
       phases: phases.map((phase, index) => normalizePhase(clonePhase(phase), index, true)),
@@ -307,7 +355,7 @@ export default function TrainingPhasesEditor({
     if (!selectedProfileID.startsWith('custom:')) return;
     const nextProfiles = customProfiles.filter(profile => profile.id !== selectedProfileID);
     persistCustomProfiles(nextProfiles);
-    setSelectedProfileID(builtInAutoTrainingProfiles[0]?.id ?? '');
+    setSelectedProfileID(availableBuiltInProfiles[0]?.id ?? '');
   };
 
   const autoControls = (

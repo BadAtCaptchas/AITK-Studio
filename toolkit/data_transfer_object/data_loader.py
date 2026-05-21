@@ -3,8 +3,6 @@ from typing import TYPE_CHECKING, List, Union
 import cv2
 import torch
 
-from PIL import Image
-from PIL.ImageOps import exif_transpose
 import av
             
 from toolkit import image_utils
@@ -155,10 +153,10 @@ class FileItemDTO(
                         f"Warning: Some images in the dataset cannot be fast read. "
                         + f"This process is faster for png, jpeg"
                     )
-                    img = exif_transpose(Image.open(self.path))
+                    img = image_utils.open_static_image(self.path)
                     w, h = img.size
             else:
-                img = exif_transpose(Image.open(self.path))
+                img = image_utils.open_static_image(self.path)
                 w, h = img.size
             size_database[file_key] = (w, h, file_signature)
         self.width: int = w

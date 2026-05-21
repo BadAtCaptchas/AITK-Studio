@@ -20,6 +20,7 @@
     "include": [
         "cron/**/*.ts",
         "src/paths.ts",
+        "src/utils/basic.ts",
         "src/server/pythonPath.ts",
         "src/server/scriptRunner.ts",
         "src/server/trainingAdvisor.ts"

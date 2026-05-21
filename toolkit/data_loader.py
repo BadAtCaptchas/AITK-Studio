@@ -10,7 +10,6 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from PIL.ImageOps import exif_transpose
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from tqdm import tqdm
@@ -109,7 +108,7 @@ class ImageDataset(Dataset, CaptionMixin):
             try:
                 w, h = image_utils.get_image_size(file)
             except image_utils.UnknownImageFormat:
-                img = exif_transpose(Image.open(file))
+                img = image_utils.open_static_image(file)
                 w, h = img.size
             # img = Image.open(file)
             if int(min([w, h]) * self.scale) >= self.resolution:
@@ -143,7 +142,7 @@ class ImageDataset(Dataset, CaptionMixin):
     def __getitem__(self, index):
         img_path = self.file_list[index]
         try:
-            img = exif_transpose(Image.open(img_path)).convert('RGB')
+            img = image_utils.open_static_image(img_path, mode='RGB')
         except Exception as e:
             print_acc(f"Error opening image: {img_path}")
             print_acc(e)
@@ -328,9 +327,9 @@ class PairedImageDataset(Dataset):
         if isinstance(img_path_or_tuple, tuple):
             # load both images
             img_path = img_path_or_tuple[0]
-            img1 = exif_transpose(Image.open(img_path)).convert('RGB')
+            img1 = image_utils.open_static_image(img_path, mode='RGB')
             img_path = img_path_or_tuple[1]
-            img2 = exif_transpose(Image.open(img_path)).convert('RGB')
+            img2 = image_utils.open_static_image(img_path, mode='RGB')
 
             # always use # 2 (pos)
             bucket_resolution = get_bucket_for_image_size(
@@ -369,7 +368,7 @@ class PairedImageDataset(Dataset):
             img.paste(img2, (img1.width, 0))
         else:
             img_path = img_path_or_tuple
-            img = exif_transpose(Image.open(img_path)).convert('RGB')
+            img = image_utils.open_static_image(img_path, mode='RGB')
             height = self.size
             # determine width to keep aspect ratio
             width = int(img.size[0] * height / img.size[1])
@@ -587,6 +586,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 )
                 self.file_list.append(file_item)
             except Exception as e:
+                if isinstance(e, image_utils.UnsupportedAnimatedImageError):
+                    raise
                 print_acc(traceback.format_exc())
                 if self.is_video:
                     print_acc(f"Error processing video: {file}")

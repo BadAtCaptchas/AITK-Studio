@@ -13,6 +13,12 @@ import numpy as np
 import torch
 from diffusers import AutoencoderTiny
 from PIL import Image as PILImage
+from toolkit.image_io import (
+    UnsupportedAnimatedImageError,
+    image_has_alpha,
+    open_static_image,
+    open_static_image_from_bytes,
+)
 
 FILE_UNKNOWN = "Sorry, don't know how to get size for this file."
 
@@ -28,8 +34,57 @@ ICO = types['ICO'] = 'ICO'
 JPEG = types['JPEG'] = 'JPEG'
 PNG = types['PNG'] = 'PNG'
 TIFF = types['TIFF'] = 'TIFF'
+WEBP = types['WEBP'] = 'WEBP'
 
 image_fields = ['path', 'type', 'file_size', 'width', 'height']
+
+
+def _read_webp_dimensions(input, size):
+    input.seek(0)
+    header = input.read(12)
+    if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WEBP":
+        raise UnknownImageFormat(FILE_UNKNOWN)
+
+    offset = 12
+    while offset + 8 <= size:
+        input.seek(offset)
+        chunk_header = input.read(8)
+        if len(chunk_header) < 8:
+            break
+
+        fourcc = chunk_header[:4]
+        chunk_size = struct.unpack("<I", chunk_header[4:8])[0]
+        payload_offset = offset + 8
+        if payload_offset + chunk_size > size:
+            raise UnknownImageFormat("Truncated WebP chunk")
+
+        input.seek(payload_offset)
+        if fourcc == b"VP8X":
+            payload = input.read(10)
+            if len(payload) < 10:
+                raise UnknownImageFormat("Truncated WebP VP8X chunk")
+            width = 1 + int.from_bytes(payload[4:7], "little")
+            height = 1 + int.from_bytes(payload[7:10], "little")
+            return width, height
+        if fourcc == b"VP8 ":
+            payload = input.read(10)
+            if len(payload) < 10 or payload[3:6] != b"\x9d\x01\x2a":
+                raise UnknownImageFormat("Invalid WebP VP8 chunk")
+            width = struct.unpack("<H", payload[6:8])[0] & 0x3FFF
+            height = struct.unpack("<H", payload[8:10])[0] & 0x3FFF
+            return width, height
+        if fourcc == b"VP8L":
+            payload = input.read(5)
+            if len(payload) < 5 or payload[0] != 0x2F:
+                raise UnknownImageFormat("Invalid WebP VP8L chunk")
+            b1, b2, b3, b4 = payload[1], payload[2], payload[3], payload[4]
+            width = 1 + b1 + ((b2 & 0x3F) << 8)
+            height = 1 + ((b2 & 0xC0) >> 6) + (b3 << 2) + ((b4 & 0x0F) << 10)
+            return width, height
+
+        offset = payload_offset + chunk_size + (chunk_size % 2)
+
+    raise UnknownImageFormat("Unsupported WebP bitstream")
 
 
 class Image(collections.namedtuple('Image', image_fields)):
@@ -237,6 +292,9 @@ def get_image_metadata_from_bytesio(input, size, file_path=None):
                     break
         except Exception as e:
             raise UnknownImageFormat(str(e))
+    elif size >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        imgtype = WEBP
+        width, height = _read_webp_dimensions(input, size)
     elif size >= 2:
         # see http://en.wikipedia.org/wiki/ICO_(file_format)
         imgtype = 'ICO'

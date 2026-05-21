@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from PIL import Image
-from PIL.ImageOps import exif_transpose
+from toolkit import image_io
 
 ENCRYPTED_DATASET_MANIFEST = ".aitk_encrypted_dataset.json"
 CATALOG_AAD = b"aitk-encrypted-catalog:v1"
@@ -190,10 +190,19 @@ class EncryptedDatasetReader:
         with open(self._resolve_object_path(object_path), "w", encoding="utf-8") as f:
             json.dump(payload, f, separators=(",", ":"))
 
-    def open_image(self, item: EncryptedDatasetItem) -> Image.Image:
+    def open_image(
+        self,
+        item: EncryptedDatasetItem,
+        mode: Optional[str] = None,
+        require_alpha: bool = False,
+    ) -> Image.Image:
         data = self.decrypt_object_bytes(item.objectPath)
-        image = Image.open(io.BytesIO(data))
-        return exif_transpose(image)
+        return image_io.open_static_image_from_bytes(
+            data,
+            source=self.virtual_path(item),
+            mode=mode,
+            require_alpha=require_alpha,
+        )
 
     def get_caption(self, item: EncryptedDatasetItem) -> Optional[str]:
         if not item.captionObjectPath:

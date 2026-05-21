@@ -182,14 +182,6 @@ export default function TrainingPhasesEditor({
     [availableBuiltInProfiles, availableCustomProfiles],
   );
 
-  const fallbackProfileID = allProfiles[0]?.id ?? '';
-
-  useEffect(() => {
-    if (fallbackProfileID && !allProfiles.some(profile => profile.id === selectedProfileID)) {
-      setSelectedProfileID(fallbackProfileID);
-    }
-  }, [allProfiles, fallbackProfileID, selectedProfileID]);
-
   const profileOptions = useMemo(
     () => [
       {
@@ -280,6 +272,23 @@ export default function TrainingPhasesEditor({
     });
     setPhases(nextPhases, true);
   };
+
+  useEffect(() => {
+    if (allProfiles.some(profile => profile.id === selectedProfileID)) return;
+
+    const fallbackProfile = allProfiles[0];
+    if (!fallbackProfile) {
+      setSelectedProfileID('');
+      return;
+    }
+
+    if (autoTrain) {
+      applyAutoProfile(fallbackProfile);
+      return;
+    }
+
+    setSelectedProfileID(fallbackProfile.id);
+  }, [allProfiles, autoTrain, selectedProfileID]);
 
   const toggleAutoTrain = (enabled: boolean) => {
     if (!enabled) {

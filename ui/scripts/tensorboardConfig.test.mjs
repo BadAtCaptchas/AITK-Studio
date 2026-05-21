@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const childProcess = require('child_process');
 const tensorBoardModulePath = require.resolve('../dist/src/server/tensorboard.js');
 const originalSpawnSync = childProcess.spawnSync;
+const originalExistsSync = fs.existsSync;
 const originalEnableEnv = process.env.AITK_ENABLE_TENSORBOARD;
 
 function restoreEnvironment() {
   childProcess.spawnSync = originalSpawnSync;
+  fs.existsSync = originalExistsSync;
   if (originalEnableEnv === undefined) {
     delete process.env.AITK_ENABLE_TENSORBOARD;
   } else {
@@ -69,4 +73,25 @@ test('explicit true enables TensorBoard without probing package availability', (
 
   assert.equal(tensorBoard.isTensorBoardEnabled(), true);
   assert.equal(getProbeCount(), 0);
+});
+
+test('TensorBoard launch uses pythonw on Windows when resolving bare python.exe', () => {
+  const { tensorBoard } = loadTensorBoardWithProbeStatus(0);
+
+  assert.equal(tensorBoard.getTensorBoardLaunchPythonPath('python.exe', 'win32'), 'pythonw.exe');
+});
+
+test('TensorBoard launch uses sibling pythonw in a Windows virtualenv', () => {
+  const { tensorBoard } = loadTensorBoardWithProbeStatus(0);
+  const pythonPath = path.win32.join('C:\\toolkit', '.venv', 'Scripts', 'python.exe');
+  const pythonwPath = path.win32.join('C:\\toolkit', '.venv', 'Scripts', 'pythonw.exe');
+  fs.existsSync = target => target === pythonwPath || originalExistsSync(target);
+
+  assert.equal(tensorBoard.getTensorBoardLaunchPythonPath(pythonPath, 'win32'), pythonwPath);
+});
+
+test('TensorBoard launch keeps console Python outside Windows', () => {
+  const { tensorBoard } = loadTensorBoardWithProbeStatus(0);
+
+  assert.equal(tensorBoard.getTensorBoardLaunchPythonPath('/venv/bin/python', 'linux'), '/venv/bin/python');
 });

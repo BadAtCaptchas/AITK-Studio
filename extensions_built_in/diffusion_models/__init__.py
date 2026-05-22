@@ -11,8 +11,33 @@ from .ltx2 import LTX2Model, LTX23Model
 from .zeta_chroma import ZetaChromaModel
 from .ernie_image import ErnieImageModel
 from .nucleus_image import NucleusImageModel
-from .hidream.hidream_o1_model import HidreamO1Model
-from .glm_image import GlmImageModel
+
+
+def _unavailable_model_class(class_name: str, arch: str, import_error: ImportError):
+    class UnavailableModel:
+        pass
+
+    def __init__(self, *args, **kwargs):
+        raise ImportError(
+            f"{class_name} requires optional dependencies that are not available: {import_error}"
+        ) from import_error
+
+    UnavailableModel.__name__ = class_name
+    UnavailableModel.__qualname__ = class_name
+    UnavailableModel.arch = arch
+    UnavailableModel.__init__ = __init__
+    return UnavailableModel
+
+
+try:
+    from .hidream.hidream_o1_model import HidreamO1Model
+except ImportError as e:
+    HidreamO1Model = _unavailable_model_class("HidreamO1Model", "hidream_o1", e)
+
+try:
+    from .glm_image import GlmImageModel
+except ImportError as e:
+    GlmImageModel = _unavailable_model_class("GlmImageModel", "glm_image", e)
 
 AI_TOOLKIT_MODELS = [
     # put a list of models here

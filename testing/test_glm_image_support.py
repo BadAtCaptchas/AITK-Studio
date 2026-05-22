@@ -19,6 +19,7 @@ GLM_MODEL_PATH = (
     / "glm_image.py"
 )
 REGISTRY_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__init__.py"
+HIDREAM_INIT_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "hidream" / "__init__.py"
 UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
 AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
 TRAINING_PHASES_EDITOR_PATH = (
@@ -79,6 +80,16 @@ class GlmImageStaticSupportTest(unittest.TestCase):
 
         self.assertIn("from .glm_image import GlmImageModel", source)
         self.assertIn("GlmImageModel,", source)
+
+    def test_optional_hidream_o1_import_is_guarded(self):
+        registry_source = REGISTRY_PATH.read_text(encoding="utf-8")
+        hidream_source = HIDREAM_INIT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("def _unavailable_model_class", registry_source)
+        self.assertIn("except ImportError as e:", registry_source)
+        self.assertIn('"HidreamO1Model", "hidream_o1"', registry_source)
+        self.assertNotIn("from .hidream_o1_model import HidreamO1Model", hidream_source.split("def __getattr__")[0])
+        self.assertIn('if name == "HidreamO1Model":', hidream_source)
 
     def test_ui_model_defaults_and_default_auto_profile(self):
         source = UI_OPTIONS_PATH.read_text(encoding="utf-8")

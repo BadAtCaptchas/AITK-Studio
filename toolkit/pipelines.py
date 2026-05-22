@@ -12,6 +12,10 @@ from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.pipelines.stable_diffusion_xl.pipeline_output import StableDiffusionXLPipelineOutput
 from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import rescale_noise_cfg
 from diffusers.utils import is_torch_xla_available
+from toolkit.import_compat import ensure_pkg_resources_packaging
+
+ensure_pkg_resources_packaging()
+
 from k_diffusion.external import CompVisVDenoiser, CompVisDenoiser
 from k_diffusion.sampling import get_sigmas_karras, BrownianTreeNoiseSampler
 from toolkit.models.flux import bypass_flux_guidance, restore_flux_guidance

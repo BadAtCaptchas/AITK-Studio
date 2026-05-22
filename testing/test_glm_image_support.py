@@ -78,7 +78,7 @@ class GlmImageStaticSupportTest(unittest.TestCase):
     def test_backend_registry_includes_glm_image(self):
         source = REGISTRY_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("from .glm_image import GlmImageModel", source)
+        self.assertIn('GlmImageModel, = _optional_models(".glm_image"', source)
         self.assertIn("GlmImageModel,", source)
 
     def test_optional_hidream_o1_import_is_guarded(self):
@@ -90,6 +90,16 @@ class GlmImageStaticSupportTest(unittest.TestCase):
         self.assertIn('"HidreamO1Model", "hidream_o1"', registry_source)
         self.assertNotIn("from .hidream_o1_model import HidreamO1Model", hidream_source.split("def __getattr__")[0])
         self.assertIn('if name == "HidreamO1Model":', hidream_source)
+
+    def test_optional_qwen_image_imports_are_guarded(self):
+        registry_source = REGISTRY_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('".qwen_image"', registry_source)
+        self.assertIn('"QwenImageModel", "qwen_image"', registry_source)
+        self.assertIn('"QwenImageEditModel", "qwen_image_edit"', registry_source)
+        self.assertIn(
+            '"QwenImageEditPlusModel", "qwen_image_edit_plus"', registry_source
+        )
 
     def test_ui_model_defaults_and_default_auto_profile(self):
         source = UI_OPTIONS_PATH.read_text(encoding="utf-8")

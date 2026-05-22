@@ -17,6 +17,8 @@ type Props = {
   network?: NetworkConfig;
   setJobConfig: (value: any, key: string) => void;
   disableTimestepType?: boolean;
+  modelArchName?: string;
+  defaultAutoTrainingProfileId?: string;
 };
 
 const CUSTOM_PROFILE_STORAGE_KEY = 'aitk.autoTrainingProfiles.v1';
@@ -103,6 +105,7 @@ function normalizePhase(phase: TrainingPhaseConfig, index: number, autoTrain: bo
 function cloneProfile(profile: AutoTrainingProfile): AutoTrainingProfile {
   return {
     ...profile,
+    modelArchs: profile.modelArchs ? [...profile.modelArchs] : undefined,
     train: profile.train
       ? {
           ...profile.train,
@@ -134,12 +137,14 @@ export default function TrainingPhasesEditor({
   network,
   setJobConfig,
   disableTimestepType = false,
+  modelArchName,
+  defaultAutoTrainingProfileId,
 }: Props) {
   const autoTrain = !!train.auto_train;
   const phases = train.phases ?? [];
   const phaseTotal = sumPhaseSteps(phases);
   const [customProfiles, setCustomProfiles] = useState<AutoTrainingProfile[]>([]);
-  const [selectedProfileID, setSelectedProfileID] = useState(builtInAutoTrainingProfiles[0]?.id ?? '');
+  const [selectedProfileID, setSelectedProfileID] = useState(defaultAutoTrainingProfileId ?? builtInAutoTrainingProfiles[0]?.id ?? '');
   const [customProfileName, setCustomProfileName] = useState('');
 
   useEffect(() => {
@@ -151,23 +156,59 @@ export default function TrainingPhasesEditor({
     }
   }, []);
 
-  const allProfiles = useMemo(
-    () => [...builtInAutoTrainingProfiles, ...customProfiles],
-    [customProfiles],
+  const profileMatchesModel = (profile: AutoTrainingProfile) => {
+    return !profile.modelArchs?.length || !modelArchName || profile.modelArchs.includes(modelArchName);
+  };
+
+  const builtInProfiles = useMemo(
+    () => builtInAutoTrainingProfiles.filter(profileMatchesModel),
+    [modelArchName],
   );
+
+  const modelCustomProfiles = useMemo(
+    () => customProfiles.filter(profileMatchesModel),
+    [customProfiles, modelArchName],
+  );
+
+  const allProfiles = useMemo(
+    () => [...builtInProfiles, ...modelCustomProfiles],
+    [builtInProfiles, modelCustomProfiles],
+  );
+
+  const preferredProfileID = useMemo(
+    () =>
+      defaultAutoTrainingProfileId && allProfiles.some(profile => profile.id === defaultAutoTrainingProfileId)
+        ? defaultAutoTrainingProfileId
+        : allProfiles[0]?.id ?? '',
+    [allProfiles, defaultAutoTrainingProfileId],
+  );
+
+  useEffect(() => {
+    if (preferredProfileID) setSelectedProfileID(preferredProfileID);
+  }, [modelArchName, defaultAutoTrainingProfileId, preferredProfileID]);
+
+  useEffect(() => {
+    if (!allProfiles.length) {
+      setSelectedProfileID('');
+      return;
+    }
+    if (!allProfiles.some(profile => profile.id === selectedProfileID)) {
+      setSelectedProfileID(preferredProfileID);
+    }
+  }, [allProfiles, selectedProfileID, preferredProfileID]);
 
   const profileOptions = useMemo(
     () => [
       {
         label: 'Built in',
-        options: builtInAutoTrainingProfiles.map(profile => ({ value: profile.id, label: profile.name })),
+        options: builtInProfiles.map(profile => ({ value: profile.id, label: profile.name })),
       },
       {
         label: 'Custom',
-        options: customProfiles.map(profile => ({ value: profile.id, label: profile.name })),
+        options: modelCustomProfiles.map(profile => ({ value: profile.id, label: profile.name })),
       },
     ],
-    [customProfiles],
+    [builtInProfiles, modelCustomProfiles],
   );
 
   const persistCustomProfiles = (profiles: AutoTrainingProfile[]) => {
@@ -263,7 +304,7 @@ export default function TrainingPhasesEditor({
       return;
     }
 
-    const profile = allProfiles.find(candidate => candidate.id === selectedProfileID) ?? builtInAutoTrainingProfiles[0];
+    const profile = allProfiles.find(candidate => candidate.id === selectedProfileID) ?? allProfiles[0];
     if (profile) {
       applyAutoProfile(profile);
     } else {
@@ -278,6 +319,7 @@ export default function TrainingPhasesEditor({
     const profile: AutoTrainingProfile = {
       id: `custom:${Date.now()}`,
       name,
+      modelArchs: modelArchName ? [modelArchName] : undefined,
       train: {
         optimizer: train.optimizer,
         lr: train.lr,
@@ -289,9 +331,14 @@ export default function TrainingPhasesEditor({
       network: network
         ? {
             type: network.type,
+            linear: network.linear,
+            linear_alpha: network.linear_alpha,
+            conv: network.conv,
+            conv_alpha: network.conv_alpha,
             dropout: network.dropout,
             lokr_factor: network.lokr_factor,
             lokr_full_rank: network.lokr_full_rank,
+            transformer_only: network.transformer_only,
           }
         : undefined,
       phases: phases.map((phase, index) => normalizePhase(clonePhase(phase), index, true)),

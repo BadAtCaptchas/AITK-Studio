@@ -828,6 +828,8 @@ export default function SimpleJob({
               network={jobConfig.config.process[0].network}
               setJobConfig={setJobConfig}
               disableTimestepType={disableSections.includes('train.timestep_type')}
+              modelArchName={modelArch?.name}
+              defaultAutoTrainingProfileId={modelArch?.defaultAutoTrainingProfileId}
             />
           </Card>
         </div>

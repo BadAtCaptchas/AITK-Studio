@@ -253,10 +253,26 @@ class GlmImageModel(BaseModel):
         gen_config.width = int(gen_config.width // sc * sc)
         gen_config.height = int(gen_config.height // sc * sc)
 
+        prompt_embeds, negative_prompt_embeds = self._prepare_sampling_prompt_embeds(
+            conditional_embeds,
+            unconditional_embeds,
+        )
+        prompts = (
+            gen_config.prompt
+            if isinstance(gen_config.prompt, list)
+            else [gen_config.prompt]
+        )
+        prior_token_ids = self._get_prior_tokens_for_prompts(
+            prompts,
+            height=gen_config.height,
+            width=gen_config.width,
+        )
+
         img = pipeline(
-            prompt=gen_config.prompt,
-            prompt_embeds=self._text_embeds_to_tensor(conditional_embeds),
-            negative_prompt_embeds=self._text_embeds_to_tensor(unconditional_embeds),
+            prompt=None,
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+            prior_token_ids=prior_token_ids,
             height=gen_config.height,
             width=gen_config.width,
             num_inference_steps=gen_config.num_inference_steps,
@@ -266,6 +282,35 @@ class GlmImageModel(BaseModel):
             **extra,
         ).images[0]
         return img
+
+    def _prepare_sampling_prompt_embeds(
+        self,
+        conditional_embeds: AdvancedPromptEmbeds,
+        unconditional_embeds: AdvancedPromptEmbeds,
+    ):
+        prompt_embeds = self._text_embeds_to_tensor(conditional_embeds)
+        negative_prompt_embeds = self._text_embeds_to_tensor(unconditional_embeds)
+
+        if (
+            prompt_embeds.dim() == 3
+            and negative_prompt_embeds.dim() == 3
+            and prompt_embeds.shape[1] != negative_prompt_embeds.shape[1]
+        ):
+            max_len = max(prompt_embeds.shape[1], negative_prompt_embeds.shape[1])
+            prompt_embeds = self._left_pad_prompt_embed_tensor(prompt_embeds, max_len)
+            negative_prompt_embeds = self._left_pad_prompt_embed_tensor(
+                negative_prompt_embeds,
+                max_len,
+            )
+
+        return prompt_embeds, negative_prompt_embeds
+
+    def _left_pad_prompt_embed_tensor(self, tensor: torch.Tensor, max_len: int):
+        if tensor.shape[1] >= max_len:
+            return tensor
+        pad_shape = (tensor.shape[0], max_len - tensor.shape[1], *tensor.shape[2:])
+        pad = torch.zeros(pad_shape, device=tensor.device, dtype=tensor.dtype)
+        return torch.cat([pad, tensor], dim=1)
 
     def _text_embeds_to_tensor(self, prompt_embeds: AdvancedPromptEmbeds):
         text_embeds = prompt_embeds.text_embeds

@@ -12,11 +12,13 @@ const sqlitePath = path.resolve(process.env.AITK_SQLITE_PATH || path.join(toolki
 const mongoUri = process.env.AITK_MONGODB_URI?.trim();
 const mongoDbName = process.env.AITK_MONGODB_DB?.trim() || 'ai_toolkit';
 const prismaCli = require.resolve('prisma/build/index.js');
-const prismaExecOptions = { stdio: 'inherit' };
 const SQLITE_BUSY_TIMEOUT_MS = 30000;
 
-function runPrisma(args) {
-  execFileSync(process.execPath, [prismaCli, ...args], prismaExecOptions);
+function runPrisma(args, options = {}) {
+  execFileSync(process.execPath, [prismaCli, ...args], {
+    stdio: options.nonInteractive ? ['ignore', 'inherit', 'inherit'] : 'inherit',
+    env: options.nonInteractive ? { ...process.env, CI: '1' } : process.env,
+  });
 }
 
 function sqliteAll(db, sql, params = []) {
@@ -184,9 +186,9 @@ if (provider === 'sqlite') {
     await applySqliteCompatibilitySchema(sqlitePath);
   } else {
     try {
-      runPrisma(['db', 'push']);
+      runPrisma(['db', 'push'], { nonInteractive: true });
     } catch (error) {
-      console.warn('Prisma db push could not apply the schema without dropping legacy tables.');
+      console.warn('Prisma db push could not apply the schema without data loss or a reset.');
       console.warn('Applying additive SQLite compatibility changes instead.');
       await applySqliteCompatibilitySchema(sqlitePath);
     }

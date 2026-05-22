@@ -8,6 +8,7 @@ export type AutoTrainingProfile = {
   name: string;
   description?: string;
   compatibleArchs?: string[];
+  modelArchs?: string[];
   train?: Partial<TrainConfig>;
   network?: Partial<NetworkConfig>;
   phases: TrainingPhaseConfig[];
@@ -140,9 +141,14 @@ function threePhase(
   ];
 }
 
+function profileArchs(profile: AutoTrainingProfile): string[] | undefined {
+  return [...(profile.compatibleArchs ?? []), ...(profile.modelArchs ?? [])];
+}
+
 export function isAutoTrainingProfileCompatible(profile: AutoTrainingProfile, currentArch?: string): boolean {
-  if (!profile.compatibleArchs?.length || !currentArch) return true;
-  return profile.compatibleArchs.some(pattern => {
+  const archs = profileArchs(profile);
+  if (!archs?.length || !currentArch) return true;
+  return archs.some(pattern => {
     if (pattern.endsWith('*')) {
       return currentArch.startsWith(pattern.slice(0, -1));
     }
@@ -193,6 +199,46 @@ export const builtInAutoTrainingProfiles: AutoTrainingProfile[] = [
       phase('Capture style', 0.000075, 'balanced', 'standard'),
       phase('Strengthen detail', 0.00004, 'style', 'standard'),
       phase('Polish finish', 0.000015, 'style', 'standard'),
+    ],
+  },
+  {
+    id: 'glm-image-balanced-lora',
+    name: 'GLM-Image Balanced LoRA',
+    description: 'Balanced GLM-Image transformer LoRA profile for general subject, style, and detail learning.',
+    modelArchs: ['glm_image'],
+    network: loraNetwork(32, { transformer_only: true }),
+    train: trainDefaults(0.00005, {
+      batch_size: 1,
+      gradient_accumulation: 1,
+      cache_text_embeddings: true,
+      timestep_type: 'weighted',
+      content_or_style: 'content',
+      save_on_phase_change: true,
+    }),
+    phases: [
+      phase('Teach subject', 0.00005, 'content', 'standard', { timestep_type: 'weighted' }),
+      phase('Stabilize', 0.00003, 'balanced', 'standard', { timestep_type: 'weighted' }),
+      phase('Polish style', 0.000015, 'style', 'standard', { timestep_type: 'weighted' }),
+    ],
+  },
+  {
+    id: 'glm-image-low-vram-lora',
+    name: 'GLM-Image Low VRAM LoRA',
+    description: 'Lower-rank GLM-Image LoRA profile with accumulation for tighter VRAM budgets.',
+    modelArchs: ['glm_image'],
+    network: loraNetwork(16, { dropout: 0.05, transformer_only: true }),
+    train: trainDefaults(0.00003, {
+      batch_size: 1,
+      gradient_accumulation: 2,
+      cache_text_embeddings: true,
+      timestep_type: 'weighted',
+      content_or_style: 'content',
+      save_on_phase_change: true,
+    }),
+    phases: [
+      phase('Teach subject', 0.00003, 'content', 'standard', { timestep_type: 'weighted' }),
+      phase('Stabilize', 0.00002, 'balanced', 'standard', { timestep_type: 'weighted' }),
+      phase('Polish style', 0.00001, 'style', 'standard', { timestep_type: 'weighted' }),
     ],
   },
   {

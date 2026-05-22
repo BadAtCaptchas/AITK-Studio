@@ -20,6 +20,10 @@ from toolkit.samplers.mean_flow_scheduler import MeanFlowScheduler
 
 from toolkit.samplers.custom_flowmatch_sampler import CustomFlowMatchEulerDiscreteScheduler
 
+from toolkit.import_compat import ensure_pkg_resources_packaging
+
+ensure_pkg_resources_packaging()
+
 from k_diffusion.external import CompVisDenoiser
 
 from toolkit.samplers.custom_lcm_scheduler import CustomLCMScheduler

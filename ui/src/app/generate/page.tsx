@@ -117,11 +117,11 @@ function getDefaultModelConfig(archName: string): GeneratorModelConfig {
     quantize_te: Boolean(getArchDefault(archName, 'config.process[0].model.quantize_te', false)),
     qtype: 'qfloat8',
     qtype_te: 'qfloat8',
-    low_vram: Boolean(getArchDefault(archName, 'config.process[0].model.low_vram', false)),
+    low_vram: false,
     model_kwargs:
       (getArchDefault(archName, 'config.process[0].model.model_kwargs', {}) as Record<string, unknown>) || {},
     dtype: String(getArchDefault(archName, 'config.process[0].train.dtype', 'bf16')),
-    layer_offloading: Boolean(getArchDefault(archName, 'config.process[0].model.layer_offloading', false)),
+    layer_offloading: false,
     layer_offloading_transformer_percent: getArchNumberDefault(
       archName,
       'config.process[0].model.layer_offloading_transformer_percent',
@@ -387,6 +387,8 @@ export default function GeneratePage() {
       arch: String(lora.model?.arch || current.arch),
       dtype: String((lora.model as GeneratorModelConfig).dtype || current.dtype || 'bf16'),
       model_kwargs: (lora.model?.model_kwargs as Record<string, unknown>) || current.model_kwargs || {},
+      low_vram: current.low_vram,
+      layer_offloading: current.layer_offloading,
     }));
     if (lora.model.arch) {
       setSampler(getDefaultSampler(String(lora.model.arch)));

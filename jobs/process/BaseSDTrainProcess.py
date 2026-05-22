@@ -294,6 +294,44 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # override in subclass
         return generate_image_config_list
 
+    def _generate_sample_images(self, gen_img_config_list: List[GenerateImageConfig], sampler=None):
+        restore_attrs = []
+        seen_attrs = set()
+
+        def set_temporarily(obj, attr, value):
+            if obj is None or not hasattr(obj, attr):
+                return
+            key = (id(obj), attr)
+            if key in seen_attrs:
+                return
+            seen_attrs.add(key)
+            restore_attrs.append((obj, attr, getattr(obj, attr)))
+            setattr(obj, attr, value)
+
+        sd_model_config = getattr(self.sd, "model_config", None)
+        sample_uses_cpu_offload = any([
+            bool(getattr(self.sd, "low_vram", False)),
+            bool(getattr(self.model_config, "low_vram", False)),
+            bool(getattr(sd_model_config, "low_vram", False)),
+            bool(getattr(self.model_config, "layer_offloading", False)),
+            bool(getattr(sd_model_config, "layer_offloading", False)),
+        ])
+
+        set_temporarily(self.sd, "low_vram", False)
+        set_temporarily(self.model_config, "low_vram", False)
+        set_temporarily(sd_model_config, "low_vram", False)
+        set_temporarily(self.model_config, "layer_offloading", False)
+        set_temporarily(sd_model_config, "layer_offloading", False)
+
+        if sample_uses_cpu_offload:
+            print_acc("Temporarily disabling low-VRAM/offload for sample generation")
+
+        try:
+            self.sd.generate_images(gen_img_config_list, sampler=sampler)
+        finally:
+            for obj, attr, value in reversed(restore_attrs):
+                setattr(obj, attr, value)
+
     def sample(self, step=None, is_first=False):
         if not self.accelerator.is_main_process:
             return
@@ -389,15 +427,15 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
             self.adapter.is_sampling = True
         
-        # send to be generated
-        self.sd.generate_images(gen_img_config_list, sampler=sample_config.sampler)
+        try:
+            # send to be generated
+            self._generate_sample_images(gen_img_config_list, sampler=sample_config.sampler)
+        finally:
+            if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
+                self.adapter.is_sampling = False
 
-        
-        if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
-            self.adapter.is_sampling = False
-
-        if self.ema is not None:
-            self.ema.train()
+            if self.ema is not None:
+                self.ema.train()
 
     def update_training_metadata(self):
         o_dict = OrderedDict({

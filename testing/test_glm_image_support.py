@@ -44,6 +44,8 @@ def load_glm_module():
         "_ensure_prior_encoder_on_device",
         "_get_prior_tokens_for_prompts",
         "_build_prior_token_inputs",
+        "_prepare_sampling_prompt_embeds",
+        "_left_pad_prompt_embed_tensor",
     }
     methods = [
         node
@@ -117,6 +119,17 @@ class GlmImageStaticSupportTest(unittest.TestCase):
         self.assertIn("'config.process[0].train.timestep_type': ['weighted', 'sigmoid']", block)
         self.assertIn("'config.process[0].sample.guidance_scale': [1.5, 4]", block)
         self.assertIn("'config.process[0].sample.sample_steps': [50, 30]", block)
+
+    def test_glm_sampling_uses_prior_tokens_when_prompt_embeds_are_forwarded(self):
+        source = GLM_MODEL_PATH.read_text(encoding="utf-8")
+        start = source.index("    def generate_single_image(")
+        end = source.index("    def _prepare_sampling_prompt_embeds", start)
+        block = source[start:end]
+
+        self.assertIn("prior_token_ids = self._get_prior_tokens_for_prompts", block)
+        self.assertIn("prompt=None", block)
+        self.assertIn("prior_token_ids=prior_token_ids", block)
+        self.assertNotIn("prompt=gen_config.prompt", block)
 
     def test_auto_training_profiles_are_model_scoped(self):
         source = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
@@ -236,6 +249,27 @@ class GlmImageModelBehaviorTest(unittest.TestCase):
         self.assertTrue(torch.equal(padded[0, :2], torch.zeros((2, 3))))
         self.assertTrue(torch.equal(padded[0, 2:], torch.ones((2, 3))))
         self.assertTrue(torch.equal(padded[1], torch.full((4, 3), 2.0)))
+
+    def test_sampling_prompt_embeds_are_padded_to_matching_sequence_lengths(self):
+        model = self.make_model()
+        conditional = self.glm_module.AdvancedPromptEmbeds(
+            text_embeds=[torch.ones((3, 2), dtype=torch.float32)]
+        )
+        unconditional = self.glm_module.AdvancedPromptEmbeds(
+            text_embeds=[torch.full((1, 2), 2.0, dtype=torch.float32)]
+        )
+
+        prompt_embeds, negative_prompt_embeds = model._prepare_sampling_prompt_embeds(
+            conditional,
+            unconditional,
+        )
+
+        self.assertEqual(prompt_embeds.shape, (1, 3, 2))
+        self.assertEqual(negative_prompt_embeds.shape, (1, 3, 2))
+        self.assertTrue(torch.equal(negative_prompt_embeds[0, :2], torch.zeros((2, 2))))
+        self.assertTrue(
+            torch.equal(negative_prompt_embeds[0, 2:], torch.full((1, 2), 2.0))
+        )
 
 
 if __name__ == "__main__":

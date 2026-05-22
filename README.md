@@ -20,6 +20,7 @@ OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffus
 - [Alpha-VLLM/Lumina-Image-2.0](https://huggingface.co/Alpha-VLLM/Lumina-Image-2.0) (Lumina2)
 - [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) (Qwen-Image)
 - [Qwen/Qwen-Image-2512](https://huggingface.co/Qwen/Qwen-Image-2512) (Qwen-Image-2512)
+- [zai-org/GLM-Image](https://huggingface.co/zai-org/GLM-Image) (GLM-Image)
 - [HiDream-ai/HiDream-I1-Full](https://huggingface.co/HiDream-ai/HiDream-I1-Full) (HiDream)
 - [HiDream-ai/HiDream-O1-Image](https://huggingface.co/HiDream-ai/HiDream-O1-Image) (HiDream-O1)
 - [OmniGen2/OmniGen2](https://huggingface.co/OmniGen2/OmniGen2) (OmniGen2)
@@ -33,6 +34,8 @@ OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffus
 - [NucleusAI/Nucleus-Image](https://huggingface.co/NucleusAI/Nucleus-Image) (Nucleus-Image)
 
 HiDream-O1 training defaults to `train.t0_loss_target: true`, so the trainer compares the reconstructed timestep-0 prediction directly against the image latent target. That keeps O1 in its native x0 loss space instead of relying on velocity-space loss weighting to control small-timestep spikes.
+
+GLM-Image is supported for text-to-image sampling and transformer LoRA training through upstream Diffusers `GlmImagePipeline` and `GlmImageTransformer2DModel`. The built-in `glm_image` preset defaults to `zai-org/GLM-Image`, flowmatch scheduling, 1024px samples, 50 sample steps, guidance `1.5`, quantization, and exposed low-VRAM controls. V1 trains transformer LoRA only with `target_lora_modules: ["GlmImageTransformer2DModel"]`.
 
 ### Instruction / Edit
 - [black-forest-labs/FLUX.1-Kontext-dev](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev) (FLUX.1-Kontext-dev)
@@ -400,11 +403,18 @@ Defaults are `metric: loss/loss`, `mode: min`, `window: 100`, `patience: 2`, `mi
 
 Auto learn lets a training job keep running until the configured metric stops improving, then move to the next training phase. When the final phase plateaus, the trainer stops the job. This is useful when the correct number of steps is not known up front.
 
-In the UI, open `New Job`, go to `Training Phases`, and enable `Auto learn`. Fixed step inputs are hidden because auto learn does not know the total step count ahead of time. The profile dropdown includes an `Anatomy LoKr` preset with three open-ended stages:
+In the UI, open `New Job`, go to `Training Phases`, and enable `Auto learn`. Fixed step inputs are hidden because auto learn does not know the total step count ahead of time. Profiles can be global or scoped to the selected model architecture; legacy profiles without a model scope remain visible for every model, and newly saved custom profiles record the active model architecture.
+
+The profile dropdown includes an `Anatomy LoKr` preset with three open-ended stages:
 
 - Teach: AdamW, `lr: 0.00002`, weighted high-noise timesteps, MSE loss, `dropout: 0.05`, `weight_decay: 0.0001`, LoKr factor 8.
 - Stabilize: AdamW, `lr: 0.00001`, weighted balanced timesteps, MSE loss.
 - Fine detail cleanup: AdamW, `lr: 0.000005`, weighted low-noise timesteps, MSE loss.
+
+For GLM-Image, the UI defaults Auto learn to `glm-image-balanced-lora` instead of the generic Anatomy profile. The GLM profiles are open-ended, use loss-plateau auto advance, save on each phase change, and do not set fixed phase step counts:
+
+- `glm-image-balanced-lora`: LoRA rank/alpha `32`, `adamw8bit`, weighted timesteps, MSE loss, and LR phases `0.00005 -> 0.00003 -> 0.000015` for content, balanced, and style stages.
+- `glm-image-low-vram-lora`: LoRA rank/alpha `16`, dropout `0.05`, `adamw8bit`, weighted timesteps, MSE loss, batch size `1`, gradient accumulation `2`, and LR phases `0.00003 -> 0.00002 -> 0.00001`.
 
 You can also save the current auto-learn settings as a custom profile from the same editor. Custom profiles are stored in the browser's local storage.
 
@@ -447,6 +457,8 @@ train:
 ```
 
 Progress displays use the current step without a percentage bar while auto learn is active, because there is no planned final step. Resuming a checkpoint restores the current phase and continues plateau tracking from the saved training state.
+
+For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`.
 
 ### Need help or found a bug?
 

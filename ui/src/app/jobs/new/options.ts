@@ -57,6 +57,7 @@ export interface ModelArch {
   additionalSections?: AdditionalSections[];
   accuracyRecoveryAdapters?: { [key: string]: string };
   sampleTags?: SampleTags;
+  defaultAutoTrainingProfileId?: string;
 }
 
 const defaultNameOrPath = '';
@@ -342,6 +343,28 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
     },
     disableSections: ['network.conv'],
+  },
+  {
+    name: 'glm_image',
+    label: 'GLM-Image',
+    group: 'image',
+    defaultAutoTrainingProfileId: 'glm-image-balanced-lora',
+    defaults: {
+      'config.process[0].model.name_or_path': ['zai-org/GLM-Image', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
+      'config.process[0].model.qtype': ['qfloat8', 'qfloat8'],
+      'config.process[0].sample.width': [1024, 1024],
+      'config.process[0].sample.height': [1024, 1024],
+      'config.process[0].sample.guidance_scale': [1.5, 4],
+      'config.process[0].sample.sample_steps': [50, 30],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: ['model.low_vram', 'model.layer_offloading'],
   },
   {
     name: 'qwen_image',

@@ -22,6 +22,8 @@ type Props = {
   currentArch?: string;
   setJobConfig: (value: any, key: string) => void;
   disableTimestepType?: boolean;
+  modelArchName?: string;
+  defaultAutoTrainingProfileId?: string;
 };
 
 const CUSTOM_PROFILE_STORAGE_KEY = 'aitk.autoTrainingProfiles.v1';
@@ -123,6 +125,7 @@ function cloneProfile(profile: AutoTrainingProfile): AutoTrainingProfile {
   return {
     ...profile,
     compatibleArchs: profile.compatibleArchs ? [...profile.compatibleArchs] : undefined,
+    modelArchs: profile.modelArchs ? [...profile.modelArchs] : undefined,
     train: profile.train ? clonePlainValue(profile.train) : undefined,
     network: profile.network ? clonePlainValue(profile.network) : undefined,
     phases: profile.phases.map(clonePhase),
@@ -150,13 +153,16 @@ export default function TrainingPhasesEditor({
   currentArch,
   setJobConfig,
   disableTimestepType = false,
+  modelArchName,
+  defaultAutoTrainingProfileId,
 }: Props) {
   const autoTrain = !!train.auto_train;
   const phases = train.phases ?? [];
   const phaseTotal = sumPhaseSteps(phases);
   const [customProfiles, setCustomProfiles] = useState<AutoTrainingProfile[]>([]);
-  const [selectedProfileID, setSelectedProfileID] = useState(builtInAutoTrainingProfiles[0]?.id ?? '');
+  const [selectedProfileID, setSelectedProfileID] = useState(defaultAutoTrainingProfileId ?? builtInAutoTrainingProfiles[0]?.id ?? '');
   const [customProfileName, setCustomProfileName] = useState('');
+  const activeArch = modelArchName ?? currentArch;
 
   useEffect(() => {
     try {
@@ -168,19 +174,41 @@ export default function TrainingPhasesEditor({
   }, []);
 
   const availableBuiltInProfiles = useMemo(
-    () => builtInAutoTrainingProfiles.filter(profile => isAutoTrainingProfileCompatible(profile, currentArch)),
-    [currentArch],
+    () => builtInAutoTrainingProfiles.filter(profile => isAutoTrainingProfileCompatible(profile, activeArch)),
+    [activeArch],
   );
 
   const availableCustomProfiles = useMemo(
-    () => customProfiles.filter(profile => isAutoTrainingProfileCompatible(profile, currentArch)),
-    [customProfiles, currentArch],
+    () => customProfiles.filter(profile => isAutoTrainingProfileCompatible(profile, activeArch)),
+    [customProfiles, activeArch],
   );
 
   const allProfiles = useMemo(
     () => [...availableBuiltInProfiles, ...availableCustomProfiles],
     [availableBuiltInProfiles, availableCustomProfiles],
   );
+
+  const preferredProfileID = useMemo(
+    () =>
+      defaultAutoTrainingProfileId && allProfiles.some(profile => profile.id === defaultAutoTrainingProfileId)
+        ? defaultAutoTrainingProfileId
+        : allProfiles[0]?.id ?? '',
+    [allProfiles, defaultAutoTrainingProfileId],
+  );
+
+  useEffect(() => {
+    if (preferredProfileID) setSelectedProfileID(preferredProfileID);
+  }, [activeArch, defaultAutoTrainingProfileId, preferredProfileID]);
+
+  useEffect(() => {
+    if (!allProfiles.length) {
+      setSelectedProfileID('');
+      return;
+    }
+    if (!allProfiles.some(profile => profile.id === selectedProfileID)) {
+      setSelectedProfileID(preferredProfileID);
+    }
+  }, [allProfiles, selectedProfileID, preferredProfileID]);
 
   const profileOptions = useMemo(
     () => [
@@ -321,7 +349,7 @@ export default function TrainingPhasesEditor({
     const profile: AutoTrainingProfile = {
       id: `custom:${Date.now()}`,
       name,
-      compatibleArchs: currentArch ? [currentArch] : undefined,
+      modelArchs: activeArch ? [activeArch] : undefined,
       train: {
         optimizer: train.optimizer,
         lr: train.lr,

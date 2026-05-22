@@ -50,7 +50,6 @@ try:
         convert_lora_diffusers_to_original,
     )
 except ImportError as e:
-    print("Diffusers import error:", e)
     raise ImportError(
         "Diffusers is out of date. Update diffusers to the latest version by doing pip uninstall diffusers and then pip install -r requirements.txt"
     )

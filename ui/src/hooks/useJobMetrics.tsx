@@ -29,6 +29,13 @@ export interface MetricsResponse {
 type SeriesMap = Record<string, MetricPoint[]>;
 type LatestMap = Record<string, MetricPoint | null>;
 type Status = 'idle' | 'loading' | 'success' | 'error' | 'refreshing';
+type UseJobMetricsOptions =
+  | number
+  | {
+      maxPoints?: number;
+      keys?: string[];
+      enabled?: boolean;
+    };
 
 const DEFAULT_METRIC_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
 const DEFAULT_MAX_POINTS = 4000;
@@ -49,7 +56,32 @@ function encodeSinceSteps(lastStepByKey: Record<string, number | null>) {
   return parts.length ? parts.join(',') : undefined;
 }
 
-export default function useJobMetrics(jobID: string, jobStatus?: string, maxPoints = DEFAULT_MAX_POINTS) {
+function normalizeOptions(options: UseJobMetricsOptions | undefined) {
+  if (typeof options === 'number') {
+    return {
+      maxPoints: options,
+      keys: DEFAULT_METRIC_KEYS,
+      enabled: true,
+    };
+  }
+
+  const keys = options?.keys?.map(key => key.trim()).filter(Boolean);
+  return {
+    maxPoints: options?.maxPoints ?? DEFAULT_MAX_POINTS,
+    keys: keys?.length ? keys : DEFAULT_METRIC_KEYS,
+    enabled: options?.enabled ?? true,
+  };
+}
+
+export default function useJobMetrics(
+  jobID: string,
+  jobStatus?: string,
+  options: UseJobMetricsOptions = DEFAULT_MAX_POINTS,
+) {
+  const normalizedOptions = normalizeOptions(options);
+  const maxPoints = normalizedOptions.maxPoints;
+  const metricKeys = normalizedOptions.keys.join(',');
+  const enabled = normalizedOptions.enabled;
   const [series, setSeries] = useState<SeriesMap>({});
   const [latest, setLatest] = useState<LatestMap>({});
   const [keys, setKeys] = useState<string[]>([]);
@@ -64,7 +96,7 @@ export default function useJobMetrics(jobID: string, jobStatus?: string, maxPoin
 
   const refreshMetrics = useCallback(
     async (options: { full?: boolean } = {}) => {
-      if (!jobID || inFlightRef.current) return;
+      if (!enabled || !jobID || inFlightRef.current) return;
 
       const full = options.full || !didInitialLoadRef.current || needsFullRefreshRef.current;
       needsFullRefreshRef.current = false;
@@ -77,7 +109,7 @@ export default function useJobMetrics(jobID: string, jobStatus?: string, maxPoin
 
       try {
         const params: Record<string, string | number | undefined> = {
-          keys: DEFAULT_METRIC_KEYS.join(','),
+          keys: metricKeys,
           max_points: maxPoints,
         };
         if (!full) {
@@ -138,7 +170,7 @@ export default function useJobMetrics(jobID: string, jobStatus?: string, maxPoin
         inFlightRef.current = false;
       }
     },
-    [jobID, maxPoints],
+    [enabled, jobID, maxPoints, metricKeys],
   );
 
   useEffect(() => {
@@ -151,16 +183,19 @@ export default function useJobMetrics(jobID: string, jobStatus?: string, maxPoin
     setKeys([]);
     setVersion(0);
     setStatus('idle');
-    refreshMetrics({ full: true });
+    if (enabled) {
+      refreshMetrics({ full: true });
+    }
 
     return () => abortRef.current?.abort();
-  }, [jobID, refreshMetrics]);
+  }, [enabled, jobID, refreshMetrics]);
 
   const pollInterval = useMemo(() => {
+    if (!enabled) return null;
     if (isTerminalStatus(jobStatus)) return null;
     if (isSlowPollingStatus(jobStatus)) return 10_000;
     return 2_000;
-  }, [jobStatus]);
+  }, [enabled, jobStatus]);
 
   useEffect(() => {
     if (!pollInterval) return;

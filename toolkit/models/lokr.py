@@ -77,6 +77,8 @@ def make_kron(w1, w2, scale):
 
 
 class LokrModule(ToolkitModuleMixin, nn.Module):
+    _warned_normal_dropout = False
+
     def __init__(
         self,
         lora_name,
@@ -190,7 +192,10 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
         self.dropout = dropout
         if dropout:
-            print("[WARN]LoKr haven't implemented normal dropout yet.")
+            if not LokrModule._warned_normal_dropout:
+                print("[WARN]LoKr does not support normal dropout yet; ignoring dropout.")
+                LokrModule._warned_normal_dropout = True
+            self.dropout = None
         self.rank_dropout = rank_dropout
         self.module_dropout = module_dropout
 

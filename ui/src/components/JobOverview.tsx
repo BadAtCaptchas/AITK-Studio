@@ -6,10 +6,16 @@ import CPUWidget from '@/components/CPUWidget';
 import FilesWidget from '@/components/FilesWidget';
 import TensorBoardLink from '@/components/TensorBoardLink';
 import { JobAdvisorPanel } from '@/components/TrainingAdvisorPanel';
-import { getTotalSteps } from '@/utils/jobs';
-import { Cpu, HardDrive, Info, Gauge } from 'lucide-react';
+import { getJobConfig, getTotalSteps } from '@/utils/jobs';
+import {
+  buildTrainingPhaseSummary,
+  hasTrainingPhases,
+  type TrainingPhaseSummary,
+} from '@/utils/trainingPhaseSummary';
+import { Cpu, HardDrive, Info, Gauge, Layers } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useJobLog from '@/hooks/useJobLog';
+import useJobMetrics from '@/hooks/useJobMetrics';
 import useJobDownloadProgress from '@/hooks/useJobDownloadProgress';
 import { HFDownloadProgressBand } from '@/components/HFDownloadProgress';
 
@@ -19,6 +25,70 @@ interface JobOverviewProps {
 
 function isLiveJob(job: Job) {
   return job.status === 'queued' || job.status === 'running' || job.status === 'stopping';
+}
+
+function formatPhaseValue(value: number) {
+  return value.toLocaleString();
+}
+
+function usefulPhaseReason(reason: string | null) {
+  if (!reason || reason === 'initial' || reason === 'resume') return null;
+  return reason.replace(/_/g, ' ');
+}
+
+function phaseDetailText(summary: TrainingPhaseSummary) {
+  if (summary.phaseStep !== null && summary.phaseSteps !== null) {
+    return `Phase step ${formatPhaseValue(summary.phaseStep)} of ${formatPhaseValue(summary.phaseSteps)}`;
+  }
+  if (summary.phaseStep !== null) {
+    return `Phase step ${formatPhaseValue(summary.phaseStep)}`;
+  }
+  if (summary.telemetryPending) {
+    return 'Open-ended auto learn phase; waiting for telemetry';
+  }
+  if (summary.isAutoTrain) {
+    return 'Open-ended auto learn phase';
+  }
+  return 'Phase step unavailable';
+}
+
+function phaseStatusText(summary: TrainingPhaseSummary) {
+  const reason = usefulPhaseReason(summary.reason);
+  if (reason) return `Last transition: ${reason}`;
+  if (summary.telemetryPending) return 'Telemetry pending';
+  return summary.source === 'metrics' ? 'Live telemetry' : 'Estimated from config';
+}
+
+function TrainingPhaseOverview({ summary }: { summary: TrainingPhaseSummary }) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-950/50 px-4 py-3 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Layers className="w-5 h-5 text-cyan-400 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs text-gray-400">Training phase</p>
+            <p className="text-sm font-medium text-gray-100 truncate">
+              Phase {summary.index + 1} of {summary.count}: {summary.name}
+            </p>
+          </div>
+        </div>
+        <span className="rounded-full border border-gray-700 bg-gray-900 px-2.5 py-1 text-xs text-gray-300">
+          {summary.isAutoTrain ? 'Auto learn' : 'Phased'}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span className="text-gray-300">{phaseDetailText(summary)}</span>
+        <span className="text-gray-500">{phaseStatusText(summary)}</span>
+      </div>
+
+      {summary.progress !== null && (
+        <div className="w-full bg-gray-800 rounded-full h-1.5">
+          <div className="h-1.5 rounded-full bg-cyan-500 transition-all" style={{ width: `${summary.progress}%` }} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function JobOverview({ job }: JobOverviewProps) {
@@ -46,6 +116,35 @@ export default function JobOverview({ job }: JobOverviewProps) {
   const { cpuInfo, isCPUInfoLoaded } = useCPUInfo(systemPollInterval, job.worker_id);
   const totalSteps = getTotalSteps(job);
   const progress = totalSteps && totalSteps > 0 ? (job.step / totalSteps) * 100 : null;
+  const jobType = job?.job_type || 'unknown';
+  const trainConfig = useMemo(() => {
+    if (jobType !== 'train') return null;
+    try {
+      return getJobConfig(job).config.process[0]?.train ?? null;
+    } catch {
+      return null;
+    }
+  }, [job.job_config, jobType]);
+  const hasPhaseOverview = jobType === 'train' && hasTrainingPhases(trainConfig);
+  const phaseMetricsOptions = useMemo(
+    () => ({
+      keys: ['phase/*'],
+      maxPoints: 100,
+      enabled: hasPhaseOverview,
+    }),
+    [hasPhaseOverview],
+  );
+  const { latest: phaseMetricLatest } = useJobMetrics(job.id, job.status, phaseMetricsOptions);
+  const phaseSummary = useMemo(
+    () =>
+      buildTrainingPhaseSummary(trainConfig, job.step, {
+        index: phaseMetricLatest['phase/index'],
+        name: phaseMetricLatest['phase/name'],
+        step: phaseMetricLatest['phase/step'],
+        reason: phaseMetricLatest['phase/reason'],
+      }),
+    [job.step, phaseMetricLatest, trainConfig],
+  );
 
   const logLines: string[] = useMemo(() => {
     // split at line breaks on \n or \r\n but not \r
@@ -98,8 +197,6 @@ export default function JobOverview({ job }: JobOverviewProps) {
     }
   };
 
-  const jobType = job?.job_type || 'unknown';
-
   let status = job.status;
   if (isStopping) {
     status = 'stopping';
@@ -144,6 +241,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
               )}
             </div>
           )}
+          {phaseSummary && <TrainingPhaseOverview summary={phaseSummary} />}
 
           {/* Job Info Grid */}
           <div className="grid gap-4 grid-cols-1 md:grid-cols-3">

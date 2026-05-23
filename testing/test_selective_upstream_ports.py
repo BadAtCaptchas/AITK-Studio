@@ -63,6 +63,34 @@ class FakeMetricKeysCollection:
 
 
 class SelectiveUpstreamPortsTest(unittest.TestCase):
+    def test_zimage_l2p_upstream_port_is_registered(self):
+        registry_source = (
+            PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__init__.py"
+        ).read_text(encoding="utf-8")
+        zimage_init_source = (
+            PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "z_image" / "__init__.py"
+        ).read_text(encoding="utf-8")
+        ui_options_source = (
+            PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('"ZImageL2PModel", "zimage_l2p"', registry_source)
+        self.assertIn("ZImageL2PModel,", registry_source)
+        self.assertIn('if name == "ZImageL2PModel":', zimage_init_source)
+        self.assertIn("name: 'zimage_l2p'", ui_options_source)
+        self.assertIn("Z-Image L2P (pixel space)", ui_options_source)
+
+    def test_sample_viewer_delete_port_preserves_remote_media_helpers(self):
+        source = (
+            PROJECT_ROOT / "ui" / "src" / "components" / "SampleImageViewer.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("getDisplayPath, getMediaUrl, parseRemoteAssetRef", source)
+        self.assertIn("const canDeleteSample", source)
+        self.assertIn("handleDelete", source)
+        self.assertIn("case 'Delete':", source)
+        self.assertNotIn("react-zoom-pan-pinch", source)
+
     def test_sqlite_ui_logger_prunes_future_steps_on_resume(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = str(Path(tmpdir) / "loss_log.db")

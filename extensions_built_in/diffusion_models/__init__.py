@@ -73,7 +73,10 @@ Flux2Model, Flux2Klein4BModel, Flux2Klein9BModel, AsymFlux2Klein9BModel = _optio
         ("AsymFlux2Klein9BModel", "asymflux2_klein_9b"),
     ),
 )
-ZImageModel, = _optional_models(".z_image", (("ZImageModel", "zimage"),))
+ZImageModel, = _optional_models(".z_image.z_image", (("ZImageModel", "zimage"),))
+ZImageL2PModel, = _optional_models(
+    ".z_image.z_image_l2p_model", (("ZImageL2PModel", "zimage_l2p"),)
+)
 LTX2Model, LTX23Model = _optional_models(
     ".ltx2",
     (
@@ -113,6 +116,7 @@ AI_TOOLKIT_MODELS = [
     QwenImageEditPlusModel,
     Flux2Model,
     ZImageModel,
+    ZImageL2PModel,
     LTX2Model,
     LTX23Model,
     Flux2Klein4BModel,

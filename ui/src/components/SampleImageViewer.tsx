@@ -132,6 +132,32 @@ export default function SampleImageViewer({
     setImageAtIndex(nextIdx);
   }, [sampleImages, currentIndex, imgInfo.promptIdx, setImageAtIndex]);
 
+  const canDeleteSample = useMemo(() => Boolean(imgPath && !parseRemoteAssetRef(imgPath)), [imgPath]);
+
+  const handleDelete = useCallback(() => {
+    if (!imgPath || !canDeleteSample) return;
+    openConfirm({
+      title: 'Delete Sample',
+      message: 'Are you sure you want to delete this sample? This action cannot be undone.',
+      type: 'warning',
+      confirmText: 'Delete',
+      onConfirm: () => {
+        apiClient
+          .post('/api/img/delete', { imgPath: imgPath })
+          .then(() => {
+            console.log('Image deleted:', imgPath);
+            onChange(null);
+            if (refreshSampleImages) {
+              refreshSampleImages();
+            }
+          })
+          .catch(error => {
+            console.error('Error deleting image:', error);
+          });
+      },
+    });
+  }, [imgPath, canDeleteSample, onChange, refreshSampleImages]);
+
   const sampleItem = useMemo<SampleItem | null>(() => {
     if (!sampleConfig) return null;
     if (imgInfo.promptIdx < 0) return null;
@@ -199,13 +225,17 @@ export default function SampleImageViewer({
         case 'ArrowRight':
           handleArrowRight();
           break;
+        case 'Delete':
+        case 'Backspace':
+          handleDelete();
+          break;
         default:
           break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onCancel, handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight]);
+  }, [isOpen, onCancel, handleArrowUp, handleArrowDown, handleArrowLeft, handleArrowRight, handleDelete]);
 
   if (!mounted) return null;
 
@@ -319,34 +349,9 @@ export default function SampleImageViewer({
                       </a>
                     </MenuItem>
                   )}
-                  {imgPath && !parseRemoteAssetRef(imgPath) && (
+                  {canDeleteSample && (
                     <MenuItem>
-                      <div
-                        className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded"
-                        onClick={() => {
-                          let message = `Are you sure you want to delete this sample? This action cannot be undone.`;
-                          openConfirm({
-                            title: 'Delete Sample',
-                            message: message,
-                            type: 'warning',
-                            confirmText: 'Delete',
-                            onConfirm: () => {
-                              apiClient
-                                .post('/api/img/delete', { imgPath: imgPath })
-                                .then(() => {
-                                  console.log('Image deleted:', imgPath);
-                                  onChange(null);
-                                  if (refreshSampleImages) {
-                                    refreshSampleImages();
-                                  }
-                                })
-                                .catch(error => {
-                                  console.error('Error deleting image:', error);
-                                });
-                            },
-                          });
-                        }}
-                      >
+                      <div className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded" onClick={handleDelete}>
                         Delete Sample
                       </div>
                     </MenuItem>

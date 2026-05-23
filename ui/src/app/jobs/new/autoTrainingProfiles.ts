@@ -248,7 +248,6 @@ export const builtInAutoTrainingProfiles: AutoTrainingProfile[] = [
     compatibleArchs: [...flowImageArchs, ...sdArchs],
     network: {
       type: 'lokr',
-      dropout: 0.05,
       lokr_factor: 8,
       lokr_full_rank: false,
     },
@@ -486,7 +485,6 @@ export const builtInAutoTrainingProfiles: AutoTrainingProfile[] = [
     compatibleArchs: [...anatomyRealismArchs, 'hidream'],
     network: {
       type: 'lokr',
-      dropout: 0.03,
       lokr_factor: 8,
       lokr_full_rank: false,
     },

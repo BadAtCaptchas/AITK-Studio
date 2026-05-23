@@ -145,6 +145,17 @@ class GlmImageStaticSupportTest(unittest.TestCase):
         self.assertIn("phase('Polish style', 0.000015", source)
         self.assertIn("phase('Polish style', 0.00001", source)
 
+    def test_lokr_auto_training_profiles_do_not_set_normal_dropout(self):
+        source = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
+
+        for profile_id in ("anatomy-lokr", "anatomy-realism-lokr"):
+            start = source.index(f"id: '{profile_id}'")
+            end = source.find("\n  {", start + 1)
+            block = source[start:] if end == -1 else source[start:end]
+
+            self.assertIn("type: 'lokr'", block)
+            self.assertNotIn("dropout:", block)
+
     def test_training_phase_editor_filters_profiles_by_model(self):
         editor_source = TRAINING_PHASES_EDITOR_PATH.read_text(encoding="utf-8")
         simple_job_source = SIMPLE_JOB_PATH.read_text(encoding="utf-8")

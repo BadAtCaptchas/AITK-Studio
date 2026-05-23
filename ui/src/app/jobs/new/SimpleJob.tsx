@@ -78,6 +78,8 @@ export default function SimpleJob({
   }, [modelArch, jobType]);
 
   const isVideoModel = !!(modelArch?.group === 'video');
+  const networkType = jobConfig.config.process[0].network?.type ?? 'lora';
+  const supportsNormalNetworkDropout = networkType !== 'lokr';
   const isAudioModel = !!(modelArch?.group === 'audio');
   const autoTrain = !!jobConfig.config.process[0].train.auto_train;
 
@@ -453,14 +455,19 @@ export default function SimpleJob({
           <Card title="Target">
             <SelectInput
               label="Target Type"
-              value={jobConfig.config.process[0].network?.type ?? 'lora'}
-              onChange={value => setJobConfig(value, 'config.process[0].network.type')}
+              value={networkType}
+              onChange={value => {
+                setJobConfig(value, 'config.process[0].network.type');
+                if (value === 'lokr') {
+                  setJobConfig(undefined, 'config.process[0].network.dropout');
+                }
+              }}
               options={[
                 { value: 'lora', label: 'LoRA' },
                 { value: 'lokr', label: 'LoKr' },
               ]}
             />
-            {jobConfig.config.process[0].network?.type == 'lokr' && (
+            {networkType == 'lokr' && (
               <SelectInput
                 label="LoKr Factor"
                 value={`${jobConfig.config.process[0].network?.lokr_factor ?? -1}`}
@@ -474,11 +481,11 @@ export default function SimpleJob({
                 ]}
               />
             )}
-            {jobConfig.config.process[0].network?.type == 'lora' && (
+            {networkType == 'lora' && (
               <>
                 <NumberInput
                   label="Linear Rank"
-                  value={jobConfig.config.process[0].network.linear}
+                  value={jobConfig.config.process[0].network?.linear ?? null}
                   onChange={value => {
                     console.log('onChange', value);
                     setJobConfig(value, 'config.process[0].network.linear');
@@ -492,7 +499,7 @@ export default function SimpleJob({
                 {disableSections.includes('network.conv') ? null : (
                   <NumberInput
                     label="Conv Rank"
-                    value={jobConfig.config.process[0].network.conv}
+                    value={jobConfig.config.process[0].network?.conv ?? null}
                     onChange={value => {
                       console.log('onChange', value);
                       setJobConfig(value, 'config.process[0].network.conv');
@@ -505,15 +512,17 @@ export default function SimpleJob({
                 )}
               </>
             )}
-            <NumberInput
-              label="Network Dropout"
-              className="pt-2"
-              value={jobConfig.config.process[0].network?.dropout ?? null}
-              onChange={value => setJobConfig(value ?? undefined, 'config.process[0].network.dropout')}
-              placeholder="eg. 0.05"
-              min={0}
-              max={1}
-            />
+            {supportsNormalNetworkDropout && (
+              <NumberInput
+                label="Network Dropout"
+                className="pt-2"
+                value={jobConfig.config.process[0].network?.dropout ?? null}
+                onChange={value => setJobConfig(value ?? undefined, 'config.process[0].network.dropout')}
+                placeholder="eg. 0.05"
+                min={0}
+                max={1}
+              />
+            )}
           </Card>
           {!disableSections.includes('slider') && (
             <Card title="Slider">

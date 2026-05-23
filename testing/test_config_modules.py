@@ -33,6 +33,11 @@ class NetworkConfigTest(unittest.TestCase):
 
         self.assertEqual(config.pretrained_lora_path, "C:/models/canonical.safetensors")
 
+    def test_lokr_normal_dropout_is_ignored(self):
+        config = NetworkConfig(type="lokr", dropout=0.05)
+
+        self.assertIsNone(config.dropout)
+
 
 if __name__ == "__main__":
     unittest.main()

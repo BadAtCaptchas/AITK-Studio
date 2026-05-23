@@ -132,6 +132,10 @@ function cloneProfile(profile: AutoTrainingProfile): AutoTrainingProfile {
   };
 }
 
+function supportsNormalNetworkDropout(networkType?: string): boolean {
+  return networkType?.toLowerCase() !== 'lokr';
+}
+
 function sanitizeStoredProfiles(raw: unknown): AutoTrainingProfile[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -280,6 +284,7 @@ export default function TrainingPhasesEditor({
 
   const applyAutoProfile = (profile: AutoTrainingProfile) => {
     const nextProfile = cloneProfile(profile);
+    const profileNetworkType = nextProfile.network?.type ?? network?.type;
     setSelectedProfileID(nextProfile.id);
     setJobConfig(true, 'config.process[0].train.auto_train');
 
@@ -289,7 +294,12 @@ export default function TrainingPhasesEditor({
       setJobConfig(value, `config.process[0].train.${key}`);
     }
 
+    if (!supportsNormalNetworkDropout(profileNetworkType)) {
+      setJobConfig(undefined, 'config.process[0].network.dropout');
+    }
+
     for (const [key, value] of Object.entries(nextProfile.network ?? {})) {
+      if (key === 'dropout' && !supportsNormalNetworkDropout(profileNetworkType)) continue;
       setJobConfig(value, `config.process[0].network.${key}`);
     }
 
@@ -372,7 +382,7 @@ export default function TrainingPhasesEditor({
             linear_alpha: network.linear_alpha,
             conv: network.conv,
             conv_alpha: network.conv_alpha,
-            dropout: network.dropout,
+            dropout: supportsNormalNetworkDropout(network.type) ? network.dropout : undefined,
             lokr_factor: network.lokr_factor,
             lokr_full_rank: network.lokr_full_rank,
             network_kwargs: network.network_kwargs ? clonePlainValue(network.network_kwargs) : undefined,

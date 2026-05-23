@@ -411,7 +411,7 @@ In the UI, open `New Job`, go to `Training Phases`, and enable `Auto learn`. Fix
 
 The profile dropdown includes an `Anatomy LoKr` preset with three open-ended stages:
 
-- Teach: AdamW, `lr: 0.00002`, weighted high-noise timesteps, MSE loss, `dropout: 0.05`, `weight_decay: 0.0001`, LoKr factor 8.
+- Teach: AdamW, `lr: 0.00002`, weighted high-noise timesteps, MSE loss, `weight_decay: 0.0001`, LoKr factor 8.
 - Stabilize: AdamW, `lr: 0.00001`, weighted balanced timesteps, MSE loss.
 - Fine detail cleanup: AdamW, `lr: 0.000005`, weighted low-noise timesteps, MSE loss.
 

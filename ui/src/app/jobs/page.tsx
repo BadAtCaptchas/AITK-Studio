@@ -49,7 +49,10 @@ function getImportErrorMessage(error: unknown) {
 function getImportProgressPercent(status: ImportStatus) {
   if (status.phase === 'completed') return 100;
   if (status.phase === 'processing') return 72;
-  if (status.phase === 'failed') return status.uploadPercent ? Math.max(8, Math.round(status.uploadPercent * 0.65)) : 8;
+  if (status.phase === 'failed') {
+    if (status.uploadPercent !== null && status.uploadPercent >= 100) return 72;
+    return status.uploadPercent ? Math.max(8, Math.round(status.uploadPercent * 0.65)) : 8;
+  }
   if (status.uploadPercent === null) return 8;
   return Math.max(8, Math.round(status.uploadPercent * 0.65));
 }
@@ -163,8 +166,14 @@ export default function Dashboard() {
 
   const importProgressPercent = importStatus ? getImportProgressPercent(importStatus) : 0;
   const importTarget = importStatus?.gpuIDs ? `GPU #${importStatus.gpuIDs}` : 'Default GPU';
-  const importUploadComplete = importStatus ? ['processing', 'completed'].includes(importStatus.phase) : false;
+  const importUploadComplete = importStatus
+    ? ['processing', 'completed'].includes(importStatus.phase) ||
+      (importStatus.phase === 'failed' && importStatus.uploadPercent !== null && importStatus.uploadPercent >= 100)
+    : false;
   const importProcessingComplete = importStatus?.phase === 'completed';
+  const importUploadFailed =
+    importStatus?.phase === 'failed' && (importStatus.uploadPercent === null || importStatus.uploadPercent < 100);
+  const importRestoreFailed = importStatus?.phase === 'failed' && !importUploadFailed;
 
   return (
     <>
@@ -279,7 +288,7 @@ export default function Dashboard() {
                     className={`rounded border px-3 py-2 ${getStageClass(
                       importStatus.phase === 'uploading',
                       importUploadComplete,
-                      importStatus.phase === 'failed',
+                      importUploadFailed,
                     )}`}
                   >
                     <div className="font-medium">Upload</div>
@@ -291,6 +300,7 @@ export default function Dashboard() {
                     className={`rounded border px-3 py-2 ${getStageClass(
                       importStatus.phase === 'processing',
                       importProcessingComplete,
+                      importRestoreFailed,
                     )}`}
                   >
                     <div className="font-medium">Restore</div>

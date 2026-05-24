@@ -720,6 +720,8 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.timestep_type': ['linear', 'sigmoid'],
       'config.process[0].network.conv': [undefined, 16],
       'config.process[0].network.conv_alpha': [undefined, 16],
+      'config.process[0].network.network_kwargs.only_if_contains': [[], []],
+      'config.process[0].network.network_kwargs.ignore_if_contains': [[], []],
       'config.process[0].model.low_vram': [true, false],
     },
     disableSections: ['network.conv'],

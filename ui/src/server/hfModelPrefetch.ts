@@ -18,6 +18,10 @@ function trimOutput(value: string, maxLength = 6000) {
   return value.length > maxLength ? value.slice(value.length - maxLength) : value;
 }
 
+export function normalizeModelReferenceValue(value: string) {
+  return value.trim().replace(/\\/g, '/');
+}
+
 async function runModelPrefetchScript(inputPath: string): Promise<HfModelPrefetchResult> {
   const pythonPath = getToolkitPythonPath();
   const scriptPath = path.join(TOOLKIT_ROOT, 'scripts', 'prefetch_hf_models.py');
@@ -75,10 +79,19 @@ export async function prefetchModelReferences(references: ModelReference[]): Pro
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-model-prefetch-'));
   const inputPath = path.join(tempDir, 'references.json');
   try {
-    await fs.writeFile(inputPath, JSON.stringify({ references }), 'utf8');
+    await fs.writeFile(
+      inputPath,
+      JSON.stringify({
+        references: references.map(reference => ({
+          ...reference,
+          value: normalizeModelReferenceValue(reference.value),
+        })),
+      }),
+      'utf8',
+    );
     const result = await runModelPrefetchScript(inputPath);
     return {
-      handledValues: Array.isArray(result.handledValues) ? result.handledValues : [],
+      handledValues: Array.isArray(result.handledValues) ? result.handledValues.map(normalizeModelReferenceValue) : [],
       downloads: Array.isArray(result.downloads) ? result.downloads : [],
       warnings: Array.isArray(result.warnings) ? result.warnings : [],
     };

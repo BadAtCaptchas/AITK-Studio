@@ -68,6 +68,7 @@ from toolkit.util.quantize import quantize, get_qtype
 from toolkit.accelerator import get_accelerator, unwrap_model
 from typing import TYPE_CHECKING
 from toolkit.print import print_acc
+from toolkit.hf_model_paths import resolve_hub_single_file_path
 from diffusers import FluxFillPipeline
 from transformers import AutoModel, AutoTokenizer, Gemma2Model, Qwen2Model, LlamaModel
 from toolkit.basic import flush
@@ -314,6 +315,7 @@ class StableDiffusion:
                 # pipln = StableDiffusionKDiffusionXLPipeline
 
             # see if path exists
+            model_path = resolve_hub_single_file_path(model_path, "base model")
             if not os.path.exists(model_path) or os.path.isdir(model_path):
                 # try to load with default diffusers
                 pipe = pipln.from_pretrained(
@@ -972,6 +974,7 @@ class StableDiffusion:
                 load_args['text_encoder'] = text_encoder
 
             # see if path exists
+            model_path = resolve_hub_single_file_path(model_path, "base model")
             if not os.path.exists(model_path) or os.path.isdir(model_path):
                 # try to load with default diffusers
                 pipe = pipln.from_pretrained(
@@ -1092,6 +1095,7 @@ class StableDiffusion:
             # load the refiner model
             dtype = get_torch_dtype(self.dtype)
             model_path = self.model_config.refiner_name_or_path
+            model_path = resolve_hub_single_file_path(model_path, "refiner model")
             if not os.path.exists(model_path) or os.path.isdir(model_path):
                 # TODO only load unet??
                 refiner = StableDiffusionXLImg2ImgPipeline.from_pretrained(
@@ -2726,6 +2730,7 @@ class StableDiffusion:
         # load the refiner model
         dtype = get_torch_dtype(self.dtype)
         model_path = self.model_config._original_refiner_name_or_path
+        model_path = resolve_hub_single_file_path(model_path, "refiner model")
         if not os.path.exists(model_path) or os.path.isdir(model_path):
             # TODO only load unet??
             refiner = StableDiffusionXLImg2ImgPipeline.from_pretrained(

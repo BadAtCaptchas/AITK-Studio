@@ -3,6 +3,7 @@ import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import { getDisplayPath, getDownloadUrl } from '@/utils/media';
 import type { EncryptedDatasetStartKey } from '@/types';
+import type { AxiosProgressEvent } from 'axios';
 import {
   derivePasswordKey,
   exportRawAesKey,
@@ -36,6 +37,17 @@ export type TrainingJobExportProgress = {
 export type TrainingJobExportResult = {
   zipPath: string;
   fileName: string;
+  warnings: string[];
+};
+
+export type TrainingJobImportProgress = {
+  loaded: number;
+  total: number | null;
+  percent: number | null;
+};
+
+export type TrainingJobImportResult = {
+  job: Job;
   warnings: string[];
 };
 
@@ -199,7 +211,11 @@ export const cancelTrainingJobExport = (jobID: string, exportID: string) => {
     .then(res => res.data as TrainingJobExportProgress);
 };
 
-export const importTrainingJob = (file: File, gpuIDs: string | null) => {
+export const importTrainingJob = (
+  file: File,
+  gpuIDs: string | null,
+  onUploadProgress?: (progress: TrainingJobImportProgress) => void,
+) => {
   const formData = new FormData();
   formData.append('file', file);
   if (gpuIDs) {
@@ -209,8 +225,16 @@ export const importTrainingJob = (file: File, gpuIDs: string | null) => {
   return apiClient
     .post('/api/jobs/import', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (event: AxiosProgressEvent) => {
+        const total = event.total && event.total > 0 ? event.total : file.size || null;
+        onUploadProgress?.({
+          loaded: event.loaded,
+          total,
+          percent: total ? Math.min(100, Math.round((event.loaded / total) * 100)) : null,
+        });
+      },
     })
-    .then(res => res.data as { job: Job; warnings: string[] });
+    .then(res => res.data as TrainingJobImportResult);
 };
 
 export const downloadServerFile = (filePath: string, fileName?: string) => {

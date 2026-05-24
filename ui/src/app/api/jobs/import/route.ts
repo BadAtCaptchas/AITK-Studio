@@ -17,10 +17,12 @@ import {
   resolveConfigPath,
   rewriteJobConfigForTarget,
   safeNameSegment,
+  setConfigPathValue,
   validateArchiveEntryName,
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
 import { db } from '@/server/db';
+import { prefetchModelReferences } from '@/server/hfModelPrefetch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -183,6 +185,15 @@ export async function POST(request: NextRequest) {
       warnings.push(`Imported job was renamed to "${importedName}" because the original name was unavailable.`);
     }
 
+    const modelPrefetch = await prefetchModelReferences(manifest.models.references || []);
+    warnings.push(...(modelPrefetch.warnings || []));
+    const prefetchedModelValues = new Set(modelPrefetch.handledValues || []);
+    const prefetchedFilePathByValue = new Map<string, string>(
+      (modelPrefetch.downloads || [])
+        .filter(download => download.kind === 'file' && download.value && download.path)
+        .map(download => [download.value, download.path] as const),
+    );
+
     const trainingSource = getExtractedArchivePath(extractRoot, manifest.training.archivePath);
     const finalTrainingFolder = path.join(trainingRoot, importedName);
     await copyArchivePath(trainingSource, finalTrainingFolder);
@@ -214,6 +225,7 @@ export async function POST(request: NextRequest) {
 
     for (const reference of manifest.models.references || []) {
       if (!reference.isLocal) continue;
+      if (prefetchedModelValues.has(reference.value)) continue;
       const targetPath = resolveConfigPath(reference.value);
       if (!fs.existsSync(targetPath)) {
         warnings.push(`Local model reference is not present on this system: ${reference.value}`);
@@ -232,6 +244,12 @@ export async function POST(request: NextRequest) {
       sqliteDbPath: path.join(TOOLKIT_ROOT, 'aitk_db.db'),
       datasetPathByConfigPath,
     });
+    for (const reference of manifest.models.references || []) {
+      const localModelPath = prefetchedFilePathByValue.get(reference.value);
+      if (localModelPath) {
+        setConfigPathValue(rewrittenConfig, reference.configPath, localModelPath);
+      }
+    }
 
     await fsp.writeFile(path.join(finalTrainingFolder, '.job_config.json'), JSON.stringify(rewrittenConfig, null, 2));
     await fsp.writeFile(

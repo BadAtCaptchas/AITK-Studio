@@ -1,0 +1,34 @@
+{
+  "name": "AI Toolkit Blackwell",
+  "category": "NVIDIA",
+  "imageName": "REPLACE_WITH_YOUR_REGISTRY/ai-toolkit:0.9.10-blackwell",
+  "isPublic": false,
+  "isServerless": false,
+  "containerDiskInGb": 100,
+  "volumeInGb": 250,
+  "volumeMountPath": "/workspace",
+  "ports": [
+    "8675/http",
+    "6006/http",
+    "22/tcp"
+  ],
+  "dockerEntrypoint": [],
+  "dockerStartCmd": [],
+  "env": {
+    "AI_TOOLKIT_AUTH": "{{ RUNPOD_SECRET_ai_toolkit_auth }}",
+    "AITK_PERSIST_ROOT": "/workspace/ai-toolkit",
+    "AITK_DB_PROVIDER": "sqlite",
+    "AITK_SQLITE_PATH": "/workspace/ai-toolkit/aitk_db.db",
+    "AITK_ENABLE_TENSORBOARD": "0",
+    "AITK_TENSORBOARD_PORT": "6006",
+    "AITK_TENSORBOARD_HOST": "0.0.0.0",
+    "HF_HOME": "/workspace/.cache/huggingface",
+    "HUGGINGFACE_HUB_CACHE": "/workspace/.cache/huggingface/hub",
+    "HF_HUB_ENABLE_HF_TRANSFER": "1",
+    "NODE_ENV": "production",
+    "PYTHONUNBUFFERED": "1",
+    "PYTHONIOENCODING": "utf-8",
+    "TZ": "UTC"
+  },
+  "readme": "AI Toolkit RunPod Blackwell template. See runpod/README.md in https://github.com/rmcc3/ai-toolkit for build, deployment, and operating instructions."
+}

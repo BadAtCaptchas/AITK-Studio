@@ -486,7 +486,7 @@ You will instantiate a UI that will let you upload your images, caption them, tr
 
 ## Training in RunPod
 
-There is no maintained RunPod template for this fork. To run on RunPod, create a pod with a compatible Python and CUDA environment, clone `https://github.com/rmcc3/ai-toolkit.git`, and follow the installation steps above inside the pod.
+This fork includes a maintained private RunPod Pod template for the revamped UI. See [`runpod/README.md`](runpod/README.md) for the Blackwell-first template, persistent volume layout, required `AI_TOOLKIT_AUTH` secret, and access URL format: `https://<POD_ID>-8675.proxy.runpod.net`.
 
 ## Training in Modal
 

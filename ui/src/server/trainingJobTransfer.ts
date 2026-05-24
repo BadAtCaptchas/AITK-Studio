@@ -268,6 +268,15 @@ export async function listFilesRecursive(root: string, shouldInclude: (absoluteP
   return files;
 }
 
+const DATASET_CACHE_DIR_NAMES = new Set(['_latent_cache', '_clip_vision_cache', '_t_e_cache']);
+
+export function shouldIncludeDatasetExportPath(_absolutePath: string, relativePath: string) {
+  const normalized = relativePath.replace(/\\/g, '/');
+  if (!normalized) return true;
+
+  return !normalized.split('/').some(segment => DATASET_CACHE_DIR_NAMES.has(segment));
+}
+
 export function shouldIncludeTrainingExportPath(_absolutePath: string, relativePath: string) {
   const normalized = relativePath.replace(/\\/g, '/');
   const basename = path.basename(relativePath);

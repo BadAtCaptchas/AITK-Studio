@@ -14,6 +14,7 @@ import {
   listFilesRecursive,
   makeExportFileName,
   resolveConfigPath,
+  shouldIncludeDatasetExportPath,
   shouldIncludeTrainingExportPath,
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
@@ -156,7 +157,12 @@ export async function createRemoteTrainingJobBundle(
   const datasetFiles = (
     await Promise.all(
       datasetMappings.map(mapping =>
-        collectFilesForArchive(resolveConfigPath(mapping.originalPath), mapping.archivePath, mapping.isDirectory),
+        collectFilesForArchive(
+          resolveConfigPath(mapping.originalPath),
+          mapping.archivePath,
+          mapping.isDirectory,
+          shouldIncludeDatasetExportPath,
+        ),
       ),
     )
   ).flat();

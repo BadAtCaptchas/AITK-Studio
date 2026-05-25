@@ -2,11 +2,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 
 const contentTypeMap: { [key: string]: string } = {
-  // Images
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
@@ -14,7 +14,6 @@ const contentTypeMap: { [key: string]: string } = {
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
   '.bmp': 'image/bmp',
-  // Videos
   '.mp4': 'video/mp4',
   '.avi': 'video/x-msvideo',
   '.mov': 'video/quicktime',
@@ -22,7 +21,6 @@ const contentTypeMap: { [key: string]: string } = {
   '.wmv': 'video/x-ms-wmv',
   '.m4v': 'video/x-m4v',
   '.flv': 'video/x-flv',
-  // Audio
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.flac': 'audio/flac',
@@ -59,42 +57,72 @@ function isPathInsideRoot(root: string, filepath: string) {
 export async function GET(request: NextRequest, { params }: { params: ImageRouteParams }) {
   const { imagePath } = await params;
   try {
-    // Decode the path
     const filepath = getRequestedPath(request, imagePath);
 
-    // Get allowed directories
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();
     const dataRoot = await getDataRoot();
 
-    const allowedDirs = (
-      await Promise.all([datasetRoot, trainingRoot, dataRoot].map(dir => resolveExistingDir(dir)))
-    ).filter((dir): dir is string => dir !== null);
+    const [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot] = await Promise.all(
+      [datasetRoot, trainingRoot, dataRoot].map(dir => resolveExistingDir(dir)),
+    );
+    const allowedDirs = [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot].filter(
+      (dir): dir is string => dir !== null,
+    );
 
-    // Security check: Ensure path is in allowed directory using canonical paths
     const canonicalPath = await fs.promises.realpath(filepath).catch(() => null);
-    const isAllowed =
-      canonicalPath !== null && allowedDirs.some(allowedDir => isPathInsideRoot(allowedDir, canonicalPath));
-
-    if (!isAllowed) {
+    if (!canonicalPath || !allowedDirs.some(allowedDir => isPathInsideRoot(allowedDir, canonicalPath))) {
       console.warn(`Access denied: ${filepath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
     }
 
-    if (canonicalPath && findEncryptedDatasetRoot(canonicalPath, datasetRoot)) {
+    if (canonicalDatasetRoot && findEncryptedDatasetRoot(canonicalPath, canonicalDatasetRoot)) {
       return new NextResponse('Encrypted dataset objects are not served through this route', { status: 403 });
     }
 
-    // Stat file (async)
+    if (request.signal.aborted) {
+      return new NextResponse(null, { status: 499 });
+    }
+
     const stat = await fs.promises.stat(canonicalPath).catch(() => null);
     if (!stat || !stat.isFile()) {
       return new NextResponse('File not found', { status: 404 });
     }
 
-    const ext = path.extname(filepath).toLowerCase();
+    const ext = path.extname(canonicalPath).toLowerCase();
     const contentType = contentTypeMap[ext] || 'application/octet-stream';
 
-    // Support range requests for video/audio seeking
+    const etag = `W/"${stat.ino.toString(36)}-${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
+    const cacheControl = 'public, max-age=86400, immutable';
+
+    const ifNoneMatch = request.headers.get('if-none-match');
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': cacheControl,
+        },
+      });
+    }
+
+    const buildBody = (start?: number, end?: number) => {
+      const nodeStream =
+        start !== undefined && end !== undefined
+          ? fs.createReadStream(canonicalPath, { start, end })
+          : fs.createReadStream(canonicalPath);
+
+      const onAbort = () => nodeStream.destroy();
+      if (request.signal.aborted) {
+        nodeStream.destroy();
+      } else {
+        request.signal.addEventListener('abort', onAbort, { once: true });
+      }
+      nodeStream.once('close', () => request.signal.removeEventListener('abort', onAbort));
+
+      return Readable.toWeb(nodeStream) as unknown as ReadableStream;
+    };
+
     const rangeHeader = request.headers.get('range');
     if (rangeHeader) {
       const parts = rangeHeader.replace(/bytes=/, '').split('-');
@@ -102,49 +130,26 @@ export async function GET(request: NextRequest, { params }: { params: ImageRoute
       const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
       const chunkSize = end - start + 1;
 
-      const stream = fs.createReadStream(canonicalPath, { start, end });
-      const readable = new ReadableStream({
-        start(controller) {
-          stream.on('data', chunk => controller.enqueue(chunk));
-          stream.on('end', () => controller.close());
-          stream.on('error', err => controller.error(err));
-        },
-        cancel() {
-          stream.destroy();
-        },
-      });
-
-      return new NextResponse(readable as any, {
+      return new NextResponse(buildBody(start, end) as any, {
         status: 206,
         headers: {
           'Content-Range': `bytes ${start}-${end}/${stat.size}`,
           'Accept-Ranges': 'bytes',
           'Content-Length': String(chunkSize),
           'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=86400',
+          'Cache-Control': cacheControl,
+          ETag: etag,
         },
       });
     }
 
-    // Stream the file instead of buffering it entirely
-    const stream = fs.createReadStream(canonicalPath);
-    const readable = new ReadableStream({
-      start(controller) {
-        stream.on('data', chunk => controller.enqueue(chunk));
-        stream.on('end', () => controller.close());
-        stream.on('error', err => controller.error(err));
-      },
-      cancel() {
-        stream.destroy();
-      },
-    });
-
-    return new NextResponse(readable as any, {
+    return new NextResponse(buildBody() as any, {
       headers: {
         'Content-Type': contentType,
         'Content-Length': String(stat.size),
-        'Cache-Control': 'public, max-age=86400',
+        'Cache-Control': cacheControl,
         'Accept-Ranges': 'bytes',
+        ETag: etag,
       },
     });
   } catch (error) {

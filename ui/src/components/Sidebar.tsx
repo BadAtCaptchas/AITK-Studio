@@ -3,6 +3,7 @@ import { Home, Settings, BrainCircuit, Images, Plus, Wand2 } from 'lucide-react'
 import { FaXTwitter, FaDiscord, FaYoutube } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
+import ActiveJobWidget from './ActiveJobWidget';
 
 const Sidebar = () => {
   const navigation = [
@@ -44,23 +45,27 @@ const Sidebar = () => {
           ))}
         </ul>
       </nav>
+      <ActiveJobWidget />
       <a
         href="https://ostris.com/support"
         target="_blank"
         rel="noreferrer"
-        className="flex items-center space-x-2 px-4 py-3"
+        className="group flex items-center space-x-2 px-4 py-3 text-gray-400 hover:text-gray-200 transition-colors"
       >
-        <div className="min-w-[26px] min-h-[26px]">
-          <svg height="24" version="1.1" width="24" xmlns="http://www.w3.org/2000/svg">
-            <g transform="translate(0 -1028.4)">
-              <path
-                d="m7 1031.4c-1.5355 0-3.0784 0.5-4.25 1.7-2.3431 2.4-2.2788 6.1 0 8.5l9.25 9.8 9.25-9.8c2.279-2.4 2.343-6.1 0-8.5-2.343-2.3-6.157-2.3-8.5 0l-0.75 0.8-0.75-0.8c-1.172-1.2-2.7145-1.7-4.25-1.7z"
-                fill="#c0392b"
-              />
-            </g>
-          </svg>
-        </div>
-        <div className="uppercase text-gray-500 text-sm mb-2 flex-1 pt-2 pl-0">Support Ostris</div>
+        <svg
+          height="20"
+          width="20"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          style={{ overflow: 'visible' }}
+        >
+          <path
+            className="animate-heartbeat"
+            d="m7 3c-1.5355 0-3.0784 0.5-4.25 1.7-2.3431 2.4-2.2788 6.1 0 8.5l9.25 9.8 9.25-9.8c2.279-2.4 2.343-6.1 0-8.5-2.343-2.3-6.157-2.3-8.5 0l-0.75 0.8-0.75-0.8c-1.172-1.2-2.7145-1.7-4.25-1.7z"
+            fill="#c0392b"
+          />
+        </svg>
+        <span className="uppercase text-sm font-medium tracking-wide">Support Ostris</span>
       </a>
 
       {/* Social links grid */}

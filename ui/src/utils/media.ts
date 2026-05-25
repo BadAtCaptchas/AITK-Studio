@@ -36,6 +36,12 @@ export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audi
     const type = overrideType || remote.type || 'img';
     return `/api/remote-assets?job_id=${encodeURIComponent(remote.jobID)}&type=${encodeURIComponent(type)}&path=${encodeURIComponent(remote.path)}`;
   }
+  if (overrideType === 'audio-art') {
+    return `/api/audio/art/${encodeURIComponent(value)}`;
+  }
+  if (overrideType === 'file') {
+    return `/api/files/${encodeURIComponent(value)}`;
+  }
   return `/api/img/${encodeURIComponent(value)}`;
 }
 

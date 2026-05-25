@@ -40,16 +40,16 @@ export async function GET(request: NextRequest, { params }: { params: { filePath
     }
 
     // Get file info
-    const stat = fs.statSync(decodedFilePath);
+    const stat = fs.statSync(resolvedFilePath);
     if (!stat.isFile()) {
       return new NextResponse('Not a file', { status: 400 });
     }
 
     // Get filename for Content-Disposition
-    const filename = path.basename(decodedFilePath);
+    const filename = path.basename(resolvedFilePath);
 
     // Determine content type
-    const ext = path.extname(decodedFilePath).toLowerCase();
+    const ext = path.extname(resolvedFilePath).toLowerCase();
     const contentTypeMap: { [key: string]: string } = {
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',

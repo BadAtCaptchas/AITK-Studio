@@ -33,6 +33,8 @@ Create a RunPod secret named `ai_toolkit_auth` with a strong bearer token. The t
 {{ RUNPOD_SECRET_ai_toolkit_auth }}
 ```
 
+If you want durable resume for encrypted datasets, also create `aitk_durable_dataset_key_secret` with a separate random value of at least 32 characters. Without it, encrypted jobs can still start with a supplied key, but durable encrypted resume is rejected.
+
 In the RunPod console, create a private Pod template with the values from `template.blackwell.json`:
 
 - Image: the pushed value of `IMAGE_NAME`
@@ -122,6 +124,7 @@ Restart the Pod and confirm that jobs, datasets, outputs, and the SQLite databas
 ## Troubleshooting
 
 - UI exits immediately: confirm the `ai_toolkit_auth` secret exists and is not empty.
+- Durable encrypted resume is rejected: confirm `AITK_DURABLE_DATASET_KEY_SECRET` is set from the `aitk_durable_dataset_key_secret` RunPod secret and was not changed after queuing the job.
 - UI loads but jobs cannot download gated models: add your Hugging Face token in the UI settings or provide `HF_TOKEN` as a RunPod secret-backed environment variable.
 - TensorBoard link is missing: set `AITK_ENABLE_TENSORBOARD=1` and restart the Pod.
 - Data disappeared after restart: confirm the Pod has a network volume mounted at `/workspace`; data outside `/workspace` is ephemeral.

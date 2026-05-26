@@ -3,6 +3,7 @@ import { disconnectDb } from '../src/server/db';
 import { startTensorBoard } from '../src/server/tensorboard';
 import { getTrainingFolder } from './paths';
 import { getCloudflaredConfig, startCloudflared } from '../src/server/cloudflared';
+import { purgeLegacyDurableEncryptedDatasetKeys } from '../src/server/encryptedDatasetSecrets';
 
 const SHUTDOWN_TIMEOUT_MS = 3000;
 
@@ -53,9 +54,23 @@ class CronWorker {
   }
 }
 
-// it automatically starts the loop
-const cronWorker = new CronWorker();
-console.log('Cron worker started with interval:', cronWorker.interval, 'ms');
+let cronWorker: CronWorker | null = null;
+
+async function startCronWorker() {
+  try {
+    const purged = await purgeLegacyDurableEncryptedDatasetKeys();
+    if (purged > 0) {
+      console.warn(`Purged ${purged} legacy plaintext durable encrypted dataset key setting(s).`);
+    }
+  } catch (error) {
+    console.error('Error purging legacy durable encrypted dataset keys:', error);
+  }
+
+  cronWorker = new CronWorker();
+  console.log('Cron worker started with interval:', cronWorker.interval, 'ms');
+}
+
+void startCronWorker();
 
 async function startOptionalTensorBoard() {
   const trainingRoot = await getTrainingFolder();
@@ -108,7 +123,9 @@ async function shutdown(signal: NodeJS.Signals) {
 
   console.log(`Cron worker received ${signal}, shutting down...`);
   shutdownPromise = (async () => {
-    await waitWithTimeout(cronWorker.stop(), SHUTDOWN_TIMEOUT_MS);
+    if (cronWorker) {
+      await waitWithTimeout(cronWorker.stop(), SHUTDOWN_TIMEOUT_MS);
+    }
     await disconnectDb();
   })();
 

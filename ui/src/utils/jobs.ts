@@ -62,7 +62,7 @@ function basenameFromPath(value: string) {
 function promptForDurableEncryptedResume() {
   if (typeof window === 'undefined') return false;
   return window.confirm(
-    'Store this encrypted dataset key on the server so the job can resume from the queue after an app restart? This weakens security: server or database access can recover the key for this job.',
+    'Store a wrapped copy of this encrypted dataset key on the server so the job can resume from the queue after an app restart? This requires AITK_DURABLE_DATASET_KEY_SECRET on the server; changing that secret invalidates durable resume for queued jobs.',
   );
 }
 

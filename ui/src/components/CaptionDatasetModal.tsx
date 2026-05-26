@@ -232,7 +232,7 @@ export const CaptionDatasetModal: React.FC = () => {
                 <span>
                   Allow durable encrypted resume
                   <span className="block text-xs text-gray-500">
-                    Stores this dataset key on the server until the job completes or is deleted.
+                    Stores a wrapped dataset key on the server until the job completes or is deleted.
                   </span>
                 </span>
               </label>

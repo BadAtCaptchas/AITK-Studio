@@ -14,6 +14,7 @@ import {
 } from '@/server/encryptedDatasets';
 import {
   getEncryptedKeyCoverage,
+  isDurableEncryptedDatasetKeySecretError,
   storeDurableEncryptedDatasetKeys,
 } from '@/server/encryptedDatasetSecrets';
 import { startJobNow } from '../../../../../../cron/actions/startJob';
@@ -81,7 +82,14 @@ async function handleStart(
   let encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
   let useDurableEncryptedKeys = requiredEncryptedDatasets.length > 0 && encryptedKeyCoverage.durableKeys.length > 0;
   if (durableEncryptedDatasetKeys && requiredEncryptedDatasets.length > 0) {
-    await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
+    try {
+      await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
+    } catch (error) {
+      if (isDurableEncryptedDatasetKeySecretError(error)) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
     encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedKeysForLaunch);
     encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
     useDurableEncryptedKeys = true;

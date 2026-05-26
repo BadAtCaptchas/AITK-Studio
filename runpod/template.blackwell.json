@@ -19,6 +19,7 @@
     "AITK_PERSIST_ROOT": "/workspace/ai-toolkit",
     "AITK_DB_PROVIDER": "sqlite",
     "AITK_SQLITE_PATH": "/workspace/ai-toolkit/aitk_db.db",
+    "AITK_DURABLE_DATASET_KEY_SECRET": "{{ RUNPOD_SECRET_aitk_durable_dataset_key_secret }}",
     "AITK_ENABLE_TENSORBOARD": "0",
     "AITK_TENSORBOARD_PORT": "6006",
     "AITK_TENSORBOARD_HOST": "0.0.0.0",

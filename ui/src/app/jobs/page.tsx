@@ -5,13 +5,14 @@ import { TopBar, MainContent } from '@/components/layout';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
-import { AlertTriangle, ArrowRight, CheckCircle2, FileArchive, Loader2, Upload, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, CloudDownload, FileArchive, Loader2, Upload, X } from 'lucide-react';
 import { SelectInput } from '@/components/formInputs';
 import useGPUInfo from '@/hooks/useGPUInfo';
-import { importTrainingJob } from '@/utils/jobs';
+import { downloadJobModelReferences, importTrainingJob } from '@/utils/jobs';
 import type { Job } from '@/types';
 
 type ImportPhase = 'uploading' | 'processing' | 'completed' | 'failed';
+type ModelDownloadPhase = 'downloading' | 'completed' | 'failed';
 
 type ImportStatus = {
   phase: ImportPhase;
@@ -22,6 +23,13 @@ type ImportStatus = {
   total: number | null;
   uploadPercent: number | null;
   job: Job | null;
+  warnings: string[];
+  error: string | null;
+};
+
+type ModelDownloadStatus = {
+  phase: ModelDownloadPhase;
+  handledCount: number;
   warnings: string[];
   error: string | null;
 };
@@ -38,12 +46,16 @@ function formatBytes(bytes: number) {
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
-function getImportErrorMessage(error: unknown) {
+function getApiErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === 'object' && 'response' in error) {
     const response = (error as { response?: { data?: { error?: string } } }).response;
     if (response?.data?.error) return response.data.error;
   }
-  return error instanceof Error ? error.message : 'Failed to import training job.';
+  return error instanceof Error ? error.message : fallback;
+}
+
+function getImportErrorMessage(error: unknown) {
+  return getApiErrorMessage(error, 'Failed to import training job.');
 }
 
 function getImportProgressPercent(status: ImportStatus) {
@@ -93,8 +105,10 @@ export default function Dashboard() {
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
+  const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
   const [jobsTableKey, setJobsTableKey] = useState(0);
   const isImporting = importStatus?.phase === 'uploading' || importStatus?.phase === 'processing';
+  const isModelDownloading = modelDownloadStatus?.phase === 'downloading';
 
   useEffect(() => {
     if (isGPUInfoLoaded && gpuIDs === null && gpuList.length > 0) {
@@ -107,6 +121,7 @@ export default function Dashboard() {
     event.target.value = '';
     if (!file || isImporting) return;
 
+    setModelDownloadStatus(null);
     setImportStatus({
       phase: 'uploading',
       fileName: file.name,
@@ -161,6 +176,34 @@ export default function Dashboard() {
         warnings: [],
         error: getImportErrorMessage(error),
       }));
+    }
+  };
+
+  const handleDownloadImportedModels = async () => {
+    const job = importStatus?.job;
+    if (!job || isModelDownloading) return;
+
+    setModelDownloadStatus({ phase: 'downloading', handledCount: 0, warnings: [], error: null });
+    try {
+      const result = await downloadJobModelReferences(job.id);
+      setModelDownloadStatus({
+        phase: 'completed',
+        handledCount: result.handledValues.length,
+        warnings: result.warnings || [],
+        error: null,
+      });
+      if (result.job) {
+        setImportStatus(current => (current?.job?.id === result.job.id ? { ...current, job: result.job } : current));
+      }
+      setJobsTableKey(key => key + 1);
+    } catch (error) {
+      console.error('Error downloading referenced models:', error);
+      setModelDownloadStatus({
+        phase: 'failed',
+        handledCount: 0,
+        warnings: [],
+        error: getApiErrorMessage(error, 'Failed to download referenced models.'),
+      });
     }
   };
 
@@ -343,6 +386,21 @@ export default function Dashboard() {
 
                 {!isImporting && (
                   <div className="mt-3 flex flex-wrap gap-2">
+                    {importStatus.job && importStatus.phase === 'completed' && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDownloadImportedModels()}
+                        disabled={isModelDownloading}
+                        className="inline-flex items-center gap-2 rounded-md bg-green-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-600 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        {isModelDownloading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <CloudDownload className="h-4 w-4" />
+                        )}
+                        {isModelDownloading ? 'Downloading Models...' : 'Download Referenced Models'}
+                      </button>
+                    )}
                     {importStatus.job && (
                       <Link
                         href={`/jobs/${importStatus.job.id}`}
@@ -359,6 +417,32 @@ export default function Dashboard() {
                     >
                       Import Another
                     </button>
+                  </div>
+                )}
+                {modelDownloadStatus && (
+                  <div
+                    className={`mt-2 rounded border px-3 py-2 text-xs ${
+                      modelDownloadStatus.phase === 'failed'
+                        ? 'border-red-500/40 bg-red-500/10 text-red-100'
+                        : modelDownloadStatus.phase === 'completed'
+                          ? 'border-green-500/40 bg-green-500/10 text-green-100'
+                          : 'border-blue-500/40 bg-blue-500/10 text-blue-100'
+                    }`}
+                  >
+                    {modelDownloadStatus.phase === 'downloading'
+                      ? 'Downloading referenced models...'
+                      : modelDownloadStatus.phase === 'failed'
+                        ? modelDownloadStatus.error
+                        : modelDownloadStatus.handledCount > 0
+                          ? `Downloaded ${modelDownloadStatus.handledCount} referenced model${modelDownloadStatus.handledCount === 1 ? '' : 's'}.`
+                          : modelDownloadStatus.warnings[0] || 'No downloadable model references were found.'}
+                    {modelDownloadStatus.phase === 'completed' && modelDownloadStatus.warnings.length > 0 && (
+                      <ul className="mt-1 list-disc space-y-1 pl-4">
+                        {modelDownloadStatus.warnings.map((warning, index) => (
+                          <li key={`${warning}-${index}`}>{warning}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
               </div>

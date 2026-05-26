@@ -110,7 +110,10 @@ class GlmImageModel(BaseModel):
                     base_model_path = model_path
 
             transformer = GlmImageTransformer2DModel.from_pretrained(
-                transformer_path, subfolder=transformer_subfolder, torch_dtype=dtype
+                transformer_path,
+                subfolder=transformer_subfolder,
+                torch_dtype=dtype,
+                use_safetensors=True,
             )
 
         if self.model_config.quantize:
@@ -140,7 +143,10 @@ class GlmImageModel(BaseModel):
             base_model_path, subfolder="tokenizer"
         )
         text_encoder = T5EncoderModel.from_pretrained(
-            base_model_path, subfolder="text_encoder", torch_dtype=dtype
+            base_model_path,
+            subfolder="text_encoder",
+            torch_dtype=dtype,
+            use_safetensors=True,
         )
 
         self.print_and_status_update("Loading prior encoder")
@@ -151,6 +157,7 @@ class GlmImageModel(BaseModel):
             base_model_path,
             subfolder="vision_language_encoder",
             torch_dtype=dtype,
+            use_safetensors=True,
         )
 
         if (
@@ -184,7 +191,10 @@ class GlmImageModel(BaseModel):
 
         self.print_and_status_update("Loading VAE")
         vae = AutoencoderKL.from_pretrained(
-            base_model_path, subfolder="vae", torch_dtype=dtype
+            base_model_path,
+            subfolder="vae",
+            torch_dtype=dtype,
+            use_safetensors=True,
         )
 
         self.noise_scheduler = GlmImageModel.get_train_scheduler()

@@ -254,51 +254,121 @@ export function runScriptStreaming(invocation: ScriptInvocation): Response {
   let stdoutBuf = '';
   let stderrBuf = '';
   let timedOut = false;
+  let streamClosed = false;
+  let childSettled = false;
+  let timer: NodeJS.Timeout | null = null;
+  let streamController: { enqueue(chunk: Uint8Array): void; close(): void } | null = null;
+
+  const clearRunTimer = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const detachOutputListeners = () => {
+    child.stdout.off('data', handleStdout);
+    child.stderr.off('data', handleStderr);
+  };
+
+  const finishChildListeners = () => {
+    clearRunTimer();
+    detachOutputListeners();
+    child.off('error', handleError);
+    child.off('close', handleClose);
+    streamController = null;
+  };
+
+  const stopStreaming = () => {
+    streamClosed = true;
+    streamController = null;
+    clearRunTimer();
+    detachOutputListeners();
+  };
+
+  const send = (obj: unknown) => {
+    if (streamClosed || !streamController) return false;
+    try {
+      streamController.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+      return true;
+    } catch {
+      stopStreaming();
+      if (!child.killed) child.kill('SIGKILL');
+      return false;
+    }
+  };
+
+  const closeStream = () => {
+    if (streamClosed) return;
+    const controller = streamController;
+    streamClosed = true;
+    streamController = null;
+    try {
+      controller?.close();
+    } catch {
+      // The client may have disconnected between the last send and close.
+    }
+  };
+
+  function handleStdout(chunk: Buffer) {
+    const text = chunk.toString('utf-8');
+    stdoutBuf += text;
+    send({ type: 'stdout', data: text });
+  }
+
+  function handleStderr(chunk: Buffer) {
+    const text = chunk.toString('utf-8');
+    stderrBuf += text;
+    send({ type: 'stderr', data: text });
+  }
+
+  function handleError(error: Error) {
+    if (childSettled) return;
+    childSettled = true;
+    clearRunTimer();
+    if (!streamClosed) {
+      send({ type: 'error', message: error.message });
+      closeStream();
+    }
+    finishChildListeners();
+  }
+
+  function handleClose(code: number | null, signal: NodeJS.Signals | null) {
+    if (childSettled) return;
+    childSettled = true;
+    clearRunTimer();
+    if (!streamClosed) {
+      send({
+        type: 'exit',
+        exitCode: code,
+        signal,
+        ok: !timedOut && code === 0,
+        timedOut,
+        result: parseResult(stdoutBuf),
+        stderr: stderrBuf,
+      });
+      closeStream();
+    }
+    finishChildListeners();
+  }
 
   const stream = new ReadableStream({
     start(controller) {
-      const send = (obj: unknown) => {
-        controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
-      };
+      streamController = controller;
 
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         timedOut = true;
         send({ type: 'error', message: 'Script timed out after 20 minutes' });
         child.kill('SIGKILL');
       }, SCRIPT_TIMEOUT_MS);
 
-      child.stdout.on('data', (chunk: Buffer) => {
-        const text = chunk.toString('utf-8');
-        stdoutBuf += text;
-        send({ type: 'stdout', data: text });
-      });
-      child.stderr.on('data', (chunk: Buffer) => {
-        const text = chunk.toString('utf-8');
-        stderrBuf += text;
-        send({ type: 'stderr', data: text });
-      });
-
-      child.on('error', error => {
-        clearTimeout(timer);
-        send({ type: 'error', message: error.message });
-        controller.close();
-      });
-
-      child.on('close', (code, signal) => {
-        clearTimeout(timer);
-        send({
-          type: 'exit',
-          exitCode: code,
-          signal,
-          ok: !timedOut && code === 0,
-          timedOut,
-          result: parseResult(stdoutBuf),
-          stderr: stderrBuf,
-        });
-        controller.close();
-      });
+      child.stdout.on('data', handleStdout);
+      child.stderr.on('data', handleStderr);
+      child.on('error', handleError);
+      child.on('close', handleClose);
     },
     cancel() {
+      stopStreaming();
       if (!child.killed) child.kill('SIGKILL');
     },
   });

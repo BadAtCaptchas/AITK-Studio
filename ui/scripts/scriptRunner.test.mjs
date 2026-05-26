@@ -6,7 +6,25 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildScriptInvocation, ScriptValidationError } = require('../dist/src/server/scriptRunner.js');
+const { buildScriptInvocation, runScriptStreaming, ScriptValidationError } = require('../dist/src/server/scriptRunner.js');
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function withTimeout(promise, ms, message) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function makeFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aitk-script-runner-'));
@@ -106,4 +124,22 @@ test('buildScriptInvocation rejects LoRA paths outside the training folder', () 
       ),
     /LoRA inputs must be inside/,
   );
+});
+
+test('runScriptStreaming tolerates cancellation before child close', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aitk-stream-cancel-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const scriptPath = path.join(root, 'stream-cancel.py');
+  fs.writeFileSync(scriptPath, ['import time', 'print("ready", flush=True)', 'time.sleep(10)'].join('\n'));
+
+  const response = runScriptStreaming({ scriptPath, args: [] });
+  assert.ok(response.body);
+
+  const reader = response.body.getReader();
+  const first = await withTimeout(reader.read(), 5000, 'timed out waiting for stream output');
+  assert.equal(first.done, false);
+
+  await reader.cancel();
+  await delay(500);
 });

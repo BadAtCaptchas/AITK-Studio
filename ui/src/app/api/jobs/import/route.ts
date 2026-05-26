@@ -17,12 +17,10 @@ import {
   resolveConfigPath,
   rewriteJobConfigForTarget,
   safeNameSegment,
-  setConfigPathValue,
   validateArchiveEntryName,
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
 import { db } from '@/server/db';
-import { normalizeModelReferenceValue, prefetchModelReferences } from '@/server/hfModelPrefetch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -180,23 +178,11 @@ export async function POST(request: NextRequest) {
     const sourceName = sourceJob?.name || sourceJobConfig?.config?.name || manifest.source.jobName;
     const importedName = await getAvailableJobName(sourceName, trainingRoot);
     let warnings = [...(manifest.warnings || [])];
+    const modelReferences = Array.isArray(manifest.models?.references) ? manifest.models.references : [];
 
     if (importedName !== safeNameSegment(sourceName, 'imported_job')) {
       warnings.push(`Imported job was renamed to "${importedName}" because the original name was unavailable.`);
     }
-
-    const modelPrefetch = await prefetchModelReferences(manifest.models.references || []);
-    warnings.push(...(modelPrefetch.warnings || []));
-    const prefetchedModelValues = new Set(modelPrefetch.handledValues || []);
-    const prefetchedFilePathByValue = new Map<string, string>(
-      (modelPrefetch.downloads || [])
-        .filter(download => download.kind === 'file' && download.value && download.path)
-        .map(download => [normalizeModelReferenceValue(download.value), download.path] as const),
-    );
-    warnings = warnings.filter(warning => {
-      if (!warning.startsWith('Local model reference is not present on this system:')) return true;
-      return ![...prefetchedModelValues].some(value => value && warning.includes(value));
-    });
 
     const trainingSource = getExtractedArchivePath(extractRoot, manifest.training.archivePath);
     const finalTrainingFolder = path.join(trainingRoot, importedName);
@@ -227,10 +213,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    for (const reference of manifest.models.references || []) {
+    for (const reference of modelReferences) {
       if (!reference.isLocal) continue;
-      const normalizedReferenceValue = normalizeModelReferenceValue(reference.value);
-      if (prefetchedModelValues.has(normalizedReferenceValue)) continue;
       const targetPath = resolveConfigPath(reference.value);
       if (!fs.existsSync(targetPath)) {
         warnings.push(`Local model reference is not present on this system: ${reference.value}`);
@@ -249,12 +233,6 @@ export async function POST(request: NextRequest) {
       sqliteDbPath: path.join(TOOLKIT_ROOT, 'aitk_db.db'),
       datasetPathByConfigPath,
     });
-    for (const reference of manifest.models.references || []) {
-      const localModelPath = prefetchedFilePathByValue.get(normalizeModelReferenceValue(reference.value));
-      if (localModelPath) {
-        setConfigPathValue(rewrittenConfig, reference.configPath, localModelPath);
-      }
-    }
 
     await fsp.writeFile(path.join(finalTrainingFolder, '.job_config.json'), JSON.stringify(rewrittenConfig, null, 2));
     await fsp.writeFile(

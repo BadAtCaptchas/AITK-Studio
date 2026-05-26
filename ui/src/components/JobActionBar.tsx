@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2 } from 'lucide-react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload } from 'lucide-react';
 import {
   Button,
   Dialog,
@@ -24,6 +24,7 @@ import {
   getTrainingJobExportProgress,
   cancelTrainingJobExport,
   downloadServerFile,
+  downloadJobModelReferences,
   type TrainingJobCheckpointExportMode,
   type TrainingJobExportProgress,
 } from '@/utils/jobs';
@@ -46,6 +47,12 @@ type ExportStatus = {
   progress: TrainingJobExportProgress | null;
 };
 type ExportDialogState = { includeDatasets: boolean } | null;
+type ModelDownloadStatus = {
+  phase: 'downloading' | 'completed' | 'failed';
+  handledCount: number;
+  warnings: string[];
+  error: string | null;
+};
 
 function sleep(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms));
@@ -96,6 +103,23 @@ function getExportStatusLabel(exportStatus: ExportStatus | null) {
   );
 }
 
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { data?: { error?: string } } }).response;
+    if (response?.data?.error) return response.data.error;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+function getModelDownloadStatusLabel(status: ModelDownloadStatus) {
+  if (status.phase === 'downloading') return 'Downloading referenced models...';
+  if (status.phase === 'failed') return status.error || 'Model download failed';
+  if (status.handledCount > 0) {
+    return `Downloaded ${status.handledCount} referenced model${status.handledCount === 1 ? '' : 's'}.`;
+  }
+  return status.warnings[0] || 'No downloadable model references were found.';
+}
+
 export default function JobActionBar({
   job,
   onRefresh,
@@ -106,20 +130,27 @@ export default function JobActionBar({
 }: JobActionBarProps) {
   const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
+  const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
   const [exportDialog, setExportDialog] = useState<ExportDialogState>(null);
   const [checkpointMode, setCheckpointMode] = useState<TrainingJobCheckpointExportMode>('latest');
   const exportStatusTimeout = useRef<number | null>(null);
+  const modelDownloadStatusTimeout = useRef<number | null>(null);
   const exportInFlight = useRef(false);
+  const modelDownloadInFlight = useRef(false);
   const activeExportID = useRef<string | null>(null);
   const cancelExportInFlight = useRef(false);
   const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
+  const isDownloadingModels = modelDownloadStatus?.phase === 'downloading';
 
   useEffect(() => {
     return () => {
       isMounted.current = false;
       if (exportStatusTimeout.current !== null) {
         window.clearTimeout(exportStatusTimeout.current);
+      }
+      if (modelDownloadStatusTimeout.current !== null) {
+        window.clearTimeout(modelDownloadStatusTimeout.current);
       }
       activeExportID.current = null;
     };
@@ -137,6 +168,18 @@ export default function JobActionBar({
       }
       exportStatusTimeout.current = null;
     }, 2500);
+  };
+
+  const clearModelDownloadStatusSoon = () => {
+    if (modelDownloadStatusTimeout.current !== null) {
+      window.clearTimeout(modelDownloadStatusTimeout.current);
+    }
+    modelDownloadStatusTimeout.current = window.setTimeout(() => {
+      if (isMounted.current) {
+        setModelDownloadStatus(null);
+      }
+      modelDownloadStatusTimeout.current = null;
+    }, 3500);
   };
 
   const updateExportStatus = (mode: ExportMode, progress: TrainingJobExportProgress) => {
@@ -229,7 +272,41 @@ export default function JobActionBar({
     void handleExport(includeDatasets, checkpointMode);
   };
 
+  const handleDownloadModelReferences = async () => {
+    if (job.job_type !== 'train' || modelDownloadInFlight.current) return;
+
+    modelDownloadInFlight.current = true;
+    if (modelDownloadStatusTimeout.current !== null) {
+      window.clearTimeout(modelDownloadStatusTimeout.current);
+      modelDownloadStatusTimeout.current = null;
+    }
+    setModelDownloadStatus({ phase: 'downloading', handledCount: 0, warnings: [], error: null });
+    try {
+      const result = await downloadJobModelReferences(job.id);
+      setModelDownloadStatus({
+        phase: 'completed',
+        handledCount: result.handledValues.length,
+        warnings: result.warnings || [],
+        error: null,
+      });
+      onRefresh?.();
+      clearModelDownloadStatusSoon();
+    } catch (error) {
+      console.error('Error downloading referenced models:', error);
+      setModelDownloadStatus({
+        phase: 'failed',
+        handledCount: 0,
+        warnings: [],
+        error: getApiErrorMessage(error, 'Failed to download referenced models.'),
+      });
+      clearModelDownloadStatusSoon();
+    } finally {
+      modelDownloadInFlight.current = false;
+    }
+  };
+
   const exportStatusLabel = getExportStatusLabel(exportStatus);
+  const modelDownloadStatusLabel = modelDownloadStatus ? getModelDownloadStatusLabel(modelDownloadStatus) : '';
   const exportStatusDetail = getExportProgressDetail(exportStatus?.progress || null);
   const exportPercent = Math.round(exportStatus?.progress?.percent || (exportStatus?.phase === 'ready' ? 100 : 0));
   const canCancelExport =
@@ -390,6 +467,24 @@ export default function JobActionBar({
               </div>
             </MenuItem>
           )}
+          {job.job_type === 'train' && (
+            <MenuItem>
+              <div
+                className={`px-4 py-1 rounded flex items-center gap-2 ${
+                  isDownloadingModels ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+                }`}
+                aria-disabled={isDownloadingModels}
+                onClick={() => void handleDownloadModelReferences()}
+              >
+                {isDownloadingModels ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CloudDownload className="w-4 h-4" />
+                )}
+                Download Referenced Models
+              </div>
+            </MenuItem>
+          )}
           <MenuItem>
             <div
               className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded"
@@ -530,6 +625,27 @@ export default function JobActionBar({
                   style={{ width: `${Math.max(2, exportPercent)}%` }}
                 />
               </div>
+            )}
+          </div>
+        </div>
+      )}
+      {modelDownloadStatus && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed ${exportStatus ? 'bottom-24' : 'bottom-4'} right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
+        >
+          {modelDownloadStatus.phase === 'completed' ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-green-400" />
+          ) : modelDownloadStatus.phase === 'failed' ? (
+            <X className="mt-0.5 h-4 w-4 flex-none text-red-400" />
+          ) : (
+            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-blue-400" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="truncate">{modelDownloadStatusLabel}</div>
+            {modelDownloadStatus.phase === 'completed' && modelDownloadStatus.warnings.length > 0 && (
+              <div className="mt-0.5 truncate text-xs text-gray-400">{modelDownloadStatus.warnings[0]}</div>
             )}
           </div>
         </div>

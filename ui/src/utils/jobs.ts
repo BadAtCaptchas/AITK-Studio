@@ -51,6 +51,14 @@ export type TrainingJobImportResult = {
   warnings: string[];
 };
 
+export type JobModelPrefetchResult = {
+  handledValues: string[];
+  downloads: Array<{ value: string; path: string; kind: string; cached?: boolean }>;
+  warnings: string[];
+  updatedConfig: boolean;
+  job: Job;
+};
+
 export type StartJobOptions = {
   durableEncryptedDatasetKeys?: boolean;
 };
@@ -235,6 +243,12 @@ export const importTrainingJob = (
       },
     })
     .then(res => res.data as TrainingJobImportResult);
+};
+
+export const downloadJobModelReferences = (jobID: string) => {
+  return apiClient
+    .post(`/api/jobs/${jobID}/prefetch-models`)
+    .then(res => res.data as JobModelPrefetchResult);
 };
 
 export const downloadServerFile = (filePath: string, fileName?: string) => {

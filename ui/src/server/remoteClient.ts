@@ -117,6 +117,7 @@ export async function syncRemoteJob(localJob: Job) {
       pid: null,
       job_type: remoteJob.job_type,
       job_ref: remoteJob.job_ref,
+      save_now: remoteJob.save_now ?? false,
       remote_sync_at: new Date(),
       remote_error: null,
     });

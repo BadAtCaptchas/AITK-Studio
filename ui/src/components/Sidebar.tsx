@@ -86,6 +86,9 @@ const Sidebar = () => {
           <ThemeToggle />
         </div>
       </div>
+      <div className="bg-gray-800 py-1 text-center text-[10px] text-gray-400">
+        OstrisAI-Toolkit v{process.env.NEXT_PUBLIC_APP_VERSION}
+      </div>
     </div>
   );
 };

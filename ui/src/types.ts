@@ -112,6 +112,7 @@ export interface Job {
   pid: number | null;
   job_type: string;
   job_ref: string | null;
+  save_now: boolean;
   hf_download_progress?: HFDownloadProgress | null;
 }
 

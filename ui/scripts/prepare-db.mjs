@@ -112,7 +112,8 @@ async function applySqliteCompatibilitySchema(filename) {
         queue_position INTEGER NOT NULL DEFAULT 0,
         pid INTEGER,
         job_type TEXT NOT NULL DEFAULT 'train',
-        job_ref TEXT
+        job_ref TEXT,
+        save_now BOOLEAN NOT NULL DEFAULT false
       );
       `,
     );
@@ -120,6 +121,7 @@ async function applySqliteCompatibilitySchema(filename) {
     await ensureColumn(db, 'Job', 'remote_job_id', 'TEXT');
     await ensureColumn(db, 'Job', 'remote_sync_at', 'DATETIME');
     await ensureColumn(db, 'Job', 'remote_error', 'TEXT');
+    await ensureColumn(db, 'Job', 'save_now', 'BOOLEAN NOT NULL DEFAULT false');
 
     await sqliteRun(
       db,

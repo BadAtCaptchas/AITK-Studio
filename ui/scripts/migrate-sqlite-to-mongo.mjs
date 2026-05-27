@@ -66,6 +66,7 @@ function normalizeJob(row) {
     pid: row.pid == null ? null : Number(row.pid),
     job_type: String(row.job_type || 'train'),
     job_ref: row.job_ref == null ? null : String(row.job_ref),
+    save_now: Boolean(row.save_now),
   };
 }
 

@@ -7,7 +7,9 @@ from typing import Literal, Optional
 import threading
 import time
 import signal
+from toolkit.basic import flush
 from toolkit.exceptions import JobStopRequested
+from toolkit.print import print_acc
 from toolkit.ui_database import UIJobStore
 
 AITK_Status = Literal["running", "stopped", "error", "completed"]
@@ -126,6 +128,29 @@ class DiffusionTrainer(SDTrainer):
             self.is_stopping = True
             raise JobStopRequested("Job returning to queue", return_to_queue=True)
 
+    def should_save(self):
+        if not self.is_ui_trainer:
+            return False
+        return self.ui_job_store.should_save()
+
+    def maybe_save(self):
+        if not self.is_ui_trainer:
+            return
+        if not self.should_save():
+            return
+
+        self.update_db_key("save_now", False)
+        if self.progress_bar is not None:
+            self.progress_bar.pause()
+        print_acc(f"\nSaving at step {self.step_num}")
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
+        self.save(self.step_num)
+        self.ensure_params_requires_grad()
+        flush()
+        if self.progress_bar is not None:
+            self.progress_bar.unpause()
+
     async def _update_key(self, key, value):
         if not self.accelerator.is_main_process:
             return
@@ -213,6 +238,7 @@ class DiffusionTrainer(SDTrainer):
         if self.is_ui_trainer:
             self.update_step()
             self.maybe_stop()
+            self.maybe_save()
 
     def hook_before_model_load(self):
         super().hook_before_model_load()

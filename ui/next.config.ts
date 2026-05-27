@@ -1,6 +1,21 @@
 import type { NextConfig } from 'next';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+function getAppVersion() {
+  try {
+    const versionFile = readFileSync(join(process.cwd(), '..', 'version.py'), 'utf8');
+    const versionMatch = versionFile.match(/VERSION\s*=\s*["']([^"']+)["']/);
+    return versionMatch ? versionMatch[1] : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_APP_VERSION: getAppVersion(),
+  },
   serverExternalPackages: ['macstats', 'osx-temperature-sensor'],
   webpack: (config, { isServer }) => {
     if (isServer) {

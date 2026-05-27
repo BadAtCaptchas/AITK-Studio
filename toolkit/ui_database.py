@@ -19,6 +19,7 @@ JOB_UPDATE_FIELDS = {
     "info",
     "speed_string",
     "pid",
+    "save_now",
 }
 
 
@@ -155,6 +156,24 @@ class UIJobStore:
                 return False if return_to_queue is None else return_to_queue[0] == 1
 
         return bool(self._retry_sqlite_operation(_check_return_to_queue))
+
+    def should_save(self) -> bool:
+        if not self.available:
+            return False
+
+        if self.provider == "mongodb":
+            assert self._jobs is not None
+            row = self._jobs.find_one({"id": self.job_id}, {"_id": 0, "save_now": 1})
+            return bool(row.get("save_now")) if row else False
+
+        def _check_save():
+            with self._db_connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT save_now FROM Job WHERE id = ?", (self.job_id,))
+                save_now = cursor.fetchone()
+                return False if save_now is None else save_now[0] == 1
+
+        return bool(self._retry_sqlite_operation(_check_save))
 
     def update_key(self, key: str, value: Any):
         if not self.available:

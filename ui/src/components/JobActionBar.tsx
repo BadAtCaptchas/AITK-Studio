@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload } from 'lucide-react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save } from 'lucide-react';
 import {
   Button,
   Dialog,
@@ -25,6 +25,7 @@ import {
   cancelTrainingJobExport,
   downloadServerFile,
   downloadJobModelReferences,
+  saveJobNow,
   type TrainingJobCheckpointExportMode,
   type TrainingJobExportProgress,
 } from '@/utils/jobs';
@@ -305,6 +306,16 @@ export default function JobActionBar({
     }
   };
 
+  const handleSaveNextStep = async () => {
+    try {
+      await saveJobNow(job.id);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error requesting checkpoint save:', error);
+      alert(getApiErrorMessage(error, 'Failed to request a checkpoint save.'));
+    }
+  };
+
   const exportStatusLabel = getExportStatusLabel(exportStatus);
   const modelDownloadStatusLabel = modelDownloadStatus ? getModelDownloadStatusLabel(modelDownloadStatus) : '';
   const exportStatusDetail = getExportProgressDetail(exportStatus?.progress || null);
@@ -437,6 +448,17 @@ export default function JobActionBar({
               >
                 Clone Job
               </Link>
+            </MenuItem>
+          )}
+          {job.job_type === 'train' && canStop && (
+            <MenuItem>
+              <div
+                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
+                onClick={() => void handleSaveNextStep()}
+              >
+                <Save className="w-4 h-4" />
+                Save Next Step
+              </div>
             </MenuItem>
           )}
           {job.job_type === 'train' && (

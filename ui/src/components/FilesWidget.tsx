@@ -1,8 +1,10 @@
 import React from 'react';
 import useFilesList from '@/hooks/useFilesList';
-import { Loader2, AlertCircle, Download, Box, Brain } from 'lucide-react';
+import { Loader2, AlertCircle, Download, Box, Brain, Trash2 } from 'lucide-react';
 import { openMergeLoRAsModal } from './MergeLoRAsModal';
 import { getDisplayPath, getDownloadUrl, parseRemoteAssetRef } from '@/utils/media';
+import { openConfirm } from './ConfirmModal';
+import { apiClient } from '@/utils/api';
 
 const getFilename = (filePath: string) => getDisplayPath(filePath).split(/[\\/]/).pop() || '';
 const getFoldername = (filePath: string) => filePath.replace(/[\\/][^\\/]*$/, '');
@@ -21,6 +23,25 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
     } else {
       return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
     }
+  };
+
+  const handleDeleteFile = (filePath: string) => {
+    const fileName = getFilename(filePath);
+    openConfirm({
+      title: 'Delete Checkpoint',
+      message: `Are you sure you want to delete "${fileName}"? This action cannot be undone.`,
+      type: 'warning',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        try {
+          await apiClient.post('/api/files/delete', { filePath });
+          refreshFiles();
+        } catch (error) {
+          console.error('Error deleting checkpoint:', error);
+          alert('Failed to delete checkpoint. Please try again.');
+        }
+      },
+    });
   };
 
   return (
@@ -69,14 +90,14 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
             {files.map((file, index) => {
               const fileName = getFilename(file.path);
               const nameWithoutExt = fileName.replace('.safetensors', '');
+              const isRemote = !!parseRemoteAssetRef(file.path);
+              const downloadUrl = getDownloadUrl(file.path);
               return (
-                <a
+                <div
                   key={index}
-                  target="_blank"
-                  href={getDownloadUrl(file.path)}
                   className="group flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-800 transition-all duration-200"
                 >
-                  <div className="flex items-center space-x-2 min-w-0">
+                  <a target="_blank" href={downloadUrl} className="flex items-center space-x-2 min-w-0 flex-1">
                     <Box className="w-4 h-4 text-purple-600 dark:text-purple-400 flex-shrink-0" />
                     <div className="flex flex-col min-w-0">
                       <div className="flex text-sm text-gray-200">
@@ -86,14 +107,29 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
                       </div>
                       <span className="text-xs text-gray-500">.safetensors</span>
                     </div>
-                  </div>
+                  </a>
                   <div className="flex items-center space-x-3 flex-shrink-0">
                     <span className="text-xs text-gray-400">{cleanSize(file.size)}</span>
-                    <div className="bg-purple-500 bg-opacity-0 group-hover:bg-opacity-10 rounded-full p-1 transition-all">
+                    <a
+                      target="_blank"
+                      href={downloadUrl}
+                      className="bg-purple-500 bg-opacity-0 group-hover:bg-opacity-10 rounded-full p-1 transition-all"
+                      title="Download checkpoint"
+                    >
                       <Download className="w-3 h-3 text-purple-600 dark:text-purple-400" />
-                    </div>
+                    </a>
+                    {!isRemote && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteFile(file.path)}
+                        className="bg-red-500 bg-opacity-0 group-hover:bg-opacity-10 hover:!bg-opacity-30 rounded-full p-1 transition-all"
+                        title="Delete checkpoint"
+                      >
+                        <Trash2 className="w-3 h-3 text-red-500" />
+                      </button>
+                    )}
                   </div>
-                </a>
+                </div>
               );
             })}
           </div>

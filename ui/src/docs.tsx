@@ -288,6 +288,59 @@ const docs: { [key: string]: ConfigDoc } = {
       </>
     ),
   },
+  'train.sega_distill': {
+    title: 'SEGA Distillation',
+    description: (
+      <>
+        Runs an online frozen teacher with SEGA-modulated Flux2 RoPE and trains the LoRA student to match that teacher.
+        This is currently limited to FLUX.2 and FLUX.2 Klein LoRA training and adds an extra teacher prediction each
+        step.
+      </>
+    ),
+  },
+  'train.sega_distill_weight': {
+    title: 'SEGA Distillation Weight',
+    description: (
+      <>
+        Multiplies the SEGA teacher matching loss before backpropagation. The default keeps the distillation target at
+        normal loss strength.
+      </>
+    ),
+  },
+  'train.sega_distill_base_resolution': {
+    title: 'SEGA Base Resolution',
+    description: (
+      <>
+        Resolution used as the identity point for SEGA scaling. Larger training resolutions receive stronger
+        frequency-aware RoPE scaling.
+      </>
+    ),
+  },
+  'train.sega_distill_strength': {
+    title: 'SEGA Strength',
+    description: (
+      <>
+        Controls how strongly the latent FFT energy changes the teacher RoPE scaling. Set to zero for identity scaling.
+      </>
+    ),
+  },
+  'train.sega_distill_scale': {
+    title: 'SEGA Scale Clamp',
+    description: (
+      <>
+        Minimum and maximum bounds for the RoPE scale factors produced by the SEGA teacher.
+      </>
+    ),
+  },
+  'train.sega_distill_on_reg': {
+    title: 'Apply SEGA To Reg',
+    description: (
+      <>
+        Applies SEGA distillation to regularization batches. By default regularization batches keep the normal training
+        target.
+      </>
+    ),
+  },
   'train.do_differential_guidance': {
     title: 'Differential Guidance',
     description: (

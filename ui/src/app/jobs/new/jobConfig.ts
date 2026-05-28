@@ -93,6 +93,13 @@ export const defaultJobConfig: JobConfig = {
           diff_output_preservation: false,
           diff_output_preservation_multiplier: 1.0,
           diff_output_preservation_class: 'person',
+          sega_distill: false,
+          sega_distill_weight: 1.0,
+          sega_distill_base_resolution: 1024,
+          sega_distill_strength: 1.0,
+          sega_distill_min_scale: 0.5,
+          sega_distill_max_scale: 2.0,
+          sega_distill_on_reg: false,
           switch_boundary_every: 1,
           loss_type: 'mse',
         },
@@ -160,6 +167,15 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   const train = jobConfig.config.process[0]?.train;
   if (train && train.auto_train === undefined) {
     train.auto_train = false;
+  }
+  if (train) {
+    if (train.sega_distill === undefined) train.sega_distill = false;
+    if (train.sega_distill_weight === undefined) train.sega_distill_weight = 1.0;
+    if (train.sega_distill_base_resolution === undefined) train.sega_distill_base_resolution = 1024;
+    if (train.sega_distill_strength === undefined) train.sega_distill_strength = 1.0;
+    if (train.sega_distill_min_scale === undefined) train.sega_distill_min_scale = 0.5;
+    if (train.sega_distill_max_scale === undefined) train.sega_distill_max_scale = 2.0;
+    if (train.sega_distill_on_reg === undefined) train.sega_distill_on_reg = false;
   }
   if (train && Array.isArray(train.phases)) {
     if (train.phases.length === 0) {

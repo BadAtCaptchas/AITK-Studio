@@ -274,7 +274,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.snr_gos: Union[LearnableSNRGamma, None] = None
         self.ema: ExponentialMovingAverage = None
         
-        validate_configs(self.train_config, self.model_config, self.save_config, self.dataset_configs)
+        validate_configs(self.train_config, self.model_config, self.save_config, self.dataset_configs, self.network_config)
         self.phase_manager = TrainingPhaseManager(self.train_config)
         self.phase_manager.apply(self.train_config, self.step_num)
         

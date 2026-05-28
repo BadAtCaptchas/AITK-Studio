@@ -496,6 +496,15 @@ class TrainConfig:
         # blank prompt preservation will preserve the model's knowledge of a blank prompt
         self.blank_prompt_preservation = kwargs.get('blank_prompt_preservation', False)
         self.blank_prompt_preservation_multiplier = kwargs.get('blank_prompt_preservation_multiplier', 1.0)
+
+        # Online SEGA teacher distillation. Disabled by default; currently used by Flux2/Klein LoRA training.
+        self.sega_distill = bool(kwargs.get('sega_distill', False))
+        self.sega_distill_weight = float(kwargs.get('sega_distill_weight', 1.0))
+        self.sega_distill_base_resolution = float(kwargs.get('sega_distill_base_resolution', 1024))
+        self.sega_distill_strength = float(kwargs.get('sega_distill_strength', 1.0))
+        self.sega_distill_min_scale = float(kwargs.get('sega_distill_min_scale', 0.5))
+        self.sega_distill_max_scale = float(kwargs.get('sega_distill_max_scale', 2.0))
+        self.sega_distill_on_reg = bool(kwargs.get('sega_distill_on_reg', False))
         
         # legacy
         if match_adapter_assist and self.match_adapter_chance == 0.0:
@@ -614,7 +623,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b']
 
 
 class ModelConfig:
@@ -1399,7 +1408,8 @@ def validate_configs(
     train_config: TrainConfig,
     model_config: ModelConfig,
     save_config: SaveConfig,
-    dataset_configs: List[DatasetConfig]
+    dataset_configs: List[DatasetConfig],
+    network_config: Optional[NetworkConfig] = None,
 ):
     if model_config.is_flux:
         if save_config.save_format != 'diffusers':
@@ -1437,6 +1447,50 @@ def validate_configs(
     
     if train_config.diff_output_preservation and train_config.blank_prompt_preservation:
         raise ValueError("Cannot use both differential output preservation and blank prompt preservation at the same time. Please set one of them to False.")
+
+    if train_config.sega_distill:
+        supported_sega_arches = {'flux2', 'flux2_klein_4b', 'flux2_klein_9b'}
+        if model_config.arch not in supported_sega_arches:
+            raise ValueError(
+                f"SEGA distillation currently supports {sorted(supported_sega_arches)}, got {model_config.arch}."
+            )
+        if network_config is None or getattr(network_config, 'type', None) != 'lora':
+            raise ValueError("SEGA distillation currently requires network.type to be lora.")
+        if train_config.diff_output_preservation:
+            raise ValueError("SEGA distillation cannot be combined with differential output preservation.")
+        if train_config.blank_prompt_preservation:
+            raise ValueError("SEGA distillation cannot be combined with blank prompt preservation.")
+        if train_config.do_prior_divergence:
+            raise ValueError("SEGA distillation cannot be combined with prior divergence.")
+        if train_config.inverted_mask_prior:
+            raise ValueError("SEGA distillation cannot be combined with inverted mask prior.")
+        if train_config.do_guidance_loss:
+            raise ValueError("SEGA distillation cannot be combined with guidance loss.")
+        if train_config.do_differential_guidance:
+            raise ValueError("SEGA distillation cannot be combined with differential guidance.")
+        if train_config.loss_type == 'mean_flow':
+            raise ValueError("SEGA distillation is not supported with mean_flow loss.")
+
+        numeric_bounds = {
+            'sega_distill_weight': train_config.sega_distill_weight,
+            'sega_distill_base_resolution': train_config.sega_distill_base_resolution,
+            'sega_distill_strength': train_config.sega_distill_strength,
+            'sega_distill_min_scale': train_config.sega_distill_min_scale,
+            'sega_distill_max_scale': train_config.sega_distill_max_scale,
+        }
+        for key, value in numeric_bounds.items():
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key} must be numeric for SEGA distillation.") from exc
+            if not math.isfinite(numeric_value):
+                raise ValueError(f"{key} must be finite for SEGA distillation.")
+            if key != 'sega_distill_strength' and numeric_value <= 0:
+                raise ValueError(f"{key} must be greater than 0 for SEGA distillation.")
+            if key == 'sega_distill_strength' and numeric_value < 0:
+                raise ValueError("sega_distill_strength must be greater than or equal to 0.")
+        if float(train_config.sega_distill_min_scale) > float(train_config.sega_distill_max_scale):
+            raise ValueError("sega_distill_min_scale must be less than or equal to sega_distill_max_scale.")
     
     if train_config.batch_size > 1 and any(dataset_config.auto_frame_count for dataset_config in dataset_configs):
         raise ValueError("Cannot use batch size greater than 1 with auto_frame_count. Please set batch_size to 1 or auto_frame_count to False.")

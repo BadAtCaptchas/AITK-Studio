@@ -248,6 +248,43 @@ test('preflight accepts auto training phases without fixed steps', () => {
   assert.equal(result.findings.length, 0);
 });
 
+test('preflight reports invalid SEGA distillation configuration', () => {
+  const dataset = makeDataset({ 'one.png': 'fake', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.sega_distill = true;
+  processConfig.train.diff_output_preservation = true;
+  processConfig.train.do_prior_divergence = true;
+  processConfig.train.inverted_mask_prior = true;
+  processConfig.model.arch = 'flex1';
+  processConfig.network.type = 'lokr';
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.sega_distill.unsupported_arch'));
+  assert.ok(ids.has('train.sega_distill.non_lora'));
+  assert.ok(ids.has('train.sega_distill.conflicts'));
+  assert.ok(ids.has('train.sega_distill.teacher_cost'));
+});
+
+test('preflight accepts compatible SEGA distillation configuration with teacher cost note', () => {
+  const dataset = makeDataset({ 'one.png': 'fake', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.sega_distill = true;
+  processConfig.model.arch = 'flux2_klein_4b';
+  processConfig.network.type = 'lora';
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(!ids.has('train.sega_distill.unsupported_arch'));
+  assert.ok(!ids.has('train.sega_distill.non_lora'));
+  assert.ok(!ids.has('train.sega_distill.conflicts'));
+  assert.ok(ids.has('train.sega_distill.teacher_cost'));
+});
+
 test('preflight reports auto training phases that cannot advance', () => {
   const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
   const config = baseConfig(dataset);

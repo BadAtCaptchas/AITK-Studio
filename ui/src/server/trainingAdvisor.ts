@@ -518,6 +518,7 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const optimizer = String(train?.optimizer ?? '').toLowerCase();
   const usesAdaptiveProdigyLr = optimizer.startsWith('prodigy');
   const arch = String(processConfig.model?.arch ?? '');
+  const networkType = String(processConfig.network?.type ?? '');
   const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx/i.test(arch);
   const warnLr = sensitiveArch ? 1e-4 : 3e-4;
   const criticalLr = sensitiveArch ? 3e-4 : 1e-3;
@@ -546,6 +547,76 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
       'Consider lowering LR or using training phases with a short warmup/finetune stage.',
       undefined,
       ['config.process[0].train.lr'],
+    );
+  }
+
+  if (train?.sega_distill) {
+    const supportedSegaArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b']);
+    if (!supportedSegaArchs.has(arch)) {
+      addFinding(
+        findings,
+        'critical',
+        'preflight',
+        'config',
+        'train.sega_distill.unsupported_arch',
+        'SEGA distillation does not support this model',
+        `SEGA distillation is enabled for ${arch || 'an unknown model architecture'}.`,
+        'Use FLUX.2 or FLUX.2 Klein, or disable SEGA distillation.',
+        undefined,
+        ['config.process[0].model.arch', 'config.process[0].train.sega_distill'],
+      );
+    }
+
+    if (networkType !== 'lora') {
+      addFinding(
+        findings,
+        'critical',
+        'preflight',
+        'config',
+        'train.sega_distill.non_lora',
+        'SEGA distillation requires LoRA',
+        `The configured target type is ${networkType || 'missing'}, but SEGA distillation currently trains LoRA only.`,
+        'Change the target type to LoRA or disable SEGA distillation.',
+        undefined,
+        ['config.process[0].network.type', 'config.process[0].train.sega_distill'],
+      );
+    }
+
+    const conflictPaths = [
+      train.diff_output_preservation ? 'config.process[0].train.diff_output_preservation' : null,
+      train.blank_prompt_preservation ? 'config.process[0].train.blank_prompt_preservation' : null,
+      train.do_prior_divergence ? 'config.process[0].train.do_prior_divergence' : null,
+      train.inverted_mask_prior ? 'config.process[0].train.inverted_mask_prior' : null,
+      train.do_differential_guidance ? 'config.process[0].train.do_differential_guidance' : null,
+      train.do_guidance_loss ? 'config.process[0].train.do_guidance_loss' : null,
+    ].filter((value): value is string => !!value);
+
+    if (conflictPaths.length > 0) {
+      addFinding(
+        findings,
+        'critical',
+        'preflight',
+        'config',
+        'train.sega_distill.conflicts',
+        'SEGA distillation has conflicting training targets',
+        'SEGA distillation must own the teacher target for this v1 implementation.',
+        'Disable DOP, BPP, prior divergence, inverted-mask prior, guidance loss, and differential guidance when using SEGA distillation.',
+        conflictPaths,
+        ['config.process[0].train.sega_distill', ...conflictPaths],
+      );
+    }
+
+    addFinding(
+      findings,
+      'info',
+      'preflight',
+      'performance',
+      'train.sega_distill.teacher_cost',
+      'SEGA distillation adds teacher compute',
+      'Each training step runs an additional frozen Flux2 teacher prediction.',
+      'Expect lower throughput and watch VRAM during the first run.',
+      undefined,
+      ['config.process[0].train.sega_distill'],
     );
   }
 

@@ -1364,6 +1364,73 @@ class SDTrainer(BaseSDTrainProcess):
                 self.network.is_active = was_network_active
         return prior_pred
 
+    def _get_sega_distill_config(self) -> dict:
+        return {
+            "enabled": True,
+            "base_resolution": self.train_config.sega_distill_base_resolution,
+            "strength": self.train_config.sega_distill_strength,
+            "min_scale": self.train_config.sega_distill_min_scale,
+            "max_scale": self.train_config.sega_distill_max_scale,
+        }
+
+    def _should_do_sega_distill(self, batch: 'DataLoaderBatchDTO') -> bool:
+        if not self.train_config.sega_distill:
+            return False
+        if not self.train_config.sega_distill_on_reg and any(batch.get_is_reg_list()):
+            return False
+        return True
+
+    def _record_sega_scale_stats(self):
+        stats = getattr(self.sd, "_last_sega_scale_stats", None)
+        if not stats:
+            return
+        for key, value in stats.items():
+            self._record_monitor_metric(f"train/sega_scale_{key}", value)
+
+    def get_sega_teacher_prediction(
+            self,
+            noisy_latents: torch.Tensor,
+            conditional_embeds: PromptEmbeds,
+            timesteps: torch.Tensor,
+            pred_kwargs: dict,
+            batch: 'DataLoaderBatchDTO',
+            unconditional_embeds: Optional[PromptEmbeds] = None,
+    ):
+        was_unet_training = self.sd.unet.training
+        was_network_active = False
+        if self.network is not None:
+            was_network_active = self.network.is_active
+            self.network.is_active = False
+
+        try:
+            with torch.no_grad():
+                dtype = get_torch_dtype(self.train_config.dtype)
+                self.sd.unet.eval()
+                if unconditional_embeds is not None:
+                    unconditional_embeds = unconditional_embeds.to(self.device_torch, dtype=dtype).detach()
+                teacher_pred = self.sd.predict_noise(
+                    latents=noisy_latents.to(self.device_torch, dtype=dtype).detach(),
+                    conditional_embeddings=conditional_embeds.to(self.device_torch, dtype=dtype).detach(),
+                    unconditional_embeddings=unconditional_embeds,
+                    timestep=timesteps,
+                    guidance_scale=self.train_config.cfg_scale,
+                    guidance_embedding_scale=self.train_config.cfg_scale,
+                    detach_unconditional=False,
+                    rescale_cfg=self.train_config.cfg_rescale,
+                    bypass_guidance_embedding=self.train_config.bypass_guidance_embedding,
+                    batch=batch,
+                    sega_config=self._get_sega_distill_config(),
+                    **pred_kwargs
+                ).detach()
+                self._record_sega_scale_stats()
+        finally:
+            if was_unet_training:
+                self.sd.unet.train()
+            if self.network is not None:
+                self.network.is_active = was_network_active
+
+        return teacher_pred
+
     def before_unet_predict(self):
         pass
 
@@ -2124,9 +2191,22 @@ class SDTrainer(BaseSDTrainProcess):
                             next_sample_noise = (stepped_latents - (1.0 - t_01) * original_samples) / t_01
                             noise = next_sample_noise
                             timesteps = stepped_timesteps
+                sega_teacher_pred = None
+                if self._should_do_sega_distill(batch):
+                    with self.timer('sega_teacher_predict'):
+                        sega_teacher_pred = self.get_sega_teacher_prediction(
+                            noisy_latents=noisy_latents,
+                            conditional_embeds=conditional_embeds,
+                            timesteps=timesteps,
+                            pred_kwargs=pred_kwargs,
+                            batch=batch,
+                            unconditional_embeds=unconditional_embeds,
+                        )
                 # do a prior pred if we have an unconditional image, we will swap out the giadance later
                 if batch.unconditional_latents is not None or self.do_guided_loss:
                     # do guided loss
+                    if sega_teacher_pred is not None:
+                        raise ValueError("SEGA distillation is not supported with guided loss batches.")
                     loss = self.get_guided_loss(
                         noisy_latents=noisy_latents,
                         conditional_embeds=conditional_embeds,
@@ -2142,6 +2222,8 @@ class SDTrainer(BaseSDTrainProcess):
                     )
                     
                 elif self.train_config.loss_type == 'mean_flow':
+                    if sega_teacher_pred is not None:
+                        raise ValueError("SEGA distillation is not supported with mean_flow loss.")
                     loss = self.get_mean_flow_loss(
                         noisy_latents=noisy_latents,
                         conditional_embeds=conditional_embeds,
@@ -2167,14 +2249,22 @@ class SDTrainer(BaseSDTrainProcess):
                         )
                     self.after_unet_predict()
                     self._record_tensor_stats('train/noise_pred', noise_pred)
+                    if sega_teacher_pred is not None:
+                        self._record_monitor_metric(
+                            'train/sega_distill_loss',
+                            torch.nn.functional.mse_loss(
+                                noise_pred.detach().float(),
+                                sega_teacher_pred.detach().float(),
+                            ),
+                        )
 
                     with self.timer('calculate_loss'):
                         noise = noise.to(self.device_torch, dtype=dtype).detach()
-                        prior_to_calculate_loss = prior_pred
+                        prior_to_calculate_loss = sega_teacher_pred if sega_teacher_pred is not None else prior_pred
                         # if we are doing diff_output_preservation and not noing inverted masked prior
                         # then we need to send none here so it will not target the prior
                         doing_preservation = self.train_config.diff_output_preservation or self.train_config.blank_prompt_preservation
-                        if doing_preservation and not do_inverted_masked_prior:
+                        if sega_teacher_pred is None and doing_preservation and not do_inverted_masked_prior:
                             prior_to_calculate_loss = None
                         
                         loss = self.calculate_loss(
@@ -2186,6 +2276,9 @@ class SDTrainer(BaseSDTrainProcess):
                             mask_multiplier=mask_multiplier,
                             prior_pred=prior_to_calculate_loss,
                         )
+                        if sega_teacher_pred is not None:
+                            loss = loss * self.train_config.sega_distill_weight
+                            self._record_monitor_metric('train/loss_final', loss)
                     
                     if self.train_config.diff_output_preservation or self.train_config.blank_prompt_preservation:
                         # send the loss backwards otherwise checkpointing will fail

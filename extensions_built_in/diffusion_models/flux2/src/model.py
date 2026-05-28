@@ -149,6 +149,7 @@ class Flux2(nn.Module):
         ctx: Tensor,
         ctx_ids: Tensor,
         guidance: Tensor | None,
+        sega_rope_scale: Tensor | None = None,
     ):
         num_txt_tokens = ctx.shape[1]
 
@@ -167,6 +168,12 @@ class Flux2(nn.Module):
 
         pe_x = self.pe_embedder(x_ids)
         pe_ctx = self.pe_embedder(ctx_ids)
+        single_rope_scale = None
+        if sega_rope_scale is not None:
+            txt_rope_scale = sega_rope_scale.new_ones(
+                (sega_rope_scale.shape[0], txt.shape[1], sega_rope_scale.shape[-1])
+            )
+            single_rope_scale = torch.cat((txt_rope_scale, sega_rope_scale), dim=1)
 
         for block in self.double_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -178,6 +185,7 @@ class Flux2(nn.Module):
                     pe_ctx,
                     double_block_mod_img,
                     double_block_mod_txt,
+                    sega_rope_scale,
                     use_reentrant=False,
                 )
             else:
@@ -188,6 +196,7 @@ class Flux2(nn.Module):
                     pe_ctx,
                     double_block_mod_img,
                     double_block_mod_txt,
+                    sega_rope_scale,
                 )
 
         img = torch.cat((txt, img), dim=1)
@@ -200,6 +209,7 @@ class Flux2(nn.Module):
                     img,
                     pe,
                     single_block_mod,
+                    single_rope_scale,
                     use_reentrant=False,
                 )
             else:
@@ -207,6 +217,7 @@ class Flux2(nn.Module):
                     img,
                     pe,
                     single_block_mod,
+                    single_rope_scale,
                 )
 
         img = img[:, num_txt_tokens:, ...]
@@ -317,6 +328,7 @@ class SingleStreamBlock(nn.Module):
         x: Tensor,
         pe: Tensor,
         mod: tuple[Tensor, Tensor],
+        rope_scale: Tensor | None = None,
     ) -> Tensor:
         mod_shift, mod_scale, mod_gate = mod
         x_mod = (1 + mod_scale) * self.pre_norm(x) + mod_shift
@@ -330,7 +342,7 @@ class SingleStreamBlock(nn.Module):
         q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
         q, k = self.norm(q, k, v)
 
-        attn = attention(q, k, v, pe)
+        attn = attention(q, k, v, pe, rope_scale=rope_scale)
 
         # compute activation in mlp stream, cat again and run second linear layer
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
@@ -392,6 +404,7 @@ class DoubleStreamBlock(nn.Module):
         pe_ctx: Tensor,
         mod_img: tuple[Tensor, Tensor],
         mod_txt: tuple[Tensor, Tensor],
+        img_rope_scale: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         img_mod1, img_mod2 = mod_img
         txt_mod1, txt_mod2 = mod_txt
@@ -426,7 +439,13 @@ class DoubleStreamBlock(nn.Module):
         v = torch.cat((txt_v, img_v), dim=2)
 
         pe = torch.cat((pe_ctx, pe), dim=2)
-        attn = attention(q, k, v, pe)
+        rope_scale = None
+        if img_rope_scale is not None:
+            txt_rope_scale = img_rope_scale.new_ones(
+                (img_rope_scale.shape[0], txt.shape[1], img_rope_scale.shape[-1])
+            )
+            rope_scale = torch.cat((txt_rope_scale, img_rope_scale), dim=1)
+        attn = attention(q, k, v, pe, rope_scale=rope_scale)
         txt_attn, img_attn = attn[:, : txt_q.shape[2]], attn[:, txt_q.shape[2] :]
 
         # calculate the img blocks
@@ -523,8 +542,14 @@ class QKNorm(torch.nn.Module):
         return q.to(v), k.to(v)
 
 
-def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor) -> Tensor:
+def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor, rope_scale: Tensor | None = None) -> Tensor:
     q, k = apply_rope(q, k, pe)
+    if rope_scale is not None:
+        scale = rope_scale.to(device=q.device, dtype=q.dtype)
+        if scale.ndim == 3:
+            scale = scale.unsqueeze(1)
+        q = q * scale
+        k = k * scale
 
     x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
     x = rearrange(x, "B H L D -> B L (H D)")

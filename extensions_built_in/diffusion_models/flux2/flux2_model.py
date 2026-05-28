@@ -40,6 +40,11 @@ from .src.sampling import (
     encode_image_refs,
     scatter_ids,
 )
+from .sega import (
+    build_flux2_sega_rope_scale,
+    normalize_sega_config,
+    summarize_rope_scale,
+)
 
 scheduler_config = {
     "base_image_seq_len": 256,
@@ -430,6 +435,7 @@ class Flux2Model(BaseModel):
         text_embeddings: PromptEmbeds,
         guidance_embedding_scale: float,
         batch: "DataLoaderBatchDTO" = None,
+        sega_config: dict | None = None,
         **kwargs,
     ):
         with torch.no_grad():
@@ -533,6 +539,34 @@ class Flux2Model(BaseModel):
             )
 
             cast_dtype = self.model.dtype
+            sega_rope_scale = None
+            self._last_sega_scale_stats = None
+            normalized_sega_config = normalize_sega_config(sega_config)
+            if normalized_sega_config["enabled"]:
+                axes_dim = getattr(getattr(self.transformer, "pe_embedder", None), "axes_dim", [32, 32, 32, 32])
+                primary_rope_scale = build_flux2_sega_rope_scale(
+                    latent_model_input,
+                    packed_latents.shape[1],
+                    axes_dim,
+                    base_resolution=normalized_sega_config["base_resolution"],
+                    strength=normalized_sega_config["strength"],
+                    min_scale=normalized_sega_config["min_scale"],
+                    max_scale=normalized_sega_config["max_scale"],
+                    vae_scale_factor=getattr(self.pipeline, "vae_scale_factor", 16),
+                ).to(device=img_input.device, dtype=img_input.dtype)
+                self._last_sega_scale_stats = summarize_rope_scale(primary_rope_scale)
+                sega_rope_scale = primary_rope_scale
+                if img_cond_seq is not None:
+                    cond_rope_scale = torch.ones(
+                        (
+                            primary_rope_scale.shape[0],
+                            img_cond_seq.shape[1],
+                            primary_rope_scale.shape[-1],
+                        ),
+                        device=primary_rope_scale.device,
+                        dtype=primary_rope_scale.dtype,
+                    )
+                    sega_rope_scale = torch.cat((primary_rope_scale, cond_rope_scale), dim=1)
 
         packed_noise_pred = self.transformer(
             x=img_input.to(self.device_torch, cast_dtype),
@@ -541,6 +575,7 @@ class Flux2Model(BaseModel):
             ctx=txt.to(self.device_torch, cast_dtype),
             ctx_ids=txt_ids.to(self.device_torch),
             guidance=guidance_vec.to(self.device_torch, cast_dtype),
+            sega_rope_scale=sega_rope_scale.to(self.device_torch, cast_dtype) if sega_rope_scale is not None else None,
         )
 
         if img_cond_seq is not None:

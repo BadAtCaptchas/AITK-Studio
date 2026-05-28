@@ -695,6 +695,10 @@ export default function JobLossGraph({ job }: Props) {
   const latestEffectiveBatch = latestMetricValue(latest, series, 'train/effective_batch_size');
   const latestNoisePredStd = latestMetricValue(latest, series, 'train/noise_pred_std');
   const latestTargetStd = latestMetricValue(latest, series, 'train/target_std');
+  const latestSegaDistillLoss = latestMetricValue(latest, series, 'train/sega_distill_loss');
+  const latestSegaScaleMean = latestMetricValue(latest, series, 'train/sega_scale_mean');
+  const latestSegaScaleMin = latestMetricValue(latest, series, 'train/sega_scale_min');
+  const latestSegaScaleMax = latestMetricValue(latest, series, 'train/sega_scale_max');
 
   const phaseTransitions = useMemo(
     () => buildPhaseTransitions(phasePoints, phaseNamePoints),
@@ -1194,6 +1198,13 @@ export default function JobLossGraph({ job }: Props) {
                 <StatRow label="pred std" value={formatNum(latestNoisePredStd, 3)} />
                 <StatRow label="target std" value={formatNum(latestTargetStd, 3)} />
                 <StatRow label="sigma" value={formatNum(latestSigmaMean, 3)} />
+                {latestSegaDistillLoss != null && <StatRow label="sega loss" value={formatNum(latestSegaDistillLoss, 4)} />}
+                {latestSegaScaleMean != null && (
+                  <StatRow
+                    label="sega scale"
+                    value={`${formatNum(latestSegaScaleMean, 3)} (${formatNum(latestSegaScaleMin, 3)}-${formatNum(latestSegaScaleMax, 3)})`}
+                  />
+                )}
               </div>
             </div>
 

@@ -45,6 +45,7 @@ type Props = {
 };
 
 const isDev = process.env.NODE_ENV === 'development';
+const segaDistillArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b']);
 
 export default function SimpleJob({
   jobConfig,
@@ -82,6 +83,34 @@ export default function SimpleJob({
   const supportsNormalNetworkDropout = networkType !== 'lokr';
   const isAudioModel = !!(modelArch?.group === 'audio');
   const autoTrain = !!jobConfig.config.process[0].train.auto_train;
+  const trainConfig = jobConfig.config.process[0].train;
+  const supportsSegaDistill = segaDistillArchs.has(jobConfig.config.process[0].model.arch);
+  const segaDistillEnabled = !!trainConfig.sega_distill;
+  const canEnableSegaDistill = supportsSegaDistill && networkType === 'lora';
+  const showSegaDistill = supportsSegaDistill || segaDistillEnabled;
+
+  const setSegaDefaults = () => {
+    if (trainConfig.sega_distill_weight === undefined) setJobConfig(1.0, 'config.process[0].train.sega_distill_weight');
+    if (trainConfig.sega_distill_base_resolution === undefined) {
+      setJobConfig(1024, 'config.process[0].train.sega_distill_base_resolution');
+    }
+    if (trainConfig.sega_distill_strength === undefined) setJobConfig(1.0, 'config.process[0].train.sega_distill_strength');
+    if (trainConfig.sega_distill_min_scale === undefined) setJobConfig(0.5, 'config.process[0].train.sega_distill_min_scale');
+    if (trainConfig.sega_distill_max_scale === undefined) setJobConfig(2.0, 'config.process[0].train.sega_distill_max_scale');
+    if (trainConfig.sega_distill_on_reg === undefined) setJobConfig(false, 'config.process[0].train.sega_distill_on_reg');
+  };
+
+  const handleSegaDistillToggle = (enabled: boolean) => {
+    if (enabled && !canEnableSegaDistill) return;
+    setJobConfig(enabled, 'config.process[0].train.sega_distill');
+    if (!enabled) return;
+    setSegaDefaults();
+    setJobConfig(false, 'config.process[0].train.diff_output_preservation');
+    setJobConfig(false, 'config.process[0].train.blank_prompt_preservation');
+    setJobConfig(undefined, 'config.process[0].train.do_differential_guidance');
+    setJobConfig(undefined, 'config.process[0].train.differential_guidance_scale');
+    setJobConfig(undefined, 'config.process[0].train.do_guidance_loss');
+  };
 
   const handleTrainingStepsChange = (value: number | null) => {
     if (autoTrain) return;
@@ -171,13 +200,19 @@ export default function SimpleJob({
     if (!disableSections.includes('train.diff_output_preservation')) {
       count += 1;
     }
+    if (showSegaDistill) {
+      count += 1;
+    }
     return count;
-  }, [disableSections]);
+  }, [disableSections, showSegaDistill]);
 
   let trainingBarClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6';
 
   if (numTrainingCols == 5) {
     trainingBarClass = 'grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6';
+  }
+  if (numTrainingCols == 6) {
+    trainingBarClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6';
   }
 
   const transformerQuantizationOptions: GroupedSelectOption[] | SelectOption[] = useMemo(() => {
@@ -460,6 +495,9 @@ export default function SimpleJob({
                 setJobConfig(value, 'config.process[0].network.type');
                 if (value === 'lokr') {
                   setJobConfig(undefined, 'config.process[0].network.dropout');
+                  if (jobConfig.config.process[0].train.sega_distill) {
+                    setJobConfig(false, 'config.process[0].train.sega_distill');
+                  }
                 }
               }}
               options={[
@@ -770,6 +808,9 @@ export default function SimpleJob({
                           // only one can be enabled at a time
                           setJobConfig(false, 'config.process[0].train.blank_prompt_preservation');
                         }
+                        if (value && jobConfig.config.process[0].train.sega_distill) {
+                          setJobConfig(false, 'config.process[0].train.sega_distill');
+                        }
                       }}
                     />
                     {jobConfig.config.process[0].train.diff_output_preservation && (
@@ -810,6 +851,9 @@ export default function SimpleJob({
                           // only one can be enabled at a time
                           setJobConfig(false, 'config.process[0].train.diff_output_preservation');
                         }
+                        if (value && jobConfig.config.process[0].train.sega_distill) {
+                          setJobConfig(false, 'config.process[0].train.sega_distill');
+                        }
                       }}
                     />
                     {jobConfig.config.process[0].train.blank_prompt_preservation && (
@@ -831,6 +875,72 @@ export default function SimpleJob({
                   </>
                 )}
               </div>
+              {showSegaDistill && (
+                <div>
+                  <FormGroup label="SEGA Distillation" docKey="train.sega_distill">
+                    <Checkbox
+                      label="SEGA Distillation"
+                      docKey="train.sega_distill"
+                      checked={segaDistillEnabled}
+                      disabled={!segaDistillEnabled && !canEnableSegaDistill}
+                      onChange={handleSegaDistillToggle}
+                    />
+                  </FormGroup>
+                  {segaDistillEnabled && (
+                    <>
+                      <NumberInput
+                        label="Weight"
+                        className="pt-2"
+                        docKey="train.sega_distill_weight"
+                        value={trainConfig.sega_distill_weight ?? 1.0}
+                        onChange={value => setJobConfig(value ?? 1.0, 'config.process[0].train.sega_distill_weight')}
+                        min={0.000001}
+                      />
+                      <NumberInput
+                        label="Base Resolution"
+                        className="pt-2"
+                        docKey="train.sega_distill_base_resolution"
+                        value={trainConfig.sega_distill_base_resolution ?? 1024}
+                        onChange={value =>
+                          setJobConfig(value ?? 1024, 'config.process[0].train.sega_distill_base_resolution')
+                        }
+                        min={1}
+                      />
+                      <NumberInput
+                        label="Strength"
+                        className="pt-2"
+                        docKey="train.sega_distill_strength"
+                        value={trainConfig.sega_distill_strength ?? 1.0}
+                        onChange={value => setJobConfig(value ?? 1.0, 'config.process[0].train.sega_distill_strength')}
+                        min={0}
+                      />
+                      <div className="grid grid-cols-2 gap-3 pt-2">
+                        <NumberInput
+                          label="Min Scale"
+                          docKey="train.sega_distill_scale"
+                          value={trainConfig.sega_distill_min_scale ?? 0.5}
+                          onChange={value => setJobConfig(value ?? 0.5, 'config.process[0].train.sega_distill_min_scale')}
+                          min={0.01}
+                        />
+                        <NumberInput
+                          label="Max Scale"
+                          docKey="train.sega_distill_scale"
+                          value={trainConfig.sega_distill_max_scale ?? 2.0}
+                          onChange={value => setJobConfig(value ?? 2.0, 'config.process[0].train.sega_distill_max_scale')}
+                          min={0.01}
+                        />
+                      </div>
+                      <Checkbox
+                        label="Apply To Reg"
+                        className="pt-3"
+                        checked={trainConfig.sega_distill_on_reg ?? false}
+                        onChange={value => setJobConfig(value, 'config.process[0].train.sega_distill_on_reg')}
+                        docKey="train.sega_distill_on_reg"
+                      />
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <TrainingPhasesEditor
               train={jobConfig.config.process[0].train}
@@ -863,6 +973,9 @@ export default function SimpleJob({
                     ) {
                       // set default differential guidance scale to 3.0
                       setJobConfig(3.0, 'config.process[0].train.differential_guidance_scale');
+                    }
+                    if (newValue && jobConfig.config.process[0].train.sega_distill) {
+                      setJobConfig(false, 'config.process[0].train.sega_distill');
                     }
                   }}
                 />

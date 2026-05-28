@@ -288,6 +288,17 @@ export default function TrainingPhasesEditor({
     setSelectedProfileID(nextProfile.id);
     setJobConfig(true, 'config.process[0].train.auto_train');
 
+    if (!('sega_distill' in (nextProfile.train ?? {}))) {
+      setJobConfig(false, 'config.process[0].train.sega_distill');
+    }
+    if (nextProfile.train?.sega_distill) {
+      setJobConfig(false, 'config.process[0].train.diff_output_preservation');
+      setJobConfig(false, 'config.process[0].train.blank_prompt_preservation');
+      setJobConfig(undefined, 'config.process[0].train.do_differential_guidance');
+      setJobConfig(undefined, 'config.process[0].train.differential_guidance_scale');
+      setJobConfig(undefined, 'config.process[0].train.do_guidance_loss');
+    }
+
     for (const [key, value] of Object.entries(nextProfile.train ?? {})) {
       if (key === 'steps' || key === 'phases' || key === 'auto_train') continue;
       if (key === 'timestep_type' && disableTimestepType) continue;
@@ -374,6 +385,13 @@ export default function TrainingPhasesEditor({
         gradient_accumulation: train.gradient_accumulation,
         t0_loss_target: train.t0_loss_target,
         max_loss: train.max_loss,
+        sega_distill: train.sega_distill,
+        sega_distill_weight: train.sega_distill_weight,
+        sega_distill_base_resolution: train.sega_distill_base_resolution,
+        sega_distill_strength: train.sega_distill_strength,
+        sega_distill_min_scale: train.sega_distill_min_scale,
+        sega_distill_max_scale: train.sega_distill_max_scale,
+        sega_distill_on_reg: train.sega_distill_on_reg,
       },
       network: network
         ? {

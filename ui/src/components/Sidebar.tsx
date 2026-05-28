@@ -4,6 +4,7 @@ import { FaXTwitter, FaDiscord, FaYoutube } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
 import ActiveJobWidget from './ActiveJobWidget';
+import OstrisCloudBalance from './OstrisCloudBalance';
 
 const Sidebar = () => {
   const navigation = [
@@ -30,6 +31,7 @@ const Sidebar = () => {
           </span>
         </h1>
       </div>
+      <OstrisCloudBalance />
       <nav className="flex-1">
         <ul className="px-2 py-4 space-y-2">
           {navigation.map(item => (

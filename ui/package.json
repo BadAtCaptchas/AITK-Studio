@@ -14,7 +14,7 @@
     "test:tensorboard": "tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
     "test:remote": "tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs",
     "test:basic": "tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs",
-    "test:encrypted-dataset-secrets": "tsc -p tsconfig.worker.json && node --test scripts/encryptedDatasetSecrets.test.mjs",
+    "test:encrypted-dataset-secrets": "tsc -p tsconfig.worker.json && node --test scripts/encryptedDatasetSecrets.test.mjs scripts/encryptedDatasets.test.mjs",
     "test:secure-caption": "tsc -p tsconfig.worker.json && node --test scripts/secureCaptionCrypto.test.mjs scripts/ollamaClient.test.mjs scripts/secureRemoteCaptionJobs.test.mjs",
     "test:phase-summary": "tsc -p tsconfig.worker.json && node --test scripts/trainingPhaseSummary.test.mjs",
     "test:scripts": "tsc -p tsconfig.worker.json && node --test scripts/scriptRunner.test.mjs",

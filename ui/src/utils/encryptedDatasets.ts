@@ -25,6 +25,10 @@ export function getRememberedEncryptedDatasetKey(datasetPathOrName: string) {
   return rememberedKeys.get(normalizeDatasetKey(datasetPathOrName)) || null;
 }
 
+export function forgetRememberedEncryptedDatasetKey(datasetPathOrName: string) {
+  rememberedKeys.delete(normalizeDatasetKey(datasetPathOrName));
+}
+
 export function randomId(bytes = 16) {
   const buf = crypto.getRandomValues(new Uint8Array(bytes));
   return arrayBufferToBase64Url(buf);

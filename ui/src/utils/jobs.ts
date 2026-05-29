@@ -7,6 +7,7 @@ import type { AxiosProgressEvent } from 'axios';
 import {
   derivePasswordKey,
   exportRawAesKey,
+  forgetRememberedEncryptedDatasetKey,
   getRememberedEncryptedDatasetKey,
   rememberEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
@@ -118,7 +119,21 @@ export const startJob = (
         const requiredDatasets = error.response?.status === 409 ? error.response?.data?.encryptedDatasets : null;
         if (Array.isArray(requiredDatasets)) {
           try {
-            const supplied = encryptedDatasetKeys || [];
+            const invalidDatasets = Array.isArray(error.response?.data?.invalidEncryptedDatasets)
+              ? error.response.data.invalidEncryptedDatasets
+              : [];
+            invalidDatasets.forEach((dataset: any) => {
+              if (typeof dataset?.path === 'string') forgetRememberedEncryptedDatasetKey(dataset.path);
+              if (typeof dataset?.name === 'string') forgetRememberedEncryptedDatasetKey(dataset.name);
+            });
+            const invalidPathKeys = new Set(
+              invalidDatasets
+                .map((dataset: any) => (typeof dataset?.path === 'string' ? dataset.path.replace(/[\\/]+$/, '').toLowerCase() : null))
+                .filter((value: string | null): value is string => !!value),
+            );
+            const supplied = (encryptedDatasetKeys || []).filter(
+              key => !invalidPathKeys.has(key.datasetPath.replace(/[\\/]+$/, '').toLowerCase()),
+            );
             const additional = await Promise.all(requiredDatasets.map(resolveEncryptedDatasetStartKey));
             const durableEncryptedDatasetKeys =
               options.durableEncryptedDatasetKeys ?? promptForDurableEncryptedResume();

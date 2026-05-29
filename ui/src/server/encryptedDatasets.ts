@@ -1,10 +1,14 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 import { TOOLKIT_ROOT } from '../paths';
 import type { DatasetSummary, EncryptedDatasetManifest, EncryptedDatasetStartKey } from '../types';
 
 export const ENCRYPTED_DATASET_MANIFEST = '.aitk_encrypted_dataset.json';
+const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
+const AES_GCM_AUTH_TAG_BYTES = 16;
+const AES_GCM_NONCE_BYTES = 12;
 
 const DATASET_CONFIG_FIELDS = [
   'folder_path',
@@ -100,6 +104,53 @@ export function validateEncryptedManifest(value: unknown): EncryptedDatasetManif
 export async function readEncryptedManifest(datasetFolder: string) {
   const text = await fsp.readFile(encryptedManifestPath(datasetFolder), 'utf-8');
   return validateEncryptedManifest(JSON.parse(text));
+}
+
+function base64ToBuffer(value: string, fieldName: string) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    throw new Error(`Invalid encrypted dataset ${fieldName}`);
+  }
+  return Buffer.from(value, 'base64');
+}
+
+export function validateEncryptedCatalogKey(manifest: EncryptedDatasetManifest, keyB64: string) {
+  validateEncryptedManifest(manifest);
+  const key = base64ToBuffer(keyB64, 'key');
+  if (key.length !== 32) {
+    throw new Error('Encrypted dataset key must be 32 bytes');
+  }
+
+  const nonce = base64ToBuffer(manifest.catalog.nonce, 'catalog nonce');
+  if (nonce.length !== AES_GCM_NONCE_BYTES) {
+    throw new Error('Invalid encrypted dataset catalog nonce');
+  }
+
+  const encrypted = base64ToBuffer(manifest.catalog.data, 'catalog data');
+  if (encrypted.length <= AES_GCM_AUTH_TAG_BYTES) {
+    throw new Error('Invalid encrypted dataset catalog data');
+  }
+
+  const ciphertext = encrypted.subarray(0, encrypted.length - AES_GCM_AUTH_TAG_BYTES);
+  const tag = encrypted.subarray(encrypted.length - AES_GCM_AUTH_TAG_BYTES);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce, {
+    authTagLength: AES_GCM_AUTH_TAG_BYTES,
+  });
+  decipher.setAAD(CATALOG_AAD);
+  decipher.setAuthTag(tag);
+  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  const catalog = JSON.parse(plaintext.toString('utf8'));
+  if (catalog?.version !== 1 || !Array.isArray(catalog.items)) {
+    throw new Error('Invalid encrypted dataset catalog');
+  }
+  return true;
+}
+
+export async function validateEncryptedDatasetStartKey(
+  requiredDataset: { path: string; name: string },
+  keyB64: string,
+) {
+  const manifest = await readEncryptedManifest(requiredDataset.path);
+  return validateEncryptedCatalogKey(manifest, keyB64);
 }
 
 export async function writeEncryptedManifest(datasetFolder: string, manifest: EncryptedDatasetManifest) {

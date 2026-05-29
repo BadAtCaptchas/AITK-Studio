@@ -25,12 +25,16 @@ export type OllamaGenerateOptions = {
 type OllamaGenerationAttempt = {
   endpoint: 'generate' | 'chat';
   attempt: number;
+  numPredict: number;
   caption: string;
   doneReason: string | null;
+  hadThinking: boolean;
 };
 
 const OLLAMA_CAPTION_MAX_ATTEMPTS = 3;
 const OLLAMA_CAPTION_EMPTY_RETRY_DELAY_MS = 2000;
+const OLLAMA_CAPTION_MIN_NUM_PREDICT = 1024;
+const OLLAMA_CAPTION_MAX_NUM_PREDICT = 4096;
 
 export type OllamaModelPullStatus = {
   status: 'ready' | 'pulling' | 'error';
@@ -101,8 +105,36 @@ function extractOllamaDoneReason(data: unknown) {
   return typeof doneReason === 'string' ? doneReason : null;
 }
 
+function hasOllamaThinking(data: unknown) {
+  if (typeof data !== 'object' || data === null) return false;
+  const record = data as Record<string, unknown>;
+  if (typeof record.thinking === 'string' && record.thinking.trim()) return true;
+
+  const message = record.message;
+  if (typeof message === 'object' && message !== null) {
+    const thinking = (message as Record<string, unknown>).thinking;
+    return typeof thinking === 'string' && thinking.trim().length > 0;
+  }
+
+  return false;
+}
+
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function captionNumPredict(maxNewTokens: number | undefined, attempt: number) {
+  const requested = Number.isFinite(maxNewTokens) && (maxNewTokens || 0) > 0 ? Math.round(maxNewTokens as number) : 0;
+  const baseBudget = Math.max(OLLAMA_CAPTION_MIN_NUM_PREDICT, requested * 4);
+  const retryBudget = baseBudget * 2 ** Math.max(0, attempt - 1);
+  return Math.min(OLLAMA_CAPTION_MAX_NUM_PREDICT, retryBudget);
+}
+
+function captionBodyForAttempt(body: Record<string, unknown>, maxNewTokens: number | undefined, attempt: number) {
+  return {
+    ...body,
+    options: { num_predict: captionNumPredict(maxNewTokens, attempt) },
+  };
 }
 
 export async function listOllamaModels(baseUrl = getOllamaBaseUrl()) {
@@ -258,9 +290,6 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   if (options.systemPrompt?.trim()) {
     generateBody.system = options.systemPrompt.trim();
   }
-  if (Number.isFinite(options.maxNewTokens) && (options.maxNewTokens || 0) > 0) {
-    generateBody.options = { num_predict: Math.round(options.maxNewTokens as number) };
-  }
 
   const messages: Array<Record<string, unknown>> = [];
   if (options.systemPrompt?.trim()) {
@@ -277,17 +306,24 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     stream: false,
     keep_alive: '10m',
   };
-  if (Number.isFinite(options.maxNewTokens) && (options.maxNewTokens || 0) > 0) {
-    chatBody.options = { num_predict: Math.round(options.maxNewTokens as number) };
-  }
 
   const attempts: OllamaGenerationAttempt[] = [];
   for (let attempt = 1; attempt <= OLLAMA_CAPTION_MAX_ATTEMPTS; attempt += 1) {
-    const generateAttempt = await runOllamaGenerationAttempt('generate', generateBody, baseUrl, attempt);
+    const generateAttempt = await runOllamaGenerationAttempt(
+      'generate',
+      captionBodyForAttempt(generateBody, options.maxNewTokens, attempt),
+      baseUrl,
+      attempt,
+    );
     attempts.push(generateAttempt);
     if (generateAttempt.caption) return generateAttempt.caption;
 
-    const chatAttempt = await runOllamaGenerationAttempt('chat', chatBody, baseUrl, attempt);
+    const chatAttempt = await runOllamaGenerationAttempt(
+      'chat',
+      captionBodyForAttempt(chatBody, options.maxNewTokens, attempt),
+      baseUrl,
+      attempt,
+    );
     attempts.push(chatAttempt);
     if (chatAttempt.caption) return chatAttempt.caption;
 
@@ -298,7 +334,12 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
 
   const reasons = attempts
     .filter(attempt => attempt.doneReason)
-    .map(attempt => `${attempt.endpoint} attempt ${attempt.attempt}: ${attempt.doneReason}`)
+    .map(
+      attempt =>
+        `${attempt.endpoint} attempt ${attempt.attempt}: ${attempt.doneReason} at num_predict ${attempt.numPredict}${
+          attempt.hadThinking ? ' with thinking' : ''
+        }`,
+    )
     .join(', ');
   throw new Error(
     `Ollama returned an empty caption${reasons ? ` (${reasons})` : ''}. Confirm the selected model supports image inputs and try a stronger caption prompt.`,
@@ -321,11 +362,14 @@ async function runOllamaGenerationAttempt(
   }
 
   const data = await response.json();
+  const numPredict = ((body.options as Record<string, unknown> | undefined)?.num_predict as number | undefined) || 0;
   return {
     endpoint,
     attempt,
+    numPredict,
     caption: extractOllamaCaptionText(data),
     doneReason: extractOllamaDoneReason(data),
+    hadThinking: hasOllamaThinking(data),
   };
 }
 

@@ -24,9 +24,13 @@ export type OllamaGenerateOptions = {
 
 type OllamaGenerationAttempt = {
   endpoint: 'generate' | 'chat';
+  attempt: number;
   caption: string;
   doneReason: string | null;
 };
+
+const OLLAMA_CAPTION_MAX_ATTEMPTS = 3;
+const OLLAMA_CAPTION_EMPTY_RETRY_DELAY_MS = 2000;
 
 export type OllamaModelPullStatus = {
   status: 'ready' | 'pulling' | 'error';
@@ -94,6 +98,10 @@ function extractOllamaDoneReason(data: unknown) {
   if (typeof data !== 'object' || data === null) return null;
   const doneReason = (data as Record<string, unknown>).done_reason;
   return typeof doneReason === 'string' ? doneReason : null;
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export async function listOllamaModels(baseUrl = getOllamaBaseUrl()) {
@@ -221,6 +229,7 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     prompt,
     images: [options.imageBase64],
     stream: false,
+    keep_alive: '10m',
   };
   if (options.systemPrompt?.trim()) {
     generateBody.system = options.systemPrompt.trim();
@@ -228,9 +237,6 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   if (Number.isFinite(options.maxNewTokens) && (options.maxNewTokens || 0) > 0) {
     generateBody.options = { num_predict: Math.round(options.maxNewTokens as number) };
   }
-
-  const generateAttempt = await runOllamaGenerationAttempt('generate', generateBody, baseUrl);
-  if (generateAttempt.caption) return generateAttempt.caption;
 
   const messages: Array<Record<string, unknown>> = [];
   if (options.systemPrompt?.trim()) {
@@ -245,17 +251,30 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     model,
     messages,
     stream: false,
+    keep_alive: '10m',
   };
   if (Number.isFinite(options.maxNewTokens) && (options.maxNewTokens || 0) > 0) {
     chatBody.options = { num_predict: Math.round(options.maxNewTokens as number) };
   }
 
-  const chatAttempt = await runOllamaGenerationAttempt('chat', chatBody, baseUrl);
-  if (chatAttempt.caption) return chatAttempt.caption;
+  const attempts: OllamaGenerationAttempt[] = [];
+  for (let attempt = 1; attempt <= OLLAMA_CAPTION_MAX_ATTEMPTS; attempt += 1) {
+    const generateAttempt = await runOllamaGenerationAttempt('generate', generateBody, baseUrl, attempt);
+    attempts.push(generateAttempt);
+    if (generateAttempt.caption) return generateAttempt.caption;
 
-  const reasons = [generateAttempt, chatAttempt]
+    const chatAttempt = await runOllamaGenerationAttempt('chat', chatBody, baseUrl, attempt);
+    attempts.push(chatAttempt);
+    if (chatAttempt.caption) return chatAttempt.caption;
+
+    if (attempt < OLLAMA_CAPTION_MAX_ATTEMPTS) {
+      await sleep(OLLAMA_CAPTION_EMPTY_RETRY_DELAY_MS);
+    }
+  }
+
+  const reasons = attempts
     .filter(attempt => attempt.doneReason)
-    .map(attempt => `${attempt.endpoint}: ${attempt.doneReason}`)
+    .map(attempt => `${attempt.endpoint} attempt ${attempt.attempt}: ${attempt.doneReason}`)
     .join(', ');
   throw new Error(
     `Ollama returned an empty caption${reasons ? ` (${reasons})` : ''}. Confirm the selected model supports image inputs and try a stronger caption prompt.`,
@@ -266,6 +285,7 @@ async function runOllamaGenerationAttempt(
   endpoint: OllamaGenerationAttempt['endpoint'],
   body: Record<string, unknown>,
   baseUrl: string,
+  attempt: number,
 ): Promise<OllamaGenerationAttempt> {
   const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/${endpoint}`, {
     method: 'POST',
@@ -279,6 +299,7 @@ async function runOllamaGenerationAttempt(
   const data = await response.json();
   return {
     endpoint,
+    attempt,
     caption: extractOllamaCaptionText(data),
     doneReason: extractOllamaDoneReason(data),
   };

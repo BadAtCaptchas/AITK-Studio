@@ -1,4 +1,5 @@
 import os
+import copy
 from typing import TYPE_CHECKING, List, Union
 import cv2
 import torch
@@ -189,6 +190,17 @@ class FileItemDTO(
         self.tensor: Union[torch.Tensor, None] = None
         self.audio_data = None
         self.audio_tensor = None
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for key, value in self.__dict__.items():
+            if key == "encrypted_reader":
+                setattr(result, key, value)
+            else:
+                setattr(result, key, copy.deepcopy(value, memo))
+        return result
 
     def cleanup(self):
         self.tensor = None

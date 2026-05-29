@@ -164,7 +164,28 @@ test('generateOllamaImageCaption sends system prompt to Ollama generate', async 
   assert.equal(caption, 'a caption');
   assert.equal(generateBodies.length, 1);
   assert.equal(generateBodies[0].system, 'Return compact training captions.');
-  assert.deepEqual(generateBodies[0].options, { num_predict: 32 });
+  assert.equal('think' in generateBodies[0], false);
+  assert.deepEqual(generateBodies[0].options, { num_predict: 1024 });
+});
+
+test('generateOllamaImageCaption adds thinking budget to larger requested token budgets', async () => {
+  const generateBodies = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
+    if (String(url).endsWith('/api/generate')) {
+      generateBodies.push(JSON.parse(init.body));
+      return response({ response: 'a longer caption' });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const caption = await ollama.generateOllamaImageCaption(
+    { model: 'llava', prompt: 'caption', imageBase64: 'aW1n', maxNewTokens: 768 },
+    'http://ollama.test',
+  );
+
+  assert.equal(caption, 'a longer caption');
+  assert.deepEqual(generateBodies[0].options, { num_predict: 3072 });
 });
 
 test('generateOllamaImageCaption falls back to chat when generate is empty', async () => {
@@ -194,6 +215,37 @@ test('generateOllamaImageCaption falls back to chat when generate is empty', asy
     { role: 'system', content: 'Return compact training captions.' },
     { role: 'user', content: 'caption', images: ['aW1n'] },
   ]);
+  assert.equal('think' in chatBody, false);
+  assert.deepEqual(chatBody.options, { num_predict: 1024 });
+});
+
+test('generateOllamaImageCaption expands retry budget for thinking-only length responses', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body });
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'qwen3-vl:latest' }] });
+    if (String(url).endsWith('/api/generate')) return response({ response: '', thinking: 'private trace', done_reason: 'length' });
+    if (String(url).endsWith('/api/chat')) {
+      return response({ message: { content: '', thinking: 'private trace' }, done_reason: 'length' });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  await assert.rejects(
+    ollama.generateOllamaImageCaption(
+      { model: 'qwen3-vl', prompt: 'caption', imageBase64: 'aW1n', maxNewTokens: 180 },
+      'http://ollama.test',
+    ),
+    /with thinking/,
+  );
+
+  const generationBodies = calls
+    .filter(call => call.url.endsWith('/api/generate') || call.url.endsWith('/api/chat'))
+    .map(call => JSON.parse(call.body));
+  assert.deepEqual(
+    generationBodies.map(body => body.options.num_predict),
+    [1024, 1024, 2048, 2048, 4096, 4096],
+  );
 });
 
 test('generateOllamaImageCaption accepts message content response shape', async () => {

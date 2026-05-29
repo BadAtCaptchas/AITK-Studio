@@ -9,6 +9,7 @@ const envKeys = [
   'AITK_CLOUDFLARED_PUBLIC_URL',
   'AITK_CLOUDFLARED_TOKEN_FILE',
   'AITK_CLOUDFLARED_BIN',
+  'AITK_CLOUDFLARED_AUTO_DOWNLOAD',
   'AITK_CLOUDFLARED_METRICS_ADDR',
   'AITK_CLOUDFLARED_LOG_LEVEL',
   'AI_TOOLKIT_AUTH',
@@ -41,6 +42,7 @@ test('cloudflared config is disabled by default', () => {
 
   assert.equal(config.enabled, false);
   assert.equal(config.bin, 'cloudflared');
+  assert.equal(config.autoDownload, false);
   assert.equal(config.metricsAddr, '127.0.0.1:60123');
 });
 
@@ -49,6 +51,7 @@ test('cloudflared config reads managed tunnel env vars without exposing token co
   process.env.AITK_CLOUDFLARED_PUBLIC_URL = 'https://worker.example.com';
   process.env.AITK_CLOUDFLARED_TOKEN_FILE = '/tmp/tunnel-token';
   process.env.AITK_CLOUDFLARED_BIN = '/usr/local/bin/cloudflared';
+  process.env.AITK_CLOUDFLARED_AUTO_DOWNLOAD = '1';
   process.env.AITK_CLOUDFLARED_METRICS_ADDR = '127.0.0.1:60222';
   process.env.AITK_CLOUDFLARED_LOG_LEVEL = 'warn';
 
@@ -59,6 +62,7 @@ test('cloudflared config reads managed tunnel env vars without exposing token co
   assert.equal(config.configured, true);
   assert.equal(config.publicUrl, 'https://worker.example.com');
   assert.equal(config.tokenFile, '/tmp/tunnel-token');
+  assert.equal(config.autoDownload, true);
   assert.equal(config.metricsAddr, '127.0.0.1:60222');
   assert.equal(config.logLevel, 'warn');
   assert.equal(JSON.stringify(config).includes('eyJ'), false);
@@ -76,4 +80,22 @@ test('cloudflared status reports auth requirement when enabled', async () => {
   assert.equal(status.enabled, true);
   assert.equal(status.running, false);
   assert.match(status.error, /AI_TOOLKIT_AUTH/);
+});
+
+test('cloudflared download info uses official release assets for common platforms', () => {
+  const cloudflared = loadCloudflared();
+
+  const linux = cloudflared.getCloudflaredDownloadInfoForPlatform('linux', 'x64');
+  assert.equal(linux.supported, true);
+  assert.equal(linux.assetName, 'cloudflared-linux-amd64');
+  assert.match(linux.url, /github\.com\/cloudflare\/cloudflared\/releases\/latest\/download\/cloudflared-linux-amd64$/);
+
+  const windows = cloudflared.getCloudflaredDownloadInfoForPlatform('win32', 'x64');
+  assert.equal(windows.supported, true);
+  assert.equal(windows.assetName, 'cloudflared-windows-amd64.exe');
+
+  const darwin = cloudflared.getCloudflaredDownloadInfoForPlatform('darwin', 'arm64');
+  assert.equal(darwin.supported, true);
+  assert.equal(darwin.assetName, 'cloudflared-darwin-arm64.tgz');
+  assert.equal(darwin.archive, 'tgz');
 });

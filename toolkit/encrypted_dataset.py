@@ -117,6 +117,15 @@ class EncryptedDatasetReader:
             EncryptedDatasetItem(**item) for item in self.catalog.get("items", [])
         ]
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["aesgcm"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.aesgcm = AESGCM(self.key)
+
     def _lookup_key(self) -> bytes:
         key_map = _load_env_key_map()
         key = key_map.get(_normalize_key(self.dataset_path)) or key_map.get(os.path.basename(self.dataset_path).lower())

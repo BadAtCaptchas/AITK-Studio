@@ -85,6 +85,8 @@ class BaseCaptioner(BaseExtensionProcess):
         self.model2 = None
         self.processor2 = None
         self.file_paths = []
+        self.caption_success_count = 0
+        self.caption_failure_count = 0
         self.device_torch = torch.device(self.caption_config.device)
         self.torch_dtype = get_torch_dtype(self.caption_config.dtype)
 
@@ -110,6 +112,8 @@ class BaseCaptioner(BaseExtensionProcess):
             print("****************************************************")
 
     def run_caption_loop(self):
+        self.caption_success_count = 0
+        self.caption_failure_count = 0
         for file_path in tqdm.tqdm(
             self.file_paths, desc="Captioning files", unit="file"
         ):
@@ -119,11 +123,25 @@ class BaseCaptioner(BaseExtensionProcess):
                     break
             try:
                 file_caption = self.get_caption_for_file(file_path)
-                if file_caption is not None:
-                    self.save_caption_for_file(file_path, file_caption)
+                if file_caption is None or str(file_caption).strip() == "":
+                    self.caption_failure_count += 1
+                    print(f"Error captioning file {file_path}: captioner returned no text")
+                    continue
+                self.save_caption_for_file(file_path, str(file_caption).strip())
+                self.caption_success_count += 1
             except Exception as e:
+                self.caption_failure_count += 1
                 print(f"Error captioning file {file_path}: {e}")
                 continue
+        if self.file_paths and self.caption_success_count == 0 and self.caption_failure_count > 0:
+            raise RuntimeError(
+                f"Captioning failed: no captions were generated for {self.caption_failure_count} attempted file(s)."
+            )
+        if self.caption_failure_count > 0:
+            print(
+                f"Captioning completed with {self.caption_failure_count} failed file(s) "
+                f"and {self.caption_success_count} saved caption(s)."
+            )
 
     def load_pil_image(self, file_path: str, max_res: Optional[int] = None) -> Image:
         if self.encrypted_reader is not None:

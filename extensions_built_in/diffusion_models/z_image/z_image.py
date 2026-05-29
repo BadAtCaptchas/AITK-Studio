@@ -132,6 +132,7 @@ class ZImageModel(BaseModel):
             target_lin_modules=self.target_lora_modules,
             is_assistant_adapter=True,
             is_ara=True,
+            base_model=self,
         )
         network.apply_to(None, transformer, apply_text_encoder=False, apply_unet=True)
         self.print_and_status_update("Merging in assistant LoRA")

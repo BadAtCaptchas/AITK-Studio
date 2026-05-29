@@ -38,6 +38,36 @@ class NetworkConfigTest(unittest.TestCase):
 
         self.assertIsNone(config.dropout)
 
+    def test_validate_rejects_network_without_trainable_target(self):
+        with self.assertRaisesRegex(ValueError, "train.train_unet"):
+            validate_configs(
+                TrainConfig(train_unet=False, train_text_encoder=False),
+                ModelConfig(arch="zimage:turbo", name_or_path="Tongyi-MAI/Z-Image-Turbo"),
+                SaveConfig(save_format="diffusers"),
+                [],
+                NetworkConfig(type="lora"),
+            )
+
+    def test_validate_rejects_zero_rank_lora_without_conv_target(self):
+        with self.assertRaisesRegex(ValueError, "network.linear"):
+            validate_configs(
+                TrainConfig(),
+                ModelConfig(arch="zimage:turbo", name_or_path="Tongyi-MAI/Z-Image-Turbo"),
+                SaveConfig(save_format="diffusers"),
+                [],
+                NetworkConfig(type="lora", linear=0, linear_alpha=0, conv=None),
+            )
+
+    def test_validate_rejects_unsupported_zimage_network_type(self):
+        with self.assertRaisesRegex(ValueError, "Z-Image"):
+            validate_configs(
+                TrainConfig(),
+                ModelConfig(arch="zimage:turbo", name_or_path="Tongyi-MAI/Z-Image-Turbo"),
+                SaveConfig(save_format="diffusers"),
+                [],
+                NetworkConfig(type="locon"),
+            )
+
 
 class SegaDistillConfigTest(unittest.TestCase):
     def test_sega_distill_defaults_disabled(self):

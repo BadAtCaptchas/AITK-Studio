@@ -146,7 +146,13 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
                 raise RuntimeError("Remote Ollama model prepare returned an unknown status")
             now = time.time()
             if now - last_status_update > 30:
-                self.print_and_status_update("Remote Ollama model is downloading")
+                phase = str(response_payload.get("phase") or "").strip().lower()
+                if phase == "warming":
+                    self.print_and_status_update("Remote Ollama model is warming up")
+                elif phase == "pulling":
+                    self.print_and_status_update("Remote Ollama model is downloading")
+                else:
+                    self.print_and_status_update("Remote Ollama model is preparing")
                 last_status_update = now
             time.sleep(5)
 

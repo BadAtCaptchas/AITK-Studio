@@ -37,6 +37,7 @@ export type OllamaModelPullStatus = {
   error: string | null;
   startedAt: string;
   updatedAt: string;
+  phase?: 'checking' | 'pulling' | 'warming' | 'ready';
 };
 
 declare global {
@@ -176,33 +177,40 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
     return copyPullState(existing);
   }
 
-  const models = await listOllamaModels(normalizedBaseUrl);
-  if (hasOllamaModel(models, trimmedModel)) {
-    const now = new Date().toISOString();
-    const ready: OllamaModelPullStatus = { status: 'ready', error: null, startedAt: now, updatedAt: now };
-    pulls.set(key, ready);
-    return copyPullState(ready);
-  }
-
   if (existing?.status === 'error') {
     return copyPullState(existing);
   }
 
   const now = new Date().toISOString();
-  const state: OllamaModelPullStatus = { status: 'pulling', error: null, startedAt: now, updatedAt: now };
+  const state: OllamaModelPullStatus = {
+    status: 'pulling',
+    phase: 'checking',
+    error: null,
+    startedAt: now,
+    updatedAt: now,
+  };
   pulls.set(key, state);
 
   void (async () => {
     try {
-      const response = await fetch(`${normalizedBaseUrl}/api/pull`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: trimmedModel, stream: false }),
-      });
-      if (!response.ok) {
-        throw new Error(await readOllamaError(response));
+      const models = await listOllamaModels(normalizedBaseUrl);
+      if (!hasOllamaModel(models, trimmedModel)) {
+        state.phase = 'pulling';
+        state.updatedAt = new Date().toISOString();
+        const response = await fetch(`${normalizedBaseUrl}/api/pull`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: trimmedModel, stream: false }),
+        });
+        if (!response.ok) {
+          throw new Error(await readOllamaError(response));
+        }
       }
+      state.phase = 'warming';
+      state.updatedAt = new Date().toISOString();
+      await warmOllamaModel(trimmedModel, normalizedBaseUrl);
       state.status = 'ready';
+      state.phase = 'ready';
       state.error = null;
       state.updatedAt = new Date().toISOString();
     } catch (error) {
@@ -213,6 +221,22 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
   })();
 
   return copyPullState(state);
+}
+
+async function warmOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
+  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      prompt: '',
+      stream: false,
+      keep_alive: '10m',
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await readOllamaError(response));
+  }
 }
 
 export async function generateOllamaImageCaption(options: OllamaGenerateOptions, baseUrl = getOllamaBaseUrl()) {
@@ -322,6 +346,8 @@ export async function unloadOllamaModel(model: string, baseUrl = getOllamaBaseUr
   if (!response.ok) {
     throw new Error(await readOllamaError(response));
   }
+
+  pullStateMap().delete(modelPullKey(trimmedModel, trimTrailingSlash(baseUrl)));
 
   return { unloaded: true };
 }

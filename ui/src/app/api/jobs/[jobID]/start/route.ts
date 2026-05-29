@@ -17,6 +17,7 @@ import {
   isDurableEncryptedDatasetKeySecretError,
   storeDurableEncryptedDatasetKeys,
 } from '@/server/encryptedDatasetSecrets';
+import { isSecureRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
 import { startJobNow } from '../../../../../../cron/actions/startJob';
 import type { EncryptedDatasetStartKey, JobStartRequest } from '@/types';
 
@@ -36,6 +37,15 @@ function ensureApiAccess(request: NextRequest): NextResponse | null {
 
 function isValidJobId(jobID: string) {
   return /^[a-zA-Z0-9_-]+$/.test(jobID);
+}
+
+function isSecureRemoteOllamaCaptionJobConfigJson(jobConfigJson: unknown) {
+  if (typeof jobConfigJson !== 'string' || !jobConfigJson.trim()) return false;
+  try {
+    return isSecureRemoteOllamaCaptionJob(JSON.parse(jobConfigJson));
+  } catch {
+    return false;
+  }
 }
 
 async function handleStart(
@@ -179,16 +189,26 @@ async function handleStart(
     return (await db.jobs.findById(jobID)) || job;
   };
 
+  if (isSecureRemoteOllamaCaptionJob(jobConfig)) {
+    await startJobNow(jobID, {
+      encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
+    });
+    return NextResponse.json((await db.jobs.findById(jobID)) || job);
+  }
+
   if (requiredEncryptedDatasets.length > 0 && useDurableEncryptedKeys) {
     return NextResponse.json(await queueLocalJob());
   }
 
   if (requiredEncryptedDatasets.length > 0) {
-    const runningJob = await db.jobs.findFirst({
+    const runningJobs = await db.jobs.list({
       status: ['running', 'stopping'],
       gpu_ids: job.gpu_ids,
       worker_id: 'local',
     });
+    const runningJob = runningJobs.find(
+      candidate => candidate.id !== job.id && !isSecureRemoteOllamaCaptionJobConfigJson(candidate.job_config),
+    );
     if (runningJob && runningJob.id !== job.id) {
       return NextResponse.json(
         { error: 'Encrypted jobs must start immediately; the selected local GPU is busy.' },

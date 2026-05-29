@@ -16,6 +16,7 @@ import {
   clearDurableEncryptedDatasetKeys,
   getDurableEncryptedDatasetKeys,
 } from '../../src/server/encryptedDatasetSecrets';
+import { getSecureRemoteOllamaWorkerId } from '../../src/server/secureRemoteCaptionJobs';
 import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
@@ -24,18 +25,6 @@ const LAUNCH_LOG_FILE = 'launch.log';
 type StartJobOptions = {
   encryptedDatasetKeys?: EncryptedDatasetStartKey[];
 };
-
-function getSecureRemoteOllamaWorkerId(jobConfig: any) {
-  const processes = Array.isArray(jobConfig?.config?.process) ? jobConfig.config.process : [];
-  for (const processConfig of processes) {
-    if (processConfig?.type !== 'SecureRemoteOllamaCaptioner') continue;
-    const workerId = processConfig?.caption?.remote_worker_id;
-    if (typeof workerId === 'string' && workerId.trim() && workerId !== 'local') {
-      return workerId.trim();
-    }
-  }
-  return null;
-}
 
 function normalizeWorkerBaseUrl(baseUrl: string) {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');

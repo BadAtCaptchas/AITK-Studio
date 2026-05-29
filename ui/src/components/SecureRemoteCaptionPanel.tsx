@@ -9,7 +9,6 @@ import type { SelectOption } from '@/types';
 import { apiClient } from '@/utils/api';
 import { pathJoin } from '@/utils/basic';
 import { startJob } from '@/utils/jobs';
-import { startQueue } from '@/utils/queue';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import useDatasetList from '@/hooks/useDatasetList';
 import useSettings from '@/hooks/useSettings';
@@ -247,7 +246,6 @@ export default function SecureRemoteCaptionPanel() {
         saved.id,
         rememberedKey ? [{ datasetPath, keyB64: rememberedKey }] : undefined,
       );
-      await startQueue('0');
       setStartedJobId(saved.id);
       setSubmitStatus('success');
     } catch (error: any) {

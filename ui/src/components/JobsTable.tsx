@@ -19,6 +19,19 @@ interface JobsTableProps {
   job_type?: string | null;
 }
 
+type JobGroup = {
+  name: string;
+  jobs: Job[];
+  workerID: string;
+  gpuIDs: string | null;
+};
+
+const activeJobStatuses = new Set(['queued', 'running', 'stopping']);
+
+function isRemoteWorker(workerID: string) {
+  return workerID !== 'local';
+}
+
 export default function JobsTable({ onlyActive = false, job_type = null }: JobsTableProps) {
   const { jobs, status, refreshJobs } = useJobsList({ onlyActive, reloadInterval: 5000, job_type });
   const { queues, status: queueStatus, refreshQueues } = useQueueList();
@@ -132,7 +145,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
   const jobsDict = useMemo(() => {
     if (!isGPUInfoLoaded) return {};
     if (jobs.length === 0) return {};
-    let jd: { [key: string]: { name: string; jobs: Job[]; workerID: string; gpuIDs: string | null } } = {};
+    let jd: { [key: string]: JobGroup } = {};
     const workerName = (workerID: string) => {
       if (workerID === 'local') return 'Local';
       return workers.find(worker => worker.id === workerID)?.name || 'Remote';
@@ -149,6 +162,18 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
         return `GPU #${gpuID}`;
       }
     };
+    const ensureWorkerGpuGroup = (workerID: string, gpuIDs: string) => {
+      const key = `${workerID}:${gpuIDs}`;
+      if (!jd[key]) {
+        jd[key] = {
+          name: `${workerName(workerID)} / ${gpuName(workerID, gpuIDs)}`,
+          jobs: [],
+          workerID,
+          gpuIDs,
+        };
+      }
+      return jd[key];
+    };
 
     gpuList.forEach(gpu => {
       jd[`local:${gpu.index}`] = {
@@ -159,20 +184,16 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
       };
     });
     queues.forEach(queue => {
-      const key = `${queue.worker_id}:${queue.gpu_ids}`;
-      if (!jd[key]) {
-        jd[key] = {
-          name: `${workerName(queue.worker_id)} / ${gpuName(queue.worker_id, queue.gpu_ids)}`,
-          jobs: [],
-          workerID: queue.worker_id,
-          gpuIDs: queue.gpu_ids,
-        };
-      }
+      ensureWorkerGpuGroup(queue.worker_id, queue.gpu_ids);
     });
     jd['idle'] = { name: 'Idle', jobs: [], workerID: 'local', gpuIDs: null };
     jobs.forEach(job => {
-      const key = `${job.worker_id || 'local'}:${job.gpu_ids || '0'}`;
-      if (['queued', 'running', 'stopping'].includes(job.status) && key in jd) {
+      const workerID = job.worker_id || 'local';
+      const gpuIDs = job.gpu_ids || '0';
+      const key = `${workerID}:${gpuIDs}`;
+      if (isRemoteWorker(workerID)) {
+        ensureWorkerGpuGroup(workerID, gpuIDs).jobs.push(job);
+      } else if (activeJobStatuses.has(job.status) && key in jd) {
         jd[key].jobs.push(job);
       } else {
         jd['idle'].jobs.push(job);
@@ -220,7 +241,7 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
               >
                 <div className="flex items-center space-x-2 flex-1 py-2">
                   <h2 className="font-semibold text-white">{group.name}</h2>
-                  <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300"># {queue?.gpu_ids}</span>
+                  <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300"># {group.gpuIDs}</span>
                 </div>
                 <div className="text-sm text-gray-300 italic flex items-center">
                   {queue?.is_running ? (

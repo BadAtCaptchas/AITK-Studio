@@ -88,14 +88,98 @@ export async function remoteProxyFetch(
 
 export async function fetchRemoteJob(workerId: string, remoteJobId: string) {
   const worker = await getRemoteWorker(workerId);
+  return fetchWorkerJob(worker, remoteJobId);
+}
+
+async function fetchWorkerJob(worker: WorkerNodeRecord, remoteJobId: string) {
   return remoteJson<Job | null>(worker, `/api/jobs?id=${encodeURIComponent(remoteJobId)}`);
+}
+
+export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string | null) {
+  const query = jobType ? `?job_type=${encodeURIComponent(jobType)}` : '';
+  return remoteJson<{ jobs: Job[] }>(worker, `/api/jobs${query}`);
+}
+
+function remoteJobPatch(remoteJob: Job, workerId: string, remoteJobId: string, name: string) {
+  return {
+    name,
+    worker_id: workerId,
+    remote_job_id: remoteJobId,
+    gpu_ids: remoteJob.gpu_ids,
+    job_config: remoteJob.job_config,
+    status: remoteJob.status,
+    stop: remoteJob.stop,
+    return_to_queue: remoteJob.return_to_queue,
+    step: remoteJob.step,
+    info: remoteJob.info,
+    speed_string: remoteJob.speed_string,
+    queue_position: remoteJob.queue_position,
+    pid: null,
+    job_type: remoteJob.job_type,
+    job_ref: remoteJob.job_ref,
+    save_now: remoteJob.save_now ?? false,
+    remote_sync_at: new Date(),
+    remote_error: null,
+  };
+}
+
+async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job, localJobId?: string) {
+  const baseName = remoteJob.name || remoteJob.id;
+  const existing = await db.jobs.findByName(baseName);
+  if (!existing || existing.id === localJobId) return baseName;
+  if (existing.worker_id === worker.id && existing.remote_job_id === remoteJob.id) return baseName;
+
+  const workerScopedName = `${baseName} (${worker.name})`;
+  const scopedExisting = await db.jobs.findByName(workerScopedName);
+  if (!scopedExisting || scopedExisting.id === localJobId) return workerScopedName;
+  if (scopedExisting.worker_id === worker.id && scopedExisting.remote_job_id === remoteJob.id) return workerScopedName;
+
+  return `${baseName} (${worker.name}, ${remoteJob.id.slice(0, 8)})`;
+}
+
+async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
+  const existing = await db.jobs.findByRemoteId(worker.id, remoteJob.id);
+  const name = await resolveRemoteMirrorName(worker, remoteJob, existing?.id);
+  const patch = remoteJobPatch(remoteJob, worker.id, remoteJob.id, name);
+
+  const synced = existing
+    ? await db.jobs.update(existing.id, patch)
+    : await db.jobs.create({
+        name: patch.name,
+        worker_id: patch.worker_id,
+        remote_job_id: patch.remote_job_id,
+        gpu_ids: patch.gpu_ids,
+        job_config: patch.job_config,
+        status: patch.status,
+        stop: patch.stop,
+        return_to_queue: patch.return_to_queue,
+        step: patch.step,
+        info: patch.info,
+        speed_string: patch.speed_string,
+        queue_position: patch.queue_position,
+        pid: patch.pid,
+        job_type: patch.job_type,
+        job_ref: patch.job_ref,
+        save_now: patch.save_now,
+        remote_sync_at: patch.remote_sync_at,
+        remote_error: patch.remote_error,
+      });
+
+  if (remoteJob.status === 'completed') {
+    await clearDurableEncryptedDatasetKeys(synced.id).catch(error =>
+      console.error('Error clearing durable encrypted dataset keys:', error),
+    );
+  }
+
+  return synced;
 }
 
 export async function syncRemoteJob(localJob: Job) {
   if (isLocalWorker(localJob.worker_id) || !localJob.remote_job_id) return localJob;
 
   try {
-    const remoteJob = await fetchRemoteJob(localJob.worker_id, localJob.remote_job_id);
+    const worker = await getRemoteWorker(localJob.worker_id);
+    const remoteJob = await fetchWorkerJob(worker, localJob.remote_job_id);
     if (!remoteJob) {
       return db.jobs.update(localJob.id, {
         remote_error: 'Remote job was not found on the worker.',
@@ -103,24 +187,8 @@ export async function syncRemoteJob(localJob: Job) {
       });
     }
 
-    const synced = await db.jobs.update(localJob.id, {
-      name: remoteJob.name,
-      gpu_ids: remoteJob.gpu_ids,
-      job_config: remoteJob.job_config,
-      status: remoteJob.status,
-      stop: remoteJob.stop,
-      return_to_queue: remoteJob.return_to_queue,
-      step: remoteJob.step,
-      info: remoteJob.info,
-      speed_string: remoteJob.speed_string,
-      queue_position: remoteJob.queue_position,
-      pid: null,
-      job_type: remoteJob.job_type,
-      job_ref: remoteJob.job_ref,
-      save_now: remoteJob.save_now ?? false,
-      remote_sync_at: new Date(),
-      remote_error: null,
-    });
+    const name = await resolveRemoteMirrorName(worker, remoteJob, localJob.id);
+    const synced = await db.jobs.update(localJob.id, remoteJobPatch(remoteJob, worker.id, remoteJob.id, name));
     if (remoteJob.status === 'completed') {
       await clearDurableEncryptedDatasetKeys(localJob.id).catch(error =>
         console.error('Error clearing durable encrypted dataset keys:', error),
@@ -135,14 +203,34 @@ export async function syncRemoteJob(localJob: Job) {
   }
 }
 
-export async function syncRemoteJobs(jobs: Job[]) {
-  return Promise.all(jobs.map(job => syncRemoteJob(job)));
+export async function syncRemoteJobs(jobs: Job[], alreadySyncedJobIds = new Set<string>()) {
+  return Promise.all(jobs.map(job => (alreadySyncedJobIds.has(job.id) ? job : syncRemoteJob(job))));
+}
+
+export async function discoverRemoteJobs(jobType?: string | null) {
+  const workers = await db.workerNodes.list({ enabled: true });
+  const syncedJobIds = new Set<string>();
+  await Promise.all(
+    workers.map(async workerRecord => {
+      try {
+        const worker = await getRemoteWorker(workerRecord.id);
+        const data = await fetchWorkerJobs(worker, jobType);
+        const syncedJobs = await Promise.all(
+          (data.jobs || []).map(remoteJob => upsertRemoteJobMirror(worker, remoteJob)),
+        );
+        syncedJobs.forEach(job => syncedJobIds.add(job.id));
+      } catch (error) {
+        console.error(`Failed to discover jobs for worker ${workerRecord.name}:`, error);
+      }
+    }),
+  );
+  return syncedJobIds;
 }
 
 export async function uploadBundleToWorker(worker: WorkerNodeRecord, zipPath: string, gpuIds: string) {
   const form = new FormData();
   const buffer = await fs.readFile(zipPath);
-  const blob = new Blob([buffer], { type: 'application/zip' });
+  const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
   form.append('file', blob, path.basename(zipPath));
   form.append('gpu_ids', gpuIds);
   return remoteJson<{ job: Job; warnings: string[] }>(worker, '/api/jobs/import', {

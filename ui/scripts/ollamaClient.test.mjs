@@ -48,6 +48,49 @@ test('ensureOllamaModel pulls missing model', async () => {
   assert.equal(JSON.parse(calls[1].body).model, 'llava:13b');
 });
 
+test('startOllamaModelPull returns ready when model is already installed', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || 'GET' });
+    assert.match(String(url), /\/api\/tags$/);
+    return response({ models: [{ model: 'llava-ready:latest' }] });
+  };
+
+  const result = await ollama.startOllamaModelPull('llava-ready', 'http://ollama.test');
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.error, null);
+  assert.equal(calls.length, 1);
+});
+
+test('startOllamaModelPull starts missing model pull without awaiting completion', async () => {
+  const calls = [];
+  let resolvePull;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body });
+    if (String(url).endsWith('/api/tags')) return response({ models: [] });
+    if (String(url).endsWith('/api/pull')) {
+      return new Promise(resolve => {
+        resolvePull = () => resolve(response({ status: 'success' }));
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const first = await ollama.startOllamaModelPull('llava-pulling:latest', 'http://ollama.test');
+  const second = await ollama.startOllamaModelPull('llava-pulling:latest', 'http://ollama.test');
+
+  assert.equal(first.status, 'pulling');
+  assert.equal(second.status, 'pulling');
+  assert.equal(calls.filter(call => call.url.endsWith('/api/pull')).length, 1);
+  assert.equal(JSON.parse(calls.find(call => call.url.endsWith('/api/pull')).body).model, 'llava-pulling:latest');
+
+  resolvePull();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const third = await ollama.startOllamaModelPull('llava-pulling:latest', 'http://ollama.test');
+  assert.equal(third.status, 'ready');
+});
+
 test('generateOllamaImageCaption returns clean errors from Ollama failures', async () => {
   globalThis.fetch = async url => {
     if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
@@ -90,6 +133,37 @@ test('generateOllamaImageCaption sends system prompt to Ollama generate', async 
   assert.equal(generateBodies.length, 1);
   assert.equal(generateBodies[0].system, 'Return compact training captions.');
   assert.deepEqual(generateBodies[0].options, { num_predict: 32 });
+});
+
+test('generateOllamaImageCaption accepts message content response shape', async () => {
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
+    if (String(url).endsWith('/api/generate')) return response({ message: { content: 'nested caption' } });
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const caption = await ollama.generateOllamaImageCaption(
+    { model: 'llava', prompt: 'caption', imageBase64: 'aW1n', maxNewTokens: 32 },
+    'http://ollama.test',
+  );
+
+  assert.equal(caption, 'nested caption');
+});
+
+test('generateOllamaImageCaption rejects empty model responses', async () => {
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
+    if (String(url).endsWith('/api/generate')) return response({ response: '', done_reason: 'stop' });
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  await assert.rejects(
+    ollama.generateOllamaImageCaption(
+      { model: 'llava', prompt: 'caption', imageBase64: 'aW1n', maxNewTokens: 32 },
+      'http://ollama.test',
+    ),
+    /empty caption/,
+  );
 });
 
 test('unloadOllamaModel sends keep_alive zero generate request', async () => {

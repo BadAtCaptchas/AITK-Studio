@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -36,6 +37,7 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
         if not self.remote_token:
             raise ValueError("Secure remote caption worker token is missing")
         self.print_and_status_update("Using secure remote Ollama caption worker")
+        self.ensure_remote_model()
 
     def _image_to_base64(self, file_path: str) -> str:
         image = self.load_pil_image(file_path, max_res=self.caption_config.max_res).convert("RGB")
@@ -92,6 +94,61 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
             except Exception:
                 pass
             raise RuntimeError(f"Remote Ollama unload failed: {message}") from exc
+
+    def _post_secure_pull(self, envelope: dict) -> dict:
+        body = json.dumps(envelope).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.remote_base_url}/api/secure-caption/ollama/pull",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.remote_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            message = exc.read().decode("utf-8", errors="replace")[:500]
+            try:
+                parsed = json.loads(message)
+                message = parsed.get("error") or message
+            except Exception:
+                pass
+            raise RuntimeError(f"Remote Ollama model prepare failed: {message}") from exc
+
+    def ensure_remote_model(self):
+        model = self.caption_config.model_name_or_path
+        if not model:
+            raise ValueError("Ollama model is required")
+        job_id = self.job_id or self.job.name
+        last_status_update = 0.0
+        while True:
+            item_id = f"pull-{uuid.uuid4().hex}"
+            request_envelope = encrypt_secure_caption_json(
+                self.remote_token,
+                "request",
+                job_id,
+                item_id,
+                {"model": model},
+            )
+            response_envelope = self._post_secure_pull(request_envelope)
+            response_payload = decrypt_secure_caption_json(self.remote_token, "response", response_envelope)
+            status = str(response_payload.get("status", "")).strip().lower()
+            if status == "ready":
+                self.print_and_status_update("Remote Ollama model is ready")
+                return
+            if status == "error":
+                message = str(response_payload.get("error") or "remote Ollama model pull failed")
+                raise RuntimeError(f"Remote Ollama model prepare failed: {message}")
+            if status != "pulling":
+                raise RuntimeError("Remote Ollama model prepare returned an unknown status")
+            now = time.time()
+            if now - last_status_update > 30:
+                self.print_and_status_update("Remote Ollama model is downloading")
+                last_status_update = now
+            time.sleep(5)
 
     def unload_remote_model(self):
         if not self.remote_base_url or not self.remote_token:

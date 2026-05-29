@@ -22,6 +22,18 @@ export type OllamaGenerateOptions = {
   maxNewTokens?: number;
 };
 
+export type OllamaModelPullStatus = {
+  status: 'ready' | 'pulling' | 'error';
+  error: string | null;
+  startedAt: string;
+  updatedAt: string;
+};
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __aitkOllamaModelPulls: Map<string, OllamaModelPullStatus> | undefined;
+}
+
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
 }
@@ -53,6 +65,23 @@ async function readOllamaError(response: Response) {
     // Keep the trimmed text below.
   }
   return body.slice(0, 500);
+}
+
+function extractOllamaCaptionText(data: unknown) {
+  if (typeof data !== 'object' || data === null) return '';
+  const record = data as Record<string, unknown>;
+  if (typeof record.response === 'string') return record.response.trim();
+
+  const message = record.message;
+  if (typeof message === 'object' && message !== null) {
+    const content = (message as Record<string, unknown>).content;
+    if (typeof content === 'string') return content.trim();
+  }
+
+  const text = record.text;
+  if (typeof text === 'string') return text.trim();
+
+  return '';
 }
 
 export async function listOllamaModels(baseUrl = getOllamaBaseUrl()) {
@@ -100,6 +129,72 @@ export async function ensureOllamaModel(model: string, baseUrl = getOllamaBaseUr
   return { pulled: true };
 }
 
+function pullStateMap() {
+  if (!globalThis.__aitkOllamaModelPulls) {
+    globalThis.__aitkOllamaModelPulls = new Map();
+  }
+  return globalThis.__aitkOllamaModelPulls;
+}
+
+function modelPullKey(model: string, baseUrl: string) {
+  return `${trimTrailingSlash(baseUrl)}::${normalizeModelName(model)}`;
+}
+
+function copyPullState(state: OllamaModelPullStatus): OllamaModelPullStatus {
+  return { ...state };
+}
+
+export async function startOllamaModelPull(model: string, baseUrl = getOllamaBaseUrl()): Promise<OllamaModelPullStatus> {
+  const trimmedModel = model.trim();
+  if (!trimmedModel) throw new Error('Ollama model is required');
+
+  const normalizedBaseUrl = trimTrailingSlash(baseUrl);
+  const key = modelPullKey(trimmedModel, normalizedBaseUrl);
+  const pulls = pullStateMap();
+  const existing = pulls.get(key);
+  if (existing?.status === 'pulling' || existing?.status === 'ready') {
+    return copyPullState(existing);
+  }
+
+  const models = await listOllamaModels(normalizedBaseUrl);
+  if (hasOllamaModel(models, trimmedModel)) {
+    const now = new Date().toISOString();
+    const ready: OllamaModelPullStatus = { status: 'ready', error: null, startedAt: now, updatedAt: now };
+    pulls.set(key, ready);
+    return copyPullState(ready);
+  }
+
+  if (existing?.status === 'error') {
+    return copyPullState(existing);
+  }
+
+  const now = new Date().toISOString();
+  const state: OllamaModelPullStatus = { status: 'pulling', error: null, startedAt: now, updatedAt: now };
+  pulls.set(key, state);
+
+  void (async () => {
+    try {
+      const response = await fetch(`${normalizedBaseUrl}/api/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: trimmedModel, stream: false }),
+      });
+      if (!response.ok) {
+        throw new Error(await readOllamaError(response));
+      }
+      state.status = 'ready';
+      state.error = null;
+      state.updatedAt = new Date().toISOString();
+    } catch (error) {
+      state.status = 'error';
+      state.error = error instanceof Error ? error.message : 'Ollama model pull failed';
+      state.updatedAt = new Date().toISOString();
+    }
+  })();
+
+  return copyPullState(state);
+}
+
 export async function generateOllamaImageCaption(options: OllamaGenerateOptions, baseUrl = getOllamaBaseUrl()) {
   const model = options.model.trim();
   const prompt = options.prompt.trim();
@@ -131,8 +226,18 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     throw new Error(await readOllamaError(response));
   }
 
-  const data = (await response.json()) as { response?: string };
-  return (data.response || '').trim();
+  const data = await response.json();
+  const caption = extractOllamaCaptionText(data);
+  if (!caption) {
+    const doneReason =
+      typeof data === 'object' && data !== null && typeof (data as Record<string, unknown>).done_reason === 'string'
+        ? ` Done reason: ${(data as Record<string, unknown>).done_reason}.`
+        : '';
+    throw new Error(
+      `Ollama returned an empty caption.${doneReason} Confirm the selected model supports image inputs and try a stronger caption prompt.`,
+    );
+  }
+  return caption;
 }
 
 export async function unloadOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {

@@ -8,10 +8,16 @@ import { apiClient } from '@/utils/api';
 import type { WorkerNode } from '@/types';
 import { Checkbox } from '@/components/formInputs';
 import SecureRemoteCaptionPanel from '@/components/SecureRemoteCaptionPanel';
+import { Download, Loader2 } from 'lucide-react';
 
 type CloudflaredStatus = {
   configured: boolean;
   enabled: boolean;
+  detected: boolean;
+  bin: string;
+  downloadAvailable: boolean;
+  downloadUrl: string | null;
+  installPath: string;
   running: boolean;
   pid: number | null;
   publicUrl: string | null;
@@ -19,6 +25,8 @@ type CloudflaredStatus = {
   message: string;
   error: string | null;
 };
+
+const CLOUDFLARED_AUTO_DOWNLOAD_KEY = 'AITK_CLOUDFLARED_AUTO_DOWNLOAD';
 
 const emptyWorkerForm = {
   id: '',
@@ -35,6 +43,9 @@ export default function Settings() {
   const [workerForm, setWorkerForm] = useState(emptyWorkerForm);
   const [workerStatus, setWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const [cloudflared, setCloudflared] = useState<CloudflaredStatus | null>(null);
+  const [cloudflaredAction, setCloudflaredAction] = useState<'idle' | 'starting' | 'downloading' | 'error'>('idle');
+  const [cloudflaredActionError, setCloudflaredActionError] = useState('');
+  const [cloudflaredAutoDownload, setCloudflaredAutoDownload] = useState(true);
 
   const refreshCloudflared = () => {
     apiClient
@@ -45,7 +56,45 @@ export default function Settings() {
 
   useEffect(() => {
     refreshCloudflared();
+    if (typeof window !== 'undefined') {
+      setCloudflaredAutoDownload(window.localStorage.getItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY) !== 'false');
+    }
   }, []);
+
+  const setAutoDownloadCloudflared = (checked: boolean) => {
+    setCloudflaredAutoDownload(checked);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY, checked ? 'true' : 'false');
+    }
+  };
+
+  const startCloudflared = async () => {
+    setCloudflaredAction('starting');
+    setCloudflaredActionError('');
+    try {
+      const res = await apiClient.post('/api/cloudflared', { autoDownload: cloudflaredAutoDownload });
+      setCloudflared(res.data);
+      setCloudflaredAction('idle');
+    } catch (error: any) {
+      setCloudflaredAction('error');
+      setCloudflaredActionError(error?.response?.data?.error || 'Failed to start cloudflared.');
+      refreshCloudflared();
+    }
+  };
+
+  const downloadCloudflared = async () => {
+    setCloudflaredAction('downloading');
+    setCloudflaredActionError('');
+    try {
+      const res = await apiClient.put('/api/cloudflared');
+      setCloudflared(res.data?.status || null);
+      setCloudflaredAction('idle');
+    } catch (error: any) {
+      setCloudflaredAction('error');
+      setCloudflaredActionError(error?.response?.data?.error || 'Failed to download cloudflared.');
+      refreshCloudflared();
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -316,17 +365,51 @@ export default function Settings() {
             </p>
             <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3 text-sm">
               <div>Status: {cloudflared?.message || 'Unknown'}</div>
+              <div>Binary: {cloudflared?.bin || 'Not checked'}</div>
+              <div>Detected: {cloudflared?.detected ? 'Yes' : 'No'}</div>
               <div>Public URL: {cloudflared?.publicUrl || 'Not set'}</div>
               <div>Metrics: {cloudflared?.metricsAddr || 'Not set'}</div>
+              {!cloudflared?.detected && cloudflared?.downloadAvailable && (
+                <div className="mt-2 text-amber-300">cloudflared can be downloaded to {cloudflared.installPath}.</div>
+              )}
               {cloudflared?.error && <div className="mt-2 text-red-400">{cloudflared.error}</div>}
+              {cloudflaredAction === 'error' && <div className="mt-2 text-red-400">{cloudflaredActionError}</div>}
+            </div>
+            <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3">
+              <Checkbox
+                checked={cloudflaredAutoDownload}
+                onChange={setAutoDownloadCloudflared}
+                label={
+                  <span>
+                    Auto-download missing cloudflared
+                    <span className="mt-1 block text-xs font-normal text-gray-500">
+                      Uses the official Cloudflare GitHub release for this OS and stores it in the local bin folder.
+                    </span>
+                  </span>
+                }
+              />
             </div>
             <div className="mt-4 flex gap-2">
               <button
                 type="button"
-                onClick={() => apiClient.post('/api/cloudflared').finally(refreshCloudflared)}
+                onClick={startCloudflared}
+                disabled={cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'}
                 className="rounded-lg bg-green-700 px-4 py-2 text-sm hover:bg-green-600"
               >
-                Start
+                {cloudflaredAction === 'starting' ? 'Starting...' : 'Start'}
+              </button>
+              <button
+                type="button"
+                onClick={downloadCloudflared}
+                disabled={!cloudflared?.downloadAvailable || cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm hover:bg-blue-600 disabled:opacity-50"
+              >
+                {cloudflaredAction === 'downloading' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Download
               </button>
               <button
                 type="button"

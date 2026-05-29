@@ -131,7 +131,7 @@ async function handleStart(
       await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
     } catch (error) {
       if (isDurableEncryptedDatasetKeySecretError(error)) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        return NextResponse.json({ error: error.message, code: 'durable_encrypted_key_secret_unavailable' }, { status: 400 });
       }
       throw error;
     }

@@ -75,6 +75,19 @@ function promptForDurableEncryptedResume() {
   );
 }
 
+function apiErrorMessage(error: any, fallback = 'Request failed') {
+  return error?.response?.data?.error || error?.message || fallback;
+}
+
+function isDurableEncryptedKeySecretError(error: any) {
+  return error?.response?.status === 400 && error?.response?.data?.code === 'durable_encrypted_key_secret_unavailable';
+}
+
+function promptStartWithoutDurableEncryptedResume(message: string) {
+  if (typeof window === 'undefined') return false;
+  return window.confirm(`${message}\n\nStart this job now without storing the encrypted dataset key for resume?`);
+}
+
 async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: string }) {
   const remembered =
     getRememberedEncryptedDatasetKey(dataset.path) || getRememberedEncryptedDatasetKey(dataset.name);
@@ -137,19 +150,35 @@ export const startJob = (
             const additional = await Promise.all(requiredDatasets.map(resolveEncryptedDatasetStartKey));
             const durableEncryptedDatasetKeys =
               options.durableEncryptedDatasetKeys ?? promptForDurableEncryptedResume();
-            await apiClient.post(`/api/jobs/${jobID}/start`, {
+            const retryPayload = {
               encryptedDatasetKeys: [...supplied, ...additional],
               durableEncryptedDatasetKeys,
-            });
+            };
+            try {
+              await apiClient.post(`/api/jobs/${jobID}/start`, retryPayload);
+            } catch (startError: any) {
+              if (
+                durableEncryptedDatasetKeys &&
+                isDurableEncryptedKeySecretError(startError) &&
+                promptStartWithoutDurableEncryptedResume(apiErrorMessage(startError))
+              ) {
+                await apiClient.post(`/api/jobs/${jobID}/start`, {
+                  ...retryPayload,
+                  durableEncryptedDatasetKeys: false,
+                });
+              } else {
+                throw new Error(apiErrorMessage(startError, 'Failed to start job.'));
+              }
+            }
             resolve();
             return;
           } catch (keyError) {
-            reject(keyError);
+            reject(keyError instanceof Error ? keyError : new Error(apiErrorMessage(keyError, 'Failed to start job.')));
             return;
           }
         }
         console.error('Error starting job:', error);
-        reject(error);
+        reject(new Error(apiErrorMessage(error, 'Failed to start job.')));
       });
   });
 };

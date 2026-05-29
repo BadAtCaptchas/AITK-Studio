@@ -17,6 +17,13 @@ function response(body, status = 200) {
   });
 }
 
+async function waitFor(predicate) {
+  for (let i = 0; i < 10; i += 1) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+}
+
 test('ensureOllamaModel skips pull when model is already installed', async () => {
   const calls = [];
   globalThis.fetch = async (url, init) => {
@@ -48,24 +55,39 @@ test('ensureOllamaModel pulls missing model', async () => {
   assert.equal(JSON.parse(calls[1].body).model, 'llava:13b');
 });
 
-test('startOllamaModelPull returns ready when model is already installed', async () => {
+test('startOllamaModelPull warms installed model before reporting ready', async () => {
   const calls = [];
+  let resolveWarm;
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), method: init?.method || 'GET' });
-    assert.match(String(url), /\/api\/tags$/);
-    return response({ models: [{ model: 'llava-ready:latest' }] });
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava-ready:latest' }] });
+    if (String(url).endsWith('/api/generate')) {
+      return new Promise(resolve => {
+        resolveWarm = () => resolve(response({ done: true, done_reason: 'load' }));
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
   };
 
-  const result = await ollama.startOllamaModelPull('llava-ready', 'http://ollama.test');
+  const first = await ollama.startOllamaModelPull('llava-ready', 'http://ollama.test');
+  const second = await ollama.startOllamaModelPull('llava-ready', 'http://ollama.test');
+  await waitFor(() => calls.some(call => call.url.endsWith('/api/generate')));
 
-  assert.equal(result.status, 'ready');
-  assert.equal(result.error, null);
-  assert.equal(calls.length, 1);
+  assert.equal(first.status, 'pulling');
+  assert.equal(second.status, 'pulling');
+  assert.equal(calls.filter(call => call.url.endsWith('/api/generate')).length, 1);
+
+  resolveWarm();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const third = await ollama.startOllamaModelPull('llava-ready', 'http://ollama.test');
+  assert.equal(third.status, 'ready');
+  assert.equal(third.error, null);
 });
 
 test('startOllamaModelPull starts missing model pull without awaiting completion', async () => {
   const calls = [];
   let resolvePull;
+  let resolveWarm;
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body });
     if (String(url).endsWith('/api/tags')) return response({ models: [] });
@@ -74,11 +96,17 @@ test('startOllamaModelPull starts missing model pull without awaiting completion
         resolvePull = () => resolve(response({ status: 'success' }));
       });
     }
+    if (String(url).endsWith('/api/generate')) {
+      return new Promise(resolve => {
+        resolveWarm = () => resolve(response({ done: true, done_reason: 'load' }));
+      });
+    }
     throw new Error(`Unexpected URL: ${url}`);
   };
 
   const first = await ollama.startOllamaModelPull('llava-pulling:latest', 'http://ollama.test');
   const second = await ollama.startOllamaModelPull('llava-pulling:latest', 'http://ollama.test');
+  await waitFor(() => calls.some(call => call.url.endsWith('/api/pull')));
 
   assert.equal(first.status, 'pulling');
   assert.equal(second.status, 'pulling');
@@ -86,6 +114,10 @@ test('startOllamaModelPull starts missing model pull without awaiting completion
   assert.equal(JSON.parse(calls.find(call => call.url.endsWith('/api/pull')).body).model, 'llava-pulling:latest');
 
   resolvePull();
+  await waitFor(() => calls.some(call => call.url.endsWith('/api/generate')));
+  assert.equal(calls.filter(call => call.url.endsWith('/api/generate')).length, 1);
+
+  resolveWarm();
   await new Promise(resolve => setTimeout(resolve, 0));
   const third = await ollama.startOllamaModelPull('llava-pulling:latest', 'http://ollama.test');
   assert.equal(third.status, 'ready');

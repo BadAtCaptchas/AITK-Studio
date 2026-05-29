@@ -222,6 +222,12 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
         )
         if ignore_if_contains is None:
             ignore_if_contains = []
+        if isinstance(only_if_contains, str):
+            only_if_contains = [only_if_contains]
+        if only_if_contains is not None:
+            only_if_contains = [word for word in only_if_contains if word]
+            if len(only_if_contains) == 0:
+                only_if_contains = None
         self.ignore_if_contains = ignore_if_contains
         self.transformer_only = transformer_only
         self.base_model_ref = None

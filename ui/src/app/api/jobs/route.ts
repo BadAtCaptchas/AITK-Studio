@@ -3,7 +3,14 @@ import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
 import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
 import { reconcileLocalJobProcess } from '@/server/jobProcess';
-import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob, syncRemoteJobs } from '@/server/remoteClient';
+import {
+  discoverRemoteJobs,
+  getRemoteWorker,
+  isLocalWorker,
+  remoteJson,
+  syncRemoteJob,
+  syncRemoteJobs,
+} from '@/server/remoteClient';
 import type { Job } from '@/types';
 
 
@@ -91,7 +98,8 @@ export async function GET(request: Request) {
       return NextResponse.json(reconciled ? await withHFDownloadProgress(reconciled) : reconciled);
     }
 
-    const jobs = await syncRemoteJobs(await db.jobs.list({ job_type }));
+    const discoveredJobIds = await discoverRemoteJobs(job_type);
+    const jobs = await syncRemoteJobs(await db.jobs.list({ job_type }), discoveredJobIds);
     const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
       (job): job is Job => job !== null,
     );

@@ -11,6 +11,7 @@ import { TOOLKIT_ROOT } from '../paths';
 export type CloudflaredStatus = {
   configured: boolean;
   enabled: boolean;
+  mode: 'named' | 'quick';
   detected: boolean;
   bin: string;
   downloadAvailable: boolean;
@@ -19,13 +20,17 @@ export type CloudflaredStatus = {
   running: boolean;
   pid: number | null;
   publicUrl: string | null;
+  targetUrl: string;
   metricsAddr: string;
   message: string;
   error: string | null;
 };
 
 const DEFAULT_METRICS_ADDR = '127.0.0.1:60123';
+const DEFAULT_TARGET_URL = 'http://127.0.0.1:8675';
 const PID_FILE = path.join(TOOLKIT_ROOT, '.cloudflared.pid');
+const URL_FILE = path.join(TOOLKIT_ROOT, '.cloudflared.url');
+const LOG_FILE = path.join(TOOLKIT_ROOT, '.cloudflared.log');
 const LOCAL_BIN_DIR = path.join(TOOLKIT_ROOT, 'bin');
 const LOCAL_BIN_PATH = path.join(LOCAL_BIN_DIR, process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
 const CLOUDFLARED_RELEASE_BASE = 'https://github.com/cloudflare/cloudflared/releases/latest/download';
@@ -66,6 +71,8 @@ export function getCloudflaredConfig() {
   const autoDownload = boolEnv(process.env.AITK_CLOUDFLARED_AUTO_DOWNLOAD);
   const publicUrl = process.env.AITK_CLOUDFLARED_PUBLIC_URL?.trim() || null;
   const tokenFile = process.env.AITK_CLOUDFLARED_TOKEN_FILE?.trim() || null;
+  const mode: 'named' | 'quick' = tokenFile ? 'named' : 'quick';
+  const targetUrl = process.env.AITK_CLOUDFLARED_TARGET_URL?.trim() || DEFAULT_TARGET_URL;
   const metricsAddr = process.env.AITK_CLOUDFLARED_METRICS_ADDR?.trim() || DEFAULT_METRICS_ADDR;
   const logLevel = process.env.AITK_CLOUDFLARED_LOG_LEVEL?.trim() || 'info';
 
@@ -73,11 +80,13 @@ export function getCloudflaredConfig() {
     enabled,
     bin,
     autoDownload,
+    mode,
     publicUrl,
     tokenFile,
+    targetUrl,
     metricsAddr,
     logLevel,
-    configured: Boolean(publicUrl && tokenFile),
+    configured: enabled && (mode === 'quick' || Boolean(tokenFile)),
   };
 }
 
@@ -337,6 +346,33 @@ async function readPid() {
   }
 }
 
+async function readGeneratedPublicUrl() {
+  const fromFile = await fsp.readFile(URL_FILE, 'utf8').catch(() => '');
+  const fromFileUrl = extractPublicUrl(fromFile);
+  if (fromFileUrl) return fromFileUrl;
+
+  const fromLog = await fsp.readFile(LOG_FILE, 'utf8').catch(() => '');
+  const fromLogUrl = extractPublicUrl(fromLog);
+  if (fromLogUrl) {
+    await fsp.writeFile(URL_FILE, fromLogUrl, 'utf8').catch(() => undefined);
+  }
+  return fromLogUrl;
+}
+
+function extractPublicUrl(value: string) {
+  return value.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com\b/)?.[0] || null;
+}
+
+async function waitForGeneratedPublicUrl(timeoutMs = 15_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const publicUrl = await readGeneratedPublicUrl();
+    if (publicUrl) return publicUrl;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return null;
+}
+
 function isPidRunning(pid: number) {
   try {
     process.kill(pid, 0);
@@ -355,6 +391,7 @@ export async function getCloudflaredStatus(): Promise<CloudflaredStatus> {
 
   if (pid != null && !running) {
     await fsp.rm(PID_FILE, { force: true }).catch(() => undefined);
+    await fsp.rm(URL_FILE, { force: true }).catch(() => undefined);
   }
 
   let error: string | null = null;
@@ -362,17 +399,16 @@ export async function getCloudflaredStatus(): Promise<CloudflaredStatus> {
     error = 'AI_TOOLKIT_AUTH is required when cloudflared is enabled.';
   } else if (config.enabled && !detected) {
     error = 'cloudflared binary was not found. Download it from Settings or set AITK_CLOUDFLARED_BIN.';
-  } else if (config.enabled && !config.publicUrl) {
-    error = 'AITK_CLOUDFLARED_PUBLIC_URL is required when cloudflared is enabled.';
-  } else if (config.enabled && !config.tokenFile) {
-    error = 'AITK_CLOUDFLARED_TOKEN_FILE is required when cloudflared is enabled.';
   } else if (config.enabled && config.tokenFile && !fs.existsSync(config.tokenFile)) {
     error = `cloudflared token file does not exist: ${config.tokenFile}`;
   }
 
+  const generatedPublicUrl = running && config.mode === 'quick' ? await readGeneratedPublicUrl() : null;
+
   return {
     configured: config.configured,
     enabled: config.enabled,
+    mode: config.mode,
     detected,
     bin: config.bin,
     downloadAvailable: downloadInfo.supported && !hasExplicitCloudflaredBin(),
@@ -380,7 +416,8 @@ export async function getCloudflaredStatus(): Promise<CloudflaredStatus> {
     installPath: downloadInfo.installPath,
     running,
     pid: running ? pid : null,
-    publicUrl: config.publicUrl,
+    publicUrl: config.publicUrl || generatedPublicUrl,
+    targetUrl: config.targetUrl,
     metricsAddr: config.metricsAddr,
     message: running ? 'cloudflared is running' : config.enabled ? 'cloudflared is not running' : 'cloudflared is disabled',
     error,
@@ -403,16 +440,21 @@ async function assertStartable(options: { autoDownload?: boolean } = {}) {
   if (!detected) {
     throw new Error('cloudflared binary was not found. Download it from Settings or set AITK_CLOUDFLARED_BIN.');
   }
-  if (!config.publicUrl) {
-    throw new Error('AITK_CLOUDFLARED_PUBLIC_URL is required when cloudflared is enabled.');
-  }
-  if (!config.tokenFile) {
-    throw new Error('AITK_CLOUDFLARED_TOKEN_FILE is required when cloudflared is enabled.');
-  }
-  if (!fs.existsSync(config.tokenFile)) {
+  if (config.tokenFile && !fs.existsSync(config.tokenFile)) {
     throw new Error(`cloudflared token file does not exist: ${config.tokenFile}`);
   }
   return getCloudflaredConfig();
+}
+
+export function buildCloudflaredArgs(config = getCloudflaredConfig()) {
+  const args = ['tunnel', '--metrics', config.metricsAddr, '--loglevel', config.logLevel];
+  if (config.mode === 'named') {
+    if (!config.tokenFile) {
+      throw new Error('AITK_CLOUDFLARED_TOKEN_FILE is required for named cloudflared tunnels.');
+    }
+    return [...args, 'run', '--token-file', config.tokenFile];
+  }
+  return [...args, '--url', config.targetUrl];
 }
 
 export async function startCloudflared(options: { autoDownload?: boolean } = {}) {
@@ -420,28 +462,33 @@ export async function startCloudflared(options: { autoDownload?: boolean } = {})
   if (current.running) return current;
 
   const config = await assertStartable(options);
-  const tokenFile = config.tokenFile;
-  if (!tokenFile) {
-    throw new Error('AITK_CLOUDFLARED_TOKEN_FILE is required when cloudflared is enabled.');
-  }
   await fsp.mkdir(path.dirname(PID_FILE), { recursive: true });
+  await fsp.rm(URL_FILE, { force: true }).catch(() => undefined);
+  await fsp.writeFile(LOG_FILE, '', 'utf8');
+  const logOut = fs.openSync(LOG_FILE, 'a');
+  const logErr = fs.openSync(LOG_FILE, 'a');
 
   const subprocess: ChildProcess = spawn(
     config.bin,
-    ['tunnel', '--metrics', config.metricsAddr, '--loglevel', config.logLevel, 'run', '--token-file', tokenFile],
+    buildCloudflaredArgs(config),
     {
       cwd: TOOLKIT_ROOT,
       detached: true,
-      stdio: 'ignore' as const,
+      stdio: ['ignore', logOut, logErr],
       windowsHide: true,
     },
   );
+  fs.closeSync(logOut);
+  fs.closeSync(logErr);
 
   if (subprocess.pid == null) {
     throw new Error('cloudflared did not return a process id.');
   }
   await fsp.writeFile(PID_FILE, String(subprocess.pid), 'utf8');
   subprocess.unref();
+  if (config.mode === 'quick') {
+    await waitForGeneratedPublicUrl();
+  }
   return getCloudflaredStatus();
 }
 
@@ -455,5 +502,6 @@ export async function stopCloudflared() {
     }
   }
   await fsp.rm(PID_FILE, { force: true }).catch(() => undefined);
+  await fsp.rm(URL_FILE, { force: true }).catch(() => undefined);
   return getCloudflaredStatus();
 }

@@ -55,14 +55,13 @@ validate_cloudflared_config() {
         exit 1
     fi
 
-    if [[ -z "${AITK_CLOUDFLARED_PUBLIC_URL:-}" ]]; then
-        echo "ERROR: AITK_CLOUDFLARED_PUBLIC_URL is required when cloudflared is enabled." >&2
-        exit 1
-    fi
-
-    if [[ -z "${AITK_CLOUDFLARED_TOKEN_FILE:-}" || ! -f "${AITK_CLOUDFLARED_TOKEN_FILE}" ]]; then
-        echo "ERROR: AITK_CLOUDFLARED_TOKEN_FILE must point to an existing tunnel token file." >&2
-        exit 1
+    if [[ -n "${AITK_CLOUDFLARED_TOKEN_FILE:-}" ]]; then
+        if [[ ! -f "${AITK_CLOUDFLARED_TOKEN_FILE}" ]]; then
+            echo "ERROR: AITK_CLOUDFLARED_TOKEN_FILE must point to an existing tunnel token file." >&2
+            exit 1
+        fi
+    else
+        echo "cloudflared will use a quick tunnel and report the generated URL in Settings."
     fi
 }
 

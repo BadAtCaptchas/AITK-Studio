@@ -10,6 +10,7 @@ const envKeys = [
   'AITK_CLOUDFLARED_TOKEN_FILE',
   'AITK_CLOUDFLARED_BIN',
   'AITK_CLOUDFLARED_AUTO_DOWNLOAD',
+  'AITK_CLOUDFLARED_TARGET_URL',
   'AITK_CLOUDFLARED_METRICS_ADDR',
   'AITK_CLOUDFLARED_LOG_LEVEL',
   'AI_TOOLKIT_AUTH',
@@ -43,6 +44,8 @@ test('cloudflared config is disabled by default', () => {
   assert.equal(config.enabled, false);
   assert.equal(config.bin, 'cloudflared');
   assert.equal(config.autoDownload, false);
+  assert.equal(config.mode, 'quick');
+  assert.equal(config.targetUrl, 'http://127.0.0.1:8675');
   assert.equal(config.metricsAddr, '127.0.0.1:60123');
 });
 
@@ -60,6 +63,7 @@ test('cloudflared config reads managed tunnel env vars without exposing token co
 
   assert.equal(config.enabled, true);
   assert.equal(config.configured, true);
+  assert.equal(config.mode, 'named');
   assert.equal(config.publicUrl, 'https://worker.example.com');
   assert.equal(config.tokenFile, '/tmp/tunnel-token');
   assert.equal(config.autoDownload, true);
@@ -80,6 +84,35 @@ test('cloudflared status reports auth requirement when enabled', async () => {
   assert.equal(status.enabled, true);
   assert.equal(status.running, false);
   assert.match(status.error, /AI_TOOLKIT_AUTH/);
+});
+
+test('cloudflared quick tunnel mode does not require a known public URL', async () => {
+  process.env.AITK_CLOUDFLARED_ENABLED = '1';
+  process.env.AITK_CLOUDFLARED_BIN = process.execPath;
+  process.env.AITK_CLOUDFLARED_TARGET_URL = 'http://127.0.0.1:9999';
+  process.env.AI_TOOLKIT_AUTH = 'test-auth';
+  delete process.env.AITK_CLOUDFLARED_PUBLIC_URL;
+  delete process.env.AITK_CLOUDFLARED_TOKEN_FILE;
+
+  const cloudflared = loadCloudflared();
+  const status = await cloudflared.getCloudflaredStatus();
+  const args = cloudflared.buildCloudflaredArgs(cloudflared.getCloudflaredConfig());
+
+  assert.equal(status.enabled, true);
+  assert.equal(status.mode, 'quick');
+  assert.equal(status.error, null);
+  assert.equal(status.targetUrl, 'http://127.0.0.1:9999');
+  assert.deepEqual(args.slice(-2), ['--url', 'http://127.0.0.1:9999']);
+});
+
+test('cloudflared named tunnel mode uses token-file arguments', () => {
+  process.env.AITK_CLOUDFLARED_ENABLED = '1';
+  process.env.AITK_CLOUDFLARED_TOKEN_FILE = '/tmp/tunnel-token';
+
+  const cloudflared = loadCloudflared();
+  const args = cloudflared.buildCloudflaredArgs(cloudflared.getCloudflaredConfig());
+
+  assert.deepEqual(args.slice(-3), ['run', '--token-file', '/tmp/tunnel-token']);
 });
 
 test('cloudflared download info uses official release assets for common platforms', () => {

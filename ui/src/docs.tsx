@@ -293,8 +293,8 @@ const docs: { [key: string]: ConfigDoc } = {
     description: (
       <>
         Runs an online frozen teacher with SEGA-modulated Flux2 RoPE and adds a teacher-matching loss beside the normal
-        dataset loss. This is currently limited to FLUX.2 and FLUX.2 Klein LoRA training and adds an extra teacher
-        prediction each step.
+        dataset loss. This is currently limited to FLUX.2, FLUX.2 Klein, and Z-Image LoRA training and adds an extra
+        teacher prediction each step.
       </>
     ),
   },

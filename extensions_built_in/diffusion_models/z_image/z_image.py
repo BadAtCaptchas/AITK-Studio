@@ -17,6 +17,12 @@ from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
 from toolkit.memory_management import MemoryManager
 from safetensors.torch import load_file
+from ..flux2.sega import normalize_sega_config
+from .sega import (
+    apply_zimage_sega_rope_scale,
+    build_zimage_sega_rope_scale,
+    summarize_zimage_rope_scale,
+)
 from .paths import resolve_single_file_model_path
 
 from transformers import AutoTokenizer, Qwen3ForCausalLM
@@ -337,21 +343,40 @@ class ZImageModel(BaseModel):
         latent_model_input: torch.Tensor,
         timestep: torch.Tensor,  # 0 to 1000 scale
         text_embeddings: PromptEmbeds,
+        sega_config: dict | None = None,
         **kwargs,
     ):
         if self.model.device == torch.device("cpu"):
             self.model.to(self.device_torch)
+
+        self._last_sega_scale_stats = None
+        sega_rope_scale = None
+        normalized_sega_config = normalize_sega_config(sega_config)
+        if normalized_sega_config["enabled"]:
+            axes_dims = getattr(self.transformer, "axes_dims", [32, 48, 48])
+            vae_scale_factor = getattr(self.pipeline, "vae_scale_factor", 8)
+            sega_rope_scale = build_zimage_sega_rope_scale(
+                latent_model_input,
+                axes_dims,
+                base_resolution=normalized_sega_config["base_resolution"],
+                strength=normalized_sega_config["strength"],
+                min_scale=normalized_sega_config["min_scale"],
+                max_scale=normalized_sega_config["max_scale"],
+                vae_scale_factor=vae_scale_factor,
+            )
+            self._last_sega_scale_stats = summarize_zimage_rope_scale(sega_rope_scale)
 
         latent_model_input = latent_model_input.unsqueeze(2)
         latent_model_input_list = list(latent_model_input.unbind(dim=0))
 
         timestep_model_input = (1000 - timestep) / 1000
 
-        model_out_list = self.transformer(
-            latent_model_input_list,
-            timestep_model_input,
-            text_embeddings.text_embeds,
-        )[0]
+        with apply_zimage_sega_rope_scale(self.transformer, sega_rope_scale):
+            model_out_list = self.transformer(
+                latent_model_input_list,
+                timestep_model_input,
+                text_embeddings.text_embeds,
+            )[0]
 
         noise_pred = torch.stack([t.float() for t in model_out_list], dim=0)
 

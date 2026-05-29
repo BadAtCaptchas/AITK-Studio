@@ -45,7 +45,7 @@ type Props = {
 };
 
 const isDev = process.env.NODE_ENV === 'development';
-const segaDistillArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b']);
+const segaDistillArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'zimage']);
 
 export default function SimpleJob({
   jobConfig,
@@ -84,7 +84,8 @@ export default function SimpleJob({
   const isAudioModel = !!(modelArch?.group === 'audio');
   const autoTrain = !!jobConfig.config.process[0].train.auto_train;
   const trainConfig = jobConfig.config.process[0].train;
-  const supportsSegaDistill = segaDistillArchs.has(jobConfig.config.process[0].model.arch);
+  const modelArchName = jobConfig.config.process[0].model.arch;
+  const supportsSegaDistill = segaDistillArchs.has(modelArchName.split(':')[0]);
   const segaDistillEnabled = !!trainConfig.sega_distill;
   const canEnableSegaDistill = supportsSegaDistill && networkType === 'lora';
   const showSegaDistill = supportsSegaDistill || segaDistillEnabled;

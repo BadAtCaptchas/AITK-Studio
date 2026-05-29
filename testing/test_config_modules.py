@@ -56,6 +56,15 @@ class SegaDistillConfigTest(unittest.TestCase):
             NetworkConfig(type="lora"),
         )
 
+    def test_sega_distill_validation_accepts_zimage_lora(self):
+        validate_configs(
+            TrainConfig(sega_distill=True),
+            ModelConfig(arch="zimage:turbo", name_or_path="Tongyi-MAI/Z-Image-Turbo"),
+            SaveConfig(save_format="diffusers"),
+            [],
+            NetworkConfig(type="lora"),
+        )
+
     def test_sega_distill_rejects_unsupported_arch_and_non_lora(self):
         with self.assertRaisesRegex(ValueError, "supports"):
             validate_configs(

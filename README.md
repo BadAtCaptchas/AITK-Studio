@@ -290,12 +290,13 @@ Optional managed `cloudflared` support is configured with environment variables 
 AITK_CLOUDFLARED_ENABLED=1
 AITK_CLOUDFLARED_PUBLIC_URL=https://your-worker.example.com
 AITK_CLOUDFLARED_TOKEN_FILE=/path/to/cloudflared-token
+AITK_CLOUDFLARED_TARGET_URL=http://127.0.0.1:8675
 AITK_CLOUDFLARED_METRICS_ADDR=127.0.0.1:60123
 AITK_CLOUDFLARED_LOG_LEVEL=info
 AITK_CLOUDFLARED_AUTO_DOWNLOAD=0
 ```
 
-`AI_TOOLKIT_AUTH` is required when `AITK_CLOUDFLARED_ENABLED=1`. Tunnel tokens are read from a token file and are not exposed through the browser. The app can start, stop, download, and show tunnel status from the Settings page; Docker images include `cloudflared` for this workflow. If the binary is missing and no custom `AITK_CLOUDFLARED_BIN` is set, the Settings page can download the official Cloudflare GitHub release into `bin/cloudflared` (`bin/cloudflared.exe` on Windows). Set `AITK_CLOUDFLARED_AUTO_DOWNLOAD=1` or enable the Settings checkbox to download automatically before starting.
+`AI_TOOLKIT_AUTH` is required when `AITK_CLOUDFLARED_ENABLED=1`. `AITK_CLOUDFLARED_TOKEN_FILE` is optional: when it is set, the app starts a named tunnel with that token; when it is not set, the app starts a Cloudflare quick tunnel with a random `trycloudflare.com` URL and shows the generated URL in Settings after Cloudflared reports it. `AITK_CLOUDFLARED_PUBLIC_URL` is optional metadata for named tunnels. The app can start, stop, download, and show tunnel status from the Settings page; Docker images include `cloudflared` for this workflow. If the binary is missing and no custom `AITK_CLOUDFLARED_BIN` is set, the Settings page can download the official Cloudflare GitHub release into `bin/cloudflared` (`bin/cloudflared.exe` on Windows). Set `AITK_CLOUDFLARED_AUTO_DOWNLOAD=1` or enable the Settings checkbox to download automatically before starting.
 
 ### Secure remote Ollama captioning
 

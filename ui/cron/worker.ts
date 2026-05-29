@@ -94,7 +94,7 @@ async function startOptionalCloudflared() {
   if (!getCloudflaredConfig().enabled) return;
   const status = await startCloudflared();
   if (status.running) {
-    console.log(`cloudflared tunnel started for ${status.publicUrl}`);
+    console.log(`cloudflared ${status.mode} tunnel started${status.publicUrl ? ` for ${status.publicUrl}` : ''}`);
   } else if (status.error) {
     console.error(`cloudflared did not start: ${status.error}`);
   }

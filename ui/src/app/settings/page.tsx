@@ -13,6 +13,7 @@ import { Download, Loader2 } from 'lucide-react';
 type CloudflaredStatus = {
   configured: boolean;
   enabled: boolean;
+  mode: 'named' | 'quick';
   detected: boolean;
   bin: string;
   downloadAvailable: boolean;
@@ -21,6 +22,7 @@ type CloudflaredStatus = {
   running: boolean;
   pid: number | null;
   publicUrl: string | null;
+  targetUrl: string;
   metricsAddr: string;
   message: string;
   error: string | null;
@@ -365,9 +367,11 @@ export default function Settings() {
             </p>
             <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3 text-sm">
               <div>Status: {cloudflared?.message || 'Unknown'}</div>
+              <div>Mode: {cloudflared ? (cloudflared.mode === 'named' ? 'Named tunnel' : 'Quick tunnel') : 'Unknown'}</div>
               <div>Binary: {cloudflared?.bin || 'Not checked'}</div>
               <div>Detected: {cloudflared?.detected ? 'Yes' : 'No'}</div>
-              <div>Public URL: {cloudflared?.publicUrl || 'Not set'}</div>
+              <div>Public URL: {cloudflared?.publicUrl || (cloudflared?.running ? 'Waiting for cloudflared' : 'Not set')}</div>
+              <div>Target URL: {cloudflared?.targetUrl || 'Not set'}</div>
               <div>Metrics: {cloudflared?.metricsAddr || 'Not set'}</div>
               {!cloudflared?.detected && cloudflared?.downloadAvailable && (
                 <div className="mt-2 text-amber-300">cloudflared can be downloaded to {cloudflared.installPath}.</div>

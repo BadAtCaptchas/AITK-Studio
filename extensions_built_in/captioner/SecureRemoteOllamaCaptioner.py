@@ -70,6 +70,52 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
                 pass
             raise RuntimeError(f"Remote Ollama caption failed: {message}") from exc
 
+    def _post_secure_unload(self, envelope: dict) -> dict:
+        body = json.dumps(envelope).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.remote_base_url}/api/secure-caption/ollama/unload",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.remote_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            message = exc.read().decode("utf-8", errors="replace")[:500]
+            try:
+                parsed = json.loads(message)
+                message = parsed.get("error") or message
+            except Exception:
+                pass
+            raise RuntimeError(f"Remote Ollama unload failed: {message}") from exc
+
+    def unload_remote_model(self):
+        if not self.remote_base_url or not self.remote_token:
+            return
+        model = self.caption_config.model_name_or_path
+        if not model:
+            return
+        item_id = f"unload-{uuid.uuid4().hex}"
+        job_id = self.job_id or self.job.name
+        payload = {"model": model}
+        request_envelope = encrypt_secure_caption_json(self.remote_token, "request", job_id, item_id, payload)
+        response_envelope = self._post_secure_unload(request_envelope)
+        decrypt_secure_caption_json(self.remote_token, "response", response_envelope)
+
+    def run(self):
+        try:
+            super(SecureRemoteOllamaCaptioner, self).run()
+        finally:
+            try:
+                self.unload_remote_model()
+                print("Remote Ollama model unload requested")
+            except Exception as exc:
+                print(f"Warning: remote Ollama model unload failed: {exc}")
+
     def get_caption_for_file(self, file_path: str) -> str:
         item_id = self._item_id_for_file(file_path)
         job_id = self.job_id or self.job.name

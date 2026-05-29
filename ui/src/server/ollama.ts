@@ -22,6 +22,12 @@ export type OllamaGenerateOptions = {
   maxNewTokens?: number;
 };
 
+type OllamaGenerationAttempt = {
+  endpoint: 'generate' | 'chat';
+  caption: string;
+  doneReason: string | null;
+};
+
 export type OllamaModelPullStatus = {
   status: 'ready' | 'pulling' | 'error';
   error: string | null;
@@ -82,6 +88,12 @@ function extractOllamaCaptionText(data: unknown) {
   if (typeof text === 'string') return text.trim();
 
   return '';
+}
+
+function extractOllamaDoneReason(data: unknown) {
+  if (typeof data !== 'object' || data === null) return null;
+  const doneReason = (data as Record<string, unknown>).done_reason;
+  return typeof doneReason === 'string' ? doneReason : null;
 }
 
 export async function listOllamaModels(baseUrl = getOllamaBaseUrl()) {
@@ -204,20 +216,58 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
 
   await ensureOllamaModel(model, baseUrl);
 
-  const body: Record<string, unknown> = {
+  const generateBody: Record<string, unknown> = {
     model,
     prompt,
     images: [options.imageBase64],
     stream: false,
   };
   if (options.systemPrompt?.trim()) {
-    body.system = options.systemPrompt.trim();
+    generateBody.system = options.systemPrompt.trim();
   }
   if (Number.isFinite(options.maxNewTokens) && (options.maxNewTokens || 0) > 0) {
-    body.options = { num_predict: Math.round(options.maxNewTokens as number) };
+    generateBody.options = { num_predict: Math.round(options.maxNewTokens as number) };
   }
 
-  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/generate`, {
+  const generateAttempt = await runOllamaGenerationAttempt('generate', generateBody, baseUrl);
+  if (generateAttempt.caption) return generateAttempt.caption;
+
+  const messages: Array<Record<string, unknown>> = [];
+  if (options.systemPrompt?.trim()) {
+    messages.push({ role: 'system', content: options.systemPrompt.trim() });
+  }
+  messages.push({
+    role: 'user',
+    content: prompt,
+    images: [options.imageBase64],
+  });
+  const chatBody: Record<string, unknown> = {
+    model,
+    messages,
+    stream: false,
+  };
+  if (Number.isFinite(options.maxNewTokens) && (options.maxNewTokens || 0) > 0) {
+    chatBody.options = { num_predict: Math.round(options.maxNewTokens as number) };
+  }
+
+  const chatAttempt = await runOllamaGenerationAttempt('chat', chatBody, baseUrl);
+  if (chatAttempt.caption) return chatAttempt.caption;
+
+  const reasons = [generateAttempt, chatAttempt]
+    .filter(attempt => attempt.doneReason)
+    .map(attempt => `${attempt.endpoint}: ${attempt.doneReason}`)
+    .join(', ');
+  throw new Error(
+    `Ollama returned an empty caption${reasons ? ` (${reasons})` : ''}. Confirm the selected model supports image inputs and try a stronger caption prompt.`,
+  );
+}
+
+async function runOllamaGenerationAttempt(
+  endpoint: OllamaGenerationAttempt['endpoint'],
+  body: Record<string, unknown>,
+  baseUrl: string,
+): Promise<OllamaGenerationAttempt> {
+  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -227,17 +277,11 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   }
 
   const data = await response.json();
-  const caption = extractOllamaCaptionText(data);
-  if (!caption) {
-    const doneReason =
-      typeof data === 'object' && data !== null && typeof (data as Record<string, unknown>).done_reason === 'string'
-        ? ` Done reason: ${(data as Record<string, unknown>).done_reason}.`
-        : '';
-    throw new Error(
-      `Ollama returned an empty caption.${doneReason} Confirm the selected model supports image inputs and try a stronger caption prompt.`,
-    );
-  }
-  return caption;
+  return {
+    endpoint,
+    caption: extractOllamaCaptionText(data),
+    doneReason: extractOllamaDoneReason(data),
+  };
 }
 
 export async function unloadOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {

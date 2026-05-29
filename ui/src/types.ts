@@ -267,6 +267,7 @@ export interface NetworkConfig {
   lokr_factor: number;
   network_kwargs: {
     ignore_if_contains: string[];
+    only_if_contains?: string[];
   };
   transformer_only?: boolean;
 }

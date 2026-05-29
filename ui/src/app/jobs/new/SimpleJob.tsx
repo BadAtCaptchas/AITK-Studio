@@ -639,7 +639,7 @@ export default function SimpleJob({
                     setJobConfig(value, 'config.process[0].network.linear_alpha');
                   }}
                   placeholder="eg. 16"
-                  min={0}
+                  min={1}
                   max={1024}
                   required
                 />
@@ -1155,7 +1155,7 @@ export default function SimpleJob({
                           onChange={value =>
                             setJobConfig(value == '' ? null : value, `config.process[0].datasets[${i}].control_path`)
                           }
-                          options={[{ value: '', label: <>&nbsp;</> }, ...datasetOptions]}
+                          options={[{ value: '', label: ' ' }, ...datasetOptions]}
                         />
                       )}
                       {modelArch?.additionalSections?.includes('datasets.multi_control_paths') && (
@@ -1171,7 +1171,7 @@ export default function SimpleJob({
                                 `config.process[0].datasets[${i}].control_path_1`,
                               )
                             }
-                            options={[{ value: '', label: <>&nbsp;</> }, ...datasetOptions]}
+                            options={[{ value: '', label: ' ' }, ...datasetOptions]}
                           />
                           <SelectInput
                             label="Control Dataset 2"
@@ -1184,7 +1184,7 @@ export default function SimpleJob({
                                 `config.process[0].datasets[${i}].control_path_2`,
                               )
                             }
-                            options={[{ value: '', label: <>&nbsp;</> }, ...datasetOptions]}
+                            options={[{ value: '', label: ' ' }, ...datasetOptions]}
                           />
                           <SelectInput
                             label="Control Dataset 3"
@@ -1197,7 +1197,7 @@ export default function SimpleJob({
                                 `config.process[0].datasets[${i}].control_path_3`,
                               )
                             }
-                            options={[{ value: '', label: <>&nbsp;</> }, ...datasetOptions]}
+                            options={[{ value: '', label: ' ' }, ...datasetOptions]}
                           />
                         </>
                       )}

@@ -465,6 +465,36 @@ class ToolkitNetworkMixin:
         # will prevent optimizer from loading as it will have double states
         self.did_change_weights = False
 
+    def get_empty_network_error_message(self: Network) -> str:
+        details = {
+            "arch": None,
+            "network_type": getattr(self, "network_type", None),
+            "train_unet": getattr(self, "train_unet", None),
+            "train_text_encoder": getattr(self, "train_text_encoder", None),
+            "rank": getattr(self, "lora_dim", None),
+            "conv_rank": getattr(self, "conv_lora_dim", None),
+            "target_lora_modules": getattr(self, "target_lora_modules", None),
+            "transformer_block_names": getattr(self, "transformer_block_names", None),
+            "only_if_contains": getattr(self, "only_if_contains", None),
+            "ignore_if_contains": getattr(self, "ignore_if_contains", None),
+        }
+        if self.network_config is not None:
+            details["network_type"] = getattr(self.network_config, "type", details["network_type"])
+            details["rank"] = getattr(self.network_config, "linear", details["rank"])
+            details["conv_rank"] = getattr(self.network_config, "conv", details["conv_rank"])
+        base_model_ref = getattr(self, "base_model_ref", None)
+        if base_model_ref is not None:
+            base_model = base_model_ref()
+            if base_model is not None:
+                details["arch"] = getattr(base_model, "arch", None)
+
+        detail_text = ", ".join(f"{key}={value!r}" for key, value in details.items())
+        return (
+            "There are not any lora modules in this network. "
+            "Check your config and try again. "
+            f"Details: {detail_text}"
+        )
+
     def get_keymap(self: Network, force_weight_mapping=False):
         use_weight_mapping = False
 
@@ -735,7 +765,7 @@ class ToolkitNetworkMixin:
         try:
             first_module = self.get_all_modules()[0]
         except IndexError:
-            raise ValueError("There are not any lora modules in this network. Check your config and try again")
+            raise ValueError(self.get_empty_network_error_message())
         
         if hasattr(first_module, 'lora_down'):
             device = first_module.lora_down.weight.device

@@ -1427,6 +1427,24 @@ def validate_configs(
             raise ValueError("Cannot use accuracy recovery adapter and assistant lora at the same time. "
                              "Please set one of them to None.")
 
+    if network_config is not None:
+        if not train_config.train_unet and not train_config.train_text_encoder:
+            raise ValueError(
+                "Network training requires train.train_unet or train.train_text_encoder to be true."
+            )
+
+        network_type = network_config.type.lower()
+        if model_config.arch == "zimage" and network_type not in {"lora", "lokr"}:
+            raise ValueError("Z-Image training currently supports network.type lora or lokr.")
+
+        if network_type in {"lora", "lokr"}:
+            linear_rank = network_config.linear if network_config.linear is not None else 0
+            conv_rank = network_config.conv if network_config.conv is not None else 0
+            if linear_rank <= 0 and conv_rank <= 0:
+                raise ValueError(
+                    "network.linear must be greater than 0 for LoRA/LoKr training unless network.conv is greater than 0."
+                )
+
     # see if any datasets are caching text embeddings
     is_caching_text_embeddings = any(dataset.cache_text_embeddings for dataset in dataset_configs)
     if is_caching_text_embeddings:

@@ -235,6 +235,9 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
             self.base_model_ref = weakref.ref(base_model)
 
         self.only_if_contains: Union[List, None] = only_if_contains
+        self.transformer_block_names = None
+        if base_model is not None:
+            self.transformer_block_names = base_model.get_transformer_block_names()
 
         self.lora_dim = lora_dim
         self.alpha = alpha
@@ -339,10 +342,18 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
             )
             loras = []
             skipped = []
-            attached_modules = []
+            attached_module_ids = set()
             lora_shape_dict = {}
             for name, module in root_module.named_modules():
-                if module.__class__.__name__ in target_replace_modules:
+                module_name = module.__class__.__name__
+                is_target_module = module_name in target_replace_modules
+                if is_unet and self.transformer_only and self.transformer_block_names is not None and name == "":
+                    # Transformer-only models can have wrapper/root class names that
+                    # do not match target_replace_modules. Scanning from the root and
+                    # filtering by block names below keeps LoRA targeting resilient.
+                    is_target_module = True
+
+                if is_target_module:
                     for child_name, child_module in module.named_modules():
                         is_linear = child_module.__class__.__name__ in LINEAR_MODULES
                         is_conv2d = child_module.__class__.__name__ in CONV_MODULES
@@ -371,12 +382,8 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                             skip = True
                         
                         if self.transformer_only and is_unet:
-                            transformer_block_names = None
-                            if base_model is not None:
-                                transformer_block_names = base_model.get_transformer_block_names()
-                            
-                            if transformer_block_names is not None:
-                                if not any([name in lora_name for name in transformer_block_names]):
+                            if self.transformer_block_names is not None:
+                                if not any([name in lora_name for name in self.transformer_block_names]):
                                     skip = True
                             else:
                                 if self.is_pixart:
@@ -406,6 +413,8 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                                         skip = True
 
                         if (is_linear or is_conv2d) and not skip:
+                            if id(child_module) in attached_module_ids:
+                                continue
 
                             if self.only_if_contains is not None:
                                 if not any([word in clean_name for word in self.only_if_contains]) and not any([word in lora_name for word in self.only_if_contains]):
@@ -458,6 +467,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                                 **module_kwargs
                             )
                             loras.append(lora)
+                            attached_module_ids.add(id(child_module))
                             if self.network_type.lower() == "lokr":
                                 try:
                                     lora_shape_dict[lora_name] = [list(lora.lokr_w1.weight.shape), list(lora.lokr_w2.weight.shape)]
@@ -500,9 +510,9 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
         print(f"create LoRA for Text Encoder: {len(self.text_encoder_loras)} modules.")
 
         # extend U-Net target modules if conv2d 3x3 is enabled, or load from weights
-        target_modules = target_lin_modules
+        target_modules = list(target_lin_modules)
         if modules_dim is not None or self.conv_lora_dim is not None or conv_block_dims is not None:
-            target_modules += target_conv_modules
+            target_modules += list(target_conv_modules)
 
         if is_v3:
             target_modules = ["SD3Transformer2DModel"]
@@ -518,6 +528,8 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
         
         if is_lumina2:
             target_modules = ["Lumina2Transformer2DModel"]
+
+        self.target_lora_modules = list(target_modules)
 
         if train_unet:
             self.unet_loras, skipped_un = create_modules(True, None, unet, target_modules)

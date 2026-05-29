@@ -20,6 +20,12 @@ class ZImageTransformer2DModel(torch.nn.Module):
         )
 
 
+class WrappedZImageTransformer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.wrapped = ZImageTransformer2DModel()
+
+
 class _BaseModel:
     arch = "zimage"
     use_old_lokr_format = False
@@ -29,7 +35,12 @@ class _BaseModel:
 
 
 class LoRASpecialFilterTest(unittest.TestCase):
-    def _build_network(self, only_if_contains):
+    def _build_network(
+        self,
+        only_if_contains=None,
+        unet=None,
+        target_lin_modules=None,
+    ):
         network_config = NetworkConfig(
             type="lora",
             linear=2,
@@ -38,7 +49,7 @@ class LoRASpecialFilterTest(unittest.TestCase):
         )
         return LoRASpecialNetwork(
             text_encoder=None,
-            unet=ZImageTransformer2DModel(),
+            unet=unet or ZImageTransformer2DModel(),
             lora_dim=network_config.linear,
             multiplier=1.0,
             alpha=network_config.linear_alpha,
@@ -48,7 +59,7 @@ class LoRASpecialFilterTest(unittest.TestCase):
             network_type=network_config.type,
             transformer_only=network_config.transformer_only,
             is_transformer=True,
-            target_lin_modules=["ZImageTransformer2DModel"],
+            target_lin_modules=target_lin_modules or ["ZImageTransformer2DModel"],
             base_model=_BaseModel(),
             only_if_contains=only_if_contains,
         )
@@ -62,6 +73,39 @@ class LoRASpecialFilterTest(unittest.TestCase):
         network = self._build_network(["does_not_exist"])
 
         self.assertEqual(len(network.get_all_modules()), 0)
+
+    def test_zimage_turbo_style_config_creates_modules(self):
+        network = self._build_network([])
+
+        self.assertEqual(len(network.get_all_modules()), 1)
+
+    def test_assistant_lora_wrapped_model_still_creates_training_modules(self):
+        transformer = ZImageTransformer2DModel()
+        assistant_network = self._build_network(unet=transformer)
+        assistant_network.apply_to(
+            None,
+            transformer,
+            apply_text_encoder=False,
+            apply_unet=True,
+        )
+
+        training_network = self._build_network(unet=transformer)
+
+        self.assertEqual(len(training_network.get_all_modules()), 1)
+
+    def test_transformer_block_scan_handles_root_class_mismatch(self):
+        network = self._build_network(
+            unet=WrappedZImageTransformer(),
+            target_lin_modules=["DoesNotMatchWrapper"],
+        )
+
+        self.assertEqual(len(network.get_all_modules()), 1)
+
+    def test_empty_network_error_includes_targeting_details(self):
+        network = self._build_network(["does_not_exist"])
+
+        with self.assertRaisesRegex(ValueError, "only_if_contains=\\['does_not_exist'\\]"):
+            network._update_torch_multiplier()
 
 
 if __name__ == "__main__":

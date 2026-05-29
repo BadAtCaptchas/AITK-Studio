@@ -11,6 +11,9 @@ import {
 } from '@/server/remoteClient';
 import {
   getEncryptedDatasetsForJobConfig,
+  getKeyForRequiredDataset,
+  normalizeEncryptedKeyMap,
+  validateEncryptedDatasetStartKey,
 } from '@/server/encryptedDatasets';
 import {
   getEncryptedKeyCoverage,
@@ -46,6 +49,26 @@ function isSecureRemoteOllamaCaptionJobConfigJson(jobConfigJson: unknown) {
   } catch {
     return false;
   }
+}
+
+async function findInvalidEncryptedDatasetKeys(
+  requiredDatasets: { path: string; name: string }[],
+  encryptedKeys: EncryptedDatasetStartKey[],
+) {
+  const keyMap = normalizeEncryptedKeyMap(encryptedKeys);
+  const invalidDatasets: Array<{ path: string; name: string }> = [];
+
+  for (const dataset of requiredDatasets) {
+    const keyB64 = getKeyForRequiredDataset(keyMap, dataset);
+    if (!keyB64) continue;
+    try {
+      await validateEncryptedDatasetStartKey(dataset, keyB64);
+    } catch {
+      invalidDatasets.push(dataset);
+    }
+  }
+
+  return invalidDatasets;
 }
 
 async function handleStart(
@@ -91,6 +114,18 @@ async function handleStart(
   }
   let encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
   let useDurableEncryptedKeys = requiredEncryptedDatasets.length > 0 && encryptedKeyCoverage.durableKeys.length > 0;
+  let invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(requiredEncryptedDatasets, encryptedKeysForLaunch);
+  if (invalidEncryptedDatasets.length > 0) {
+    return NextResponse.json(
+      {
+        error: 'invalid decryption key',
+        encryptedDatasets: invalidEncryptedDatasets,
+        invalidEncryptedDatasets,
+      },
+      { status: 409 },
+    );
+  }
+
   if (durableEncryptedDatasetKeys && requiredEncryptedDatasets.length > 0) {
     try {
       await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
@@ -103,6 +138,17 @@ async function handleStart(
     encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedKeysForLaunch);
     encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
     useDurableEncryptedKeys = true;
+    invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(requiredEncryptedDatasets, encryptedKeysForLaunch);
+    if (invalidEncryptedDatasets.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'invalid decryption key',
+          encryptedDatasets: invalidEncryptedDatasets,
+          invalidEncryptedDatasets,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   if (!isLocalWorker(job.worker_id)) {

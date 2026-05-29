@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCloudflaredStatus } from '@/server/cloudflared';
+import { getOllamaStatus } from '@/server/ollama';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,5 +11,6 @@ export async function GET() {
     app: 'ai-toolkit',
     timestamp: new Date().toISOString(),
     cloudflared: await getCloudflaredStatus(),
+    ollama: await getOllamaStatus(),
   });
 }

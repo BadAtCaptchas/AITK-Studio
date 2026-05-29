@@ -25,6 +25,38 @@ type StartJobOptions = {
   encryptedDatasetKeys?: EncryptedDatasetStartKey[];
 };
 
+function getSecureRemoteOllamaWorkerId(jobConfig: any) {
+  const processes = Array.isArray(jobConfig?.config?.process) ? jobConfig.config.process : [];
+  for (const processConfig of processes) {
+    if (processConfig?.type !== 'SecureRemoteOllamaCaptioner') continue;
+    const workerId = processConfig?.caption?.remote_worker_id;
+    if (typeof workerId === 'string' && workerId.trim() && workerId !== 'local') {
+      return workerId.trim();
+    }
+  }
+  return null;
+}
+
+function normalizeWorkerBaseUrl(baseUrl: string) {
+  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new Error('Worker base URL must start with http:// or https://');
+  }
+  return trimmed;
+}
+
+async function getSecureRemoteOllamaWorker(workerId: string) {
+  const worker = await db.workerNodes.findById(workerId);
+  if (!worker) throw new Error(`Remote worker not found: ${workerId}`);
+  if (!worker.enabled) throw new Error(`Remote worker is disabled: ${worker.name}`);
+  if (!worker.api_token) throw new Error(`Remote worker has no API token: ${worker.name}`);
+  return {
+    id: worker.id,
+    base_url: normalizeWorkerBaseUrl(worker.base_url),
+    api_token: worker.api_token,
+  };
+}
+
 function appendLaunchLog(launchLogPath: string, message: string) {
   try {
     fs.appendFileSync(launchLogPath, `${message}\n`);
@@ -97,6 +129,14 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
 
       const dbConfig = getDatabaseConfig();
       const jobConfig = JSON.parse(job.job_config);
+      const secureRemoteOllamaWorkerId = getSecureRemoteOllamaWorkerId(jobConfig);
+      const secureRemoteOllamaEnv: Record<string, string> = {};
+      if (secureRemoteOllamaWorkerId) {
+        const worker = await getSecureRemoteOllamaWorker(secureRemoteOllamaWorkerId);
+        secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_BASE_URL = worker.base_url;
+        secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_TOKEN = worker.api_token;
+        secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_WORKER_ID = worker.id;
+      }
       const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
       const durableEncryptedDatasetKeys = await getDurableEncryptedDatasetKeys(jobID);
       const encryptedKeyMap = normalizeEncryptedKeyMap([
@@ -150,6 +190,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
+        ...secureRemoteOllamaEnv,
       };
       if (encryptedDatasetKeys.length > 0) {
         additionalEnv.AITK_ENCRYPTED_DATASET_KEYS_B64 = Buffer.from(

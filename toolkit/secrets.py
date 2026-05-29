@@ -4,7 +4,7 @@ from typing import Any
 
 
 SENSITIVE_CONFIG_KEY_RE = re.compile(
-    r"(token|secret|password|api[_-]?key|access[_-]?key|private[_-]?key|credential)",
+    r"(token|secret|password|api[_-]?key|access[_-]?key|private[_-]?key|credential|prompt)",
     re.IGNORECASE,
 )
 REDACTED_VALUE = "[REDACTED]"

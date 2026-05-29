@@ -51,6 +51,10 @@ RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/downloa
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Ollama for optional secure remote caption workers. The startup script
+# keeps it bound to localhost unless explicitly overridden.
+RUN curl -fsSL https://ollama.com/install.sh | sh
+
 WORKDIR /app
 
 # Set aliases for python and pip

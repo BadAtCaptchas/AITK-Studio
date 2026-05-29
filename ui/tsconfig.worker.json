@@ -24,6 +24,8 @@
         "src/utils/trainingPhaseSummary.ts",
         "src/server/pythonPath.ts",
         "src/server/scriptRunner.ts",
+        "src/server/secureCaptionCrypto.ts",
+        "src/server/ollama.ts",
         "src/server/trainingAdvisor.ts"
     ]
 }

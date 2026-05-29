@@ -96,6 +96,24 @@ validate_cloudflared_config() {
     fi
 }
 
+start_ollama() {
+    if [[ "${AITK_OLLAMA_ENABLED:-0}" != "1" ]]; then
+        return
+    fi
+
+    if ! command -v ollama >/dev/null 2>&1; then
+        echo "ERROR: AITK_OLLAMA_ENABLED=1 but the ollama binary was not found." >&2
+        exit 1
+    fi
+
+    export OLLAMA_HOST="${AITK_OLLAMA_HOST:-127.0.0.1:11434}"
+    export AITK_OLLAMA_BASE_URL="${AITK_OLLAMA_BASE_URL:-http://${OLLAMA_HOST}}"
+    export OLLAMA_MODELS="${OLLAMA_MODELS:-${PERSIST_ROOT}/ollama}"
+    mkdir -p "${OLLAMA_MODELS}"
+    echo "Starting Ollama on ${OLLAMA_HOST} with models at ${OLLAMA_MODELS}..."
+    nohup ollama serve >/tmp/ollama.log 2>&1 &
+}
+
 link_persistent_dir() {
     local name="$1"
     local target="${PERSIST_ROOT}/${name}"
@@ -168,6 +186,7 @@ require_auth_secret
 validate_cloudflared_config
 prepare_workspace
 configure_runpod_proxy_urls
+start_ollama
 
 echo "Persistent root: ${PERSIST_ROOT}"
 echo "SQLite path: ${AITK_SQLITE_PATH}"

@@ -55,6 +55,17 @@ test('ensureOllamaModel pulls missing model', async () => {
   assert.equal(JSON.parse(calls[1].body).model, 'llava:13b');
 });
 
+test('listOllamaModels reports unreachable Ollama base URL', async () => {
+  globalThis.fetch = async () => {
+    throw new TypeError('fetch failed');
+  };
+
+  await assert.rejects(
+    ollama.listOllamaModels('http://ollama.test'),
+    /Ollama model list failed at http:\/\/ollama\.test\/api\/tags: fetch failed/,
+  );
+});
+
 test('startOllamaModelPull warms installed model before reporting ready', async () => {
   const calls = [];
   let resolveWarm;
@@ -299,4 +310,18 @@ test('unloadOllamaModel sends keep_alive zero generate request', async () => {
     stream: false,
     keep_alive: 0,
   });
+});
+
+test('unloadOllamaModel treats missing model as already unloaded', async () => {
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/api/generate')) {
+      assert.equal(JSON.parse(init.body).keep_alive, 0);
+      return response({ error: "model 'gemma4:31b' not found" }, 404);
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const result = await ollama.unloadOllamaModel('gemma4:31b', 'http://ollama.test');
+
+  assert.deepEqual(result, { unloaded: false, reason: 'model_not_found' });
 });

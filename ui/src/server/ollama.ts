@@ -82,6 +82,31 @@ async function readOllamaError(response: Response) {
   return body.slice(0, 500);
 }
 
+function ollamaFetchErrorMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : 'fetch failed';
+}
+
+async function fetchOllama(
+  path: string,
+  init: RequestInit,
+  baseUrl: string,
+  operation: string,
+): Promise<{ response: Response; url: string }> {
+  const normalizedBaseUrl = trimTrailingSlash(baseUrl);
+  const url = `${normalizedBaseUrl}${path}`;
+  try {
+    return { response: await fetch(url, init), url };
+  } catch (error) {
+    throw new Error(
+      `Ollama ${operation} failed at ${url}: ${ollamaFetchErrorMessage(error)}. Confirm Ollama is running and AITK_OLLAMA_BASE_URL points to the remote server's local Ollama.`,
+    );
+  }
+}
+
+async function throwOllamaResponseError(response: Response, url: string, operation: string): Promise<never> {
+  throw new Error(`Ollama ${operation} failed at ${url}: ${await readOllamaError(response)}`);
+}
+
 function extractOllamaCaptionText(data: unknown) {
   if (typeof data !== 'object' || data === null) return '';
   const record = data as Record<string, unknown>;
@@ -138,9 +163,9 @@ function captionBodyForAttempt(body: Record<string, unknown>, maxNewTokens: numb
 }
 
 export async function listOllamaModels(baseUrl = getOllamaBaseUrl()) {
-  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/tags`, { cache: 'no-store' });
+  const { response, url } = await fetchOllama('/api/tags', { cache: 'no-store' }, baseUrl, 'model list');
   if (!response.ok) {
-    throw new Error(await readOllamaError(response));
+    await throwOllamaResponseError(response, url, 'model list');
   }
   const data = (await response.json()) as { models?: OllamaModel[] };
   return Array.isArray(data.models) ? data.models : [];
@@ -171,13 +196,18 @@ export async function ensureOllamaModel(model: string, baseUrl = getOllamaBaseUr
     return { pulled: false };
   }
 
-  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/pull`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: trimmedModel, stream: false }),
-  });
+  const { response, url } = await fetchOllama(
+    '/api/pull',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: trimmedModel, stream: false }),
+    },
+    baseUrl,
+    `model pull for ${trimmedModel}`,
+  );
   if (!response.ok) {
-    throw new Error(await readOllamaError(response));
+    await throwOllamaResponseError(response, url, `model pull for ${trimmedModel}`);
   }
   return { pulled: true };
 }
@@ -229,13 +259,18 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
       if (!hasOllamaModel(models, trimmedModel)) {
         state.phase = 'pulling';
         state.updatedAt = new Date().toISOString();
-        const response = await fetch(`${normalizedBaseUrl}/api/pull`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: trimmedModel, stream: false }),
-        });
+        const { response, url } = await fetchOllama(
+          '/api/pull',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: trimmedModel, stream: false }),
+          },
+          normalizedBaseUrl,
+          `model pull for ${trimmedModel}`,
+        );
         if (!response.ok) {
-          throw new Error(await readOllamaError(response));
+          await throwOllamaResponseError(response, url, `model pull for ${trimmedModel}`);
         }
       }
       state.phase = 'warming';
@@ -256,18 +291,23 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
 }
 
 async function warmOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
-  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      prompt: '',
-      stream: false,
-      keep_alive: '10m',
-    }),
-  });
+  const { response, url } = await fetchOllama(
+    '/api/generate',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        prompt: '',
+        stream: false,
+        keep_alive: '10m',
+      }),
+    },
+    baseUrl,
+    `model warm-up for ${model}`,
+  );
   if (!response.ok) {
-    throw new Error(await readOllamaError(response));
+    await throwOllamaResponseError(response, url, `model warm-up for ${model}`);
   }
 }
 
@@ -352,13 +392,18 @@ async function runOllamaGenerationAttempt(
   baseUrl: string,
   attempt: number,
 ): Promise<OllamaGenerationAttempt> {
-  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const { response, url } = await fetchOllama(
+    `/api/${endpoint}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    baseUrl,
+    `${endpoint} caption attempt ${attempt}`,
+  );
   if (!response.ok) {
-    throw new Error(await readOllamaError(response));
+    await throwOllamaResponseError(response, url, `${endpoint} caption attempt ${attempt}`);
   }
 
   const data = await response.json();
@@ -377,18 +422,28 @@ export async function unloadOllamaModel(model: string, baseUrl = getOllamaBaseUr
   const trimmedModel = model.trim();
   if (!trimmedModel) throw new Error('Ollama model is required');
 
-  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: trimmedModel,
-      prompt: '',
-      stream: false,
-      keep_alive: 0,
-    }),
-  });
+  const { response, url } = await fetchOllama(
+    '/api/generate',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: trimmedModel,
+        prompt: '',
+        stream: false,
+        keep_alive: 0,
+      }),
+    },
+    baseUrl,
+    `model unload for ${trimmedModel}`,
+  );
   if (!response.ok) {
-    throw new Error(await readOllamaError(response));
+    const message = await readOllamaError(response);
+    if (response.status === 404 || message.toLowerCase().includes('not found')) {
+      pullStateMap().delete(modelPullKey(trimmedModel, trimTrailingSlash(baseUrl)));
+      return { unloaded: false, reason: 'model_not_found' };
+    }
+    throw new Error(`Ollama model unload for ${trimmedModel} failed at ${url}: ${message}`);
   }
 
   pullStateMap().delete(modelPullKey(trimmedModel, trimTrailingSlash(baseUrl)));

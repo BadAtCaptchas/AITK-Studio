@@ -623,7 +623,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage']
 
 
 class ModelConfig:
@@ -1449,7 +1449,7 @@ def validate_configs(
         raise ValueError("Cannot use both differential output preservation and blank prompt preservation at the same time. Please set one of them to False.")
 
     if train_config.sega_distill:
-        supported_sega_arches = {'flux2', 'flux2_klein_4b', 'flux2_klein_9b'}
+        supported_sega_arches = {'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'zimage'}
         if model_config.arch not in supported_sega_arches:
             raise ValueError(
                 f"SEGA distillation currently supports {sorted(supported_sega_arches)}, got {model_config.arch}."

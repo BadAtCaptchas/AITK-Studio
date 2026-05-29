@@ -273,7 +273,7 @@ test('preflight accepts compatible SEGA distillation configuration with teacher 
   const config = baseConfig(dataset);
   const processConfig = config.config.process[0];
   processConfig.train.sega_distill = true;
-  processConfig.model.arch = 'flux2_klein_4b';
+  processConfig.model.arch = 'zimage:turbo';
   processConfig.network.type = 'lora';
 
   const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });

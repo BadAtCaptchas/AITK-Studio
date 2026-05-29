@@ -518,6 +518,7 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const optimizer = String(train?.optimizer ?? '').toLowerCase();
   const usesAdaptiveProdigyLr = optimizer.startsWith('prodigy');
   const arch = String(processConfig.model?.arch ?? '');
+  const baseArch = arch.split(':')[0];
   const networkType = String(processConfig.network?.type ?? '');
   const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx/i.test(arch);
   const warnLr = sensitiveArch ? 1e-4 : 3e-4;
@@ -551,8 +552,8 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   }
 
   if (train?.sega_distill) {
-    const supportedSegaArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b']);
-    if (!supportedSegaArchs.has(arch)) {
+    const supportedSegaArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'zimage']);
+    if (!supportedSegaArchs.has(baseArch)) {
       addFinding(
         findings,
         'critical',

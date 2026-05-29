@@ -296,6 +296,22 @@ AITK_CLOUDFLARED_LOG_LEVEL=info
 
 `AI_TOOLKIT_AUTH` is required when `AITK_CLOUDFLARED_ENABLED=1`. Tunnel tokens are read from a token file and are not exposed through the browser. The app can start, stop, and show tunnel status from the Settings page; Docker images include `cloudflared` for this workflow.
 
+### Secure remote Ollama captioning
+
+Settings includes a **Secure Remote Captioning** tool for image datasets. It starts a local UI caption job that streams one image at a time to a selected remote worker's UI, where the worker calls its local Ollama server. The dataset is not bundled or stored on the remote worker, and prompt/system-prompt/image/caption payloads are encrypted at the application layer in addition to the worker's HTTPS tunnel and bearer token. The optional system prompt is saved per dataset in the central UI and reused when that dataset is selected.
+
+On the remote worker, run the UI with `AI_TOOLKIT_AUTH` and Cloudflared as above, and keep Ollama bound to localhost:
+
+```bash
+AITK_OLLAMA_ENABLED=1
+AITK_OLLAMA_HOST=127.0.0.1:11434
+AITK_OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+Docker and RunPod images include Ollama. When `AITK_OLLAMA_ENABLED=1`, the startup scripts launch `ollama serve` without exposing port `11434`; only the authenticated UI is exposed through Cloudflared. If the selected Ollama model is not installed, the remote worker pulls it automatically before captioning.
+
+Threat model limit: the remote host and its Ollama process must decrypt each image and prompt in memory to run inference. This protects transport, logs, and remote disk persistence; it does not protect against a compromised remote machine.
+
 ## Training job import/export
 
 The UI can export and import training jobs from the queue page. Use the action menu on a training job to export either:

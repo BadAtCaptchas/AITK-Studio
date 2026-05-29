@@ -17,9 +17,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ wo
     const worker = await getRemoteWorker(workerID);
     const [health, gpu] = await Promise.all([fetchWorkerHealth(worker), fetchWorkerGpu(worker).catch(error => ({ error }))]);
     const gpus = 'gpus' in gpu ? gpu.gpus : [];
+    const ollama = health.ollama as { ok?: boolean; error?: string | null; modelCount?: number } | undefined;
+    const ollamaError = ollama && ollama.ok === false ? `Ollama: ${ollama.error || 'unavailable'}` : null;
     const updated = await db.workerNodes.update(workerID, {
       last_status: health.ok ? 'online' : 'error',
-      last_error: health.ok ? null : 'Worker health check failed',
+      last_error: health.ok ? ollamaError : 'Worker health check failed',
       last_checked_at: new Date(),
       capabilities: JSON.stringify({ health, hasGpuApi: 'gpus' in gpu }),
       gpus: JSON.stringify(gpus),

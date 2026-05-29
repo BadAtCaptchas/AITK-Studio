@@ -538,6 +538,7 @@ export interface CaptionProcessConfig {
   caption: {
     model_name_or_path: string;
     model_name_or_path2?: string;
+    device?: string;
     dtype: string;
     quantize: boolean;
     qtype: string;
@@ -549,6 +550,8 @@ export interface CaptionProcessConfig {
     max_res?: number;
     max_new_tokens?: number;
     fixed_caption?: string;
+    remote_worker_id?: string;
+    system_prompt?: string;
   }
 }
 

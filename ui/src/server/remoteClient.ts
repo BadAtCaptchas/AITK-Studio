@@ -156,6 +156,7 @@ export async function fetchWorkerHealth(worker: WorkerNodeRecord) {
     ok: boolean;
     app: string;
     cloudflared: unknown;
+    ollama?: unknown;
     timestamp: string;
   }>(worker, '/api/remote/health');
 }

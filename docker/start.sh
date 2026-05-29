@@ -66,6 +66,22 @@ validate_cloudflared_config() {
     fi
 }
 
+start_ollama() {
+    if [[ "${AITK_OLLAMA_ENABLED:-0}" != "1" ]]; then
+        return
+    fi
+
+    if ! command -v ollama >/dev/null 2>&1; then
+        echo "ERROR: AITK_OLLAMA_ENABLED=1 but the ollama binary was not found." >&2
+        exit 1
+    fi
+
+    export OLLAMA_HOST="${AITK_OLLAMA_HOST:-127.0.0.1:11434}"
+    export AITK_OLLAMA_BASE_URL="${AITK_OLLAMA_BASE_URL:-http://${OLLAMA_HOST}}"
+    echo "Starting Ollama on ${OLLAMA_HOST}..."
+    nohup ollama serve >/tmp/ollama.log 2>&1 &
+}
+
 # Export env vars
 export_env_vars() {
     echo "Exporting environment variables..."
@@ -84,5 +100,6 @@ setup_ssh
 export_env_vars
 require_auth_secret
 validate_cloudflared_config
+start_ollama
 echo "Starting OstrisAI-Toolkit Revamped UI..."
 cd /app/ai-toolkit/ui && npm run update_db && npm run start

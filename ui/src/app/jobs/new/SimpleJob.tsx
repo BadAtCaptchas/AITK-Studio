@@ -1,5 +1,5 @@
 'use client';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   modelArchs,
   ModelArch,
@@ -22,7 +22,7 @@ import {
   SliderInput,
 } from '@/components/formInputs';
 import Card from '@/components/Card';
-import { X, Copy } from 'lucide-react';
+import { X, Copy, Loader2, Shuffle } from 'lucide-react';
 import AddSingleImageModal, { openAddImageModal } from '@/components/AddSingleImageModal';
 import SampleControlImage from '@/components/SampleControlImage';
 import { FlipHorizontal2, FlipVertical2 } from 'lucide-react';
@@ -30,6 +30,8 @@ import { handleModelArchChange } from './utils';
 import { IoFlaskSharp } from 'react-icons/io5';
 import { isMac } from '@/helpers/basic';
 import TrainingPhasesEditor from './TrainingPhasesEditor';
+import { apiClient } from '@/utils/api';
+import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 
 type Props = {
   jobConfig: JobConfig;
@@ -40,7 +42,7 @@ type Props = {
   gpuIDs: string | null;
   setGpuIDs: (value: string | null) => void;
   gpuList: any;
-  datasetOptions: any;
+  datasetOptions: Array<SelectOption & { encrypted?: boolean; name?: string }>;
   isLoading?: boolean;
 };
 
@@ -59,6 +61,9 @@ export default function SimpleJob({
   datasetOptions,
   isLoading,
 }: Props) {
+  const [randomPromptLoadingIndex, setRandomPromptLoadingIndex] = useState<number | null>(null);
+  const [encryptedKeyRefreshKey, setEncryptedKeyRefreshKey] = useState(0);
+
   const modelArch = useMemo(() => {
     return modelArchs.find(a => a.name === jobConfig.config.process[0].model.arch) as ModelArch;
   }, [jobConfig.config.process[0].model.arch]);
@@ -172,6 +177,109 @@ export default function SimpleJob({
     }
     return sections.length > 0 ? sections : null;
   }, [modelArch]);
+
+  const randomPromptDatasets = useMemo(() => {
+    return jobConfig.config.process[0].datasets
+      .map(dataset => {
+        const option = datasetOptions.find(item => item.value === dataset.folder_path);
+        const encrypted = option?.encrypted === true;
+        const keyB64 = encrypted
+          ? getRememberedEncryptedDatasetKey(dataset.folder_path) ||
+            (option?.name ? getRememberedEncryptedDatasetKey(option.name) : null)
+          : null;
+
+        return {
+          folderPath: dataset.folder_path,
+          captionExt: dataset.caption_ext,
+          defaultCaption: dataset.default_caption,
+          encrypted,
+          keyB64,
+          label: option?.label || dataset.folder_path,
+        };
+      })
+      .filter(dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path);
+  }, [datasetOptions, encryptedKeyRefreshKey, jobConfig.config.process[0].datasets]);
+
+  const accessibleRandomPromptDatasets = useMemo(
+    () => randomPromptDatasets.filter(dataset => !dataset.encrypted || dataset.keyB64),
+    [randomPromptDatasets],
+  );
+
+  const randomPromptDisabledReason = useMemo(() => {
+    if (randomPromptDatasets.length === 0) return 'Select a dataset before importing a random prompt';
+    if (accessibleRandomPromptDatasets.length === 0) {
+      return 'Unlock the encrypted dataset before importing random prompts';
+    }
+    return 'Import random prompt from dataset';
+  }, [accessibleRandomPromptDatasets.length, randomPromptDatasets.length]);
+
+  const canImportRandomPrompt = randomPromptDatasets.length > 0 && accessibleRandomPromptDatasets.length > 0;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const refreshRememberedKeys = () => setEncryptedKeyRefreshKey(value => value + 1);
+    window.addEventListener('focus', refreshRememberedKeys);
+    document.addEventListener('visibilitychange', refreshRememberedKeys);
+    return () => {
+      window.removeEventListener('focus', refreshRememberedKeys);
+      document.removeEventListener('visibilitychange', refreshRememberedKeys);
+    };
+  }, []);
+
+  const setSamplePromptValue = (sampleIndex: number, prompt: string) => {
+    if (modelArch?.sampleTags && taggedSampleArr?.[sampleIndex]) {
+      const tagKey =
+        (modelArch.sampleTags.CAPTION && 'CAPTION') ||
+        (modelArch.sampleTags.PROMPT && 'PROMPT') ||
+        Object.entries(modelArch.sampleTags).find(
+          ([, tag]) => tag.type === 'text' || tag.type === 'multiline',
+        )?.[0];
+
+      if (tagKey) {
+        setJobConfig(
+          objToTags({ ...taggedSampleArr[sampleIndex], [tagKey]: prompt }),
+          `config.process[0].sample.samples[${sampleIndex}].prompt`,
+        );
+        return;
+      }
+    }
+
+    setJobConfig(prompt, `config.process[0].sample.samples[${sampleIndex}].prompt`);
+  };
+
+  const importRandomPromptFromDataset = async (sampleIndex: number) => {
+    const datasets = accessibleRandomPromptDatasets.map(dataset => ({
+      folderPath: dataset.folderPath,
+      captionExt: dataset.captionExt,
+      defaultCaption: dataset.defaultCaption,
+    }));
+    const encryptedDatasetKeys = accessibleRandomPromptDatasets
+      .filter(dataset => dataset.encrypted && dataset.keyB64)
+      .map(dataset => ({
+        datasetPath: dataset.folderPath,
+        keyB64: dataset.keyB64 as string,
+      }));
+
+    if (datasets.length === 0) {
+      alert(randomPromptDisabledReason);
+      return;
+    }
+
+    setRandomPromptLoadingIndex(sampleIndex);
+    try {
+      const response = await apiClient.post('/api/datasets/randomPrompt', { datasets, encryptedDatasetKeys });
+      const prompt = typeof response.data?.prompt === 'string' ? response.data.prompt.trim() : '';
+      if (!prompt) {
+        alert('No captions were found in the configured datasets.');
+        return;
+      }
+      setSamplePromptValue(sampleIndex, prompt);
+    } catch (error: any) {
+      alert(error?.response?.data?.error || 'Could not import a random prompt from the dataset.');
+    } finally {
+      setRandomPromptLoadingIndex(current => (current === sampleIndex ? null : current));
+    }
+  };
 
   const numTopCards = useMemo(() => {
     let count = 4; // job settings, model config, target config, save config
@@ -1671,7 +1779,21 @@ export default function SimpleJob({
                     </div>
                     <div className="pb-4"></div>
                   </div>
-                  <div>
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => importRandomPromptFromDataset(i)}
+                      disabled={randomPromptLoadingIndex !== null || !canImportRandomPrompt}
+                      className="rounded-full p-1 text-sm text-gray-300 hover:bg-gray-800 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={randomPromptDisabledReason}
+                      aria-label={randomPromptDisabledReason}
+                    >
+                      {randomPromptLoadingIndex === i ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Shuffle className="h-5 w-5" />
+                      )}
+                    </button>
                     <button
                       type="button"
                       onClick={() =>

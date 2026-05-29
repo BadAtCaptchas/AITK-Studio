@@ -36,7 +36,9 @@ export default function TrainingForm() {
   const { workers, status: workerStatus } = useWorkers();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus } = useDatasetList();
-  const [datasetOptions, setDatasetOptions] = useState<{ value: string; label: string }[]>([]);
+  const [datasetOptions, setDatasetOptions] = useState<
+    { value: string; label: string; encrypted: boolean; name: string }[]
+  >([]);
   const [showAdvancedView, setShowAdvancedView] = useState(false);
 
   const [jobConfig, setJobConfig] = useNestedState<JobConfig>(objectCopy(migrateJobConfig(defaultJobConfig)));
@@ -92,6 +94,8 @@ export default function TrainingForm() {
     const datasetOptions = datasets.map(dataset => ({
       value: path.join(settings.DATASETS_FOLDER, dataset.name),
       label: dataset.encrypted ? `${dataset.name} (encrypted)` : dataset.name,
+      encrypted: dataset.encrypted,
+      name: dataset.name,
     }));
     setDatasetOptions(datasetOptions);
 

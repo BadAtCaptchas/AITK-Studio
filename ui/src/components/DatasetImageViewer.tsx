@@ -10,6 +10,7 @@ import { apiClient } from '@/utils/api';
 import { isVideo, isAudio } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { getDisplayPath, getMediaUrl } from '@/utils/media';
 
 interface Props {
   imgPath: string | null; // current image path
@@ -55,12 +56,16 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
 
   const filename = useMemo(() => {
     if (!imgPath) return '';
+    const displayPath = getDisplayPath(imgPath);
+    if (displayPath !== imgPath) return displayPath;
     if (imgPath.includes('\\')) {
       const parts = imgPath.split('\\');
       return parts[parts.length - 1];
     }
     return imgPath.split('/').pop() || '';
   }, [imgPath]);
+
+  const mediaUrl = useMemo(() => (imgPath ? getMediaUrl(imgPath) : ''), [imgPath]);
 
   const currentIndex = useMemo(() => {
     if (!imgPath) return -1;
@@ -298,11 +303,11 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
               {imgPath &&
                 (isAudio(imgPath) ? (
                   <div className="w-[500px] h-[500px] max-w-full sm:max-w-[95vw] max-h-[70vh]">
-                    <AudioPlayer src={`/api/img/${encodeURIComponent(imgPath)}`} title={filename} autoPlay />
+                    <AudioPlayer src={mediaUrl} title={filename} autoPlay />
                   </div>
                 ) : isVideo(imgPath) ? (
                   <video
-                    src={`/api/img/${encodeURIComponent(imgPath)}`}
+                    src={mediaUrl}
                     className="w-auto h-auto max-w-full sm:max-w-[95vw] max-h-[70vh] object-contain"
                     preload="none"
                     playsInline
@@ -325,7 +330,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                   >
                     <TransformComponent>
                       <img
-                        src={`/api/img/${encodeURIComponent(imgPath)}`}
+                        src={mediaUrl}
                         alt="Dataset Image"
                         draggable={false}
                         className="w-auto h-auto max-w-full sm:max-w-[95vw] max-h-[70vh] object-contain select-none !pointer-events-auto"
@@ -375,7 +380,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                     <MenuItem>
                       <a
                         className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
-                        href={`/api/img/${encodeURIComponent(imgPath)}`}
+                        href={getMediaUrl(imgPath, 'file')}
                         download={filename}
                       >
                         Download

@@ -66,6 +66,10 @@ async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: 
   return response;
 }
 
+export async function remoteFetch(worker: WorkerNodeRecord, routePath: string, init: RequestInit = {}) {
+  return remoteRequest(worker, routePath, init);
+}
+
 export async function remoteJson<T>(worker: WorkerNodeRecord, routePath: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body != null && !headers.has('Content-Type') && !(init.body instanceof FormData)) {

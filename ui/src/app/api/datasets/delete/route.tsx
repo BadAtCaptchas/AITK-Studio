@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
 function resolveWithinRoot(root: string, target: unknown) {
   if (typeof target !== 'string' || target.trim().length === 0) {
@@ -23,6 +24,17 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { name } = body;
+    const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
+    if (!isLocalWorker(workerID)) {
+      const worker = await getRemoteWorker(workerID);
+      return NextResponse.json(
+        await remoteJson(worker, '/api/datasets/delete', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        }),
+      );
+    }
+
     const datasetsPath = await getDatasetsRoot();
     const datasetPath = resolveWithinRoot(datasetsPath, name);
 

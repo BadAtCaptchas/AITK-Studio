@@ -10,6 +10,7 @@ import {
   validateEncryptedManifest,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
 type EncryptedObjectUpdate = {
   objectPath: string;
@@ -19,9 +20,19 @@ type EncryptedObjectUpdate = {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { datasetName, manifest, objects, deleteObjects } = body;
+    const { datasetName, manifest, objects, deleteObjects, worker_id } = body;
     if (typeof datasetName !== 'string') {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
+    }
+
+    if (!isLocalWorker(worker_id)) {
+      const worker = await getRemoteWorker(worker_id);
+      return NextResponse.json(
+        await remoteJson(worker, '/api/datasets/encrypted/update', {
+          method: 'POST',
+          body: JSON.stringify({ datasetName, manifest, objects, deleteObjects }),
+        }),
+      );
     }
 
     const datasetsRoot = await getDatasetsRoot();

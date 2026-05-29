@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
+import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
+import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -19,11 +21,26 @@ export async function POST(request: NextRequest) {
   }
 
   const { imgPath } = body;
-  console.log('Received POST request for caption:', imgPath);
   try {
+    const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
+    if (remoteAsset) {
+      const worker = await getRemoteWorker(remoteAsset.workerID);
+      const remoteResponse = await remoteFetch(worker, '/api/caption/get', {
+        method: 'POST',
+        body: JSON.stringify({ imgPath: remoteAsset.path }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      return new NextResponse(remoteResponse.body, {
+        status: remoteResponse.status,
+        headers: {
+          'Content-Type': remoteResponse.headers.get('content-type') || 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
     // Decode the path
     const filepath = imgPath;
-    console.log('Decoded image path:', filepath);
 
     // Get allowed directories
     const allowedDir = await getDatasetsRoot();

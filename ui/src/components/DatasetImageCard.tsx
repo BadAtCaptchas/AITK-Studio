@@ -6,6 +6,7 @@ import { apiClient } from '@/utils/api';
 import AudioPlayer from './AudioPlayer';
 import { isVideo, isAudio } from '@/utils/basic';
 import useCaptionBatch, { setCachedCaption } from '@/hooks/useCaptionBatch';
+import { getDisplayPath, getMediaUrl } from '@/utils/media';
 
 interface DatasetImageCardProps {
   imageUrl: string;
@@ -42,6 +43,8 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   const isItAVideo = isVideo(imageUrl);
   const isItAudio = isAudio(imageUrl);
   const isItImage = !isItAVideo && !isItAudio;
+  const mediaUrl = getMediaUrl(imageUrl);
+  const displayName = getDisplayPath(imageUrl);
 
   useEffect(() => {
     const el = cardRef.current;
@@ -75,7 +78,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
     let objectUrl: string | null = null;
 
     const timer = window.setTimeout(() => {
-      fetch(`/api/img/${encodeURIComponent(imageUrl)}`, { signal: controller.signal })
+      fetch(mediaUrl, { signal: controller.signal })
         .then(r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.blob();
@@ -99,7 +102,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
       setBlobUrl(null);
       setLoaded(false);
     };
-  }, [imageUrl, isItImage, isVisible]);
+  }, [imageUrl, isItImage, isVisible, mediaUrl]);
 
   const combinedRefreshKey = captionRefreshKey + pollTick;
   const { caption: fetchedCaption, isLoaded: isCaptionLoaded } = useCaptionBatch(
@@ -185,7 +188,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
         >
           {isVisible && isItAVideo && (
             <video
-              src={`/api/img/${encodeURIComponent(imageUrl)}`}
+              src={mediaUrl}
               className="w-full h-full object-contain"
               autoPlay={false}
               loop
@@ -199,7 +202,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
               onClick={() => setShowAudioPlayer(true)}
             >
               <img
-                src={`/api/audio/art/${encodeURIComponent(imageUrl)}`}
+                src={getMediaUrl(imageUrl, 'audio-art')}
                 alt={alt}
                 className="w-full h-full object-contain"
                 onError={e => {
@@ -209,7 +212,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
             </div>
           )}
           {isVisible && isItAudio && showAudioPlayer && (
-            <AudioPlayer src={`/api/img/${encodeURIComponent(imageUrl)}`} title={imageUrl.replace(/^.*[\\/]/, '')} />
+            <AudioPlayer src={mediaUrl} title={displayName} />
           )}
           {isItImage && blobUrl && (
             <img

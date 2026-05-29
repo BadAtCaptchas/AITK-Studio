@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, use, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
 import { FaChevronLeft } from 'react-icons/fa';
 import { VirtuosoGrid } from 'react-virtuoso';
@@ -26,12 +27,20 @@ import {
   importRawAesKey,
   rememberEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
+import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 
 export default function DatasetPage({ params }: { params: { datasetName: string } }) {
   const [imgList, setImgList] = useState<{ img_path: string }[]>([]);
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
   const usableParams = use(params as any) as { datasetName: string };
   const datasetName = usableParams.datasetName;
+  const searchParams = useSearchParams();
+  const workerID = searchParams.get('worker_id') || 'local';
+  const isRemoteDataset = workerID !== 'local';
+  const datasetRef = useMemo(
+    () => (isRemoteDataset ? makeRemoteDatasetRef(workerID, datasetName) : null),
+    [datasetName, isRemoteDataset, workerID],
+  );
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const { settings } = useSettings();
   const [encryptedManifest, setEncryptedManifest] = useState<EncryptedDatasetManifest | null>(null);
@@ -49,7 +58,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
   const refreshImageList = (dbName: string) => {
     setStatus('loading');
     apiClient
-      .post('/api/datasets/listImages', { datasetName: dbName })
+      .post('/api/datasets/listImages', { datasetName: dbName, worker_id: workerID })
       .then((res: any) => {
         const data = res.data;
         if (data.encrypted) {
@@ -88,7 +97,10 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     };
   }, [encryptedCatalog, encryptedKey, encryptedManifest]);
 
-  useOpenImagesModalOnDrag(datasetName, () => refreshImageList(datasetName), encryptedUploadOptions);
+  useOpenImagesModalOnDrag(datasetName, () => refreshImageList(datasetName), {
+    ...encryptedUploadOptions,
+    workerID,
+  });
 
   const unlockEncryptedDataset = async (key: CryptoKey, manifest: EncryptedDatasetManifest) => {
     const catalog = await decryptCatalog(manifest, key);
@@ -97,6 +109,10 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     setEncryptedCatalog(catalog);
     setEncryptedRawKeyB64(rawKeyB64);
     rememberEncryptedDatasetKey(datasetName, rawKeyB64);
+    if (datasetRef) {
+      rememberEncryptedDatasetKey(datasetRef, rawKeyB64);
+      rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, datasetName), rawKeyB64);
+    }
     if (settings?.DATASETS_FOLDER) {
       rememberEncryptedDatasetKey(pathJoin(settings.DATASETS_FOLDER, datasetName), rawKeyB64);
     }
@@ -130,11 +146,13 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     if (datasetName) {
       refreshImageList(datasetName);
     }
-  }, [datasetName]);
+  }, [datasetName, workerID]);
 
   useEffect(() => {
     if (!encryptedManifest || encryptedKey || encryptedCatalog) return;
     const remembered =
+      (datasetRef ? getRememberedEncryptedDatasetKey(datasetRef) : null) ||
+      getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(workerID, datasetName)) ||
       getRememberedEncryptedDatasetKey(datasetName) ||
       (settings?.DATASETS_FOLDER
         ? getRememberedEncryptedDatasetKey(pathJoin(settings.DATASETS_FOLDER, datasetName))
@@ -143,7 +161,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     importRawAesKey(remembered)
       .then(key => unlockEncryptedDataset(key, encryptedManifest))
       .catch(() => undefined);
-  }, [datasetName, encryptedCatalog, encryptedKey, encryptedManifest, settings?.DATASETS_FOLDER]);
+  }, [datasetName, datasetRef, encryptedCatalog, encryptedKey, encryptedManifest, settings?.DATASETS_FOLDER, workerID]);
 
   const PageInfoContent = useMemo(() => {
     let icon = null;
@@ -210,6 +228,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
     await apiClient.post('/api/datasets/encrypted/update', {
       datasetName,
+      worker_id: workerID,
       manifest: nextManifest,
       objects: [
         {
@@ -231,6 +250,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
     await apiClient.post('/api/datasets/encrypted/update', {
       datasetName,
+      worker_id: workerID,
       manifest: nextManifest,
       deleteObjects: [item.objectPath, item.captionObjectPath].filter(Boolean),
     });
@@ -250,19 +270,27 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
           <h1 className="text-base sm:text-lg truncate">
             <span className="hidden sm:inline">Dataset: </span>
             {datasetName}
+            {isRemoteDataset ? <span className="ml-2 text-xs text-blue-300">Remote</span> : null}
           </h1>
         </div>
         <div className="flex-1"></div>
         <div className="flex-shrink-0 flex items-center gap-1 sm:gap-2">
-          <AutoCaptionButton
-            datasetPath={`${pathJoin(settings.DATASETS_FOLDER, datasetName)}`}
-            setIsAutoCaptioning={setIsAutoCaptioning}
-            encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
-          />
+          {!isRemoteDataset && (
+            <AutoCaptionButton
+              datasetPath={`${pathJoin(settings.DATASETS_FOLDER, datasetName)}`}
+              setIsAutoCaptioning={setIsAutoCaptioning}
+              encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
+            />
+          )}
           <Button
             className="text-white bg-slate-600 px-2 sm:px-3 py-1 rounded-md text-sm sm:text-base whitespace-nowrap disabled:opacity-50"
             disabled={!!encryptedManifest && !encryptedCatalog}
-            onClick={() => openImagesModal(datasetName, () => refreshImageList(datasetName), encryptedUploadOptions)}
+            onClick={() =>
+              openImagesModal(datasetName, () => refreshImageList(datasetName), {
+                ...encryptedUploadOptions,
+                workerID,
+              })
+            }
           >
             <span className="sm:hidden">+ Add</span>
             <span className="hidden sm:inline">Add Images</span>
@@ -341,6 +369,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
               <EncryptedDatasetItemCard
                 key={item.id}
                 datasetName={datasetName}
+                workerID={workerID}
                 item={item}
                 cryptoKey={encryptedKey}
                 isAutoCaptioning={isAutoCaptioning}

@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
+import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
+import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: Request) {
   try {
@@ -18,6 +20,17 @@ export async function POST(request: Request) {
     const { imgPath } = body;
     if (typeof imgPath !== 'string') {
       return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
+    }
+
+    const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
+    if (remoteAsset) {
+      const worker = await getRemoteWorker(remoteAsset.workerID);
+      return NextResponse.json(
+        await remoteJson(worker, '/api/img/delete', {
+          method: 'POST',
+          body: JSON.stringify({ imgPath: remoteAsset.path }),
+        }),
+      );
     }
 
     const datasetsPath = await getDatasetsRoot();

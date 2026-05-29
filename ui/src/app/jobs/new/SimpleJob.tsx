@@ -32,6 +32,7 @@ import { isMac } from '@/helpers/basic';
 import TrainingPhasesEditor from './TrainingPhasesEditor';
 import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
+import { parseRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 
 type Props = {
   jobConfig: JobConfig;
@@ -42,7 +43,9 @@ type Props = {
   gpuIDs: string | null;
   setGpuIDs: (value: string | null) => void;
   gpuList: any;
-  datasetOptions: Array<SelectOption & { encrypted?: boolean; name?: string }>;
+  datasetOptions: Array<
+    SelectOption & { encrypted?: boolean; name?: string; source?: 'local' | 'remote'; worker_id?: string; ref?: string }
+  >;
   isLoading?: boolean;
 };
 
@@ -183,6 +186,7 @@ export default function SimpleJob({
       .map(dataset => {
         const option = datasetOptions.find(item => item.value === dataset.folder_path);
         const encrypted = option?.encrypted === true;
+        const remote = option?.source === 'remote' || !!parseRemoteDatasetRef(dataset.folder_path);
         const keyB64 = encrypted
           ? getRememberedEncryptedDatasetKey(dataset.folder_path) ||
             (option?.name ? getRememberedEncryptedDatasetKey(option.name) : null)
@@ -193,11 +197,12 @@ export default function SimpleJob({
           captionExt: dataset.caption_ext,
           defaultCaption: dataset.default_caption,
           encrypted,
+          remote,
           keyB64,
           label: option?.label || dataset.folder_path,
         };
       })
-      .filter(dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path);
+      .filter(dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path && !dataset.remote);
   }, [datasetOptions, encryptedKeyRefreshKey, jobConfig.config.process[0].datasets]);
 
   const accessibleRandomPromptDatasets = useMemo(

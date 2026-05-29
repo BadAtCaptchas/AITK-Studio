@@ -121,6 +121,11 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
         name: entry.name,
         encrypted,
         itemCount: encrypted ? null : undefined,
+        source: 'local' as const,
+        worker_id: 'local',
+        worker_name: 'Local',
+        ref: `aitk-dataset://local/${encodeURIComponent(entry.name)}`,
+        path: datasetFolder,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));

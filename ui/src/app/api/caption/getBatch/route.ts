@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
+import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
+import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -24,9 +26,18 @@ export async function POST(request: NextRequest) {
 
   const allowedRoot = path.resolve(await getDatasetsRoot());
   const captions: Record<string, string> = {};
+  const remoteGroups = new Map<string, Array<{ ref: string; path: string }>>();
 
   for (const imgPath of imgPaths) {
     if (typeof imgPath !== 'string') continue;
+    const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
+    if (remoteAsset) {
+      const group = remoteGroups.get(remoteAsset.workerID) || [];
+      group.push({ ref: imgPath, path: remoteAsset.path });
+      remoteGroups.set(remoteAsset.workerID, group);
+      continue;
+    }
+
     const resolvedFilePath = path.resolve(imgPath);
     const relativeFilePath = path.relative(allowedRoot, resolvedFilePath);
     const isAllowed =
@@ -41,6 +52,26 @@ export async function POST(request: NextRequest) {
       captions[imgPath] = '';
     }
   }
+
+  await Promise.all(
+    Array.from(remoteGroups.entries()).map(async ([workerID, entries]) => {
+      try {
+        const worker = await getRemoteWorker(workerID);
+        const remoteData = await remoteJson<{ captions?: Record<string, string> }>(worker, '/api/caption/getBatch', {
+          method: 'POST',
+          body: JSON.stringify({ imgPaths: entries.map(entry => entry.path) }),
+        });
+        const remoteCaptions = remoteData?.captions || {};
+        entries.forEach(entry => {
+          captions[entry.ref] = remoteCaptions[entry.path] ?? '';
+        });
+      } catch {
+        entries.forEach(entry => {
+          captions[entry.ref] = '';
+        });
+      }
+    }),
+  );
 
   return NextResponse.json({ captions });
 }

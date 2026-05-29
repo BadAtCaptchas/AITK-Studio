@@ -5,6 +5,8 @@ import path from 'path';
 import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
+import { getRemoteWorker, remoteProxyFetch } from '@/server/remoteClient';
+import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 const contentTypeMap: { [key: string]: string } = {
   '.jpg': 'image/jpeg',
@@ -31,7 +33,7 @@ type ImageRouteParams = {
   imagePath: string | string[];
 };
 
-function getRequestedPath(request: NextRequest, imagePath: string | string[]) {
+function getRequestedValue(request: NextRequest, imagePath: string | string[]) {
   const pathname = request.nextUrl?.pathname;
   const routePrefix = '/api/img/';
   const rawPath =
@@ -41,7 +43,29 @@ function getRequestedPath(request: NextRequest, imagePath: string | string[]) {
         ? imagePath.join('/')
         : imagePath;
 
-  return path.resolve(decodeURIComponent(rawPath));
+  return decodeURIComponent(rawPath);
+}
+
+function remoteAssetPath(remotePath: string) {
+  return `/api/img/${encodeURIComponent(remotePath)}`;
+}
+
+function copyResponseHeaders(source: Response) {
+  const headers = new Headers();
+  for (const name of [
+    'content-type',
+    'content-length',
+    'content-range',
+    'accept-ranges',
+    'cache-control',
+    'content-disposition',
+    'x-content-type-options',
+    'etag',
+  ]) {
+    const value = source.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  return headers;
 }
 
 async function resolveExistingDir(dir: string) {
@@ -57,7 +81,18 @@ function isPathInsideRoot(root: string, filepath: string) {
 export async function GET(request: NextRequest, { params }: { params: ImageRouteParams }) {
   const { imagePath } = await params;
   try {
-    const filepath = getRequestedPath(request, imagePath);
+    const requestedValue = getRequestedValue(request, imagePath);
+    const remoteAsset = parseRemoteDatasetAssetRef(requestedValue);
+    if (remoteAsset) {
+      const worker = await getRemoteWorker(remoteAsset.workerID);
+      const remoteResponse = await remoteProxyFetch(worker, remoteAssetPath(remoteAsset.path), request.headers);
+      return new NextResponse(remoteResponse.body, {
+        status: remoteResponse.status,
+        headers: copyResponseHeaders(remoteResponse),
+      });
+    }
+
+    const filepath = path.resolve(requestedValue);
 
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();

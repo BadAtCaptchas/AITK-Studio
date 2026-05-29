@@ -91,3 +91,24 @@ test('generateOllamaImageCaption sends system prompt to Ollama generate', async 
   assert.equal(generateBodies[0].system, 'Return compact training captions.');
   assert.deepEqual(generateBodies[0].options, { num_predict: 32 });
 });
+
+test('unloadOllamaModel sends keep_alive zero generate request', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body });
+    if (String(url).endsWith('/api/generate')) return response({ done: true });
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const result = await ollama.unloadOllamaModel('llava:latest', 'http://ollama.test');
+
+  assert.deepEqual(result, { unloaded: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].body), {
+    model: 'llava:latest',
+    prompt: '',
+    stream: false,
+    keep_alive: 0,
+  });
+});

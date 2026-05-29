@@ -134,3 +134,24 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   const data = (await response.json()) as { response?: string };
   return (data.response || '').trim();
 }
+
+export async function unloadOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
+  const trimmedModel = model.trim();
+  if (!trimmedModel) throw new Error('Ollama model is required');
+
+  const response = await fetch(`${trimTrailingSlash(baseUrl)}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: trimmedModel,
+      prompt: '',
+      stream: false,
+      keep_alive: 0,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await readOllamaError(response));
+  }
+
+  return { unloaded: true };
+}

@@ -28,6 +28,7 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
         super(SecureRemoteOllamaCaptioner, self).__init__(process_id, job, config, **kwargs)
         self.remote_base_url = ""
         self.remote_token = ""
+        self.remote_model_ready = False
 
     def load_model(self):
         self.remote_base_url = os.environ.get("AITK_SECURE_CAPTION_REMOTE_BASE_URL", "").strip().rstrip("/")
@@ -38,6 +39,7 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
             raise ValueError("Secure remote caption worker token is missing")
         self.print_and_status_update("Using secure remote Ollama caption worker")
         self.ensure_remote_model()
+        self.remote_model_ready = True
 
     def _image_to_base64(self, file_path: str) -> str:
         image = self.load_pil_image(file_path, max_res=self.caption_config.max_res).convert("RGB")
@@ -158,24 +160,28 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
 
     def unload_remote_model(self):
         if not self.remote_base_url or not self.remote_token:
-            return
+            return False
+        if not self.remote_model_ready:
+            return False
         model = self.caption_config.model_name_or_path
         if not model:
-            return
+            return False
         item_id = f"unload-{uuid.uuid4().hex}"
         job_id = self.job_id or self.job.name
         payload = {"model": model}
         request_envelope = encrypt_secure_caption_json(self.remote_token, "request", job_id, item_id, payload)
         response_envelope = self._post_secure_unload(request_envelope)
-        decrypt_secure_caption_json(self.remote_token, "response", response_envelope)
+        response_payload = decrypt_secure_caption_json(self.remote_token, "response", response_envelope)
+        self.remote_model_ready = False
+        return bool(response_payload.get("unloaded", True))
 
     def run(self):
         try:
             super(SecureRemoteOllamaCaptioner, self).run()
         finally:
             try:
-                self.unload_remote_model()
-                print("Remote Ollama model unload requested")
+                if self.unload_remote_model():
+                    print("Remote Ollama model unload requested")
             except Exception as exc:
                 print(f"Warning: remote Ollama model unload failed: {exc}")
 

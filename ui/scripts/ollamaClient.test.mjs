@@ -135,6 +135,35 @@ test('generateOllamaImageCaption sends system prompt to Ollama generate', async 
   assert.deepEqual(generateBodies[0].options, { num_predict: 32 });
 });
 
+test('generateOllamaImageCaption falls back to chat when generate is empty', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body });
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
+    if (String(url).endsWith('/api/generate')) return response({ response: '', done_reason: 'load' });
+    if (String(url).endsWith('/api/chat')) return response({ message: { content: 'chat caption' } });
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const caption = await ollama.generateOllamaImageCaption(
+    {
+      model: 'llava',
+      prompt: 'caption',
+      systemPrompt: 'Return compact training captions.',
+      imageBase64: 'aW1n',
+      maxNewTokens: 32,
+    },
+    'http://ollama.test',
+  );
+
+  assert.equal(caption, 'chat caption');
+  const chatBody = JSON.parse(calls.find(call => call.url.endsWith('/api/chat')).body);
+  assert.deepEqual(chatBody.messages, [
+    { role: 'system', content: 'Return compact training captions.' },
+    { role: 'user', content: 'caption', images: ['aW1n'] },
+  ]);
+});
+
 test('generateOllamaImageCaption accepts message content response shape', async () => {
   globalThis.fetch = async (url, init) => {
     if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
@@ -154,6 +183,7 @@ test('generateOllamaImageCaption rejects empty model responses', async () => {
   globalThis.fetch = async url => {
     if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
     if (String(url).endsWith('/api/generate')) return response({ response: '', done_reason: 'stop' });
+    if (String(url).endsWith('/api/chat')) return response({ message: { content: '' }, done_reason: 'stop' });
     throw new Error(`Unexpected URL: ${url}`);
   };
 

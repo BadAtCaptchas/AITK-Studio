@@ -339,7 +339,7 @@ export const builtInAutoTrainingProfiles: AutoTrainingProfile[] = [
   {
     id: 'flux2-sega-distill',
     name: 'FLUX.2 SEGA Distill',
-    description: 'FLUX.2 LoRA profile that trains against an online SEGA teacher for higher-resolution behavior.',
+    description: 'FLUX.2 LoRA profile that keeps the dataset loss and adds an online SEGA teacher for higher-resolution behavior.',
     compatibleArchs: ['flux2', 'flux2_klein_4b', 'flux2_klein_9b'],
     network: loraNetwork(32),
     train: trainDefaults(0.000075, {

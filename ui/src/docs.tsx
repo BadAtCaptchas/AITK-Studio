@@ -292,9 +292,9 @@ const docs: { [key: string]: ConfigDoc } = {
     title: 'SEGA Distillation',
     description: (
       <>
-        Runs an online frozen teacher with SEGA-modulated Flux2 RoPE and trains the LoRA student to match that teacher.
-        This is currently limited to FLUX.2 and FLUX.2 Klein LoRA training and adds an extra teacher prediction each
-        step.
+        Runs an online frozen teacher with SEGA-modulated Flux2 RoPE and adds a teacher-matching loss beside the normal
+        dataset loss. This is currently limited to FLUX.2 and FLUX.2 Klein LoRA training and adds an extra teacher
+        prediction each step.
       </>
     ),
   },
@@ -302,8 +302,7 @@ const docs: { [key: string]: ConfigDoc } = {
     title: 'SEGA Distillation Weight',
     description: (
       <>
-        Multiplies the SEGA teacher matching loss before backpropagation. The default keeps the distillation target at
-        normal loss strength.
+        Multiplies the auxiliary SEGA teacher matching loss before it is added to the normal dataset loss.
       </>
     ),
   },

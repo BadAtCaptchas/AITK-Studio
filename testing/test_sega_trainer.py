@@ -78,6 +78,23 @@ class SegaTeacherPredictionTest(unittest.TestCase):
         self.assertTrue(call["bypass_guidance_embedding"])
         self.assertTrue(call["sega_config"]["enabled"])
 
+    def test_distillation_is_auxiliary_to_supervised_loss(self):
+        trainer = object.__new__(SDTrainer)
+        trainer.train_config = types.SimpleNamespace(sega_distill_weight=0.25)
+        trainer._monitor_metrics = OrderedDict()
+        trainer._should_record_monitor_metrics = lambda: True
+
+        loss = torch.tensor(2.0)
+        noise_pred = torch.zeros(1, 1, 2, 2)
+        teacher_pred = torch.ones(1, 1, 2, 2)
+
+        final_loss = trainer._add_sega_distill_aux_loss(loss, noise_pred, teacher_pred)
+
+        self.assertAlmostEqual(float(final_loss), 2.25)
+        self.assertAlmostEqual(trainer._monitor_metrics["train/sega_supervised_loss"], 2.0)
+        self.assertAlmostEqual(trainer._monitor_metrics["train/sega_distill_loss"], 1.0)
+        self.assertAlmostEqual(trainer._monitor_metrics["train/sega_distill_weighted_loss"], 0.25)
+
 
 if __name__ == "__main__":
     unittest.main()

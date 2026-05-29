@@ -1387,6 +1387,27 @@ class SDTrainer(BaseSDTrainProcess):
         for key, value in stats.items():
             self._record_monitor_metric(f"train/sega_scale_{key}", value)
 
+    def _add_sega_distill_aux_loss(
+            self,
+            loss: torch.Tensor,
+            noise_pred: torch.Tensor,
+            sega_teacher_pred: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        if sega_teacher_pred is None:
+            return loss
+
+        distill_loss = torch.nn.functional.mse_loss(
+            noise_pred.float(),
+            sega_teacher_pred.detach().float(),
+        )
+        weighted_distill_loss = distill_loss.to(device=loss.device, dtype=loss.dtype) * self.train_config.sega_distill_weight
+
+        self._record_monitor_metric('train/sega_supervised_loss', loss.detach())
+        self._record_monitor_metric('train/sega_distill_loss', distill_loss)
+        self._record_monitor_metric('train/sega_distill_weighted_loss', weighted_distill_loss)
+
+        return loss + weighted_distill_loss
+
     def get_sega_teacher_prediction(
             self,
             noisy_latents: torch.Tensor,
@@ -2246,25 +2267,17 @@ class SDTrainer(BaseSDTrainProcess):
                             batch=batch,
                             is_primary_pred=True,
                             **pred_kwargs
-                        )
+                    )
                     self.after_unet_predict()
                     self._record_tensor_stats('train/noise_pred', noise_pred)
-                    if sega_teacher_pred is not None:
-                        self._record_monitor_metric(
-                            'train/sega_distill_loss',
-                            torch.nn.functional.mse_loss(
-                                noise_pred.detach().float(),
-                                sega_teacher_pred.detach().float(),
-                            ),
-                        )
 
                     with self.timer('calculate_loss'):
                         noise = noise.to(self.device_torch, dtype=dtype).detach()
-                        prior_to_calculate_loss = sega_teacher_pred if sega_teacher_pred is not None else prior_pred
+                        prior_to_calculate_loss = prior_pred
                         # if we are doing diff_output_preservation and not noing inverted masked prior
                         # then we need to send none here so it will not target the prior
                         doing_preservation = self.train_config.diff_output_preservation or self.train_config.blank_prompt_preservation
-                        if sega_teacher_pred is None and doing_preservation and not do_inverted_masked_prior:
+                        if doing_preservation and not do_inverted_masked_prior:
                             prior_to_calculate_loss = None
                         
                         loss = self.calculate_loss(
@@ -2277,7 +2290,7 @@ class SDTrainer(BaseSDTrainProcess):
                             prior_pred=prior_to_calculate_loss,
                         )
                         if sega_teacher_pred is not None:
-                            loss = loss * self.train_config.sega_distill_weight
+                            loss = self._add_sega_distill_aux_loss(loss, noise_pred, sega_teacher_pred)
                             self._record_monitor_metric('train/loss_final', loss)
                     
                     if self.train_config.diff_output_preservation or self.train_config.blank_prompt_preservation:

@@ -3,11 +3,33 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { isEncryptedDatasetFolder, readEncryptedManifest, resolveDatasetFolder } from '@/server/encryptedDatasets';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { makeRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: Request) {
   const datasetsPath = await getDatasetsRoot();
   const body = await request.json();
   const { datasetName } = body;
+  const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
+
+  if (!isLocalWorker(workerID)) {
+    const worker = await getRemoteWorker(workerID);
+    const data: any = await remoteJson(worker, '/api/datasets/listImages', {
+      method: 'POST',
+      body: JSON.stringify({ datasetName }),
+    });
+    if (Array.isArray(data?.images)) {
+      data.images = data.images.map((image: any) => ({
+        ...image,
+        img_path:
+          typeof image?.img_path === 'string'
+            ? makeRemoteDatasetAssetRef(workerID, 'img', image.img_path)
+            : image?.img_path,
+      }));
+    }
+    return NextResponse.json(data);
+  }
+
   let datasetFolder: string;
   try {
     datasetFolder = resolveDatasetFolder(datasetsPath, datasetName);

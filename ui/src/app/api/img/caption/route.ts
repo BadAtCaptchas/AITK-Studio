@@ -3,11 +3,24 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
+import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
+import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { imgPath, caption } = body;
+    const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
+    if (remoteAsset) {
+      const worker = await getRemoteWorker(remoteAsset.workerID);
+      return NextResponse.json(
+        await remoteJson(worker, '/api/img/caption', {
+          method: 'POST',
+          body: JSON.stringify({ imgPath: remoteAsset.path, caption }),
+        }),
+      );
+    }
+
     const datasetsPath = await getDatasetsRoot();
     const datasetsRoot = path.resolve(datasetsPath);
     const resolvedImagePath = path.resolve(imgPath);

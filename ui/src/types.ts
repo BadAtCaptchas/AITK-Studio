@@ -65,6 +65,11 @@ export interface DatasetSummary {
   name: string;
   encrypted: boolean;
   itemCount?: number | null;
+  source?: 'local' | 'remote';
+  worker_id?: string;
+  worker_name?: string;
+  ref?: string;
+  path?: string;
 }
 
 export interface EncryptedDatasetStartKey {

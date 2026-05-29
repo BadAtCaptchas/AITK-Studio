@@ -1,3 +1,5 @@
+import { parseRemoteDatasetAssetRef } from './remoteDatasetRefs';
+
 type RemoteAssetRef = {
   jobID: string;
   type: string;
@@ -25,12 +27,19 @@ export function parseRemoteAssetRef(value: string): RemoteAssetRef | null {
 }
 
 export function getDisplayPath(value: string) {
+  const remoteDataset = parseRemoteDatasetAssetRef(value);
+  if (remoteDataset) return remoteDataset.filename;
   const remote = parseRemoteAssetRef(value);
   return remote?.filename || value;
 }
 
 export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audio-art') {
   if (value.startsWith('/api/') || /^https?:\/\//i.test(value)) return value;
+  const remoteDataset = parseRemoteDatasetAssetRef(value);
+  if (remoteDataset) {
+    const type = overrideType || remoteDataset.type || 'img';
+    return `/api/remote-datasets/assets?worker_id=${encodeURIComponent(remoteDataset.workerID)}&type=${encodeURIComponent(type)}&path=${encodeURIComponent(remoteDataset.path)}`;
+  }
   const remote = parseRemoteAssetRef(value);
   if (remote) {
     const type = overrideType || remote.type || 'img';

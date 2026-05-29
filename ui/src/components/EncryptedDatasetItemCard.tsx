@@ -14,6 +14,7 @@ import AudioPlayer from './AudioPlayer';
 
 type EncryptedDatasetItemCardProps = {
   datasetName: string;
+  workerID?: string;
   item: EncryptedDatasetItem;
   cryptoKey: CryptoKey;
   isAutoCaptioning: boolean;
@@ -23,6 +24,7 @@ type EncryptedDatasetItemCardProps = {
 
 const EncryptedDatasetItemCard: React.FC<EncryptedDatasetItemCardProps> = ({
   datasetName,
+  workerID = 'local',
   item,
   cryptoKey,
   isAutoCaptioning,
@@ -42,12 +44,12 @@ const EncryptedDatasetItemCard: React.FC<EncryptedDatasetItemCardProps> = ({
     async (objectPath: string) => {
       const res = await apiClient.post(
         '/api/datasets/encrypted/object',
-        { datasetName, objectPath },
+        { datasetName, objectPath, worker_id: workerID },
         { responseType: 'blob' },
       );
       return res.data as Blob;
     },
-    [datasetName],
+    [datasetName, workerID],
   );
 
   const loadMedia = useCallback(async () => {

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
 import { isAbsolute, join, resolve, relative, sep } from 'path';
 import { getDatasetsRoot } from '@/server/settings';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import {
   isEncryptedDatasetFolder,
   resolveEncryptedObjectPath,
@@ -17,6 +18,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Datasets path not found' }, { status: 500 });
     }
     const formData = await request.formData();
+    const workerID = (formData.get('worker_id') as string) || 'local';
+    if (!isLocalWorker(workerID)) {
+      const worker = await getRemoteWorker(workerID);
+      return NextResponse.json(
+        await remoteJson(worker, '/api/datasets/upload', {
+          method: 'POST',
+          body: formData,
+        }),
+      );
+    }
+
     const files = formData.getAll('files');
     const datasetName = (formData.get('datasetName') as string)?.trim();
     const encrypted = formData.get('encrypted') === '1';

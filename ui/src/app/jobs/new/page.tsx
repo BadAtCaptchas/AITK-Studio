@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobConfig';
 import { jobTypeOptions } from './options';
-import { JobConfig } from '@/types';
+import type { JobConfig } from '@/types';
 import { objectCopy } from '@/utils/basic';
 import { useNestedState, setNestedValue } from '@/utils/hooks';
 import { SelectInput } from '@/components/formInputs';
@@ -22,6 +22,16 @@ import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { apiClient } from '@/utils/api';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
+import type { SelectOption } from '@/types';
+import {
+  getRememberedEncryptedDatasetKey,
+  rememberEncryptedDatasetKey,
+} from '@/utils/encryptedDatasets';
+import {
+  makeRemoteDatasetRef,
+  parseRemoteDatasetRef,
+  remoteDatasetRememberKey,
+} from '@/utils/remoteDatasetRefs';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -35,9 +45,9 @@ export default function TrainingForm() {
   const { settings, isSettingsLoaded } = useSettings();
   const { workers, status: workerStatus } = useWorkers();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
-  const { datasets, status: datasetFetchStatus } = useDatasetList();
+  const { datasets, status: datasetFetchStatus } = useDatasetList({ includeRemote: true });
   const [datasetOptions, setDatasetOptions] = useState<
-    { value: string; label: string; encrypted: boolean; name: string }[]
+    Array<SelectOption & { encrypted: boolean; name: string; source: 'local' | 'remote'; worker_id: string; ref: string }>
   >([]);
   const [showAdvancedView, setShowAdvancedView] = useState(false);
 
@@ -91,12 +101,25 @@ export default function TrainingForm() {
     if (!isSettingsLoaded) return;
     if (datasetFetchStatus !== 'success') return;
 
-    const datasetOptions = datasets.map(dataset => ({
-      value: path.join(settings.DATASETS_FOLDER, dataset.name),
-      label: dataset.encrypted ? `${dataset.name} (encrypted)` : dataset.name,
-      encrypted: dataset.encrypted,
-      name: dataset.name,
-    }));
+    const datasetOptions = datasets.map(dataset => {
+      const source = (dataset.source || 'local') as 'local' | 'remote';
+      const workerID = dataset.worker_id || 'local';
+      const ref = source === 'remote' ? dataset.ref || makeRemoteDatasetRef(workerID, dataset.name) : dataset.ref || '';
+      return {
+        value: source === 'remote' ? ref : path.join(settings.DATASETS_FOLDER, dataset.name),
+        label:
+          source === 'remote'
+            ? `${dataset.name}${dataset.encrypted ? ' (encrypted)' : ''} - ${dataset.worker_name || workerID}`
+            : dataset.encrypted
+              ? `${dataset.name} (encrypted)`
+              : dataset.name,
+        encrypted: dataset.encrypted,
+        name: dataset.name,
+        source,
+        worker_id: workerID,
+        ref,
+      };
+    });
     setDatasetOptions(datasetOptions);
 
     if (datasetOptions.length > 0) {
@@ -161,39 +184,120 @@ export default function TrainingForm() {
     }
   }, [settings, isSettingsLoaded]);
 
+  const copyRememberedRemoteDatasetKey = (remoteRef: string, imported: { name: string; path: string }) => {
+    const parsed = parseRemoteDatasetRef(remoteRef);
+    if (!parsed) return;
+    const remembered =
+      getRememberedEncryptedDatasetKey(remoteRef) ||
+      getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(parsed.workerID, parsed.datasetName)) ||
+      getRememberedEncryptedDatasetKey(parsed.datasetName);
+    if (!remembered) return;
+    rememberEncryptedDatasetKey(imported.path, remembered);
+    rememberEncryptedDatasetKey(imported.name, remembered);
+  };
+
+  const importRemoteDatasetForJob = async (
+    remoteRef: string,
+    cache: Map<string, Promise<{ name: string; path: string }>>,
+  ) => {
+    const existing = cache.get(remoteRef);
+    if (existing) return existing;
+    const parsed = parseRemoteDatasetRef(remoteRef);
+    if (!parsed) throw new Error('Invalid remote dataset reference');
+
+    const promise = apiClient
+      .post('/api/datasets/import-remote', {
+        worker_id: parsed.workerID,
+        datasetName: parsed.datasetName,
+      })
+      .then(res => {
+        const importedName = res.data?.dataset?.name;
+        const importedPath = res.data?.path || (importedName ? path.join(settings.DATASETS_FOLDER, importedName) : null);
+        if (!importedName || !importedPath) {
+          throw new Error('Remote dataset import did not return a local dataset path');
+        }
+        const imported = { name: importedName, path: importedPath };
+        copyRememberedRemoteDatasetKey(remoteRef, imported);
+        return imported;
+      });
+    cache.set(remoteRef, promise);
+    return promise;
+  };
+
+  const importRemoteDatasetsForJobConfig = async (rawConfig: JobConfig) => {
+    const nextConfig = objectCopy(rawConfig) as JobConfig;
+    const importCache = new Map<string, Promise<{ name: string; path: string }>>();
+    const datasetPathFields = [
+      'folder_path',
+      'dataset_path',
+      'control_path',
+      'control_path_1',
+      'control_path_2',
+      'control_path_3',
+      'mask_path',
+      'unconditional_path',
+      'inpaint_path',
+      'clip_image_path',
+    ];
+
+    for (const processConfig of nextConfig.config.process || []) {
+      for (const dataset of processConfig.datasets || []) {
+        for (const field of datasetPathFields) {
+          const current = (dataset as any)[field];
+          if (typeof current === 'string' && parseRemoteDatasetRef(current)) {
+            const imported = await importRemoteDatasetForJob(current, importCache);
+            (dataset as any)[field] = imported.path;
+          } else if (Array.isArray(current)) {
+            const nextValues = [];
+            for (const value of current) {
+              if (typeof value === 'string' && parseRemoteDatasetRef(value)) {
+                const imported = await importRemoteDatasetForJob(value, importCache);
+                nextValues.push(imported.path);
+              } else {
+                nextValues.push(value);
+              }
+            }
+            (dataset as any)[field] = nextValues;
+          }
+        }
+      }
+    }
+
+    return nextConfig;
+  };
+
   const saveJob = async () => {
     if (status === 'saving') return;
     setStatus('saving');
 
-    apiClient
-      .post('/api/jobs', {
+    try {
+      const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfig);
+      setJobConfig(preparedJobConfig);
+      const res = await apiClient.post('/api/jobs', {
         id: runId,
-        name: jobConfig.config.name,
+        name: preparedJobConfig.config.name,
         worker_id: workerID,
         gpu_ids: gpuIDs,
-        job_config: jobConfig,
-      })
-      .then(res => {
-        setStatus('success');
-        if (runId) {
-          router.push(`/jobs/${runId}`);
-        } else {
-          router.push(`/jobs/${res.data.id}`);
-        }
-      })
-      .catch(error => {
-        if (error.response?.status === 409) {
-          alert('Training name already exists. Please choose a different name.');
-        } else {
-          alert('Failed to save job. Please try again.');
-        }
-        console.log('Error saving training:', error);
-      })
-      .finally(() =>
-        setTimeout(() => {
-          setStatus('idle');
-        }, 2000),
-      );
+        job_config: preparedJobConfig,
+      });
+      setStatus('success');
+      if (runId) {
+        router.push(`/jobs/${runId}`);
+      } else {
+        router.push(`/jobs/${res.data.id}`);
+      }
+    } catch (error: any) {
+      if (error.response?.status === 409) {
+        alert('Training name already exists. Please choose a different name.');
+      } else {
+        alert(error?.response?.data?.error || 'Failed to save job. Please try again.');
+      }
+      console.log('Error saving training:', error);
+    } finally {
+      setTimeout(() => {
+        setStatus('idle');
+      }, 2000);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

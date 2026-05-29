@@ -48,6 +48,16 @@ function albumArtUrlFromSrc(src: string): string {
   if (src.startsWith(prefix)) {
     return `/api/audio/art/${src.slice(prefix.length)}`;
   }
+  const remoteDatasetPrefix = '/api/remote-datasets/assets';
+  if (src.startsWith(remoteDatasetPrefix)) {
+    try {
+      const url = new URL(src, window.location.origin);
+      url.searchParams.set('type', 'audio-art');
+      return `${url.pathname}?${url.searchParams.toString()}`;
+    } catch {
+      return src;
+    }
+  }
   // Fallback: assume src is already an encoded path
   return `/api/audio/art/${encodeURIComponent(src)}`;
 }

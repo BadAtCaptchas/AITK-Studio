@@ -282,7 +282,7 @@ The UI can control remote AI Toolkit worker instances. Each worker runs the same
 
 Remote workers are authoritative after upload. The central UI mirrors status, step, speed, config, and error text from the worker. Base model files are not bundled; they must exist on the worker or the import will report warnings.
 
-Encrypted dataset bundles include only ciphertext dataset folders. Starting an encrypted job on a remote worker requires supplying the dataset secret at start time unless durable encrypted resume was enabled for that job. Remote encrypted starts require an `https://` worker URL unless `AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS=1` is set explicitly.
+Encrypted dataset bundles include only ciphertext dataset folders. Starting an encrypted job on a remote worker requires supplying the dataset secret at start time unless durable encrypted resume was enabled for that job. YubiKey-protected encrypted datasets use the same central unlock path: the browser connected to the central UI prompts for the USB security key, unwraps the dataset key, and the central server forwards only the ephemeral dataset key to the HTTPS worker start request. Remote workers do not need a YubiKey, USB access, or a native FIDO helper. Remote encrypted starts require an `https://` worker URL unless `AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS=1` is set explicitly.
 
 Optional managed `cloudflared` support is configured with environment variables on any instance you want to expose through Cloudflare Tunnel:
 
@@ -574,6 +574,7 @@ The UI can create encrypted datasets for images, video, audio, and captions. Cho
 
 - `Password`: the browser derives an AES-256-GCM key with WebCrypto PBKDF2-SHA256 and a random salt.
 - `Key File`: the browser hashes the selected key file and uses the resulting raw key material.
+- `YubiKey`: the browser uses WebAuthn PRF with a cross-platform security key, such as a USB YubiKey, to unwrap a randomly generated dataset key.
 
 Encrypted upload happens before files leave the browser. The dataset folder stores:
 
@@ -582,7 +583,9 @@ Encrypted upload happens before files leave the browser. The dataset folder stor
 
 Original filenames, captions, media metadata, and logical paths live inside the encrypted catalog. The server never receives plaintext media or captions during encrypted upload, preview, caption editing, auto-caption saves, training, import, or export.
 
-To preview, edit, upload more files, auto-caption, or train with an encrypted dataset, open the dataset page and unlock it with the password or key file. The browser keeps the raw key in page memory only. Training and caption jobs require the secret again when they start; by default, secrets are sent with the start request, are not written into job configs, database rows, logs, or export bundles, and are removed from the Python environment after launch.
+To preview, edit, upload more files, auto-caption, or train with an encrypted dataset, open the dataset page and unlock it with the password, key file, or YubiKey. The browser keeps the raw key in page memory only. Training and caption jobs require the secret again when they start; by default, secrets are sent with the start request, are not written into job configs, database rows, logs, or export bundles, and are removed from the Python environment after launch.
+
+YubiKey mode requires a browser and origin that support the WebAuthn PRF extension in a secure context. The dataset key is wrapped to the WebAuthn relying-party ID used when the dataset was created, so unlock from the same hostname you used during creation. The manifest records USB-capable credential metadata and a planned native USB extension point, but direct server-side `libfido2` or `python-fido2` USB access is not implemented yet.
 
 For queue durability, set `AITK_DURABLE_DATASET_KEY_SECRET` to a real secret of at least 32 characters, then enable **Allow durable encrypted resume** when starting an encrypted train or caption job. This stores a wrapped copy of the dataset key in the UI database so the cron launcher can start or resume the queued job after the app restarts. Database backups alone are not enough to recover the dataset key without the server-side wrapping secret, but a compromised server process can still unwrap it. Durable keys are cleared when the job completes successfully or is deleted, and are retained after stop/error states so the job can resume. Changing `AITK_DURABLE_DATASET_KEY_SECRET` invalidates existing queued durable keys and users must re-enter the dataset secret. Durable keys are not written into job configs, launch logs, Python logs, or export bundles.
 

@@ -13,6 +13,8 @@ export type RemoteDatasetAssetRef = {
   type: RemoteDatasetAssetType;
   path: string;
   filename: string;
+  expires?: number;
+  signature?: string;
 };
 
 function basename(value: string) {
@@ -43,8 +45,11 @@ export function makeRemoteDatasetAssetRef(
   type: RemoteDatasetAssetType,
   remotePath: string,
   filename = basename(remotePath),
+  access?: { expires: number; signature: string } | null,
 ) {
-  return `${REMOTE_DATASET_ASSET_REF_PREFIX}${encodeURIComponent(workerID)}/${encodeURIComponent(type)}/${encodeURIComponent(remotePath)}/${encodeURIComponent(filename)}`;
+  const base = `${REMOTE_DATASET_ASSET_REF_PREFIX}${encodeURIComponent(workerID)}/${encodeURIComponent(type)}/${encodeURIComponent(remotePath)}/${encodeURIComponent(filename)}`;
+  if (!access) return base;
+  return `${base}/${encodeURIComponent(String(access.expires))}/${encodeURIComponent(access.signature)}`;
 }
 
 export function parseRemoteDatasetAssetRef(value: string | null | undefined): RemoteDatasetAssetRef | null {
@@ -52,7 +57,7 @@ export function parseRemoteDatasetAssetRef(value: string | null | undefined): Re
   const raw = value.slice(REMOTE_DATASET_ASSET_REF_PREFIX.length);
   const parts = raw.split('/');
   if (parts.length < 3) return null;
-  const [encodedWorkerID, encodedType, encodedPath, encodedFilename] = parts;
+  const [encodedWorkerID, encodedType, encodedPath, encodedFilename, encodedExpires, encodedSignature] = parts;
   try {
     const type = decodeURIComponent(encodedType || '') as RemoteDatasetAssetType;
     if (type !== 'img' && type !== 'file' && type !== 'audio-art') return null;
@@ -60,6 +65,11 @@ export function parseRemoteDatasetAssetRef(value: string | null | undefined): Re
     const path = decodeURIComponent(encodedPath || '');
     const filename = decodeURIComponent(encodedFilename || '') || basename(path);
     if (!workerID || !path) return null;
+    const expires = encodedExpires ? Number(decodeURIComponent(encodedExpires)) : undefined;
+    const signature = encodedSignature ? decodeURIComponent(encodedSignature) : undefined;
+    if (expires && signature && Number.isSafeInteger(expires)) {
+      return { workerID, type, path, filename, expires, signature };
+    }
     return { workerID, type, path, filename };
   } catch {
     return null;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRemoteWorker, remoteProxyFetch } from '@/server/remoteClient';
+import { isRemoteDatasetAssetRequestAuthorized } from '@/server/remoteDatasetAssetAccess';
 import type { RemoteDatasetAssetType } from '@/utils/remoteDatasetRefs';
 
 export const runtime = 'nodejs';
@@ -40,6 +41,17 @@ export async function GET(request: NextRequest) {
   }
   if (type !== 'img' && type !== 'file' && type !== 'audio-art') {
     return new NextResponse('Invalid remote dataset asset type', { status: 400 });
+  }
+  if (
+    !isRemoteDatasetAssetRequestAuthorized(
+      request.headers,
+      workerID,
+      remotePath,
+      request.nextUrl.searchParams.get('expires'),
+      request.nextUrl.searchParams.get('sig'),
+    )
+  ) {
+    return new NextResponse('Unauthorized', { status: 401 });
   }
 
   try {

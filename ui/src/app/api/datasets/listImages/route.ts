@@ -4,7 +4,7 @@ import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { isEncryptedDatasetFolder, readEncryptedManifest, resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
-import { makeRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
+import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAccess';
 
 export async function POST(request: Request) {
   const datasetsPath = await getDatasetsRoot();
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         ...image,
         img_path:
           typeof image?.img_path === 'string'
-            ? makeRemoteDatasetAssetRef(workerID, 'img', image.img_path)
+            ? makeSignedRemoteDatasetAssetRef(workerID, 'img', image.img_path)
             : image?.img_path,
       }));
     }

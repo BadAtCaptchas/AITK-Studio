@@ -38,7 +38,16 @@ export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audi
   const remoteDataset = parseRemoteDatasetAssetRef(value);
   if (remoteDataset) {
     const type = overrideType || remoteDataset.type || 'img';
-    return `/api/remote-datasets/assets?worker_id=${encodeURIComponent(remoteDataset.workerID)}&type=${encodeURIComponent(type)}&path=${encodeURIComponent(remoteDataset.path)}`;
+    const params = new URLSearchParams({
+      worker_id: remoteDataset.workerID,
+      type,
+      path: remoteDataset.path,
+    });
+    if (remoteDataset.expires && remoteDataset.signature) {
+      params.set('expires', String(remoteDataset.expires));
+      params.set('sig', remoteDataset.signature);
+    }
+    return `/api/remote-datasets/assets?${params.toString()}`;
   }
   const remote = parseRemoteAssetRef(value);
   if (remote) {
@@ -56,6 +65,10 @@ export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audi
 
 export function getDownloadUrl(value: string) {
   if (value.startsWith('/api/') || /^https?:\/\//i.test(value)) return value;
+  const remoteDataset = parseRemoteDatasetAssetRef(value);
+  if (remoteDataset) {
+    return getMediaUrl(value, 'file');
+  }
   const remote = parseRemoteAssetRef(value);
   if (remote) {
     return getMediaUrl(value, 'file');

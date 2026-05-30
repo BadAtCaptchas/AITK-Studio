@@ -1,6 +1,6 @@
 import React from 'react';
 import useFilesList from '@/hooks/useFilesList';
-import { Loader2, AlertCircle, Download, Box, Brain, Trash2 } from 'lucide-react';
+import { Loader2, AlertCircle, Download, Box, Brain, Trash2, SlidersHorizontal } from 'lucide-react';
 import { openMergeLoRAsModal } from './MergeLoRAsModal';
 import { getDisplayPath, getDownloadUrl, parseRemoteAssetRef } from '@/utils/media';
 import { openConfirm } from './ConfirmModal';
@@ -12,6 +12,11 @@ const getFoldername = (filePath: string) => filePath.replace(/[\\/][^\\/]*$/, ''
 export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName?: string }) {
   const { files, status, refreshFiles } = useFilesList(jobID, 5000);
   const localFiles = files.filter(file => !parseRemoteAssetRef(file.path));
+
+  const isOptimizerFile = (filePath: string) => getFilename(filePath) === 'optimizer.pt';
+  const checkpointFiles = files.filter(file => !isOptimizerFile(file.path));
+  const localCheckpointFiles = localFiles.filter(file => !isOptimizerFile(file.path));
+  const optimizerFile = files.find(file => isOptimizerFile(file.path));
 
   const cleanSize = (size: number) => {
     if (size < 1024) {
@@ -50,18 +55,21 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
         <div className="flex items-center space-x-2">
           <Brain className="w-5 h-5 text-purple-600 dark:text-purple-400" />
           <h2 className="font-semibold text-gray-100">Checkpoints</h2>
-          <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300">{files.length}</span>
+          <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300">{checkpointFiles.length}</span>
         </div>
-        {localFiles.length > 0 && (
+        {localCheckpointFiles.length > 0 && (
           <button
             type="button"
             className="rounded-full bg-purple-500/10 px-3 py-1 text-xs font-medium uppercase text-purple-300 hover:bg-purple-500/20"
             onClick={() => {
-              const firstPath = localFiles[0].path;
+              const firstPath = localCheckpointFiles[0].path;
               openMergeLoRAsModal(
                 getFoldername(firstPath),
                 `${jobName || 'job'}_merged`,
-                localFiles.map(file => ({ path: file.path, label: getFilename(file.path).replace(/\.safetensors$/i, '') })),
+                localCheckpointFiles.map(file => ({
+                  path: file.path,
+                  label: getFilename(file.path).replace(/\.safetensors$/i, ''),
+                })),
                 refreshFiles,
               );
             }}
@@ -87,7 +95,7 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
 
         {['success', 'refreshing'].includes(status) && (
           <div className="space-y-1">
-            {files.map((file, index) => {
+            {checkpointFiles.map((file, index) => {
               const fileName = getFilename(file.path);
               const nameWithoutExt = fileName.replace('.safetensors', '');
               const isRemote = !!parseRemoteAssetRef(file.path);
@@ -132,6 +140,44 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
                 </div>
               );
             })}
+
+            {optimizerFile && (
+              <div className="group flex items-center justify-between px-2 py-1.5 rounded-lg border-t border-gray-800 mt-1 pt-2 hover:bg-gray-800 transition-all duration-200">
+                <a
+                  target="_blank"
+                  href={getDownloadUrl(optimizerFile.path)}
+                  className="flex items-center space-x-2 min-w-0 flex-1"
+                >
+                  <SlidersHorizontal className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex text-sm text-amber-200">
+                      <span className="overflow-hidden text-ellipsis direction-rtl whitespace-nowrap">optimizer</span>
+                    </div>
+                    <span className="text-xs text-amber-600/70">.pt - optimizer state</span>
+                  </div>
+                </a>
+                <div className="flex items-center space-x-3 flex-shrink-0">
+                  <span className="text-xs text-gray-400">{cleanSize(optimizerFile.size)}</span>
+                  <a
+                    target="_blank"
+                    href={getDownloadUrl(optimizerFile.path)}
+                    className="bg-amber-500 bg-opacity-0 group-hover:bg-opacity-10 rounded-full p-1 transition-all"
+                  >
+                    <Download className="w-3 h-3 text-amber-500" />
+                  </a>
+                  {!parseRemoteAssetRef(optimizerFile.path) && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteFile(optimizerFile.path)}
+                      className="bg-red-500 bg-opacity-0 group-hover:bg-opacity-10 hover:!bg-opacity-30 rounded-full p-1 transition-all"
+                      title="Delete optimizer state"
+                    >
+                      <Trash2 className="w-3 h-3 text-red-500" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

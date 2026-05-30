@@ -1,7 +1,8 @@
 // src/app/api/datasets/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
 import { writeFile, mkdir } from 'fs/promises';
-import { isAbsolute, join, resolve, relative, sep } from 'path';
+import { basename, dirname, extname, isAbsolute, join, resolve, relative, sep } from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import {
@@ -10,6 +11,52 @@ import {
   validateEncryptedManifest,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
+
+function cleanPathSegment(segment: string, fallback: string) {
+  const cleaned = segment
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/^\.+/, '')
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+function cleanUploadFileName(fileName: string) {
+  const base = basename(fileName || 'file');
+  const ext = extname(base);
+  const stem = ext ? base.slice(0, -ext.length) : base;
+  return `${cleanPathSegment(stem, 'file')}${ext.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+}
+
+function cleanRelativeUploadPath(relativePath: string, fallbackName: string) {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const rawParts = normalized.split('/').filter(Boolean);
+  const fallbackFileName = cleanUploadFileName(fallbackName);
+
+  if (rawParts.length === 0 || normalized.startsWith('/') || rawParts.some(part => part === '..')) {
+    return fallbackFileName;
+  }
+
+  const parts = rawParts.map((part, index) =>
+    index === rawParts.length - 1 ? cleanUploadFileName(part) : cleanPathSegment(part, `folder_${index + 1}`),
+  );
+  return join(...parts);
+}
+
+function nextAvailableFilePath(uploadDir: string, relativeFilePath: string) {
+  const targetDir = resolve(uploadDir, dirname(relativeFilePath));
+  const fileName = basename(relativeFilePath);
+  const ext = extname(fileName);
+  const stem = ext ? fileName.slice(0, -ext.length) : fileName;
+  let candidate = resolve(targetDir, fileName);
+  let suffix = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = resolve(targetDir, `${stem}_${suffix}${ext}`);
+    suffix += 1;
+  }
+  return candidate;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,10 +68,14 @@ export async function POST(request: NextRequest) {
     const workerID = (formData.get('worker_id') as string) || 'local';
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
+      const remoteFormData = new FormData();
+      formData.forEach((value, key) => {
+        if (key !== 'worker_id') remoteFormData.append(key, value);
+      });
       return NextResponse.json(
         await remoteJson(worker, '/api/datasets/upload', {
           method: 'POST',
-          body: formData,
+          body: remoteFormData,
         }),
       );
     }
@@ -32,6 +83,17 @@ export async function POST(request: NextRequest) {
     const files = formData.getAll('files');
     const datasetName = (formData.get('datasetName') as string)?.trim();
     const encrypted = formData.get('encrypted') === '1';
+    const preserveRelativePaths = formData.get('preserveRelativePaths') === '1';
+    const failIfDatasetExists = formData.get('failIfDatasetExists') === '1';
+    const relativePathsText = formData.get('relativePaths');
+    let relativePaths: string[] = [];
+    if (typeof relativePathsText === 'string' && relativePathsText.trim()) {
+      const parsed = JSON.parse(relativePathsText);
+      if (!Array.isArray(parsed)) {
+        return NextResponse.json({ error: 'relativePaths must be an array' }, { status: 400 });
+      }
+      relativePaths = parsed.map(value => (typeof value === 'string' ? value : ''));
+    }
 
     if (!files || files.length === 0) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
@@ -54,6 +116,15 @@ export async function POST(request: NextRequest) {
       isAbsolute(uploadDirRelative)
     ) {
       return NextResponse.json({ error: 'Invalid dataset name' }, { status: 400 });
+    }
+
+    if (
+      failIfDatasetExists &&
+      fs.existsSync(uploadDir) &&
+      fs.statSync(uploadDir).isDirectory() &&
+      fs.readdirSync(uploadDir).length > 0
+    ) {
+      return NextResponse.json({ error: 'Dataset already exists' }, { status: 409 });
     }
 
     await mkdir(uploadDir, { recursive: true });
@@ -105,12 +176,24 @@ export async function POST(request: NextRequest) {
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
 
-      // Clean filename and ensure it's unique
-      const fileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const filePath = join(uploadDir, fileName);
+      const requestedPath =
+        preserveRelativePaths && relativePaths[i]
+          ? cleanRelativeUploadPath(relativePaths[i], file.name)
+          : cleanUploadFileName(file.name);
+      const filePath = nextAvailableFilePath(uploadDir, requestedPath);
+      const filePathRelative = relative(uploadDir, filePath);
+      if (
+        filePathRelative === '' ||
+        filePathRelative.startsWith('..') ||
+        filePathRelative.includes(`..${sep}`) ||
+        isAbsolute(filePathRelative)
+      ) {
+        return NextResponse.json({ error: 'Invalid upload path' }, { status: 400 });
+      }
 
+      await mkdir(dirname(filePath), { recursive: true });
       await writeFile(filePath, buffer);
-      savedFiles.push(fileName);
+      savedFiles.push(filePathRelative);
     }
 
     return NextResponse.json({

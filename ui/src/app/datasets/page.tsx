@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import Link from 'next/link';
 import { TextInput } from '@/components/formInputs';
@@ -52,8 +52,80 @@ function rememberDatasetKey(dataset: DatasetSummary, rawKeyB64: string) {
   }
 }
 
+type FolderImportEntry = {
+  id: string;
+  file: File;
+  relativePath: string;
+  rootName: string;
+};
+
+const FOLDER_IMPORT_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.bmp',
+  '.mp4',
+  '.avi',
+  '.mov',
+  '.mkv',
+  '.wmv',
+  '.m4v',
+  '.flv',
+  '.webm',
+  '.mp3',
+  '.wav',
+  '.flac',
+  '.ogg',
+  '.m4a',
+  '.aac',
+  '.txt',
+]);
+
+function cleanClientDatasetName(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function relativePathForFile(file: File) {
+  return ((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name).replace(/\\/g, '/');
+}
+
+function rootNameForRelativePath(relativePath: string) {
+  return relativePath.split('/').filter(Boolean)[0] || 'imported_folder';
+}
+
+function extensionForRelativePath(relativePath: string) {
+  const fileName = relativePath.split('/').pop() || '';
+  const dotIndex = fileName.lastIndexOf('.');
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
+}
+
+function nextClientDatasetName(preferredName: string, usedNames: Set<string>) {
+  const baseName = cleanClientDatasetName(preferredName) || 'imported_folder';
+  let candidate = baseName;
+  let suffix = 2;
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${baseName}_${suffix}`;
+    suffix += 1;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
 export default function Datasets() {
   const router = useRouter();
+  const folderImportInputRef = useRef<HTMLInputElement | null>(null);
+  const setFolderImportInputRef = useCallback((node: HTMLInputElement | null) => {
+    folderImportInputRef.current = node;
+    if (!node) return;
+    node.setAttribute('webkitdirectory', '');
+    node.setAttribute('directory', '');
+  }, []);
   const { datasets, errors, status, refreshDatasets } = useDatasetList({ includeRemote: true });
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
@@ -80,6 +152,13 @@ export default function Datasets() {
   const [combineSourceErrors, setCombineSourceErrors] = useState<Record<string, string>>({});
   const [combineSourceLoading, setCombineSourceLoading] = useState<Record<string, boolean>>({});
   const [isCombiningDatasets, setIsCombiningDatasets] = useState(false);
+  const [isFolderImportModalOpen, setIsFolderImportModalOpen] = useState(false);
+  const [folderImportEntries, setFolderImportEntries] = useState<FolderImportEntry[]>([]);
+  const [folderImportMode, setFolderImportMode] = useState<'separate' | 'combined'>('separate');
+  const [folderImportWorkerID, setFolderImportWorkerID] = useState('local');
+  const [folderImportDatasetName, setFolderImportDatasetName] = useState('');
+  const [isImportingFolders, setIsImportingFolders] = useState(false);
+  const [folderImportStatus, setFolderImportStatus] = useState('');
 
   // Transform datasets array into rows with objects
   const tableRows = datasets.map(dataset => ({
@@ -107,6 +186,27 @@ export default function Datasets() {
     [combineSources],
   );
   const combineWorkerID = combineSources.length > 0 ? datasetWorkerID(combineSources[0]) : 'local';
+  const folderImportGroups = useMemo(() => {
+    const groups = new Map<string, FolderImportEntry[]>();
+    folderImportEntries.forEach(entry => {
+      const current = groups.get(entry.rootName) || [];
+      current.push(entry);
+      groups.set(entry.rootName, current);
+    });
+    return Array.from(groups.entries()).map(([rootName, entries]) => ({ rootName, entries }));
+  }, [folderImportEntries]);
+  const folderImportFileCount = folderImportEntries.length;
+  const folderImportWorkerOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    options.set('local', 'Local');
+    datasets.forEach(dataset => {
+      const workerID = datasetWorkerID(dataset);
+      if (workerID !== 'local') {
+        options.set(workerID, dataset.worker_name || workerID);
+      }
+    });
+    return Array.from(options.entries()).map(([id, name]) => ({ id, name }));
+  }, [datasets]);
 
   const columns: TableColumn[] = [
     {
@@ -448,6 +548,134 @@ export default function Datasets() {
     }
   };
 
+  const addFolderImportFiles = (fileList: FileList | null) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    const entries = files
+      .map(file => {
+        const relativePath = relativePathForFile(file);
+        return {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          file,
+          relativePath,
+          rootName: rootNameForRelativePath(relativePath),
+        };
+      })
+      .filter(entry => {
+        const parts = entry.relativePath.split('/').filter(Boolean);
+        if (parts.some(part => part.startsWith('.'))) return false;
+        return FOLDER_IMPORT_EXTENSIONS.has(extensionForRelativePath(entry.relativePath));
+      });
+
+    if (entries.length === 0) {
+      alert('No supported media or caption files were found in that folder.');
+      return;
+    }
+
+    setFolderImportEntries(previous => [...previous, ...entries]);
+    setFolderImportStatus('');
+    if (!folderImportDatasetName && folderImportMode === 'combined') {
+      setFolderImportDatasetName(`${entries[0].rootName}_combined`);
+    }
+  };
+
+  const closeFolderImportModal = () => {
+    if (isImportingFolders) return;
+    setIsFolderImportModalOpen(false);
+    setFolderImportEntries([]);
+    setFolderImportDatasetName('');
+    setFolderImportStatus('');
+    setFolderImportMode('separate');
+    setFolderImportWorkerID('local');
+  };
+
+  const uploadFolderImportBatch = async (
+    workerID: string,
+    datasetName: string,
+    entries: FolderImportEntry[],
+    relativePaths: string[],
+  ) => {
+    const formData = new FormData();
+    formData.append('datasetName', datasetName);
+    if (workerID !== 'local') formData.append('worker_id', workerID);
+    formData.append('failIfDatasetExists', '1');
+    formData.append('preserveRelativePaths', '1');
+    formData.append('relativePaths', JSON.stringify(relativePaths));
+    entries.forEach(entry => {
+      formData.append('files', entry.file);
+    });
+    await apiClient.post('/api/datasets/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0,
+    });
+  };
+
+  const handleImportFolders = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isImportingFolders) return;
+    if (folderImportEntries.length === 0) {
+      alert('Choose at least one folder.');
+      return;
+    }
+
+    try {
+      setIsImportingFolders(true);
+      const targetDatasetNames = new Set(
+        datasets
+          .filter(dataset => datasetWorkerID(dataset) === folderImportWorkerID)
+          .map(dataset => dataset.name.toLowerCase()),
+      );
+
+      if (folderImportMode === 'separate') {
+        let importedCount = 0;
+        for (const group of folderImportGroups) {
+          const datasetName = nextClientDatasetName(group.rootName, targetDatasetNames);
+          setFolderImportStatus(`Importing ${datasetName}...`);
+          const relativePaths = group.entries.map(entry => {
+            const parts = entry.relativePath.split('/').filter(Boolean);
+            return parts.length > 1 ? parts.slice(1).join('/') : entry.file.name;
+          });
+          await uploadFolderImportBatch(folderImportWorkerID, datasetName, group.entries, relativePaths);
+          importedCount += 1;
+        }
+        setFolderImportStatus(`Imported ${importedCount} datasets.`);
+      } else {
+        const datasetName = cleanClientDatasetName(folderImportDatasetName);
+        if (!datasetName) {
+          alert('Output dataset name is required.');
+          return;
+        }
+        if (targetDatasetNames.has(datasetName.toLowerCase())) {
+          alert('A dataset with that name already exists.');
+          return;
+        }
+        setFolderImportStatus(`Importing ${datasetName}...`);
+        await uploadFolderImportBatch(
+          folderImportWorkerID,
+          datasetName,
+          folderImportEntries,
+          folderImportEntries.map(entry => entry.relativePath),
+        );
+        setFolderImportStatus(`Imported ${datasetName}.`);
+        router.push(
+          folderImportWorkerID === 'local'
+            ? `/datasets/${encodeURIComponent(datasetName)}`
+            : `/datasets/${encodeURIComponent(datasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
+        );
+      }
+
+      refreshDatasets();
+      setIsFolderImportModalOpen(false);
+      setFolderImportEntries([]);
+      setFolderImportDatasetName('');
+      setFolderImportStatus('');
+    } catch (error: any) {
+      alert(error?.response?.data?.error || 'Failed to import folders.');
+    } finally {
+      setIsImportingFolders(false);
+    }
+  };
+
   const handleCreateDataset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isCreatingDataset) return;
@@ -524,6 +752,12 @@ export default function Datasets() {
           </div>
         )}
         <div className="flex items-center gap-2">
+          <Button
+            className="text-white bg-slate-600 px-3 py-1 rounded-md hover:bg-slate-500 transition-colors"
+            onClick={() => setIsFolderImportModalOpen(true)}
+          >
+            Import Folders
+          </Button>
           <Button
             className="text-white bg-slate-600 px-3 py-1 rounded-md hover:bg-slate-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
             disabled={!canCombineSelection}
@@ -671,6 +905,144 @@ export default function Datasets() {
             </div>
           </form>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={isFolderImportModalOpen}
+        onClose={closeFolderImportModal}
+        title="Import Folders"
+        size="lg"
+        closeOnOverlayClick={!isImportingFolders}
+      >
+        <form onSubmit={handleImportFolders} className="space-y-4 text-gray-200">
+          <input
+            ref={setFolderImportInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={event => {
+              addFolderImportFiles(event.currentTarget.files);
+              event.currentTarget.value = '';
+            }}
+          />
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setFolderImportMode('separate')}
+              className={`rounded-md border px-3 py-2 text-left ${
+                folderImportMode === 'separate'
+                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  : 'border-gray-700 bg-gray-900 text-gray-300'
+              }`}
+            >
+              Separate Datasets
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFolderImportMode('combined');
+                if (!folderImportDatasetName && folderImportGroups[0]) {
+                  setFolderImportDatasetName(`${folderImportGroups[0].rootName}_combined`);
+                }
+              }}
+              className={`rounded-md border px-3 py-2 text-left ${
+                folderImportMode === 'combined'
+                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  : 'border-gray-700 bg-gray-900 text-gray-300'
+              }`}
+            >
+              One Dataset
+            </button>
+          </div>
+
+          {folderImportWorkerOptions.length > 1 && (
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Import To</label>
+              <select
+                value={folderImportWorkerID}
+                onChange={e => setFolderImportWorkerID(e.target.value)}
+                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+              >
+                {folderImportWorkerOptions.map(worker => (
+                  <option key={worker.id} value={worker.id}>
+                    {worker.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {folderImportMode === 'combined' && (
+            <TextInput
+              label="Output Dataset Name"
+              value={folderImportDatasetName}
+              onChange={setFolderImportDatasetName}
+            />
+          )}
+
+          <div className="rounded-md border border-gray-700 bg-gray-900 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-gray-200">
+                  {folderImportGroups.length} folder{folderImportGroups.length === 1 ? '' : 's'} selected
+                </div>
+                <div className="text-sm text-gray-400">
+                  {folderImportFileCount} file{folderImportFileCount === 1 ? '' : 's'} ready
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => folderImportInputRef.current?.click()}
+                className="rounded-md bg-slate-600 px-3 py-2 text-sm text-white hover:bg-slate-500"
+              >
+                Add Folder
+              </button>
+            </div>
+
+            {folderImportGroups.length > 0 && (
+              <div className="mt-3 max-h-48 overflow-y-auto rounded-md border border-gray-800 bg-gray-950">
+                {folderImportGroups.map(group => (
+                  <div
+                    key={group.rootName}
+                    className="flex items-center justify-between gap-3 border-b border-gray-800 px-3 py-2 last:border-b-0"
+                  >
+                    <span className="min-w-0 truncate text-sm">{group.rootName}</span>
+                    <span className="text-xs text-gray-400">
+                      {group.entries.length} file{group.entries.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {folderImportMode === 'separate' && folderImportGroups.length > 0 && (
+            <div className="rounded-md border border-gray-700 bg-gray-900 p-3 text-sm text-gray-300">
+              {folderImportGroups.map(group => group.rootName).join(', ')}
+            </div>
+          )}
+
+          {folderImportStatus && <div className="text-sm text-blue-300">{folderImportStatus}</div>}
+
+          <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600"
+              onClick={closeFolderImportModal}
+              disabled={isImportingFolders}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isImportingFolders || folderImportEntries.length === 0}
+              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isImportingFolders ? 'Importing...' : 'Import'}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       <Modal

@@ -15,11 +15,10 @@ import { apiClient } from '@/utils/api';
 import { useRouter } from 'next/navigation';
 import {
   createEmptyEncryptedManifest,
-  deriveKeyFileKey,
-  derivePasswordKey,
-  exportRawAesKey,
   getRememberedEncryptedDatasetKey,
   rememberEncryptedDatasetKey,
+  unlockEncryptedDatasetKey,
+  type DatasetCredentialMode,
 } from '@/utils/encryptedDatasets';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import type { DatasetSummary, EncryptedDatasetManifest } from '@/types';
@@ -59,7 +58,7 @@ export default function Datasets() {
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
   const [newDatasetMode, setNewDatasetMode] = useState<'plain' | 'encrypted'>('plain');
-  const [credentialMode, setCredentialMode] = useState<'password' | 'keyFile'>('password');
+  const [credentialMode, setCredentialMode] = useState<DatasetCredentialMode>('password');
   const [datasetPassword, setDatasetPassword] = useState('');
   const [datasetPasswordConfirm, setDatasetPasswordConfirm] = useState('');
   const [datasetKeyFile, setDatasetKeyFile] = useState<File | null>(null);
@@ -70,7 +69,7 @@ export default function Datasets() {
   const [combineSources, setCombineSources] = useState<DatasetSummary[]>([]);
   const [combineOutputName, setCombineOutputName] = useState('');
   const [combineOutputMode, setCombineOutputMode] = useState<'plain' | 'encrypted'>('plain');
-  const [combineCredentialMode, setCombineCredentialMode] = useState<'password' | 'keyFile'>('password');
+  const [combineCredentialMode, setCombineCredentialMode] = useState<DatasetCredentialMode>('password');
   const [combinePassword, setCombinePassword] = useState('');
   const [combinePasswordConfirm, setCombinePasswordConfirm] = useState('');
   const [combineKeyFile, setCombineKeyFile] = useState<File | null>(null);
@@ -333,17 +332,28 @@ export default function Datasets() {
       return;
     }
     try {
-      const key =
-        manifest.crypto.kdf.type === 'PBKDF2-SHA256'
-          ? await derivePasswordKey(combineSourcePasswords[ref] || '', manifest)
-          : combineSourceKeyFiles[ref]
-            ? await deriveKeyFileKey(combineSourceKeyFiles[ref] as File)
-            : null;
-      if (!key) {
+      let unlocked;
+      if (manifest.crypto.kdf.type === 'PBKDF2-SHA256') {
+        unlocked = await unlockEncryptedDatasetKey(manifest, {
+          provider: 'password',
+          password: combineSourcePasswords[ref] || '',
+        });
+      } else if (manifest.crypto.kdf.type === 'KEYFILE-SHA256') {
+        if (!combineSourceKeyFiles[ref]) {
+          setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Select the key file for this dataset.' }));
+          return;
+        }
+        unlocked = await unlockEncryptedDatasetKey(manifest, {
+          provider: 'keyFile',
+          file: combineSourceKeyFiles[ref] as File,
+        });
+      } else if (manifest.crypto.kdf.type === 'WEBAUTHN-PRF') {
+        unlocked = await unlockEncryptedDatasetKey(manifest, { provider: 'webauthnPrf' });
+      } else {
         setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Select the key file for this dataset.' }));
         return;
       }
-      const rawKeyB64 = await exportRawAesKey(key);
+      const rawKeyB64 = unlocked.rawKeyB64;
       setCombineSourceKeys(previous => ({ ...previous, [ref]: rawKeyB64 }));
       setCombineSourceErrors(previous => ({ ...previous, [ref]: '' }));
       rememberDatasetKey(source, rawKeyB64);
@@ -377,13 +387,19 @@ export default function Datasets() {
           outputEncryptedManifest = result.manifest;
           outputKeyB64 = result.rawKeyB64;
         } else {
-          if (!combineKeyFile) {
-            alert('Select a key file.');
-            return;
+          if (combineCredentialMode === 'yubiKey') {
+            const result = await createEmptyEncryptedManifest('yubiKey');
+            outputEncryptedManifest = result.manifest;
+            outputKeyB64 = result.rawKeyB64;
+          } else {
+            if (!combineKeyFile) {
+              alert('Select a key file.');
+              return;
+            }
+            const result = await createEmptyEncryptedManifest('keyFile', combineKeyFile);
+            outputEncryptedManifest = result.manifest;
+            outputKeyB64 = result.rawKeyB64;
           }
-          const result = await createEmptyEncryptedManifest('keyFile', combineKeyFile);
-          outputEncryptedManifest = result.manifest;
-          outputKeyB64 = result.rawKeyB64;
         }
       }
 
@@ -449,13 +465,19 @@ export default function Datasets() {
           encryptedManifest = result.manifest;
           rawKeyB64 = result.rawKeyB64;
         } else {
-          if (!datasetKeyFile) {
-            alert('Select a key file.');
-            return;
+          if (credentialMode === 'yubiKey') {
+            const result = await createEmptyEncryptedManifest('yubiKey');
+            encryptedManifest = result.manifest;
+            rawKeyB64 = result.rawKeyB64;
+          } else {
+            if (!datasetKeyFile) {
+              alert('Select a key file.');
+              return;
+            }
+            const result = await createEmptyEncryptedManifest('keyFile', datasetKeyFile);
+            encryptedManifest = result.manifest;
+            rawKeyB64 = result.rawKeyB64;
           }
-          const result = await createEmptyEncryptedManifest('keyFile', datasetKeyFile);
-          encryptedManifest = result.manifest;
-          rawKeyB64 = result.rawKeyB64;
         }
       }
 
@@ -571,7 +593,7 @@ export default function Datasets() {
 
             {newDatasetMode === 'encrypted' && (
               <div className="mt-4 space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setCredentialMode('password')}
@@ -589,6 +611,15 @@ export default function Datasets() {
                     }`}
                   >
                     Key File
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCredentialMode('yubiKey')}
+                    className={`rounded-md px-3 py-2 text-sm ${
+                      credentialMode === 'yubiKey' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                    }`}
+                  >
+                    YubiKey
                   </button>
                 </div>
                 {credentialMode === 'password' ? (
@@ -608,12 +639,16 @@ export default function Datasets() {
                       className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
                     />
                   </div>
-                ) : (
+                ) : credentialMode === 'keyFile' ? (
                   <input
                     type="file"
                     onChange={e => setDatasetKeyFile(e.target.files?.[0] || null)}
                     className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
                   />
+                ) : (
+                  <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                    YubiKey / USB Security Key
+                  </div>
                 )}
               </div>
             )}
@@ -725,7 +760,7 @@ export default function Datasets() {
                             placeholder="Dataset password"
                             className="min-w-0 flex-1 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-gray-100"
                           />
-                        ) : (
+                        ) : manifest.crypto.kdf.type === 'KEYFILE-SHA256' ? (
                           <input
                             type="file"
                             onChange={e =>
@@ -736,6 +771,10 @@ export default function Datasets() {
                             }
                             className="min-w-0 flex-1 text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
                           />
+                        ) : (
+                          <div className="min-w-0 flex-1 rounded-md border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-gray-300">
+                            YubiKey / USB Security Key
+                          </div>
                         )}
                         <button
                           type="button"
@@ -755,7 +794,7 @@ export default function Datasets() {
 
           {combineOutputMode === 'encrypted' && (
             <div className="space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => setCombineCredentialMode('password')}
@@ -773,6 +812,15 @@ export default function Datasets() {
                   }`}
                 >
                   Key File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCombineCredentialMode('yubiKey')}
+                  className={`rounded-md px-3 py-2 text-sm ${
+                    combineCredentialMode === 'yubiKey' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                  }`}
+                >
+                  YubiKey
                 </button>
               </div>
               {combineCredentialMode === 'password' ? (
@@ -792,12 +840,16 @@ export default function Datasets() {
                     className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
                   />
                 </div>
-              ) : (
+              ) : combineCredentialMode === 'keyFile' ? (
                 <input
                   type="file"
                   onChange={e => setCombineKeyFile(e.target.files?.[0] || null)}
                   className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
                 />
+              ) : (
+                <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                  YubiKey / USB Security Key
+                </div>
               )}
             </div>
           )}

@@ -4,6 +4,13 @@ import type {
   EncryptedDatasetManifest,
   EncryptedDatasetMediaKind,
 } from '@/types';
+import {
+  WEBAUTHN_PRF_KDF_TYPE,
+  WEBAUTHN_PRF_NATIVE_USB_PROVIDER,
+  decryptWithWebAuthnPrfKey,
+  encryptWithWebAuthnPrfKey,
+  webAuthnPrfWrappedKeyAad,
+} from '@/utils/webauthnPrfCrypto';
 
 export const ENCRYPTED_DATASET_FORMAT = 'aitk-encrypted-dataset';
 export const ENCRYPTED_DATASET_VERSION = 1;
@@ -12,6 +19,26 @@ export const PBKDF2_ITERATIONS = 600_000;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const rememberedKeys = new Map<string, string>();
+const WEBAUTHN_TIMEOUT_MS = 120_000;
+
+type WebAuthnPrfCredentialDescriptor = Extract<
+  EncryptedDatasetManifest['crypto']['kdf'],
+  { type: 'WEBAUTHN-PRF' }
+>['credentials'][number];
+
+export type DatasetCredentialMode = 'password' | 'keyFile' | 'yubiKey';
+
+export type EncryptedDatasetUnlockRequest =
+  | { provider: 'password'; password: string }
+  | { provider: 'keyFile'; file: File }
+  | { provider: 'webauthnPrf' }
+  | { provider: 'nativeUsb' };
+
+export type EncryptedDatasetUnlockResult = {
+  provider: Exclude<EncryptedDatasetUnlockRequest['provider'], 'nativeUsb'>;
+  key: CryptoKey;
+  rawKeyB64: string;
+};
 
 export function normalizeDatasetKey(datasetPathOrName: string) {
   return datasetPathOrName.replace(/[\\/]+$/, '').toLowerCase();
@@ -52,8 +79,13 @@ export function base64ToArrayBuffer(value: string) {
   return bytes.buffer;
 }
 
-function arrayBufferToBase64Url(buffer: ArrayBuffer | Uint8Array) {
+export function arrayBufferToBase64Url(buffer: ArrayBuffer | Uint8Array) {
   return arrayBufferToBase64(buffer).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+export function base64UrlToArrayBuffer(value: string) {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  return base64ToArrayBuffer(padded);
 }
 
 export async function importRawAesKey(rawKeyB64: string) {
@@ -95,6 +127,215 @@ export async function deriveKeyFileKey(file: File) {
   return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
 }
 
+function ensureWebAuthnPrfAvailable() {
+  if (typeof window === 'undefined' || !window.isSecureContext) {
+    throw new Error('YubiKey unlock requires a secure browser context.');
+  }
+  if (!navigator.credentials || typeof PublicKeyCredential === 'undefined') {
+    throw new Error('This browser does not support WebAuthn security keys.');
+  }
+}
+
+function currentRpId() {
+  if (typeof window === 'undefined') return 'localhost';
+  return window.location.hostname || 'localhost';
+}
+
+function explicitRpId(rpId: string) {
+  if (!rpId || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(rpId) || rpId.includes(':')) return undefined;
+  return rpId;
+}
+
+function requirePublicKeyCredential(value: Credential | null) {
+  if (!value || value.type !== 'public-key') {
+    throw new Error('A WebAuthn security key response was not returned.');
+  }
+  return value as PublicKeyCredential;
+}
+
+function getPrfFirstResult(credential: PublicKeyCredential) {
+  const results = credential.getClientExtensionResults() as any;
+  return results?.prf?.results?.first as ArrayBuffer | undefined;
+}
+
+function normalizeTransports(value: unknown) {
+  if (!Array.isArray(value)) return ['usb'];
+  const transports = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return transports.length > 0 ? transports : ['usb'];
+}
+
+async function evaluateWebAuthnPrf(
+  rpId: string,
+  credentials: WebAuthnPrfCredentialDescriptor[],
+) {
+  ensureWebAuthnPrfAvailable();
+  const evalByCredential: Record<string, { first: ArrayBuffer }> = {};
+  const allowCredentials = credentials.map(credential => {
+    evalByCredential[credential.id] = { first: base64ToArrayBuffer(credential.saltB64) };
+    return {
+      type: 'public-key',
+      id: base64UrlToArrayBuffer(credential.id),
+      transports: credential.transports,
+    };
+  });
+
+  const assertion = requirePublicKeyCredential(
+    await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        ...(explicitRpId(rpId) ? { rpId } : {}),
+        allowCredentials: allowCredentials as PublicKeyCredentialDescriptor[],
+        userVerification: 'preferred',
+        timeout: WEBAUTHN_TIMEOUT_MS,
+        extensions: {
+          prf: { evalByCredential },
+        } as any,
+      },
+    }),
+  );
+  const credentialId = arrayBufferToBase64Url(assertion.rawId);
+  const credential = credentials.find(item => item.id === credentialId || item.id === assertion.id);
+  const prfOutput = getPrfFirstResult(assertion);
+  if (!credential || !prfOutput) {
+    throw new Error('This security key did not return a WebAuthn PRF result for the dataset.');
+  }
+  return { credential, prfOutput };
+}
+
+async function createWebAuthnPrfCredential(rpId: string, saltB64: string) {
+  ensureWebAuthnPrfAvailable();
+  const salt = base64ToArrayBuffer(saltB64);
+  const credential = requirePublicKeyCredential(
+    await navigator.credentials.create({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: {
+          name: 'AI Toolkit',
+          ...(explicitRpId(rpId) ? { id: rpId } : {}),
+        },
+        user: {
+          id: crypto.getRandomValues(new Uint8Array(16)),
+          name: 'ai-toolkit-dataset-key',
+          displayName: 'AI Toolkit Dataset Key',
+        },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7 },
+          { type: 'public-key', alg: -257 },
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: 'cross-platform',
+          residentKey: 'discouraged',
+          userVerification: 'preferred',
+        },
+        timeout: WEBAUTHN_TIMEOUT_MS,
+        attestation: 'none',
+        extensions: {
+          prf: { eval: { first: salt } },
+        } as any,
+      },
+    }),
+  );
+  const credentialId = arrayBufferToBase64Url(credential.rawId);
+  const transports = normalizeTransports((credential.response as any).getTransports?.());
+  const prfOutput = getPrfFirstResult(credential);
+  return { credentialId, transports, prfOutput };
+}
+
+async function createWebAuthnPrfDatasetKey(label?: string) {
+  const rpId = currentRpId();
+  const rawDatasetKey = crypto.getRandomValues(new Uint8Array(32));
+  const rawKeyB64 = arrayBufferToBase64(rawDatasetKey);
+  const saltB64 = arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(32)));
+  const created = await createWebAuthnPrfCredential(rpId, saltB64);
+  const unsignedCredential: WebAuthnPrfCredentialDescriptor = {
+    id: created.credentialId,
+    label: label?.trim() || 'YubiKey / USB Security Key',
+    transports: created.transports,
+    saltB64,
+    createdAt: new Date().toISOString(),
+    wrappedKey: {
+      algorithm: 'AES-256-GCM',
+      nonce: '',
+      data: '',
+    },
+  };
+  const prfOutput =
+    created.prfOutput || (await evaluateWebAuthnPrf(rpId, [unsignedCredential])).prfOutput;
+  const wrappedKey = await encryptWithWebAuthnPrfKey(
+    prfOutput,
+    rawDatasetKey,
+    webAuthnPrfWrappedKeyAad(rpId, unsignedCredential.id, saltB64),
+  );
+
+  const kdf: Extract<EncryptedDatasetManifest['crypto']['kdf'], { type: 'WEBAUTHN-PRF' }> = {
+    type: 'WEBAUTHN-PRF',
+    keyLength: 32,
+    rpId,
+    credentials: [
+      {
+        ...unsignedCredential,
+        wrappedKey: {
+          algorithm: 'AES-256-GCM' as const,
+          ...wrappedKey,
+        },
+      },
+    ],
+    nativeUsb: {
+      provider: WEBAUTHN_PRF_NATIVE_USB_PROVIDER,
+      status: 'planned' as const,
+    },
+  };
+
+  return {
+    rawKeyB64,
+    kdf,
+  };
+}
+
+export async function unlockWebAuthnPrfDatasetKey(manifest: EncryptedDatasetManifest) {
+  const kdf = manifest.crypto.kdf;
+  if (kdf.type !== WEBAUTHN_PRF_KDF_TYPE) {
+    throw new Error('This dataset is not protected by a WebAuthn PRF security key.');
+  }
+  const { credential, prfOutput } = await evaluateWebAuthnPrf(kdf.rpId, kdf.credentials);
+  const decrypted = await decryptWithWebAuthnPrfKey(
+    prfOutput,
+    credential.wrappedKey.nonce,
+    credential.wrappedKey.data,
+    webAuthnPrfWrappedKeyAad(kdf.rpId, credential.id, credential.saltB64),
+  );
+  if (decrypted.byteLength !== 32) {
+    throw new Error('Invalid WebAuthn PRF wrapped dataset key.');
+  }
+  const rawKeyB64 = arrayBufferToBase64(decrypted);
+  return {
+    provider: 'webauthnPrf' as const,
+    key: await importRawAesKey(rawKeyB64),
+    rawKeyB64,
+  };
+}
+
+export async function unlockEncryptedDatasetKey(
+  manifest: EncryptedDatasetManifest,
+  request: EncryptedDatasetUnlockRequest,
+): Promise<EncryptedDatasetUnlockResult> {
+  if (request.provider === 'password') {
+    const key = await derivePasswordKey(request.password, manifest);
+    return { provider: 'password', key, rawKeyB64: await exportRawAesKey(key) };
+  }
+  if (request.provider === 'keyFile') {
+    if (manifest.crypto.kdf.type !== 'KEYFILE-SHA256') {
+      throw new Error('This dataset does not use a key file.');
+    }
+    const key = await deriveKeyFileKey(request.file);
+    return { provider: 'keyFile', key, rawKeyB64: await exportRawAesKey(key) };
+  }
+  if (request.provider === 'webauthnPrf') {
+    return unlockWebAuthnPrfDatasetKey(manifest);
+  }
+  throw new Error('Native USB unlock is not implemented yet.');
+}
+
 export function objectAad(objectPath: string) {
   return `aitk-encrypted-object:${objectPath}`;
 }
@@ -129,39 +370,56 @@ export async function decryptBytes(key: CryptoKey, nonceB64: string, dataB64: st
 }
 
 export async function createEmptyEncryptedManifest(
-  mode: 'password' | 'keyFile',
-  secret: string | File,
+  mode: DatasetCredentialMode,
+  secret?: string | File,
 ) {
-  let key: CryptoKey;
+  let key: CryptoKey | null = null;
+  let rawKeyB64: string | null = null;
+  let kdf: EncryptedDatasetManifest['crypto']['kdf'];
+  if (mode === 'yubiKey') {
+    const result = await createWebAuthnPrfDatasetKey(typeof secret === 'string' ? secret : undefined);
+    rawKeyB64 = result.rawKeyB64;
+    key = await importRawAesKey(rawKeyB64);
+    kdf = result.kdf;
+  } else if (mode === 'password') {
+    if (typeof secret !== 'string') throw new Error('Password is required.');
+    kdf = {
+      type: 'PBKDF2-SHA256',
+      salt: arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(16))),
+      iterations: PBKDF2_ITERATIONS,
+      keyLength: 32,
+    };
+  } else {
+    if (!(secret instanceof File)) throw new Error('Key file is required.');
+    kdf = {
+      type: 'KEYFILE-SHA256',
+      keyLength: 32,
+    };
+  }
+
   const manifest: EncryptedDatasetManifest = {
     format: ENCRYPTED_DATASET_FORMAT,
     version: ENCRYPTED_DATASET_VERSION,
     crypto: {
       algorithm: 'AES-256-GCM',
-      kdf:
-        mode === 'password'
-          ? {
-              type: 'PBKDF2-SHA256',
-              salt: arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(16))),
-              iterations: PBKDF2_ITERATIONS,
-              keyLength: 32,
-            }
-          : {
-              type: 'KEYFILE-SHA256',
-              keyLength: 32,
-            },
+      kdf,
     },
     catalog: { nonce: '', data: '' },
   };
 
   if (mode === 'password') {
     key = await derivePasswordKey(secret as string, manifest);
-  } else {
+    rawKeyB64 = await exportRawAesKey(key);
+  } else if (mode === 'keyFile') {
     key = await deriveKeyFileKey(secret as File);
+    rawKeyB64 = await exportRawAesKey(key);
   }
 
+  if (!key || !rawKeyB64) {
+    throw new Error('Encrypted dataset key could not be created.');
+  }
   const { manifest: encryptedManifest } = await encryptCatalog({ version: 1, items: [] }, key, manifest);
-  return { manifest: encryptedManifest, key, rawKeyB64: await exportRawAesKey(key) };
+  return { manifest: encryptedManifest, key, rawKeyB64 };
 }
 
 export async function decryptCatalog(manifest: EncryptedDatasetManifest, key: CryptoKey) {

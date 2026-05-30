@@ -23,6 +23,27 @@ export type DatasetEncryptionKdf =
   | {
       type: 'KEYFILE-SHA256';
       keyLength: 32;
+    }
+  | {
+      type: 'WEBAUTHN-PRF';
+      keyLength: 32;
+      rpId: string;
+      credentials: Array<{
+        id: string;
+        label?: string;
+        transports?: string[];
+        saltB64: string;
+        createdAt: string;
+        wrappedKey: {
+          algorithm: 'AES-256-GCM';
+          nonce: string;
+          data: string;
+        };
+      }>;
+      nativeUsb?: {
+        provider: 'ctap2-hmac-secret';
+        status: 'planned';
+      };
     };
 
 export type EncryptedDatasetManifest = {

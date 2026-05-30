@@ -93,7 +93,7 @@ def _validate_manifest(manifest: dict) -> None:
     if crypto.get("algorithm") != "AES-256-GCM":
         raise EncryptedDatasetError("Unsupported encrypted dataset algorithm")
     kdf_type = (crypto.get("kdf") or {}).get("type")
-    if kdf_type not in ("PBKDF2-SHA256", "KEYFILE-SHA256"):
+    if kdf_type not in ("PBKDF2-SHA256", "KEYFILE-SHA256", "WEBAUTHN-PRF"):
         raise EncryptedDatasetError("Unsupported encrypted dataset KDF")
     catalog = manifest.get("catalog") or {}
     if not catalog.get("nonce") or not catalog.get("data"):

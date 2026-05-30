@@ -16,7 +16,7 @@ def b64(value: bytes) -> str:
 
 
 class EncryptedDatasetReaderTest(unittest.TestCase):
-    def make_dataset(self):
+    def make_dataset(self, kdf=None):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = tmp.name
@@ -59,7 +59,7 @@ class EncryptedDatasetReaderTest(unittest.TestCase):
             "version": 1,
             "crypto": {
                 "algorithm": "AES-256-GCM",
-                "kdf": {"type": "KEYFILE-SHA256", "keyLength": 32},
+                "kdf": kdf or {"type": "KEYFILE-SHA256", "keyLength": 32},
             },
             "catalog": encrypt(json.dumps(catalog).encode("utf-8"), b"aitk-encrypted-catalog:v1"),
         }
@@ -112,6 +112,38 @@ class EncryptedDatasetReaderTest(unittest.TestCase):
         self.assertNotIn("secret caption", stored)
         refreshed = EncryptedDatasetReader(root, key=key)
         self.assertEqual(refreshed.get_caption(refreshed.items[0]), "secret caption")
+
+    def test_webauthn_prf_manifest_reads_with_supplied_raw_key(self):
+        root, key = self.make_dataset(
+            {
+                "type": "WEBAUTHN-PRF",
+                "keyLength": 32,
+                "rpId": "localhost",
+                "credentials": [
+                    {
+                        "id": "mockCredentialId",
+                        "label": "Mock YubiKey",
+                        "transports": ["usb"],
+                        "saltB64": b64(os.urandom(32)),
+                        "createdAt": "2026-05-30T00:00:00.000Z",
+                        "wrappedKey": {
+                            "algorithm": "AES-256-GCM",
+                            "nonce": b64(os.urandom(12)),
+                            "data": b64(os.urandom(48)),
+                        },
+                    }
+                ],
+                "nativeUsb": {
+                    "provider": "ctap2-hmac-secret",
+                    "status": "planned",
+                },
+            }
+        )
+
+        reader = EncryptedDatasetReader(root, key=key)
+
+        self.assertEqual(len(reader.items), 1)
+        self.assertEqual(reader.open_image(reader.items[0]).size, (4, 3))
 
 
 if __name__ == "__main__":

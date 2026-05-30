@@ -5,11 +5,10 @@ import { getDisplayPath, getDownloadUrl } from '@/utils/media';
 import type { EncryptedDatasetStartKey } from '@/types';
 import type { AxiosProgressEvent } from 'axios';
 import {
-  derivePasswordKey,
-  exportRawAesKey,
   forgetRememberedEncryptedDatasetKey,
   getRememberedEncryptedDatasetKey,
   rememberEncryptedDatasetKey,
+  unlockEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
 
 export type TrainingJobCheckpointExportMode = 'latest' | 'all';
@@ -99,14 +98,20 @@ async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: st
   const res = await apiClient.post('/api/datasets/listImages', { datasetName });
   const manifest = res.data?.manifest;
   if (!manifest) throw new Error(`Encrypted dataset key required for ${datasetName}`);
+  if (manifest.crypto?.kdf?.type === 'WEBAUTHN-PRF') {
+    const unlocked = await unlockEncryptedDatasetKey(manifest, { provider: 'webauthnPrf' });
+    rememberEncryptedDatasetKey(dataset.path, unlocked.rawKeyB64);
+    rememberEncryptedDatasetKey(datasetName, unlocked.rawKeyB64);
+    return { datasetPath: dataset.path, keyB64: unlocked.rawKeyB64 };
+  }
+
   if (manifest.crypto?.kdf?.type !== 'PBKDF2-SHA256') {
     throw new Error(`Encrypted dataset ${datasetName} requires its key file. Unlock the dataset page first.`);
   }
 
   const password = window.prompt(`Password for encrypted dataset "${datasetName}"`);
   if (!password) throw new Error(`Encrypted dataset key required for ${datasetName}`);
-  const key = await derivePasswordKey(password, manifest);
-  const keyB64 = await exportRawAesKey(key);
+  const { rawKeyB64: keyB64 } = await unlockEncryptedDatasetKey(manifest, { provider: 'password', password });
   rememberEncryptedDatasetKey(dataset.path, keyB64);
   rememberEncryptedDatasetKey(datasetName, keyB64);
   return { datasetPath: dataset.path, keyB64 };

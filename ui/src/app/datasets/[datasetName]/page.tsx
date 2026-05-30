@@ -19,13 +19,12 @@ import type { EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetMan
 import {
   arrayBufferToBase64,
   decryptCatalog,
-  deriveKeyFileKey,
-  derivePasswordKey,
   encryptCatalog,
   exportRawAesKey,
   getRememberedEncryptedDatasetKey,
   importRawAesKey,
   rememberEncryptedDatasetKey,
+  unlockEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 
@@ -124,10 +123,18 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     try {
       const key =
         encryptedManifest.crypto.kdf.type === 'PBKDF2-SHA256'
-          ? await derivePasswordKey(unlockPassword, encryptedManifest)
-          : unlockKeyFile
-            ? await deriveKeyFileKey(unlockKeyFile)
-            : null;
+          ? (await unlockEncryptedDatasetKey(encryptedManifest, {
+              provider: 'password',
+              password: unlockPassword,
+            })).key
+          : encryptedManifest.crypto.kdf.type === 'KEYFILE-SHA256' && unlockKeyFile
+            ? (await unlockEncryptedDatasetKey(encryptedManifest, {
+                provider: 'keyFile',
+                file: unlockKeyFile,
+              })).key
+            : encryptedManifest.crypto.kdf.type === 'WEBAUTHN-PRF'
+              ? (await unlockEncryptedDatasetKey(encryptedManifest, { provider: 'webauthnPrf' })).key
+              : null;
       if (!key) {
         setUnlockError('Select the key file for this dataset.');
         return;
@@ -313,12 +320,16 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
                   placeholder="Dataset password"
                   className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
                 />
-              ) : (
+              ) : encryptedManifest.crypto.kdf.type === 'KEYFILE-SHA256' ? (
                 <input
                   type="file"
                   onChange={e => setUnlockKeyFile(e.target.files?.[0] || null)}
                   className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
                 />
+              ) : (
+                <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                  YubiKey / USB Security Key
+                </div>
               )}
               {unlockError && <div className="text-sm text-red-400">{unlockError}</div>}
               <Button className="w-full rounded-md bg-blue-600 px-3 py-2 text-white" onClick={handleUnlock}>

@@ -86,7 +86,7 @@ export function validateEncryptedManifest(value: unknown): EncryptedDatasetManif
     throw new Error('Unsupported encrypted dataset algorithm');
   }
   const kdfType = manifest.crypto?.kdf?.type;
-  if (kdfType !== 'PBKDF2-SHA256' && kdfType !== 'KEYFILE-SHA256') {
+  if (kdfType !== 'PBKDF2-SHA256' && kdfType !== 'KEYFILE-SHA256' && kdfType !== 'WEBAUTHN-PRF') {
     throw new Error('Unsupported encrypted dataset KDF');
   }
   if (kdfType === 'PBKDF2-SHA256') {
@@ -94,6 +94,33 @@ export function validateEncryptedManifest(value: unknown): EncryptedDatasetManif
     if (!kdf.salt || !Number.isFinite(kdf.iterations) || kdf.iterations < 100_000 || kdf.keyLength !== 32) {
       throw new Error('Invalid encrypted dataset password KDF header');
     }
+  }
+  if (kdfType === 'WEBAUTHN-PRF') {
+    const kdf = manifest.crypto.kdf as any;
+    if (kdf.keyLength !== 32 || typeof kdf.rpId !== 'string' || !kdf.rpId.trim()) {
+      throw new Error('Invalid encrypted dataset WebAuthn PRF header');
+    }
+    if (!Array.isArray(kdf.credentials) || kdf.credentials.length === 0) {
+      throw new Error('Encrypted dataset WebAuthn PRF credential is missing');
+    }
+    kdf.credentials.forEach((credential: any) => {
+      if (!credential || !isBase64Url(credential.id) || !isBase64(credential.saltB64)) {
+        throw new Error('Invalid encrypted dataset WebAuthn PRF credential');
+      }
+      if (
+        credential.transports != null &&
+        (!Array.isArray(credential.transports) || credential.transports.some((item: unknown) => typeof item !== 'string'))
+      ) {
+        throw new Error('Invalid encrypted dataset WebAuthn PRF transports');
+      }
+      if (
+        credential.wrappedKey?.algorithm !== 'AES-256-GCM' ||
+        !isBase64(credential.wrappedKey?.nonce) ||
+        !isBase64(credential.wrappedKey?.data)
+      ) {
+        throw new Error('Invalid encrypted dataset WebAuthn PRF wrapped key');
+      }
+    });
   }
   if (!manifest.catalog?.nonce || !manifest.catalog?.data) {
     throw new Error('Invalid encrypted dataset catalog');
@@ -111,6 +138,14 @@ function base64ToBuffer(value: string, fieldName: string) {
     throw new Error(`Invalid encrypted dataset ${fieldName}`);
   }
   return Buffer.from(value, 'base64');
+}
+
+function isBase64(value: unknown) {
+  return typeof value === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+
+function isBase64Url(value: unknown) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value);
 }
 
 export function validateEncryptedCatalogKey(manifest: EncryptedDatasetManifest, keyB64: string) {

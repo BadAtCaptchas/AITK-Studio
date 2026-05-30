@@ -14,14 +14,24 @@ import UniversalTable, { TableColumn } from '@/components/UniversalTable';
 import { apiClient } from '@/utils/api';
 import { useRouter } from 'next/navigation';
 import {
+  buildEncryptedDatasetItem,
   createEmptyEncryptedManifest,
+  encryptCatalog,
+  getMediaKind,
   getRememberedEncryptedDatasetKey,
   rememberEncryptedDatasetKey,
   unlockEncryptedDatasetKey,
   type DatasetCredentialMode,
 } from '@/utils/encryptedDatasets';
+import {
+  createFlattenedFileNameAllocator,
+  folderImportCaptionKey,
+  folderImportExtension,
+  folderImportRootName,
+  stripFolderImportRoot,
+} from '@/utils/folderImport';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
-import type { DatasetSummary, EncryptedDatasetManifest } from '@/types';
+import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
 
 function datasetRowKey(dataset: DatasetSummary) {
   return dataset.ref || `${dataset.worker_id || 'local'}:${dataset.name}`;
@@ -95,16 +105,6 @@ function relativePathForFile(file: File) {
   return ((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name).replace(/\\/g, '/');
 }
 
-function rootNameForRelativePath(relativePath: string) {
-  return relativePath.split('/').filter(Boolean)[0] || 'imported_folder';
-}
-
-function extensionForRelativePath(relativePath: string) {
-  const fileName = relativePath.split('/').pop() || '';
-  const dotIndex = fileName.lastIndexOf('.');
-  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
-}
-
 function nextClientDatasetName(preferredName: string, usedNames: Set<string>) {
   const baseName = cleanClientDatasetName(preferredName) || 'imported_folder';
   let candidate = baseName;
@@ -155,6 +155,11 @@ export default function Datasets() {
   const [isFolderImportModalOpen, setIsFolderImportModalOpen] = useState(false);
   const [folderImportEntries, setFolderImportEntries] = useState<FolderImportEntry[]>([]);
   const [folderImportMode, setFolderImportMode] = useState<'separate' | 'combined'>('separate');
+  const [folderImportOutputMode, setFolderImportOutputMode] = useState<'plain' | 'encrypted'>('plain');
+  const [folderImportCredentialMode, setFolderImportCredentialMode] = useState<DatasetCredentialMode>('password');
+  const [folderImportPassword, setFolderImportPassword] = useState('');
+  const [folderImportPasswordConfirm, setFolderImportPasswordConfirm] = useState('');
+  const [folderImportKeyFile, setFolderImportKeyFile] = useState<File | null>(null);
   const [folderImportWorkerID, setFolderImportWorkerID] = useState('local');
   const [folderImportDatasetName, setFolderImportDatasetName] = useState('');
   const [isImportingFolders, setIsImportingFolders] = useState(false);
@@ -558,13 +563,13 @@ export default function Datasets() {
           id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           file,
           relativePath,
-          rootName: rootNameForRelativePath(relativePath),
+          rootName: folderImportRootName(relativePath),
         };
       })
       .filter(entry => {
         const parts = entry.relativePath.split('/').filter(Boolean);
         if (parts.some(part => part.startsWith('.'))) return false;
-        return FOLDER_IMPORT_EXTENSIONS.has(extensionForRelativePath(entry.relativePath));
+        return FOLDER_IMPORT_EXTENSIONS.has(folderImportExtension(entry.relativePath));
       });
 
     if (entries.length === 0) {
@@ -586,6 +591,11 @@ export default function Datasets() {
     setFolderImportDatasetName('');
     setFolderImportStatus('');
     setFolderImportMode('separate');
+    setFolderImportOutputMode('plain');
+    setFolderImportCredentialMode('password');
+    setFolderImportPassword('');
+    setFolderImportPasswordConfirm('');
+    setFolderImportKeyFile(null);
     setFolderImportWorkerID('local');
   };
 
@@ -610,6 +620,123 @@ export default function Datasets() {
     });
   };
 
+  const createFolderImportEncryption = async () => {
+    if (folderImportCredentialMode === 'password') {
+      if (!folderImportPassword || folderImportPassword !== folderImportPasswordConfirm) {
+        throw new Error('Password and confirmation must match.');
+      }
+      return createEmptyEncryptedManifest('password', folderImportPassword);
+    }
+    if (folderImportCredentialMode === 'yubiKey') {
+      return createEmptyEncryptedManifest('yubiKey');
+    }
+    if (!folderImportKeyFile) {
+      throw new Error('Select a key file.');
+    }
+    return createEmptyEncryptedManifest('keyFile', folderImportKeyFile);
+  };
+
+  const rememberFolderImportOutputKey = (workerID: string, datasetName: string, rawKeyB64: string) => {
+    rememberDatasetKey(
+      {
+        name: datasetName,
+        encrypted: true,
+        worker_id: workerID,
+        ref:
+          workerID === 'local'
+            ? `${workerID}:${datasetName}`
+            : makeRemoteDatasetRef(workerID, datasetName),
+      },
+      rawKeyB64,
+    );
+  };
+
+  const buildEncryptedFolderImportPayload = async (
+    entries: FolderImportEntry[],
+    relativePaths: string[],
+    manifest: EncryptedDatasetManifest,
+    key: CryptoKey,
+  ) => {
+    const captionFiles = new Map<string, File>();
+    entries.forEach((entry, index) => {
+      const relativePath = relativePaths[index] || entry.relativePath || entry.file.name;
+      if (/\.txt$/i.test(relativePath)) {
+        captionFiles.set(folderImportCaptionKey(relativePath), entry.file);
+      }
+    });
+
+    const allocateCatalogName = createFlattenedFileNameAllocator();
+    const catalog: EncryptedDatasetCatalog = { version: 1, items: [] };
+    const encryptedObjects: Array<{ objectPath: string; blob: Blob }> = [];
+
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const mediaKind = getMediaKind(entry.file);
+      if (!mediaKind) continue;
+      const relativePath = relativePaths[index] || entry.relativePath || entry.file.name;
+      const captionFile = captionFiles.get(folderImportCaptionKey(relativePath));
+      const catalogName = allocateCatalogName(relativePath);
+      const { item, encryptedObjects: itemObjects } = await buildEncryptedDatasetItem(
+        entry.file,
+        key,
+        captionFile ? await captionFile.text() : null,
+        catalogName,
+      );
+      catalog.items.push(item);
+      encryptedObjects.push(...itemObjects);
+    }
+
+    if (catalog.items.length === 0) {
+      throw new Error('No supported media files were found in the selected folders.');
+    }
+
+    const { manifest: encryptedManifest } = await encryptCatalog(catalog, key, manifest);
+    return { manifest: encryptedManifest, encryptedObjects, itemCount: catalog.items.length };
+  };
+
+  const uploadEncryptedFolderImportBatch = async (
+    workerID: string,
+    datasetName: string,
+    entries: FolderImportEntry[],
+    relativePaths: string[],
+  ) => {
+    const encryption = await createFolderImportEncryption();
+    const createResult = await apiClient
+      .post('/api/datasets/create', {
+        worker_id: workerID,
+        name: datasetName,
+        encrypted: true,
+        encryptedManifest: encryption.manifest,
+      })
+      .then(res => res.data);
+    const createdName = createResult?.name || datasetName;
+    const encryptedPayload = await buildEncryptedFolderImportPayload(
+      entries,
+      relativePaths,
+      encryption.manifest,
+      encryption.key,
+    );
+
+    const formData = new FormData();
+    formData.append('datasetName', createdName);
+    if (workerID !== 'local') formData.append('worker_id', workerID);
+    formData.append('encrypted', '1');
+    formData.append('manifest', JSON.stringify(encryptedPayload.manifest));
+    formData.append(
+      'objectPaths',
+      JSON.stringify(encryptedPayload.encryptedObjects.map(encryptedObject => encryptedObject.objectPath)),
+    );
+    encryptedPayload.encryptedObjects.forEach(encryptedObject => {
+      formData.append('files', encryptedObject.blob, encryptedObject.objectPath.split('/').pop() || 'object.bin');
+    });
+    await apiClient.post('/api/datasets/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 0,
+    });
+    rememberFolderImportOutputKey(workerID, createdName, encryption.rawKeyB64);
+    return { datasetName: createdName, itemCount: encryptedPayload.itemCount };
+  };
+
   const handleImportFolders = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isImportingFolders) return;
@@ -631,11 +758,12 @@ export default function Datasets() {
         for (const group of folderImportGroups) {
           const datasetName = nextClientDatasetName(group.rootName, targetDatasetNames);
           setFolderImportStatus(`Importing ${datasetName}...`);
-          const relativePaths = group.entries.map(entry => {
-            const parts = entry.relativePath.split('/').filter(Boolean);
-            return parts.length > 1 ? parts.slice(1).join('/') : entry.file.name;
-          });
-          await uploadFolderImportBatch(folderImportWorkerID, datasetName, group.entries, relativePaths);
+          const relativePaths = group.entries.map(entry => stripFolderImportRoot(entry.relativePath, entry.file.name));
+          if (folderImportOutputMode === 'encrypted') {
+            await uploadEncryptedFolderImportBatch(folderImportWorkerID, datasetName, group.entries, relativePaths);
+          } else {
+            await uploadFolderImportBatch(folderImportWorkerID, datasetName, group.entries, relativePaths);
+          }
           importedCount += 1;
         }
         setFolderImportStatus(`Imported ${importedCount} datasets.`);
@@ -650,17 +778,24 @@ export default function Datasets() {
           return;
         }
         setFolderImportStatus(`Importing ${datasetName}...`);
-        await uploadFolderImportBatch(
-          folderImportWorkerID,
-          datasetName,
-          folderImportEntries,
-          folderImportEntries.map(entry => entry.relativePath),
-        );
-        setFolderImportStatus(`Imported ${datasetName}.`);
+        const relativePaths = folderImportEntries.map(entry => entry.relativePath);
+        const importResult =
+          folderImportOutputMode === 'encrypted'
+            ? await uploadEncryptedFolderImportBatch(
+                folderImportWorkerID,
+                datasetName,
+                folderImportEntries,
+                relativePaths,
+              )
+            : await uploadFolderImportBatch(folderImportWorkerID, datasetName, folderImportEntries, relativePaths).then(
+                () => ({ datasetName }),
+              );
+        const importedDatasetName = importResult.datasetName;
+        setFolderImportStatus(`Imported ${importedDatasetName}.`);
         router.push(
           folderImportWorkerID === 'local'
-            ? `/datasets/${encodeURIComponent(datasetName)}`
-            : `/datasets/${encodeURIComponent(datasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
+            ? `/datasets/${encodeURIComponent(importedDatasetName)}`
+            : `/datasets/${encodeURIComponent(importedDatasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
         );
       }
 
@@ -669,8 +804,11 @@ export default function Datasets() {
       setFolderImportEntries([]);
       setFolderImportDatasetName('');
       setFolderImportStatus('');
+      setFolderImportPassword('');
+      setFolderImportPasswordConfirm('');
+      setFolderImportKeyFile(null);
     } catch (error: any) {
-      alert(error?.response?.data?.error || 'Failed to import folders.');
+      alert(error?.response?.data?.error || error?.message || 'Failed to import folders.');
     } finally {
       setIsImportingFolders(false);
     }
@@ -956,6 +1094,31 @@ export default function Datasets() {
             </button>
           </div>
 
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setFolderImportOutputMode('plain')}
+              className={`rounded-md border px-3 py-2 text-left ${
+                folderImportOutputMode === 'plain'
+                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  : 'border-gray-700 bg-gray-900 text-gray-300'
+              }`}
+            >
+              Plain
+            </button>
+            <button
+              type="button"
+              onClick={() => setFolderImportOutputMode('encrypted')}
+              className={`rounded-md border px-3 py-2 text-left ${
+                folderImportOutputMode === 'encrypted'
+                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  : 'border-gray-700 bg-gray-900 text-gray-300'
+              }`}
+            >
+              Encrypted
+            </button>
+          </div>
+
           {folderImportWorkerOptions.length > 1 && (
             <div>
               <label className="mb-1 block text-sm text-gray-300">Import To</label>
@@ -979,6 +1142,74 @@ export default function Datasets() {
               value={folderImportDatasetName}
               onChange={setFolderImportDatasetName}
             />
+          )}
+
+          {folderImportOutputMode === 'encrypted' && (
+            <div className="space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFolderImportCredentialMode('password')}
+                  className={`rounded-md px-3 py-2 text-sm ${
+                    folderImportCredentialMode === 'password'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-300'
+                  }`}
+                >
+                  Password
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFolderImportCredentialMode('keyFile')}
+                  className={`rounded-md px-3 py-2 text-sm ${
+                    folderImportCredentialMode === 'keyFile'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-300'
+                  }`}
+                >
+                  Key File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFolderImportCredentialMode('yubiKey')}
+                  className={`rounded-md px-3 py-2 text-sm ${
+                    folderImportCredentialMode === 'yubiKey'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800 text-gray-300'
+                  }`}
+                >
+                  YubiKey
+                </button>
+              </div>
+              {folderImportCredentialMode === 'password' ? (
+                <div className="space-y-3">
+                  <input
+                    type="password"
+                    value={folderImportPassword}
+                    onChange={e => setFolderImportPassword(e.target.value)}
+                    placeholder="Password"
+                    className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                  />
+                  <input
+                    type="password"
+                    value={folderImportPasswordConfirm}
+                    onChange={e => setFolderImportPasswordConfirm(e.target.value)}
+                    placeholder="Confirm password"
+                    className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                  />
+                </div>
+              ) : folderImportCredentialMode === 'keyFile' ? (
+                <input
+                  type="file"
+                  onChange={e => setFolderImportKeyFile(e.target.files?.[0] || null)}
+                  className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
+                />
+              ) : (
+                <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                  YubiKey / USB Security Key
+                </div>
+              )}
+            </div>
           )}
 
           <div className="rounded-md border border-gray-700 bg-gray-900 p-3">

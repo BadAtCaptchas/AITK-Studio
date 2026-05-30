@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import {
   cleanDatasetName,
   resolveDatasetFolder,
@@ -12,6 +13,21 @@ import {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
+    if (!isLocalWorker(workerID)) {
+      const worker = await getRemoteWorker(workerID);
+      const { worker_id, ...remoteBody } = body;
+      const remoteResult = await remoteJson<any>(worker, '/api/datasets/create', {
+        method: 'POST',
+        body: JSON.stringify(remoteBody),
+      });
+      return NextResponse.json({
+        ...remoteResult,
+        worker_id: worker.id,
+        worker_name: worker.name,
+      });
+    }
+
     let { name, encrypted, encryptedManifest } = body;
     name = cleanDatasetName(name || '');
     if (!name) {
@@ -35,7 +51,10 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true, name: name, encrypted: !!encrypted });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to create dataset' }, { status: 500 });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error?.message || 'Failed to create dataset' },
+      { status: typeof error?.status === 'number' ? error.status : 500 },
+    );
   }
 }

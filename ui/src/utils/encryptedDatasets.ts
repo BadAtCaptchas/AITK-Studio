@@ -21,6 +21,17 @@ const textDecoder = new TextDecoder();
 const rememberedKeys = new Map<string, string>();
 const WEBAUTHN_TIMEOUT_MS = 120_000;
 
+function copyToArrayBuffer(bytes: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+  if (bytes instanceof ArrayBuffer) return bytes;
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  return copy.buffer as ArrayBuffer;
+}
+
+function encodeUtf8(value: string): ArrayBuffer {
+  return copyToArrayBuffer(textEncoder.encode(value));
+}
+
 type WebAuthnPrfCredentialDescriptor = Extract<
   EncryptedDatasetManifest['crypto']['kdf'],
   { type: 'WEBAUTHN-PRF' }
@@ -61,8 +72,8 @@ export function randomId(bytes = 16) {
   return arrayBufferToBase64Url(buf);
 }
 
-export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array) {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+export function arrayBufferToBase64(buffer: ArrayBuffer | ArrayBufferView) {
+  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array(copyToArrayBuffer(buffer));
   let binary = '';
   bytes.forEach(byte => {
     binary += String.fromCharCode(byte);
@@ -70,16 +81,16 @@ export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array) {
   return btoa(binary);
 }
 
-export function base64ToArrayBuffer(value: string) {
+export function base64ToArrayBuffer(value: string): ArrayBuffer {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return bytes.buffer;
+  return bytes.buffer as ArrayBuffer;
 }
 
-export function arrayBufferToBase64Url(buffer: ArrayBuffer | Uint8Array) {
+export function arrayBufferToBase64Url(buffer: ArrayBuffer | ArrayBufferView) {
   return arrayBufferToBase64(buffer).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
@@ -105,9 +116,7 @@ export async function derivePasswordKey(password: string, manifest: EncryptedDat
   if (kdf.type !== 'PBKDF2-SHA256') {
     throw new Error('This dataset requires a key file.');
   }
-  const passwordKey = await crypto.subtle.importKey('raw', textEncoder.encode(password), 'PBKDF2', false, [
-    'deriveKey',
-  ]);
+  const passwordKey = await crypto.subtle.importKey('raw', encodeUtf8(password), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
@@ -344,13 +353,12 @@ export function catalogAad() {
   return 'aitk-encrypted-catalog:v1';
 }
 
-export async function encryptBytes(key: CryptoKey, bytes: ArrayBuffer | Uint8Array, aad: string) {
+export async function encryptBytes(key: CryptoKey, bytes: ArrayBuffer | ArrayBufferView, aad: string) {
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: nonce, additionalData: textEncoder.encode(aad), tagLength: 128 },
+    { name: 'AES-GCM', iv: nonce, additionalData: encodeUtf8(aad), tagLength: 128 },
     key,
-    plaintext,
+    copyToArrayBuffer(bytes),
   );
   return { nonce: arrayBufferToBase64(nonce), data: arrayBufferToBase64(encrypted) };
 }
@@ -361,7 +369,7 @@ export async function decryptBytes(key: CryptoKey, nonceB64: string, dataB64: st
     {
       name: 'AES-GCM',
       iv: base64ToArrayBuffer(nonceB64),
-      additionalData: textEncoder.encode(aad),
+      additionalData: encodeUtf8(aad),
       tagLength: 128,
     },
     key,
@@ -536,6 +544,7 @@ export async function buildEncryptedDatasetItem(
   file: File,
   key: CryptoKey,
   caption: string | null,
+  catalogName = file.name,
 ) {
   const mediaKind = getMediaKind(file);
   if (!mediaKind) throw new Error(`Unsupported file type: ${file.name}`);
@@ -546,8 +555,8 @@ export async function buildEncryptedDatasetItem(
   const now = new Date().toISOString();
   const item: EncryptedDatasetItem = {
     id: itemId,
-    name: file.name,
-    extension: getExtension(file.name).toLowerCase(),
+    name: catalogName,
+    extension: getExtension(catalogName).toLowerCase(),
     mimeType: file.type || 'application/octet-stream',
     mediaKind,
     objectPath,

@@ -6,6 +6,7 @@ import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteProxyFetch } from '@/server/remoteClient';
+import { isRemoteDatasetAssetRequestAuthorized } from '@/server/remoteDatasetAssetAccess';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 const contentTypeMap: { [key: string]: string } = {
@@ -84,6 +85,17 @@ export async function GET(request: NextRequest, { params }: { params: ImageRoute
     const requestedValue = getRequestedValue(request, imagePath);
     const remoteAsset = parseRemoteDatasetAssetRef(requestedValue);
     if (remoteAsset) {
+      if (
+        !isRemoteDatasetAssetRequestAuthorized(
+          request.headers,
+          remoteAsset.workerID,
+          remoteAsset.path,
+          remoteAsset.expires,
+          remoteAsset.signature,
+        )
+      ) {
+        return new NextResponse('Unauthorized', { status: 401 });
+      }
       const worker = await getRemoteWorker(remoteAsset.workerID);
       const remoteResponse = await remoteProxyFetch(worker, remoteAssetPath(remoteAsset.path), request.headers);
       return new NextResponse(remoteResponse.body, {

@@ -33,7 +33,7 @@ Create a RunPod secret named `ai_toolkit_auth` with a strong bearer token. The t
 {{ RUNPOD_SECRET_ai_toolkit_auth }}
 ```
 
-If you want durable resume for encrypted datasets, also create `aitk_durable_dataset_key_secret` with a separate random value of at least 32 characters. Without it, encrypted jobs can still start with a supplied key, but durable encrypted resume is rejected.
+If you want durable resume for encrypted datasets, also create `aitk_durable_dataset_key_secret` with a separate random value of at least 32 characters. Without it, encrypted jobs can still start with a supplied key, but durable encrypted resume is rejected. YubiKey-protected datasets are unlocked in the browser attached to the central UI; the RunPod worker receives only the ephemeral dataset key during the authenticated HTTPS job start and does not need USB access.
 
 In the RunPod console, create a private Pod template with the values from `template.blackwell.json`:
 

@@ -143,7 +143,7 @@ function AdvisorResultPanel({
   return (
     <section
       className={classNames(
-        'rounded-lg border border-gray-800',
+        'border border-gray-800',
         variant === 'card' ? 'bg-gray-900 p-4' : 'bg-gray-950/50 p-3',
       )}
     >

@@ -15,6 +15,7 @@ import { apiClient } from '@/utils/api';
 import useSettings from '@/hooks/useSettings';
 import { pathJoin } from '@/utils/basic';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
+import { PageNotice } from '@/components/OperatorPrimitives';
 import type { EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
 import {
   arrayBufferToBase64,
@@ -28,10 +29,10 @@ import {
 } from '@/utils/encryptedDatasets';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 
-export default function DatasetPage({ params }: { params: { datasetName: string } }) {
+export default function DatasetPage({ params }: { params: Promise<{ datasetName: string }> }) {
   const [imgList, setImgList] = useState<{ img_path: string }[]>([]);
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
-  const usableParams = use(params as any) as { datasetName: string };
+  const usableParams = use(params);
   const datasetName = usableParams.datasetName;
   const searchParams = useSearchParams();
   const workerID = searchParams.get('worker_id') || 'local';
@@ -210,12 +211,14 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     if (!showIt) return null;
 
     return (
-      <div
-        className={`mt-10 flex flex-col items-center justify-center py-16 px-8 rounded-xl border-2 border-gray-700 border-dashed ${bgColor} ${textColor} mx-auto max-w-md text-center`}
-      >
-        <div className={`${iconColor} mb-4`}>{icon}</div>
-        <h3 className="text-lg font-semibold mb-2">{text}</h3>
-        <p className="text-sm opacity-75 leading-relaxed">{subtitle}</p>
+      <div className={`mx-auto mt-10 max-w-xl border border-dashed border-gray-700 px-4 py-6 ${bgColor} ${textColor}`}>
+        <div className="flex items-start gap-3">
+          <div className={`${iconColor} mt-0.5`}>{icon}</div>
+          <div>
+            <h3 className="text-sm font-semibold">{text}</h3>
+            <p className="mt-1 text-sm opacity-75">{subtitle}</p>
+          </div>
+        </div>
       </div>
     );
   }, [status, imgList.length, encryptedManifest]);
@@ -269,12 +272,12 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
     <>
       <TopBar>
         <div className="flex-shrink-0">
-          <Button className="text-gray-500 dark:text-gray-300 px-2 sm:px-3 mt-1" onClick={() => history.back()}>
+          <Button className="operator-icon-button" onClick={() => history.back()} title="Back">
             <FaChevronLeft />
           </Button>
         </div>
         <div className="min-w-0 flex-shrink">
-          <h1 className="text-base sm:text-lg truncate">
+          <h1 className="truncate text-base font-semibold">
             <span className="hidden sm:inline">Dataset: </span>
             {datasetName}
             {isRemoteDataset ? <span className="ml-2 text-xs text-blue-300">Remote</span> : null}
@@ -290,7 +293,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
             />
           )}
           <Button
-            className="text-white bg-slate-600 px-2 sm:px-3 py-1 rounded-md text-sm sm:text-base whitespace-nowrap disabled:opacity-50"
+            className="operator-button whitespace-nowrap py-1 text-sm"
             disabled={!!encryptedManifest && !encryptedCatalog}
             onClick={() =>
               openImagesModal(datasetName, () => refreshImageList(datasetName), {
@@ -306,7 +309,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
       </TopBar>
       <MainContent ref={scrollParentCallback}>
         {encryptedManifest && !encryptedCatalog && (
-          <div className="mx-auto mt-10 max-w-md rounded-md border border-gray-700 bg-gray-900 p-5 text-gray-200">
+          <div className="mx-auto mt-10 max-w-md border border-gray-700 bg-gray-900 p-5 text-gray-200">
             <h2 className="text-base font-semibold">Encrypted Dataset Locked</h2>
             <p className="mt-2 text-sm text-gray-400">
               Unlock in this browser to preview, edit captions, upload, or start encrypted training.
@@ -318,21 +321,21 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
                   value={unlockPassword}
                   onChange={e => setUnlockPassword(e.target.value)}
                   placeholder="Dataset password"
-                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                  className="w-full border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
                 />
               ) : encryptedManifest.crypto.kdf.type === 'KEYFILE-SHA256' ? (
                 <input
                   type="file"
                   onChange={e => setUnlockKeyFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
+                  className="block w-full text-sm text-gray-300 file:mr-3 file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
                 />
               ) : (
-                <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                <div className="border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
                   YubiKey / USB Security Key
                 </div>
               )}
               {unlockError && <div className="text-sm text-red-400">{unlockError}</div>}
-              <Button className="w-full rounded-md bg-blue-600 px-3 py-2 text-white" onClick={handleUnlock}>
+              <Button className="operator-button w-full border-cyan-800 bg-cyan-950/60 text-cyan-100" onClick={handleUnlock}>
                 Unlock
               </Button>
             </div>
@@ -340,15 +343,9 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
         )}
         {PageInfoContent}
         {status === 'success' && encryptedCatalog && encryptedKey && encryptedCatalog.items.length === 0 && (
-          <div className="mt-10 flex flex-col items-center justify-center py-16 px-8 rounded-xl border-2 border-gray-700 border-dashed bg-gray-800/50 text-gray-100 mx-auto max-w-md text-center">
-            <div className="text-gray-400 mb-4">
-              <LuImageOff className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">No Images Found</h3>
-            <p className="text-sm opacity-75 leading-relaxed">
-              This encrypted dataset is empty. Click "Add Images" to get started.
-            </p>
-          </div>
+          <PageNotice tone="neutral" title="No images found" className="mx-auto mt-10 max-w-xl">
+            This encrypted dataset is empty. Add images to make it available for training.
+          </PageNotice>
         )}
         {status === 'success' && imgList.length > 0 && scrollParent && (
           <VirtuosoGrid

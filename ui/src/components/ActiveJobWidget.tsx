@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { CgSpinner } from 'react-icons/cg';
 import useJobsList from '@/hooks/useJobsList';
 import type { JobConfig } from '@/types';
+import { ProgressBar, StatusBadge } from '@/components/OperatorPrimitives';
 
 export default function ActiveJobWidget() {
   const { jobs } = useJobsList({ onlyActive: true, reloadInterval: 5000 });
@@ -12,7 +13,8 @@ export default function ActiveJobWidget() {
 
   return (
     <div className="px-3 pb-2">
-      <div className="w-[196px]">
+      <div className="w-[216px] border-t border-gray-800 pt-3">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Active Jobs</div>
         <ul className="max-h-48 overflow-y-auto space-y-2">
           {jobs.map(job => {
             let totalSteps: number | undefined;
@@ -41,18 +43,16 @@ export default function ActiveJobWidget() {
               <li key={job.id} className="min-w-0">
                 <Link
                   href={`/jobs/${job.id}`}
-                  className="block px-3 py-2 bg-gray-800 hover:bg-gray-950 rounded-lg transition-colors min-w-0"
+                  className="block min-w-0 border border-gray-800 bg-gray-900/50 px-2 py-2 transition-colors hover:bg-gray-900"
                 >
-                  <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex min-w-0 items-center gap-1.5">
                     {isRunning && <CgSpinner className="animate-spin text-blue-400 flex-shrink-0" />}
                     <span className="text-xs text-gray-100 truncate min-w-0 flex-1">{label}</span>
                   </div>
                   {isTrain && totalSteps ? (
                     <div className="mt-1.5">
-                      <div className="bg-gray-700 rounded-full h-1">
-                        <div className="bg-blue-500 h-1 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                      </div>
-                      <div className="flex justify-between gap-2 mt-0.5 min-w-0">
+                      <ProgressBar value={pct} />
+                      <div className="mt-1 flex min-w-0 justify-between gap-2">
                         <span className={`text-[10px] truncate min-w-0 ${statusColor}`}>
                           {job.info || job.status}
                         </span>
@@ -62,7 +62,9 @@ export default function ActiveJobWidget() {
                       </div>
                     </div>
                   ) : (
-                    <div className={`text-[10px] mt-0.5 truncate ${statusColor}`}>{job.info || job.status}</div>
+                    <div className="mt-1">
+                      <StatusBadge status={job.status} className="max-w-full" />
+                    </div>
                   )}
                 </Link>
               </li>

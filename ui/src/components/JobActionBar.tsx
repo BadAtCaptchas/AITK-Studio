@@ -130,6 +130,10 @@ function getRemoteCaptionDownloadStatus(job: Job) {
   }
 }
 
+const actionButtonClass = 'operator-icon-button align-middle';
+const dangerousActionButtonClass =
+  'operator-icon-button align-middle hover:border-rose-800 hover:bg-rose-950/50 hover:text-rose-100';
+
 export default function JobActionBar({
   job,
   onRefresh,
@@ -352,9 +356,11 @@ export default function JobActionBar({
     exportStatus?.progress?.cancelRequested !== true;
 
   return (
-    <div className={`${className}`}>
+    <div className={`inline-flex items-center justify-end gap-1 ${className || ''}`}>
       {canStart && (
         <Button
+          title="Start job"
+          aria-label="Start job"
           onClick={async () => {
             if (!canStart) return;
             try {
@@ -368,25 +374,29 @@ export default function JobActionBar({
               alert(error instanceof Error ? error.message : 'Failed to start job.');
             }
           }}
-          className={`ml-2 opacity-100`}
+          className={actionButtonClass}
         >
-          <Play />
+          <Play className="h-4 w-4" />
         </Button>
       )}
       {canRemoveFromQueue && (
         <Button
+          title="Remove from queue"
+          aria-label="Remove from queue"
           onClick={async () => {
             if (!canRemoveFromQueue) return;
             await markJobAsStopped(job.id);
             if (onRefresh) onRefresh();
           }}
-          className={`ml-2 opacity-100`}
+          className={actionButtonClass}
         >
-          <X />
+          <X className="h-4 w-4" />
         </Button>
       )}
       {canStop && (
         <Button
+          title="Stop job"
+          aria-label="Stop job"
           onClick={() => {
             if (!canStop) return;
             openConfirm({
@@ -400,19 +410,21 @@ export default function JobActionBar({
               },
             });
           }}
-          className={`ml-2 opacity-100`}
+          className={actionButtonClass}
         >
-          <Pause />
+          <Pause className="h-4 w-4" />
         </Button>
       )}
       {!hideView && (
-        <Link href={`/jobs/${job.id}`} className="ml-2 text-gray-200 hover:text-gray-100 inline-block">
-          <Eye />
+        <Link href={`/jobs/${job.id}`} className={actionButtonClass} title="View job" aria-label="View job">
+          <Eye className="h-4 w-4" />
         </Link>
       )}
       {job.job_type === 'caption' && canEdit && (
         <div
-          className="ml-2 hover:text-gray-100 inline-block cursor-pointer"
+          className={actionButtonClass}
+          title="Edit captions"
+          aria-label="Edit captions"
           onClick={() =>
             openCaptionDatasetModal(
               job.job_ref || '',
@@ -423,16 +435,20 @@ export default function JobActionBar({
             )
           }
         >
-          <Pen />
+          <Pen className="h-4 w-4" />
         </div>
       )}
       {job.job_type === 'train' && canEdit && (
-        <Link href={`/jobs/new?id=${job.id}`} className="ml-2 hover:text-gray-100 inline-block">
-          <Pen />
+        <Link href={`/jobs/new?id=${job.id}`} className={actionButtonClass} title="Edit job" aria-label="Edit job">
+          <Pen className="h-4 w-4" />
         </Link>
       )}
       <Button
+        title={canDelete ? 'Delete job' : 'Stop the job before deleting'}
+        aria-label="Delete job"
+        disabled={!canDelete}
         onClick={() => {
+          if (!canDelete) return;
           let message = `Are you sure you want to delete the job "${job.name}"? This will also permanently remove it from your disk.`;
           if (job.status === 'running') {
             message += ' WARNING: The job is currently running. You should stop it first if you can.';
@@ -455,16 +471,20 @@ export default function JobActionBar({
             },
           });
         }}
-        className={`ml-2 opacity-100`}
+        className={dangerousActionButtonClass}
       >
-        <Trash2 />
+        <Trash2 className="h-4 w-4" />
       </Button>
-      <div className="border-r border-1 border-gray-700 ml-2 inline"></div>
+      <div className="mx-1 h-5 border-r border-gray-700"></div>
       <Menu>
-        <MenuButton className={`ml-2 inline-flex items-center ${isExporting ? 'cursor-wait opacity-80' : ''}`}>
-          {isExporting ? <Loader2 className="animate-spin" /> : <Cog />}
+        <MenuButton
+          title="More job actions"
+          aria-label="More job actions"
+          className={`${actionButtonClass} ${isExporting ? 'cursor-wait opacity-80' : ''}`}
+        >
+          {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cog className="h-4 w-4" />}
         </MenuButton>
-        <MenuItems anchor="bottom" className="bg-gray-900 border border-gray-700 rounded shadow-lg w-56 px-2 py-2 mt-4">
+        <MenuItems anchor="bottom" className="z-50 mt-2 w-60 border border-gray-700 bg-gray-950 px-2 py-2">
           {job.job_type === 'train' && (
             <MenuItem>
               <Link

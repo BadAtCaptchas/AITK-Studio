@@ -1,6 +1,5 @@
-import React from 'react';
 import { CpuInfo } from '@/types';
-import { Thermometer, Zap, Clock, HardDrive, Fan, Cpu } from 'lucide-react';
+import { HardDrive, Cpu } from 'lucide-react';
 
 interface CPUWidgetProps {
   cpu: CpuInfo | null;
@@ -15,68 +14,54 @@ export default function CPUWidget({ cpu }: CPUWidgetProps) {
     return value < 30 ? 'bg-emerald-500' : value < 70 ? 'bg-amber-500' : 'bg-rose-500';
   };
 
-  const getTemperatureColor = (temp: number): string => {
-    return temp < 50 ? 'text-emerald-500' : temp < 80 ? 'text-amber-500' : 'text-rose-500';
-  };
-
   if (!cpu) {
     return (
-      <div className="bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800">
-        <div className="bg-gray-800 px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <h2 className="font-semibold text-gray-100">CPU Info</h2>
-          </div>
+      <div className="operator-panel overflow-hidden">
+        <div className="operator-panel-header">
+          <h2 className="font-semibold text-gray-100">CPU Info</h2>
         </div>
-        <div className="p-4">
-          <p className="text-sm text-gray-400">No CPU data available</p>
+        <div className="p-3">
+          <p className="text-sm text-gray-400">No CPU data available.</p>
         </div>
       </div>
     );
   }
 
+  const usedMemory = cpu.totalMemory - cpu.availableMemory;
+  const memoryPercent = cpu.totalMemory > 0 ? (usedMemory / cpu.totalMemory) * 100 : 0;
+
   return (
-    <div className="bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800">
-      <div className="bg-gray-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <h2 className="font-semibold text-gray-100">{cpu.name}</h2>
-          {/* <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-300">#{1}</span> */}
-        </div>
+    <div className="operator-panel overflow-hidden">
+      <div className="operator-panel-header">
+        <h2 className="truncate font-semibold text-gray-100">{cpu.name}</h2>
       </div>
 
-      <div className="p-4 space-y-4">
-        {/* Temperature, Fan, and Utilization Section */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="">
-            <div className="flex items-center space-x-2 mb-1 mt-1">
-              <Cpu className="w-4 h-4 text-gray-400" />
-              <p className="text-xs text-gray-400">CPU Load</p>
-              <span className="text-xs text-gray-300 ml-auto">{cpu.currentLoad.toFixed(1)}%</span>
-            </div>
-            <div className="w-full bg-gray-700 rounded-full h-1">
-              <div
-                className={`h-1 rounded-full transition-all ${getUtilizationColor(cpu.currentLoad)}`}
-                style={{ width: `${cpu.currentLoad}%` }}
-              />
-            </div>
+      <div className="space-y-3 p-3">
+        <div>
+          <div className="mb-1 flex items-center space-x-2">
+            <Cpu className="h-4 w-4 text-gray-400" />
+            <p className="text-xs text-gray-400">CPU Load</p>
+            <span className="ml-auto text-xs text-gray-300">{cpu.currentLoad.toFixed(1)}%</span>
           </div>
-          <div>
-            <div className="flex items-center space-x-2 mb-1 mt-1">
-              <HardDrive className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <p className="text-xs text-gray-400">Memory</p>
-              <span className="text-xs text-gray-300 ml-auto">
-                {(((cpu.totalMemory - cpu.availableMemory) / cpu.totalMemory) * 100).toFixed(1)}%
-              </span>
-            </div>
-            <div className="w-full bg-gray-700 rounded-full h-1">
-              <div
-                className="h-1 rounded-full bg-blue-500 transition-all"
-                style={{ width: `${((cpu.totalMemory - cpu.availableMemory) / cpu.totalMemory) * 100}%` }}
-              />
-            </div>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {formatMemory(cpu.totalMemory - cpu.availableMemory)} / {formatMemory(cpu.totalMemory)}
-            </p>
+          <div className="h-1 w-full rounded-sm bg-gray-800">
+            <div
+              className={`h-1 rounded-sm transition-all ${getUtilizationColor(cpu.currentLoad)}`}
+              style={{ width: `${cpu.currentLoad}%` }}
+            />
           </div>
+        </div>
+        <div>
+          <div className="mb-1 flex items-center space-x-2">
+            <HardDrive className="h-4 w-4 text-cyan-400" />
+            <p className="text-xs text-gray-400">Memory</p>
+            <span className="ml-auto text-xs text-gray-300">{memoryPercent.toFixed(1)}%</span>
+          </div>
+          <div className="h-1 w-full rounded-sm bg-gray-800">
+            <div className="h-1 rounded-sm bg-cyan-500 transition-all" style={{ width: `${memoryPercent}%` }} />
+          </div>
+          <p className="mt-0.5 text-xs text-gray-400">
+            {formatMemory(usedMemory)} / {formatMemory(cpu.totalMemory)}
+          </p>
         </div>
       </div>
     </div>

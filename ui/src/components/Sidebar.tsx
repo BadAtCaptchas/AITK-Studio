@@ -1,5 +1,8 @@
+'use client';
+
 import Link from 'next/link';
-import { Home, Settings, BrainCircuit, Images, Plus, Wand2 } from 'lucide-react';
+import { Home, Settings, ListOrdered, Images, Plus, Wand2 } from 'lucide-react';
+import { usePathname } from 'next/navigation';
 import { FaXTwitter, FaDiscord, FaYoutube } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
@@ -7,52 +10,75 @@ import ActiveJobWidget from './ActiveJobWidget';
 import OstrisCloudBalance from './OstrisCloudBalance';
 
 const Sidebar = () => {
+  const pathname = usePathname();
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'New Job', href: '/jobs/new', icon: Plus },
     { name: 'Generate', href: '/generate', icon: Wand2 },
-    { name: 'Queue', href: '/jobs', icon: BrainCircuit },
+    { name: 'Queue', href: '/jobs', icon: ListOrdered },
     { name: 'Datasets', href: '/datasets', icon: Images },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
   const socialsBoxClass =
-    'flex flex-col items-center justify-center p-1 hover:bg-gray-800 rounded-lg transition-colors';
+    'flex flex-col items-center justify-center rounded-sm p-1 hover:bg-gray-800 transition-colors';
   const socialIconClass = 'w-5 h-5 text-gray-400 hover:text-white';
 
+  const isActive = (href: string) => {
+    if (href === '/jobs') {
+      return pathname === '/jobs' || (pathname.startsWith('/jobs/') && !pathname.startsWith('/jobs/new'));
+    }
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
   return (
-    <div className="flex flex-col w-59 bg-gray-900 text-gray-100">
-      <div className="px-4 py-3">
+    <aside className="flex w-full shrink-0 flex-col border-b border-gray-800 bg-gray-950 text-gray-100 md:h-screen md:w-60 md:border-b-0 md:border-r">
+      <div className="flex items-center justify-between gap-3 px-3 py-2 md:block md:px-4 md:py-3">
         <h1 className="flex items-center text-sm leading-tight">
           <ThemeLogo />
-          <span className="flex flex-col uppercase">
+          <span className="hidden flex-col uppercase sm:flex">
             <span className="font-bold">OstrisAI-Toolkit</span>
             <span className="text-gray-300">Revamped</span>
           </span>
         </h1>
+        <div className="md:hidden">
+          <ThemeToggle />
+        </div>
       </div>
-      <OstrisCloudBalance />
-      <nav className="flex-1">
-        <ul className="px-2 py-4 space-y-2">
-          {navigation.map(item => (
-            <li key={item.name}>
-              <Link
-                href={item.href}
-                className="flex items-center px-4 py-2 text-gray-300 hover:bg-gray-800 rounded-lg transition-colors"
-              >
-                <item.icon className="w-5 h-5 mr-3" />
-                {item.name}
-              </Link>
-            </li>
-          ))}
+      <div className="hidden md:block">
+        <OstrisCloudBalance />
+      </div>
+      <nav className="operator-scrollbar-none min-w-0 flex-1 overflow-x-auto md:overflow-y-auto md:overflow-x-hidden">
+        <ul className="flex gap-1 px-2 pb-2 md:block md:space-y-1 md:py-3">
+          {navigation.map(item => {
+            const active = isActive(item.href);
+            return (
+              <li key={item.name} className="min-w-fit md:min-w-0">
+                <Link
+                  href={item.href}
+                  aria-current={active ? 'page' : undefined}
+                  className={`flex items-center gap-2 rounded-sm border px-3 py-2 text-sm transition-colors md:px-4 ${
+                    active
+                      ? 'border-cyan-800 bg-cyan-950/30 text-cyan-100'
+                      : 'border-transparent text-gray-300 hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100'
+                  }`}
+                >
+                  <item.icon className="h-4 w-4 flex-none" />
+                  <span className="truncate">{item.name}</span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </nav>
-      <ActiveJobWidget />
+      <div className="hidden md:block">
+        <ActiveJobWidget />
+      </div>
       <a
         href="https://ostris.com/support"
         target="_blank"
         rel="noreferrer"
-        className="group flex items-center space-x-2 px-4 py-3 text-gray-400 hover:text-gray-200 transition-colors"
+        className="group hidden items-center space-x-2 px-4 py-3 text-gray-400 transition-colors hover:text-gray-200 md:flex"
       >
         <svg
           height="20"
@@ -71,7 +97,7 @@ const Sidebar = () => {
       </a>
 
       {/* Social links grid */}
-      <div className="px-1 py-1 border-t border-gray-800">
+      <div className="hidden border-t border-gray-800 px-1 py-1 md:block">
         <div className="grid grid-cols-4 gap-4">
           <a href="https://discord.gg/VXmU2f5WEU" target="_blank" rel="noreferrer" className={socialsBoxClass}>
             <FaDiscord className={socialIconClass} />
@@ -88,10 +114,10 @@ const Sidebar = () => {
           <ThemeToggle />
         </div>
       </div>
-      <div className="bg-gray-800 py-1 text-center text-[10px] text-gray-400">
+      <div className="hidden bg-gray-900 py-1 text-center text-[10px] text-gray-500 md:block">
         OstrisAI-Toolkit v{process.env.NEXT_PUBLIC_APP_VERSION}
       </div>
-    </div>
+    </aside>
   );
 };
 

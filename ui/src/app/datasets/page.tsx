@@ -7,7 +7,7 @@ import { TextInput } from '@/components/formInputs';
 import useDatasetList from '@/hooks/useDatasetList';
 import { Button } from '@headlessui/react';
 import { FaRegTrashAlt } from 'react-icons/fa';
-import { Download } from 'lucide-react';
+import { Download, Search, Database, FolderPlus, Layers, Plus } from 'lucide-react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { TopBar, MainContent } from '@/components/layout';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
@@ -129,6 +129,7 @@ export default function Datasets() {
   const { datasets, errors, status, refreshDatasets } = useDatasetList({ includeRemote: true });
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
+  const [datasetFilter, setDatasetFilter] = useState('');
   const [newDatasetMode, setNewDatasetMode] = useState<'plain' | 'encrypted'>('plain');
   const [credentialMode, setCredentialMode] = useState<DatasetCredentialMode>('password');
   const [datasetPassword, setDatasetPassword] = useState('');
@@ -175,6 +176,15 @@ export default function Datasets() {
     ref: datasetRowKey(dataset),
     worker_id: datasetWorkerID(dataset),
   }));
+  const filteredTableRows = useMemo(() => {
+    const query = datasetFilter.trim().toLowerCase();
+    if (!query) return tableRows;
+    return tableRows.filter(row =>
+      [row.name, row.source, row.worker, row.encrypted ? 'encrypted' : 'plain']
+        .filter(Boolean)
+        .some(value => `${value}`.toLowerCase().includes(query)),
+    );
+  }, [datasetFilter, tableRows]);
 
   const selectedDatasets = useMemo(
     () => tableRows.filter(row => selectedDatasetRefs.has(row.ref)).map(row => row.dataset),
@@ -879,8 +889,9 @@ export default function Datasets() {
   return (
     <>
       <TopBar>
-        <div>
-          <h1 className="text-lg">Datasets</h1>
+        <div className="flex shrink-0 items-center gap-2">
+          <Database className="h-4 w-4 text-cyan-300" />
+          <h1 className="text-base font-semibold">Datasets</h1>
         </div>
         <div className="flex-1"></div>
         {selectedDatasets.length > 0 && (
@@ -891,28 +902,52 @@ export default function Datasets() {
         )}
         <div className="flex items-center gap-2">
           <Button
-            className="text-white bg-slate-600 px-3 py-1 rounded-md hover:bg-slate-500 transition-colors"
+            className="operator-button shrink-0 py-1"
             onClick={() => setIsFolderImportModalOpen(true)}
+            title="Import folders"
+            aria-label="Import folders"
           >
-            Import Folders
+            <FolderPlus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Import Folders</span>
           </Button>
           <Button
-            className="text-white bg-slate-600 px-3 py-1 rounded-md hover:bg-slate-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            className="operator-button shrink-0 py-1"
             disabled={!canCombineSelection}
             onClick={() => openCombineModal()}
+            title="Combine selected datasets"
+            aria-label="Combine selected datasets"
           >
-            Combine
+            <Layers className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Combine</span>
           </Button>
           <Button
-            className="text-white bg-slate-600 px-3 py-1 rounded-md hover:bg-slate-500 transition-colors"
+            className="operator-button shrink-0 py-1"
             onClick={() => openNewDatasetModal()}
+            title="New dataset"
+            aria-label="New dataset"
           >
-            New Dataset
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">New Dataset</span>
           </Button>
         </div>
       </TopBar>
 
       <MainContent>
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-gray-500">
+            {filteredTableRows.length} of {tableRows.length} datasets shown
+            {selectedDatasets.length > 0 ? `, ${selectedDatasets.length} selected` : ''}
+          </div>
+          <label className="relative block w-full sm:w-80">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <input
+              value={datasetFilter}
+              onChange={event => setDatasetFilter(event.target.value)}
+              placeholder="Filter datasets, workers, type"
+              className="h-8 w-full border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-cyan-700 focus:outline-none"
+            />
+          </label>
+        </div>
         {errors.length > 0 && (
           <div className="mb-3 rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-sm text-yellow-200">
             Some remote datasets could not be loaded:{' '}
@@ -921,9 +956,12 @@ export default function Datasets() {
         )}
         <UniversalTable
           columns={columns}
-          rows={tableRows}
+          rows={filteredTableRows}
           isLoading={status === 'loading'}
           onRefresh={refreshDatasets}
+          emptyTitle={datasetFilter ? 'No datasets match the filter' : 'No datasets found'}
+          emptyDescription="Create a dataset or import folders to prepare training data."
+          errorMessage={status === 'error' ? 'Datasets could not be loaded.' : null}
         />
       </MainContent>
 

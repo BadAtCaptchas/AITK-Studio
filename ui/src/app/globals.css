@@ -83,6 +83,35 @@ body {
 }
 
 @layer components {
+  .operator-surface {
+    @apply border border-gray-800 bg-gray-950/45 rounded-sm;
+  }
+
+  .operator-panel {
+    @apply border border-gray-800 bg-gray-900/70 rounded-sm;
+  }
+
+  .operator-panel-header {
+    @apply flex min-w-0 items-center justify-between gap-3 border-b border-gray-800 px-3 py-2 text-sm font-medium text-gray-200;
+  }
+
+  .operator-icon-button {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-300 hover:border-gray-700 hover:bg-gray-800 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .operator-button {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-100 hover:border-gray-600 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .operator-scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .operator-scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
   /* control */
   .aitk-react-select-container .aitk-react-select__control {
     @apply flex w-full h-8 min-h-0 px-0 text-sm bg-gray-950 dark:bg-gray-800 border border-gray-700 rounded-sm hover:border-gray-600 items-center;

@@ -286,29 +286,6 @@ export default function SimpleJob({
     }
   };
 
-  const numTopCards = useMemo(() => {
-    let count = 4; // job settings, model config, target config, save config
-    if (modelArch?.additionalSections?.includes('model.multistage')) {
-      count += 1; // add multistage card
-    }
-    if (!disableSections.includes('model.quantize')) {
-      count += 1; // add quantization card
-    }
-    if (!disableSections.includes('slider')) {
-      count += 1; // add slider card
-    }
-    return count;
-  }, [modelArch, disableSections]);
-
-  let topBarClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-6';
-
-  if (numTopCards == 5) {
-    topBarClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6';
-  }
-  if (numTopCards == 6) {
-    topBarClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-6';
-  }
-
   const numTrainingCols = useMemo(() => {
     let count = 4;
     if (!disableSections.includes('train.diff_output_preservation')) {
@@ -320,13 +297,13 @@ export default function SimpleJob({
     return count;
   }, [disableSections, showSegaDistill]);
 
-  let trainingBarClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6';
+  let trainingBarClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4';
 
   if (numTrainingCols == 5) {
-    trainingBarClass = 'grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6';
+    trainingBarClass = 'grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5';
   }
   if (numTrainingCols == 6) {
-    trainingBarClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6';
+    trainingBarClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6';
   }
 
   const transformerQuantizationOptions: GroupedSelectOption[] | SelectOption[] = useMemo(() => {
@@ -374,8 +351,8 @@ export default function SimpleJob({
 
   let numDatasetCols = 4;
   let numSampleTopCols = 4;
-  let datasetStyleClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6';
-  let sampleTopStyleClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6';
+  let datasetStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4';
+  let sampleTopStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4';
   if (isVideoModel) {
     numSampleTopCols += 1;
   }
@@ -384,19 +361,19 @@ export default function SimpleJob({
     numSampleTopCols -= 1;
   }
   if (numDatasetCols == 3) {
-    datasetStyleClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6';
+    datasetStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3';
   }
   if (numSampleTopCols == 5) {
-    sampleTopStyleClass = 'grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6';
+    sampleTopStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5';
   }
   if (numSampleTopCols == 3) {
-    sampleTopStyleClass = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6';
+    sampleTopStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3';
   }
   return (
     <>
       <form
         onSubmit={handleSubmit}
-        className={`space-y-8 relative ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
+        className={`relative space-y-4 ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
       >
         {isLoading && (
           <div className="absolute inset-0 z-50 flex items-center justify-center">
@@ -406,111 +383,119 @@ export default function SimpleJob({
             </div>
           </div>
         )}
-        <div className={topBarClass}>
-          <Card title="Job">
-            <TextInput
-              label="Training Name"
-              value={jobConfig.config.name}
-              docKey="config.name"
-              onChange={value => setJobConfig(value, 'config.name')}
-              placeholder="Enter training name"
-              disabled={runId !== null}
-              required
-            />
-            {showGPUSelect && (
-              <SelectInput
-                label="GPU ID"
-                value={`${gpuIDs}`}
-                docKey="gpuids"
-                onChange={value => setGpuIDs(value)}
-                options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
-              />
-            )}
-            {disableSections.includes('trigger_word') ? null : (
+        <Card title="Setup">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-[1fr_1.4fr_1fr]">
+            <section className="min-w-0 space-y-2">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Job</h3>
               <TextInput
-                label="Trigger Word"
-                value={jobConfig.config.process[0].trigger_word || ''}
-                docKey="config.process[0].trigger_word"
-                onChange={(value: string | null) => {
-                  if (value?.trim() === '') {
-                    value = null;
-                  }
-                  setJobConfig(value, 'config.process[0].trigger_word');
-                }}
-                placeholder=""
+                label="Training Name"
+                value={jobConfig.config.name}
+                docKey="config.name"
+                onChange={value => setJobConfig(value, 'config.name')}
+                placeholder="Enter training name"
+                disabled={runId !== null}
                 required
               />
-            )}
-          </Card>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                {showGPUSelect && (
+                  <SelectInput
+                    label="GPU ID"
+                    value={`${gpuIDs}`}
+                    docKey="gpuids"
+                    onChange={value => setGpuIDs(value)}
+                    options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
+                  />
+                )}
+                {disableSections.includes('trigger_word') ? null : (
+                  <TextInput
+                    label="Trigger Word"
+                    value={jobConfig.config.process[0].trigger_word || ''}
+                    docKey="config.process[0].trigger_word"
+                    onChange={(value: string | null) => {
+                      if (value?.trim() === '') {
+                        value = null;
+                      }
+                      setJobConfig(value, 'config.process[0].trigger_word');
+                    }}
+                    placeholder=""
+                    required
+                  />
+                )}
+              </div>
+            </section>
 
-          {/* Model Configuration Section */}
-          <Card title="Model">
-            <SelectInput
-              label="Model Architecture"
-              value={jobConfig.config.process[0].model.arch}
-              onChange={value => {
-                handleModelArchChange(jobConfig.config.process[0].model.arch, value, jobConfig, setJobConfig);
-              }}
-              options={groupedModelOptions}
-            />
-            <TextInput
-              label="Name or Path"
-              value={jobConfig.config.process[0].model.name_or_path}
-              docKey="config.process[0].model.name_or_path"
-              onChange={(value: string | null) => {
-                if (value?.trim() === '') {
-                  value = null;
-                }
-                setJobConfig(value, 'config.process[0].model.name_or_path');
-              }}
-              placeholder=""
-              required
-            />
-            {modelArch?.additionalSections?.includes('model.assistant_lora_path') && (
-              <TextInput
-                label="Training Adapter Path"
-                value={jobConfig.config.process[0].model.assistant_lora_path ?? ''}
-                docKey="config.process[0].model.assistant_lora_path"
-                onChange={(value: string | undefined) => {
-                  if (value?.trim() === '') {
-                    value = undefined;
-                  }
-                  setJobConfig(value, 'config.process[0].model.assistant_lora_path');
-                }}
-                placeholder=""
-              />
-            )}
-            {modelArch?.additionalSections?.includes('model.low_vram') && (
-              <FormGroup label="Options">
-                <Checkbox
-                  label="Low VRAM"
-                  checked={jobConfig.config.process[0].model.low_vram}
-                  onChange={value => setJobConfig(value, 'config.process[0].model.low_vram')}
+            <section className="min-w-0 space-y-2 border-t border-gray-800 pt-3 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Model</h3>
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-[0.8fr_1.2fr]">
+                <SelectInput
+                  label="Model Architecture"
+                  value={jobConfig.config.process[0].model.arch}
+                  onChange={value => {
+                    handleModelArchChange(jobConfig.config.process[0].model.arch, value, jobConfig, setJobConfig);
+                  }}
+                  options={groupedModelOptions}
                 />
-              </FormGroup>
-            )}
-            {modelArch?.additionalSections?.includes('model.qie.match_target_res') && (
-              <Checkbox
-                label="Match Target Res"
-                docKey="model.qie.match_target_res"
-                checked={jobConfig.config.process[0].model.model_kwargs.match_target_res}
-                onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.match_target_res')}
-              />
-            )}
-            {modelArch?.additionalSections?.includes('model.layer_offloading') && !isMac() && (
-              <>
-                <Checkbox
-                  label={
-                    <>
-                      Layer Offloading <IoFlaskSharp className="inline text-yellow-500" name="Experimental" />{' '}
-                    </>
-                  }
-                  checked={jobConfig.config.process[0].model.layer_offloading || false}
-                  onChange={value => setJobConfig(value, 'config.process[0].model.layer_offloading')}
-                  docKey="model.layer_offloading"
+                <TextInput
+                  label="Name or Path"
+                  value={jobConfig.config.process[0].model.name_or_path}
+                  docKey="config.process[0].model.name_or_path"
+                  onChange={(value: string | null) => {
+                    if (value?.trim() === '') {
+                      value = null;
+                    }
+                    setJobConfig(value, 'config.process[0].model.name_or_path');
+                  }}
+                  placeholder=""
+                  required
                 />
-                {jobConfig.config.process[0].model.layer_offloading && (
-                  <div className="pt-2">
+              </div>
+              {modelArch?.additionalSections?.includes('model.assistant_lora_path') && (
+                <TextInput
+                  label="Training Adapter Path"
+                  value={jobConfig.config.process[0].model.assistant_lora_path ?? ''}
+                  docKey="config.process[0].model.assistant_lora_path"
+                  onChange={(value: string | undefined) => {
+                    if (value?.trim() === '') {
+                      value = undefined;
+                    }
+                    setJobConfig(value, 'config.process[0].model.assistant_lora_path');
+                  }}
+                  placeholder=""
+                />
+              )}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+                {modelArch?.additionalSections?.includes('model.low_vram') && (
+                  <Checkbox
+                    label="Low VRAM"
+                    checked={jobConfig.config.process[0].model.low_vram}
+                    onChange={value => setJobConfig(value, 'config.process[0].model.low_vram')}
+                  />
+                )}
+                {modelArch?.additionalSections?.includes('model.qie.match_target_res') && (
+                  <Checkbox
+                    label="Match Target Res"
+                    docKey="model.qie.match_target_res"
+                    checked={jobConfig.config.process[0].model.model_kwargs.match_target_res}
+                    onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.match_target_res')}
+                  />
+                )}
+                {modelArch?.additionalSections?.includes('model.layer_offloading') && !isMac() && (
+                  <Checkbox
+                    label={
+                      <>
+                        Layer Offloading <IoFlaskSharp className="inline text-yellow-500" name="Experimental" />{' '}
+                      </>
+                    }
+                    checked={jobConfig.config.process[0].model.layer_offloading || false}
+                    onChange={value => setJobConfig(value, 'config.process[0].model.layer_offloading')}
+                    docKey="model.layer_offloading"
+                  />
+                )}
+              </div>
+              {modelArch?.additionalSections?.includes('model.layer_offloading') &&
+                !isMac() &&
+                jobConfig.config.process[0].model.layer_offloading && (
+                  <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2">
                     <SliderInput
                       label="Transformer Offload %"
                       value={Math.round(
@@ -537,206 +522,213 @@ export default function SimpleJob({
                     />
                   </div>
                 )}
-              </>
-            )}
-          </Card>
-          {disableSections.includes('model.quantize') ? null : (
-            <Card title="Quantization">
+            </section>
+
+            <section className="min-w-0 space-y-2 border-t border-gray-800 pt-3 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Target</h3>
               <SelectInput
-                label="Transformer"
-                value={jobConfig.config.process[0].model.quantize ? jobConfig.config.process[0].model.qtype : ''}
+                label="Target Type"
+                value={networkType}
                 onChange={value => {
-                  if (value === '') {
-                    setJobConfig(false, 'config.process[0].model.quantize');
-                    value = defaultQtype;
-                  } else {
-                    setJobConfig(true, 'config.process[0].model.quantize');
-                  }
-                  setJobConfig(value, 'config.process[0].model.qtype');
-                }}
-                options={transformerQuantizationOptions}
-              />
-              {!disableSections.includes('model.quantize_te') && (
-                <SelectInput
-                  label="Text Encoder"
-                  value={
-                    jobConfig.config.process[0].model.quantize_te ? jobConfig.config.process[0].model.qtype_te : ''
-                  }
-                  onChange={value => {
-                    if (value === '') {
-                      setJobConfig(false, 'config.process[0].model.quantize_te');
-                      value = defaultQtype;
-                    } else {
-                      setJobConfig(true, 'config.process[0].model.quantize_te');
+                  setJobConfig(value, 'config.process[0].network.type');
+                  if (value === 'lokr') {
+                    setJobConfig(undefined, 'config.process[0].network.dropout');
+                    if (jobConfig.config.process[0].train.sega_distill) {
+                      setJobConfig(false, 'config.process[0].train.sega_distill');
                     }
-                    setJobConfig(value, 'config.process[0].model.qtype_te');
-                  }}
-                  options={quantizationOptions}
-                />
-              )}
-            </Card>
-          )}
-          {modelArch?.additionalSections?.includes('model.multistage') && (
-            <Card title="Multistage">
-              <FormGroup label="Stages to Train" docKey={'model.multistage'}>
-                <Checkbox
-                  label="High Noise"
-                  checked={jobConfig.config.process[0].model.model_kwargs?.train_high_noise || false}
-                  onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.train_high_noise')}
-                />
-                <Checkbox
-                  label="Low Noise"
-                  checked={jobConfig.config.process[0].model.model_kwargs?.train_low_noise || false}
-                  onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.train_low_noise')}
-                />
-              </FormGroup>
-              <NumberInput
-                label="Switch Every"
-                value={jobConfig.config.process[0].train.switch_boundary_every}
-                onChange={value => setJobConfig(value, 'config.process[0].train.switch_boundary_every')}
-                placeholder="eg. 1"
-                docKey={'train.switch_boundary_every'}
-                min={1}
-                required
-              />
-            </Card>
-          )}
-          <Card title="Target">
-            <SelectInput
-              label="Target Type"
-              value={networkType}
-              onChange={value => {
-                setJobConfig(value, 'config.process[0].network.type');
-                if (value === 'lokr') {
-                  setJobConfig(undefined, 'config.process[0].network.dropout');
-                  if (jobConfig.config.process[0].train.sega_distill) {
-                    setJobConfig(false, 'config.process[0].train.sega_distill');
                   }
-                }
-              }}
-              options={[
-                { value: 'lora', label: 'LoRA' },
-                { value: 'lokr', label: 'LoKr' },
-              ]}
-            />
-            {networkType == 'lokr' && (
-              <SelectInput
-                label="LoKr Factor"
-                value={`${jobConfig.config.process[0].network?.lokr_factor ?? -1}`}
-                onChange={value => setJobConfig(parseInt(value), 'config.process[0].network.lokr_factor')}
+                }}
                 options={[
-                  { value: '-1', label: 'Auto' },
-                  { value: '4', label: '4' },
-                  { value: '8', label: '8' },
-                  { value: '16', label: '16' },
-                  { value: '32', label: '32' },
+                  { value: 'lora', label: 'LoRA' },
+                  { value: 'lokr', label: 'LoKr' },
                 ]}
               />
-            )}
-            {networkType == 'lora' && (
-              <>
-                <NumberInput
-                  label="Linear Rank"
-                  value={jobConfig.config.process[0].network?.linear ?? null}
-                  onChange={value => {
-                    console.log('onChange', value);
-                    setJobConfig(value, 'config.process[0].network.linear');
-                    setJobConfig(value, 'config.process[0].network.linear_alpha');
-                  }}
-                  placeholder="eg. 16"
-                  min={1}
-                  max={1024}
-                  required
+              {networkType == 'lokr' && (
+                <SelectInput
+                  label="LoKr Factor"
+                  value={`${jobConfig.config.process[0].network?.lokr_factor ?? -1}`}
+                  onChange={value => setJobConfig(parseInt(value), 'config.process[0].network.lokr_factor')}
+                  options={[
+                    { value: '-1', label: 'Auto' },
+                    { value: '4', label: '4' },
+                    { value: '8', label: '8' },
+                    { value: '16', label: '16' },
+                    { value: '32', label: '32' },
+                  ]}
                 />
-                {disableSections.includes('network.conv') ? null : (
+              )}
+              {networkType == 'lora' && (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                   <NumberInput
-                    label="Conv Rank"
-                    value={jobConfig.config.process[0].network?.conv ?? null}
+                    label="Linear Rank"
+                    value={jobConfig.config.process[0].network?.linear ?? null}
                     onChange={value => {
                       console.log('onChange', value);
-                      setJobConfig(value, 'config.process[0].network.conv');
-                      setJobConfig(value, 'config.process[0].network.conv_alpha');
+                      setJobConfig(value, 'config.process[0].network.linear');
+                      setJobConfig(value, 'config.process[0].network.linear_alpha');
                     }}
                     placeholder="eg. 16"
-                    min={0}
+                    min={1}
                     max={1024}
+                    required
+                  />
+                  {disableSections.includes('network.conv') ? null : (
+                    <NumberInput
+                      label="Conv Rank"
+                      value={jobConfig.config.process[0].network?.conv ?? null}
+                      onChange={value => {
+                        console.log('onChange', value);
+                        setJobConfig(value, 'config.process[0].network.conv');
+                        setJobConfig(value, 'config.process[0].network.conv_alpha');
+                      }}
+                      placeholder="eg. 16"
+                      min={0}
+                      max={1024}
+                    />
+                  )}
+                </div>
+              )}
+              {supportsNormalNetworkDropout && (
+                <NumberInput
+                  label="Network Dropout"
+                  value={jobConfig.config.process[0].network?.dropout ?? null}
+                  onChange={value => setJobConfig(value ?? undefined, 'config.process[0].network.dropout')}
+                  placeholder="eg. 0.05"
+                  min={0}
+                  max={1}
+                />
+              )}
+            </section>
+          </div>
+        </Card>
+
+        <Card title="Model runtime and saving" collapsible>
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2 xl:grid-cols-4">
+            {disableSections.includes('model.quantize') ? null : (
+              <section className="min-w-0 space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Quantization</h3>
+                <SelectInput
+                  label="Transformer"
+                  value={jobConfig.config.process[0].model.quantize ? jobConfig.config.process[0].model.qtype : ''}
+                  onChange={value => {
+                    if (value === '') {
+                      setJobConfig(false, 'config.process[0].model.quantize');
+                      value = defaultQtype;
+                    } else {
+                      setJobConfig(true, 'config.process[0].model.quantize');
+                    }
+                    setJobConfig(value, 'config.process[0].model.qtype');
+                  }}
+                  options={transformerQuantizationOptions}
+                />
+                {!disableSections.includes('model.quantize_te') && (
+                  <SelectInput
+                    label="Text Encoder"
+                    value={
+                      jobConfig.config.process[0].model.quantize_te ? jobConfig.config.process[0].model.qtype_te : ''
+                    }
+                    onChange={value => {
+                      if (value === '') {
+                        setJobConfig(false, 'config.process[0].model.quantize_te');
+                        value = defaultQtype;
+                      } else {
+                        setJobConfig(true, 'config.process[0].model.quantize_te');
+                      }
+                      setJobConfig(value, 'config.process[0].model.qtype_te');
+                    }}
+                    options={quantizationOptions}
                   />
                 )}
-              </>
+              </section>
             )}
-            {supportsNormalNetworkDropout && (
-              <NumberInput
-                label="Network Dropout"
-                className="pt-2"
-                value={jobConfig.config.process[0].network?.dropout ?? null}
-                onChange={value => setJobConfig(value ?? undefined, 'config.process[0].network.dropout')}
-                placeholder="eg. 0.05"
-                min={0}
-                max={1}
-              />
+            {modelArch?.additionalSections?.includes('model.multistage') && (
+              <section className="min-w-0 space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Multistage</h3>
+                <FormGroup label="Stages to Train" docKey={'model.multistage'}>
+                  <Checkbox
+                    label="High Noise"
+                    checked={jobConfig.config.process[0].model.model_kwargs?.train_high_noise || false}
+                    onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.train_high_noise')}
+                  />
+                  <Checkbox
+                    label="Low Noise"
+                    checked={jobConfig.config.process[0].model.model_kwargs?.train_low_noise || false}
+                    onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.train_low_noise')}
+                  />
+                </FormGroup>
+                <NumberInput
+                  label="Switch Every"
+                  value={jobConfig.config.process[0].train.switch_boundary_every}
+                  onChange={value => setJobConfig(value, 'config.process[0].train.switch_boundary_every')}
+                  placeholder="eg. 1"
+                  docKey={'train.switch_boundary_every'}
+                  min={1}
+                  required
+                />
+              </section>
             )}
-          </Card>
-          {!disableSections.includes('slider') && (
-            <Card title="Slider">
-              <TextInput
-                label="Target Class"
-                className=""
-                value={jobConfig.config.process[0].slider?.target_class ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.target_class')}
-                placeholder="eg. person"
+            {!disableSections.includes('slider') && (
+              <section className="min-w-0 space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Slider</h3>
+                <TextInput
+                  label="Target Class"
+                  value={jobConfig.config.process[0].slider?.target_class ?? ''}
+                  onChange={value => setJobConfig(value, 'config.process[0].slider.target_class')}
+                  placeholder="eg. person"
+                />
+                <TextInput
+                  label="Positive Prompt"
+                  value={jobConfig.config.process[0].slider?.positive_prompt ?? ''}
+                  onChange={value => setJobConfig(value, 'config.process[0].slider.positive_prompt')}
+                  placeholder="eg. person who is happy"
+                />
+                <TextInput
+                  label="Negative Prompt"
+                  value={jobConfig.config.process[0].slider?.negative_prompt ?? ''}
+                  onChange={value => setJobConfig(value, 'config.process[0].slider.negative_prompt')}
+                  placeholder="eg. person who is sad"
+                />
+                <TextInput
+                  label="Anchor Class"
+                  value={jobConfig.config.process[0].slider?.anchor_class ?? ''}
+                  onChange={value => setJobConfig(value, 'config.process[0].slider.anchor_class')}
+                  placeholder=""
+                />
+              </section>
+            )}
+            <section className="min-w-0 space-y-2">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Saving</h3>
+              <SelectInput
+                label="Data Type"
+                value={jobConfig.config.process[0].save.dtype}
+                onChange={value => setJobConfig(value, 'config.process[0].save.dtype')}
+                options={[
+                  { value: 'bf16', label: 'BF16' },
+                  { value: 'fp16', label: 'FP16' },
+                  { value: 'fp32', label: 'FP32' },
+                ]}
               />
-              <TextInput
-                label="Positive Prompt"
-                className=""
-                value={jobConfig.config.process[0].slider?.positive_prompt ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.positive_prompt')}
-                placeholder="eg. person who is happy"
-              />
-              <TextInput
-                label="Negative Prompt"
-                className=""
-                value={jobConfig.config.process[0].slider?.negative_prompt ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.negative_prompt')}
-                placeholder="eg. person who is sad"
-              />
-              <TextInput
-                label="Anchor Class"
-                className=""
-                value={jobConfig.config.process[0].slider?.anchor_class ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.anchor_class')}
-                placeholder=""
-              />
-            </Card>
-          )}
-          <Card title="Save">
-            <SelectInput
-              label="Data Type"
-              value={jobConfig.config.process[0].save.dtype}
-              onChange={value => setJobConfig(value, 'config.process[0].save.dtype')}
-              options={[
-                { value: 'bf16', label: 'BF16' },
-                { value: 'fp16', label: 'FP16' },
-                { value: 'fp32', label: 'FP32' },
-              ]}
-            />
-            <NumberInput
-              label="Save Every"
-              value={jobConfig.config.process[0].save.save_every}
-              onChange={value => setJobConfig(value, 'config.process[0].save.save_every')}
-              placeholder="eg. 250"
-              min={1}
-              required
-            />
-            <NumberInput
-              label="Max Step Saves to Keep"
-              value={jobConfig.config.process[0].save.max_step_saves_to_keep}
-              onChange={value => setJobConfig(value, 'config.process[0].save.max_step_saves_to_keep')}
-              placeholder="eg. 4"
-              min={1}
-              required
-            />
-          </Card>
-        </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                <NumberInput
+                  label="Save Every"
+                  value={jobConfig.config.process[0].save.save_every}
+                  onChange={value => setJobConfig(value, 'config.process[0].save.save_every')}
+                  placeholder="eg. 250"
+                  min={1}
+                  required
+                />
+                <NumberInput
+                  label="Max Step Saves to Keep"
+                  value={jobConfig.config.process[0].save.max_step_saves_to_keep}
+                  onChange={value => setJobConfig(value, 'config.process[0].save.max_step_saves_to_keep')}
+                  placeholder="eg. 4"
+                  min={1}
+                  required
+                />
+              </div>
+            </section>
+          </div>
+        </Card>
         <div>
           <Card title="Training">
             <div className={trainingBarClass}>
@@ -1113,7 +1105,7 @@ export default function SimpleJob({
           <Card title="Datasets">
             <>
               {jobConfig.config.process[0].datasets.map((dataset, i) => (
-                <div key={i} className="p-4 rounded-lg bg-gray-800 relative">
+                <div key={i} className="relative border border-gray-800 bg-gray-950/50 p-3">
                   <div className="absolute top-2 right-2 flex gap-1">
                     <button
                       type="button"
@@ -1123,7 +1115,7 @@ export default function SimpleJob({
                         datasets.splice(i + 1, 0, duplicated);
                         setJobConfig(datasets, 'config.process[0].datasets');
                       }}
-                      className="bg-gray-700 hover:bg-gray-600 rounded-full p-2 text-sm transition-colors"
+                      className="operator-icon-button"
                       title="Duplicate Dataset"
                     >
                       <Copy className="w-4 h-4" />
@@ -1136,13 +1128,13 @@ export default function SimpleJob({
                           'config.process[0].datasets',
                         )
                       }
-                      className="bg-red-600 hover:bg-red-700 text-white rounded-full p-2 text-sm transition-colors"
+                      className="operator-icon-button hover:border-rose-800 hover:bg-rose-950/60 hover:text-rose-100"
                       title="Remove Dataset"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <h2 className="text-lg font-bold mb-4">Dataset {i + 1}</h2>
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">Dataset {i + 1}</h2>
                   <div className={datasetStyleClass}>
                     <div>
                       <SelectInput
@@ -1387,7 +1379,7 @@ export default function SimpleJob({
                   newDataset.controls = controls;
                   setJobConfig([...jobConfig.config.process[0].datasets, newDataset], 'config.process[0].datasets');
                 }}
-                className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                className="operator-button w-full"
               >
                 Add Dataset
               </button>
@@ -1395,7 +1387,7 @@ export default function SimpleJob({
           </Card>
         </div>
         <div>
-          <Card title="Sample">
+          <Card title="Sample generation" collapsible>
             <div className={sampleTopStyleClass}>
               <div>
                 <NumberInput
@@ -1548,7 +1540,7 @@ export default function SimpleJob({
               <div></div>
             </FormGroup>
             {jobConfig.config.process[0].sample.samples.map((sample, i) => (
-              <div key={i} className="rounded-lg pl-4 pr-1 mb-4 bg-gray-950">
+              <div key={i} className="mb-3 border border-gray-800 bg-gray-950/50 pl-3 pr-1">
                 <div className="flex items-center space-x-2">
                   <div className="flex-1">
                     <div className="flex">
@@ -1789,7 +1781,7 @@ export default function SimpleJob({
                       type="button"
                       onClick={() => importRandomPromptFromDataset(i)}
                       disabled={randomPromptLoadingIndex !== null || !canImportRandomPrompt}
-                      className="rounded-full p-1 text-sm text-gray-300 hover:bg-gray-800 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="operator-icon-button border-0 disabled:cursor-not-allowed disabled:opacity-50"
                       title={randomPromptDisabledReason}
                       aria-label={randomPromptDisabledReason}
                     >
@@ -1807,7 +1799,7 @@ export default function SimpleJob({
                           'config.process[0].sample.samples',
                         )
                       }
-                      className="rounded-full p-1 text-sm"
+                      className="operator-icon-button border-0"
                     >
                       <X />
                     </button>
@@ -1823,7 +1815,7 @@ export default function SimpleJob({
                   'config.process[0].sample.samples',
                 )
               }
-              className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+              className="operator-button w-full"
             >
               Add Prompt
             </button>

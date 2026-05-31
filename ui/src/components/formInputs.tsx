@@ -306,8 +306,8 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
           )}
         </label>
       )}
-      <div className="flex gap-2">
-        <div className={isCustom ? 'w-1/3' : 'w-full'}>
+      <div className="flex min-w-0 gap-2">
+        <div className={isCustom ? 'min-w-0 w-1/3' : 'min-w-0 w-full'}>
           <Select
             value={selectedOption}
             options={selectOptions}
@@ -341,10 +341,9 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
             type="text"
             value={value}
             onChange={e => onChange(e.target.value)}
-            className={`${inputClasses} w-2/3`}
+            className={`${inputClasses} min-w-0 w-2/3`}
             placeholder={props.placeholder ?? 'Enter custom value'}
             disabled={props.disabled}
-            autoFocus
           />
         )}
       </div>

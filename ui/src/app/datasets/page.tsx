@@ -7,7 +7,7 @@ import { TextInput } from '@/components/formInputs';
 import useDatasetList from '@/hooks/useDatasetList';
 import { Button } from '@headlessui/react';
 import { FaRegTrashAlt } from 'react-icons/fa';
-import { Download, Search, Database, FolderPlus, Layers, Plus } from 'lucide-react';
+import { Download, Search, Database, FolderPlus, Layers, Pencil, Plus } from 'lucide-react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { TopBar, MainContent } from '@/components/layout';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
@@ -136,6 +136,10 @@ export default function Datasets() {
   const [datasetPasswordConfirm, setDatasetPasswordConfirm] = useState('');
   const [datasetKeyFile, setDatasetKeyFile] = useState<File | null>(null);
   const [isCreatingDataset, setIsCreatingDataset] = useState(false);
+  const [renameDataset, setRenameDataset] = useState<DatasetSummary | null>(null);
+  const [renameDatasetName, setRenameDatasetName] = useState('');
+  const [isRenamingDataset, setIsRenamingDataset] = useState(false);
+  const [renameDatasetError, setRenameDatasetError] = useState('');
   const [importingRef, setImportingRef] = useState<string | null>(null);
   const [selectedDatasetRefs, setSelectedDatasetRefs] = useState<Set<string>>(() => new Set());
   const [isCombineModalOpen, setIsCombineModalOpen] = useState(false);
@@ -282,7 +286,7 @@ export default function Datasets() {
     {
       title: 'Actions',
       key: 'actions',
-      className: 'w-28 text-right',
+      className: 'w-36 text-right',
       render: row => (
         <div className="flex justify-end gap-1">
           {row.source === 'remote' && (
@@ -296,9 +300,18 @@ export default function Datasets() {
             </button>
           )}
           <button
+            className="text-gray-200 hover:bg-cyan-700 p-2 rounded-full transition-colors"
+            onClick={() => openRenameDatasetModal(row.dataset)}
+            title="Rename dataset"
+            aria-label={`Rename ${row.name}`}
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
             className="text-gray-200 hover:bg-red-600 p-2 rounded-full transition-colors"
             onClick={() => handleDeleteDataset(row.name, row.worker_id)}
             title="Delete dataset"
+            aria-label={`Delete ${row.name}`}
           >
             <FaRegTrashAlt />
           </button>
@@ -362,6 +375,63 @@ export default function Datasets() {
       ),
     );
     setIsCombineModalOpen(true);
+  };
+
+  const openRenameDatasetModal = (dataset: DatasetSummary) => {
+    setRenameDataset(dataset);
+    setRenameDatasetName(dataset.name);
+    setRenameDatasetError('');
+  };
+
+  const closeRenameDatasetModal = () => {
+    if (isRenamingDataset) return;
+    setRenameDataset(null);
+    setRenameDatasetName('');
+    setRenameDatasetError('');
+  };
+
+  const handleRenameDataset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renameDataset || isRenamingDataset) return;
+
+    const normalizedName = cleanClientDatasetName(renameDatasetName);
+    if (!normalizedName) {
+      setRenameDatasetError('Dataset name is required.');
+      return;
+    }
+
+    try {
+      setIsRenamingDataset(true);
+      setRenameDatasetError('');
+      const workerID = datasetWorkerID(renameDataset);
+      const res = await apiClient.post('/api/datasets/rename', {
+        name: renameDataset.name,
+        newName: renameDatasetName,
+        worker_id: workerID,
+      });
+      const renamedName = res.data?.name || normalizedName;
+      const rememberedKey = getRememberedDatasetKey(renameDataset);
+      if (rememberedKey) {
+        rememberEncryptedDatasetKey(renamedName, rememberedKey);
+        if (workerID !== 'local') {
+          rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, renamedName), rememberedKey);
+          rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, renamedName), rememberedKey);
+        }
+      }
+      setSelectedDatasetRefs(previous => {
+        const next = new Set(previous);
+        next.delete(datasetRowKey(renameDataset));
+        return next;
+      });
+      refreshDatasets();
+      setRenameDataset(null);
+      setRenameDatasetName('');
+      setRenameDatasetError('');
+    } catch (error: any) {
+      setRenameDatasetError(error?.response?.data?.error || 'Failed to rename dataset.');
+    } finally {
+      setIsRenamingDataset(false);
+    }
   };
 
   const handleDeleteDataset = (datasetName: string, workerID = 'local') => {
@@ -1081,6 +1151,42 @@ export default function Datasets() {
             </div>
           </form>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!renameDataset}
+        onClose={closeRenameDatasetModal}
+        title="Rename Dataset"
+        size="md"
+        closeOnOverlayClick={!isRenamingDataset}
+      >
+        <form onSubmit={handleRenameDataset} className="space-y-4 text-gray-200">
+          <div className="rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300">
+            {renameDataset
+              ? renameDataset.worker_name ||
+                (datasetWorkerID(renameDataset) === 'local' ? 'Local' : datasetWorkerID(renameDataset))
+              : 'Local'}
+          </div>
+          <TextInput label="Dataset Name" value={renameDatasetName} onChange={setRenameDatasetName} />
+          {renameDatasetError && <div className="text-sm text-red-400">{renameDatasetError}</div>}
+          <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+              onClick={closeRenameDatasetModal}
+              disabled={isRenamingDataset}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isRenamingDataset}
+              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRenamingDataset ? 'Renaming...' : 'Rename'}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       <Modal

@@ -1,15 +1,18 @@
 'use client';
 
 import { useEffect, useState, use, useMemo, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
 import { FaChevronLeft } from 'react-icons/fa';
 import { VirtuosoGrid } from 'react-virtuoso';
+import { Pencil } from 'lucide-react';
 import DatasetImageCard from '@/components/DatasetImageCard';
 import DatasetImageViewer from '@/components/DatasetImageViewer';
 import EncryptedDatasetItemCard from '@/components/EncryptedDatasetItemCard';
 import { Button } from '@headlessui/react';
 import AddImagesModal, { openImagesModal, useOpenImagesModalOnDrag } from '@/components/AddImagesModal';
+import { Modal } from '@/components/Modal';
+import { TextInput } from '@/components/formInputs';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import useSettings from '@/hooks/useSettings';
@@ -34,6 +37,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
   const usableParams = use(params);
   const datasetName = usableParams.datasetName;
+  const router = useRouter();
   const searchParams = useSearchParams();
   const workerID = searchParams.get('worker_id') || 'local';
   const isRemoteDataset = workerID !== 'local';
@@ -53,6 +57,10 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
   const [selectedImgPath, setSelectedImgPath] = useState<string | null>(null);
   const [captionRefreshKeys, setCaptionRefreshKeys] = useState<Record<string, number>>({});
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [renameDatasetName, setRenameDatasetName] = useState(datasetName);
+  const [isRenamingDataset, setIsRenamingDataset] = useState(false);
+  const [renameDatasetError, setRenameDatasetError] = useState('');
   const scrollParentCallback = useCallback((el: HTMLDivElement | null) => setScrollParent(el), []);
 
   const refreshImageList = (dbName: string) => {
@@ -171,6 +179,63 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
       .catch(() => undefined);
   }, [datasetName, datasetRef, encryptedCatalog, encryptedKey, encryptedManifest, settings?.DATASETS_FOLDER, workerID]);
 
+  useEffect(() => {
+    if (!isRenameModalOpen) {
+      setRenameDatasetName(datasetName);
+    }
+  }, [datasetName, isRenameModalOpen]);
+
+  const openRenameModal = () => {
+    setRenameDatasetName(datasetName);
+    setRenameDatasetError('');
+    setIsRenameModalOpen(true);
+  };
+
+  const closeRenameModal = () => {
+    if (isRenamingDataset) return;
+    setIsRenameModalOpen(false);
+    setRenameDatasetError('');
+  };
+
+  const rememberRenamedEncryptedKey = (renamedName: string) => {
+    if (!encryptedRawKeyB64) return;
+    rememberEncryptedDatasetKey(renamedName, encryptedRawKeyB64);
+    if (isRemoteDataset) {
+      rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, renamedName), encryptedRawKeyB64);
+      rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, renamedName), encryptedRawKeyB64);
+    }
+    if (settings?.DATASETS_FOLDER) {
+      rememberEncryptedDatasetKey(pathJoin(settings.DATASETS_FOLDER, renamedName), encryptedRawKeyB64);
+    }
+  };
+
+  const handleRenameDataset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isRenamingDataset) return;
+
+    try {
+      setIsRenamingDataset(true);
+      setRenameDatasetError('');
+      const res = await apiClient.post('/api/datasets/rename', {
+        name: datasetName,
+        newName: renameDatasetName,
+        worker_id: workerID,
+      });
+      const renamedName = res.data?.name || renameDatasetName.trim();
+      rememberRenamedEncryptedKey(renamedName);
+      setIsRenameModalOpen(false);
+      router.replace(
+        isRemoteDataset
+          ? `/datasets/${encodeURIComponent(renamedName)}?worker_id=${encodeURIComponent(workerID)}`
+          : `/datasets/${encodeURIComponent(renamedName)}`,
+      );
+    } catch (error: any) {
+      setRenameDatasetError(error?.response?.data?.error || 'Failed to rename dataset.');
+    } finally {
+      setIsRenamingDataset(false);
+    }
+  };
+
   const PageInfoContent = useMemo(() => {
     let icon = null;
     let text = '';
@@ -285,6 +350,15 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
         </div>
         <div className="flex-1"></div>
         <div className="flex-shrink-0 flex items-center gap-1 sm:gap-2">
+          <Button
+            className="operator-button whitespace-nowrap py-1 text-sm"
+            onClick={openRenameModal}
+            title="Rename dataset"
+            aria-label="Rename dataset"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Rename</span>
+          </Button>
           {!isRemoteDataset && (
             <AutoCaptionButton
               datasetPath={`${pathJoin(settings.DATASETS_FOLDER, datasetName)}`}
@@ -388,6 +462,35 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
           </div>
         )}
       </MainContent>
+      <Modal
+        isOpen={isRenameModalOpen}
+        onClose={closeRenameModal}
+        title="Rename Dataset"
+        size="md"
+        closeOnOverlayClick={!isRenamingDataset}
+      >
+        <form onSubmit={handleRenameDataset} className="space-y-4 text-gray-200">
+          <TextInput label="Dataset Name" value={renameDatasetName} onChange={setRenameDatasetName} />
+          {renameDatasetError && <div className="text-sm text-red-400">{renameDatasetError}</div>}
+          <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+              onClick={closeRenameModal}
+              disabled={isRenamingDataset}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isRenamingDataset}
+              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRenamingDataset ? 'Renaming...' : 'Rename'}
+            </button>
+          </div>
+        </form>
+      </Modal>
       <AddImagesModal />
       <DatasetImageViewer
         imgPath={selectedImgPath}

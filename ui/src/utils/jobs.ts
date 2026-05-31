@@ -254,7 +254,7 @@ export const saveJobNow = (jobID: string) => {
 
 export const retryRemoteCaptionResult = (jobID: string) => {
   return apiClient
-    .post(`/api/jobs/${jobID}/remote-caption-result`)
+    .post(`/api/jobs/${jobID}/remote-caption-result`, { retryFailed: true })
     .then(res => res.data as Job);
 };
 

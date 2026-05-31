@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save } from 'lucide-react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save, RefreshCcw } from 'lucide-react';
 import {
   Button,
   Dialog,
@@ -122,9 +122,10 @@ function getModelDownloadStatusLabel(status: ModelDownloadStatus) {
   return status.warnings[0] || 'No downloadable model references were found.';
 }
 
-function getRemoteCaptionDownloadStatus(job: Job) {
+function getRemoteCaptionState(job: Job) {
   try {
-    return JSON.parse(job.job_config)?.config?.remote_caption?.downloadStatus || null;
+    const state = JSON.parse(job.job_config)?.config?.remote_caption;
+    return state && typeof state === 'object' ? state : null;
   } catch {
     return null;
   }
@@ -145,6 +146,7 @@ export default function JobActionBar({
   const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
+  const [captionResultSyncing, setCaptionResultSyncing] = useState(false);
   const [exportDialog, setExportDialog] = useState<ExportDialogState>(null);
   const [checkpointMode, setCheckpointMode] = useState<TrainingJobCheckpointExportMode>('latest');
   const exportStatusTimeout = useRef<number | null>(null);
@@ -157,7 +159,14 @@ export default function JobActionBar({
   const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
   const isDownloadingModels = modelDownloadStatus?.phase === 'downloading';
-  const remoteCaptionDownloadStatus = getRemoteCaptionDownloadStatus(job);
+  const remoteCaptionState = getRemoteCaptionState(job);
+  const remoteCaptionDownloadStatus = remoteCaptionState?.downloadStatus || null;
+  const remoteCaptionLastError = typeof remoteCaptionState?.lastError === 'string' ? remoteCaptionState.lastError : null;
+  const canRetryRemoteCaptionSync =
+    job.job_type === 'caption' && job.worker_id !== 'local' && remoteCaptionDownloadStatus === 'failed';
+  const canManualRemoteCaptionSync =
+    job.job_type === 'caption' && job.worker_id !== 'local' && remoteCaptionDownloadStatus !== 'merged';
+  const remoteCaptionActionBusy = captionResultSyncing || remoteCaptionDownloadStatus === 'downloading';
 
   useEffect(() => {
     return () => {
@@ -334,14 +343,17 @@ export default function JobActionBar({
   const handleRetryRemoteCaptionResult = async () => {
     if (captionResultInFlight.current) return;
     captionResultInFlight.current = true;
+    setCaptionResultSyncing(true);
     try {
       await retryRemoteCaptionResult(job.id);
       onRefresh?.();
     } catch (error) {
       console.error('Error syncing remote caption result:', error);
       alert(getApiErrorMessage(error, 'Failed to sync remote caption result.'));
+      onRefresh?.();
     } finally {
       captionResultInFlight.current = false;
+      setCaptionResultSyncing(false);
     }
   };
 
@@ -437,6 +449,17 @@ export default function JobActionBar({
         >
           <Pen className="h-4 w-4" />
         </div>
+      )}
+      {canRetryRemoteCaptionSync && (
+        <Button
+          title={remoteCaptionLastError ? `Retry caption sync: ${remoteCaptionLastError}` : 'Retry caption sync'}
+          aria-label="Retry caption sync"
+          disabled={captionResultSyncing}
+          onClick={() => void handleRetryRemoteCaptionResult()}
+          className={`${actionButtonClass} ${captionResultSyncing ? 'cursor-wait opacity-80' : 'text-rose-200 hover:border-rose-800 hover:bg-rose-950/50'}`}
+        >
+          {captionResultSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+        </Button>
       )}
       {job.job_type === 'train' && canEdit && (
         <Link href={`/jobs/new?id=${job.id}`} className={actionButtonClass} title="Edit job" aria-label="Edit job">
@@ -552,14 +575,25 @@ export default function JobActionBar({
               </div>
             </MenuItem>
           )}
-          {job.job_type === 'caption' && job.worker_id !== 'local' && (
+          {canManualRemoteCaptionSync && (
             <MenuItem>
               <div
-                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
-                onClick={() => void handleRetryRemoteCaptionResult()}
+                className={`px-4 py-1 rounded flex items-center gap-2 ${
+                  remoteCaptionActionBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
+                }`}
+                aria-disabled={remoteCaptionActionBusy}
+                onClick={() => {
+                  if (!remoteCaptionActionBusy) void handleRetryRemoteCaptionResult();
+                }}
               >
-                <CloudDownload className="w-4 h-4" />
-                {remoteCaptionDownloadStatus === 'failed' ? 'Retry Caption Download' : 'Sync Caption Result'}
+                {remoteCaptionActionBusy ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : remoteCaptionDownloadStatus === 'failed' ? (
+                  <RefreshCcw className="w-4 h-4" />
+                ) : (
+                  <CloudDownload className="w-4 h-4" />
+                )}
+                {remoteCaptionDownloadStatus === 'failed' ? 'Retry Caption Sync' : 'Sync Caption Result'}
               </div>
             </MenuItem>
           )}

@@ -300,7 +300,7 @@ AITK_CLOUDFLARED_AUTO_DOWNLOAD=0
 
 ### Secure remote Ollama captioning
 
-Settings includes a **Secure Remote Captioning** tool for image datasets. It starts a local UI caption job that streams one image at a time to a selected remote worker's UI, where the worker calls its local Ollama server. The dataset is not bundled or stored on the remote worker, and prompt/system-prompt/image/caption payloads are encrypted at the application layer in addition to the worker's HTTPS tunnel and bearer token. The optional system prompt is saved per dataset in the central UI and reused when that dataset is selected.
+The Queue page includes a **Secure Remote Captioning** job view for image datasets. It starts a local UI caption job that streams one image at a time to a selected remote worker's UI, where the worker calls its local Ollama server. The dataset is not bundled or stored on the remote worker, and prompt/system-prompt/image/caption payloads are encrypted at the application layer in addition to the worker's HTTPS tunnel and bearer token. The optional system prompt is saved per dataset in the central UI and reused when that dataset is selected.
 
 On the remote worker, run the UI with `AI_TOOLKIT_AUTH` and Cloudflared as above, and keep Ollama bound to localhost:
 

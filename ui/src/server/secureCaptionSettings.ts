@@ -60,3 +60,15 @@ export async function setSecureCaptionSystemPrompt(datasetName: string, systemPr
   await db.settings.upsert(key, prompt);
   return prompt;
 }
+
+export async function renameSecureCaptionSystemPrompt(oldDatasetName: string, newDatasetName: string) {
+  const oldKey = secureCaptionSystemPromptSettingKey(oldDatasetName);
+  const newKey = secureCaptionSystemPromptSettingKey(newDatasetName);
+  if (oldKey === newKey) return;
+
+  const existing = await db.settings.get(oldKey);
+  if (!existing) return;
+
+  await db.settings.upsert(newKey, existing.value);
+  await db.settings.delete(oldKey);
+}

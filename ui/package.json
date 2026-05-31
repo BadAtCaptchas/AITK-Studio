@@ -15,6 +15,7 @@
     "test:remote": "tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs",
     "test:basic": "tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs",
     "test:dataset-combine": "tsc -p tsconfig.worker.json && node --test scripts/datasetCombine.test.mjs",
+    "test:dataset-rename": "tsc -p tsconfig.worker.json && node --test scripts/datasetRename.test.mjs",
     "test:folder-import": "tsc -p tsconfig.worker.json && node --test scripts/folderImport.test.mjs",
     "test:encrypted-dataset-secrets": "tsc -p tsconfig.worker.json && node --test scripts/encryptedDatasetSecrets.test.mjs scripts/encryptedDatasets.test.mjs",
     "test:secure-caption": "tsc -p tsconfig.worker.json && node --test scripts/secureCaptionCrypto.test.mjs scripts/ollamaClient.test.mjs scripts/secureRemoteCaptionJobs.test.mjs scripts/remoteCaptionJobs.test.mjs scripts/remoteCaptionResults.test.mjs",

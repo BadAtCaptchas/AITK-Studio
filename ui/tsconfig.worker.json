@@ -29,6 +29,7 @@
         "src/server/cloudflared.ts",
         "src/server/secureCaptionCrypto.ts",
         "src/server/ollama.ts",
+        "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
         "src/server/trainingAdvisor.ts"
     ]

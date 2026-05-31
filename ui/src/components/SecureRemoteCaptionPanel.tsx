@@ -58,6 +58,7 @@ export default function SecureRemoteCaptionPanel() {
   const [recaption, setRecaption] = useState(false);
   const [maxRes, setMaxRes] = useState(768);
   const [maxNewTokens, setMaxNewTokens] = useState(180);
+  const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'starting' | 'success' | 'error'>('idle');
   const [submitError, setSubmitError] = useState('');
   const [startedJobId, setStartedJobId] = useState<string | null>(null);
@@ -148,6 +149,10 @@ export default function SecureRemoteCaptionPanel() {
   }, [datasetName, datasets]);
 
   useEffect(() => {
+    setAllowDurableEncryptedResume(false);
+  }, [datasetName]);
+
+  useEffect(() => {
     if (workerID) {
       void loadModels(workerID);
     }
@@ -205,7 +210,7 @@ export default function SecureRemoteCaptionPanel() {
           name: 'Secure Remote Ollama Caption',
           process: [
             {
-              type: 'SecureRemoteOllamaCaptioner',
+              type: 'OllamaCaptioner',
               sqlite_db_path: './aitk_db.db',
               device: 'cpu',
               caption: {
@@ -221,7 +226,6 @@ export default function SecureRemoteCaptionPanel() {
                 caption_prompt: captionPrompt,
                 max_res: maxRes,
                 max_new_tokens: maxNewTokens,
-                remote_worker_id: workerID,
                 system_prompt: savedSystemPrompt,
               },
             },
@@ -231,7 +235,7 @@ export default function SecureRemoteCaptionPanel() {
       const saved = await apiClient
         .post('/api/jobs', {
           name: jobName,
-          worker_id: 'local',
+          worker_id: workerID,
           gpu_ids: '0',
           job_config: jobConfig,
           job_type: 'caption',
@@ -245,6 +249,7 @@ export default function SecureRemoteCaptionPanel() {
       await startJob(
         saved.id,
         rememberedKey ? [{ datasetPath, keyB64: rememberedKey }] : undefined,
+        { durableEncryptedDatasetKeys: selectedDataset?.encrypted ? allowDurableEncryptedResume : false },
       );
       setStartedJobId(saved.id);
       setSubmitStatus('success');
@@ -262,6 +267,7 @@ export default function SecureRemoteCaptionPanel() {
     submitStatus !== 'starting' &&
     systemPromptStatus !== 'loading' &&
     systemPromptStatus !== 'saving' &&
+    (!selectedDataset?.encrypted || allowDurableEncryptedResume) &&
     !isLoading;
 
   return (
@@ -373,8 +379,15 @@ export default function SecureRemoteCaptionPanel() {
         </div>
 
         {selectedDataset?.encrypted && (
-          <div className="rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
-            Encrypted datasets must be unlocked in this browser before starting, unless the password can be entered at start.
+          <div className="space-y-2 rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+            <div>
+              Encrypted remote captioning needs a durable wrapped key so the worker can continue while this server is offline.
+            </div>
+            <Checkbox
+              label="Allow durable encrypted resume"
+              checked={allowDurableEncryptedResume}
+              onChange={setAllowDurableEncryptedResume}
+            />
           </div>
         )}
 

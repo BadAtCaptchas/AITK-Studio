@@ -36,8 +36,20 @@ class SecureRemoteOllamaCaptionerExtension(Extension):
         return SecureRemoteOllamaCaptioner
 
 
+class OllamaCaptionerExtension(Extension):
+    uid = "OllamaCaptioner"
+    name = "Ollama Captioner"
+
+    @classmethod
+    def get_process(cls):
+        from .OllamaCaptioner import OllamaCaptioner
+
+        return OllamaCaptioner
+
+
 AI_TOOLKIT_EXTENSIONS = [
     AceStepCaptionerExtension,
+    OllamaCaptionerExtension,
     Qwen3VLCaptionerExtension,
     SecureRemoteOllamaCaptionerExtension,
 ]

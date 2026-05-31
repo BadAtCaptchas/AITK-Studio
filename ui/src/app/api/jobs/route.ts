@@ -11,6 +11,7 @@ import {
   syncRemoteJob,
   syncRemoteJobs,
 } from '@/server/remoteClient';
+import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 import type { Job } from '@/types';
 
 
@@ -87,13 +88,19 @@ export async function GET(request: Request) {
       const job = await db.jobs.findById(id);
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
-        return NextResponse.json(await withHFDownloadProgress(synced));
+        const captionSynced = await syncRemoteCaptionResultForJob(synced);
+        return NextResponse.json(await withHFDownloadProgress(captionSynced));
       }
       const reconciled = await reconcileLocalJobProcess(job);
       return NextResponse.json(reconciled ? await withHFDownloadProgress(reconciled) : reconciled);
     }
     if (job_ref) {
       const job = await db.jobs.findLatestByRef(job_ref);
+      if (job && !isLocalWorker(job.worker_id)) {
+        const synced = await syncRemoteJob(job);
+        const captionSynced = await syncRemoteCaptionResultForJob(synced);
+        return NextResponse.json(await withHFDownloadProgress(captionSynced));
+      }
       const reconciled = await reconcileLocalJobProcess(job);
       return NextResponse.json(reconciled ? await withHFDownloadProgress(reconciled) : reconciled);
     }
@@ -103,8 +110,9 @@ export async function GET(request: Request) {
     const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
       (job): job is Job => job !== null,
     );
+    const resultSyncedJobs = await Promise.all(reconciledJobs.map(job => syncRemoteCaptionResultForJob(job)));
     return NextResponse.json({
-      jobs: await Promise.all(reconciledJobs.map(job => withHFDownloadProgress(job))),
+      jobs: await Promise.all(resultSyncedJobs.map(job => withHFDownloadProgress(job))),
     });
   } catch (error) {
     console.error(error);

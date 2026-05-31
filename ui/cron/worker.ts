@@ -4,6 +4,7 @@ import { startTensorBoard } from '../src/server/tensorboard';
 import { getTrainingFolder } from './paths';
 import { getCloudflaredConfig, startCloudflared } from '../src/server/cloudflared';
 import { purgeLegacyDurableEncryptedDatasetKeys } from '../src/server/encryptedDatasetSecrets';
+import { syncRemoteCaptionResults } from '../src/server/remoteCaptionResults';
 
 const SHUTDOWN_TIMEOUT_MS = 3000;
 
@@ -42,6 +43,7 @@ class CronWorker {
 
   async loop() {
     await processQueue();
+    await syncRemoteCaptionResults();
   }
 
   async stop() {

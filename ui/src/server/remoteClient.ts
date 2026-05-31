@@ -206,10 +206,12 @@ export async function syncRemoteJob(localJob: Job) {
       });
     }
 
+    const latestLocalJob = await db.jobs.findById(localJob.id);
+    const localJobForPatch = latestLocalJob || localJob;
     const name = await resolveRemoteMirrorName(worker, remoteJob, localJob.id);
     const synced = await db.jobs.update(
       localJob.id,
-      remoteJobPatch(remoteJob, worker.id, remoteJob.id, name, localJob),
+      remoteJobPatch(remoteJob, worker.id, remoteJob.id, name, localJobForPatch),
     );
     if (remoteJob.status === 'completed' && !getJobRemoteCaptionState(synced)) {
       await clearDurableEncryptedDatasetKeys(localJob.id).catch(error =>

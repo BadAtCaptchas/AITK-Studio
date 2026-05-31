@@ -7,7 +7,6 @@ import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import type { WorkerNode } from '@/types';
 import { Checkbox } from '@/components/formInputs';
-import SecureRemoteCaptionPanel from '@/components/SecureRemoteCaptionPanel';
 import { Download, Loader2 } from 'lucide-react';
 
 type CloudflaredStatus = {
@@ -269,8 +268,6 @@ export default function Settings() {
         </form>
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <SecureRemoteCaptionPanel />
-
           <section className="rounded-xl border border-gray-800 bg-gray-900 p-4">
             <div className="mb-4 flex items-center justify-between">
               <div>

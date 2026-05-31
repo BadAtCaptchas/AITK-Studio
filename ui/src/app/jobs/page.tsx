@@ -245,6 +245,15 @@ export default function Dashboard() {
             {isImporting ? 'Importing...' : 'Import Training Job'}
           </Button>
         </div>
+        <div className="mr-2">
+          <Link
+            href="/jobs/secure-remote-captioning"
+            className="inline-flex items-center gap-2 rounded-md bg-gray-700 px-3 py-1 text-white hover:bg-gray-600"
+          >
+            <CloudDownload className="h-4 w-4" />
+            Secure Remote Captioning
+          </Link>
+        </div>
         <div>
           <Link href="/jobs/new" className="text-white bg-slate-600 px-3 py-1 rounded-md">
             New Training Job

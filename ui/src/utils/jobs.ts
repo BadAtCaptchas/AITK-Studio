@@ -252,6 +252,12 @@ export const saveJobNow = (jobID: string) => {
   });
 };
 
+export const retryRemoteCaptionResult = (jobID: string) => {
+  return apiClient
+    .post(`/api/jobs/${jobID}/remote-caption-result`)
+    .then(res => res.data as Job);
+};
+
 export const exportTrainingJob = (
   jobID: string,
   includeDatasets: boolean,

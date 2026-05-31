@@ -10,6 +10,10 @@ import {
   uploadBundleToWorker,
 } from '@/server/remoteClient';
 import {
+  dispatchRemoteCaptionJob,
+  isRemoteCaptionDispatchError,
+} from '@/server/remoteCaptionDispatch';
+import {
   getEncryptedDatasetsForJobConfig,
   getKeyForRequiredDataset,
   normalizeEncryptedKeyMap,
@@ -164,6 +168,19 @@ async function handleStart(
           { status: 400 },
         );
       }
+
+      if (job.job_type === 'caption') {
+        const dispatched = await dispatchRemoteCaptionJob({
+          job,
+          jobConfig,
+          worker,
+          encrypted: requiredEncryptedDatasets.length > 0,
+          durableEncryptedDatasetKeys: useDurableEncryptedKeys,
+          encryptedKeysForLaunch,
+        });
+        return NextResponse.json(dispatched);
+      }
+
       let remoteJobId = job.remote_job_id;
 
       if (!remoteJobId) {
@@ -207,7 +224,10 @@ async function handleStart(
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to start remote job';
       await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
-      return NextResponse.json({ error: message }, { status: 502 });
+      return NextResponse.json(
+        { error: message },
+        { status: isRemoteCaptionDispatchError(error) ? error.status : 502 },
+      );
     }
   }
 

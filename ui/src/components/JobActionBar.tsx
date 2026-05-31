@@ -26,6 +26,7 @@ import {
   downloadServerFile,
   downloadJobModelReferences,
   saveJobNow,
+  retryRemoteCaptionResult,
   type TrainingJobCheckpointExportMode,
   type TrainingJobExportProgress,
 } from '@/utils/jobs';
@@ -121,6 +122,14 @@ function getModelDownloadStatusLabel(status: ModelDownloadStatus) {
   return status.warnings[0] || 'No downloadable model references were found.';
 }
 
+function getRemoteCaptionDownloadStatus(job: Job) {
+  try {
+    return JSON.parse(job.job_config)?.config?.remote_caption?.downloadStatus || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function JobActionBar({
   job,
   onRefresh,
@@ -138,11 +147,13 @@ export default function JobActionBar({
   const modelDownloadStatusTimeout = useRef<number | null>(null);
   const exportInFlight = useRef(false);
   const modelDownloadInFlight = useRef(false);
+  const captionResultInFlight = useRef(false);
   const activeExportID = useRef<string | null>(null);
   const cancelExportInFlight = useRef(false);
   const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
   const isDownloadingModels = modelDownloadStatus?.phase === 'downloading';
+  const remoteCaptionDownloadStatus = getRemoteCaptionDownloadStatus(job);
 
   useEffect(() => {
     return () => {
@@ -313,6 +324,20 @@ export default function JobActionBar({
     } catch (error) {
       console.error('Error requesting checkpoint save:', error);
       alert(getApiErrorMessage(error, 'Failed to request a checkpoint save.'));
+    }
+  };
+
+  const handleRetryRemoteCaptionResult = async () => {
+    if (captionResultInFlight.current) return;
+    captionResultInFlight.current = true;
+    try {
+      await retryRemoteCaptionResult(job.id);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error syncing remote caption result:', error);
+      alert(getApiErrorMessage(error, 'Failed to sync remote caption result.'));
+    } finally {
+      captionResultInFlight.current = false;
     }
   };
 
@@ -504,6 +529,17 @@ export default function JobActionBar({
                   <CloudDownload className="w-4 h-4" />
                 )}
                 Download Referenced Models
+              </div>
+            </MenuItem>
+          )}
+          {job.job_type === 'caption' && job.worker_id !== 'local' && (
+            <MenuItem>
+              <div
+                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
+                onClick={() => void handleRetryRemoteCaptionResult()}
+              >
+                <CloudDownload className="w-4 h-4" />
+                {remoteCaptionDownloadStatus === 'failed' ? 'Retry Caption Download' : 'Sync Caption Result'}
               </div>
             </MenuItem>
           )}

@@ -2,7 +2,8 @@ import path from 'path';
 import fs from 'fs/promises';
 import { db, type WorkerNodeRecord } from './db';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
-import type { Job, Queue, GPUApiResponse, CpuInfo } from '@/types';
+import { getJobRemoteCaptionState } from './remoteCaptionJobs';
+import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
 
 export class RemoteClientError extends Error {
   status: number;
@@ -104,8 +105,14 @@ export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string
   return remoteJson<{ jobs: Job[] }>(worker, `/api/jobs${query}`);
 }
 
-function remoteJobPatch(remoteJob: Job, workerId: string, remoteJobId: string, name: string) {
-  return {
+function remoteJobPatch(
+  remoteJob: Job,
+  workerId: string,
+  remoteJobId: string,
+  name: string,
+  existingLocalJob?: Job | null,
+) {
+  const patch = {
     name,
     worker_id: workerId,
     remote_job_id: remoteJobId,
@@ -125,6 +132,14 @@ function remoteJobPatch(remoteJob: Job, workerId: string, remoteJobId: string, n
     remote_sync_at: new Date(),
     remote_error: null,
   };
+
+  if (existingLocalJob && getJobRemoteCaptionState(existingLocalJob)) {
+    patch.name = existingLocalJob.name;
+    patch.job_config = existingLocalJob.job_config;
+    patch.job_ref = existingLocalJob.job_ref;
+  }
+
+  return patch;
 }
 
 async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job, localJobId?: string) {
@@ -144,7 +159,7 @@ async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job,
 async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
   const existing = await db.jobs.findByRemoteId(worker.id, remoteJob.id);
   const name = await resolveRemoteMirrorName(worker, remoteJob, existing?.id);
-  const patch = remoteJobPatch(remoteJob, worker.id, remoteJob.id, name);
+  const patch = remoteJobPatch(remoteJob, worker.id, remoteJob.id, name, existing);
 
   const synced = existing
     ? await db.jobs.update(existing.id, patch)
@@ -169,7 +184,7 @@ async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
         remote_error: patch.remote_error,
       });
 
-  if (remoteJob.status === 'completed') {
+  if (remoteJob.status === 'completed' && !getJobRemoteCaptionState(synced)) {
     await clearDurableEncryptedDatasetKeys(synced.id).catch(error =>
       console.error('Error clearing durable encrypted dataset keys:', error),
     );
@@ -192,8 +207,11 @@ export async function syncRemoteJob(localJob: Job) {
     }
 
     const name = await resolveRemoteMirrorName(worker, remoteJob, localJob.id);
-    const synced = await db.jobs.update(localJob.id, remoteJobPatch(remoteJob, worker.id, remoteJob.id, name));
-    if (remoteJob.status === 'completed') {
+    const synced = await db.jobs.update(
+      localJob.id,
+      remoteJobPatch(remoteJob, worker.id, remoteJob.id, name, localJob),
+    );
+    if (remoteJob.status === 'completed' && !getJobRemoteCaptionState(synced)) {
       await clearDurableEncryptedDatasetKeys(localJob.id).catch(error =>
         console.error('Error clearing durable encrypted dataset keys:', error),
       );
@@ -251,6 +269,26 @@ export async function fetchWorkerHealth(worker: WorkerNodeRecord) {
     ollama?: unknown;
     timestamp: string;
   }>(worker, '/api/remote/health');
+}
+
+export async function uploadDatasetArchiveToWorker(
+  worker: WorkerNodeRecord,
+  zipPath: string,
+  preferredName?: string,
+) {
+  const form = new FormData();
+  const buffer = await fs.readFile(zipPath);
+  const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
+  form.append('file', blob, path.basename(zipPath));
+  if (preferredName) form.append('preferredName', preferredName);
+  return remoteJson<{
+    dataset: { name: string; encrypted: boolean; path?: string };
+    path: string;
+    renamed: boolean;
+  }>(worker, '/api/datasets/import-archive', {
+    method: 'POST',
+    body: form,
+  });
 }
 
 export async function fetchWorkerGpu(worker: WorkerNodeRecord) {

@@ -1,5 +1,4 @@
-import { defaultDatasetsFolder, defaultDataRoot } from '@/paths';
-import { defaultTrainFolder } from '@/paths';
+import { defaultDatasetsFolder, defaultDataRoot, defaultTrainFolder } from '../paths';
 import NodeCache from 'node-cache';
 import { db } from './db';
 

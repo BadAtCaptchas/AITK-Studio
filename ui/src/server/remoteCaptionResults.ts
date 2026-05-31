@@ -153,12 +153,15 @@ async function cleanupRemoteDataset(job: Job, state: RemoteCaptionState) {
   }
 }
 
-export async function syncRemoteCaptionResultForJob(job: Job, options: { force?: boolean } = {}) {
+export async function syncRemoteCaptionResultForJob(
+  job: Job,
+  options: { force?: boolean; retryFailed?: boolean } = {},
+) {
   if (isLocalWorker(job.worker_id) || !job.remote_job_id) return job;
   const state = getJobRemoteCaptionState(job);
   if (!state) return job;
   if (state.downloadStatus === 'merged' && !options.force) return job;
-  if (state.downloadStatus === 'failed' && !options.force) return job;
+  if (state.downloadStatus === 'failed' && !options.force && !options.retryFailed) return job;
   if (isFreshDownloadInProgress(state) && !options.force) return job;
   if (job.status !== 'completed') return job;
   if (!state.remoteDatasetName) return job;
@@ -246,6 +249,7 @@ export async function syncRemoteCaptionResultForJob(job: Job, options: { force?:
       downloadStartedAt: undefined,
       lastError: message,
     }, {
+      info: `Remote caption sync failed: ${message}`,
       remote_error: message,
     });
   } finally {

@@ -56,6 +56,15 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+const DOWNLOAD_STALE_MS = 10 * 60 * 1000;
+
+function isFreshDownloadInProgress(state: RemoteCaptionState) {
+  if (state.downloadStatus !== 'downloading') return false;
+  if (!state.downloadStartedAt) return false;
+  const startedAt = Date.parse(state.downloadStartedAt);
+  return Number.isFinite(startedAt) && Date.now() - startedAt < DOWNLOAD_STALE_MS;
+}
+
 async function writeResponseBodyToFile(response: Response, targetPath: string) {
   if (!response.body) throw new Error('Remote worker returned an empty dataset archive');
   await fsp.mkdir(path.dirname(targetPath), { recursive: true });
@@ -150,6 +159,7 @@ export async function syncRemoteCaptionResultForJob(job: Job, options: { force?:
   if (!state) return job;
   if (state.downloadStatus === 'merged' && !options.force) return job;
   if (state.downloadStatus === 'failed' && !options.force) return job;
+  if (isFreshDownloadInProgress(state) && !options.force) return job;
   if (job.status !== 'completed') return job;
   if (!state.remoteDatasetName) return job;
 
@@ -158,17 +168,22 @@ export async function syncRemoteCaptionResultForJob(job: Job, options: { force?:
   syncs.add(job.id);
 
   const datasetsRoot = await getDatasetsRoot();
-  const workRoot = path.join(datasetsRoot, `.aitk-remote-caption-result-${job.id}`);
-  const zipPath = path.join(workRoot, 'dataset.zip');
-  const extractRoot = path.join(workRoot, 'extract');
+  let workRoot: string | null = null;
   let workingJob = job;
 
   try {
+    const downloadStartedAt = nowIso();
     workingJob = await updateRemoteCaptionState(workingJob, {
       downloadStatus: 'downloading',
       completedAt: state.completedAt || nowIso(),
+      downloadStartedAt,
       lastError: null,
     });
+
+    await fsp.mkdir(datasetsRoot, { recursive: true });
+    workRoot = await fsp.mkdtemp(path.join(datasetsRoot, `.aitk-remote-caption-result-${job.id}-`));
+    const zipPath = path.join(workRoot, 'dataset.zip');
+    const extractRoot = path.join(workRoot, 'extract');
 
     const worker = await getRemoteWorker(workingJob.worker_id);
     const remoteResponse = await remoteFetch(worker, '/api/datasets/export', {
@@ -176,7 +191,6 @@ export async function syncRemoteCaptionResultForJob(job: Job, options: { force?:
       body: JSON.stringify({ datasetName: state.remoteDatasetName }),
       headers: { 'Content-Type': 'application/json' },
     });
-    await fsp.rm(workRoot, { recursive: true, force: true }).catch(() => undefined);
     await writeResponseBodyToFile(remoteResponse, zipPath);
     await extractZipSafely(zipPath, extractRoot);
 
@@ -204,6 +218,7 @@ export async function syncRemoteCaptionResultForJob(job: Job, options: { force?:
         downloadStatus: 'merged',
         downloadedAt: mergedAt,
         mergedAt,
+        downloadStartedAt: undefined,
         cleanupError,
         lastError: null,
       },
@@ -221,15 +236,23 @@ export async function syncRemoteCaptionResultForJob(job: Job, options: { force?:
     return updated;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Remote caption result download failed';
+    const latest = await db.jobs.findById(workingJob.id).catch(() => null);
+    const latestState = latest ? getJobRemoteCaptionState(latest) : null;
+    if (latest && latestState?.downloadStatus === 'merged') {
+      return latest;
+    }
     return updateRemoteCaptionState(workingJob, {
       downloadStatus: 'failed',
+      downloadStartedAt: undefined,
       lastError: message,
     }, {
       remote_error: message,
     });
   } finally {
     syncs.delete(job.id);
-    await fsp.rm(workRoot, { recursive: true, force: true }).catch(() => undefined);
+    if (workRoot) {
+      await fsp.rm(workRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }
 

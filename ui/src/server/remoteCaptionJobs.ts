@@ -26,6 +26,7 @@ export type RemoteCaptionState = {
   recaption: boolean;
   dispatchedAt?: string;
   completedAt?: string;
+  downloadStartedAt?: string;
   downloadedAt?: string;
   mergedAt?: string;
   importedFallbackPath?: string;

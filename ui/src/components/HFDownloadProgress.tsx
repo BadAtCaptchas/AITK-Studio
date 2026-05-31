@@ -71,7 +71,7 @@ export function HFDownloadProgressBand({ progress }: { progress: HFDownloadProgr
     <div
       role="status"
       className={classNames(
-        'overflow-hidden rounded-lg border px-4 py-3 shadow-inner',
+        'overflow-hidden border px-4 py-3',
         isFailed
           ? 'border-rose-500/30 bg-rose-950/20'
           : isComplete

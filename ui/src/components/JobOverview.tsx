@@ -18,6 +18,7 @@ import useJobLog from '@/hooks/useJobLog';
 import useJobMetrics from '@/hooks/useJobMetrics';
 import useJobDownloadProgress from '@/hooks/useJobDownloadProgress';
 import { HFDownloadProgressBand } from '@/components/HFDownloadProgress';
+import { PageNotice, ProgressBar, StatusBadge } from '@/components/OperatorPrimitives';
 
 interface JobOverviewProps {
   job: Job;
@@ -61,7 +62,7 @@ function phaseStatusText(summary: TrainingPhaseSummary) {
 
 function TrainingPhaseOverview({ summary }: { summary: TrainingPhaseSummary }) {
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-950/50 px-4 py-3 space-y-2">
+    <div className="space-y-2 border border-gray-800 bg-gray-950/50 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <Layers className="w-5 h-5 text-cyan-400 shrink-0" />
@@ -83,9 +84,7 @@ function TrainingPhaseOverview({ summary }: { summary: TrainingPhaseSummary }) {
       </div>
 
       {summary.progress !== null && (
-        <div className="w-full bg-gray-800 rounded-full h-1.5">
-          <div className="h-1.5 rounded-full bg-cyan-500 transition-all" style={{ width: `${summary.progress}%` }} />
-        </div>
+        <ProgressBar value={summary.progress} />
       )}
     </div>
   );
@@ -180,48 +179,31 @@ export default function JobOverview({ job }: JobOverviewProps) {
     }
   }, [log, isScrolledToBottom]);
 
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'running':
-        return 'bg-emerald-500/10 text-emerald-500';
-      case 'stopping':
-        return 'bg-amber-500/10 text-amber-500';
-      case 'stopped':
-        return 'bg-gray-500/10 text-gray-400';
-      case 'completed':
-        return 'bg-blue-500/10 text-blue-500';
-      case 'error':
-        return 'bg-rose-500/10 text-rose-500';
-      default:
-        return 'bg-gray-500/10 text-gray-400';
-    }
-  };
-
   let status = job.status;
   if (isStopping) {
     status = 'stopping';
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
       {/* Job Information Panel */}
-      <div className="col-span-2 bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800 flex flex-col">
-        <div className="bg-gray-800 px-4 py-3 flex items-center justify-between">
-          <h2 className="text-gray-100">
+      <div className="col-span-2 flex flex-col overflow-hidden border border-gray-800 bg-gray-900/60">
+        <div className="flex items-center justify-between gap-3 border-b border-gray-800 bg-gray-900 px-3 py-2">
+          <h2 className="min-w-0 truncate text-gray-100">
             <Info className="w-5 h-5 mr-2 -mt-1 text-amber-600 dark:text-amber-400 inline-block" /> {job.info}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-none items-center gap-2">
             {jobType === 'train' && <TensorBoardLink compact />}
-            <span className={`px-3 py-1 rounded-full text-sm ${getStatusColor(job.status)}`}>{job.status}</span>
+            <StatusBadge status={status} />
           </div>
         </div>
 
-        <div className="p-4 space-y-6 flex flex-col flex-grow">
+        <div className="flex flex-grow flex-col space-y-4 p-3">
           <HFDownloadProgressBand progress={hfDownloadProgress} />
           {job.remote_error && (
-            <div className="rounded-lg border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+            <PageNotice tone="warning" title="Remote worker reported a problem">
               {job.remote_error}
-            </div>
+            </PageNotice>
           )}
           {jobType === 'train' && <JobAdvisorPanel job={job} />}
 
@@ -235,9 +217,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
                 </span>
               </div>
               {progress !== null && (
-                <div className="w-full bg-gray-800 rounded-full h-2">
-                  <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
-                </div>
+                <ProgressBar value={progress} />
               )}
             </div>
           )}
@@ -254,7 +234,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
             </div>
 
             <div className="flex items-center space-x-4">
-              <Cpu className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+              <Cpu className="w-5 h-5 text-cyan-500 dark:text-cyan-400" />
               <div>
                 <p className="text-xs text-gray-400">Assigned GPUs</p>
                 <p className="text-sm font-medium text-gray-200">
@@ -273,19 +253,17 @@ export default function JobOverview({ job }: JobOverviewProps) {
           </div>
 
           {/* Log - Now using flex-grow to fill remaining space */}
-          <div className="bg-gray-950 rounded-lg p-4 relative flex-grow min-h-60">
+          <div className="relative min-h-60 flex-grow border border-gray-800 bg-gray-950">
             <div
               ref={logRef}
-              className="text-xs text-gray-300 absolute inset-0 p-4 overflow-y-auto"
+              className="absolute inset-0 overflow-y-auto p-3 text-xs text-gray-300"
               onScroll={handleScroll}
             >
               {statusLog === 'loading' && 'Loading log...'}
               {statusLog === 'error' && 'Error loading log'}
               {['success', 'refreshing'].includes(statusLog) && (
                 <div>
-                  {logLines.map((line, index) => {
-                    return <pre key={index}>{line}</pre>;
-                  })}
+                  {logLines.length > 0 ? logLines.map((line, index) => <pre key={index}>{line}</pre>) : 'No log output yet.'}
                 </div>
               )}
             </div>

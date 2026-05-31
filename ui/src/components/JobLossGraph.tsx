@@ -964,7 +964,7 @@ export default function JobLossGraph({ job }: Props) {
                 : 'Waiting for loss points...';
 
   return (
-    <div className="bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800 flex flex-col h-full">
+    <div className="flex h-full flex-col overflow-hidden border border-gray-800 bg-gray-900/60">
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <div className="h-2 w-2 rounded-full bg-blue-400" />
@@ -1067,9 +1067,9 @@ export default function JobLossGraph({ job }: Props) {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-3 min-h-[520px]">
-          <div className="bg-gray-950 rounded-lg border border-gray-800 min-h-[420px] flex flex-col overflow-hidden">
+          <div className="flex min-h-[420px] flex-col overflow-hidden border border-gray-800 bg-gray-950">
             <div className="px-3 py-2 border-b border-gray-800 flex flex-wrap items-center gap-2 justify-between">
-              <div className="inline-flex rounded-md border border-gray-800 bg-gray-900 p-0.5">
+              <div className="inline-flex border border-gray-800 bg-gray-900 p-0.5">
                 <ChartTabButton active={chartTab === 'loss'} onClick={() => setChartTab('loss')} label="Loss" />
                 <ChartTabButton
                   active={chartTab === 'learning_rate'}
@@ -1130,7 +1130,7 @@ export default function JobLossGraph({ job }: Props) {
           </div>
 
           <div className="space-y-3">
-            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+            <div className="border border-gray-800 bg-gray-950 p-3">
               <div className="text-xs text-gray-400 mb-2">Display</div>
               <div className="flex flex-wrap gap-2">
                 <ToggleButton checked={showSmoothed} onClick={() => setShowSmoothed(v => !v)} label="Smooth" />
@@ -1160,7 +1160,7 @@ export default function JobLossGraph({ job }: Props) {
               </div>
             </div>
 
-            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+            <div className="border border-gray-800 bg-gray-950 p-3">
               <div className="text-xs text-gray-400 mb-2">Loss Series</div>
               {lossKeys.length === 0 ? (
                 <div className="text-sm text-gray-500">No loss keys found yet.</div>
@@ -1191,7 +1191,7 @@ export default function JobLossGraph({ job }: Props) {
               )}
             </div>
 
-            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+            <div className="border border-gray-800 bg-gray-950 p-3">
               <div className="text-xs text-gray-400 mb-2">Latest training stats</div>
               <div className="space-y-1.5">
                 <StatRow label="loss final" value={formatNum(latestLossFinal)} />
@@ -1212,7 +1212,7 @@ export default function JobLossGraph({ job }: Props) {
               </div>
             </div>
 
-            <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+            <div className="border border-gray-800 bg-gray-950 p-3">
               <div className="text-xs text-gray-400 mb-2">Current Phase</div>
               <div className="text-sm text-gray-100 truncate">
                 {currentPhase ? currentPhase.name || `Phase ${currentPhase.index + 1}` : 'No phase data'}
@@ -1224,7 +1224,7 @@ export default function JobLossGraph({ job }: Props) {
           </div>
         </div>
 
-        <div className="bg-gray-950 rounded-lg border border-gray-800 p-3">
+        <div className="border border-gray-800 bg-gray-950 p-3">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="text-xs text-gray-400">Events & phase timeline</div>
             <div className="flex items-center gap-3 text-[11px] text-gray-500">
@@ -1288,7 +1288,7 @@ function KpiCard({
     accent === 'emerald' ? 'bg-emerald-500' : accent === 'amber' ? 'bg-amber-500' : accent === 'rose' ? 'bg-rose-500' : 'bg-blue-500';
 
   return (
-    <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 min-w-0">
+    <div className="min-w-0 border border-gray-800 bg-gray-950 p-3">
       <div className="flex items-center gap-2 text-xs text-gray-400">
         {icon}
         <span>{label}</span>
@@ -1349,7 +1349,7 @@ function StatRow({ label, value }: { label: string; value: string }) {
 function HoverReadout({ hover }: { hover: HoverState | null }) {
   if (!hover || hover.items.length === 0) return null;
   return (
-    <div className="absolute top-3 left-3 z-10 rounded-md border border-gray-800 bg-gray-950/92 px-3 py-2 shadow-lg max-w-[260px]">
+    <div className="absolute left-3 top-3 z-10 max-w-[260px] rounded-sm border border-gray-800 bg-gray-950/92 px-3 py-2">
       <div className="text-[11px] text-gray-500 mb-1">step {formatCompact(hover.step)}</div>
       <div className="space-y-1">
         {hover.items.slice(0, 6).map(item => (

@@ -24,6 +24,7 @@ import { getMediaUrl } from '@/utils/media';
 import { startQueue } from '@/utils/queue';
 import type { ModelConfig, SelectOption } from '@/types';
 import { groupedModelOptions, modelArchs, quantizationOptions } from '@/app/jobs/new/options';
+import { PageNotice } from '@/components/OperatorPrimitives';
 
 type GeneratedLora = {
   id: string;
@@ -305,6 +306,7 @@ export default function GeneratePage() {
   const [inlineError, setInlineError] = useState('');
   const [inlineMessage, setInlineMessage] = useState('');
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   useEffect(() => {
     if (isGPUInfoLoaded && gpuIDs === null) {
@@ -479,28 +481,48 @@ export default function GeneratePage() {
     }
   };
 
-  const validateGeneration = (promptItems: PromptImageSettings[], model: GeneratorModelConfig) => {
+  const getGenerationValidationErrors = (promptItems: PromptImageSettings[], model: GeneratorModelConfig) => {
+    const errors: string[] = [];
     if (!isSettingsLoaded || !settings.TRAINING_FOLDER) {
-      alert('Settings are still loading. Please try again.');
-      return false;
+      errors.push('Settings are still loading. Try again after the training folder is available.');
     }
     if (!gpuIDs) {
-      alert('Select a GPU before generating.');
-      return false;
+      errors.push('Select a GPU before generating.');
     }
     if (!model.name_or_path) {
-      alert('Select a base model before generating.');
-      return false;
+      errors.push('Select a base model before generating.');
     }
     if (useLora && !loraPath.trim()) {
-      alert('Select a LoRA or enter a LoRA path.');
-      return false;
+      errors.push('Select a LoRA or enter a LoRA path.');
     }
     if (promptItems.length === 0) {
-      alert('Enter at least one prompt.');
-      return false;
+      errors.push('Enter at least one prompt.');
     }
-    return true;
+    if (!jobName.trim()) {
+      errors.push('Job name is required.');
+    }
+    if (jobName.trim() === '.' || jobName.includes('..') || /[\\/]/.test(jobName)) {
+      errors.push('Job name cannot contain path separators or "..".');
+    }
+    if (!width || width < 64 || width > 4096) {
+      errors.push('Width must be between 64 and 4096.');
+    }
+    if (!height || height < 64 || height > 4096) {
+      errors.push('Height must be between 64 and 4096.');
+    }
+    if (!sampleSteps || sampleSteps < 1 || sampleSteps > 200) {
+      errors.push('Steps must be between 1 and 200.');
+    }
+    if (!numRepeats || numRepeats < 1 || numRepeats > 100) {
+      errors.push('Images per prompt must be between 1 and 100.');
+    }
+    return errors;
+  };
+
+  const validateGeneration = (promptItems: PromptImageSettings[], model: GeneratorModelConfig) => {
+    const errors = getGenerationValidationErrors(promptItems, model);
+    setValidationErrors(errors);
+    return errors.length === 0;
   };
 
   const buildGenerateJobConfig = (
@@ -602,9 +624,9 @@ export default function GeneratePage() {
     } catch (error: any) {
       console.error('Error creating generate job:', error);
       if (error.response?.status === 409) {
-        alert('A job with this name already exists. Choose another name.');
+        setValidationErrors(['A job with this name already exists. Choose another name.']);
       } else {
-        alert('Failed to create generate job.');
+        setValidationErrors([error.response?.data?.error || 'Failed to create generate job.']);
       }
       setStatus('error');
     } finally {
@@ -627,7 +649,7 @@ export default function GeneratePage() {
     if (!validateGeneration(promptItems, model)) return;
     if (!selectedGpuIDs) return;
     if (imageCount !== 1) {
-      alert('Multiple images must be created as a generate job.');
+      setValidationErrors(['Multiple images must be created as a generate job.']);
       return;
     }
 
@@ -686,8 +708,9 @@ export default function GeneratePage() {
   return (
     <>
       <TopBar>
-        <div>
-          <h1 className="text-lg">Generate Images</h1>
+        <div className="flex shrink-0 items-center gap-2">
+          <Wand2 className="h-4 w-4 text-cyan-300" />
+          <h1 className="text-base font-semibold">Generate Images</h1>
         </div>
         <div className="flex-1"></div>
         {gpuList.length > 0 && (
@@ -700,25 +723,36 @@ export default function GeneratePage() {
           </div>
         )}
         <Button
-          className="inline-flex items-center gap-2 rounded-md bg-green-600 px-3 py-1 text-white hover:bg-green-700 disabled:opacity-60"
+          className="operator-button border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900"
           onClick={handleGenerate}
           disabled={isBusy || !isSettingsLoaded || !isGPUInfoLoaded}
+          title={primaryButtonLabel}
+          aria-label={primaryButtonLabel}
         >
           {isBusy ? <Wand2 className="h-4 w-4 animate-pulse" /> : <ImagePlus className="h-4 w-4" />}
-          {primaryButtonLabel}
+          <span className="hidden sm:inline">{primaryButtonLabel}</span>
         </Button>
       </TopBar>
 
       <MainContent>
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
+        {validationErrors.length > 0 && (
+          <PageNotice tone="danger" title="Fix these generation settings" className="mb-4">
+            <ul className="list-disc space-y-1 pl-4">
+              {validationErrors.map((error, index) => (
+                <li key={`${error}-${index}`}>{error}</li>
+              ))}
+            </ul>
+          </PageNotice>
+        )}
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
           <form
-            className="space-y-5 rounded-lg border border-gray-800 bg-gray-900 p-4"
+            className="operator-panel space-y-4 p-3"
             onSubmit={event => {
               event.preventDefault();
               void handleGenerate();
             }}
           >
-            <div className="flex items-center gap-2 border-b border-gray-800 pb-3">
+            <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
               <Wand2 className="h-5 w-5 text-blue-400" />
               <h2 className="font-medium text-gray-100">Prompt</h2>
             </div>
@@ -736,16 +770,16 @@ export default function GeneratePage() {
 
             <TextInput label="Job Name" value={jobName} onChange={setJobName} required />
             <div>
-              <div className="mb-1 mt-2 flex items-center justify-between gap-3">
+              <div className="mb-1 mt-2 flex items-center justify-between gap-2">
                 <label className="block text-xs text-gray-300">Prompts</label>
                 <Button
                   type="button"
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-gray-200 hover:border-gray-500 disabled:opacity-60"
+                  className="operator-button shrink-0 px-2 py-1 text-xs"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isBusy}
                 >
                   <Upload className="h-3.5 w-3.5" />
-                  Import
+                  <span className="hidden sm:inline">Import</span>
                 </Button>
               </div>
               <TextAreaInput value={prompts} onChange={handlePromptTextChange} rows={5} required />
@@ -754,7 +788,7 @@ export default function GeneratePage() {
                   {imageCount} image{imageCount === 1 ? '' : 's'} requested
                 </span>
                 {importSummary && (
-                  <span className="inline-flex items-center gap-1 rounded border border-gray-800 bg-gray-950 px-2 py-1 text-gray-300">
+                  <span className="inline-flex items-center gap-1 border border-gray-800 bg-gray-950 px-2 py-1 text-gray-300">
                     <FileJson className="h-3.5 w-3.5" />
                     {importSummary}
                   </span>
@@ -785,8 +819,8 @@ export default function GeneratePage() {
           </form>
 
           <div className="space-y-6">
-            <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
-              <div className="mb-4 flex items-center gap-2 border-b border-gray-800 pb-3">
+            <div className="operator-panel p-3">
+              <div className="mb-3 flex items-center gap-2 border-b border-gray-800 pb-2">
                 <Layers className="h-5 w-5 text-amber-400" />
                 <h2 className="font-medium text-gray-100">Model</h2>
               </div>
@@ -796,7 +830,7 @@ export default function GeneratePage() {
                   type="button"
                   aria-pressed={!useLora}
                   onClick={() => setUseLora(false)}
-                  className={`rounded-md border px-3 py-2 text-sm ${
+                    className={`border px-3 py-2 text-sm ${
                     !useLora
                       ? 'border-blue-500 bg-blue-500/10 text-gray-100'
                       : 'border-gray-700 bg-gray-950 text-gray-300 hover:border-gray-500'
@@ -808,7 +842,7 @@ export default function GeneratePage() {
                   type="button"
                   aria-pressed={useLora}
                   onClick={() => handleUseLoraChange(true)}
-                  className={`rounded-md border px-3 py-2 text-sm ${
+                    className={`border px-3 py-2 text-sm ${
                     useLora
                       ? 'border-blue-500 bg-blue-500/10 text-gray-100'
                       : 'border-gray-700 bg-gray-950 text-gray-300 hover:border-gray-500'
@@ -829,7 +863,7 @@ export default function GeneratePage() {
                   />
                 )}
                 {useLora && selectedLora && (
-                  <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-xs text-gray-400">
+                  <div className="border border-gray-800 bg-gray-950 px-3 py-2 text-xs text-gray-400">
                     <div className="truncate">{selectedLora.path}</div>
                     <div className="mt-1 flex gap-3">
                       <span>{selectedLora.jobName}</span>
@@ -838,12 +872,12 @@ export default function GeneratePage() {
                   </div>
                 )}
                 {useLora && loraStatus === 'success' && loras.length === 0 && (
-                  <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-400">
+                  <div className="border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-400">
                     No local LoRA checkpoints found.
                   </div>
                 )}
                 {useLora && loraStatus === 'error' && (
-                  <div className="rounded-md border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+                  <div className="border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">
                     Could not load local LoRA checkpoints.
                   </div>
                 )}
@@ -901,7 +935,7 @@ export default function GeneratePage() {
                     />
                   </div>
                   {supportsLayerOffloading && (
-                    <div className="col-span-2 rounded-md border border-gray-800 bg-gray-950 px-3 py-3">
+                    <div className="col-span-2 border border-gray-800 bg-gray-950 px-3 py-3">
                       <Checkbox
                         label="Layer Offloading"
                         checked={Boolean(modelConfig.layer_offloading)}
@@ -942,7 +976,7 @@ export default function GeneratePage() {
                 <div className="flex justify-end pt-2">
                   <Button
                     type="button"
-                    className="inline-flex items-center gap-2 rounded-md bg-green-600 px-3 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-60"
+                    className="operator-button border-emerald-800 bg-emerald-950/60 text-emerald-100 hover:bg-emerald-900"
                     onClick={handleGenerate}
                     disabled={isBusy || !isSettingsLoaded || !isGPUInfoLoaded}
                   >
@@ -953,14 +987,14 @@ export default function GeneratePage() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
-              <div className="mb-4 flex items-center gap-2 border-b border-gray-800 pb-3">
+            <div className="operator-panel p-3">
+              <div className="mb-3 flex items-center gap-2 border-b border-gray-800 pb-2">
                 <ImagePlus className="h-5 w-5 text-green-400" />
                 <h2 className="font-medium text-gray-100">Result</h2>
               </div>
 
               {status === 'generating' && (
-                <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-md border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
+                <div className="flex min-h-64 flex-col items-center justify-center gap-3 border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
                   <div className="flex items-center">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     {cancelRequested ? 'Canceling generation' : 'Generating image'}
@@ -969,7 +1003,7 @@ export default function GeneratePage() {
                     type="button"
                     onClick={cancelInlineGeneration}
                     disabled={cancelRequested}
-                    className="inline-flex items-center gap-2 rounded-md border border-red-800 bg-red-950 px-3 py-1.5 text-xs text-red-100 hover:bg-red-900 disabled:cursor-wait disabled:opacity-60"
+                    className="operator-button border-red-800 bg-red-950 px-3 py-1.5 text-xs text-red-100 hover:bg-red-900 disabled:cursor-wait"
                   >
                     <X className="h-3.5 w-3.5" />
                     {cancelRequested ? 'Canceling...' : 'Cancel'}
@@ -978,7 +1012,7 @@ export default function GeneratePage() {
               )}
 
               {status !== 'generating' && inlineImagePath && (
-                <div className="overflow-hidden rounded-md border border-gray-800 bg-gray-950">
+                <div className="overflow-hidden border border-gray-800 bg-gray-950">
                   <img
                     src={getMediaUrl(inlineImagePath)}
                     alt="Generated image"
@@ -991,25 +1025,25 @@ export default function GeneratePage() {
               )}
 
               {status !== 'generating' && !inlineImagePath && !inlineError && !inlineMessage && (
-                <div className="flex min-h-64 items-center justify-center rounded-md border border-dashed border-gray-800 bg-gray-950 px-4 text-center text-sm text-gray-500">
+                <div className="flex min-h-64 items-center justify-center border border-dashed border-gray-800 bg-gray-950 px-4 text-center text-sm text-gray-500">
                   Single-image generations appear here. Multiple prompts or repeats create a generate job.
                 </div>
               )}
 
               {inlineMessage && status !== 'generating' && (
-                <div className="mt-3 rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                <div className="mt-3 border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
                   {inlineMessage}
                 </div>
               )}
 
               {inlineError && (
-                <div className="mt-3 rounded-md border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+                <div className="mt-3 border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">
                   {inlineError}
                 </div>
               )}
             </div>
 
-            <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+            <div className="operator-panel p-3">
               <h2 className="mb-4 font-medium text-gray-100">Generation Jobs</h2>
               <JobsTable job_type="generate" />
             </div>

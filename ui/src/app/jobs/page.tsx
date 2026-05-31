@@ -5,7 +5,7 @@ import { TopBar, MainContent } from '@/components/layout';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
-import { AlertTriangle, ArrowRight, CheckCircle2, CloudDownload, FileArchive, Loader2, Upload, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, CloudDownload, FileArchive, ListOrdered, Loader2, Plus, Upload, X } from 'lucide-react';
 import { SelectInput } from '@/components/formInputs';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { downloadJobModelReferences, importTrainingJob } from '@/utils/jobs';
@@ -221,8 +221,9 @@ export default function Dashboard() {
   return (
     <>
       <TopBar>
-        <div>
-          <h1 className="text-lg">Queue</h1>
+        <div className="flex shrink-0 items-center gap-2">
+          <ListOrdered className="h-4 w-4 text-cyan-300" />
+          <h1 className="text-base font-semibold">Queue</h1>
         </div>
         <div className="flex-1"></div>
         {gpuList.length > 0 && (
@@ -237,26 +238,36 @@ export default function Dashboard() {
         )}
         <div className="mr-2">
           <Button
-            className="text-white bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-md inline-flex items-center gap-2 disabled:opacity-60"
+            className="operator-button shrink-0 py-1"
             onClick={() => fileInputRef.current?.click()}
             disabled={isImporting}
+            title={isImporting ? 'Importing training job' : 'Import training job'}
+            aria-label={isImporting ? 'Importing training job' : 'Import training job'}
           >
             {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            {isImporting ? 'Importing...' : 'Import Training Job'}
+            <span className="hidden sm:inline">{isImporting ? 'Importing...' : 'Import Training Job'}</span>
           </Button>
         </div>
         <div className="mr-2">
           <Link
             href="/jobs/secure-remote-captioning"
-            className="inline-flex items-center gap-2 rounded-md bg-gray-700 px-3 py-1 text-white hover:bg-gray-600"
+            className="operator-button shrink-0 py-1"
+            title="Secure remote captioning"
+            aria-label="Secure remote captioning"
           >
             <CloudDownload className="h-4 w-4" />
-            Secure Remote Captioning
+            <span className="hidden sm:inline">Secure Remote Captioning</span>
           </Link>
         </div>
         <div>
-          <Link href="/jobs/new" className="text-white bg-slate-600 px-3 py-1 rounded-md">
-            New Training Job
+          <Link
+            href="/jobs/new"
+            className="operator-button shrink-0 border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900"
+            title="New training job"
+            aria-label="New training job"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">New Training Job</span>
           </Link>
         </div>
       </TopBar>
@@ -272,7 +283,7 @@ export default function Dashboard() {
           <section
             role="status"
             aria-live="polite"
-            className="mb-4 overflow-hidden rounded-md border border-gray-700 bg-gray-900 text-gray-100 shadow-sm"
+            className="mb-4 overflow-hidden border border-gray-700 bg-gray-900 text-gray-100"
           >
             <div className="flex items-start gap-3 px-4 py-4">
               <div
@@ -304,7 +315,7 @@ export default function Dashboard() {
                       onClick={() => setImportStatus(null)}
                       title="Dismiss import status"
                       aria-label="Dismiss import status"
-                      className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                    className="operator-icon-button h-7 w-7"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -312,14 +323,14 @@ export default function Dashboard() {
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                  <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded border border-gray-700 bg-gray-950 px-2 py-1">
+                    <span className="inline-flex min-w-0 max-w-full items-center gap-1 border border-gray-700 bg-gray-950 px-2 py-1">
                     <FileArchive className="h-3.5 w-3.5 flex-none" />
                     <span className="truncate">{importStatus.fileName}</span>
                   </span>
-                  <span className="rounded border border-gray-700 bg-gray-950 px-2 py-1">
+                  <span className="border border-gray-700 bg-gray-950 px-2 py-1">
                     {formatBytes(importStatus.fileSize)}
                   </span>
-                  <span className="rounded border border-gray-700 bg-gray-950 px-2 py-1">{importTarget}</span>
+                  <span className="border border-gray-700 bg-gray-950 px-2 py-1">{importTarget}</span>
                 </div>
 
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-800">

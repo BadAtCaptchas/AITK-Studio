@@ -23,6 +23,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import { apiClient } from '@/utils/api';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import type { SelectOption } from '@/types';
+import { PageNotice } from '@/components/OperatorPrimitives';
 import {
   getRememberedEncryptedDatasetKey,
   rememberEncryptedDatasetKey,
@@ -34,6 +35,11 @@ import {
 } from '@/utils/remoteDatasetRefs';
 
 const isDev = process.env.NODE_ENV === 'development';
+
+type ValidationMessage = {
+  level: 'error' | 'warning';
+  message: string;
+};
 
 export default function TrainingForm() {
   const router = useRouter();
@@ -53,6 +59,7 @@ export default function TrainingForm() {
 
   const [jobConfig, setJobConfig] = useNestedState<JobConfig>(objectCopy(migrateJobConfig(defaultJobConfig)));
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [validationMessages, setValidationMessages] = useState<ValidationMessage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportConfig = () => {
@@ -266,8 +273,99 @@ export default function TrainingForm() {
     return nextConfig;
   };
 
+  const validateJobBeforeSave = (rawConfig: JobConfig): ValidationMessage[] => {
+    const messages: ValidationMessage[] = [];
+    const name = rawConfig.config?.name?.trim() || '';
+    const processConfig = rawConfig.config?.process?.[0];
+    const trainConfig = processConfig?.train;
+    const modelConfig = processConfig?.model;
+    const datasetsConfig = processConfig?.datasets || [];
+    const sampleConfig = processConfig?.sample;
+
+    if (!name) {
+      messages.push({ level: 'error', message: 'Training name is required.' });
+    }
+    if (name === '.' || name.includes('..') || /[\\/]/.test(name)) {
+      messages.push({ level: 'error', message: 'Training name cannot contain path separators or "..".' });
+    }
+    if (!workerID) {
+      messages.push({ level: 'error', message: 'Select a worker before creating the job.' });
+    }
+    if (!gpuIDs) {
+      messages.push({ level: 'error', message: 'Select a GPU before creating the job.' });
+    }
+    if (!processConfig) {
+      messages.push({ level: 'error', message: 'Job config must include one process.' });
+      return messages;
+    }
+    if (!modelConfig?.name_or_path?.trim()) {
+      messages.push({ level: 'error', message: 'Select or enter a base model path.' });
+    }
+    if (!datasetsConfig.length) {
+      messages.push({ level: 'error', message: 'Add at least one dataset.' });
+    }
+
+    const unresolvedDatasets = datasetsConfig.filter(dataset => {
+      return !dataset.folder_path || dataset.folder_path === defaultDatasetConfig.folder_path;
+    });
+    if (unresolvedDatasets.length > 0) {
+      messages.push({ level: 'error', message: 'Select a target dataset for every dataset entry.' });
+    }
+
+    datasetsConfig.forEach((dataset, index) => {
+      const datasetOption = datasetOptions.find(option => option.value === dataset.folder_path);
+      if (datasetOption?.encrypted) {
+        const remembered =
+          getRememberedEncryptedDatasetKey(dataset.folder_path) ||
+          (datasetOption.name ? getRememberedEncryptedDatasetKey(datasetOption.name) : null);
+        if (!remembered && !parseRemoteDatasetRef(dataset.folder_path)) {
+          messages.push({
+            level: 'warning',
+            message: `Dataset ${index + 1} is encrypted. Unlock it before starting or resuming this job.`,
+          });
+        }
+      }
+      if (!dataset.is_reg && (!dataset.resolution || dataset.resolution.length === 0)) {
+        messages.push({ level: 'error', message: `Dataset ${index + 1} needs at least one resolution.` });
+      }
+      if ((dataset.num_repeats ?? 1) < 1) {
+        messages.push({ level: 'error', message: `Dataset ${index + 1} repeats must be at least 1.` });
+      }
+    });
+
+    if (!trainConfig?.auto_train && (!trainConfig?.steps || trainConfig.steps < 1)) {
+      messages.push({ level: 'error', message: 'Training steps must be at least 1.' });
+    }
+    if (!trainConfig?.batch_size || trainConfig.batch_size < 1) {
+      messages.push({ level: 'error', message: 'Batch size must be at least 1.' });
+    }
+    if (!trainConfig?.gradient_accumulation || trainConfig.gradient_accumulation < 1) {
+      messages.push({ level: 'error', message: 'Gradient accumulation must be at least 1.' });
+    }
+    if (trainConfig?.lr == null || trainConfig.lr < 0) {
+      messages.push({ level: 'error', message: 'Learning rate must be zero or greater.' });
+    }
+
+    const samplingDisabled = trainConfig?.disable_sampling === true;
+    const samplePrompts = sampleConfig?.samples || [];
+    if (!samplingDisabled && samplePrompts.length === 0) {
+      messages.push({ level: 'warning', message: 'No sample prompts are configured.' });
+    }
+    if (!samplingDisabled && samplePrompts.some(sample => !sample.prompt?.trim())) {
+      messages.push({ level: 'warning', message: 'One or more sample prompts are blank.' });
+    }
+
+    return messages;
+  };
+
   const saveJob = async () => {
     if (status === 'saving') return;
+    const validation = validateJobBeforeSave(jobConfig);
+    setValidationMessages(validation);
+    if (validation.some(message => message.level === 'error')) {
+      setStatus('idle');
+      return;
+    }
     setStatus('saving');
 
     try {
@@ -281,16 +379,20 @@ export default function TrainingForm() {
         job_config: preparedJobConfig,
       });
       setStatus('success');
+      setValidationMessages([]);
       if (runId) {
         router.push(`/jobs/${runId}`);
       } else {
         router.push(`/jobs/${res.data.id}`);
       }
     } catch (error: any) {
+      setStatus('error');
       if (error.response?.status === 409) {
-        alert('Training name already exists. Please choose a different name.');
+        setValidationMessages([{ level: 'error', message: 'Training name already exists. Choose a different name.' }]);
       } else {
-        alert(error?.response?.data?.error || 'Failed to save job. Please try again.');
+        setValidationMessages([
+          { level: 'error', message: error?.response?.data?.error || 'Failed to save job. Please try again.' },
+        ]);
       }
       console.log('Error saving training:', error);
     } finally {
@@ -305,21 +407,40 @@ export default function TrainingForm() {
     saveJob();
   };
 
+  const validationErrors = validationMessages.filter(message => message.level === 'error');
+  const validationWarnings = validationMessages.filter(message => message.level === 'warning');
+  const validationSummary =
+    validationMessages.length > 0 ? (
+      <PageNotice
+        tone={validationErrors.length > 0 ? 'danger' : 'warning'}
+        title={validationErrors.length > 0 ? 'Fix these issues before saving' : 'Review before saving'}
+      >
+        <ul className="list-disc space-y-1 pl-4">
+          {validationErrors.map((message, index) => (
+            <li key={`error-${index}`}>{message.message}</li>
+          ))}
+          {validationWarnings.map((message, index) => (
+            <li key={`warning-${index}`}>{message.message}</li>
+          ))}
+        </ul>
+      </PageNotice>
+    ) : null;
+
   return (
     <>
       <TopBar>
         <div>
-          <Button className="text-gray-500 dark:text-gray-300 px-3 mt-1" onClick={() => history.back()}>
+          <Button className="operator-icon-button" onClick={() => history.back()} title="Back">
             <FaChevronLeft />
           </Button>
         </div>
-        <div>
-          <h1 className="text-lg">{runId ? 'Edit Training Job' : 'New Training Job'}</h1>
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-semibold">{runId ? 'Edit Training Job' : 'New Training Job'}</h1>
         </div>
         <div className="flex-1"></div>
         {showAdvancedView && (
           <>
-            <div>
+            <div className="min-w-40">
               <SelectInput
                 value={workerID}
                 onChange={value => {
@@ -332,26 +453,26 @@ export default function TrainingForm() {
                 ]}
               />
             </div>
-            <div className="mx-4 bg-gray-200 dark:bg-gray-800 w-1 h-6"></div>
-            <div>
+            <div className="mx-1 h-6 border-r border-gray-800"></div>
+            <div className="min-w-32">
               <SelectInput
                 value={`${gpuIDs}`}
                 onChange={value => setGpuIDs(value)}
                 options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
               />
             </div>
-            <div className="mx-4 bg-gray-200 dark:bg-gray-800 w-1 h-6"></div>
+            <div className="mx-1 h-6 border-r border-gray-800"></div>
             <div>
-              <Button className="text-gray-200 bg-gray-800 px-3 py-1 rounded-md" onClick={handleImportConfig}>
+              <Button className="operator-button py-1" onClick={handleImportConfig}>
                 Import Config
               </Button>
             </div>
-            <div className="mx-4 bg-gray-200 dark:bg-gray-800 w-1 h-6"></div>
+            <div className="mx-1 h-6 border-r border-gray-800"></div>
           </>
         )}
         {!showAdvancedView && (
           <>
-            <div>
+            <div className="min-w-40">
               <SelectInput
                 value={workerID}
                 onChange={value => {
@@ -364,8 +485,8 @@ export default function TrainingForm() {
                 ]}
               />
             </div>
-            <div className="mx-4 bg-gray-200 dark:bg-gray-800 w-1 h-6"></div>
-            <div>
+            <div className="mx-1 h-6 border-r border-gray-800"></div>
+            <div className="min-w-44">
               <SelectInput
                 value={`${jobConfig?.config.process[0].type}`}
                 onChange={value => {
@@ -392,13 +513,13 @@ export default function TrainingForm() {
                 options={jobTypeOptions}
               />
             </div>
-            <div className="mx-4 bg-gray-200 dark:bg-gray-800 w-1 h-6"></div>
+            <div className="mx-1 h-6 border-r border-gray-800"></div>
           </>
         )}
 
         <div className="pr-2">
           <Button
-            className="text-gray-200 bg-gray-800 px-3 py-1 rounded-md"
+            className="operator-button py-1"
             onClick={() => setShowAdvancedView(!showAdvancedView)}
           >
             {showAdvancedView ? 'Show Simple' : 'Show Advanced'}
@@ -406,7 +527,7 @@ export default function TrainingForm() {
         </div>
         <div>
           <Button
-            className="text-white bg-green-600 hover:bg-green-700 px-3 py-1 rounded-md"
+            className="operator-button border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900"
             onClick={() => saveJob()}
             disabled={status === 'saving'}
           >
@@ -425,6 +546,7 @@ export default function TrainingForm() {
 
       {showAdvancedView ? (
         <div className="pt-[48px] absolute top-0 left-0 w-full h-full overflow-auto">
+          {validationSummary && <div className="px-3 pt-3 sm:px-4">{validationSummary}</div>}
           <AdvancedConfigEditor
             config={jobConfig}
             setConfig={setJobConfig}
@@ -443,12 +565,13 @@ export default function TrainingForm() {
         </div>
       ) : (
         <MainContent>
+          {validationSummary && <div className="mb-4">{validationSummary}</div>}
           <div className="mb-6">
             <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} />
           </div>
           <ErrorBoundary
             fallback={
-              <div className="flex items-center justify-center h-64 text-lg text-red-600 font-medium bg-red-100 dark:bg-red-900/20 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg">
+              <div className="flex h-64 items-center justify-center border border-red-300 bg-red-100 text-lg font-medium text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400">
                 Advanced job detected. Please switch to advanced view to continue.
               </div>
             }

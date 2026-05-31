@@ -8,11 +8,12 @@ import { TopBar, MainContent } from '@/components/layout';
 import useJob from '@/hooks/useJob';
 import SampleImages, { SampleImagesMenu } from '@/components/SampleImages';
 import JobOverview from '@/components/JobOverview';
-import { redirect } from 'next/navigation';
 import JobActionBar from '@/components/JobActionBar';
 import JobConfigViewer from '@/components/JobConfigViewer';
 import JobLossGraph from '@/components/JobLossGraph';
 import type { Job } from '@/types';
+import { PageNotice, StatusBadge } from '@/components/OperatorPrimitives';
+import { useRouter } from 'next/navigation';
 
 type PageKey = 'overview' | 'samples' | 'config' | 'loss_log';
 
@@ -56,7 +57,7 @@ const pages: Page[] = [
     value: 'config',
     icon: MdCode,
     component: JobConfigViewer,
-    mainCss: 'pt-[80px] px-0 pb-0',
+    mainCss: 'pt-[88px] px-0 pb-0',
   },
 ];
 
@@ -67,6 +68,7 @@ function shouldPollJob(job: Job | null) {
 
 export default function JobPage({ params }: { params: Promise<{ jobID: string }> }) {
   const usableParams = use(params);
+  const router = useRouter();
   const jobID = usableParams.jobID;
   const [jobReloadInterval, setJobReloadInterval] = useState<number | null>(5000);
   const { job, status, refreshJob } = useJob(jobID, jobReloadInterval);
@@ -81,7 +83,7 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
 
   const jobType = job?.job_type || 'unknown';
 
-  let title = `Job: ${job?.name || 'Loading...'}`;
+  let title = `Job: ${job?.name || (status === 'success' ? 'Not found' : 'Loading...')}`;
   if (jobType === 'caption') {
     title = `Captioning: ${job?.job_ref || 'Loading...'}`;
   } else if (jobType === 'generate') {
@@ -93,13 +95,14 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
       {/* Fixed top bar */}
       <TopBar>
         <div>
-          <Button className="text-gray-500 dark:text-gray-300 px-3 mt-1" onClick={() => redirect('/jobs')}>
+          <Button className="operator-icon-button" onClick={() => router.push('/jobs')} title="Back to queue">
             <FaChevronLeft />
           </Button>
         </div>
-        <div>
-          <h1 className="text-lg">{title}</h1>
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-semibold">{title}</h1>
         </div>
+        {job && <StatusBadge status={job.status} />}
         <div className="flex-1"></div>
         {job && (
           <JobActionBar
@@ -107,15 +110,28 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
             onRefresh={refreshJob}
             hideView
             afterDelete={() => {
-              redirect('/jobs');
+              router.push('/jobs');
             }}
             autoStartQueue={true}
           />
         )}
       </TopBar>
-      <MainContent className={pages.find(page => page.value === pageKey)?.mainCss}>
-        {status === 'loading' && job == null && <p>Loading...</p>}
-        {status === 'error' && job == null && <p>Error fetching job</p>}
+      <MainContent className={job ? pages.find(page => page.value === pageKey)?.mainCss : undefined}>
+        {status === 'loading' && job == null && (
+          <PageNotice tone="neutral" title="Loading job">
+            Fetching job details, status, logs, and metrics.
+          </PageNotice>
+        )}
+        {status === 'error' && job == null && (
+          <PageNotice tone="danger" title="Could not load job">
+            Refresh the queue or check whether this job still exists.
+          </PageNotice>
+        )}
+        {status === 'success' && job == null && (
+          <PageNotice tone="warning" title="Job not found">
+            This job no longer exists or has not been imported into the local queue.
+          </PageNotice>
+        )}
         {job && (
           <>
             {pages.map(page => {
@@ -125,7 +141,8 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
           </>
         )}
       </MainContent>
-      <div className="bg-gray-800 absolute top-12 left-0 w-full h-8 flex items-center px-2 text-sm">
+      {job && (
+      <div className="operator-scrollbar-none absolute left-0 top-12 flex h-9 w-full items-center overflow-x-auto border-b border-gray-800 bg-gray-900 px-2 text-sm">
         {pages.map(page => {
           if (page.jobTypes && !page.jobTypes.includes(jobType)) {
             return null;
@@ -134,7 +151,11 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
             <Button
               key={page.value}
               onClick={() => setPageKey(page.value)}
-              className={`px-4 py-1 h-8 flex items-center gap-1.5 ${page.value === pageKey ? 'bg-gray-300 dark:bg-gray-700 text-white' : ''}`}
+              className={`flex h-8 items-center gap-1.5 border-b-2 px-3 py-1 ${
+                page.value === pageKey
+                  ? 'border-cyan-400 text-cyan-100'
+                  : 'border-transparent text-gray-400 hover:text-gray-100'
+              }`}
             >
               <page.icon className="text-sm" />
               {page.name}
@@ -148,6 +169,7 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
           </>
         )}
       </div>
+      )}
     </>
   );
 }

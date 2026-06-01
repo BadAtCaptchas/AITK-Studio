@@ -155,7 +155,9 @@ chmod +x run_mac.zsh
 
 # OstrisAI-Toolkit Revamped UI
 
-<img src="https://ostris.com/wp-content/uploads/2025/02/toolkit-ui.jpg" alt="OstrisAI-Toolkit Revamped UI" width="100%">
+<img src="assets/readme-ui-generate.png" alt="OstrisAI-Toolkit Revamped Generate UI" width="100%">
+
+<img src="assets/readme-ui-new-job.png" alt="OstrisAI-Toolkit Revamped New Training Job UI" width="100%">
 
 The OstrisAI-Toolkit Revamped UI is a web interface for OstrisAI-Toolkit Revamped. It allows you to easily start, stop, and monitor jobs. It also allows you to easily train models with a few clicks. It also allows you to set a token for the UI to prevent unauthorized access so it is mostly safe to run on an exposed server.
 

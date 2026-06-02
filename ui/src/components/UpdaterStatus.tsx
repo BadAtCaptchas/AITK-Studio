@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import { UPDATER_STATUS_EVENT, broadcastUpdaterStatus } from '@/utils/updaterEvents';
 
 type RepoUpdateState =
   | 'pending'
@@ -316,6 +317,10 @@ function queuedRestartStatus(status: RepoUpdateStatus | null): RepoUpdateStatus 
   };
 }
 
+function isRepoUpdateStatus(value: unknown): value is RepoUpdateStatus {
+  return Boolean(value && typeof value === 'object' && 'state' in value && 'message' in value);
+}
+
 export default function UpdaterStatus({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<RepoUpdateStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -351,6 +356,7 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
       }
 
       setStatus(nextStatus);
+      broadcastUpdaterStatus(nextStatus);
     } catch (error) {
       console.error('Error fetching updater status:', error);
     } finally {
@@ -368,6 +374,17 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
     );
     return () => window.clearInterval(interval);
   }, [status?.state]);
+
+  useEffect(() => {
+    const handleStatusEvent = (event: Event) => {
+      const nextStatus = (event as CustomEvent<unknown>).detail;
+      if (isRepoUpdateStatus(nextStatus)) {
+        setStatus(nextStatus);
+      }
+    };
+    window.addEventListener(UPDATER_STATUS_EVENT, handleStatusEvent);
+    return () => window.removeEventListener(UPDATER_STATUS_EVENT, handleStatusEvent);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -398,7 +415,9 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
       const requestedAt = new Date(response.data?.request?.requestedAt || Date.now()).getTime();
       applyRequestedAtRef.current = Number.isFinite(requestedAt) ? requestedAt : Date.now();
       applyFeedbackExpiresAtRef.current = Date.now() + APPLY_FEEDBACK_TIMEOUT_MS;
-      setStatus(prev => queuedApplyStatus(prev));
+      const optimisticStatus = queuedApplyStatus(status);
+      setStatus(optimisticStatus);
+      if (optimisticStatus) broadcastUpdaterStatus(optimisticStatus);
       window.setTimeout(() => {
         void refresh();
       }, 1000);
@@ -444,11 +463,13 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
 
         if (nextStatus.state === 'restarting') {
           setStatus(nextStatus);
+          broadcastUpdaterStatus(nextStatus);
           return;
         }
 
         if (nextStatus.state === 'error' && nextStatus.restartError) {
           setStatus(nextStatus);
+          broadcastUpdaterStatus(nextStatus);
           setRestarting(false);
           if (restartPollRef.current) {
             window.clearInterval(restartPollRef.current);
@@ -471,7 +492,9 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
       const requestedAt = new Date(response.data?.request?.requestedAt || Date.now()).getTime();
       const normalizedRequestedAt = Number.isFinite(requestedAt) ? requestedAt : Date.now();
       restartRequestedAtRef.current = normalizedRequestedAt;
-      setStatus(prev => queuedRestartStatus(prev));
+      const optimisticStatus = queuedRestartStatus(status);
+      setStatus(optimisticStatus);
+      if (optimisticStatus) broadcastUpdaterStatus(optimisticStatus);
       startRestartPolling(normalizedRequestedAt);
     } catch (error) {
       console.error('Error requesting updater restart:', error);

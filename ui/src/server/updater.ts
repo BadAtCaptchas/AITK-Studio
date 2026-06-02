@@ -29,6 +29,7 @@ export interface RepoUpdateStatus {
   nextCheckAt?: string | null;
   trigger?: 'startup' | 'schedule' | 'manual' | string;
   updaterPid?: number | null;
+  updaterGeneration?: number | null;
   intervalMinutes?: number | null;
   branch?: string | null;
   upstream?: string | null;
@@ -52,6 +53,7 @@ export interface RepoUpdateStatus {
   localShortCommit?: string | null;
   remoteCommit?: string | null;
   remoteShortCommit?: string | null;
+  recentCommits?: RepoUpdateCommit[];
   ahead?: number | null;
   behind?: number | null;
   canApplyUpdate?: boolean | null;
@@ -67,6 +69,18 @@ export interface RepoUpdateStatus {
   needsRestart?: boolean | null;
   error?: string | null;
   stale?: boolean;
+}
+
+export interface RepoUpdateCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
+  body?: string | null;
+  authorName?: string | null;
+  authorDate?: string | null;
+  committerName?: string | null;
+  committerDate?: string | null;
+  url?: string | null;
 }
 
 const TMP_ROOT = path.join(TOOLKIT_ROOT, '.tmp');

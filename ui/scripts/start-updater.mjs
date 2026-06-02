@@ -15,6 +15,7 @@ const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
 const DESIRED_REPO_FULL_NAME = `${process.env.AITK_UPDATE_REPO_OWNER || DEFAULT_REPO_OWNER}/${
   process.env.AITK_UPDATE_REPO_NAME || DEFAULT_REPO_NAME
 }`;
+const UPDATER_GENERATION = 2;
 
 function isPidRunning(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -97,7 +98,10 @@ async function startUpdater() {
   const existingPid = await readExistingPid();
   if (isPidRunning(existingPid)) {
     const existingStatus = await readExistingStatus();
-    if (!existingStatus || existingStatus.repoFullName === DESIRED_REPO_FULL_NAME) {
+    if (
+      !existingStatus ||
+      (existingStatus.repoFullName === DESIRED_REPO_FULL_NAME && existingStatus.updaterGeneration === UPDATER_GENERATION)
+    ) {
       console.log(`Repo updater already running with pid ${existingPid}.`);
       return;
     }

@@ -7,6 +7,7 @@ export type RepoUpdateState =
   | 'checking'
   | 'up_to_date'
   | 'update_available'
+  | 'unknown_current'
   | 'error'
   | 'unsupported'
   | 'disabled'
@@ -26,9 +27,22 @@ export interface RepoUpdateStatus {
   intervalMinutes?: number | null;
   branch?: string | null;
   upstream?: string | null;
+  installKind?: 'git' | 'archive' | string | null;
+  repoFullName?: string | null;
+  repoWebUrl?: string | null;
+  downloadUrl?: string | null;
+  latestVersion?: string | null;
+  latestReleaseUrl?: string | null;
+  latestReleasePublishedAt?: string | null;
   remote?: string | null;
   remoteWebUrl?: string | null;
+  remoteCommitDate?: string | null;
+  sourceRemote?: string | null;
+  sourceRemoteWebUrl?: string | null;
+  sourceRemoteMatchesCanonical?: boolean | null;
   compareUrl?: string | null;
+  compareMode?: 'commit' | 'version' | 'none' | string | null;
+  localVersion?: string | null;
   localCommit?: string | null;
   localShortCommit?: string | null;
   remoteCommit?: string | null;

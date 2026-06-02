@@ -11,7 +11,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const action = body?.action === 'apply' ? 'apply' : 'check';
+    const action = body?.action === 'apply' || body?.action === 'restart' ? body.action : 'check';
     return NextResponse.json(await requestRepoUpdateCheck(action));
   } catch (error) {
     return NextResponse.json(

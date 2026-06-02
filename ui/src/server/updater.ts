@@ -9,6 +9,7 @@ export type RepoUpdateState =
   | 'update_available'
   | 'unknown_current'
   | 'updating'
+  | 'restarting'
   | 'updated'
   | 'update_failed'
   | 'update_blocked'
@@ -62,6 +63,11 @@ export interface RepoUpdateStatus {
   updateCompletedAt?: string | null;
   updateStep?: string | null;
   updateError?: string | null;
+  restartStartedAt?: string | null;
+  restartStep?: string | null;
+  restartPid?: number | null;
+  restartChildPid?: number | null;
+  restartError?: string | null;
   previousLocalCommit?: string | null;
   stashCreated?: boolean | null;
   stashRef?: string | null;
@@ -150,7 +156,7 @@ export async function getRepoUpdateStatus() {
   return normalizeStatus(await readJson(STATUS_PATH));
 }
 
-export type RepoUpdateRequestAction = 'check' | 'apply';
+export type RepoUpdateRequestAction = 'check' | 'apply' | 'restart';
 
 export async function requestRepoUpdateCheck(action: RepoUpdateRequestAction = 'check') {
   const request = {

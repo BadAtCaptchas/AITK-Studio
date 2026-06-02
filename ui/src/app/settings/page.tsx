@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useSettings from '@/hooks/useSettings';
 import useWorkers from '@/hooks/useWorkers';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import type { WorkerNode } from '@/types';
 import { Checkbox } from '@/components/formInputs';
-import { Download, Loader2 } from 'lucide-react';
+import { Download, Loader2, Power, RefreshCw } from 'lucide-react';
 
 type CloudflaredStatus = {
   configured: boolean;
@@ -27,7 +27,56 @@ type CloudflaredStatus = {
   error: string | null;
 };
 
+type WorkerUpdaterState =
+  | 'pending'
+  | 'checking'
+  | 'up_to_date'
+  | 'update_available'
+  | 'unknown_current'
+  | 'updating'
+  | 'restarting'
+  | 'updated'
+  | 'update_failed'
+  | 'update_blocked'
+  | 'update_conflict'
+  | 'error'
+  | 'unsupported'
+  | 'disabled'
+  | 'stopped';
+
+type WorkerUpdaterStatus = {
+  state: WorkerUpdaterState;
+  message: string;
+  checkedAt?: string | null;
+  updatedAt?: string | null;
+  upstream?: string | null;
+  localShortCommit?: string | null;
+  remoteShortCommit?: string | null;
+  ahead?: number | null;
+  behind?: number | null;
+  canApplyUpdate?: boolean | null;
+  applyUpdateUnavailableReason?: string | null;
+  updateStep?: string | null;
+  updateError?: string | null;
+  restartStep?: string | null;
+  restartError?: string | null;
+  needsRestart?: boolean | null;
+  error?: string | null;
+};
+
+type WorkerUpdaterAction = 'idle' | 'checking' | 'updating' | 'restarting';
+
+type WorkerUpdaterUiState = {
+  status?: WorkerUpdaterStatus | null;
+  action?: WorkerUpdaterAction;
+  error?: string | null;
+};
+
 const CLOUDFLARED_AUTO_DOWNLOAD_KEY = 'AITK_CLOUDFLARED_AUTO_DOWNLOAD';
+const WORKER_UPDATER_POLL_MS = 5000;
+const WORKER_UPDATER_WAIT_MS = 2 * 60 * 1000;
+const WORKER_RESTART_GRACE_MS = 8000;
+const WORKER_RESTART_WAIT_MS = 10 * 60 * 1000;
 
 const emptyWorkerForm = {
   id: '',
@@ -36,6 +85,58 @@ const emptyWorkerForm = {
   api_token: '',
   enabled: true,
 };
+
+function formatUpdaterTime(value?: string | null) {
+  if (!value) return 'Not checked yet';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'Last check unknown';
+  return `Checked ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+function plural(value: number, singular: string, pluralLabel = `${singular}s`) {
+  return `${value} ${value === 1 ? singular : pluralLabel}`;
+}
+
+function workerUpdaterLabel(status?: WorkerUpdaterStatus | null, error?: string | null) {
+  if (error) return 'Updater unavailable';
+  if (!status) return 'Updater not checked';
+  if (status.state === 'up_to_date') return 'Up to date';
+  if (status.state === 'update_available') return 'Update available';
+  if (status.state === 'checking') return 'Checking';
+  if (status.state === 'updating') return 'Updating';
+  if (status.state === 'restarting') return 'Restarting';
+  if (status.state === 'updated') return 'Restart required';
+  if (status.state === 'update_blocked') return 'Manual attention needed';
+  if (status.state === 'update_conflict') return 'Local changes need attention';
+  if (status.state === 'update_failed') return 'Update failed';
+  if (status.state === 'unknown_current') return 'Latest on GitHub';
+  if (status.state === 'error') return 'Updater error';
+  return status.message || 'Updater status';
+}
+
+function workerUpdaterDetail(status?: WorkerUpdaterStatus | null, error?: string | null) {
+  if (error) return error;
+  if (!status) return 'Use the refresh action to check this worker.';
+  if (status.state === 'update_available') {
+    const behind = Number(status.behind || 0);
+    if (behind > 0) return `${plural(behind, 'commit')} behind ${status.upstream || 'GitHub'}`;
+  }
+  if (status.state === 'updating') return status.updateStep?.replaceAll('-', ' ') || 'Applying update';
+  if (status.state === 'restarting') return status.restartStep?.replaceAll('-', ' ') || 'Restarting worker';
+  if (status.state === 'updated' || status.needsRestart) return 'Restart the worker to use the update.';
+  if (status.state === 'update_blocked') return status.applyUpdateUnavailableReason || status.message;
+  if (status.state === 'update_failed') return status.updateError || status.error || status.message;
+  if (status.state === 'error') return status.restartError || status.error || status.message;
+  if (status.localShortCommit && status.remoteShortCommit) {
+    return `${status.localShortCommit} -> ${status.remoteShortCommit}`;
+  }
+  return status.message || formatUpdaterTime(status.checkedAt || status.updatedAt);
+}
+
+function workerUpdaterStatusTime(status: WorkerUpdaterStatus) {
+  const time = new Date(status.updatedAt || status.checkedAt || '').getTime();
+  return Number.isFinite(time) ? time : null;
+}
 
 export default function Settings() {
   const { settings, setSettings } = useSettings();
@@ -47,6 +148,137 @@ export default function Settings() {
   const [cloudflaredAction, setCloudflaredAction] = useState<'idle' | 'starting' | 'downloading' | 'error'>('idle');
   const [cloudflaredActionError, setCloudflaredActionError] = useState('');
   const [cloudflaredAutoDownload, setCloudflaredAutoDownload] = useState(true);
+  const [workerUpdater, setWorkerUpdater] = useState<Record<string, WorkerUpdaterUiState>>({});
+  const workerUpdaterPolls = useRef<Record<string, number>>({});
+  const loadedWorkerUpdaterIds = useRef<Set<string>>(new Set());
+
+  const updateWorkerUpdaterState = (
+    workerID: string,
+    patch: WorkerUpdaterUiState | ((current: WorkerUpdaterUiState) => WorkerUpdaterUiState),
+  ) => {
+    setWorkerUpdater(prev => {
+      const current = prev[workerID] || { action: 'idle', status: null, error: null };
+      const next = typeof patch === 'function' ? patch(current) : { ...current, ...patch };
+      return { ...prev, [workerID]: next };
+    });
+  };
+
+  const clearWorkerUpdaterPoll = (workerID: string) => {
+    const interval = workerUpdaterPolls.current[workerID];
+    if (interval) {
+      window.clearInterval(interval);
+      delete workerUpdaterPolls.current[workerID];
+    }
+  };
+
+  const workerUpdaterBusy = (workerID: string) => {
+    const action = workerUpdater[workerID]?.action || 'idle';
+    return action === 'checking' || action === 'updating' || action === 'restarting';
+  };
+
+  const fetchWorkerUpdaterStatus = async (
+    workerID: string,
+    options: { suppressError?: boolean; keepAction?: boolean; minUpdatedAt?: number } = {},
+  ) => {
+    try {
+      const res = await apiClient.get(`/api/workers/${workerID}/updater`);
+      const status = res.data?.status as WorkerUpdaterStatus;
+      const statusTime = workerUpdaterStatusTime(status);
+      if (options.minUpdatedAt && (statusTime == null || statusTime < options.minUpdatedAt)) {
+        updateWorkerUpdaterState(workerID, current => ({
+          ...current,
+          error: null,
+          action: options.keepAction ? current.action || 'idle' : 'idle',
+        }));
+        return status;
+      }
+      updateWorkerUpdaterState(workerID, current => ({
+        ...current,
+        status,
+        error: null,
+        action: options.keepAction ? current.action || 'idle' : 'idle',
+      }));
+      return status;
+    } catch (error: any) {
+      const message = error?.response?.data?.error || 'Remote updater could not be reached.';
+      if (!options.suppressError) {
+        updateWorkerUpdaterState(workerID, current => ({
+          ...current,
+          error: message,
+          action: options.keepAction ? current.action || 'idle' : 'idle',
+        }));
+      }
+      throw error;
+    }
+  };
+
+  const startWorkerUpdaterPolling = (workerID: string, action: WorkerUpdaterAction, requestedAt = Date.now()) => {
+    clearWorkerUpdaterPoll(workerID);
+    workerUpdaterPolls.current[workerID] = window.setInterval(async () => {
+      const elapsed = Date.now() - requestedAt;
+      const waitMs = action === 'restarting' ? WORKER_RESTART_WAIT_MS : WORKER_UPDATER_WAIT_MS;
+
+      if (action === 'restarting' && elapsed < WORKER_RESTART_GRACE_MS) {
+        return;
+      }
+
+      if (elapsed > waitMs) {
+        clearWorkerUpdaterPoll(workerID);
+        updateWorkerUpdaterState(workerID, current => ({ ...current, action: 'idle' }));
+        void fetchWorkerUpdaterStatus(workerID).catch(() => undefined);
+        return;
+      }
+
+      try {
+        const status = await fetchWorkerUpdaterStatus(workerID, {
+          suppressError: action === 'restarting',
+          keepAction: true,
+          minUpdatedAt: requestedAt,
+        });
+        const statusTime = workerUpdaterStatusTime(status);
+        if (statusTime == null || statusTime < requestedAt) {
+          return;
+        }
+        const stillBusy = status.state === 'checking' || status.state === 'updating' || status.state === 'restarting';
+        if (!stillBusy) {
+          clearWorkerUpdaterPoll(workerID);
+          updateWorkerUpdaterState(workerID, current => ({ ...current, action: 'idle' }));
+          refreshWorkers();
+        }
+      } catch {
+        if (action !== 'restarting') {
+          clearWorkerUpdaterPoll(workerID);
+          updateWorkerUpdaterState(workerID, current => ({ ...current, action: 'idle' }));
+        }
+      }
+    }, WORKER_UPDATER_POLL_MS);
+  };
+
+  const requestWorkerUpdaterAction = async (
+    workerID: string,
+    action: 'check' | 'apply' | 'restart',
+    optimisticStatus: WorkerUpdaterStatus,
+    uiAction: WorkerUpdaterAction,
+  ) => {
+    updateWorkerUpdaterState(workerID, current => ({
+      ...current,
+      action: uiAction,
+      status: { ...(current.status || optimisticStatus), ...optimisticStatus },
+      error: null,
+    }));
+
+    try {
+      await apiClient.post(`/api/workers/${workerID}/updater`, { action });
+      startWorkerUpdaterPolling(workerID, uiAction, Date.now());
+    } catch (error: any) {
+      clearWorkerUpdaterPoll(workerID);
+      updateWorkerUpdaterState(workerID, current => ({
+        ...current,
+        action: 'idle',
+        error: error?.response?.data?.error || `Failed to request remote ${action}.`,
+      }));
+    }
+  };
 
   const refreshCloudflared = () => {
     apiClient
@@ -61,6 +293,21 @@ export default function Settings() {
       setCloudflaredAutoDownload(window.localStorage.getItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY) !== 'false');
     }
   }, []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(workerUpdaterPolls.current).forEach(interval => window.clearInterval(interval));
+      workerUpdaterPolls.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
+    workers.forEach(worker => {
+      if (!worker.enabled || loadedWorkerUpdaterIds.current.has(worker.id)) return;
+      loadedWorkerUpdaterIds.current.add(worker.id);
+      void fetchWorkerUpdaterStatus(worker.id, { suppressError: true }).catch(() => undefined);
+    });
+  }, [workers]);
 
   const setAutoDownloadCloudflared = (checked: boolean) => {
     setCloudflaredAutoDownload(checked);
@@ -149,6 +396,47 @@ export default function Settings() {
       console.error('Worker check failed:', error);
     });
     refreshWorkers();
+  };
+
+  const checkWorkerUpdates = async (workerID: string) => {
+    await requestWorkerUpdaterAction(
+      workerID,
+      'check',
+      {
+        state: 'checking',
+        message: 'Checking worker for updates',
+        updateStep: null,
+      },
+      'checking',
+    );
+  };
+
+  const updateRemoteWorker = async (workerID: string) => {
+    await requestWorkerUpdaterAction(
+      workerID,
+      'apply',
+      {
+        state: 'updating',
+        message: 'Update requested',
+        updateStep: 'waiting-for-updater',
+        canApplyUpdate: false,
+      },
+      'updating',
+    );
+  };
+
+  const restartRemoteWorker = async (workerID: string) => {
+    await requestWorkerUpdaterAction(
+      workerID,
+      'restart',
+      {
+        state: 'restarting',
+        message: 'Restart requested',
+        restartStep: 'waiting-for-updater',
+        canApplyUpdate: false,
+      },
+      'restarting',
+    );
   };
 
   const deleteWorker = async (workerID: string) => {
@@ -328,31 +616,111 @@ export default function Settings() {
             </form>
 
             <div className="mt-5 space-y-2">
-              {workers.map(worker => (
-                <div key={worker.id} className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
-                      <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
-                      <div className="mt-1 text-xs text-gray-400">
-                        {worker.last_status}
-                        {worker.last_error ? `: ${worker.last_error}` : ''}
+              {workers.map(worker => {
+                const updater = workerUpdater[worker.id] || {};
+                const updaterStatus = updater.status;
+                const updaterAction = updater.action || 'idle';
+                const updaterBusy = workerUpdaterBusy(worker.id);
+                const canApplyWorkerUpdate = Boolean(
+                  worker.enabled && updaterStatus?.canApplyUpdate && updaterStatus.state === 'update_available',
+                );
+                const restartSuggested = Boolean(updaterStatus?.needsRestart || updaterStatus?.state === 'updated');
+                const updaterLabel =
+                  updaterAction === 'checking'
+                    ? 'Checking'
+                    : updaterAction === 'updating'
+                      ? 'Updating'
+                      : updaterAction === 'restarting'
+                        ? 'Restarting'
+                        : workerUpdaterLabel(updaterStatus, updater.error);
+                const updaterDetail =
+                  updaterAction === 'checking'
+                    ? 'Waiting for worker updater'
+                    : updaterAction === 'updating'
+                      ? 'Waiting for worker update'
+                      : updaterAction === 'restarting'
+                        ? 'Worker may disconnect while it rebuilds'
+                        : workerUpdaterDetail(updaterStatus, updater.error);
+
+                return (
+                  <div key={worker.id} className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
+                        <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
+                        <div className="mt-1 text-xs text-gray-400">
+                          {worker.last_status}
+                          {worker.last_error ? `: ${worker.last_error}` : ''}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button className="rounded bg-gray-800 px-2 py-1 text-xs" onClick={() => checkWorker(worker.id)}>
+                          Health
+                        </button>
+                        <button className="rounded bg-gray-800 px-2 py-1 text-xs" onClick={() => editWorker(worker)}>
+                          Edit
+                        </button>
+                        <button className="rounded bg-red-900 px-2 py-1 text-xs" onClick={() => deleteWorker(worker.id)}>
+                          Delete
+                        </button>
                       </div>
                     </div>
-                    <div className="flex shrink-0 gap-2">
-                      <button className="rounded bg-gray-800 px-2 py-1 text-xs" onClick={() => checkWorker(worker.id)}>
-                        Check
-                      </button>
-                      <button className="rounded bg-gray-800 px-2 py-1 text-xs" onClick={() => editWorker(worker)}>
-                        Edit
-                      </button>
-                      <button className="rounded bg-red-900 px-2 py-1 text-xs" onClick={() => deleteWorker(worker.id)}>
-                        Delete
-                      </button>
+
+                    <div className="mt-3 rounded border border-gray-800 bg-gray-900/70 px-3 py-2">
+                      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-medium text-gray-200">
+                            Updater: {updaterLabel}
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-gray-500">{updaterDetail}</div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => checkWorkerUpdates(worker.id)}
+                            disabled={!worker.enabled || updaterBusy}
+                            className="inline-flex items-center gap-1 rounded bg-gray-800 px-2 py-1 text-xs hover:bg-gray-700 disabled:opacity-50"
+                            title="Check worker updates"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${updaterAction === 'checking' ? 'animate-spin' : ''}`} />
+                            Check
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateRemoteWorker(worker.id)}
+                            disabled={!canApplyWorkerUpdate || updaterBusy}
+                            className="inline-flex items-center gap-1 rounded bg-amber-900/70 px-2 py-1 text-xs text-amber-100 hover:bg-amber-800 disabled:opacity-50"
+                            title={updaterStatus?.applyUpdateUnavailableReason || 'Update worker'}
+                          >
+                            {updaterAction === 'updating' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Download className="h-3.5 w-3.5" />
+                            )}
+                            Update
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => restartRemoteWorker(worker.id)}
+                            disabled={!worker.enabled || updaterBusy}
+                            className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-cyan-800 disabled:opacity-50 ${
+                              restartSuggested ? 'bg-cyan-900/80 text-cyan-100' : 'bg-gray-800 text-gray-200'
+                            }`}
+                            title="Restart worker"
+                          >
+                            {updaterAction === 'restarting' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Power className="h-3.5 w-3.5" />
+                            )}
+                            Restart
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {workers.length === 0 && <div className="text-sm text-gray-500">No remote workers configured.</div>}
             </div>
           </section>

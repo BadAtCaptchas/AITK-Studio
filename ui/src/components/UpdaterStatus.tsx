@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import classNames from 'classnames';
 import {
@@ -11,6 +11,7 @@ import {
   ExternalLink,
   GitBranch,
   Loader2,
+  Power,
   RefreshCw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -23,6 +24,7 @@ type RepoUpdateState =
   | 'update_available'
   | 'unknown_current'
   | 'updating'
+  | 'restarting'
   | 'updated'
   | 'update_failed'
   | 'update_blocked'
@@ -36,6 +38,7 @@ interface RepoUpdateStatus {
   state: RepoUpdateState;
   message: string;
   checkedAt?: string | null;
+  updatedAt?: string | null;
   nextCheckAt?: string | null;
   branch?: string | null;
   upstream?: string | null;
@@ -59,6 +62,11 @@ interface RepoUpdateStatus {
   applyUpdateUnavailableReason?: string | null;
   updateStep?: string | null;
   updateError?: string | null;
+  restartStartedAt?: string | null;
+  restartStep?: string | null;
+  restartPid?: number | null;
+  restartChildPid?: number | null;
+  restartError?: string | null;
   stashRef?: string | null;
   localChangesRestored?: boolean | null;
   needsRestart?: boolean | null;
@@ -107,6 +115,13 @@ const stateMeta: Record<RepoUpdateState, StatusMeta> = {
   },
   updating: {
     label: 'Updating',
+    icon: Loader2,
+    textClass: 'text-cyan-300',
+    subtleClass: 'text-cyan-500/80',
+    active: true,
+  },
+  restarting: {
+    label: 'Restarting',
     icon: Loader2,
     textClass: 'text-cyan-300',
     subtleClass: 'text-cyan-500/80',
@@ -162,6 +177,10 @@ const stateMeta: Record<RepoUpdateState, StatusMeta> = {
   },
 };
 
+const APPLY_FEEDBACK_TIMEOUT_MS = 2 * 60 * 1000;
+const RESTART_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+const RESTART_RELOAD_DELAY_MS = 8000;
+
 function plural(value: number, singular: string, pluralLabel = `${singular}s`) {
   return `${value} ${value === 1 ? singular : pluralLabel}`;
 }
@@ -203,6 +222,10 @@ function getDetail(status: RepoUpdateStatus | null) {
 
   if (status.state === 'updating') {
     return status.updateStep ? status.updateStep.replaceAll('-', ' ') : 'Applying update';
+  }
+
+  if (status.state === 'restarting') {
+    return status.restartStep ? status.restartStep.replaceAll('-', ' ') : 'Restarting app';
   }
 
   if (status.state === 'updated') {
@@ -247,6 +270,8 @@ function getTitle(status: RepoUpdateStatus | null, detail: string) {
   if (status.remoteShortCommit) parts.push(`Remote: ${status.remoteShortCommit}`);
   if (status.applyUpdateUnavailableReason) parts.push(status.applyUpdateUnavailableReason);
   if (status.updateError) parts.push(`Update error: ${status.updateError}`);
+  if (status.restartStep) parts.push(`Restart step: ${status.restartStep.replaceAll('-', ' ')}`);
+  if (status.restartError) parts.push(`Restart error: ${status.restartError}`);
   if (status.stashRef) parts.push(`Local changes stash: ${status.stashRef}`);
   if (status.needsRestart) parts.push('Restart the app to use the update.');
   if (status.sourceRemoteMatchesCanonical === false && status.sourceRemoteWebUrl) {
@@ -258,17 +283,74 @@ function getTitle(status: RepoUpdateStatus | null, detail: string) {
   return parts.filter(Boolean).join('\n');
 }
 
+function getStatusTime(status: RepoUpdateStatus) {
+  const time = new Date(status.updatedAt || status.checkedAt || '').getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function queuedApplyStatus(status: RepoUpdateStatus | null): RepoUpdateStatus | null {
+  if (!status) return status;
+  return {
+    ...status,
+    state: 'updating',
+    message: 'Update requested',
+    updateStep: 'waiting-for-updater',
+    canApplyUpdate: false,
+    updateError: null,
+    error: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function queuedRestartStatus(status: RepoUpdateStatus | null): RepoUpdateStatus | null {
+  if (!status) return status;
+  return {
+    ...status,
+    state: 'restarting',
+    message: 'Restart requested',
+    restartStep: 'waiting-for-updater',
+    canApplyUpdate: false,
+    restartError: null,
+    error: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export default function UpdaterStatus({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<RepoUpdateStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const applyRequestedAtRef = useRef<number | null>(null);
+  const applyFeedbackExpiresAtRef = useRef<number | null>(null);
+  const restartRequestedAtRef = useRef<number | null>(null);
+  const restartPollRef = useRef<number | null>(null);
 
   const refresh = async () => {
     setLoading(true);
     try {
       const res = await apiClient.get('/api/updater');
-      setStatus(res.data);
+      const nextStatus = res.data as RepoUpdateStatus;
+      const applyRequestedAt = applyRequestedAtRef.current;
+
+      if (applyRequestedAt) {
+        const statusTime = getStatusTime(nextStatus);
+        const expiresAt = applyFeedbackExpiresAtRef.current || 0;
+        const staleStatus = statusTime == null || statusTime < applyRequestedAt;
+
+        if (staleStatus && Date.now() < expiresAt) {
+          return;
+        }
+
+        if (nextStatus.state !== 'checking' && nextStatus.state !== 'updating') {
+          applyRequestedAtRef.current = null;
+          applyFeedbackExpiresAtRef.current = null;
+          setApplying(false);
+        }
+      }
+
+      setStatus(nextStatus);
     } catch (error) {
       console.error('Error fetching updater status:', error);
     } finally {
@@ -282,10 +364,18 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
       () => {
         void refresh();
       },
-      status?.state === 'checking' || status?.state === 'updating' ? 10000 : 300000,
+      status?.state === 'checking' || status?.state === 'updating' || status?.state === 'restarting' ? 3000 : 300000,
     );
     return () => window.clearInterval(interval);
   }, [status?.state]);
+
+  useEffect(() => {
+    return () => {
+      if (restartPollRef.current) {
+        window.clearInterval(restartPollRef.current);
+      }
+    };
+  }, []);
 
   const requestCheck = async () => {
     setRequesting(true);
@@ -304,23 +394,100 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
   const requestApplyUpdate = async () => {
     setApplying(true);
     try {
-      await apiClient.post('/api/updater', { action: 'apply' });
+      const response = await apiClient.post('/api/updater', { action: 'apply' });
+      const requestedAt = new Date(response.data?.request?.requestedAt || Date.now()).getTime();
+      applyRequestedAtRef.current = Number.isFinite(requestedAt) ? requestedAt : Date.now();
+      applyFeedbackExpiresAtRef.current = Date.now() + APPLY_FEEDBACK_TIMEOUT_MS;
+      setStatus(prev => queuedApplyStatus(prev));
       window.setTimeout(() => {
         void refresh();
-      }, 750);
+      }, 1000);
+      window.setTimeout(() => {
+        void refresh();
+      }, 4000);
     } catch (error) {
       console.error('Error requesting updater apply:', error);
-    } finally {
+      applyRequestedAtRef.current = null;
+      applyFeedbackExpiresAtRef.current = null;
       setApplying(false);
+    }
+  };
+
+  const startRestartPolling = (requestedAt: number) => {
+    if (restartPollRef.current) {
+      window.clearInterval(restartPollRef.current);
+    }
+
+    restartPollRef.current = window.setInterval(async () => {
+      const elapsed = Date.now() - requestedAt;
+      if (elapsed > RESTART_WAIT_TIMEOUT_MS) {
+        if (restartPollRef.current) {
+          window.clearInterval(restartPollRef.current);
+          restartPollRef.current = null;
+        }
+        setRestarting(false);
+        void refresh();
+        return;
+      }
+
+      if (elapsed < RESTART_RELOAD_DELAY_MS) {
+        return;
+      }
+
+      try {
+        const res = await apiClient.get('/api/updater');
+        const nextStatus = res.data as RepoUpdateStatus;
+        const statusTime = getStatusTime(nextStatus);
+        if (statusTime != null && restartRequestedAtRef.current && statusTime < restartRequestedAtRef.current) {
+          return;
+        }
+
+        if (nextStatus.state === 'restarting') {
+          setStatus(nextStatus);
+          return;
+        }
+
+        if (nextStatus.state === 'error' && nextStatus.restartError) {
+          setStatus(nextStatus);
+          setRestarting(false);
+          if (restartPollRef.current) {
+            window.clearInterval(restartPollRef.current);
+            restartPollRef.current = null;
+          }
+          return;
+        }
+
+        window.location.reload();
+      } catch {
+        // The server is expected to be offline while npm run build_and_start is running.
+      }
+    }, 5000);
+  };
+
+  const requestRestart = async () => {
+    setRestarting(true);
+    try {
+      const response = await apiClient.post('/api/updater', { action: 'restart' });
+      const requestedAt = new Date(response.data?.request?.requestedAt || Date.now()).getTime();
+      const normalizedRequestedAt = Number.isFinite(requestedAt) ? requestedAt : Date.now();
+      restartRequestedAtRef.current = normalizedRequestedAt;
+      setStatus(prev => queuedRestartStatus(prev));
+      startRestartPolling(normalizedRequestedAt);
+    } catch (error) {
+      console.error('Error requesting updater restart:', error);
+      restartRequestedAtRef.current = null;
+      setRestarting(false);
     }
   };
 
   const meta = useMemo(() => stateMeta[status?.state || 'pending'], [status?.state]);
   const detail = getDetail(status);
   const Icon = requesting || loading ? RefreshCw : meta.icon;
-  const spinning = requesting || loading || applying || meta.active;
+  const spinning = requesting || loading || applying || restarting || meta.active;
   const title = getTitle(status, detail);
   const canApplyUpdate = Boolean(status?.canApplyUpdate && status.state === 'update_available');
+  const isRestarting = restarting || status?.state === 'restarting';
+  const canRestart = Boolean(status?.needsRestart || status?.state === 'updated' || isRestarting);
   const repoUrl = status?.repoWebUrl || status?.remoteWebUrl || 'https://github.com/rmcc3/ai-toolkit-revamped';
   const shouldLinkRepo = Boolean(
     status &&
@@ -355,7 +522,7 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
         >
           <RefreshCw className={classNames('h-4 w-4', requesting || loading ? 'animate-spin' : '')} />
         </button>
-        {canApplyUpdate && (
+        {(canApplyUpdate || applying) && (
           <button
             type="button"
             onClick={requestApplyUpdate}
@@ -365,6 +532,18 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
             className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-amber-800/60 text-amber-300 transition-colors hover:bg-amber-950/30 disabled:opacity-50"
           >
             {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          </button>
+        )}
+        {canRestart && (
+          <button
+            type="button"
+            onClick={requestRestart}
+            disabled={isRestarting}
+            title="Restart app"
+            aria-label="Restart app"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-cyan-800/60 text-cyan-300 transition-colors hover:bg-cyan-950/30 disabled:opacity-50"
+          >
+            {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
           </button>
         )}
         {shouldLinkRepo && (
@@ -407,7 +586,7 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
       >
         <RefreshCw className={classNames('h-3.5 w-3.5', requesting || loading ? 'animate-spin' : '')} />
       </button>
-      {canApplyUpdate && (
+      {(canApplyUpdate || applying) && (
         <button
           type="button"
           onClick={requestApplyUpdate}
@@ -417,6 +596,18 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
           className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-sm border border-amber-800/60 text-amber-300 transition-colors hover:bg-amber-950/30 disabled:opacity-50"
         >
           {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        </button>
+      )}
+      {canRestart && (
+        <button
+          type="button"
+          onClick={requestRestart}
+          disabled={isRestarting}
+          title="Restart app"
+          aria-label="Restart app"
+          className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-sm border border-cyan-800/60 text-cyan-300 transition-colors hover:bg-cyan-950/30 disabled:opacity-50"
+        >
+          {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
         </button>
       )}
       {shouldLinkRepo && (

@@ -11,6 +11,7 @@ type RepoUpdateState =
   | 'checking'
   | 'up_to_date'
   | 'update_available'
+  | 'unknown_current'
   | 'error'
   | 'unsupported'
   | 'disabled'
@@ -23,8 +24,17 @@ interface RepoUpdateStatus {
   nextCheckAt?: string | null;
   branch?: string | null;
   upstream?: string | null;
+  installKind?: string | null;
+  repoFullName?: string | null;
+  repoWebUrl?: string | null;
+  downloadUrl?: string | null;
+  latestVersion?: string | null;
+  latestReleaseUrl?: string | null;
   remoteWebUrl?: string | null;
+  sourceRemoteWebUrl?: string | null;
+  sourceRemoteMatchesCanonical?: boolean | null;
   compareUrl?: string | null;
+  localVersion?: string | null;
   localShortCommit?: string | null;
   remoteShortCommit?: string | null;
   ahead?: number | null;
@@ -65,6 +75,12 @@ const stateMeta: Record<RepoUpdateState, StatusMeta> = {
     icon: Download,
     textClass: 'text-amber-300',
     subtleClass: 'text-amber-500/80',
+  },
+  unknown_current: {
+    label: 'Latest on GitHub',
+    icon: GitBranch,
+    textClass: 'text-cyan-300',
+    subtleClass: 'text-gray-500',
   },
   error: {
     label: 'Update check failed',
@@ -116,11 +132,19 @@ function getDetail(status: RepoUpdateStatus | null) {
 
   if (status.state === 'update_available') {
     const behind = Number(status.behind || 0);
-    return behind > 0 ? `${plural(behind, 'commit')} behind` : 'Remote has newer commits';
+    if (behind > 0) return `${plural(behind, 'commit')} behind`;
+    if (status.localVersion && status.latestVersion) return `${status.localVersion} -> ${status.latestVersion}`;
+    return status.latestVersion ? `Latest ${status.latestVersion}` : 'Remote has newer commits';
+  }
+
+  if (status.state === 'unknown_current') {
+    if (status.latestVersion) return `Latest ${status.latestVersion}`;
+    if (status.remoteShortCommit) return `Latest ${status.remoteShortCommit}`;
+    return status.repoFullName || 'GitHub source found';
   }
 
   if (status.state === 'checking') {
-    return status.branch ? `Branch ${status.branch}` : 'Comparing with origin';
+    return status.repoFullName ? `Checking ${status.repoFullName}` : 'Checking GitHub';
   }
 
   if (status.state === 'error') {
@@ -142,8 +166,14 @@ function getTitle(status: RepoUpdateStatus | null, detail: string) {
   const parts = [status.message, detail];
   if (status.branch) parts.push(`Branch: ${status.branch}`);
   if (status.upstream) parts.push(`Upstream: ${status.upstream}`);
+  if (status.repoFullName) parts.push(`Source: ${status.repoFullName}`);
+  if (status.localVersion) parts.push(`Local version: ${status.localVersion}`);
+  if (status.latestVersion) parts.push(`Latest release: ${status.latestVersion}`);
   if (status.localShortCommit) parts.push(`Local: ${status.localShortCommit}`);
   if (status.remoteShortCommit) parts.push(`Remote: ${status.remoteShortCommit}`);
+  if (status.sourceRemoteMatchesCanonical === false && status.sourceRemoteWebUrl) {
+    parts.push(`Local git remote: ${status.sourceRemoteWebUrl}`);
+  }
   return parts.filter(Boolean).join('\n');
 }
 

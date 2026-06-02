@@ -8,7 +8,13 @@ const UI_ROOT = path.resolve(path.dirname(__filename), '..');
 const TOOLKIT_ROOT = path.resolve(UI_ROOT, '..');
 const TMP_ROOT = path.join(TOOLKIT_ROOT, '.tmp');
 const PID_PATH = path.join(TMP_ROOT, 'repo-updater.pid');
+const STATUS_PATH = path.join(TMP_ROOT, 'repo-update-status.json');
 const UPDATER_SCRIPT = path.join(UI_ROOT, 'scripts', 'repo-updater.mjs');
+const DEFAULT_REPO_OWNER = 'rmcc3';
+const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
+const DESIRED_REPO_FULL_NAME = `${process.env.AITK_UPDATE_REPO_OWNER || DEFAULT_REPO_OWNER}/${
+  process.env.AITK_UPDATE_REPO_NAME || DEFAULT_REPO_NAME
+}`;
 
 function isPidRunning(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -29,6 +35,33 @@ async function readExistingPid() {
     return Number(payload?.pid);
   } catch {
     return null;
+  }
+}
+
+async function readExistingStatus() {
+  try {
+    return JSON.parse(await fs.readFile(STATUS_PATH, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function stopExistingUpdater(pid) {
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return;
+  }
+
+  for (let i = 0; i < 10; i += 1) {
+    await sleep(200);
+    if (!isPidRunning(pid)) {
+      return;
+    }
   }
 }
 
@@ -63,8 +96,18 @@ async function writeStartupFailure(error) {
 async function startUpdater() {
   const existingPid = await readExistingPid();
   if (isPidRunning(existingPid)) {
-    console.log(`Repo updater already running with pid ${existingPid}.`);
-    return;
+    const existingStatus = await readExistingStatus();
+    if (!existingStatus || existingStatus.repoFullName === DESIRED_REPO_FULL_NAME) {
+      console.log(`Repo updater already running with pid ${existingPid}.`);
+      return;
+    }
+
+    console.log(`Restarting repo updater for ${DESIRED_REPO_FULL_NAME}.`);
+    await stopExistingUpdater(existingPid);
+    if (isPidRunning(existingPid)) {
+      console.warn(`Repo updater pid ${existingPid} is still running; not starting a duplicate.`);
+      return;
+    }
   }
 
   const child = spawn(process.execPath, [UPDATER_SCRIPT], {

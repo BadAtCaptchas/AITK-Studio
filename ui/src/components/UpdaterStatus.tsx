@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import classNames from 'classnames';
-import { AlertCircle, CheckCircle2, CircleDashed, Download, GitBranch, Loader2, RefreshCw } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  CircleDashed,
+  Download,
+  ExternalLink,
+  GitBranch,
+  Loader2,
+  RefreshCw,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 
@@ -12,6 +21,11 @@ type RepoUpdateState =
   | 'up_to_date'
   | 'update_available'
   | 'unknown_current'
+  | 'updating'
+  | 'updated'
+  | 'update_failed'
+  | 'update_blocked'
+  | 'update_conflict'
   | 'error'
   | 'unsupported'
   | 'disabled'
@@ -39,6 +53,13 @@ interface RepoUpdateStatus {
   remoteShortCommit?: string | null;
   ahead?: number | null;
   behind?: number | null;
+  canApplyUpdate?: boolean | null;
+  applyUpdateUnavailableReason?: string | null;
+  updateStep?: string | null;
+  updateError?: string | null;
+  stashRef?: string | null;
+  localChangesRestored?: boolean | null;
+  needsRestart?: boolean | null;
   error?: string | null;
 }
 
@@ -80,6 +101,37 @@ const stateMeta: Record<RepoUpdateState, StatusMeta> = {
     label: 'Latest on GitHub',
     icon: GitBranch,
     textClass: 'text-cyan-300',
+    subtleClass: 'text-gray-500',
+  },
+  updating: {
+    label: 'Updating',
+    icon: Loader2,
+    textClass: 'text-cyan-300',
+    subtleClass: 'text-cyan-500/80',
+    active: true,
+  },
+  updated: {
+    label: 'Updated',
+    icon: CheckCircle2,
+    textClass: 'text-emerald-300',
+    subtleClass: 'text-emerald-500/80',
+  },
+  update_failed: {
+    label: 'Update failed',
+    icon: AlertCircle,
+    textClass: 'text-rose-300',
+    subtleClass: 'text-gray-500',
+  },
+  update_blocked: {
+    label: 'Manual update needed',
+    icon: GitBranch,
+    textClass: 'text-amber-300',
+    subtleClass: 'text-gray-500',
+  },
+  update_conflict: {
+    label: 'Update needs attention',
+    icon: AlertCircle,
+    textClass: 'text-amber-300',
     subtleClass: 'text-gray-500',
   },
   error: {
@@ -147,6 +199,26 @@ function getDetail(status: RepoUpdateStatus | null) {
     return status.repoFullName ? `Checking ${status.repoFullName}` : 'Checking GitHub';
   }
 
+  if (status.state === 'updating') {
+    return status.updateStep ? status.updateStep.replaceAll('-', ' ') : 'Applying update';
+  }
+
+  if (status.state === 'updated') {
+    return status.needsRestart ? 'Restart required' : formatCheckedAt(status.checkedAt);
+  }
+
+  if (status.state === 'update_blocked') {
+    return status.applyUpdateUnavailableReason || 'Open GitHub';
+  }
+
+  if (status.state === 'update_conflict') {
+    return status.stashRef ? `Saved in ${status.stashRef}` : 'Local changes need attention';
+  }
+
+  if (status.state === 'update_failed') {
+    return status.updateError || status.error || formatCheckedAt(status.checkedAt);
+  }
+
   if (status.state === 'error') {
     return status.error || formatCheckedAt(status.checkedAt);
   }
@@ -171,6 +243,10 @@ function getTitle(status: RepoUpdateStatus | null, detail: string) {
   if (status.latestVersion) parts.push(`Latest release: ${status.latestVersion}`);
   if (status.localShortCommit) parts.push(`Local: ${status.localShortCommit}`);
   if (status.remoteShortCommit) parts.push(`Remote: ${status.remoteShortCommit}`);
+  if (status.applyUpdateUnavailableReason) parts.push(status.applyUpdateUnavailableReason);
+  if (status.updateError) parts.push(`Update error: ${status.updateError}`);
+  if (status.stashRef) parts.push(`Local changes stash: ${status.stashRef}`);
+  if (status.needsRestart) parts.push('Restart the app to use the update.');
   if (status.sourceRemoteMatchesCanonical === false && status.sourceRemoteWebUrl) {
     parts.push(`Local git remote: ${status.sourceRemoteWebUrl}`);
   }
@@ -181,6 +257,7 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
   const [status, setStatus] = useState<RepoUpdateStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [applying, setApplying] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -200,7 +277,7 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
       () => {
         void refresh();
       },
-      status?.state === 'checking' ? 10000 : 300000,
+      status?.state === 'checking' || status?.state === 'updating' ? 10000 : 300000,
     );
     return () => window.clearInterval(interval);
   }, [status?.state]);
@@ -208,7 +285,7 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
   const requestCheck = async () => {
     setRequesting(true);
     try {
-      await apiClient.post('/api/updater');
+      await apiClient.post('/api/updater', { action: 'check' });
       window.setTimeout(() => {
         void refresh();
       }, 750);
@@ -219,43 +296,119 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
     }
   };
 
+  const requestApplyUpdate = async () => {
+    setApplying(true);
+    try {
+      await apiClient.post('/api/updater', { action: 'apply' });
+      window.setTimeout(() => {
+        void refresh();
+      }, 750);
+    } catch (error) {
+      console.error('Error requesting updater apply:', error);
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const meta = useMemo(() => stateMeta[status?.state || 'pending'], [status?.state]);
   const detail = getDetail(status);
   const Icon = requesting || loading ? RefreshCw : meta.icon;
-  const spinning = requesting || loading || meta.active;
+  const spinning = requesting || loading || applying || meta.active;
   const title = getTitle(status, detail);
+  const canApplyUpdate = Boolean(status?.canApplyUpdate && status.state === 'update_available');
+  const repoUrl = status?.repoWebUrl || status?.remoteWebUrl || 'https://github.com/rmcc3/ai-toolkit-revamped';
+  const shouldLinkRepo = Boolean(
+    status &&
+      repoUrl &&
+      !canApplyUpdate &&
+      ['update_available', 'unknown_current', 'update_blocked', 'update_failed', 'update_conflict', 'error'].includes(
+        status.state,
+      ),
+  );
 
   if (compact) {
     return (
-      <button
-        type="button"
-        onClick={requestCheck}
-        title={title}
-        aria-label={meta.label}
-        className={classNames(
-          'inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100',
-          meta.textClass,
+      <span className="inline-flex items-center gap-1">
+        <button
+          type="button"
+          onClick={requestCheck}
+          title={title}
+          aria-label={meta.label}
+          className={classNames(
+            'inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100',
+            meta.textClass,
+          )}
+        >
+          <Icon className={classNames('h-4 w-4', spinning ? 'animate-spin' : '')} />
+        </button>
+        {canApplyUpdate && (
+          <button
+            type="button"
+            onClick={requestApplyUpdate}
+            disabled={applying}
+            title="Apply update"
+            aria-label="Apply update"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-amber-800/60 text-amber-300 transition-colors hover:bg-amber-950/30 disabled:opacity-50"
+          >
+            {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          </button>
         )}
-      >
-        <Icon className={classNames('h-4 w-4', spinning ? 'animate-spin' : '')} />
-      </button>
+        {shouldLinkRepo && (
+          <a
+            href={repoUrl}
+            target="_blank"
+            rel="noreferrer"
+            title="Open update repository"
+            aria-label="Open update repository"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </a>
+        )}
+      </span>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={requestCheck}
-      title={title}
-      aria-label={`${meta.label}. ${detail}`}
-      className="flex w-full min-w-0 items-center gap-2 border-t border-gray-800 px-3 py-2 text-left transition-colors hover:bg-gray-900"
-    >
-      <Icon className={classNames('h-4 w-4 flex-none', meta.textClass, spinning ? 'animate-spin' : '')} />
-      <span className="min-w-0 flex-1">
-        <span className={classNames('block truncate text-[11px] font-medium', meta.textClass)}>{meta.label}</span>
-        <span className={classNames('block truncate text-[10px]', meta.subtleClass)}>{detail}</span>
-      </span>
-      <RefreshCw className="h-3.5 w-3.5 flex-none text-gray-600" />
-    </button>
+    <div className="flex w-full min-w-0 items-center gap-1 border-t border-gray-800 px-2 py-2 transition-colors hover:bg-gray-900">
+      <button
+        type="button"
+        onClick={requestCheck}
+        title={title}
+        aria-label={`${meta.label}. ${detail}`}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      >
+        <Icon className={classNames('h-4 w-4 flex-none', meta.textClass, spinning ? 'animate-spin' : '')} />
+        <span className="min-w-0 flex-1">
+          <span className={classNames('block truncate text-[11px] font-medium', meta.textClass)}>{meta.label}</span>
+          <span className={classNames('block truncate text-[10px]', meta.subtleClass)}>{detail}</span>
+        </span>
+        <RefreshCw className="h-3.5 w-3.5 flex-none text-gray-600" />
+      </button>
+      {canApplyUpdate && (
+        <button
+          type="button"
+          onClick={requestApplyUpdate}
+          disabled={applying}
+          title="Apply update"
+          aria-label="Apply update"
+          className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-sm border border-amber-800/60 text-amber-300 transition-colors hover:bg-amber-950/30 disabled:opacity-50"
+        >
+          {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        </button>
+      )}
+      {shouldLinkRepo && (
+        <a
+          href={repoUrl}
+          target="_blank"
+          rel="noreferrer"
+          title="Open update repository"
+          aria-label="Open update repository"
+          className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-sm border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-950 hover:text-gray-100"
+        >
+          <ExternalLink className="h-4 w-4" />
+        </a>
+      )}
+    </div>
   );
 }

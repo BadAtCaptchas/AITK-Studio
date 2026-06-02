@@ -9,7 +9,7 @@ from toolkit.basic import flush
 from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
-from toolkit.memory_management import MemoryManager
+from toolkit.memory_management import attach_layer_offloading
 
 from transformers import AutoTokenizer, Qwen3ForCausalLM
 from toolkit.models.FakeVAE import FakeVAE
@@ -450,10 +450,13 @@ class ZImageL2PModel(ZImageModel):
             self.model_config.layer_offloading
             and self.model_config.layer_offloading_transformer_percent > 0
         ):
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 transformer,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component="transformer",
+                block_paths=["layers"],
                 ignore_modules=[
                     transformer.x_pad_token,
                     transformer.cap_pad_token,
@@ -478,10 +481,12 @@ class ZImageL2PModel(ZImageModel):
             self.model_config.layer_offloading
             and self.model_config.layer_offloading_text_encoder_percent > 0
         ):
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 text_encoder,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                component="text_encoder",
             )
 
         text_encoder.to(self.device_torch, dtype=dtype)

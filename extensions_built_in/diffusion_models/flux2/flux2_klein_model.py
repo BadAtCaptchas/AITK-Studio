@@ -6,7 +6,7 @@ from transformers import AutoConfig, Qwen3ForCausalLM, Qwen2TokenizerFast
 from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype
 from toolkit.config_modules import ModelConfig
-from toolkit.memory_management.manager import MemoryManager
+from toolkit.memory_management import attach_layer_offloading
 from toolkit.basic import flush
 from toolkit.quantized_cache import quantized_cache_key
 from .flux2_model import Flux2Model
@@ -225,10 +225,12 @@ class Flux2KleinModel(Flux2Model):
             self.model_config.layer_offloading
             and self.model_config.layer_offloading_text_encoder_percent > 0
         ):
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 text_encoder,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                component="text_encoder",
             )
 
     def load_te(self):

@@ -17,6 +17,7 @@ type LoraModelSummary = {
   layer_offloading?: boolean;
   layer_offloading_transformer_percent?: number;
   layer_offloading_text_encoder_percent?: number;
+  layer_offloading_backend?: 'block' | 'legacy';
   model_kwargs?: Record<string, unknown>;
   extras_name_or_path?: string;
   vae_path?: string;
@@ -51,6 +52,7 @@ function getModelSummary(jobConfig: any): LoraModelSummary {
     layer_offloading: model.layer_offloading,
     layer_offloading_transformer_percent: model.layer_offloading_transformer_percent,
     layer_offloading_text_encoder_percent: model.layer_offloading_text_encoder_percent,
+    layer_offloading_backend: model.layer_offloading_backend,
     model_kwargs: model.model_kwargs,
     extras_name_or_path: model.extras_name_or_path,
     vae_path: model.vae_path,

@@ -1,6 +1,7 @@
 import { GroupedSelectOption, JobConfig, SelectOption } from '@/types';
 import { modelArchs, ModelArch } from './options';
 import { objectCopy } from '@/utils/basic';
+import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
 
 const expandDatasetDefaults = (
   defaults: { [key: string]: any },
@@ -45,16 +46,29 @@ export const handleModelArchChange = (
     if ('layer_offloading' in jobConfig.config.process[0].model) {
       const newModel = objectCopy(jobConfig.config.process[0].model);
       delete newModel.layer_offloading;
+      delete newModel.layer_offloading_backend;
       delete newModel.layer_offloading_text_encoder_percent;
       delete newModel.layer_offloading_transformer_percent;
       setJobConfig(newModel, 'config.process[0].model');
     }
   } else {
+    const memoryProfile = getLayerOffloadingMemoryProfile(newArchName);
     // set to false if not set
     if (!('layer_offloading' in jobConfig.config.process[0].model)) {
       setJobConfig(false, 'config.process[0].model.layer_offloading');
-      setJobConfig(1.0, 'config.process[0].model.layer_offloading_text_encoder_percent');
-      setJobConfig(1.0, 'config.process[0].model.layer_offloading_transformer_percent');
+      setJobConfig(memoryProfile.backend, 'config.process[0].model.layer_offloading_backend');
+      setJobConfig(memoryProfile.textEncoderPercent, 'config.process[0].model.layer_offloading_text_encoder_percent');
+      setJobConfig(memoryProfile.transformerPercent, 'config.process[0].model.layer_offloading_transformer_percent');
+    } else {
+      if (!('layer_offloading_backend' in jobConfig.config.process[0].model)) {
+        setJobConfig(memoryProfile.backend, 'config.process[0].model.layer_offloading_backend');
+      }
+      if (!('layer_offloading_text_encoder_percent' in jobConfig.config.process[0].model)) {
+        setJobConfig(memoryProfile.textEncoderPercent, 'config.process[0].model.layer_offloading_text_encoder_percent');
+      }
+      if (!('layer_offloading_transformer_percent' in jobConfig.config.process[0].model)) {
+        setJobConfig(memoryProfile.transformerPercent, 'config.process[0].model.layer_offloading_transformer_percent');
+      }
     }
   }
 

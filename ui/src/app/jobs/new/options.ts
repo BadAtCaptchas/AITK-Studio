@@ -92,7 +92,7 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
     },
     disableSections: ['network.conv'],
-    additionalSections: ['datasets.control_path', 'sample.ctrl_img'],
+    additionalSections: ['datasets.control_path', 'sample.ctrl_img', 'model.layer_offloading'],
   },
   {
     name: 'flex1',

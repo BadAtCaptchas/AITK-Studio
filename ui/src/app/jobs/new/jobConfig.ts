@@ -1,6 +1,7 @@
 'use client';
 import { isMac } from '@/helpers/basic';
 import { defaultSampleConfig } from '@/helpers/defaultSamples';
+import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
 import { JobConfig, SampleConfig, DatasetConfig, SliderConfig } from '@/types';
 
 export const defaultDatasetConfig: DatasetConfig = {
@@ -154,6 +155,13 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
     jobConfig.config.process[0].model.layer_offloading = (jobConfig.config.process[0].model.auto_memory ||
       false) as boolean;
     delete jobConfig.config.process[0].model.auto_memory;
+  }
+
+  if (jobConfig.config.process[0].model.layer_offloading) {
+    const memoryProfile = getLayerOffloadingMemoryProfile(jobConfig.config.process[0].model.arch);
+    jobConfig.config.process[0].model.layer_offloading_backend ??= memoryProfile.backend;
+    jobConfig.config.process[0].model.layer_offloading_transformer_percent ??= memoryProfile.transformerPercent;
+    jobConfig.config.process[0].model.layer_offloading_text_encoder_percent ??= memoryProfile.textEncoderPercent;
   }
 
   if (!('logging' in jobConfig.config.process[0])) {

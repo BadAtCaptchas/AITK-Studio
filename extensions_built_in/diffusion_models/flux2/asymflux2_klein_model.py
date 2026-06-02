@@ -11,7 +11,7 @@ from transformers import Qwen3ForCausalLM
 from toolkit.accelerator import unwrap_model
 from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
-from toolkit.memory_management.manager import MemoryManager
+from toolkit.memory_management import attach_layer_offloading
 from toolkit.prompt_utils import PromptEmbeds
 from toolkit.quantized_cache import quantized_cache_key
 from toolkit.util.quantize import get_qtype, quantize, quantize_model
@@ -198,10 +198,12 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
             self.model_config.layer_offloading
             and self.model_config.layer_offloading_text_encoder_percent > 0
         ):
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 text_encoder,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                component="text_encoder",
             )
 
         tokenizer_from_cache = getattr(text_encoder, "_aitk_loaded_from_quantized_cache", False)
@@ -291,10 +293,13 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
             self.model_config.layer_offloading
             and self.model_config.layer_offloading_transformer_percent > 0
         ):
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 transformer,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component="transformer",
+                block_paths=self.get_transformer_block_names(),
             )
 
         if self.model_config.low_vram:

@@ -138,6 +138,22 @@ model:
 
 The cache is used for `optimum.quanto` qtypes such as `qfloat8`. It is skipped for torchao qtypes and for FLUX.2 transformer loads that use an accuracy recovery adapter.
 
+### Layer offloading
+
+Layer offloading can reduce peak VRAM by keeping part of a supported model in CPU RAM. The default backend is `block`, which offloads deterministic whole transformer/text-encoder blocks and prefetches them back to CUDA as needed. The older per-Linear/Conv offloader remains available as `legacy` for fallback cases.
+
+```yaml
+model:
+  layer_offloading: true
+  layer_offloading_backend: block # block or legacy
+  layer_offloading_transformer_percent: 0.7
+  layer_offloading_text_encoder_percent: 0.5
+```
+
+The percentage values are fractions of whole blocks for the block backend. Lower values are faster; higher values save more VRAM. The UI fills conservative defaults for supported large CUDA models, but manually edited backend and percentage values are preserved.
+
+Block offloading is currently CUDA-first and is intended for LoRA/network training plus standalone generation. For supported architectures, full base-model fine-tuning with `layer_offloading_backend: block` is rejected unless the base transformer/text encoder is frozen; use LoRA training or set `layer_offloading_backend: legacy` instead. `low_vram` is still separate: it unloads broader model components and can be combined with memory-saving workflows, but it is generally slower than block offloading alone.
+
 MacOS:
 
 Experimental support for Silicon Macs is available. I do not have a Mac with enough RAM to fully test this

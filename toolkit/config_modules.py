@@ -232,7 +232,7 @@ class NetworkConfig:
         # for multi stage models
         self.split_multistage_loras = kwargs.get('split_multistage_loras', True)
         
-        # ramtorch, doesn't work yet
+        # Legacy per-module RAM offloading for network modules.
         self.layer_offloading = kwargs.get('layer_offloading', False)
         
         # start from a pretrained lora. `network_weights` is a legacy alias.
@@ -624,6 +624,7 @@ class TrainConfig:
 
 
 ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage']
+LayerOffloadingBackend = Literal['block', 'legacy']
 
 
 class ModelConfig:
@@ -713,6 +714,12 @@ class ModelConfig:
         if self.auto_memory:
             print("auto_memory is deprecated, use layer_offloading instead")
         self.layer_offloading = kwargs.get("layer_offloading", self.auto_memory )
+        self._layer_offloading_backend_explicit = "layer_offloading_backend" in kwargs
+        self.layer_offloading_backend: LayerOffloadingBackend = kwargs.get("layer_offloading_backend", "block")
+        if self.layer_offloading_backend not in {"block", "legacy"}:
+            raise ValueError(
+                f"layer_offloading_backend must be 'block' or 'legacy', got {self.layer_offloading_backend}"
+            )
         if self.layer_offloading and self.qtype == "qfloat8":
             self.qtype = "float8"
         if self.layer_offloading and self.qtype_te == "qfloat8":
@@ -724,7 +731,7 @@ class ModelConfig:
         if torch.backends.mps.is_available() and self.qtype_te == "qfloat8":
             self.qtype_te = "int8"
         
-        # 0 is off and 1.0 is 100% of the layers
+        # 0 is off and 1.0 is 100% of the layers/blocks, depending on backend.
         self.layer_offloading_transformer_percent = kwargs.get("layer_offloading_transformer_percent", 1.0)
         self.layer_offloading_text_encoder_percent = kwargs.get("layer_offloading_text_encoder_percent", 1.0)
 
@@ -1411,6 +1418,8 @@ def validate_configs(
     dataset_configs: List[DatasetConfig],
     network_config: Optional[NetworkConfig] = None,
 ):
+    from toolkit.memory_management.offload import is_block_offload_arch_supported
+
     if model_config.is_flux:
         if save_config.save_format != 'diffusers':
             # make it diffusers
@@ -1426,6 +1435,19 @@ def validate_configs(
         if model_config.assistant_lora_path is not None:
             raise ValueError("Cannot use accuracy recovery adapter and assistant lora at the same time. "
                              "Please set one of them to None.")
+
+    if (
+        network_config is None
+        and getattr(model_config, "layer_offloading", False)
+        and getattr(model_config, "layer_offloading_backend", "block") == "block"
+        and is_block_offload_arch_supported(getattr(model_config, "arch", None))
+        and (train_config.train_unet or train_config.train_text_encoder)
+    ):
+        raise ValueError(
+            "Block layer offloading is not supported for full base-model fine-tuning in this release. "
+            "Use LoRA/network training, freeze the base transformer/text encoder, or set "
+            "model.layer_offloading_backend: legacy."
+        )
 
     if network_config is not None:
         if not train_config.train_unet and not train_config.train_text_encoder:

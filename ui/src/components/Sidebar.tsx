@@ -8,6 +8,7 @@ import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
 import ActiveJobWidget from './ActiveJobWidget';
 import OstrisCloudBalance from './OstrisCloudBalance';
+import UpdaterStatus from './UpdaterStatus';
 
 const Sidebar = () => {
   const pathname = usePathname();
@@ -41,7 +42,8 @@ const Sidebar = () => {
             <span className="text-gray-300">Revamped</span>
           </span>
         </h1>
-        <div className="md:hidden">
+        <div className="flex items-center gap-1 md:hidden">
+          <UpdaterStatus compact />
           <ThemeToggle />
         </div>
       </div>
@@ -113,6 +115,9 @@ const Sidebar = () => {
           </a>
           <ThemeToggle />
         </div>
+      </div>
+      <div className="hidden md:block">
+        <UpdaterStatus />
       </div>
       <div className="hidden bg-gray-900 py-1 text-center text-[10px] text-gray-500 md:block">
         OstrisAI-Toolkit v{process.env.NEXT_PUBLIC_APP_VERSION}

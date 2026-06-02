@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npm run update_db && concurrently -k -n WORKER,UI \"ts-node-dev --project tsconfig.worker.json --respawn --watch cron --transpile-only cron/worker.ts\" \"next dev --turbopack\"",
+    "dev": "npm run update_db && node scripts/start-updater.mjs && concurrently -k -n WORKER,UI \"ts-node-dev --project tsconfig.worker.json --respawn --watch cron --transpile-only cron/worker.ts\" \"next dev --turbopack\"",
     "build": "node scripts/clean-worker.mjs && tsc -p tsconfig.worker.json && next build",
-    "start": "npm run update_db && concurrently -k --restart-tries -1 --restart-after 1000 -n WORKER,UI \"node dist/cron/worker.js\" \"next start --port 8675\"",
+    "start": "npm run update_db && node scripts/start-updater.mjs && concurrently -k --restart-tries -1 --restart-after 1000 -n WORKER,UI \"node dist/cron/worker.js\" \"next start --port 8675\"",
     "build_and_start": "npm install && npm run update_db && npm run build && npm run start",
     "lint": "next lint",
     "update_db": "node scripts/prepare-db.mjs",

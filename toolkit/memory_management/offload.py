@@ -99,15 +99,20 @@ def attach_layer_offloading(
 
     backend = resolve_layer_offloading_backend(model_config, module, device, block_paths)
     if backend == "block":
-        manager = BlockOffloadManager.attach(
-            module=module,
-            device=device,
-            offload_fraction=offload_percent,
-            block_paths=block_paths,
-            ignore_modules=ignore_modules,
-        )
-        module._aitk_layer_offloading_backend = "block"
-        return manager
+        try:
+            manager = BlockOffloadManager.attach(
+                module=module,
+                device=device,
+                offload_fraction=offload_percent,
+                block_paths=block_paths,
+                ignore_modules=ignore_modules,
+            )
+        except ValueError as exc:
+            label = component or "component"
+            print(f"Block layer offloading unavailable for {label}: {exc} Falling back to legacy layer offloading.")
+        else:
+            module._aitk_layer_offloading_backend = "block"
+            return manager
 
     manager = MemoryManager.attach(
         module=module,

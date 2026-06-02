@@ -47,6 +47,31 @@ def _module_tensor_nbytes(module: torch.nn.Module) -> int:
     return total
 
 
+def _tensors_nbytes(tensors: Sequence[torch.Tensor]) -> int:
+    total = 0
+    for tensor in tensors:
+        total += tensor.numel() * tensor.element_size()
+    return total
+
+
+def _is_storage_swap_supported(tensor: torch.Tensor) -> bool:
+    try:
+        data = tensor.data
+        detached = tensor.detach()
+    except Exception:
+        return False
+
+    for view in (data, detached):
+        if type(view) is not torch.Tensor:
+            return False
+        try:
+            if bool(getattr(view, "is_quantized", False)):
+                return False
+        except Exception:
+            return False
+    return True
+
+
 def _get_child(obj: Any, key: str) -> Any:
     if isinstance(obj, dict):
         return obj[key]
@@ -234,6 +259,14 @@ class StaticCudaAllocator:
 
 
 @dataclass
+class _LayerCandidate:
+    name: str
+    module: torch.nn.Module
+    params: list[torch.nn.Parameter]
+    buffers: list[torch.Tensor]
+
+
+@dataclass
 class _ManagedLayer:
     index: int
     name: str
@@ -282,28 +315,28 @@ class BlockOffloadManager:
         self,
         module: torch.nn.Module,
         process_device: torch.device,
-        layers: Sequence[tuple[str, torch.nn.Module]],
+        layers: Sequence[_LayerCandidate],
         strategy: LayerOffloadStrategy,
-        ignore_modules: Optional[Sequence[torch.nn.Module]] = None,
+        skipped_layers: Optional[Sequence[str]] = None,
     ):
         self.module = module
         self.process_device = _normalize_device(process_device)
         self.strategy = strategy
+        self.skipped_layer_names = tuple(skipped_layers or ())
         self.active = self.process_device.type == "cuda" and torch.cuda.is_available()
         self.transfer_stream = None
         if self.active:
             self.transfer_stream = torch.cuda.Stream(device=self.process_device)
 
-        ignored_tensor_ids = self._collect_ignored_tensor_ids(ignore_modules or [])
         self.layers: list[_ManagedLayer] = []
-        for index, (name, layer) in enumerate(layers):
-            params = [param for param in layer.parameters(recurse=True) if id(param) not in ignored_tensor_ids]
-            buffers = [buffer for buffer in layer.buffers(recurse=True) if id(buffer) not in ignored_tensor_ids]
+        for index, candidate in enumerate(layers):
+            params = list(candidate.params)
+            buffers = list(candidate.buffers)
             entry = _ManagedLayer(
                 index=index,
-                name=name,
-                module=layer,
-                original_forward=layer.forward,
+                name=candidate.name,
+                module=candidate.module,
+                original_forward=candidate.module.forward,
                 params=params,
                 buffers=buffers,
                 state="device" if self.active and self._entry_device(entry_params=params, entry_buffers=buffers) == self.process_device else "cpu",
@@ -325,6 +358,35 @@ class BlockOffloadManager:
                 ignored.update(id(param) for param in item.parameters(recurse=True))
                 ignored.update(id(buffer) for buffer in item.buffers(recurse=True))
         return ignored
+
+    @staticmethod
+    def _build_layer_candidates(
+        layers: Sequence[tuple[str, torch.nn.Module]],
+        ignored_tensor_ids: set[int],
+    ) -> tuple[list[_LayerCandidate], list[str]]:
+        candidates: list[_LayerCandidate] = []
+        skipped_layers: list[str] = []
+
+        for name, layer in layers:
+            params = [param for param in layer.parameters(recurse=True) if id(param) not in ignored_tensor_ids]
+            buffers = [buffer for buffer in layer.buffers(recurse=True) if id(buffer) not in ignored_tensor_ids]
+            tensors: list[torch.Tensor] = list(params) + list(buffers)
+            if not tensors:
+                skipped_layers.append(name)
+                continue
+            if any(not _is_storage_swap_supported(tensor) for tensor in tensors):
+                skipped_layers.append(name)
+                continue
+            candidates.append(
+                _LayerCandidate(
+                    name=name,
+                    module=layer,
+                    params=params,
+                    buffers=buffers,
+                )
+            )
+
+        return candidates, skipped_layers
 
     @staticmethod
     def _entry_device(
@@ -353,19 +415,30 @@ class BlockOffloadManager:
             path_label = ", ".join(block_paths or DEFAULT_BLOCK_PATHS)
             raise ValueError(f"Block offloading could not find ordered block layers at: {path_label}")
 
-        strategy = LayerOffloadStrategy.from_layers([layer for _name, layer in layers], offload_fraction)
+        ignored_tensor_ids = cls._collect_ignored_tensor_ids(ignore_modules or [])
+        candidates, skipped_layers = cls._build_layer_candidates(layers, ignored_tensor_ids)
+        if not candidates:
+            raise ValueError(
+                "Block offloading could not find any block layers with storage-swappable tensors. "
+                "This usually means the block weights are quantized tensor subclasses; use legacy "
+                "layer offloading or disable quantization for block offloading."
+            )
+
+        layer_sizes = tuple(_tensors_nbytes(list(candidate.params) + list(candidate.buffers)) for candidate in candidates)
+        strategy = LayerOffloadStrategy(layer_sizes, offload_fraction)
         if not strategy.offloaded_indices:
             raise ValueError("Block offloading was requested with a 0% whole-block offload fraction.")
 
         manager = cls(
             module=module,
             process_device=device,
-            layers=layers,
+            layers=candidates,
             strategy=strategy,
-            ignore_modules=ignore_modules,
+            skipped_layers=skipped_layers,
         )
         module._block_offload_manager = manager
         module._block_offload_original_to = module.to
+        module._aitk_block_offload_skipped_layers = tuple(skipped_layers)
         module.to = manager.memory_managed_to
         manager._patch_layers()
         if manager.active:
@@ -384,6 +457,8 @@ class BlockOffloadManager:
             delattr(self.module, "_block_offload_original_to")
         if hasattr(self.module, "_block_offload_manager"):
             delattr(self.module, "_block_offload_manager")
+        if hasattr(self.module, "_aitk_block_offload_skipped_layers"):
+            delattr(self.module, "_aitk_block_offload_skipped_layers")
 
     def _patch_layers(self):
         for entry in self.layers:

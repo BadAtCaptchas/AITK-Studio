@@ -21,6 +21,40 @@ class TinyBlockModel(torch.nn.Module):
         return x
 
 
+class StorageAliasSensitiveTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, value):
+        return torch.Tensor._make_subclass(cls, value, False)
+
+
+class TensorSubclassBlock(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(
+            StorageAliasSensitiveTensor(torch.randn(4, 4)),
+            requires_grad=False,
+        )
+
+    def forward(self, x):
+        return x
+
+
+class MixedTensorSubclassModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.blocks = torch.nn.ModuleList(
+            [
+                TensorSubclassBlock(),
+                torch.nn.Linear(4, 4),
+            ]
+        )
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return x
+
+
 class LayerOffloadStrategyTest(unittest.TestCase):
     def test_selects_deterministic_whole_block_suffix(self):
         first = LayerOffloadStrategy((10, 10, 10, 10), 0.7)
@@ -92,6 +126,34 @@ class BlockOffloadManagerTest(unittest.TestCase):
                 torch.device("cpu"),
                 offload_fraction=1.0,
                 block_paths=["missing.blocks"],
+            )
+
+    def test_tensor_subclass_blocks_are_left_resident(self):
+        model = MixedTensorSubclassModel()
+        x = torch.randn(2, 4)
+        expected = model(x)
+
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+
+        self.assertEqual([entry.name for entry in manager.layers], ["blocks.1"])
+        self.assertEqual(model._aitk_block_offload_skipped_layers, ("blocks.0",))
+        self.assertTrue(torch.allclose(model(x), expected))
+
+    def test_all_tensor_subclass_blocks_fail_clearly(self):
+        model = torch.nn.Module()
+        model.blocks = torch.nn.ModuleList([TensorSubclassBlock()])
+
+        with self.assertRaisesRegex(ValueError, "storage-swappable tensors"):
+            BlockOffloadManager.attach(
+                model,
+                torch.device("cpu"),
+                offload_fraction=1.0,
+                block_paths=["blocks"],
             )
 
     def test_default_block_backend_falls_back_to_legacy_without_cuda(self):

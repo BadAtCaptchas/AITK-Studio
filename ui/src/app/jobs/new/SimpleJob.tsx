@@ -1569,6 +1569,17 @@ export default function SimpleJob({
                       }}
                     />
                   </div>
+                  <div>
+                    <Checkbox
+                      label="Keep Low VRAM During Samples"
+                      className="pt-1"
+                      checked={jobConfig.config.process[0].sample.keep_low_vram_for_samples || false}
+                      docKey={'sample.keep_low_vram_for_samples'}
+                      onChange={value => {
+                        setJobConfig(value, 'config.process[0].sample.keep_low_vram_for_samples');
+                      }}
+                    />
+                  </div>
                 </FormGroup>
               </div>
             </div>

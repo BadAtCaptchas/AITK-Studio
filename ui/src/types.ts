@@ -504,6 +504,7 @@ export interface SampleConfig {
   walk_seed: boolean;
   guidance_scale: number;
   sample_steps: number;
+  keep_low_vram_for_samples?: boolean;
   num_frames: number;
   fps: number;
 }

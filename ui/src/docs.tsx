@@ -215,6 +215,15 @@ const docs: { [key: string]: ConfigDoc } = {
       </>
     ),
   },
+  'sample.keep_low_vram_for_samples': {
+    title: 'Keep Low VRAM During Samples',
+    description: (
+      <>
+        Leave low VRAM and legacy layer offloading enabled while generating training samples. By default, the trainer
+        temporarily disables those memory-saving modes during samples and restores them afterward.
+      </>
+    ),
+  },
   'model.layer_offloading': {
     title: (
       <>

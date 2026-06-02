@@ -98,6 +98,7 @@ class SampleConfig:
         self.walk_seed = kwargs.get('walk_seed', False)
         self.guidance_scale = kwargs.get('guidance_scale', 7)
         self.sample_steps = kwargs.get('sample_steps', 20)
+        self.keep_low_vram_for_samples = kwargs.get('keep_low_vram_for_samples', False)
         self.network_multiplier = kwargs.get('network_multiplier', 1)
         self.guidance_rescale = kwargs.get('guidance_rescale', 0.0)
         raw_ext = str(kwargs.get('format', 'jpg')).lower().lstrip('.')

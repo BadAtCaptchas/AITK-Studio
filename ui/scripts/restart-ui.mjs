@@ -107,45 +107,6 @@ function run(command, args, options = {}) {
   });
 }
 
-async function terminatePidTree(pid) {
-  if (!isPidRunning(pid)) {
-    return;
-  }
-
-  if (process.platform === 'win32') {
-    await run('taskkill.exe', ['/PID', String(pid), '/T', '/F']);
-    return;
-  }
-
-  try {
-    process.kill(-pid, 'SIGTERM');
-  } catch {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      return;
-    }
-  }
-
-  const deadline = Date.now() + STOP_GRACE_MS;
-  while (Date.now() < deadline) {
-    if (!isPidRunning(pid)) {
-      return;
-    }
-    await sleep(200);
-  }
-
-  try {
-    process.kill(-pid, 'SIGKILL');
-  } catch {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // The process may have already stopped.
-    }
-  }
-}
-
 function normalizeCommandLine(value) {
   return String(value || '').replace(/\\/g, '/').toLowerCase();
 }
@@ -184,16 +145,19 @@ async function listWindowsRuntimePids() {
     const processes = Array.isArray(parsed) ? parsed : [parsed];
     return processes
       .filter(processInfo => Number(processInfo?.ProcessId) !== process.pid)
-      .filter(processInfo => commandBelongsToRuntime(processInfo?.CommandLine))
-      .map(processInfo => Number(processInfo.ProcessId))
-      .filter(pid => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+      .map(processInfo => ({
+        pid: Number(processInfo?.ProcessId),
+        ppid: Number(processInfo?.ParentProcessId),
+        commandLine: String(processInfo?.CommandLine || ''),
+      }))
+      .filter(processInfo => Number.isInteger(processInfo.pid) && processInfo.pid > 0 && processInfo.pid !== process.pid);
   } catch {
     return [];
   }
 }
 
 async function listUnixRuntimePids() {
-  const result = await run('ps', ['-eo', 'pid=,args=']);
+  const result = await run('ps', ['-eo', 'pid=,ppid=,args=']);
   if (result.code !== 0) {
     return [];
   }
@@ -201,18 +165,114 @@ async function listUnixRuntimePids() {
   return result.stdout
     .split(/\r?\n/)
     .map(line => {
-      const match = line.trim().match(/^(\d+)\s+(.+)$/);
-      return match ? { pid: Number(match[1]), commandLine: match[2] } : null;
+      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+      return match ? { pid: Number(match[1]), ppid: Number(match[2]), commandLine: match[3] } : null;
     })
     .filter(Boolean)
-    .filter(processInfo => processInfo.pid !== process.pid)
-    .filter(processInfo => commandBelongsToRuntime(processInfo.commandLine))
-    .map(processInfo => processInfo.pid);
+    .filter(processInfo => processInfo.pid !== process.pid);
 }
 
-async function listRuntimePids() {
-  const pids = process.platform === 'win32' ? await listWindowsRuntimePids() : await listUnixRuntimePids();
-  return [...new Set(pids)].filter(pid => pid !== process.pid);
+async function listProcessInfos() {
+  return process.platform === 'win32' ? await listWindowsRuntimePids() : await listUnixRuntimePids();
+}
+
+function collectDescendantPids(processes, rootPid) {
+  if (!Number.isInteger(rootPid) || rootPid <= 0) {
+    return new Set();
+  }
+
+  const childrenByParent = new Map();
+  for (const processInfo of processes) {
+    if (!Number.isInteger(processInfo.ppid)) continue;
+    const children = childrenByParent.get(processInfo.ppid) || [];
+    children.push(processInfo.pid);
+    childrenByParent.set(processInfo.ppid, children);
+  }
+
+  const descendants = new Set();
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    if (pid !== rootPid) {
+      descendants.add(pid);
+    }
+    for (const childPid of childrenByParent.get(pid) || []) {
+      if (!descendants.has(childPid)) {
+        queue.push(childPid);
+      }
+    }
+  }
+  return descendants;
+}
+
+function collectRuntimePids(processes, runtime) {
+  const runtimeRootPid = Number(runtime?.rootPid);
+  const runtimeLauncherPid = Number(runtime?.launcherPid);
+  const pids = new Set();
+
+  if (Number.isInteger(runtimeRootPid) && runtimeRootPid > 0) {
+    pids.add(runtimeRootPid);
+  }
+
+  if (Number.isInteger(runtimeLauncherPid) && runtimeLauncherPid > 0) {
+    pids.add(runtimeLauncherPid);
+  }
+
+  for (const pid of collectDescendantPids(processes, runtimeRootPid)) {
+    pids.add(pid);
+  }
+
+  for (const pid of collectDescendantPids(processes, runtimeLauncherPid)) {
+    pids.add(pid);
+  }
+
+  for (const processInfo of processes) {
+    if (commandBelongsToRuntime(processInfo.commandLine)) {
+      pids.add(processInfo.pid);
+    }
+  }
+
+  pids.delete(process.pid);
+  return [...pids].filter(pid => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+}
+
+async function terminatePids(pids) {
+  const targets = [...new Set(pids)].filter(pid => isPidRunning(pid));
+  if (targets.length === 0) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    for (const pid of targets) {
+      await run('taskkill.exe', ['/PID', String(pid), '/T', '/F']);
+    }
+    return;
+  }
+
+  for (const pid of targets) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // It may already be gone by the time we signal it.
+    }
+  }
+
+  const deadline = Date.now() + STOP_GRACE_MS;
+  while (Date.now() < deadline) {
+    if (targets.every(pid => !isPidRunning(pid))) {
+      return;
+    }
+    await sleep(200);
+  }
+
+  for (const pid of targets) {
+    if (!isPidRunning(pid)) continue;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // The process may have already stopped.
+    }
+  }
 }
 
 async function stopRunningServer() {
@@ -224,16 +284,24 @@ async function stopRunningServer() {
   });
 
   const runtime = await readJson(RUNTIME_PATH);
-  const rootPid = Number(runtime?.rootPid);
 
-  if (Number.isInteger(rootPid) && rootPid > 0 && rootPid !== process.pid) {
-    await terminatePidTree(rootPid);
-    await sleep(500);
-  }
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const processes = await listProcessInfos();
+    const pids = collectRuntimePids(processes, runtime);
+    if (pids.length === 0) {
+      return;
+    }
 
-  const remainingPids = await listRuntimePids();
-  for (const pid of remainingPids) {
-    await terminatePidTree(pid);
+    await writeStatus({
+      state: 'restarting',
+      message: `Stopping UI server (${pids.length} processes)`,
+      restartStep: 'stopping-server',
+      restartTargetPids: pids,
+      canApplyUpdate: false,
+    });
+
+    await terminatePids(pids);
+    await sleep(700);
   }
 }
 

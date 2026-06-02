@@ -45,6 +45,7 @@ export const defaultSampleConfig: SampleConfig = {
   walk_seed: true,
   guidance_scale: 4,
   sample_steps: 30,
+  keep_low_vram_for_samples: false,
   num_frames: 1,
   fps: 1,
 }
@@ -398,6 +399,7 @@ It's Converging!
   walk_seed: true,
   guidance_scale: 4,
   sample_steps: 30,
+  keep_low_vram_for_samples: false,
   num_frames: 1,
   fps: 1,
 };

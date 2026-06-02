@@ -294,7 +294,16 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # override in subclass
         return generate_image_config_list
 
-    def _generate_sample_images(self, gen_img_config_list: List[GenerateImageConfig], sampler=None):
+    def _generate_sample_images(
+            self,
+            gen_img_config_list: List[GenerateImageConfig],
+            sampler=None,
+            keep_low_vram_for_samples=False,
+    ):
+        if keep_low_vram_for_samples:
+            self.sd.generate_images(gen_img_config_list, sampler=sampler)
+            return
+
         restore_attrs = []
         seen_attrs = set()
 
@@ -437,7 +446,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         
         try:
             # send to be generated
-            self._generate_sample_images(gen_img_config_list, sampler=sample_config.sampler)
+            self._generate_sample_images(
+                gen_img_config_list,
+                sampler=sample_config.sampler,
+                keep_low_vram_for_samples=sample_config.keep_low_vram_for_samples,
+            )
         finally:
             if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
                 self.adapter.is_sampling = False

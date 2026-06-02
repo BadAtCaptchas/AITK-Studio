@@ -55,6 +55,7 @@ interface RepoUpdateStatus {
   repoWebUrl?: string | null;
   downloadUrl?: string | null;
   latestVersion?: string | null;
+  remote?: string | null;
   remoteCommitDate?: string | null;
   sourceRemoteWebUrl?: string | null;
   sourceRemoteMatchesCanonical?: boolean | null;
@@ -186,6 +187,8 @@ export default function UpdatesPage() {
   const StatusIcon = status?.state === 'updating' || status?.state === 'checking' ? Loader2 : status?.state?.includes('fail') || status?.state === 'error' ? AlertCircle : CheckCircle2;
   const repoName = status?.repoFullName || 'rmcc3/ai-toolkit-revamped';
   const isBusy = status?.state === 'checking' || status?.state === 'updating';
+  const recommendedRemote = status?.remote || `${repoUrl.replace(/\.git$/, '')}.git`;
+  const remoteSetUrlCommand = `git remote set-url origin ${recommendedRemote}`;
 
   const facts = useMemo(
     () => [
@@ -252,7 +255,16 @@ export default function UpdatesPage() {
         {status?.sourceRemoteMatchesCanonical === false && status.sourceRemoteWebUrl && (
           <section className="mt-4 border border-amber-900 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
             <div className="font-medium">Local remote differs from update source</div>
-            <div className="mt-1 truncate text-xs text-amber-200/80">{status.sourceRemoteWebUrl}</div>
+            <div className="mt-1 truncate text-xs text-amber-200/80">Current origin: {status.sourceRemoteWebUrl}</div>
+            <div className="mt-2 text-xs text-amber-100/90">
+              Suggested origin: <span className="text-amber-50">{recommendedRemote}</span>
+            </div>
+            <div className="mt-2 overflow-x-auto rounded-sm border border-amber-900/70 bg-gray-950/70 px-2 py-1.5">
+              <code className="whitespace-nowrap text-[11px] text-amber-50">{remoteSetUrlCommand}</code>
+            </div>
+            <div className="mt-2 text-xs text-amber-200/70">
+              Use this if this checkout should receive updates from {repoName}.
+            </div>
           </section>
         )}
 

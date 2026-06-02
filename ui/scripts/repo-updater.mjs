@@ -24,12 +24,14 @@ const REPO_API_BASE = `https://api.github.com/repos/${encodeURIComponent(REPO_OW
 const DEFAULT_INTERVAL_MINUTES = 360;
 const REQUEST_POLL_MS = 5000;
 const GIT_TIMEOUT_MS = 10000;
+const GIT_UPDATE_TIMEOUT_MS = 120000;
 const HTTP_TIMEOUT_MS = 30000;
 const MAX_OUTPUT_LENGTH = 1024 * 1024;
 
 let nextCheckTimer = null;
 let requestPollTimer = null;
 let isChecking = false;
+let isUpdating = false;
 let isStopping = false;
 let handledRequestMtime = 0;
 
@@ -202,11 +204,40 @@ function encodeBranchPath(branch) {
   return branch.split('/').map(encodeURIComponent).join('/');
 }
 
+function buildRepoArchiveUrl(branch) {
+  return `${REPO_WEB_URL}/archive/refs/heads/${encodeBranchPath(branch)}.zip`;
+}
+
 function buildCompareUrl(localCommit, remoteCommit, comparable) {
   if (!comparable || !localCommit || !remoteCommit) {
     return null;
   }
   return `${REPO_WEB_URL}/compare/${shortSha(localCommit)}...${shortSha(remoteCommit)}`;
+}
+
+function manualUpdateReason(localInfo, result) {
+  if (result?.state !== 'update_available') {
+    return null;
+  }
+  if (!localInfo || localInfo.installKind !== 'git') {
+    return `This install is not a git checkout. Download updates from ${REPO_WEB_URL}.`;
+  }
+  if (!localInfo.localCommit) {
+    return 'The local git commit could not be detected.';
+  }
+  if (localInfo.branch === 'HEAD') {
+    return 'Detached HEAD checkouts need to be updated manually.';
+  }
+  if (!result?.comparable) {
+    return `The local checkout cannot be compared with ${REPO_FULL_NAME}.`;
+  }
+  if (result.compareMode !== 'commit' || Number(result.behind || 0) <= 0) {
+    return 'This update cannot be fast-forwarded automatically from the local checkout.';
+  }
+  if (Number(result.ahead || 0) > 0) {
+    return 'This branch has local commits, so the updater will not rewrite history automatically.';
+  }
+  return null;
 }
 
 function parseVersionParts(value) {
@@ -345,7 +376,7 @@ async function getRemoteRepoInfo() {
   const remoteCommit = branchInfo?.commit?.sha || null;
   const remoteShortCommit = shortSha(remoteCommit);
   const latestVersion = latestRelease?.tag_name || null;
-  const downloadUrl = latestRelease?.zipball_url || `${REPO_WEB_URL}/archive/refs/heads/${encodeBranchPath(branch)}.zip`;
+  const downloadUrl = latestRelease?.zipball_url || buildRepoArchiveUrl(branch);
 
   return {
     branch,
@@ -480,7 +511,7 @@ async function resolveUpdateResult(localInfo, remoteInfo) {
 }
 
 async function checkForUpdates(trigger) {
-  if (isChecking || isStopping) {
+  if (isChecking || isUpdating || isStopping) {
     return;
   }
 
@@ -501,6 +532,13 @@ async function checkForUpdates(trigger) {
     const localInfo = await getLocalInstallInfo();
     const remoteInfo = await getRemoteRepoInfo();
     const result = await resolveUpdateResult(localInfo, remoteInfo);
+    const applyUnavailableReason = manualUpdateReason(localInfo, result);
+    const canApplyUpdate =
+      result.state === 'update_available' &&
+      localInfo.installKind === 'git' &&
+      !applyUnavailableReason &&
+      Number(result.behind || 0) > 0 &&
+      Number(result.ahead || 0) === 0;
     const checkedAt = nowIso();
 
     await writeStatus({
@@ -534,6 +572,11 @@ async function checkForUpdates(trigger) {
       remoteShortCommit: remoteInfo.remoteShortCommit,
       ahead: result.ahead,
       behind: result.behind,
+      canApplyUpdate,
+      applyUpdateUnavailableReason: applyUnavailableReason,
+      updateStep: null,
+      updateError: null,
+      needsRestart: false,
       error: null,
     });
   } catch (error) {
@@ -554,6 +597,326 @@ async function checkForUpdates(trigger) {
   }
 }
 
+async function getWorkingTreeStatus() {
+  const status = trimOutput(await runGit(['status', '--porcelain=v1', '--untracked-files=all']));
+  return {
+    dirty: status.length > 0,
+    status,
+  };
+}
+
+async function gitPathExists(name) {
+  const gitPath = trimOutput(await runGit(['rev-parse', '--git-path', name]));
+  if (!gitPath) {
+    return false;
+  }
+  const resolved = path.isAbsolute(gitPath) ? gitPath : path.join(TOOLKIT_ROOT, gitPath);
+  try {
+    await fs.stat(resolved);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getActiveGitOperation() {
+  const checks = [
+    ['MERGE_HEAD', 'merge'],
+    ['rebase-merge', 'rebase'],
+    ['rebase-apply', 'rebase'],
+    ['CHERRY_PICK_HEAD', 'cherry-pick'],
+    ['REVERT_HEAD', 'revert'],
+  ];
+
+  for (const [gitPath, label] of checks) {
+    if (await gitPathExists(gitPath)) {
+      return label;
+    }
+  }
+
+  return null;
+}
+
+async function stashLocalChanges() {
+  const worktree = await getWorkingTreeStatus();
+  if (!worktree.dirty) {
+    return null;
+  }
+
+  const message = `AITK updater auto-stash ${nowIso()}`;
+  await runGit(['stash', 'push', '--include-untracked', '-m', message], { timeoutMs: GIT_UPDATE_TIMEOUT_MS });
+  const stashRef = trimOutput(await runGit(['stash', 'list', '--format=%gd', '-n', '1']));
+
+  return {
+    ref: stashRef || 'stash@{0}',
+    message,
+    status: worktree.status,
+  };
+}
+
+async function restoreStash(stashInfo) {
+  if (!stashInfo?.ref) {
+    return { restored: false, dropped: false };
+  }
+
+  await runGit(['stash', 'apply', '--index', stashInfo.ref], { timeoutMs: GIT_UPDATE_TIMEOUT_MS });
+  await runGit(['stash', 'drop', stashInfo.ref], { timeoutMs: GIT_TIMEOUT_MS });
+
+  return { restored: true, dropped: true };
+}
+
+function buildStatusFields(localInfo, remoteInfo, result) {
+  const applyUnavailableReason = manualUpdateReason(localInfo, result);
+  const canApplyUpdate =
+    result.state === 'update_available' &&
+    localInfo.installKind === 'git' &&
+    !applyUnavailableReason &&
+    Number(result.behind || 0) > 0 &&
+    Number(result.ahead || 0) === 0;
+
+  return {
+    installKind: localInfo.installKind,
+    branch: localInfo.branch,
+    upstream: remoteInfo.branch,
+    remote: remoteInfo.cloneUrl,
+    remoteWebUrl: remoteInfo.webUrl,
+    repoFullName: REPO_FULL_NAME,
+    repoWebUrl: remoteInfo.webUrl,
+    downloadUrl: remoteInfo.downloadUrl,
+    latestVersion: remoteInfo.latestVersion,
+    latestReleaseUrl: remoteInfo.latestReleaseUrl,
+    latestReleasePublishedAt: remoteInfo.latestReleasePublishedAt,
+    remoteCommitDate: remoteInfo.remoteCommitDate,
+    sourceRemote: localInfo.sourceRemote,
+    sourceRemoteWebUrl: localInfo.sourceRemoteWebUrl,
+    sourceRemoteMatchesCanonical: localInfo.sourceRemoteMatchesCanonical,
+    compareUrl: buildCompareUrl(localInfo.localCommit, remoteInfo.remoteCommit, result.comparable),
+    compareMode: result.compareMode,
+    localVersion: localInfo.localVersion,
+    localCommit: localInfo.localCommit,
+    localShortCommit: localInfo.localShortCommit,
+    remoteCommit: remoteInfo.remoteCommit,
+    remoteShortCommit: remoteInfo.remoteShortCommit,
+    ahead: result.ahead,
+    behind: result.behind,
+    canApplyUpdate,
+    applyUpdateUnavailableReason: applyUnavailableReason,
+  };
+}
+
+async function writeUpdateBlocked(localInfo, remoteInfo, result, reason, startedAt, trigger) {
+  await writeStatus({
+    state: 'update_blocked',
+    message: reason,
+    checkedAt: nowIso(),
+    trigger,
+    startedAt,
+    ...buildStatusFields(localInfo, remoteInfo, result),
+    canApplyUpdate: false,
+    applyUpdateUnavailableReason: reason,
+    updateStep: null,
+    updateError: null,
+    needsRestart: false,
+    error: null,
+  });
+}
+
+async function applyGitUpdate(trigger) {
+  if (isChecking || isUpdating || isStopping) {
+    return;
+  }
+
+  isUpdating = true;
+  const startedAt = nowIso();
+  const previous = (await readJson(STATUS_PATH)) || {};
+  let stashInfo = null;
+
+  await writeStatus({
+    state: 'updating',
+    message: `Applying update from ${REPO_FULL_NAME}`,
+    trigger,
+    startedAt,
+    updateStartedAt: startedAt,
+    updateStep: 'checking',
+    canApplyUpdate: false,
+    updateError: null,
+    error: null,
+    lastSuccessfulCheckAt: previous.lastSuccessfulCheckAt || null,
+  });
+
+  try {
+    const localInfo = await getLocalInstallInfo();
+    const remoteInfo = await getRemoteRepoInfo();
+    const result = await resolveUpdateResult(localInfo, remoteInfo);
+    const unavailableReason = manualUpdateReason(localInfo, result);
+
+    if (unavailableReason) {
+      await writeUpdateBlocked(localInfo, remoteInfo, result, unavailableReason, startedAt, trigger);
+      return;
+    }
+
+    if (result.state !== 'update_available' || Number(result.behind || 0) <= 0) {
+      await writeStatus({
+        state: result.state,
+        message: result.message,
+        checkedAt: nowIso(),
+        trigger,
+        startedAt,
+        ...buildStatusFields(localInfo, remoteInfo, result),
+        updateStep: null,
+        updateError: null,
+        needsRestart: false,
+        error: null,
+      });
+      return;
+    }
+
+    const activeOperation = await getActiveGitOperation();
+    if (activeOperation) {
+      await writeUpdateBlocked(
+        localInfo,
+        remoteInfo,
+        result,
+        `Finish the in-progress git ${activeOperation} before updating.`,
+        startedAt,
+        trigger,
+      );
+      return;
+    }
+
+    await writeStatus({
+      state: 'updating',
+      message: 'Saving local changes before update',
+      updateStep: 'stashing',
+      ...buildStatusFields(localInfo, remoteInfo, result),
+      canApplyUpdate: false,
+    });
+    stashInfo = await stashLocalChanges();
+
+    await writeStatus({
+      state: 'updating',
+      message: `Fetching ${REPO_FULL_NAME}`,
+      updateStep: 'fetching',
+      stashCreated: Boolean(stashInfo),
+      stashRef: stashInfo?.ref || null,
+      canApplyUpdate: false,
+    });
+    await runGit(['fetch', '--quiet', remoteInfo.cloneUrl, remoteInfo.branch], { timeoutMs: GIT_UPDATE_TIMEOUT_MS });
+
+    await writeStatus({
+      state: 'updating',
+      message: 'Applying fast-forward update',
+      updateStep: 'fast-forwarding',
+      canApplyUpdate: false,
+    });
+    await runGit(['merge', '--ff-only', 'FETCH_HEAD'], { timeoutMs: GIT_UPDATE_TIMEOUT_MS });
+
+    const updatedCommit = trimOutput(await runGit(['rev-parse', 'HEAD']));
+
+    if (stashInfo) {
+      await writeStatus({
+        state: 'updating',
+        message: 'Restoring local changes',
+        updateStep: 'restoring-local-changes',
+        canApplyUpdate: false,
+      });
+      await restoreStash(stashInfo);
+    }
+
+    await writeStatus({
+      state: 'updated',
+      message: 'Update applied. Restart the app to use the new version.',
+      checkedAt: nowIso(),
+      updateCompletedAt: nowIso(),
+      trigger,
+      startedAt,
+      ...buildStatusFields(
+        {
+          ...localInfo,
+          localCommit: updatedCommit,
+          localShortCommit: shortSha(updatedCommit),
+        },
+        remoteInfo,
+        {
+          comparable: true,
+          ahead: 0,
+          behind: 0,
+          state: 'up_to_date',
+          message: 'Repository is up to date',
+          compareMode: 'commit',
+        },
+      ),
+      previousLocalCommit: localInfo.localCommit,
+      updateStep: null,
+      updateError: null,
+      stashCreated: Boolean(stashInfo),
+      stashRef: null,
+      localChangesRestored: Boolean(stashInfo),
+      canApplyUpdate: false,
+      needsRestart: true,
+      error: null,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown update error';
+
+    if (stashInfo) {
+      try {
+        await restoreStash(stashInfo);
+        await writeStatus({
+          state: 'update_failed',
+          message: 'Update failed; local changes were restored.',
+          checkedAt: nowIso(),
+          updateCompletedAt: nowIso(),
+          trigger,
+          startedAt,
+          updateStep: null,
+          updateError: message,
+          stashCreated: true,
+          stashRef: null,
+          localChangesRestored: true,
+          canApplyUpdate: false,
+          needsRestart: false,
+          error: message,
+        });
+      } catch (restoreError) {
+        const restoreMessage = restoreError instanceof Error ? restoreError.message : 'Could not restore local changes';
+        await writeStatus({
+          state: 'update_conflict',
+          message: `Update stopped. Local changes are preserved in ${stashInfo.ref}.`,
+          checkedAt: nowIso(),
+          updateCompletedAt: nowIso(),
+          trigger,
+          startedAt,
+          updateStep: null,
+          updateError: `${message}\n${restoreMessage}`,
+          stashCreated: true,
+          stashRef: stashInfo.ref,
+          localChangesRestored: false,
+          canApplyUpdate: false,
+          needsRestart: false,
+          error: restoreMessage,
+        });
+      }
+    } else {
+      await writeStatus({
+        state: 'update_failed',
+        message: 'Update failed.',
+        checkedAt: nowIso(),
+        updateCompletedAt: nowIso(),
+        trigger,
+        startedAt,
+        updateStep: null,
+        updateError: message,
+        canApplyUpdate: false,
+        needsRestart: false,
+        error: message,
+      });
+    }
+  } finally {
+    isUpdating = false;
+  }
+}
+
 async function checkAndSchedule(trigger) {
   if (nextCheckTimer) {
     clearTimeout(nextCheckTimer);
@@ -571,8 +934,25 @@ async function checkAndSchedule(trigger) {
   }
 }
 
+async function applyAndSchedule(trigger) {
+  if (nextCheckTimer) {
+    clearTimeout(nextCheckTimer);
+    nextCheckTimer = null;
+  }
+
+  await applyGitUpdate(trigger);
+
+  if (!isStopping) {
+    const nextCheckAt = new Date(Date.now() + intervalMs).toISOString();
+    await writeStatus({ nextCheckAt });
+    nextCheckTimer = setTimeout(() => {
+      void checkAndSchedule('schedule');
+    }, intervalMs);
+  }
+}
+
 async function pollForRequests() {
-  if (isChecking || isStopping) {
+  if (isChecking || isUpdating || isStopping) {
     return;
   }
 
@@ -582,7 +962,12 @@ async function pollForRequests() {
       return;
     }
     handledRequestMtime = stat.mtimeMs;
-    await checkAndSchedule('manual');
+    const request = (await readJson(REQUEST_PATH)) || {};
+    if (request.action === 'apply') {
+      await applyAndSchedule('manual');
+    } else {
+      await checkAndSchedule('manual');
+    }
   } catch {
     // The request file only exists when the UI asks for an immediate check.
   }

@@ -8,6 +8,11 @@ export type RepoUpdateState =
   | 'up_to_date'
   | 'update_available'
   | 'unknown_current'
+  | 'updating'
+  | 'updated'
+  | 'update_failed'
+  | 'update_blocked'
+  | 'update_conflict'
   | 'error'
   | 'unsupported'
   | 'disabled'
@@ -49,6 +54,17 @@ export interface RepoUpdateStatus {
   remoteShortCommit?: string | null;
   ahead?: number | null;
   behind?: number | null;
+  canApplyUpdate?: boolean | null;
+  applyUpdateUnavailableReason?: string | null;
+  updateStartedAt?: string | null;
+  updateCompletedAt?: string | null;
+  updateStep?: string | null;
+  updateError?: string | null;
+  previousLocalCommit?: string | null;
+  stashCreated?: boolean | null;
+  stashRef?: string | null;
+  localChangesRestored?: boolean | null;
+  needsRestart?: boolean | null;
   error?: string | null;
   stale?: boolean;
 }
@@ -120,8 +136,11 @@ export async function getRepoUpdateStatus() {
   return normalizeStatus(await readJson(STATUS_PATH));
 }
 
-export async function requestRepoUpdateCheck() {
+export type RepoUpdateRequestAction = 'check' | 'apply';
+
+export async function requestRepoUpdateCheck(action: RepoUpdateRequestAction = 'check') {
   const request = {
+    action,
     requestedAt: nowIso(),
     requestedBy: 'ui',
     nonce: `${process.pid}-${Date.now()}`,

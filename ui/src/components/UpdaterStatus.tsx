@@ -45,6 +45,7 @@ interface RepoUpdateStatus {
   downloadUrl?: string | null;
   latestVersion?: string | null;
   latestReleaseUrl?: string | null;
+  remote?: string | null;
   remoteWebUrl?: string | null;
   sourceRemoteWebUrl?: string | null;
   sourceRemoteMatchesCanonical?: boolean | null;
@@ -250,6 +251,9 @@ function getTitle(status: RepoUpdateStatus | null, detail: string) {
   if (status.needsRestart) parts.push('Restart the app to use the update.');
   if (status.sourceRemoteMatchesCanonical === false && status.sourceRemoteWebUrl) {
     parts.push(`Local git remote: ${status.sourceRemoteWebUrl}`);
+    const recommendedRemote = status.remote || `${(status.repoWebUrl || status.remoteWebUrl || 'https://github.com/rmcc3/ai-toolkit-revamped').replace(/\.git$/, '')}.git`;
+    parts.push(`Suggested origin: ${recommendedRemote}`);
+    parts.push(`git remote set-url origin ${recommendedRemote}`);
   }
   return parts.filter(Boolean).join('\n');
 }

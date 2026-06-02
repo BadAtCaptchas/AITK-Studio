@@ -1,0 +1,121 @@
+import { promises as fs } from 'fs';
+import path from 'path';
+import { TOOLKIT_ROOT } from '../paths';
+
+export type RepoUpdateState =
+  | 'pending'
+  | 'checking'
+  | 'up_to_date'
+  | 'update_available'
+  | 'error'
+  | 'unsupported'
+  | 'disabled'
+  | 'stopped';
+
+export interface RepoUpdateStatus {
+  schemaVersion: 1;
+  state: RepoUpdateState;
+  message: string;
+  updatedAt: string;
+  checkedAt?: string | null;
+  startedAt?: string | null;
+  lastSuccessfulCheckAt?: string | null;
+  nextCheckAt?: string | null;
+  trigger?: 'startup' | 'schedule' | 'manual' | string;
+  updaterPid?: number | null;
+  intervalMinutes?: number | null;
+  branch?: string | null;
+  upstream?: string | null;
+  remote?: string | null;
+  remoteWebUrl?: string | null;
+  compareUrl?: string | null;
+  localCommit?: string | null;
+  localShortCommit?: string | null;
+  remoteCommit?: string | null;
+  remoteShortCommit?: string | null;
+  ahead?: number | null;
+  behind?: number | null;
+  error?: string | null;
+  stale?: boolean;
+}
+
+const TMP_ROOT = path.join(TOOLKIT_ROOT, '.tmp');
+const STATUS_PATH = path.join(TMP_ROOT, 'repo-update-status.json');
+const REQUEST_PATH = path.join(TMP_ROOT, 'repo-update-request.json');
+const STALE_CHECKING_MS = 10 * 60 * 1000;
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function defaultStatus(): RepoUpdateStatus {
+  return {
+    schemaVersion: 1,
+    state: 'pending',
+    message: 'Waiting for update checker',
+    updatedAt: nowIso(),
+    checkedAt: null,
+    nextCheckAt: null,
+    updaterPid: null,
+  };
+}
+
+function normalizeStatus(raw: unknown): RepoUpdateStatus {
+  if (!raw || typeof raw !== 'object') {
+    return defaultStatus();
+  }
+
+  const status = raw as Partial<RepoUpdateStatus>;
+  const normalized: RepoUpdateStatus = {
+    ...defaultStatus(),
+    ...status,
+    schemaVersion: 1,
+    state: status.state || 'pending',
+    message: status.message || 'Waiting for update checker',
+    updatedAt: status.updatedAt || nowIso(),
+  };
+
+  if (normalized.state === 'checking') {
+    const updatedAt = new Date(normalized.updatedAt).getTime();
+    if (Number.isFinite(updatedAt) && Date.now() - updatedAt > STALE_CHECKING_MS) {
+      normalized.state = 'error';
+      normalized.message = 'Update checker stopped while checking';
+      normalized.stale = true;
+    }
+  }
+
+  return normalized;
+}
+
+async function readJson(filePath: string) {
+  try {
+    return JSON.parse(await fs.readFile(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function writeJsonAtomic(filePath: string, value: unknown) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  await fs.rename(tmpPath, filePath);
+}
+
+export async function getRepoUpdateStatus() {
+  return normalizeStatus(await readJson(STATUS_PATH));
+}
+
+export async function requestRepoUpdateCheck() {
+  const request = {
+    requestedAt: nowIso(),
+    requestedBy: 'ui',
+    nonce: `${process.pid}-${Date.now()}`,
+  };
+  await writeJsonAtomic(REQUEST_PATH, request);
+  return {
+    success: true,
+    request,
+    status: await getRepoUpdateStatus(),
+  };
+}

@@ -1,5 +1,7 @@
+import { execFile } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 import { TOOLKIT_ROOT } from '../paths';
 
 export type RepoUpdateState =
@@ -93,9 +95,76 @@ const TMP_ROOT = path.join(TOOLKIT_ROOT, '.tmp');
 const STATUS_PATH = path.join(TMP_ROOT, 'repo-update-status.json');
 const REQUEST_PATH = path.join(TMP_ROOT, 'repo-update-request.json');
 const STALE_CHECKING_MS = 10 * 60 * 1000;
+const GIT_REMOTE_TIMEOUT_MS = 5000;
+const DEFAULT_REPO_OWNER = 'rmcc3';
+const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
+const execFileAsync = promisify(execFile);
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizeRemoteWebUrl(remoteUrl?: string | null) {
+  const raw = (remoteUrl || '').trim();
+  if (!raw) return null;
+
+  const sshMatch = raw.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+  if (sshMatch) {
+    return `https://${sshMatch[1]}/${sshMatch[2]}`;
+  }
+
+  const httpMatch = raw.match(/^(https?:\/\/.+?)(?:\.git)?$/);
+  if (httpMatch) {
+    return httpMatch[1];
+  }
+
+  return null;
+}
+
+function normalizeRepoUrlForCompare(url?: string | null) {
+  return (url || '').replace(/\.git$/, '').replace(/\/$/, '').toLowerCase();
+}
+
+function getDefaultRepoWebUrl() {
+  const owner = (process.env.AITK_UPDATE_REPO_OWNER || DEFAULT_REPO_OWNER).trim();
+  const name = (process.env.AITK_UPDATE_REPO_NAME || DEFAULT_REPO_NAME).trim();
+  return `https://github.com/${owner}/${name}`;
+}
+
+async function readLiveSourceRemote() {
+  try {
+    const result = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
+      cwd: TOOLKIT_ROOT,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+      },
+      timeout: GIT_REMOTE_TIMEOUT_MS,
+      windowsHide: true,
+    });
+    return result.stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function withLiveSourceRemote(status: RepoUpdateStatus) {
+  const sourceRemote = await readLiveSourceRemote();
+  if (!sourceRemote) {
+    return status;
+  }
+
+  const sourceRemoteWebUrl = normalizeRemoteWebUrl(sourceRemote);
+  const repoWebUrl = status.repoWebUrl || status.remoteWebUrl || getDefaultRepoWebUrl();
+
+  return {
+    ...status,
+    sourceRemote,
+    sourceRemoteWebUrl,
+    sourceRemoteMatchesCanonical: sourceRemoteWebUrl
+      ? normalizeRepoUrlForCompare(sourceRemoteWebUrl) === normalizeRepoUrlForCompare(repoWebUrl)
+      : null,
+  };
 }
 
 function defaultStatus(): RepoUpdateStatus {
@@ -153,7 +222,7 @@ async function writeJsonAtomic(filePath: string, value: unknown) {
 }
 
 export async function getRepoUpdateStatus() {
-  return normalizeStatus(await readJson(STATUS_PATH));
+  return withLiveSourceRemote(normalizeStatus(await readJson(STATUS_PATH)));
 }
 
 export type RepoUpdateRequestAction = 'check' | 'apply' | 'restart';

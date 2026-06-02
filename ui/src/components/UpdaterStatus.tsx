@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import classNames from 'classnames';
 import {
   AlertCircle,
@@ -329,9 +330,8 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
   if (compact) {
     return (
       <span className="inline-flex items-center gap-1">
-        <button
-          type="button"
-          onClick={requestCheck}
+        <Link
+          href="/updates"
           title={title}
           aria-label={meta.label}
           className={classNames(
@@ -340,6 +340,16 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
           )}
         >
           <Icon className={classNames('h-4 w-4', spinning ? 'animate-spin' : '')} />
+        </Link>
+        <button
+          type="button"
+          onClick={requestCheck}
+          disabled={requesting || loading}
+          title="Check for updates"
+          aria-label="Check for updates"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100 disabled:opacity-50"
+        >
+          <RefreshCw className={classNames('h-4 w-4', requesting || loading ? 'animate-spin' : '')} />
         </button>
         {canApplyUpdate && (
           <button
@@ -371,9 +381,8 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
 
   return (
     <div className="flex w-full min-w-0 items-center gap-1 border-t border-gray-800 px-2 py-2 transition-colors hover:bg-gray-900">
-      <button
-        type="button"
-        onClick={requestCheck}
+      <Link
+        href="/updates"
         title={title}
         aria-label={`${meta.label}. ${detail}`}
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
@@ -383,7 +392,16 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
           <span className={classNames('block truncate text-[11px] font-medium', meta.textClass)}>{meta.label}</span>
           <span className={classNames('block truncate text-[10px]', meta.subtleClass)}>{detail}</span>
         </span>
-        <RefreshCw className="h-3.5 w-3.5 flex-none text-gray-600" />
+      </Link>
+      <button
+        type="button"
+        onClick={requestCheck}
+        disabled={requesting || loading}
+        title="Check for updates"
+        aria-label="Check for updates"
+        className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-sm border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-950 hover:text-gray-100 disabled:opacity-50"
+      >
+        <RefreshCw className={classNames('h-3.5 w-3.5', requesting || loading ? 'animate-spin' : '')} />
       </button>
       {canApplyUpdate && (
         <button

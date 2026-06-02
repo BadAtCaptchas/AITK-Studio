@@ -20,6 +20,7 @@ const REPO_BRANCH = (process.env.AITK_UPDATE_REPO_BRANCH || '').trim();
 const REPO_FULL_NAME = `${REPO_OWNER}/${REPO_NAME}`;
 const REPO_WEB_URL = `https://github.com/${REPO_FULL_NAME}`;
 const REPO_API_BASE = `https://api.github.com/repos/${encodeURIComponent(REPO_OWNER)}/${encodeURIComponent(REPO_NAME)}`;
+const UPDATER_GENERATION = 2;
 
 const DEFAULT_INTERVAL_MINUTES = 360;
 const REQUEST_POLL_MS = 5000;
@@ -27,6 +28,7 @@ const GIT_TIMEOUT_MS = 10000;
 const GIT_UPDATE_TIMEOUT_MS = 120000;
 const HTTP_TIMEOUT_MS = 30000;
 const MAX_OUTPUT_LENGTH = 1024 * 1024;
+const RECENT_COMMIT_COUNT = 30;
 
 let nextCheckTimer = null;
 let requestPollTimer = null;
@@ -91,6 +93,7 @@ async function writeStatus(update) {
     ...update,
     repoFullName: REPO_FULL_NAME,
     repoWebUrl: REPO_WEB_URL,
+    updaterGeneration: UPDATER_GENERATION,
     updaterPid: process.pid,
     intervalMinutes,
     updatedAt: nowIso(),
@@ -368,11 +371,40 @@ async function getLocalInstallInfo() {
   };
 }
 
+function normalizeCommit(commit) {
+  const sha = commit?.sha || '';
+  const message = commit?.commit?.message || '';
+  const [headline, ...bodyLines] = message.split(/\r?\n/);
+  const author = commit?.commit?.author || {};
+  const committer = commit?.commit?.committer || {};
+
+  return {
+    sha,
+    shortSha: shortSha(sha),
+    message: headline || sha,
+    body: bodyLines.join('\n').trim() || null,
+    authorName: author.name || commit?.author?.login || null,
+    authorDate: author.date || null,
+    committerName: committer.name || commit?.committer?.login || null,
+    committerDate: committer.date || null,
+    url: commit?.html_url || (sha ? `${REPO_WEB_URL}/commit/${sha}` : null),
+  };
+}
+
+async function getRecentCommits(branch) {
+  const commits = await githubGet(`/commits?sha=${encodeURIComponent(branch)}&per_page=${RECENT_COMMIT_COUNT}`);
+  if (!Array.isArray(commits)) {
+    return [];
+  }
+  return commits.map(normalizeCommit).filter(commit => commit.sha);
+}
+
 async function getRemoteRepoInfo() {
   const repo = await githubGet('');
   const branch = REPO_BRANCH || repo.default_branch || 'main';
   const branchInfo = await githubGet(`/branches/${encodeURIComponent(branch)}`);
   const latestRelease = await safeGithubGet('/releases/latest', { allow404: true });
+  const recentCommits = await getRecentCommits(branch);
   const remoteCommit = branchInfo?.commit?.sha || null;
   const remoteShortCommit = shortSha(remoteCommit);
   const latestVersion = latestRelease?.tag_name || null;
@@ -391,6 +423,7 @@ async function getRemoteRepoInfo() {
     cloneUrl: repo.clone_url || `${REPO_WEB_URL}.git`,
     webUrl: repo.html_url || REPO_WEB_URL,
     downloadUrl,
+    recentCommits,
   };
 }
 
@@ -560,6 +593,7 @@ async function checkForUpdates(trigger) {
       latestReleaseUrl: remoteInfo.latestReleaseUrl,
       latestReleasePublishedAt: remoteInfo.latestReleasePublishedAt,
       remoteCommitDate: remoteInfo.remoteCommitDate,
+      recentCommits: remoteInfo.recentCommits || [],
       sourceRemote: localInfo.sourceRemote,
       sourceRemoteWebUrl: localInfo.sourceRemoteWebUrl,
       sourceRemoteMatchesCanonical: localInfo.sourceRemoteMatchesCanonical,
@@ -687,6 +721,7 @@ function buildStatusFields(localInfo, remoteInfo, result) {
     latestReleaseUrl: remoteInfo.latestReleaseUrl,
     latestReleasePublishedAt: remoteInfo.latestReleasePublishedAt,
     remoteCommitDate: remoteInfo.remoteCommitDate,
+    recentCommits: remoteInfo.recentCommits || [],
     sourceRemote: localInfo.sourceRemote,
     sourceRemoteWebUrl: localInfo.sourceRemoteWebUrl,
     sourceRemoteMatchesCanonical: localInfo.sourceRemoteMatchesCanonical,

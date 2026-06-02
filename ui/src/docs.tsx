@@ -226,12 +226,9 @@ const docs: { [key: string]: ConfigDoc } = {
     ),
     description: (
       <>
-        This is an experimental feature based on{' '}
-        <a className="text-blue-500" href="https://github.com/lodestone-rock/RamTorch" target="_blank">
-          RamTorch
-        </a>
-        . This feature is early and will have many updates and changes, so be aware it may not work consistently from
-        one update to the next. It will also only work with certain models.
+        This is an experimental whole-block CPU offloading feature for supported CUDA models. The default block backend
+        moves ordered transformer/text-encoder blocks between CPU RAM and GPU VRAM as they are needed, while the legacy
+        backend keeps the older per-module offloader available for unsupported models.
         <br />
         <br />
         Layer Offloading uses the CPU RAM instead of the GPU ram to hold most of the model weights. This allows training
@@ -240,8 +237,9 @@ const docs: { [key: string]: ConfigDoc } = {
         weights, so a larger card is usually still needed.
         <br />
         <br />
-        You can also select the percentage of the layers to offload. It is generally best to offload as few as possible
-        (close to 0%) for best performance, but you can offload more if you need the memory.
+        You can select the percentage of whole blocks to offload. It is generally best to offload as few as possible
+        (close to 0%) for best performance, but you can offload more if you need the memory. Low VRAM is still a
+        separate mode for broader component-level unloading and may be slower.
       </>
     ),
   },

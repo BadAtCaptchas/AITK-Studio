@@ -25,6 +25,7 @@ import { startQueue } from '@/utils/queue';
 import type { ModelConfig, SelectOption } from '@/types';
 import { groupedModelOptions, modelArchs, quantizationOptions } from '@/app/jobs/new/options';
 import { PageNotice } from '@/components/OperatorPrimitives';
+import { getLayerOffloadingMemoryProfile, type LayerOffloadingBackend } from '@/utils/memoryProfiles';
 
 type GeneratedLora = {
   id: string;
@@ -91,6 +92,11 @@ const imageFormatOptions: SelectOption[] = [
   { value: 'webp', label: 'WEBP' },
 ];
 
+const layerOffloadingBackendOptions: SelectOption[] = [
+  { value: 'block', label: 'Block' },
+  { value: 'legacy', label: 'Legacy' },
+];
+
 function getArchDefault(archName: string, key: string, fallback: unknown) {
   const arch = modelArchs.find(item => item.name === archName);
   const value = arch?.defaults?.[key];
@@ -111,6 +117,7 @@ function archSupportsSection(archName: string, section: 'model.layer_offloading'
 }
 
 function getDefaultModelConfig(archName: string): GeneratorModelConfig {
+  const memoryProfile = getLayerOffloadingMemoryProfile(archName);
   return {
     name_or_path: String(getArchDefault(archName, 'config.process[0].model.name_or_path', '')),
     arch: archName,
@@ -123,15 +130,18 @@ function getDefaultModelConfig(archName: string): GeneratorModelConfig {
       (getArchDefault(archName, 'config.process[0].model.model_kwargs', {}) as Record<string, unknown>) || {},
     dtype: String(getArchDefault(archName, 'config.process[0].train.dtype', 'bf16')),
     layer_offloading: false,
+    layer_offloading_backend: String(
+      getArchDefault(archName, 'config.process[0].model.layer_offloading_backend', memoryProfile.backend),
+    ) as LayerOffloadingBackend,
     layer_offloading_transformer_percent: getArchNumberDefault(
       archName,
       'config.process[0].model.layer_offloading_transformer_percent',
-      1.0,
+      memoryProfile.transformerPercent,
     ),
     layer_offloading_text_encoder_percent: getArchNumberDefault(
       archName,
       'config.process[0].model.layer_offloading_text_encoder_percent',
-      1.0,
+      memoryProfile.textEncoderPercent,
     ),
   };
 }
@@ -355,6 +365,10 @@ export default function GeneratePage() {
     () => archSupportsSection(modelConfig.arch, 'model.layer_offloading') || Boolean(modelConfig.layer_offloading),
     [modelConfig.arch, modelConfig.layer_offloading],
   );
+  const layerOffloadingMemoryProfile = useMemo(
+    () => getLayerOffloadingMemoryProfile(modelConfig.arch),
+    [modelConfig.arch],
+  );
 
   const isBusy = status === 'saving' || status === 'generating';
   const primaryButtonLabel =
@@ -391,6 +405,9 @@ export default function GeneratePage() {
       model_kwargs: (lora.model?.model_kwargs as Record<string, unknown>) || current.model_kwargs || {},
       low_vram: current.low_vram,
       layer_offloading: current.layer_offloading,
+      layer_offloading_backend: current.layer_offloading_backend,
+      layer_offloading_transformer_percent: current.layer_offloading_transformer_percent,
+      layer_offloading_text_encoder_percent: current.layer_offloading_text_encoder_percent,
     }));
     if (lora.model.arch) {
       setSampler(getDefaultSampler(String(lora.model.arch)));
@@ -422,8 +439,11 @@ export default function GeneratePage() {
     setModelConfig(current => ({
       ...current,
       layer_offloading: checked,
-      layer_offloading_transformer_percent: current.layer_offloading_transformer_percent ?? 1.0,
-      layer_offloading_text_encoder_percent: current.layer_offloading_text_encoder_percent ?? 1.0,
+      layer_offloading_backend: current.layer_offloading_backend ?? layerOffloadingMemoryProfile.backend,
+      layer_offloading_transformer_percent:
+        current.layer_offloading_transformer_percent ?? layerOffloadingMemoryProfile.transformerPercent,
+      layer_offloading_text_encoder_percent:
+        current.layer_offloading_text_encoder_percent ?? layerOffloadingMemoryProfile.textEncoderPercent,
     }));
   };
 
@@ -942,7 +962,18 @@ export default function GeneratePage() {
                         onChange={handleLayerOffloadingChange}
                       />
                       {modelConfig.layer_offloading && (
-                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <SelectInput
+                            label="Offload Backend"
+                            value={modelConfig.layer_offloading_backend ?? layerOffloadingMemoryProfile.backend}
+                            onChange={value =>
+                              setModelConfig(current => ({
+                                ...current,
+                                layer_offloading_backend: value as LayerOffloadingBackend,
+                              }))
+                            }
+                            options={layerOffloadingBackendOptions}
+                          />
                           <SliderInput
                             label="Transformer Offload %"
                             value={Math.round(

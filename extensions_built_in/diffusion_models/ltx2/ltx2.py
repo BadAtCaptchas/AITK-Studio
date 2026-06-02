@@ -18,7 +18,7 @@ from accelerate import init_empty_weights
 from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
-from toolkit.memory_management import MemoryManager
+from toolkit.memory_management import attach_layer_offloading
 from safetensors.torch import load_file
 from PIL import Image
 import huggingface_hub
@@ -307,10 +307,13 @@ class LTX2Model(BaseModel):
                 ignore_modules.append(block.audio_a2v_cross_attn_scale_shift_table)
             ignore_modules.append(transformer.scale_shift_table)
             ignore_modules.append(transformer.audio_scale_shift_table)
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 transformer,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component="transformer",
+                block_paths=self.get_transformer_block_names(),
                 ignore_modules=ignore_modules,
             )
 
@@ -434,10 +437,12 @@ class LTX2Model(BaseModel):
             self.model_config.layer_offloading
             and self.model_config.layer_offloading_text_encoder_percent > 0
         ):
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 text_encoder,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                component="text_encoder",
                 ignore_modules=[
                     text_encoder.model.language_model.base_model.embed_tokens
                 ],

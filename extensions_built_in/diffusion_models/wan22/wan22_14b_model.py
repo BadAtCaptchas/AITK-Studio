@@ -27,7 +27,7 @@ from .wan22_5b_model import (
     scheduler_config,
     time_text_monkeypatch,
 )
-from toolkit.memory_management import MemoryManager
+from toolkit.memory_management import attach_layer_offloading
 from safetensors.torch import load_file, save_file
 
 
@@ -359,16 +359,22 @@ class Wan2214bModel(Wan21):
             
         
         if layer_offloading_transformer:
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 transformer_1,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component="transformer",
+                block_paths=["blocks"],
                 ignore_modules=[transformer_1.scale_shift_table] + [block.scale_shift_table for block in transformer_1.blocks]
             )
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 transformer_2,
                 self.device_torch,
                 offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component="transformer",
+                block_paths=["blocks"],
                 ignore_modules=[transformer_2.scale_shift_table] + [block.scale_shift_table for block in transformer_2.blocks]
             )
 

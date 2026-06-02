@@ -29,6 +29,7 @@ import { FlipHorizontal2, FlipVertical2 } from 'lucide-react';
 import { handleModelArchChange } from './utils';
 import { IoFlaskSharp } from 'react-icons/io5';
 import { isMac } from '@/helpers/basic';
+import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
 import TrainingPhasesEditor from './TrainingPhasesEditor';
 import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
@@ -51,6 +52,10 @@ type Props = {
 
 const isDev = process.env.NODE_ENV === 'development';
 const segaDistillArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'zimage']);
+const layerOffloadingBackendOptions: SelectOption[] = [
+  { value: 'block', label: 'Block' },
+  { value: 'legacy', label: 'Legacy' },
+];
 
 export default function SimpleJob({
   jobConfig,
@@ -347,6 +352,11 @@ export default function SimpleJob({
     return newQuantizationOptions;
   }, [modelArch]);
 
+  const layerOffloadingMemoryProfile = useMemo(
+    () => getLayerOffloadingMemoryProfile(jobConfig.config.process[0].model.arch),
+    [jobConfig.config.process[0].model.arch],
+  );
+
   const showGPUSelect = !isMac();
 
   let numDatasetCols = 4;
@@ -487,7 +497,27 @@ export default function SimpleJob({
                       </>
                     }
                     checked={jobConfig.config.process[0].model.layer_offloading || false}
-                    onChange={value => setJobConfig(value, 'config.process[0].model.layer_offloading')}
+                    onChange={value => {
+                      setJobConfig(value, 'config.process[0].model.layer_offloading');
+                      if (value) {
+                        const model = jobConfig.config.process[0].model;
+                        if (model.layer_offloading_backend === undefined) {
+                          setJobConfig(layerOffloadingMemoryProfile.backend, 'config.process[0].model.layer_offloading_backend');
+                        }
+                        if (model.layer_offloading_transformer_percent === undefined) {
+                          setJobConfig(
+                            layerOffloadingMemoryProfile.transformerPercent,
+                            'config.process[0].model.layer_offloading_transformer_percent',
+                          );
+                        }
+                        if (model.layer_offloading_text_encoder_percent === undefined) {
+                          setJobConfig(
+                            layerOffloadingMemoryProfile.textEncoderPercent,
+                            'config.process[0].model.layer_offloading_text_encoder_percent',
+                          );
+                        }
+                      }
+                    }}
                     docKey="model.layer_offloading"
                   />
                 )}
@@ -495,7 +525,13 @@ export default function SimpleJob({
               {modelArch?.additionalSections?.includes('model.layer_offloading') &&
                 !isMac() &&
                 jobConfig.config.process[0].model.layer_offloading && (
-                  <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-3">
+                    <SelectInput
+                      label="Offload Backend"
+                      value={jobConfig.config.process[0].model.layer_offloading_backend ?? layerOffloadingMemoryProfile.backend}
+                      onChange={value => setJobConfig(value, 'config.process[0].model.layer_offloading_backend')}
+                      options={layerOffloadingBackendOptions}
+                    />
                     <SliderInput
                       label="Transformer Offload %"
                       value={Math.round(

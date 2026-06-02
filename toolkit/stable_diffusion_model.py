@@ -62,6 +62,7 @@ from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjecti
 from toolkit.paths import ORIG_CONFIGS_ROOT, DIFFUSERS_CONFIGS_ROOT
 from huggingface_hub import hf_hub_download
 from toolkit.models.flux import add_model_gpu_splitter_to_flux, bypass_flux_guidance, restore_flux_guidance
+from toolkit.memory_management import attach_layer_offloading
 
 from optimum.quanto import freeze, qfloat8, QTensor, qint4
 from toolkit.util.quantize import quantize, get_qtype
@@ -784,6 +785,19 @@ class StableDiffusion:
             else:
                 transformer.to(self.device_torch, dtype=dtype)
 
+            if (
+                self.model_config.layer_offloading
+                and self.model_config.layer_offloading_transformer_percent > 0
+            ):
+                attach_layer_offloading(
+                    self,
+                    transformer,
+                    self.device_torch,
+                    offload_percent=self.model_config.layer_offloading_transformer_percent,
+                    component="transformer",
+                    block_paths=["transformer_blocks", "single_transformer_blocks"],
+                )
+
             flush()
 
             scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(base_model_path, subfolder="scheduler", use_safetensors=True)
@@ -807,11 +821,35 @@ class StableDiffusion:
                 quantize(text_encoder_2, weights=get_qtype(self.model_config.qtype))
                 freeze(text_encoder_2)
                 flush()
+
+            if (
+                self.model_config.layer_offloading
+                and self.model_config.layer_offloading_text_encoder_percent > 0
+            ):
+                attach_layer_offloading(
+                    self,
+                    text_encoder_2,
+                    self.device_torch,
+                    offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                    component="text_encoder",
+                )
                 
             self.print_and_status_update("Loading CLIP")
             text_encoder = CLIPTextModel.from_pretrained(base_model_path, subfolder="text_encoder", torch_dtype=dtype, use_safetensors=True)
             tokenizer = CLIPTokenizer.from_pretrained(base_model_path, subfolder="tokenizer", torch_dtype=dtype, use_safetensors=True)
             text_encoder.to(self.device_torch, dtype=dtype)
+
+            if (
+                self.model_config.layer_offloading
+                and self.model_config.layer_offloading_text_encoder_percent > 0
+            ):
+                attach_layer_offloading(
+                    self,
+                    text_encoder,
+                    self.device_torch,
+                    offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                    component="text_encoder",
+                )
 
             self.print_and_status_update("Making pipe")
             Pipe = FluxPipeline

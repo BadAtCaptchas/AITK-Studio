@@ -6,7 +6,7 @@ from toolkit.accelerator import unwrap_model
 from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.dequantize import patch_dequantization_on_save
-from toolkit.memory_management.manager import MemoryManager
+from toolkit.memory_management import attach_layer_offloading
 from toolkit.models.base_model import BaseModel
 from toolkit.prompt_utils import PromptEmbeds
 from transformers import AutoTokenizer, UMT5EncoderModel
@@ -383,10 +383,13 @@ class Wan21(BaseModel):
             flush()
         
         if self.model_config.layer_offloading and self.model_config.layer_offloading_transformer_percent > 0:
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 transformer,
                 self.device_torch,
-                offload_percent=self.model_config.layer_offloading_transformer_percent
+                offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component="transformer",
+                block_paths=self.get_transformer_block_names(),
             )
         
         if self.model_config.low_vram:
@@ -441,10 +444,12 @@ class Wan21(BaseModel):
             flush()
         
         if self.model_config.layer_offloading and self.model_config.layer_offloading_text_encoder_percent > 0:
-            MemoryManager.attach(
+            attach_layer_offloading(
+                self,
                 text_encoder,
                 self.device_torch,
-                offload_percent=self.model_config.layer_offloading_text_encoder_percent
+                offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                component="text_encoder",
             )
 
         if self.model_config.low_vram:

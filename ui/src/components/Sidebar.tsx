@@ -120,7 +120,7 @@ const Sidebar = () => {
         <UpdaterStatus />
       </div>
       <div className="hidden bg-gray-900 py-1 text-center text-[10px] text-gray-500 md:block">
-        OstrisAI-Toolkit v{process.env.NEXT_PUBLIC_APP_VERSION}
+        OstrisAI-Toolkit Revamped v{process.env.NEXT_PUBLIC_APP_VERSION}
       </div>
     </aside>
   );

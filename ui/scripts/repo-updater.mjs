@@ -11,6 +11,7 @@ const STATUS_PATH = path.join(TMP_ROOT, 'repo-update-status.json');
 const REQUEST_PATH = path.join(TMP_ROOT, 'repo-update-request.json');
 const PID_PATH = path.join(TMP_ROOT, 'repo-updater.pid');
 const VERSION_PATH = path.join(TOOLKIT_ROOT, 'version.py');
+const RESTART_SCRIPT = path.join(UI_ROOT, 'scripts', 'restart-ui.mjs');
 
 const DEFAULT_REPO_OWNER = 'rmcc3';
 const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
@@ -20,7 +21,7 @@ const REPO_BRANCH = (process.env.AITK_UPDATE_REPO_BRANCH || '').trim();
 const REPO_FULL_NAME = `${REPO_OWNER}/${REPO_NAME}`;
 const REPO_WEB_URL = `https://github.com/${REPO_FULL_NAME}`;
 const REPO_API_BASE = `https://api.github.com/repos/${encodeURIComponent(REPO_OWNER)}/${encodeURIComponent(REPO_NAME)}`;
-const UPDATER_GENERATION = 2;
+const UPDATER_GENERATION = 3;
 
 const DEFAULT_INTERVAL_MINUTES = 360;
 const REQUEST_POLL_MS = 5000;
@@ -986,6 +987,63 @@ async function applyAndSchedule(trigger) {
   }
 }
 
+async function restartUi(trigger) {
+  if (isStopping) {
+    return;
+  }
+
+  isStopping = true;
+  if (nextCheckTimer) {
+    clearTimeout(nextCheckTimer);
+    nextCheckTimer = null;
+  }
+  if (requestPollTimer) {
+    clearInterval(requestPollTimer);
+    requestPollTimer = null;
+  }
+
+  const startedAt = nowIso();
+  await writeStatus({
+    state: 'restarting',
+    message: 'Restart requested',
+    trigger,
+    startedAt,
+    restartStartedAt: startedAt,
+    restartStep: 'handoff',
+    canApplyUpdate: false,
+    nextCheckAt: null,
+    updateStep: null,
+    updateError: null,
+    error: null,
+  });
+
+  const child = spawn(process.execPath, [RESTART_SCRIPT], {
+    cwd: UI_ROOT,
+    detached: true,
+    env: process.env,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+
+  child.unref();
+
+  await writeStatus({
+    state: 'restarting',
+    message: 'Restarting UI',
+    trigger,
+    startedAt,
+    restartStartedAt: startedAt,
+    restartStep: 'runner-started',
+    restartPid: child.pid,
+    canApplyUpdate: false,
+    nextCheckAt: null,
+  });
+
+  setTimeout(() => {
+    process.exit(0);
+  }, 250).unref();
+}
+
 async function pollForRequests() {
   if (isChecking || isUpdating || isStopping) {
     return;
@@ -998,8 +1056,11 @@ async function pollForRequests() {
     }
     handledRequestMtime = stat.mtimeMs;
     const request = (await readJson(REQUEST_PATH)) || {};
+    await fs.unlink(REQUEST_PATH).catch(() => undefined);
     if (request.action === 'apply') {
       await applyAndSchedule('manual');
+    } else if (request.action === 'restart') {
+      await restartUi('manual');
     } else {
       await checkAndSchedule('manual');
     }

@@ -9,13 +9,14 @@ const TOOLKIT_ROOT = path.resolve(UI_ROOT, '..');
 const TMP_ROOT = path.join(TOOLKIT_ROOT, '.tmp');
 const PID_PATH = path.join(TMP_ROOT, 'repo-updater.pid');
 const STATUS_PATH = path.join(TMP_ROOT, 'repo-update-status.json');
+const RUNTIME_PATH = path.join(TMP_ROOT, 'ui-runtime.json');
 const UPDATER_SCRIPT = path.join(UI_ROOT, 'scripts', 'repo-updater.mjs');
 const DEFAULT_REPO_OWNER = 'rmcc3';
 const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
 const DESIRED_REPO_FULL_NAME = `${process.env.AITK_UPDATE_REPO_OWNER || DEFAULT_REPO_OWNER}/${
   process.env.AITK_UPDATE_REPO_NAME || DEFAULT_REPO_NAME
 }`;
-const UPDATER_GENERATION = 2;
+const UPDATER_GENERATION = 3;
 
 function isPidRunning(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -94,7 +95,40 @@ async function writeStartupFailure(error) {
   }
 }
 
+async function writeRuntimeLaunchInfo() {
+  if (!process.env.npm_lifecycle_event) {
+    return;
+  }
+
+  try {
+    await fs.mkdir(TMP_ROOT, { recursive: true });
+    const tmpPath = `${RUNTIME_PATH}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(
+      tmpPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          rootPid: process.ppid,
+          launcherPid: process.pid,
+          lifecycleEvent: process.env.npm_lifecycle_event,
+          uiRoot: UI_ROOT,
+          toolkitRoot: TOOLKIT_ROOT,
+          startedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+    await fs.rename(tmpPath, RUNTIME_PATH);
+  } catch {
+    // Restart support should not prevent the UI from starting.
+  }
+}
+
 async function startUpdater() {
+  await writeRuntimeLaunchInfo();
+
   const existingPid = await readExistingPid();
   if (isPidRunning(existingPid)) {
     const existingStatus = await readExistingStatus();

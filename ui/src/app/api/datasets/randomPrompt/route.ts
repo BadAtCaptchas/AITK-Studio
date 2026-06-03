@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { webcrypto } from 'crypto';
 import { getDatasetsRoot } from '@/server/settings';
+import { normalizeRandomPromptCaptionExt, parseRandomPromptCaptionText } from '@/server/randomPromptCaptions';
 import {
   getKeyForRequiredDataset,
   isEncryptedDatasetFolder,
@@ -59,12 +60,6 @@ const mediaExtensions = [
 function isPathInside(parent: string, child: string) {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
-function normalizeCaptionExt(captionExt: unknown) {
-  const raw = typeof captionExt === 'string' && captionExt.trim() ? captionExt.trim() : 'txt';
-  const withDot = raw.startsWith('.') ? raw : `.${raw}`;
-  return /^\.[a-zA-Z0-9_-]+$/.test(withDot) ? withDot : '.txt';
 }
 
 function resolveDatasetPath(folderPath: unknown, datasetsRoot: string) {
@@ -188,7 +183,7 @@ function scanDatasetFolder(
     let selectedCaptionPath: string | undefined = captionPath;
 
     if (fs.existsSync(captionPath)) {
-      prompt = fs.readFileSync(captionPath, 'utf-8').trim();
+      prompt = parseRandomPromptCaptionText(fs.readFileSync(captionPath, 'utf-8'), captionExt);
     }
 
     if (!prompt && defaultCaption) {
@@ -258,7 +253,7 @@ export async function POST(request: Request) {
       scanDatasetFolder(
         datasetPath,
         datasetPath,
-        normalizeCaptionExt(dataset.captionExt),
+        normalizeRandomPromptCaptionExt(dataset.captionExt),
         typeof dataset.defaultCaption === 'string' ? dataset.defaultCaption.trim() : '',
         state,
       );

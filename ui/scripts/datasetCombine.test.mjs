@@ -10,12 +10,35 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   combineDatasets,
+  datasetCombineRequestHasKeyMaterial,
   hasPlaintextEncryptedOutputFiles,
 } = require('../dist/src/server/datasetCombine.js');
 const { ENCRYPTED_DATASET_MANIFEST } = require('../dist/src/server/encryptedDatasets.js');
 
 const CATALOG_AAD = 'aitk-encrypted-catalog:v1';
 const AUTH_TAG_BYTES = 16;
+
+test('datasetCombineRequestHasKeyMaterial detects raw keys before remote forwarding', () => {
+  assert.equal(datasetCombineRequestHasKeyMaterial(null), false);
+  assert.equal(datasetCombineRequestHasKeyMaterial({ sourceDatasets: ['plain'], outputName: 'combined' }), false);
+  assert.equal(
+    datasetCombineRequestHasKeyMaterial({
+      sourceDatasets: ['locked'],
+      outputName: 'combined',
+      encryptedDatasetKeys: [{ datasetName: 'locked', keyB64: 'source-key' }],
+    }),
+    true,
+  );
+  assert.equal(
+    datasetCombineRequestHasKeyMaterial({
+      sourceDatasets: ['plain'],
+      outputName: 'combined',
+      outputEncrypted: true,
+      outputKeyB64: 'output-key',
+    }),
+    true,
+  );
+});
 
 function b64(value) {
   return Buffer.from(value).toString('base64');

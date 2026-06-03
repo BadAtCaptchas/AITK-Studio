@@ -132,11 +132,17 @@ test('cloudflared download info uses pinned release assets and checksums for com
   assert.equal(windows.assetName, 'cloudflared-windows-amd64.exe');
   assert.equal(windows.expectedSha256, '20b9638f685333d623798e733effbad2487093f15ba592f6c7752360ff3b7ab7');
 
-  const darwin = cloudflared.getCloudflaredDownloadInfoForPlatform('darwin', 'arm64');
-  assert.equal(darwin.supported, true);
-  assert.equal(darwin.assetName, 'cloudflared-darwin-arm64.tgz');
-  assert.equal(darwin.archive, 'tgz');
-  assert.equal(darwin.expectedSha256, 'cd9f764abfd06757b4def10ee5ba3d862381ed9fc02d6c1f06086c23d88695c6');
+  const darwinAmd64 = cloudflared.getCloudflaredDownloadInfoForPlatform('darwin', 'x64');
+  assert.equal(darwinAmd64.supported, true);
+  assert.equal(darwinAmd64.assetName, 'cloudflared-darwin-amd64.tgz');
+  assert.equal(darwinAmd64.archive, 'tgz');
+  assert.equal(darwinAmd64.expectedSha256, '7240f709506bc2c1eb9da4d89cf2555499c60280ecb854b7d80e8f17d4b7903d');
+
+  const darwinArm64 = cloudflared.getCloudflaredDownloadInfoForPlatform('darwin', 'arm64');
+  assert.equal(darwinArm64.supported, true);
+  assert.equal(darwinArm64.assetName, 'cloudflared-darwin-arm64.tgz');
+  assert.equal(darwinArm64.archive, 'tgz');
+  assert.equal(darwinArm64.expectedSha256, 'ba94054c9fd4297645093d59d51442e5e546d07bb0516120e694a13d5b216d38');
 });
 
 test('cloudflared downloader rejects non-HTTPS and untrusted redirect hosts', () => {

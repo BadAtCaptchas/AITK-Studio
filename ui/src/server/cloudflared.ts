@@ -36,8 +36,8 @@ const LOCAL_BIN_PATH = path.join(LOCAL_BIN_DIR, process.platform === 'win32' ? '
 const CLOUDFLARED_RELEASE_VERSION = '2026.5.2';
 const CLOUDFLARED_RELEASE_BASE = `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_RELEASE_VERSION}`;
 const CLOUDFLARED_DOWNLOAD_SHA256: Record<string, string> = {
-  'cloudflared-darwin-amd64.tgz': 'c4fdc6021cd63003e32e70b577e17d47d493c6df4e24c7c97169ed74b67a715d',
-  'cloudflared-darwin-arm64.tgz': 'cd9f764abfd06757b4def10ee5ba3d862381ed9fc02d6c1f06086c23d88695c6',
+  'cloudflared-darwin-amd64.tgz': '7240f709506bc2c1eb9da4d89cf2555499c60280ecb854b7d80e8f17d4b7903d',
+  'cloudflared-darwin-arm64.tgz': 'ba94054c9fd4297645093d59d51442e5e546d07bb0516120e694a13d5b216d38',
   'cloudflared-linux-386': 'ad82d1dbed8bbb9d702807cbd97df932cc774d29e9da5c109b7a3c7f7aee2065',
   'cloudflared-linux-amd64': '5286698547f03df745adb2355f04c12dde52ef425491e81f433642d695521886',
   'cloudflared-linux-arm': '70a4c869a037bd69af6ce2ad0c4da4a7680d94fcfb8d4c70ecddae24d560762f',

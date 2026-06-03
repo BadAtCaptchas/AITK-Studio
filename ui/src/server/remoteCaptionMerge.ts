@@ -8,6 +8,11 @@ import {
   resolveEncryptedObjectPath,
   writeEncryptedManifest,
 } from './encryptedDatasets';
+import {
+  hasMatchingTargetMediaFile,
+  isPathInside,
+  normalizeRemoteCaptionExtension,
+} from './remoteCaptionSecurity';
 import type { EncryptedDatasetCatalog, EncryptedDatasetManifest } from '../types';
 
 const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
@@ -17,16 +22,6 @@ const DATASET_CACHE_DIR_NAMES = new Set(['_latent_cache', '_clip_vision_cache', 
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function captionExtSuffix(captionExtension: string) {
-  const normalized = captionExtension.trim().replace(/^\.+/, '').toLowerCase() || 'txt';
-  return `.${normalized}`;
-}
-
-function isPathInside(parent: string, child: string) {
-  const relative = path.relative(path.resolve(parent), path.resolve(child));
-  return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function shouldIncludeDatasetPath(relativePath: string) {
@@ -121,13 +116,13 @@ export async function mergePlainCaptionDataset(
 ) {
   const sourceRoot = path.resolve(sourceDatasetPath);
   const targetRoot = path.resolve(targetDatasetPath);
-  const suffix = captionExtSuffix(options.captionExtension);
+  const suffix = normalizeRemoteCaptionExtension(options.captionExtension);
   const files = await listFilesRecursive(sourceRoot);
   let copied = 0;
   let skipped = 0;
 
   for (const relativePath of files) {
-    if (!relativePath.toLowerCase().endsWith(suffix)) continue;
+    if (!hasMatchingTargetMediaFile(targetRoot, relativePath, suffix)) continue;
     const sourcePath = path.resolve(sourceRoot, relativePath);
     const targetPath = path.resolve(targetRoot, ...relativePath.replace(/\\/g, '/').split('/'));
     if (!isPathInside(targetRoot, targetPath)) continue;

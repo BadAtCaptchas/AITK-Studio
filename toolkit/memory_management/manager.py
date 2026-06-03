@@ -6,6 +6,9 @@ LINEAR_MODULES = [
     "Linear",
     "LoRACompatibleLinear",
     "QLinear",
+    "Linear4bit",
+    "Linear8bitLt",
+    "Fp8Linear",
 ]
 CONV_MODULES = [
     "Conv2d",

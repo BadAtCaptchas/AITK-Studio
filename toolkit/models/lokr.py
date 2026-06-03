@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from toolkit.network_mixins import ToolkitModuleMixin
+from toolkit.network_mixins import ToolkitModuleMixin, is_mergeable_lora_target
 
 from typing import TYPE_CHECKING, Union, List
 
@@ -104,7 +104,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.cp = False
         self.use_w1 = False
         self.use_w2 = False
-        self.can_merge_in = True
+        self.can_merge_in = is_mergeable_lora_target(org_module)
 
         self.shape = org_module.weight.shape
         if org_module.__class__.__name__ == 'Conv2d':
@@ -258,18 +258,16 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
     def merge_in(self, merge_weight=1.0):
         if not self.can_merge_in:
             return
+        if not is_mergeable_lora_target(self.org_module[0]):
+            self.can_merge_in = False
+            return
 
         # extract weight from org_module
         org_sd = self.org_module[0].state_dict()
-        # todo find a way to merge in weights when doing quantized model
-        if 'weight._data' in org_sd:
-            # quantized weight
-            return
-
         weight_key = "weight"
-        if 'weight._data' in org_sd:
-            # quantized weight
-            weight_key = "weight._data"
+        if weight_key not in org_sd:
+            self.can_merge_in = False
+            return
 
         orig_dtype = org_sd[weight_key].dtype
         weight = org_sd[weight_key].float()
@@ -285,6 +283,9 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             weight
             + (lokr_weight * merge_weight).to(weight.device, dtype=weight.dtype)
         )
+        if merged_weight.shape != weight.shape:
+            self.can_merge_in = False
+            return
 
         # set weight to org_module
         org_sd[weight_key] = merged_weight.to(orig_dtype)

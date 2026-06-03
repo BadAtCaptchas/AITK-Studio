@@ -520,7 +520,7 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const arch = String(processConfig.model?.arch ?? '');
   const baseArch = arch.split(':')[0];
   const networkType = String(processConfig.network?.type ?? '');
-  const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx/i.test(arch);
+  const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx|ideogram/i.test(arch);
   const warnLr = sensitiveArch ? 1e-4 : 3e-4;
   const criticalLr = sensitiveArch ? 3e-4 : 1e-3;
   if (!usesAdaptiveProdigyLr && lr > criticalLr) {

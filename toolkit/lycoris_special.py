@@ -8,12 +8,15 @@ from lycoris.modules.glora import GLoRAModule
 from torch import nn
 from transformers import CLIPTextModel
 from torch.nn import functional as F
-from toolkit.network_mixins import ToolkitNetworkMixin, ToolkitModuleMixin, ExtractableModuleMixin
+from toolkit.network_mixins import ToolkitNetworkMixin, ToolkitModuleMixin, ExtractableModuleMixin, is_mergeable_lora_target
 
 # diffusers specific stuff
 LINEAR_MODULES = [
     'Linear',
-    'LoRACompatibleLinear'
+    'LoRACompatibleLinear',
+    'Linear4bit',
+    'Linear8bitLt',
+    'Fp8Linear',
 ]
 CONV_MODULES = [
     'Conv2d',
@@ -46,6 +49,7 @@ class LoConSpecialModule(ToolkitModuleMixin, LoConModule, ExtractableModuleMixin
 
         self.scalar = nn.Parameter(torch.tensor(0.0))
         orig_module_name = org_module.__class__.__name__
+        self.can_merge_in = is_mergeable_lora_target(org_module)
         if orig_module_name in CONV_MODULES:
             self.isconv = True
             # For general LoCon
@@ -371,3 +375,5 @@ class LycorisSpecialNetwork(ToolkitNetworkMixin, LycorisNetwork):
         for lora in self.text_encoder_loras + self.unet_loras:
             assert lora.lora_name not in names, f"duplicated lora name: {lora.lora_name}"
             names.add(lora.lora_name)
+        if any(not getattr(lora, 'can_merge_in', True) for lora in self.text_encoder_loras + self.unet_loras):
+            self.can_merge_in = False

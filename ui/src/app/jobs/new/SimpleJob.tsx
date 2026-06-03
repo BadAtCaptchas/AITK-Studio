@@ -478,7 +478,12 @@ export default function SimpleJob({
                   <Checkbox
                     label="Low VRAM"
                     checked={jobConfig.config.process[0].model.low_vram}
-                    onChange={value => setJobConfig(value, 'config.process[0].model.low_vram')}
+                    onChange={value => {
+                      setJobConfig(value, 'config.process[0].model.low_vram');
+                      if (value) {
+                        setJobConfig(true, 'config.process[0].sample.keep_low_vram_for_samples');
+                      }
+                    }}
                   />
                 )}
                 {modelArch?.additionalSections?.includes('model.qie.match_target_res') && (

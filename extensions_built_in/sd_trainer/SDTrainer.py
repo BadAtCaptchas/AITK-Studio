@@ -229,6 +229,11 @@ class SDTrainer(BaseSDTrainProcess):
                     ctrl_img_2=sample_item.ctrl_img_2,
                     ctrl_img_3=sample_item.ctrl_img_3,
                 )
+                prepare_sample_config = getattr(
+                    self.sd, "prepare_sample_image_config_for_encoding", None
+                )
+                if callable(prepare_sample_config):
+                    prepare_sample_config(gen_img_config)
                 
                 has_control_images = False
                 if gen_img_config.ctrl_img is not None or gen_img_config.ctrl_img_1 is not None or gen_img_config.ctrl_img_2 is not None or gen_img_config.ctrl_img_3 is not None:

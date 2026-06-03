@@ -29,13 +29,23 @@ Module = Union['LoConSpecialModule', 'LoRAModule', 'DoRAModule']
 LINEAR_MODULES = [
     'Linear',
     'LoRACompatibleLinear',
-    'QLinear'
+    'QLinear',
+    'Linear4bit',
+    'Linear8bitLt',
+    'Fp8Linear',
     # 'GroupNorm',
 ]
 CONV_MODULES = [
     'Conv2d',
     'LoRACompatibleConv'
 ]
+UNMERGEABLE_MODULES = {
+    'QLinear',
+    'QConv2d',
+    'Linear4bit',
+    'Linear8bitLt',
+    'Fp8Linear',
+}
 
 ExtractMode = Union[
     'existing'
@@ -54,6 +64,41 @@ def print_once(msg):
     if msg not in printed_messages:
         print(msg)
         printed_messages.append(msg)
+
+
+def _expected_weight_shape(module):
+    if hasattr(module, 'out_features') and hasattr(module, 'in_features'):
+        return (module.out_features, module.in_features)
+    if all(hasattr(module, attr) for attr in ('out_channels', 'in_channels', 'kernel_size')):
+        groups = getattr(module, 'groups', 1) or 1
+        kernel_size = getattr(module, 'kernel_size')
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+        return (module.out_channels, module.in_channels // groups, *tuple(kernel_size))
+    return None
+
+
+def is_mergeable_lora_target(module) -> bool:
+    if module.__class__.__name__ in UNMERGEABLE_MODULES:
+        return False
+
+    try:
+        org_sd = module.state_dict()
+    except Exception:
+        return True
+
+    if 'weight._data' in org_sd:
+        return False
+
+    weight = org_sd.get('weight')
+    if weight is None or not hasattr(weight, 'shape'):
+        return True
+
+    expected_shape = _expected_weight_shape(module)
+    if expected_shape is not None and tuple(weight.shape) != expected_shape:
+        return False
+
+    return True
 
 
 def broadcast_and_multiply(tensor, multiplier):
@@ -348,6 +393,9 @@ class ToolkitModuleMixin:
     def merge_in(self: Module, merge_weight=1.0):
         if not self.can_merge_in:
             return
+        if not is_mergeable_lora_target(self.org_module[0]):
+            self.can_merge_in = False
+            return
         # get up/down weight
         if self.full_rank:
             up_weight = None
@@ -357,15 +405,10 @@ class ToolkitModuleMixin:
 
         # extract weight from org_module
         org_sd = self.org_module[0].state_dict()
-        # todo find a way to merge in weights when doing quantized model
-        if 'weight._data' in org_sd:
-            # quantized weight
-            return
-
         weight_key = "weight"
-        if 'weight._data' in org_sd:
-            # quantized weight
-            weight_key = "weight._data"
+        if weight_key not in org_sd:
+            self.can_merge_in = False
+            return
 
         orig_dtype = org_sd[weight_key].dtype
         weight = org_sd[weight_key].float()
@@ -383,22 +426,37 @@ class ToolkitModuleMixin:
             scale = scale.to(down_weight.device)
         # merge weight
         if self.full_rank:
-            weight = weight + multiplier * down_weight * scale
+            delta = down_weight
+            if weight.shape != delta.shape:
+                self.can_merge_in = False
+                return
+            weight = weight + multiplier * delta * scale
         elif len(weight.size()) == 2:
             # linear
-            weight = weight + multiplier * (up_weight @ down_weight) * scale
+            delta = up_weight @ down_weight
+            if weight.shape != delta.shape:
+                self.can_merge_in = False
+                return
+            weight = weight + multiplier * delta * scale
         elif down_weight.size()[2:4] == (1, 1):
             # conv2d 1x1
+            delta = (up_weight.squeeze(3).squeeze(2) @ down_weight.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
+            if weight.shape != delta.shape:
+                self.can_merge_in = False
+                return
             weight = (
                     weight
                     + multiplier
-                    * (up_weight.squeeze(3).squeeze(2) @ down_weight.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
+                    * delta
                     * scale
             )
         else:
             # conv2d 3x3
             conved = torch.nn.functional.conv2d(down_weight.permute(1, 0, 2, 3), up_weight).permute(1, 0, 2, 3)
             # print(conved.size(), weight.size(), module.stride, module.padding)
+            if weight.shape != conved.shape:
+                self.can_merge_in = False
+                return
             weight = weight + multiplier * conved * scale
 
         # set weight to org_module
@@ -856,11 +914,28 @@ class ToolkitNetworkMixin:
             module.reset_weights()
 
     def merge_in(self, merge_weight=1.0):
-        if self.network_type.lower() == 'dora':
+        if self.network_type.lower() == 'dora' or not self.can_merge_in:
             return
-        self.is_merged_in = True
-        for module in self.get_all_modules():
+        modules = self.get_all_modules()
+        if len(modules) == 0:
+            return
+        for module in modules:
+            org_module = getattr(module, 'org_module', [None])[0]
+            if org_module is not None and not is_mergeable_lora_target(org_module):
+                module.can_merge_in = False
+        if any(not getattr(module, 'can_merge_in', True) for module in modules):
+            self.can_merge_in = False
+            return
+        merged_modules = []
+        for module in modules:
             module.merge_in(merge_weight)
+            if not getattr(module, 'can_merge_in', True):
+                self.can_merge_in = False
+                for merged_module in reversed(merged_modules):
+                    merged_module.merge_out(merge_weight)
+                return
+            merged_modules.append(module)
+        self.is_merged_in = True
 
     def merge_out(self: Network, merge_weight=1.0):
         if not self.is_merged_in:

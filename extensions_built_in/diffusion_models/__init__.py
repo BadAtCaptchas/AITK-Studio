@@ -90,6 +90,9 @@ ZetaChromaModel, = _optional_models(
 ErnieImageModel, = _optional_models(
     ".ernie_image", (("ErnieImageModel", "ernie_image"),)
 )
+Ideogram4Model, = _optional_models(
+    ".ideogram4", (("Ideogram4Model", "ideogram4"),)
+)
 NucleusImageModel, = _optional_models(
     ".nucleus_image", (("NucleusImageModel", "nucleus_image"),)
 )
@@ -124,6 +127,7 @@ AI_TOOLKIT_MODELS = [
     AsymFlux2Klein9BModel,
     ZetaChromaModel,
     ErnieImageModel,
+    Ideogram4Model,
     NucleusImageModel,
     HidreamO1Model,
     GlmImageModel,

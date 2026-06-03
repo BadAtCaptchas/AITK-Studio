@@ -3,6 +3,9 @@ import { modelArchs, ModelArch } from './options';
 import { objectCopy } from '@/utils/basic';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
 
+const modelLowVramKey = 'config.process[0].model.low_vram';
+const keepLowVramForSamplesKey = 'config.process[0].sample.keep_low_vram_for_samples';
+
 const expandDatasetDefaults = (
   defaults: { [key: string]: any },
   numDatasets: number,
@@ -38,7 +41,8 @@ export const handleModelArchChange = (
 
   // update vram setting
   if (!newArch?.additionalSections?.includes('model.low_vram')) {
-    setJobConfig(false, 'config.process[0].model.low_vram');
+    setJobConfig(false, modelLowVramKey);
+    setJobConfig(false, keepLowVramForSamplesKey);
   }
 
   // handle layer offloading setting
@@ -76,6 +80,13 @@ export const handleModelArchChange = (
 
   let currentDefaults = expandDatasetDefaults(currentArch.defaults || {}, numDatasets);
   let newDefaults = expandDatasetDefaults(newArch?.defaults || {}, numDatasets);
+
+  if (currentDefaults[modelLowVramKey]?.[0] === true && !(keepLowVramForSamplesKey in currentDefaults)) {
+    currentDefaults[keepLowVramForSamplesKey] = [true, false];
+  }
+  if (newDefaults[modelLowVramKey]?.[0] === true && !(keepLowVramForSamplesKey in newDefaults)) {
+    newDefaults[keepLowVramForSamplesKey] = [true, false];
+  }
 
   // set new model
   setJobConfig(newArchName, 'config.process[0].model.arch');

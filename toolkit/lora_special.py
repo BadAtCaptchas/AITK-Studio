@@ -13,7 +13,7 @@ from toolkit.models.lokr import LokrModule
 
 from .config_modules import NetworkConfig
 from .lorm import count_parameters
-from .network_mixins import ToolkitNetworkMixin, ToolkitModuleMixin, ExtractableModuleMixin
+from .network_mixins import ToolkitNetworkMixin, ToolkitModuleMixin, ExtractableModuleMixin, is_mergeable_lora_target
 
 from toolkit.kohya_lora import LoRANetwork
 from toolkit.models.DoRA import DoRAModule
@@ -30,6 +30,9 @@ LINEAR_MODULES = [
     'Linear',
     'LoRACompatibleLinear',
     'QLinear',
+    'Linear4bit',
+    'Linear8bitLt',
+    'Fp8Linear',
     # 'GroupNorm',
 ]
 CONV_MODULES = [
@@ -62,7 +65,7 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
             is_ara: bool = False,
             **kwargs
     ):
-        self.can_merge_in = True
+        self.can_merge_in = is_mergeable_lora_target(org_module)
         """if alpha == 0 or None, alpha is rank (no scaling)."""
         ToolkitModuleMixin.__init__(self, network=network)
         torch.nn.Module.__init__(self)
@@ -556,6 +559,8 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
         for lora in self.text_encoder_loras + self.unet_loras:
             assert lora.lora_name not in names, f"duplicated lora name: {lora.lora_name}"
             names.add(lora.lora_name)
+        if any(not getattr(lora, 'can_merge_in', True) for lora in self.text_encoder_loras + self.unet_loras):
+            self.can_merge_in = False
 
         if self.full_train_in_out:
             print("full train in out")

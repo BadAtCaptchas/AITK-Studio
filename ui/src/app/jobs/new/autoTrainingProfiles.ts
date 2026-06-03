@@ -60,6 +60,7 @@ const flowImageArchs = [
 
 const qwenImageArchs = ['qwen_image', 'qwen_image:2512'];
 const qwenEditArchs = ['qwen_image_edit', 'qwen_image_edit_plus', 'qwen_image_edit_plus:2511'];
+const ideogram4Archs = ['ideogram4', 'ideogram4:fp8'];
 const sdArchs = ['sd15', 'sdxl'];
 const wanCommonArchs = ['wan21*', 'wan22_5b'];
 const wan22A14BArchs = ['wan22_14b:*', 'wan22_14b_i2v'];
@@ -239,6 +240,26 @@ export const builtInAutoTrainingProfiles: AutoTrainingProfile[] = [
       phase('Teach subject', 0.00003, 'content', 'standard', { timestep_type: 'weighted' }),
       phase('Stabilize', 0.00002, 'balanced', 'standard', { timestep_type: 'weighted' }),
       phase('Polish style', 0.00001, 'style', 'standard', { timestep_type: 'weighted' }),
+    ],
+  },
+  {
+    id: 'ideogram4-balanced-lora',
+    name: 'Ideogram 4 Balanced LoRA',
+    description: 'Transformer-only Ideogram 4 LoRA profile for JSON-caption datasets.',
+    modelArchs: ideogram4Archs,
+    network: loraNetwork(32, { transformer_only: true }),
+    train: trainDefaults(0.00004, {
+      batch_size: 1,
+      gradient_accumulation: 1,
+      cache_text_embeddings: true,
+      timestep_type: 'weighted',
+      content_or_style: 'content',
+      save_on_phase_change: true,
+    }),
+    phases: [
+      phase('Teach JSON layout', 0.00004, 'content', 'long', { timestep_type: 'weighted' }),
+      phase('Stabilize composition', 0.000025, 'balanced', 'long', { timestep_type: 'weighted' }),
+      phase('Refine style detail', 0.00001, 'style', 'long', { timestep_type: 'weighted' }),
     ],
   },
   {

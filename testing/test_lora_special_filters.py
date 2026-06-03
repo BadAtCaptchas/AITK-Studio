@@ -26,6 +26,24 @@ class WrappedZImageTransformer(torch.nn.Module):
         self.wrapped = ZImageTransformer2DModel()
 
 
+class Linear4bit(torch.nn.Linear):
+    pass
+
+
+class Ideogram4Transformer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.ModuleDict(
+                    {
+                        "qkv": Linear4bit(4, 4),
+                    }
+                )
+            ]
+        )
+
+
 class _BaseModel:
     arch = "zimage"
     use_old_lokr_format = False
@@ -34,12 +52,17 @@ class _BaseModel:
         return ["layers"]
 
 
+class _IdeogramBaseModel(_BaseModel):
+    arch = "ideogram4"
+
+
 class LoRASpecialFilterTest(unittest.TestCase):
     def _build_network(
         self,
         only_if_contains=None,
         unet=None,
         target_lin_modules=None,
+        base_model=None,
     ):
         network_config = NetworkConfig(
             type="lora",
@@ -60,7 +83,7 @@ class LoRASpecialFilterTest(unittest.TestCase):
             transformer_only=network_config.transformer_only,
             is_transformer=True,
             target_lin_modules=target_lin_modules or ["ZImageTransformer2DModel"],
-            base_model=_BaseModel(),
+            base_model=base_model or _BaseModel(),
             only_if_contains=only_if_contains,
         )
 
@@ -78,6 +101,16 @@ class LoRASpecialFilterTest(unittest.TestCase):
         network = self._build_network([])
 
         self.assertEqual(len(network.get_all_modules()), 1)
+        self.assertTrue(network.can_merge_in)
+
+    def test_mergeable_dense_transformer_modules_can_still_merge(self):
+        network = self._build_network([])
+
+        network.merge_in()
+        self.assertTrue(network.is_merged_in)
+
+        network.merge_out()
+        self.assertFalse(network.is_merged_in)
 
     def test_assistant_lora_wrapped_model_still_creates_training_modules(self):
         transformer = ZImageTransformer2DModel()
@@ -100,6 +133,21 @@ class LoRASpecialFilterTest(unittest.TestCase):
         )
 
         self.assertEqual(len(network.get_all_modules()), 1)
+
+    def test_nf4_linear4bit_transformer_modules_are_targeted(self):
+        network = self._build_network(
+            unet=Ideogram4Transformer(),
+            target_lin_modules=["Ideogram4Transformer"],
+            base_model=_IdeogramBaseModel(),
+        )
+
+        self.assertEqual(len(network.get_all_modules()), 1)
+        self.assertIn("layers", network.get_all_modules()[0].lora_name)
+        self.assertFalse(network.can_merge_in)
+        self.assertFalse(network.get_all_modules()[0].can_merge_in)
+
+        network.merge_in()
+        self.assertFalse(network.is_merged_in)
 
     def test_empty_network_error_includes_targeting_details(self):
         network = self._build_network(["does_not_exist"])

@@ -22,7 +22,10 @@ ExtractMode = Union[
 
 LINEAR_MODULES = [
     'Linear',
-    'LoRACompatibleLinear'
+    'LoRACompatibleLinear',
+    'Linear4bit',
+    'Linear8bitLt',
+    'Fp8Linear',
 ]
 CONV_MODULES = [
     # 'Conv2d',

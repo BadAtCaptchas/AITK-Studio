@@ -164,6 +164,11 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
     jobConfig.config.process[0].model.layer_offloading_text_encoder_percent ??= memoryProfile.textEncoderPercent;
   }
 
+  const sample = jobConfig.config.process[0].sample;
+  if (jobConfig.config.process[0].model.low_vram && !('keep_low_vram_for_samples' in sample)) {
+    sample.keep_low_vram_for_samples = true;
+  }
+
   if (!('logging' in jobConfig.config.process[0])) {
     //@ts-ignore
     jobConfig.config.process[0].logging = {

@@ -79,10 +79,23 @@ function normalizePromptItems(generateConfig: any) {
   return [];
 }
 
+function getPositiveInteger(value: unknown, defaultValue: number) {
+  const parsed = Number(value ?? defaultValue);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : defaultValue;
+}
+
 function getRequestedImageCount(generateConfig: any) {
-  const repeatCount = Number(generateConfig?.num_repeats ?? 1);
-  const numRepeats = Number.isFinite(repeatCount) && repeatCount > 0 ? Math.floor(repeatCount) : 1;
-  return normalizePromptItems(generateConfig).length * numRepeats;
+  const numRepeats = getPositiveInteger(generateConfig?.num_repeats, 1);
+  const promptItems = normalizePromptItems(generateConfig);
+  if (promptItems.length === 0) {
+    return 0;
+  }
+
+  const imageCount = generateConfig?.random_prompts
+    ? getPositiveInteger(generateConfig?.max_images, 10000)
+    : promptItems.length;
+
+  return imageCount * numRepeats;
 }
 
 async function findNewestGeneratedImage(outputFolder: string) {

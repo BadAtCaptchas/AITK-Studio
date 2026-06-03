@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import nodeFs from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,7 @@ const {
   mergePlainCaptionDataset,
 } = require('../dist/src/server/remoteCaptionMerge.js');
 const {
+  hasMatchingTargetMediaFile,
   resolveDatasetDirectoryInsideRoot,
 } = require('../dist/src/server/remoteCaptionSecurity.js');
 
@@ -120,13 +122,42 @@ test('plain remote caption merge only copies sidecars for known target media', a
   await fs.mkdir(source, { recursive: true });
   await fs.mkdir(target, { recursive: true });
   await fs.writeFile(path.join(source, 'known.txt'), 'caption');
+  await fs.writeFile(path.join(source, 'upper.txt'), 'uppercase extension caption');
   await fs.writeFile(path.join(source, 'orphan.txt'), 'orphan caption');
   await fs.writeFile(path.join(target, 'known.jpg'), 'local image');
+  await fs.writeFile(path.join(target, 'upper.JPG'), 'local uppercase image');
 
   const result = await mergePlainCaptionDataset(source, target, { captionExtension: 'txt', recaption: true });
-  assert.deepEqual(result, { copied: 1, skipped: 0 });
+  assert.deepEqual(result, { copied: 2, skipped: 0 });
   assert.equal(await fs.readFile(path.join(target, 'known.txt'), 'utf8'), 'caption');
+  assert.equal(await fs.readFile(path.join(target, 'upper.txt'), 'utf8'), 'uppercase extension caption');
   await assert.rejects(() => fs.stat(path.join(target, 'orphan.txt')));
+});
+
+test('target media extension matching is case-insensitive', () => {
+  const targetRoot = path.join(os.tmpdir(), 'aitk-caption-case-sensitive-target');
+  const originalStatSync = nodeFs.statSync;
+  const originalReaddirSync = nodeFs.readdirSync;
+
+  nodeFs.statSync = pathname => {
+    if (path.resolve(String(pathname)) === path.join(targetRoot, 'IMG.JPG')) {
+      return { isFile: () => true };
+    }
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  };
+  nodeFs.readdirSync = pathname => {
+    if (path.resolve(String(pathname)) === targetRoot) {
+      return [{ name: 'IMG.JPG' }];
+    }
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  };
+
+  try {
+    assert.equal(hasMatchingTargetMediaFile(targetRoot, 'IMG.txt', '.txt'), true);
+  } finally {
+    nodeFs.statSync = originalStatSync;
+    nodeFs.readdirSync = originalReaddirSync;
+  }
 });
 
 test('remote caption dataset paths must stay inside the datasets root after realpath', async () => {

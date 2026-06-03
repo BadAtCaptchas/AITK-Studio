@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
+import net from 'net';
 import { db, type WorkerNodeRecord } from './db';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '@/types';
 
@@ -20,11 +21,37 @@ export function isLocalWorker(workerId: string | null | undefined) {
 }
 
 export function normalizeWorkerBaseUrl(baseUrl: string) {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(trimmed)) {
+  const trimmed = baseUrl.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error('Worker base URL must be a valid http:// or https:// URL');
+  }
+
+  if (!/^https?:$/i.test(parsed.protocol)) {
     throw new Error('Worker base URL must start with http:// or https://');
   }
-  return trimmed;
+
+  if (parsed.username || parsed.password) {
+    throw new Error('Worker base URL cannot include credentials');
+  }
+
+  if ((parsed.pathname && parsed.pathname !== '/') || parsed.search || parsed.hash) {
+    throw new Error('Worker base URL must be an origin without path, query, or fragment');
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const ipType = net.isIP(host);
+  if (host === 'localhost' || host.endsWith('.localhost')) {
+    throw new Error('Worker base URL cannot target localhost');
+  }
+  if ((ipType === 4 && isPrivateIPv4(host)) || (ipType === 6 && isPrivateIPv6(host))) {
+    throw new Error('Worker base URL cannot target private or loopback IPs');
+  }
+
+  parsed.pathname = '';
+  return parsed.toString().replace(/\/$/, '');
 }
 
 export async function getRemoteWorker(workerId: string): Promise<WorkerNodeRecord> {
@@ -40,7 +67,25 @@ export async function getRemoteWorker(workerId: string): Promise<WorkerNodeRecor
 
 function remoteUrl(worker: WorkerNodeRecord, routePath: string) {
   const suffix = routePath.startsWith('/') ? routePath : `/${routePath}`;
-  return `${normalizeWorkerBaseUrl(worker.base_url)}${suffix}`;
+  return new URL(suffix, `${normalizeWorkerBaseUrl(worker.base_url)}/`).toString();
+}
+
+function isPrivateIPv4(ip: string) {
+  const octets = ip.split('.').map(part => Number(part));
+  if (octets.length !== 4 || octets.some(octet => Number.isNaN(octet))) return false;
+  const [a, b] = octets;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function isPrivateIPv6(ip: string) {
+  const normalized = ip.toLowerCase();
+  return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:');
 }
 
 async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: RequestInit = {}) {

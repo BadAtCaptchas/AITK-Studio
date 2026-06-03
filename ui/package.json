@@ -14,6 +14,7 @@
     "test:tensorboard": "tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
     "test:remote": "tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs",
     "test:basic": "tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs",
+    "test:random-prompt": "tsc -p tsconfig.worker.json && node --test scripts/randomPromptCaptions.test.mjs",
     "test:dataset-combine": "tsc -p tsconfig.worker.json && node --test scripts/datasetCombine.test.mjs",
     "test:dataset-rename": "tsc -p tsconfig.worker.json && node --test scripts/datasetRename.test.mjs",
     "test:folder-import": "tsc -p tsconfig.worker.json && node --test scripts/folderImport.test.mjs",

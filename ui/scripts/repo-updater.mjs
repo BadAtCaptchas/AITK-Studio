@@ -183,8 +183,15 @@ function plural(value, singular, pluralLabel = `${singular}s`) {
   return `${value} ${value === 1 ? singular : pluralLabel}`;
 }
 
-function normalizeRemoteWebUrl(remoteUrl) {
+function redactRemoteCredentials(remoteUrl) {
   const raw = (remoteUrl || '').trim();
+  if (!raw) return null;
+
+  return raw.replace(/^(https?:\/\/)(?:[^/?#]*@)/i, '$1');
+}
+
+function normalizeRemoteWebUrl(remoteUrl) {
+  const raw = redactRemoteCredentials(remoteUrl);
   if (!raw) return null;
 
   const sshMatch = raw.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
@@ -355,7 +362,7 @@ async function getLocalInstallInfo() {
 
   const branch = trimOutput(await safeGit(['rev-parse', '--abbrev-ref', 'HEAD'])) || 'HEAD';
   const localCommit = trimOutput(await safeGit(['rev-parse', 'HEAD'])) || null;
-  const sourceRemote = trimOutput(await safeGit(['remote', 'get-url', 'origin'])) || null;
+  const sourceRemote = redactRemoteCredentials(trimOutput(await safeGit(['remote', 'get-url', 'origin'])));
   const sourceRemoteWebUrl = normalizeRemoteWebUrl(sourceRemote);
 
   return {

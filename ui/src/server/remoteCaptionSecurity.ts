@@ -63,8 +63,11 @@ export async function resolveDatasetDirectoryInsideRoot(datasetPath: string, dat
 export function hasMatchingTargetMediaFile(targetRoot: string, captionRelativePath: string, captionSuffix: string) {
   if (!captionRelativePath.toLowerCase().endsWith(captionSuffix)) return false;
   const withoutCaptionExt = captionRelativePath.slice(0, -captionSuffix.length);
+  const mediaPathPrefix = path.resolve(targetRoot, ...withoutCaptionExt.replace(/\\/g, '/').split('/'));
+  if (!isPathInside(targetRoot, mediaPathPrefix)) return false;
+
   for (const mediaExt of REMOTE_CAPTION_MEDIA_EXTENSIONS) {
-    const mediaPath = path.resolve(targetRoot, ...`${withoutCaptionExt}${mediaExt}`.replace(/\\/g, '/').split('/'));
+    const mediaPath = `${mediaPathPrefix}${mediaExt}`;
     if (!isPathInside(targetRoot, mediaPath)) continue;
     try {
       if (fs.statSync(mediaPath).isFile()) return true;
@@ -72,5 +75,22 @@ export function hasMatchingTargetMediaFile(targetRoot: string, captionRelativePa
       // Try the next supported media extension.
     }
   }
+
+  const targetDirectory = path.dirname(mediaPathPrefix);
+  if (!isPathInside(targetRoot, targetDirectory)) return false;
+  const mediaBaseName = path.basename(mediaPathPrefix);
+  try {
+    for (const entry of fs.readdirSync(targetDirectory, { withFileTypes: true })) {
+      const ext = path.extname(entry.name);
+      if (!ext || !REMOTE_CAPTION_MEDIA_EXTENSIONS.has(ext.toLowerCase())) continue;
+      if (entry.name.slice(0, -ext.length) !== mediaBaseName) continue;
+      const mediaPath = path.join(targetDirectory, entry.name);
+      if (!isPathInside(targetRoot, mediaPath)) continue;
+      if (fs.statSync(mediaPath).isFile()) return true;
+    }
+  } catch {
+    // The target directory is missing or unreadable.
+  }
+
   return false;
 }

@@ -63,6 +63,7 @@ class Flux2MistralSourceTest(unittest.TestCase):
         text_encoder_from_pretrained.assert_called_once_with(
             model_path,
             torch_dtype=torch.float32,
+            use_safetensors=True,
             token=None,
             subfolder="text_encoder",
         )
@@ -98,6 +99,7 @@ class Flux2MistralSourceTest(unittest.TestCase):
         text_encoder_from_pretrained.assert_called_once_with(
             MISTRAL_PATH,
             torch_dtype=torch.float32,
+            use_safetensors=True,
             token=None,
         )
         processor_from_pretrained.assert_called_once_with(
@@ -136,6 +138,7 @@ class Flux2MistralSourceTest(unittest.TestCase):
         text_encoder_from_pretrained.assert_called_once_with(
             "custom/mistral-text-encoder",
             torch_dtype=torch.float32,
+            use_safetensors=True,
             token=None,
         )
         processor_from_pretrained.assert_called_once_with(
@@ -171,6 +174,7 @@ class Flux2MistralSourceTest(unittest.TestCase):
             mock.call(
                 "black-forest-labs/FLUX.2-dev",
                 torch_dtype=torch.float32,
+                use_safetensors=True,
                 token="hf_test_token",
                 subfolder="text_encoder",
             ),
@@ -180,6 +184,7 @@ class Flux2MistralSourceTest(unittest.TestCase):
             mock.call(
                 MISTRAL_PATH,
                 torch_dtype=torch.float32,
+                use_safetensors=True,
                 token="hf_test_token",
             ),
         )
@@ -221,6 +226,7 @@ class Flux2MistralSourceTest(unittest.TestCase):
         text_encoder_from_pretrained.assert_called_once_with(
             model_path,
             torch_dtype=torch.float32,
+            use_safetensors=True,
             token=None,
             subfolder="text_encoder",
         )

@@ -246,7 +246,11 @@ class Flux2Model(BaseModel):
         return deduped
 
     def _load_mistral_text_encoder(self, source, dtype):
-        text_encoder_kwargs = {"torch_dtype": dtype, "token": HF_TOKEN}
+        text_encoder_kwargs = {
+            "torch_dtype": dtype,
+            "token": HF_TOKEN,
+            "use_safetensors": True,
+        }
         if source["text_encoder_subfolder"] is not None:
             text_encoder_kwargs["subfolder"] = source["text_encoder_subfolder"]
         return Mistral3ForConditionalGeneration.from_pretrained(

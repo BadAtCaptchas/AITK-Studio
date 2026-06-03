@@ -13,6 +13,7 @@ import {
   getDurableEncryptedDatasetKeys,
 } from './encryptedDatasetSecrets';
 import { getDatasetsRoot } from './settings';
+import { resolveDatasetDirectoryInsideRoot } from './remoteCaptionSecurity';
 import {
   extractZipSafely,
   getExtractedDatasetPath,
@@ -95,8 +96,13 @@ async function mergeRemoteCaptionDataset(
   manifestName: string,
 ) {
   const originalDatasetPath = path.resolve(state.originalDatasetPath);
-  const originalExists = fs.existsSync(originalDatasetPath) && fs.statSync(originalDatasetPath).isDirectory();
   const datasetsRoot = await getDatasetsRoot();
+  const originalExists = fs.existsSync(originalDatasetPath) && fs.statSync(originalDatasetPath).isDirectory();
+  let realOriginalDatasetPath = originalDatasetPath;
+
+  if (originalExists) {
+    realOriginalDatasetPath = await resolveDatasetDirectoryInsideRoot(originalDatasetPath, datasetsRoot);
+  }
 
   if (!originalExists) {
     const importedFallbackPath = await importDatasetFallback(
@@ -116,14 +122,14 @@ async function mergeRemoteCaptionDataset(
     if (!keyB64) {
       throw new Error('Durable encrypted dataset key is required to merge remote captions');
     }
-    const mergeStats = await mergeEncryptedCaptionDataset(sourceDatasetPath, originalDatasetPath, {
+    const mergeStats = await mergeEncryptedCaptionDataset(sourceDatasetPath, realOriginalDatasetPath, {
       keyB64,
       recaption: state.recaption,
     });
     return { jobPatch: {}, statePatch: {}, mergeStats };
   }
 
-  const mergeStats = await mergePlainCaptionDataset(sourceDatasetPath, originalDatasetPath, {
+  const mergeStats = await mergePlainCaptionDataset(sourceDatasetPath, realOriginalDatasetPath, {
     captionExtension: state.captionExtension,
     recaption: state.recaption,
   });

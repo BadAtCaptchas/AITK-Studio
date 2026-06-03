@@ -115,20 +115,44 @@ test('cloudflared named tunnel mode uses token-file arguments', () => {
   assert.deepEqual(args.slice(-3), ['run', '--token-file', '/tmp/tunnel-token']);
 });
 
-test('cloudflared download info uses official release assets for common platforms', () => {
+test('cloudflared download info uses pinned release assets and checksums for common platforms', () => {
   const cloudflared = loadCloudflared();
 
   const linux = cloudflared.getCloudflaredDownloadInfoForPlatform('linux', 'x64');
   assert.equal(linux.supported, true);
   assert.equal(linux.assetName, 'cloudflared-linux-amd64');
-  assert.match(linux.url, /github\.com\/cloudflare\/cloudflared\/releases\/latest\/download\/cloudflared-linux-amd64$/);
+  assert.equal(
+    linux.url,
+    'https://github.com/cloudflare/cloudflared/releases/download/2026.5.2/cloudflared-linux-amd64',
+  );
+  assert.equal(linux.expectedSha256, '5286698547f03df745adb2355f04c12dde52ef425491e81f433642d695521886');
 
   const windows = cloudflared.getCloudflaredDownloadInfoForPlatform('win32', 'x64');
   assert.equal(windows.supported, true);
   assert.equal(windows.assetName, 'cloudflared-windows-amd64.exe');
+  assert.equal(windows.expectedSha256, '20b9638f685333d623798e733effbad2487093f15ba592f6c7752360ff3b7ab7');
 
   const darwin = cloudflared.getCloudflaredDownloadInfoForPlatform('darwin', 'arm64');
   assert.equal(darwin.supported, true);
   assert.equal(darwin.assetName, 'cloudflared-darwin-arm64.tgz');
   assert.equal(darwin.archive, 'tgz');
+  assert.equal(darwin.expectedSha256, 'cd9f764abfd06757b4def10ee5ba3d862381ed9fc02d6c1f06086c23d88695c6');
+});
+
+test('cloudflared downloader rejects non-HTTPS and untrusted redirect hosts', () => {
+  const cloudflared = loadCloudflared();
+
+  assert.throws(
+    () => cloudflared.assertCloudflaredDownloadUrlIsTrusted(new URL('http://github.com/cloudflare/cloudflared')),
+    /non-HTTPS/,
+  );
+  assert.throws(
+    () => cloudflared.assertCloudflaredDownloadUrlIsTrusted(new URL('https://example.com/cloudflared')),
+    /untrusted host/,
+  );
+  assert.doesNotThrow(() =>
+    cloudflared.assertCloudflaredDownloadUrlIsTrusted(
+      new URL('https://release-assets.githubusercontent.com/github-production-release-asset/cloudflared'),
+    ),
+  );
 });

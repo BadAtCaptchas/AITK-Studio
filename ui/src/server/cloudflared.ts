@@ -1,6 +1,6 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import fsp from 'fs/promises';
-import http from 'http';
 import https from 'https';
 import path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
@@ -33,7 +33,19 @@ const URL_FILE = path.join(TOOLKIT_ROOT, '.cloudflared.url');
 const LOG_FILE = path.join(TOOLKIT_ROOT, '.cloudflared.log');
 const LOCAL_BIN_DIR = path.join(TOOLKIT_ROOT, 'bin');
 const LOCAL_BIN_PATH = path.join(LOCAL_BIN_DIR, process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
-const CLOUDFLARED_RELEASE_BASE = 'https://github.com/cloudflare/cloudflared/releases/latest/download';
+const CLOUDFLARED_RELEASE_VERSION = '2026.5.2';
+const CLOUDFLARED_RELEASE_BASE = `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_RELEASE_VERSION}`;
+const CLOUDFLARED_DOWNLOAD_SHA256: Record<string, string> = {
+  'cloudflared-darwin-amd64.tgz': 'c4fdc6021cd63003e32e70b577e17d47d493c6df4e24c7c97169ed74b67a715d',
+  'cloudflared-darwin-arm64.tgz': 'cd9f764abfd06757b4def10ee5ba3d862381ed9fc02d6c1f06086c23d88695c6',
+  'cloudflared-linux-386': 'ad82d1dbed8bbb9d702807cbd97df932cc774d29e9da5c109b7a3c7f7aee2065',
+  'cloudflared-linux-amd64': '5286698547f03df745adb2355f04c12dde52ef425491e81f433642d695521886',
+  'cloudflared-linux-arm': '70a4c869a037bd69af6ce2ad0c4da4a7680d94fcfb8d4c70ecddae24d560762f',
+  'cloudflared-linux-arm64': '5a4e8ce2701105271412059f44b6a0bf1ae4542b4d98ff3180c0c019443a5815',
+  'cloudflared-windows-386.exe': '6736615e8d2b3b61e868e32907e85641b4ec7b2b8c26bd3361ec15e56e53e242',
+  'cloudflared-windows-amd64.exe': '20b9638f685333d623798e733effbad2487093f15ba592f6c7752360ff3b7ab7',
+};
+const TRUSTED_CLOUDFLARED_DOWNLOAD_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com']);
 const DOWNLOAD_MAX_REDIRECTS = 5;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 
@@ -43,6 +55,7 @@ export type CloudflaredDownloadInfo = {
   url: string | null;
   archive: 'none' | 'tgz';
   installPath: string;
+  expectedSha256: string | null;
   reason: string | null;
 };
 
@@ -110,6 +123,7 @@ export function getCloudflaredDownloadInfoForPlatform(
       url: null,
       archive: 'none',
       installPath: LOCAL_BIN_PATH,
+      expectedSha256: null,
       reason: `Unsupported CPU architecture for automatic cloudflared download: ${arch}`,
     };
   }
@@ -132,7 +146,21 @@ export function getCloudflaredDownloadInfoForPlatform(
       url: null,
       archive: 'none',
       installPath: LOCAL_BIN_PATH,
+      expectedSha256: null,
       reason: `Unsupported operating system for automatic cloudflared download: ${platform}`,
+    };
+  }
+
+  const expectedSha256 = CLOUDFLARED_DOWNLOAD_SHA256[assetName] || null;
+  if (!expectedSha256) {
+    return {
+      supported: false,
+      assetName,
+      url: null,
+      archive,
+      installPath: LOCAL_BIN_PATH,
+      expectedSha256: null,
+      reason: `Automatic cloudflared download is not supported for ${platform}/${arch} because no pinned checksum is configured.`,
     };
   }
 
@@ -142,6 +170,7 @@ export function getCloudflaredDownloadInfoForPlatform(
     url: `${CLOUDFLARED_RELEASE_BASE}/${assetName}`,
     archive,
     installPath: LOCAL_BIN_PATH,
+    expectedSha256,
     reason: null,
   };
 }
@@ -209,6 +238,15 @@ async function getCloudflaredVersion(bin: string) {
   });
 }
 
+export function assertCloudflaredDownloadUrlIsTrusted(url: URL) {
+  if (url.protocol !== 'https:') {
+    throw new Error('Refusing to download cloudflared over a non-HTTPS URL');
+  }
+  if (!TRUSTED_CLOUDFLARED_DOWNLOAD_HOSTS.has(url.hostname)) {
+    throw new Error(`Refusing to download cloudflared from untrusted host: ${url.hostname}`);
+  }
+}
+
 function downloadFile(url: string, destinationPath: string, redirects = 0): Promise<void> {
   return new Promise((resolve, reject) => {
     if (redirects > DOWNLOAD_MAX_REDIRECTS) {
@@ -217,8 +255,14 @@ function downloadFile(url: string, destinationPath: string, redirects = 0): Prom
     }
 
     const parsedUrl = new URL(url);
-    const client = parsedUrl.protocol === 'https:' ? https : http;
-    const request = client.get(
+    try {
+      assertCloudflaredDownloadUrlIsTrusted(parsedUrl);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    const request = https.get(
       parsedUrl,
       {
         headers: {
@@ -232,8 +276,10 @@ function downloadFile(url: string, destinationPath: string, redirects = 0): Prom
         const redirectUrl = response.headers.location;
         if (statusCode >= 300 && statusCode < 400 && redirectUrl) {
           response.resume();
+          const nextUrl = new URL(redirectUrl, parsedUrl);
           try {
-            await downloadFile(new URL(redirectUrl, parsedUrl).toString(), destinationPath, redirects + 1);
+            assertCloudflaredDownloadUrlIsTrusted(nextUrl);
+            await downloadFile(nextUrl.toString(), destinationPath, redirects + 1);
             resolve();
           } catch (error) {
             reject(error);
@@ -261,6 +307,23 @@ function downloadFile(url: string, destinationPath: string, redirects = 0): Prom
     });
     request.on('error', reject);
   });
+}
+
+async function sha256File(filePath: string) {
+  const hash = crypto.createHash('sha256');
+  const input = fs.createReadStream(filePath);
+  for await (const chunk of input) {
+    hash.update(chunk);
+  }
+  return hash.digest('hex');
+}
+
+async function verifyDownloadedCloudflared(filePath: string, expectedSha256: string) {
+  const actualSha256 = await sha256File(filePath);
+  if (actualSha256 !== expectedSha256) {
+    await fsp.rm(filePath, { force: true }).catch(() => undefined);
+    throw new Error('Downloaded cloudflared checksum did not match the pinned release checksum');
+  }
 }
 
 function readTarString(buffer: Buffer, start: number, length: number) {
@@ -303,7 +366,7 @@ export async function downloadCloudflared(): Promise<CloudflaredDownloadResult> 
   }
 
   const downloadInfo = getCloudflaredDownloadInfoForPlatform();
-  if (!downloadInfo.supported || !downloadInfo.url) {
+  if (!downloadInfo.supported || !downloadInfo.url || !downloadInfo.expectedSha256) {
     throw new Error(downloadInfo.reason || 'Automatic cloudflared download is not supported on this platform');
   }
 
@@ -313,10 +376,12 @@ export async function downloadCloudflared(): Promise<CloudflaredDownloadResult> 
 
   if (downloadInfo.archive === 'tgz') {
     await downloadFile(downloadInfo.url, tempPath);
+    await verifyDownloadedCloudflared(tempPath, downloadInfo.expectedSha256);
     await extractCloudflaredFromTgz(tempPath, downloadInfo.installPath);
     await fsp.rm(tempPath, { force: true }).catch(() => undefined);
   } else {
     await downloadFile(downloadInfo.url, tempPath);
+    await verifyDownloadedCloudflared(tempPath, downloadInfo.expectedSha256);
     await fsp.rename(tempPath, downloadInfo.installPath);
   }
 

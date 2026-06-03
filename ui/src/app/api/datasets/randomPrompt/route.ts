@@ -61,10 +61,12 @@ function isPathInside(parent: string, child: string) {
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+const allowedCaptionExtensions = new Set(['.txt', '.caption']);
+
 function normalizeCaptionExt(captionExt: unknown) {
   const raw = typeof captionExt === 'string' && captionExt.trim() ? captionExt.trim() : 'txt';
-  const withDot = raw.startsWith('.') ? raw : `.${raw}`;
-  return /^\.[a-zA-Z0-9_-]+$/.test(withDot) ? withDot : '.txt';
+  const normalized = raw.startsWith('.') ? raw.toLowerCase() : `.${raw.toLowerCase()}`;
+  return allowedCaptionExtensions.has(normalized) ? normalized : '.txt';
 }
 
 function resolveDatasetPath(folderPath: unknown, datasetsRoot: string) {

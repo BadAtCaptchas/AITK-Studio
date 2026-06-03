@@ -1,4 +1,3 @@
-import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { db, type WorkerNodeRecord } from './db';
@@ -8,6 +7,7 @@ import {
   resolveConfigPath,
 } from './encryptedDatasets';
 import { getDatasetsRoot } from './settings';
+import { resolveDatasetDirectoryInsideRoot } from './remoteCaptionSecurity';
 import { createDatasetExportArchive, datasetExportFileName } from './datasetTransfer';
 import {
   remoteJson,
@@ -91,9 +91,18 @@ export async function dispatchRemoteCaptionJob(options: {
     throw new RemoteCaptionDispatchError('Caption process not found in job config', 400);
   }
 
+  const datasetsRoot = await getDatasetsRoot();
   const originalDatasetPath = resolveConfigPath(captionInfo.pathToCaption);
-  if (!fs.existsSync(originalDatasetPath) || !fs.statSync(originalDatasetPath).isDirectory()) {
-    throw new RemoteCaptionDispatchError('Caption dataset not found', 404);
+  let realOriginalDatasetPath: string;
+  try {
+    realOriginalDatasetPath = await resolveDatasetDirectoryInsideRoot(originalDatasetPath, datasetsRoot);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '';
+    const isOutsideDatasetsRoot = errorMessage.includes('inside the configured datasets folder');
+    throw new RemoteCaptionDispatchError(
+      isOutsideDatasetsRoot ? errorMessage : 'Caption dataset not found',
+      isOutsideDatasetsRoot ? 400 : 404,
+    );
   }
   if (options.encrypted && !options.durableEncryptedDatasetKeys) {
     throw new RemoteCaptionDispatchError(
@@ -109,7 +118,7 @@ export async function dispatchRemoteCaptionJob(options: {
     const state = currentJobConfig.config?.remote_caption;
     const encryptedKeys =
       options.encrypted && typeof state?.remoteDatasetPath === 'string'
-        ? encryptedKeyForRemoteDataset(originalDatasetPath, options.encryptedKeysForLaunch, state.remoteDatasetPath)
+        ? encryptedKeyForRemoteDataset(realOriginalDatasetPath, options.encryptedKeysForLaunch, state.remoteDatasetPath)
         : undefined;
     await startRemoteWorkerCaptionJob(worker, job.remote_job_id, job.gpu_ids, encryptedKeys);
     const updated = await db.jobs.update(job.id, {
@@ -128,7 +137,7 @@ export async function dispatchRemoteCaptionJob(options: {
   const initialState = buildInitialRemoteCaptionState({
     job,
     worker,
-    originalDatasetPath,
+    originalDatasetPath: realOriginalDatasetPath,
     encrypted: options.encrypted,
     durableEncryptedKeys: options.durableEncryptedDatasetKeys,
     captionExtension: captionInfo.captionExtension,
@@ -141,13 +150,12 @@ export async function dispatchRemoteCaptionJob(options: {
     remote_sync_at: new Date(),
   });
 
-  const datasetsRoot = await getDatasetsRoot();
   const exportRoot = path.join(datasetsRoot, '.aitk-remote-caption-bundles');
-  const originalDatasetName = path.basename(originalDatasetPath);
+  const originalDatasetName = path.basename(realOriginalDatasetPath);
   const zipPath = path.join(exportRoot, datasetExportFileName(originalDatasetName));
 
   try {
-    await createDatasetExportArchive(originalDatasetName, originalDatasetPath, zipPath);
+    await createDatasetExportArchive(originalDatasetName, realOriginalDatasetPath, zipPath);
     const importedDataset = await uploadDatasetArchiveToWorker(
       worker,
       zipPath,
@@ -188,7 +196,7 @@ export async function dispatchRemoteCaptionJob(options: {
 
     const encryptedKeys =
       options.encrypted && importedDataset.path
-        ? encryptedKeyForRemoteDataset(originalDatasetPath, options.encryptedKeysForLaunch, importedDataset.path)
+        ? encryptedKeyForRemoteDataset(realOriginalDatasetPath, options.encryptedKeysForLaunch, importedDataset.path)
         : undefined;
     await startRemoteWorkerCaptionJob(worker, remoteJob.id, job.gpu_ids, encryptedKeys);
     return syncRemoteJob(localJob);

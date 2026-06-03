@@ -88,7 +88,7 @@ async function writeJsonAtomic(filePath, value) {
 
 async function writeStatus(update) {
   const previous = (await readJson(STATUS_PATH)) || {};
-  const status = {
+  const status = sanitizeStatus({
     schemaVersion: 1,
     ...previous,
     ...update,
@@ -98,7 +98,7 @@ async function writeStatus(update) {
     updaterPid: process.pid,
     intervalMinutes,
     updatedAt: nowIso(),
-  };
+  });
   await writeJsonAtomic(STATUS_PATH, status);
   return status;
 }
@@ -183,6 +183,22 @@ function plural(value, singular, pluralLabel = `${singular}s`) {
   return `${value} ${value === 1 ? singular : pluralLabel}`;
 }
 
+function redactUrlUserInfo(value) {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return value;
+    }
+    url.username = '';
+    url.password = '';
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 function normalizeRemoteWebUrl(remoteUrl) {
   const raw = (remoteUrl || '').trim();
   if (!raw) return null;
@@ -194,10 +210,28 @@ function normalizeRemoteWebUrl(remoteUrl) {
 
   const httpMatch = raw.match(/^(https?:\/\/.+?)(?:\.git)?$/);
   if (httpMatch) {
-    return httpMatch[1];
+    return redactUrlUserInfo(httpMatch[1]);
   }
 
   return null;
+}
+
+function sanitizeStatus(status) {
+  const sanitized = { ...status };
+
+  if (sanitized.remote) {
+    sanitized.remote = redactUrlUserInfo(sanitized.remote);
+  }
+  if (sanitized.remoteWebUrl) {
+    sanitized.remoteWebUrl = redactUrlUserInfo(sanitized.remoteWebUrl);
+  }
+  if (sanitized.sourceRemoteWebUrl) {
+    sanitized.sourceRemoteWebUrl = redactUrlUserInfo(sanitized.sourceRemoteWebUrl);
+  }
+
+  delete sanitized.sourceRemote;
+
+  return sanitized;
 }
 
 function normalizeRepoUrlForCompare(url) {
@@ -347,7 +381,6 @@ async function getLocalInstallInfo() {
       branch: null,
       localCommit: null,
       localShortCommit: null,
-      sourceRemote: null,
       sourceRemoteWebUrl: null,
       sourceRemoteMatchesCanonical: null,
     };
@@ -364,7 +397,6 @@ async function getLocalInstallInfo() {
     branch,
     localCommit,
     localShortCommit: shortSha(localCommit),
-    sourceRemote,
     sourceRemoteWebUrl,
     sourceRemoteMatchesCanonical: sourceRemoteWebUrl
       ? normalizeRepoUrlForCompare(sourceRemoteWebUrl) === normalizeRepoUrlForCompare(REPO_WEB_URL)
@@ -595,7 +627,6 @@ async function checkForUpdates(trigger) {
       latestReleasePublishedAt: remoteInfo.latestReleasePublishedAt,
       remoteCommitDate: remoteInfo.remoteCommitDate,
       recentCommits: remoteInfo.recentCommits || [],
-      sourceRemote: localInfo.sourceRemote,
       sourceRemoteWebUrl: localInfo.sourceRemoteWebUrl,
       sourceRemoteMatchesCanonical: localInfo.sourceRemoteMatchesCanonical,
       compareUrl: buildCompareUrl(localInfo.localCommit, remoteInfo.remoteCommit, result.comparable),
@@ -723,7 +754,6 @@ function buildStatusFields(localInfo, remoteInfo, result) {
     latestReleasePublishedAt: remoteInfo.latestReleasePublishedAt,
     remoteCommitDate: remoteInfo.remoteCommitDate,
     recentCommits: remoteInfo.recentCommits || [],
-    sourceRemote: localInfo.sourceRemote,
     sourceRemoteWebUrl: localInfo.sourceRemoteWebUrl,
     sourceRemoteMatchesCanonical: localInfo.sourceRemoteMatchesCanonical,
     compareUrl: buildCompareUrl(localInfo.localCommit, remoteInfo.remoteCommit, result.comparable),

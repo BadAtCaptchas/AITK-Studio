@@ -46,7 +46,6 @@ export interface RepoUpdateStatus {
   remote?: string | null;
   remoteWebUrl?: string | null;
   remoteCommitDate?: string | null;
-  sourceRemote?: string | null;
   sourceRemoteWebUrl?: string | null;
   sourceRemoteMatchesCanonical?: boolean | null;
   compareUrl?: string | null;
@@ -104,6 +103,22 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function redactUrlUserInfo(value?: string | null) {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return value;
+    }
+    url.username = '';
+    url.password = '';
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 function normalizeRemoteWebUrl(remoteUrl?: string | null) {
   const raw = (remoteUrl || '').trim();
   if (!raw) return null;
@@ -115,10 +130,28 @@ function normalizeRemoteWebUrl(remoteUrl?: string | null) {
 
   const httpMatch = raw.match(/^(https?:\/\/.+?)(?:\.git)?$/);
   if (httpMatch) {
-    return httpMatch[1];
+    return redactUrlUserInfo(httpMatch[1]);
   }
 
   return null;
+}
+
+function sanitizeStatus(status: RepoUpdateStatus) {
+  const sanitized = { ...status } as RepoUpdateStatus & { sourceRemote?: string | null };
+
+  if (sanitized.remote) {
+    sanitized.remote = redactUrlUserInfo(sanitized.remote);
+  }
+  if (sanitized.remoteWebUrl) {
+    sanitized.remoteWebUrl = redactUrlUserInfo(sanitized.remoteWebUrl);
+  }
+  if (sanitized.sourceRemoteWebUrl) {
+    sanitized.sourceRemoteWebUrl = redactUrlUserInfo(sanitized.sourceRemoteWebUrl);
+  }
+
+  delete sanitized.sourceRemote;
+
+  return sanitized;
 }
 
 function normalizeRepoUrlForCompare(url?: string | null) {
@@ -157,14 +190,13 @@ async function withLiveSourceRemote(status: RepoUpdateStatus) {
   const sourceRemoteWebUrl = normalizeRemoteWebUrl(sourceRemote);
   const repoWebUrl = status.repoWebUrl || status.remoteWebUrl || getDefaultRepoWebUrl();
 
-  return {
+  return sanitizeStatus({
     ...status,
-    sourceRemote,
     sourceRemoteWebUrl,
     sourceRemoteMatchesCanonical: sourceRemoteWebUrl
       ? normalizeRepoUrlForCompare(sourceRemoteWebUrl) === normalizeRepoUrlForCompare(repoWebUrl)
       : null,
-  };
+  });
 }
 
 function defaultStatus(): RepoUpdateStatus {
@@ -203,7 +235,7 @@ function normalizeStatus(raw: unknown): RepoUpdateStatus {
     }
   }
 
-  return normalized;
+  return sanitizeStatus(normalized);
 }
 
 async function readJson(filePath: string) {

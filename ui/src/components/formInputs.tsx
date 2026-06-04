@@ -233,6 +233,8 @@ export const SelectInput = (props: SelectInputProps) => {
         isDisabled={props.disabled}
         className="aitk-react-select-container"
         classNamePrefix="aitk-react-select"
+        menuPosition="fixed"
+        menuPlacement="auto"
         onChange={selected => {
           if (selected) {
             onChange((selected as { value: string }).value);

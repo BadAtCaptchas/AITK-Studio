@@ -266,6 +266,7 @@ export async function POST(request: NextRequest) {
     const logPath = path.join(runFolder, 'log.txt');
     const launchLogPath = path.join(runFolder, 'launch.log');
     const hfDownloadProgressPath = path.join(runFolder, '.hf_download_progress.json');
+    const comfyInstallProgressPath = path.join(runFolder, '.comfy_install_progress.json');
 
     await fsp.mkdir(outputFolder, { recursive: true });
 
@@ -297,6 +298,7 @@ export async function POST(request: NextRequest) {
       CUDA_VISIBLE_DEVICES: gpuIds,
       IS_AI_TOOLKIT_UI: '1',
       AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
+      AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
       PYTHONUNBUFFERED: '1',
       HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
     };

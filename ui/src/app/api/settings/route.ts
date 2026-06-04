@@ -65,6 +65,7 @@ export async function GET(request: NextRequest) {
       settingsObject.TRAINING_ADVISOR_ENABLED,
       false,
     );
+    settingsObject.COMFY_AUTO_INSTALL = normalizeBooleanSetting(settingsObject.COMFY_AUTO_INSTALL, false);
     if (!access.authenticated) {
       settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
       settingsObject.HF_TOKEN = '';
@@ -85,7 +86,14 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { HF_TOKEN, OPENROUTER_API_KEY, TRAINING_FOLDER, DATASETS_FOLDER, TRAINING_ADVISOR_ENABLED } = body;
+    const {
+      HF_TOKEN,
+      OPENROUTER_API_KEY,
+      TRAINING_FOLDER,
+      DATASETS_FOLDER,
+      TRAINING_ADVISOR_ENABLED,
+      COMFY_AUTO_INSTALL,
+    } = body;
 
     let normalizedDatasetsFolder = DATASETS_FOLDER;
     if (typeof DATASETS_FOLDER === 'string' && DATASETS_FOLDER !== '') {
@@ -100,6 +108,7 @@ export async function POST(request: NextRequest) {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
+      COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
     };
 
     if (typeof HF_TOKEN === 'string' && (access.authenticated || HF_TOKEN !== '')) {

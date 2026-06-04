@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
+import { withComfyInstallProgress } from '@/server/comfyInstallProgress';
 import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
 import { reconcileLocalJobProcess } from '@/server/jobProcess';
 import {
@@ -71,6 +72,9 @@ function isValidJobName(name: unknown) {
   return name === name.split('/').pop() && name === name.split('\\').pop();
 }
 
+async function withJobProgress(job: Job) {
+  return withComfyInstallProgress(await withHFDownloadProgress(job));
+}
 
 export async function GET(request: Request) {
   const accessResponse = ensureApiAccess(request);
@@ -89,20 +93,20 @@ export async function GET(request: Request) {
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
         const captionSynced = await syncRemoteCaptionResultForJob(synced);
-        return NextResponse.json(await withHFDownloadProgress(captionSynced));
+        return NextResponse.json(await withJobProgress(captionSynced));
       }
       const reconciled = await reconcileLocalJobProcess(job);
-      return NextResponse.json(reconciled ? await withHFDownloadProgress(reconciled) : reconciled);
+      return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
     if (job_ref) {
       const job = await db.jobs.findLatestByRef(job_ref);
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
         const captionSynced = await syncRemoteCaptionResultForJob(synced);
-        return NextResponse.json(await withHFDownloadProgress(captionSynced));
+        return NextResponse.json(await withJobProgress(captionSynced));
       }
       const reconciled = await reconcileLocalJobProcess(job);
-      return NextResponse.json(reconciled ? await withHFDownloadProgress(reconciled) : reconciled);
+      return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
 
     const discoveredJobIds = await discoverRemoteJobs(job_type);
@@ -112,7 +116,7 @@ export async function GET(request: Request) {
     );
     const resultSyncedJobs = await Promise.all(reconciledJobs.map(job => syncRemoteCaptionResultForJob(job)));
     return NextResponse.json({
-      jobs: await Promise.all(resultSyncedJobs.map(job => withHFDownloadProgress(job))),
+      jobs: await Promise.all(resultSyncedJobs.map(job => withJobProgress(job))),
     });
   } catch (error) {
     console.error(error);

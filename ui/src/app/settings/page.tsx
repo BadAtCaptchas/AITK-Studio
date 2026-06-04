@@ -5,9 +5,22 @@ import useSettings from '@/hooks/useSettings';
 import useWorkers from '@/hooks/useWorkers';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
-import type { WorkerNode } from '@/types';
+import type { ComfyInstallProgress, WorkerNode } from '@/types';
 import { Checkbox } from '@/components/formInputs';
+import { ComfyInstallProgressBand } from '@/components/ComfyInstallProgress';
 import { Download, Loader2, Power, RefreshCw } from 'lucide-react';
+
+type ComfyManagedInstallStatus = {
+  installed: boolean;
+  installing: boolean;
+  root: string;
+  progressPath: string;
+  logPath: string;
+  pid: number | null;
+  progress: ComfyInstallProgress | null;
+  message: string;
+  error: string | null;
+};
 
 type CloudflaredStatus = {
   configured: boolean;
@@ -148,8 +161,12 @@ export default function Settings() {
   const [cloudflaredAction, setCloudflaredAction] = useState<'idle' | 'starting' | 'downloading' | 'error'>('idle');
   const [cloudflaredActionError, setCloudflaredActionError] = useState('');
   const [cloudflaredAutoDownload, setCloudflaredAutoDownload] = useState(true);
+  const [comfyInstall, setComfyInstall] = useState<ComfyManagedInstallStatus | null>(null);
+  const [comfyInstallAction, setComfyInstallAction] = useState<'idle' | 'installing' | 'error'>('idle');
+  const [comfyInstallActionError, setComfyInstallActionError] = useState('');
   const [workerUpdater, setWorkerUpdater] = useState<Record<string, WorkerUpdaterUiState>>({});
   const workerUpdaterPolls = useRef<Record<string, number>>({});
+  const comfyInstallPoll = useRef<number | null>(null);
   const loadedWorkerUpdaterIds = useRef<Set<string>>(new Set());
 
   const updateWorkerUpdaterState = (
@@ -287,8 +304,39 @@ export default function Settings() {
       .catch(error => console.error('Error fetching cloudflared status:', error));
   };
 
+  const stopComfyInstallPolling = () => {
+    if (comfyInstallPoll.current === null) return;
+    window.clearInterval(comfyInstallPoll.current);
+    comfyInstallPoll.current = null;
+  };
+
+  const startComfyInstallPolling = () => {
+    if (comfyInstallPoll.current !== null) return;
+    comfyInstallPoll.current = window.setInterval(() => {
+      void refreshComfyInstall();
+    }, 2000);
+  };
+
+  const applyComfyInstallStatus = (nextStatus: ComfyManagedInstallStatus) => {
+    setComfyInstall(nextStatus);
+    if (nextStatus.installing) {
+      startComfyInstallPolling();
+    } else {
+      stopComfyInstallPolling();
+      setComfyInstallAction(current => (current === 'installing' ? 'idle' : current));
+    }
+  };
+
+  const refreshComfyInstall = () => {
+    apiClient
+      .get('/api/comfy/install')
+      .then(res => applyComfyInstallStatus(res.data))
+      .catch(error => console.error('Error fetching ComfyUI install status:', error));
+  };
+
   useEffect(() => {
     refreshCloudflared();
+    refreshComfyInstall();
     if (typeof window !== 'undefined') {
       setCloudflaredAutoDownload(window.localStorage.getItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY) !== 'false');
     }
@@ -298,6 +346,7 @@ export default function Settings() {
     return () => {
       Object.values(workerUpdaterPolls.current).forEach(interval => window.clearInterval(interval));
       workerUpdaterPolls.current = {};
+      stopComfyInstallPolling();
     };
   }, []);
 
@@ -341,6 +390,19 @@ export default function Settings() {
       setCloudflaredAction('error');
       setCloudflaredActionError(error?.response?.data?.error || 'Failed to download cloudflared.');
       refreshCloudflared();
+    }
+  };
+
+  const installComfyNow = async () => {
+    setComfyInstallAction('installing');
+    setComfyInstallActionError('');
+    try {
+      const res = await apiClient.post('/api/comfy/install');
+      applyComfyInstallStatus(res.data);
+    } catch (error: any) {
+      setComfyInstallAction('error');
+      setComfyInstallActionError(error?.response?.data?.error || 'Failed to start managed ComfyUI install.');
+      refreshComfyInstall();
     }
   };
 
@@ -557,6 +619,22 @@ export default function Settings() {
                     }
                   />
                 </div>
+
+                <div className="rounded-lg border border-gray-800 bg-gray-900/70 p-4">
+                  <Checkbox
+                    checked={settings.COMFY_AUTO_INSTALL === 'true'}
+                    onChange={checked => setSettings(prev => ({ ...prev, COMFY_AUTO_INSTALL: checked ? 'true' : 'false' }))}
+                    label={
+                      <span>
+                        Auto-install managed ComfyUI
+                        <span className="mt-1 block text-xs font-normal text-gray-500">
+                          When a job uses the managed ComfyUI backend, allow AI Toolkit to download and install its
+                          isolated ComfyUI copy if it is missing.
+                        </span>
+                      </span>
+                    }
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -572,6 +650,59 @@ export default function Settings() {
           {status === 'success' && <p className="text-green-500 text-center">Settings saved successfully!</p>}
           {status === 'error' && <p className="text-red-500 text-center">Error saving settings. Please try again.</p>}
         </form>
+
+        <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-gray-100">Managed ComfyUI</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Download and install the trainer-owned ComfyUI copy now. Native generation stays the default unless a
+                job explicitly selects the ComfyUI backend.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={installComfyNow}
+                disabled={comfyInstallAction === 'installing' || comfyInstall?.installing}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm hover:bg-blue-600 disabled:opacity-50"
+              >
+                {comfyInstallAction === 'installing' || comfyInstall?.installing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {comfyInstallAction === 'installing' || comfyInstall?.installing
+                  ? 'Installing...'
+                  : comfyInstall?.installed
+                    ? 'Refresh Install'
+                    : 'Download / Install Now'}
+              </button>
+              <button
+                type="button"
+                onClick={refreshComfyInstall}
+                className="inline-flex items-center gap-2 rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3 text-sm">
+            <div>Status: {comfyInstall?.message || 'Not checked'}</div>
+            <div>Installed: {comfyInstall?.installed ? 'Yes' : 'No'}</div>
+            <div>Root: {comfyInstall?.root || 'Not set'}</div>
+            <div>Log: {comfyInstall?.logPath || 'Not set'}</div>
+            {comfyInstall?.pid && <div>Installer PID: {comfyInstall.pid}</div>}
+            {comfyInstall?.error && <div className="mt-2 text-red-400">{comfyInstall.error}</div>}
+            {comfyInstallAction === 'error' && <div className="mt-2 text-red-400">{comfyInstallActionError}</div>}
+          </div>
+
+          <div className="mt-4">
+            <ComfyInstallProgressBand progress={comfyInstall?.progress || null} />
+          </div>
+        </section>
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-gray-800 bg-gray-900 p-4">

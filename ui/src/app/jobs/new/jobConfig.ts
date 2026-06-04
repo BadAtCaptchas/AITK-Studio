@@ -165,6 +165,7 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   }
 
   const sample = jobConfig.config.process[0].sample;
+  sample.backend ??= 'native';
   if (jobConfig.config.process[0].model.low_vram && !('keep_low_vram_for_samples' in sample)) {
     sample.keep_low_vram_for_samples = true;
   }

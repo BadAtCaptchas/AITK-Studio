@@ -299,7 +299,34 @@ class BaseSDTrainProcess(BaseTrainProcess):
             gen_img_config_list: List[GenerateImageConfig],
             sampler=None,
             keep_low_vram_for_samples=False,
+            sample_config=None,
+            step=None,
     ):
+        if getattr(sample_config, 'backend', 'native') == 'comfy':
+            comfy_config = sample_config.comfy
+            try:
+                from toolkit.comfy import generate_images_with_comfy
+                generate_images_with_comfy(
+                    gen_img_config_list,
+                    sampler=sampler,
+                    comfy_config=comfy_config,
+                    model_config=None,
+                    process_config=self.raw_process_config,
+                    training_process=self,
+                    step=step,
+                    device=self.device,
+                    progress_hook=self.sample_step_hook,
+                )
+                return
+            except Exception as e:
+                if comfy_config.on_error == 'skip':
+                    print_acc(f"ComfyUI sample generation failed; skipping samples: {e}")
+                    return
+                if comfy_config.on_error == 'native':
+                    print_acc(f"ComfyUI sample generation failed; falling back to native samples: {e}")
+                else:
+                    raise
+
         if keep_low_vram_for_samples:
             self.sd.generate_images(gen_img_config_list, sampler=sampler)
             return
@@ -450,6 +477,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 gen_img_config_list,
                 sampler=sample_config.sampler,
                 keep_low_vram_for_samples=sample_config.keep_low_vram_for_samples,
+                sample_config=sample_config,
+                step=step,
             )
         finally:
             if self.adapter is not None and isinstance(self.adapter, CustomAdapter):

@@ -9,6 +9,7 @@ export interface Settings {
   TRAINING_FOLDER: string;
   DATASETS_FOLDER: string;
   TRAINING_ADVISOR_ENABLED: string;
+  COMFY_AUTO_INSTALL: string;
 }
 
 export default function useSettings() {
@@ -18,6 +19,7 @@ export default function useSettings() {
     TRAINING_FOLDER: '',
     DATASETS_FOLDER: '',
     TRAINING_ADVISOR_ENABLED: 'false',
+    COMFY_AUTO_INSTALL: 'false',
   });
   const [isSettingsLoaded, setIsLoaded] = useState(false);
   useEffect(() => {
@@ -32,6 +34,7 @@ export default function useSettings() {
           TRAINING_FOLDER: data.TRAINING_FOLDER || '',
           DATASETS_FOLDER: data.DATASETS_FOLDER || '',
           TRAINING_ADVISOR_ENABLED: data.TRAINING_ADVISOR_ENABLED === 'true' ? 'true' : 'false',
+          COMFY_AUTO_INSTALL: data.COMFY_AUTO_INSTALL === 'true' ? 'true' : 'false',
         });
         setIsLoaded(true);
       })

@@ -108,6 +108,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const logPath = path.join(trainingFolder, 'log.txt');
       launchLogPath = path.join(trainingFolder, LAUNCH_LOG_FILE);
       const hfDownloadProgressPath = path.join(trainingFolder, '.hf_download_progress.json');
+      const comfyInstallProgressPath = path.join(trainingFolder, '.comfy_install_progress.json');
 
       try {
         const logsFolder = path.join(trainingFolder, 'logs');
@@ -157,6 +158,11 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       } catch (error) {
         console.error('Error clearing Hugging Face download progress file:', error);
       }
+      try {
+        fs.rmSync(comfyInstallProgressPath, { force: true });
+      } catch (error) {
+        console.error('Error clearing ComfyUI install progress file:', error);
+      }
 
       const pythonPath = getToolkitPythonPath();
       const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
@@ -178,6 +184,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
         IS_AI_TOOLKIT_UI: '1',
         AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
+        AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
         ...secureRemoteOllamaEnv,

@@ -187,3 +187,5 @@ aitk_db.db
 .claude
 aitk_db.db-wal
 aitk_db.db-shm
+.aitk_comfy/.comfy_install_progress.json
+.aitk_comfy/install.pid

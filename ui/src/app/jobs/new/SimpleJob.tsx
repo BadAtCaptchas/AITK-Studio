@@ -10,7 +10,15 @@ import {
   SampleTags,
 } from './options';
 import { defaultDatasetConfig } from './jobConfig';
-import { GroupedSelectOption, JobConfig, SelectOption, TrainingPhaseConfig } from '@/types';
+import {
+  ComfyMode,
+  ComfyOnError,
+  GenerationBackend,
+  GroupedSelectOption,
+  JobConfig,
+  SelectOption,
+  TrainingPhaseConfig,
+} from '@/types';
 import { objectCopy, tagsToObj, objToTags } from '@/utils/basic';
 import {
   TextInput,
@@ -48,6 +56,7 @@ type Props = {
     SelectOption & { encrypted?: boolean; name?: string; source?: 'local' | 'remote'; worker_id?: string; ref?: string }
   >;
   isLoading?: boolean;
+  comfyAutoInstall?: boolean;
 };
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -55,6 +64,22 @@ const segaDistillArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b', '
 const layerOffloadingBackendOptions: SelectOption[] = [
   { value: 'block', label: 'Block' },
   { value: 'legacy', label: 'Legacy' },
+];
+
+const generationBackendOptions: SelectOption[] = [
+  { value: 'native', label: 'Native' },
+  { value: 'comfy', label: 'ComfyUI' },
+];
+
+const comfyModeOptions: SelectOption[] = [
+  { value: 'external', label: 'External' },
+  { value: 'managed', label: 'Managed' },
+];
+
+const comfyOnErrorOptions: SelectOption[] = [
+  { value: 'fail', label: 'Fail' },
+  { value: 'native', label: 'Native fallback' },
+  { value: 'skip', label: 'Skip' },
 ];
 
 export default function SimpleJob({
@@ -68,6 +93,7 @@ export default function SimpleJob({
   gpuList,
   datasetOptions,
   isLoading,
+  comfyAutoInstall = false,
 }: Props) {
   const [randomPromptLoadingIndex, setRandomPromptLoadingIndex] = useState<number | null>(null);
   const [encryptedKeyRefreshKey, setEncryptedKeyRefreshKey] = useState(0);
@@ -1588,6 +1614,86 @@ export default function SimpleJob({
                 </FormGroup>
               </div>
             </div>
+            {!isAudioModel && (
+              <FormGroup label="Backend" className="pt-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                  <SelectInput
+                    label="Generation Backend"
+                    value={jobConfig.config.process[0].sample.backend ?? 'native'}
+                    onChange={value => {
+                      setJobConfig(value as GenerationBackend, 'config.process[0].sample.backend');
+                      if (value === 'comfy' && !jobConfig.config.process[0].sample.comfy) {
+                        setJobConfig(
+                          { mode: 'external', workflow_name: 'auto', on_error: 'fail' },
+                          'config.process[0].sample.comfy',
+                        );
+                      }
+                    }}
+                    options={generationBackendOptions}
+                  />
+                  {jobConfig.config.process[0].sample.backend === 'comfy' && (
+                    <>
+                      <SelectInput
+                        label="Comfy Mode"
+                        value={jobConfig.config.process[0].sample.comfy?.mode ?? 'external'}
+                        onChange={value => {
+                          setJobConfig(value as ComfyMode, 'config.process[0].sample.comfy.mode');
+                          if (value === 'managed' && comfyAutoInstall) {
+                            setJobConfig(true, 'config.process[0].sample.comfy.managed_install');
+                          }
+                        }}
+                        options={comfyModeOptions}
+                      />
+                      <SelectInput
+                        label="On Error"
+                        value={jobConfig.config.process[0].sample.comfy?.on_error ?? 'fail'}
+                        onChange={value => setJobConfig(value as ComfyOnError, 'config.process[0].sample.comfy.on_error')}
+                        options={comfyOnErrorOptions}
+                      />
+                      <TextInput
+                        label="Workflow"
+                        value={jobConfig.config.process[0].sample.comfy?.workflow_name ?? 'auto'}
+                        onChange={value => setJobConfig(value || 'auto', 'config.process[0].sample.comfy.workflow_name')}
+                        placeholder="auto"
+                      />
+                      {(jobConfig.config.process[0].sample.comfy?.mode ?? 'external') === 'external' ? (
+                        <TextInput
+                          label="Comfy URL"
+                          value={jobConfig.config.process[0].sample.comfy?.server_url ?? ''}
+                          onChange={value => setJobConfig(value, 'config.process[0].sample.comfy.server_url')}
+                          placeholder="http://127.0.0.1:8188"
+                        />
+                      ) : (
+                        <>
+                          <Checkbox
+                            label="Install Managed ComfyUI"
+                            checked={comfyAutoInstall || (jobConfig.config.process[0].sample.comfy?.managed_install ?? false)}
+                            onChange={value => setJobConfig(value, 'config.process[0].sample.comfy.managed_install')}
+                            disabled={comfyAutoInstall}
+                          />
+                          <TextInput
+                            label="Comfy Root"
+                            value={jobConfig.config.process[0].sample.comfy?.root ?? ''}
+                            onChange={value => setJobConfig(value, 'config.process[0].sample.comfy.root')}
+                            placeholder=".aitk_comfy/ComfyUI"
+                          />
+                        </>
+                      )}
+                      <TextInput
+                        label="Workflow JSON"
+                        value={
+                          typeof jobConfig.config.process[0].sample.comfy?.workflow === 'string'
+                            ? jobConfig.config.process[0].sample.comfy?.workflow
+                            : ''
+                        }
+                        onChange={value => setJobConfig(value || undefined, 'config.process[0].sample.comfy.workflow')}
+                        placeholder="optional path"
+                      />
+                    </>
+                  )}
+                </div>
+              </FormGroup>
+            )}
             <FormGroup label={`Sample Prompts (${jobConfig.config.process[0].sample.samples.length})`} className="pt-2">
               <div></div>
             </FormGroup>

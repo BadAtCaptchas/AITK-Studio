@@ -273,6 +273,21 @@ export default function TrainingForm() {
     return nextConfig;
   };
 
+  const applyComfyAutoInstallSetting = (rawConfig: JobConfig): JobConfig => {
+    if (settings.COMFY_AUTO_INSTALL !== 'true') return rawConfig;
+
+    const nextConfig = objectCopy(rawConfig) as JobConfig;
+    for (const processConfig of nextConfig.config?.process ?? []) {
+      for (const key of ['sample', 'first_sample', 'generate'] as const) {
+        const generationConfig = processConfig[key] as any;
+        if (generationConfig?.backend === 'comfy' && generationConfig?.comfy?.mode === 'managed') {
+          generationConfig.comfy.managed_install = true;
+        }
+      }
+    }
+    return nextConfig;
+  };
+
   const validateJobBeforeSave = (rawConfig: JobConfig): ValidationMessage[] => {
     const messages: ValidationMessage[] = [];
     const name = rawConfig.config?.name?.trim() || '';
@@ -360,7 +375,8 @@ export default function TrainingForm() {
 
   const saveJob = async () => {
     if (status === 'saving') return;
-    const validation = validateJobBeforeSave(jobConfig);
+    const jobConfigWithSettings = applyComfyAutoInstallSetting(jobConfig);
+    const validation = validateJobBeforeSave(jobConfigWithSettings);
     setValidationMessages(validation);
     if (validation.some(message => message.level === 'error')) {
       setStatus('idle');
@@ -369,7 +385,7 @@ export default function TrainingForm() {
     setStatus('saving');
 
     try {
-      const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfig);
+      const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings);
       setJobConfig(preparedJobConfig);
       const res = await apiClient.post('/api/jobs', {
         id: runId,
@@ -589,6 +605,7 @@ export default function TrainingForm() {
               isLoading={
                 !isSettingsLoaded || !isGPUInfoLoaded || workerStatus === 'loading' || datasetFetchStatus !== 'success'
               }
+              comfyAutoInstall={settings.COMFY_AUTO_INSTALL === 'true'}
             />
           </ErrorBoundary>
 

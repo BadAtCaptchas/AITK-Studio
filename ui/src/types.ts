@@ -140,6 +140,7 @@ export interface Job {
   job_ref: string | null;
   save_now: boolean;
   hf_download_progress?: HFDownloadProgress | null;
+  comfy_install_progress?: ComfyInstallProgress | null;
 }
 
 export type HFDownloadStatus = 'idle' | 'downloading' | 'completed' | 'failed';
@@ -165,6 +166,20 @@ export interface HFDownloadProgress {
   percent: number | null;
   downloads: HFDownloadItem[];
   error: string | null;
+  updatedAt: string;
+}
+
+export type ComfyInstallStatus = 'idle' | 'checking' | 'installing' | 'launching' | 'ready' | 'completed' | 'failed';
+
+export interface ComfyInstallProgress {
+  version: number;
+  status: ComfyInstallStatus;
+  step: string;
+  message: string;
+  root: string | null;
+  percent: number | null;
+  error: string | null;
+  startedAt: string;
   updatedAt: string;
 }
 
@@ -492,7 +507,29 @@ export interface SampleItem {
   ctrl_img_3?: string | null;
 }
 
+export type GenerationBackend = 'native' | 'comfy';
+export type ComfyMode = 'external' | 'managed';
+export type ComfyOnError = 'fail' | 'native' | 'skip';
+
+export interface ComfyConfig {
+  mode?: ComfyMode;
+  server_url?: string;
+  managed_install?: boolean;
+  root?: string;
+  ref?: string;
+  workflow_name?: string;
+  workflow?: string | Record<string, unknown>;
+  bindings?: Record<string, string | string[]>;
+  on_error?: ComfyOnError;
+  timeout?: number;
+  poll_interval?: number;
+  free_memory_after_each?: boolean;
+  offload_training_model?: boolean;
+}
+
 export interface SampleConfig {
+  backend?: GenerationBackend;
+  comfy?: ComfyConfig;
   sampler: string;
   sample_every: number;
   width: number;

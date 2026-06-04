@@ -22,7 +22,7 @@ import { apiClient } from '@/utils/api';
 import { startJob } from '@/utils/jobs';
 import { getMediaUrl } from '@/utils/media';
 import { startQueue } from '@/utils/queue';
-import type { ModelConfig, SelectOption } from '@/types';
+import type { ComfyConfig, ComfyMode, ComfyOnError, GenerationBackend, ModelConfig, SelectOption } from '@/types';
 import { groupedModelOptions, modelArchs, quantizationOptions } from '@/app/jobs/new/options';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { getLayerOffloadingMemoryProfile, type LayerOffloadingBackend } from '@/utils/memoryProfiles';
@@ -84,6 +84,22 @@ const dtypeOptions: SelectOption[] = [
 const samplerOptions: SelectOption[] = [
   { value: 'flowmatch', label: 'flowmatch' },
   { value: 'ddpm', label: 'ddpm' },
+];
+
+const generationBackendOptions: SelectOption[] = [
+  { value: 'native', label: 'Native' },
+  { value: 'comfy', label: 'ComfyUI' },
+];
+
+const comfyModeOptions: SelectOption[] = [
+  { value: 'external', label: 'External' },
+  { value: 'managed', label: 'Managed' },
+];
+
+const comfyOnErrorOptions: SelectOption[] = [
+  { value: 'fail', label: 'Fail' },
+  { value: 'native', label: 'Native fallback' },
+  { value: 'skip', label: 'Skip' },
 ];
 
 const imageFormatOptions: SelectOption[] = [
@@ -311,6 +327,14 @@ export default function GeneratePage() {
   const [imageFormat, setImageFormat] = useState('png');
   const [writePromptFile, setWritePromptFile] = useState(true);
   const [startImmediately, setStartImmediately] = useState(true);
+  const [generationBackend, setGenerationBackend] = useState<GenerationBackend>('native');
+  const [comfyMode, setComfyMode] = useState<ComfyMode>('external');
+  const [comfyServerUrl, setComfyServerUrl] = useState('');
+  const [comfyManagedInstall, setComfyManagedInstall] = useState(false);
+  const [comfyRoot, setComfyRoot] = useState('');
+  const [comfyWorkflowName, setComfyWorkflowName] = useState('auto');
+  const [comfyWorkflowPath, setComfyWorkflowPath] = useState('');
+  const [comfyOnError, setComfyOnError] = useState<ComfyOnError>('fail');
   const [status, setStatus] = useState<'idle' | 'saving' | 'generating' | 'error'>('idle');
   const [inlineImagePath, setInlineImagePath] = useState('');
   const [inlineError, setInlineError] = useState('');
@@ -371,9 +395,12 @@ export default function GeneratePage() {
   );
 
   const isBusy = status === 'saving' || status === 'generating';
+  const isManagedComfyGeneration = generationBackend === 'comfy' && comfyMode === 'managed';
   const primaryButtonLabel =
     status === 'generating'
-      ? 'Generating...'
+      ? isManagedComfyGeneration
+        ? 'Preparing ComfyUI...'
+        : 'Generating...'
       : status === 'saving'
         ? 'Creating...'
         : imageCount === 1
@@ -536,6 +563,9 @@ export default function GeneratePage() {
     if (!numRepeats || numRepeats < 1 || numRepeats > 100) {
       errors.push('Images per prompt must be between 1 and 100.');
     }
+    if (generationBackend === 'comfy' && comfyMode === 'external' && !comfyServerUrl.trim()) {
+      errors.push('ComfyUI server URL is required for external mode.');
+    }
     return errors;
   };
 
@@ -543,6 +573,26 @@ export default function GeneratePage() {
     const errors = getGenerationValidationErrors(promptItems, model);
     setValidationErrors(errors);
     return errors.length === 0;
+  };
+
+  const buildComfyConfig = (): ComfyConfig => {
+    const comfyAutoInstall = settings.COMFY_AUTO_INSTALL === 'true';
+    const comfy: ComfyConfig = {
+      mode: comfyMode,
+      workflow_name: comfyWorkflowName.trim() || 'auto',
+      on_error: comfyOnError,
+    };
+    if (comfyMode === 'external') {
+      comfy.server_url = comfyServerUrl.trim();
+    }
+    if (comfyMode === 'managed') {
+      comfy.managed_install = comfyAutoInstall || comfyManagedInstall;
+      if (comfyRoot.trim()) comfy.root = comfyRoot.trim();
+    }
+    if (comfyWorkflowPath.trim()) {
+      comfy.workflow = comfyWorkflowPath.trim();
+    }
+    return comfy;
   };
 
   const buildGenerateJobConfig = (
@@ -563,6 +613,15 @@ export default function GeneratePage() {
     }));
 
     const outputFolder = joinPath(settings.TRAINING_FOLDER, normalizedJobName, 'samples');
+    const backendConfig =
+      generationBackend === 'comfy'
+        ? {
+            backend: 'comfy' as const,
+            comfy: buildComfyConfig(),
+          }
+        : {
+            backend: 'native' as const,
+          };
     return {
       job: 'generate',
       config: {
@@ -575,6 +634,7 @@ export default function GeneratePage() {
             device: 'cuda',
             dtype: model.dtype || 'bf16',
             generate: {
+              ...backendConfig,
               sampler,
               width: width || 1024,
               height: height || 1024,
@@ -589,6 +649,7 @@ export default function GeneratePage() {
               images: promptItems.map(cleanPromptImageSettings),
             },
             sample: {
+              ...backendConfig,
               sampler,
               sample_every: 1,
               width: width || 1024,
@@ -836,6 +897,70 @@ export default function GeneratePage() {
               <Checkbox label="Start job now" checked={startImmediately} onChange={setStartImmediately} />
               <Checkbox label="Write prompt files" checked={writePromptFile} onChange={setWritePromptFile} />
             </FormGroup>
+
+            <FormGroup label="Backend">
+              <SelectInput
+                label="Generation Backend"
+                value={generationBackend}
+                onChange={value => setGenerationBackend(value as GenerationBackend)}
+                options={generationBackendOptions}
+              />
+              {generationBackend === 'comfy' && (
+                <div className="grid grid-cols-1 gap-3 pt-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <SelectInput
+                      label="Comfy Mode"
+                      value={comfyMode}
+                      onChange={value => setComfyMode(value as ComfyMode)}
+                      options={comfyModeOptions}
+                    />
+                    <SelectInput
+                      label="On Error"
+                      value={comfyOnError}
+                      onChange={value => setComfyOnError(value as ComfyOnError)}
+                      options={comfyOnErrorOptions}
+                    />
+                  </div>
+                  {comfyMode === 'external' ? (
+                    <TextInput
+                      label="Comfy URL"
+                      value={comfyServerUrl}
+                      onChange={setComfyServerUrl}
+                      placeholder="http://127.0.0.1:8188"
+                    />
+                  ) : (
+                    <>
+                      <Checkbox
+                        label="Install Managed ComfyUI"
+                        checked={settings.COMFY_AUTO_INSTALL === 'true' || comfyManagedInstall}
+                        onChange={setComfyManagedInstall}
+                        disabled={settings.COMFY_AUTO_INSTALL === 'true'}
+                      />
+                      <TextInput
+                        label="Comfy Root"
+                        value={comfyRoot}
+                        onChange={setComfyRoot}
+                        placeholder=".aitk_comfy/ComfyUI"
+                      />
+                    </>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <TextInput
+                      label="Workflow"
+                      value={comfyWorkflowName}
+                      onChange={setComfyWorkflowName}
+                      placeholder="auto"
+                    />
+                    <TextInput
+                      label="Workflow JSON"
+                      value={comfyWorkflowPath}
+                      onChange={setComfyWorkflowPath}
+                      placeholder="optional path"
+                    />
+                  </div>
+                </div>
+              )}
+            </FormGroup>
           </form>
 
           <div className="space-y-6">
@@ -1028,8 +1153,17 @@ export default function GeneratePage() {
                 <div className="flex min-h-64 flex-col items-center justify-center gap-3 border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
                   <div className="flex items-center">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {cancelRequested ? 'Canceling generation' : 'Generating image'}
+                    {cancelRequested
+                      ? 'Canceling generation'
+                      : isManagedComfyGeneration
+                        ? 'Preparing managed ComfyUI, then generating image'
+                        : 'Generating image'}
                   </div>
+                  {isManagedComfyGeneration && !cancelRequested && (
+                    <p className="max-w-md text-center text-xs text-gray-500">
+                      If managed ComfyUI is missing, AI Toolkit will download and install it before this image is generated.
+                    </p>
+                  )}
                   <Button
                     type="button"
                     onClick={cancelInlineGeneration}

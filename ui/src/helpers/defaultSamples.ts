@@ -1,6 +1,7 @@
 import { SampleConfig } from "@/types";
 
 export const defaultSampleConfig: SampleConfig = {
+  backend: 'native',
   sampler: 'flowmatch',
   sample_every: 250,
   width: 1024,
@@ -51,6 +52,7 @@ export const defaultSampleConfig: SampleConfig = {
 }
 
 export const defaultAudioSampleConfig: SampleConfig = {
+  backend: 'native',
   sampler: 'flowmatch',
   sample_every: 250,
   width: 1024,

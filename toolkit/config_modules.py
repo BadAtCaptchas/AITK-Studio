@@ -1,7 +1,7 @@
 import os
 import time
 import math
-from typing import List, Optional, Literal, Tuple, Union, TYPE_CHECKING, Dict
+from typing import Any, List, Optional, Literal, Tuple, Union, TYPE_CHECKING, Dict
 import random
 
 import torch
@@ -14,6 +14,10 @@ from torchao.quantization.quant_primitives import _DTYPE_TO_BIT_WIDTH
 ImgExt = Literal['jpg', 'png', 'webp']
 
 SaveFormat = Literal['safetensors', 'diffusers']
+
+GenerationBackend = Literal['native', 'comfy']
+ComfyMode = Literal['external', 'managed']
+ComfyOnError = Literal['fail', 'native', 'skip']
 
 if TYPE_CHECKING:
     from toolkit.guidance import GuidanceType
@@ -52,6 +56,29 @@ class LoggingConfig:
         self.monitor_gpu_stats: bool = kwargs.get('monitor_gpu_stats', True)
         self.monitor_grad_stats: bool = kwargs.get('monitor_grad_stats', True)
 
+
+class ComfyConfig:
+    def __init__(self, **kwargs):
+        self.mode: ComfyMode = kwargs.get('mode', 'external')
+        if self.mode not in ['external', 'managed']:
+            raise ValueError(f"comfy.mode must be 'external' or 'managed', got {self.mode}")
+
+        self.server_url: Optional[str] = kwargs.get('server_url', None)
+        self.managed_install: bool = kwargs.get('managed_install', False)
+        self.root: Optional[str] = kwargs.get('root', None)
+        self.ref: Optional[str] = kwargs.get('ref', None)
+        self.workflow_name: str = kwargs.get('workflow_name', 'auto')
+        self.workflow: Optional[Union[str, Dict[str, Any]]] = kwargs.get('workflow', None)
+        self.bindings: Dict[str, Any] = kwargs.get('bindings', {}) or {}
+        self.on_error: ComfyOnError = kwargs.get('on_error', 'fail')
+        if self.on_error not in ['fail', 'native', 'skip']:
+            raise ValueError(f"comfy.on_error must be 'fail', 'native', or 'skip', got {self.on_error}")
+
+        self.timeout: float = float(kwargs.get('timeout', 900))
+        self.poll_interval: float = float(kwargs.get('poll_interval', 0.5))
+        self.free_memory_after_each: bool = kwargs.get('free_memory_after_each', True)
+        self.offload_training_model: bool = kwargs.get('offload_training_model', False)
+
 class SampleItem:
     def __init__(
         self,
@@ -89,6 +116,10 @@ class SampleItem:
 
 class SampleConfig:
     def __init__(self, **kwargs):
+        self.backend: GenerationBackend = kwargs.get('backend', 'native')
+        if self.backend not in ['native', 'comfy']:
+            raise ValueError(f"sample backend must be 'native' or 'comfy', got {self.backend}")
+        self.comfy = ComfyConfig(**kwargs.get('comfy', {}))
         self.sampler: str = kwargs.get('sampler', 'ddpm')
         self.sample_every: int = kwargs.get('sample_every', 100)
         self.width: int = kwargs.get('width', 512)

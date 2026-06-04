@@ -23,9 +23,86 @@ const DATASET_CONFIG_FIELDS = [
   'clip_image_path',
 ];
 
+const DATASET_MEDIA_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.mp4',
+  '.avi',
+  '.mov',
+  '.mkv',
+  '.wmv',
+  '.m4v',
+  '.flv',
+  '.mp3',
+  '.wav',
+  '.flac',
+  '.ogg',
+]);
+
+const DATASET_CAPTION_EXTENSIONS = ['.txt', '.caption', '.json', '.sdxl', '.md'];
+
+export type DatasetCaptionSummary = {
+  itemCount: number;
+  captionedItemCount: number;
+  missingCaptionCount: number;
+};
+
 function isPathInside(parent: string, child: string) {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function safeIsFile(filePath: string) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function hasCaptionSidecar(mediaPath: string) {
+  const parsed = path.parse(mediaPath);
+  return DATASET_CAPTION_EXTENSIONS.some(captionExt => safeIsFile(path.join(parsed.dir, `${parsed.name}${captionExt}`)));
+}
+
+export function summarizePlainDatasetCaptions(datasetFolder: string): DatasetCaptionSummary {
+  const summary: DatasetCaptionSummary = {
+    itemCount: 0,
+    captionedItemCount: 0,
+    missingCaptionCount: 0,
+  };
+  const stack = [datasetFolder];
+
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== '_controls') stack.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile() || !DATASET_MEDIA_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+
+      summary.itemCount += 1;
+      if (hasCaptionSidecar(entryPath)) {
+        summary.captionedItemCount += 1;
+      } else {
+        summary.missingCaptionCount += 1;
+      }
+    }
+  }
+
+  return summary;
 }
 
 export function cleanDatasetName(name: string) {
@@ -203,10 +280,28 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
     .map(entry => {
       const datasetFolder = path.join(datasetsRoot, entry.name);
       const encrypted = isEncryptedDatasetFolder(datasetFolder);
+      if (encrypted) {
+        return {
+          name: entry.name,
+          encrypted,
+          itemCount: null,
+          captionedItemCount: null,
+          missingCaptionCount: null,
+          source: 'local' as const,
+          worker_id: 'local',
+          worker_name: 'Local',
+          ref: `aitk-dataset://local/${encodeURIComponent(entry.name)}`,
+          path: datasetFolder,
+        };
+      }
+
+      const captionSummary = summarizePlainDatasetCaptions(datasetFolder);
       return {
         name: entry.name,
         encrypted,
-        itemCount: encrypted ? null : undefined,
+        itemCount: captionSummary.itemCount,
+        captionedItemCount: captionSummary.captionedItemCount,
+        missingCaptionCount: captionSummary.missingCaptionCount,
         source: 'local' as const,
         worker_id: 'local',
         worker_name: 'Local',

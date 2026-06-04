@@ -80,6 +80,40 @@ function webAuthnPrfManifestForKey(key) {
   };
 }
 
+test('listDatasetSummaries counts missing captions for plain datasets', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-caption-summary-'));
+  const plain = path.join(root, 'plain_dataset');
+  const locked = path.join(root, 'locked_dataset');
+  await fs.mkdir(path.join(plain, 'nested'), { recursive: true });
+  await fs.mkdir(path.join(plain, '_controls'), { recursive: true });
+  await fs.mkdir(locked, { recursive: true });
+
+  await fs.writeFile(path.join(plain, 'captioned.png'), 'media');
+  await fs.writeFile(path.join(plain, 'captioned.txt'), 'caption');
+  await fs.writeFile(path.join(plain, 'json_captioned.webp'), 'media');
+  await fs.writeFile(path.join(plain, 'json_captioned.json'), JSON.stringify({ caption: 'json caption' }));
+  await fs.writeFile(path.join(plain, 'nested', 'missing.jpg'), 'media');
+  await fs.writeFile(path.join(plain, 'notes.txt'), 'orphan text');
+  await fs.writeFile(path.join(plain, '_controls', 'control.png'), 'ignored media');
+  await fs.writeFile(
+    path.join(locked, encryptedDatasets.ENCRYPTED_DATASET_MANIFEST),
+    JSON.stringify(manifestForKey(crypto.randomBytes(32))),
+    'utf8',
+  );
+
+  const summaries = await encryptedDatasets.listDatasetSummaries(root);
+  const plainSummary = summaries.find(dataset => dataset.name === 'plain_dataset');
+  const lockedSummary = summaries.find(dataset => dataset.name === 'locked_dataset');
+
+  assert.equal(plainSummary.itemCount, 3);
+  assert.equal(plainSummary.captionedItemCount, 2);
+  assert.equal(plainSummary.missingCaptionCount, 1);
+  assert.equal(lockedSummary.encrypted, true);
+  assert.equal(lockedSummary.itemCount, null);
+  assert.equal(lockedSummary.captionedItemCount, null);
+  assert.equal(lockedSummary.missingCaptionCount, null);
+});
+
 test('validateEncryptedCatalogKey accepts the matching dataset key', () => {
   const key = crypto.randomBytes(32);
   const manifest = manifestForKey(key);

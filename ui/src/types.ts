@@ -86,6 +86,8 @@ export interface DatasetSummary {
   name: string;
   encrypted: boolean;
   itemCount?: number | null;
+  captionedItemCount?: number | null;
+  missingCaptionCount?: number | null;
   source?: 'local' | 'remote';
   worker_id?: string;
   worker_name?: string;

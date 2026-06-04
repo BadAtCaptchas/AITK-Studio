@@ -7,7 +7,20 @@ import { TextInput } from '@/components/formInputs';
 import useDatasetList from '@/hooks/useDatasetList';
 import { Button } from '@headlessui/react';
 import { FaRegTrashAlt } from 'react-icons/fa';
-import { Download, Search, Database, FolderPlus, Layers, Pencil, Plus } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Database,
+  Download,
+  FolderPlus,
+  HelpCircle,
+  Layers,
+  LockKeyhole,
+  MinusCircle,
+  Pencil,
+  Plus,
+  Search,
+} from 'lucide-react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { TopBar, MainContent } from '@/components/layout';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
@@ -60,6 +73,96 @@ function rememberDatasetKey(dataset: DatasetSummary, rawKeyB64: string) {
     rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, dataset.name), rawKeyB64);
     rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, dataset.name), rawKeyB64);
   }
+}
+
+function captionStatusSearchText(dataset: DatasetSummary) {
+  if (dataset.encrypted) return 'captions locked encrypted';
+  if (typeof dataset.itemCount !== 'number' || typeof dataset.missingCaptionCount !== 'number') {
+    return 'captions not scanned unknown';
+  }
+  if (dataset.itemCount === 0) return 'captions no media empty';
+  if (dataset.missingCaptionCount > 0) return `${dataset.missingCaptionCount} missing captions`;
+  return 'captions complete captioned';
+}
+
+function CaptionStatusBadge({ dataset }: { dataset: DatasetSummary }) {
+  const itemCount = typeof dataset.itemCount === 'number' ? dataset.itemCount : null;
+  const missingCount = typeof dataset.missingCaptionCount === 'number' ? dataset.missingCaptionCount : null;
+  const captionedCount =
+    typeof dataset.captionedItemCount === 'number'
+      ? dataset.captionedItemCount
+      : itemCount !== null && missingCount !== null
+        ? Math.max(itemCount - missingCount, 0)
+        : null;
+
+  if (dataset.encrypted) {
+    return (
+      <span
+        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-xs font-medium text-slate-300"
+        title="Caption counts are encrypted until the dataset is unlocked"
+      >
+        <LockKeyhole className="h-3.5 w-3.5 text-slate-400" />
+        Locked
+      </span>
+    );
+  }
+
+  if (itemCount === null || missingCount === null || captionedCount === null) {
+    return (
+      <span
+        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs font-medium text-gray-300"
+        title="Caption status is not available from this worker"
+      >
+        <HelpCircle className="h-3.5 w-3.5 text-gray-400" />
+        Not scanned
+      </span>
+    );
+  }
+
+  if (itemCount === 0) {
+    return (
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs font-medium text-gray-300">
+        <MinusCircle className="h-3.5 w-3.5 text-gray-400" />
+        No media
+      </span>
+    );
+  }
+
+  const hasMissingCaptions = missingCount > 0;
+  const coveragePercent = Math.max(0, Math.min(100, (captionedCount / itemCount) * 100));
+
+  return (
+    <div
+      className="flex min-w-[9.5rem] flex-col gap-1"
+      title={
+        hasMissingCaptions
+          ? `${missingCount} of ${itemCount} media item${itemCount === 1 ? '' : 's'} are missing caption sidecars`
+          : `All ${itemCount} media item${itemCount === 1 ? '' : 's'} have caption sidecars`
+      }
+    >
+      <span
+        className={
+          hasMissingCaptions
+            ? 'inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-100'
+            : 'inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-100'
+        }
+      >
+        {hasMissingCaptions ? (
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+        ) : (
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />
+        )}
+        <span>{hasMissingCaptions ? `${missingCount} missing` : 'Complete'}</span>
+        <span className={hasMissingCaptions ? 'text-amber-200/70' : 'text-emerald-200/70'}>of {itemCount}</span>
+      </span>
+      <span className="block h-1.5 w-28 overflow-hidden rounded-full bg-gray-800" aria-hidden="true">
+        <span
+          className={`block h-full rounded-full ${hasMissingCaptions ? 'bg-amber-400' : 'bg-emerald-400'}`}
+          style={{ width: `${hasMissingCaptions ? Math.max(coveragePercent, 6) : 100}%` }}
+        />
+      </span>
+    </div>
+  );
 }
 
 type FolderImportEntry = {
@@ -177,6 +280,7 @@ export default function Datasets() {
     encrypted: dataset.encrypted,
     source: dataset.source || 'local',
     worker: dataset.worker_name || 'Local',
+    captions: captionStatusSearchText(dataset),
     ref: datasetRowKey(dataset),
     worker_id: datasetWorkerID(dataset),
   }));
@@ -184,7 +288,7 @@ export default function Datasets() {
     const query = datasetFilter.trim().toLowerCase();
     if (!query) return tableRows;
     return tableRows.filter(row =>
-      [row.name, row.source, row.worker, row.encrypted ? 'encrypted' : 'plain']
+      [row.name, row.source, row.worker, row.encrypted ? 'encrypted' : 'plain', row.captions]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
@@ -257,7 +361,7 @@ export default function Datasets() {
               ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
               : `/datasets/${encodeURIComponent(row.name)}`
           }
-          className="text-gray-200 hover:text-gray-100"
+          className="block max-w-[26rem] truncate text-gray-200 hover:text-gray-100"
         >
           {row.name}
         </Link>
@@ -282,6 +386,12 @@ export default function Datasets() {
           {row.encrypted ? 'Encrypted' : 'Plain'}
         </span>
       ),
+    },
+    {
+      title: 'Captions',
+      key: 'captions',
+      className: 'w-48',
+      render: row => <CaptionStatusBadge dataset={row.dataset} />,
     },
     {
       title: 'Actions',

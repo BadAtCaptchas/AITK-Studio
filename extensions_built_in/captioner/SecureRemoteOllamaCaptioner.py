@@ -190,7 +190,7 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
         job_id = self.job_id or self.job.name
         payload = {
             "model": self.caption_config.model_name_or_path,
-            "prompt": self.caption_config.caption_prompt,
+            "prompt": self.build_caption_prompt(file_path),
             "systemPrompt": self.caption_config.system_prompt,
             "imageBase64": self._image_to_base64(file_path),
             "maxNewTokens": self.caption_config.max_new_tokens,
@@ -199,4 +199,4 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
         response_envelope = self._post_secure_caption(request_envelope)
         response_payload = decrypt_secure_caption_json(self.remote_token, "response", response_envelope)
         caption = str(response_payload.get("caption", "")).strip()
-        return caption or None
+        return self.normalize_caption_output(file_path, caption) if caption else None

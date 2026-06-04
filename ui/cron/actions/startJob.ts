@@ -3,7 +3,7 @@ import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { TOOLKIT_ROOT, getHFToken, getTrainingFolder } from '../paths';
+import { TOOLKIT_ROOT, getHFToken, getOpenRouterApiKey, getTrainingFolder } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
@@ -95,6 +95,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
     try {
       const trainingRoot = await getTrainingFolder();
       const hfToken = await getHFToken();
+      const openRouterApiKey = await getOpenRouterApiKey();
       const tensorBoardEnabled = isTensorBoardEnabled();
       const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
@@ -181,6 +182,10 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
         ...secureRemoteOllamaEnv,
       };
+      if (openRouterApiKey) {
+        additionalEnv.OPENROUTER_API_KEY = openRouterApiKey;
+        additionalEnv.AITK_OPENROUTER_API_KEY = openRouterApiKey;
+      }
       if (encryptedDatasetKeys.length > 0) {
         additionalEnv.AITK_ENCRYPTED_DATASET_KEYS_B64 = Buffer.from(
           JSON.stringify(encryptedDatasetKeys),

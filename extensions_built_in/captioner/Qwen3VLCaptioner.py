@@ -60,7 +60,7 @@ class Qwen3VLCaptioner(BaseCaptioner):
                             "type": "image",
                             "image": img,
                         },
-                        {"type": "text", "text": self.caption_config.caption_prompt},
+                        {"type": "text", "text": self.build_caption_prompt(file_path)},
                     ],
                 }
             ]
@@ -89,7 +89,7 @@ class Qwen3VLCaptioner(BaseCaptioner):
                 clean_up_tokenization_spaces=False,
             )
 
-            return output_text[0].strip()
+            return self.normalize_caption_output(file_path, output_text[0])
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
             return None

@@ -1,0 +1,171 @@
+import base64
+import io
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+from collections import OrderedDict
+from typing import Optional
+
+from .BaseCaptioner import BaseCaptioner, CaptionConfig, IDEOGRAM_JSON_SCHEMA
+
+
+class OpenRouterCaptionConfig(CaptionConfig):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.system_prompt = kwargs.get("system_prompt", "")
+        self.api_key_env = kwargs.get("api_key_env", "OPENROUTER_API_KEY")
+        self.base_url = kwargs.get(
+            "base_url", "https://openrouter.ai/api/v1"
+        ).rstrip("/")
+        self.site_url = kwargs.get("site_url", "")
+        self.app_title = kwargs.get("app_title", "AI Toolkit Captioner")
+        self.temperature: Optional[float] = kwargs.get("temperature", 0.2)
+
+
+class OpenRouterCaptioner(BaseCaptioner):
+    caption_config_class = OpenRouterCaptionConfig
+    caption_config: OpenRouterCaptionConfig
+
+    def __init__(self, process_id: int, job, config: OrderedDict, **kwargs):
+        super(OpenRouterCaptioner, self).__init__(process_id, job, config, **kwargs)
+        self.api_key = ""
+
+    def load_model(self):
+        if self.encrypted_reader is not None:
+            raise ValueError(
+                "OpenRouter captioning is not supported for encrypted datasets. "
+                "Caption an unencrypted copy, then encrypt the finished dataset if needed."
+            )
+        env_names = [
+            self.caption_config.api_key_env,
+            "OPENROUTER_API_KEY",
+            "AITK_OPENROUTER_API_KEY",
+        ]
+        for env_name in env_names:
+            value = os.environ.get(env_name, "").strip()
+            if value:
+                self.api_key = value
+                break
+        if not self.api_key:
+            raise ValueError(
+                "OpenRouter API key is missing. Set OPENROUTER_API_KEY or save it in the UI settings."
+            )
+        if not self.caption_config.model_name_or_path:
+            raise ValueError("OpenRouter model is required")
+        self.print_and_status_update(
+            f"Using OpenRouter model {self.caption_config.model_name_or_path}"
+        )
+
+    def _image_to_data_url(self, file_path: str) -> str:
+        image = self.load_pil_image(
+            file_path, max_res=self.caption_config.max_res
+        ).convert("RGB")
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=95, optimize=True)
+        return f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+
+    def _headers(self) -> dict:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.caption_config.site_url:
+            headers["HTTP-Referer"] = self.caption_config.site_url
+        if self.caption_config.app_title:
+            headers["X-Title"] = self.caption_config.app_title
+        return headers
+
+    def _request_json(self, payload: dict, timeout: int = 900) -> dict:
+        body = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.caption_config.base_url}/chat/completions",
+            data=body,
+            headers=self._headers(),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            message = exc.read().decode("utf-8", errors="replace")[:1000]
+            try:
+                parsed = json.loads(message)
+                message = (
+                    parsed.get("error", {}).get("message")
+                    if isinstance(parsed.get("error"), dict)
+                    else parsed.get("error")
+                ) or message
+            except Exception:
+                pass
+            raise RuntimeError(f"OpenRouter request failed: {message}") from exc
+
+    def _message_content_text(self, data: dict) -> str:
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return ""
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        if not isinstance(message, dict):
+            return ""
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            return "\n".join(parts).strip()
+        return ""
+
+    def _build_payload(self, file_path: str) -> dict:
+        messages = []
+        if self.caption_config.system_prompt.strip():
+            messages.append(
+                {"role": "system", "content": self.caption_config.system_prompt.strip()}
+            )
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": self.build_caption_prompt(file_path)},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": self._image_to_data_url(file_path)},
+                    },
+                ],
+            }
+        )
+        payload = {
+            "model": self.caption_config.model_name_or_path.strip(),
+            "messages": messages,
+            "stream": False,
+            "max_tokens": int(self.caption_config.max_new_tokens),
+        }
+        if self.caption_config.temperature is not None:
+            payload["temperature"] = float(self.caption_config.temperature)
+        if self.is_ideogram_json_output():
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "ideogram_caption",
+                    "strict": True,
+                    "schema": IDEOGRAM_JSON_SCHEMA,
+                },
+            }
+            payload["provider"] = {"require_parameters": True}
+        return payload
+
+    def get_caption_for_file(self, file_path: str) -> str:
+        payload = self._build_payload(file_path)
+        for attempt in range(1, 4):
+            data = self._request_json(payload)
+            caption = self._message_content_text(data)
+            if caption:
+                return self.normalize_caption_output(file_path, caption)
+            if attempt < 3:
+                time.sleep(2)
+        raise RuntimeError(
+            "OpenRouter returned an empty caption. Confirm the selected model supports image inputs."
+        )

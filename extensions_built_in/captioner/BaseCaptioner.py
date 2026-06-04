@@ -1,7 +1,9 @@
 import asyncio
 from collections import OrderedDict
 
+import json
 import os
+import re
 from typing import Literal, Optional
 import threading
 import time
@@ -20,6 +22,99 @@ from toolkit.train_tools import get_torch_dtype
 from toolkit.ui_database import UIJobStore
 
 AITK_Status = Literal["running", "stopped", "error", "completed"]
+
+IDEOGRAM_JSON_OUTPUT_FORMAT = "ideogram_json"
+
+DEFAULT_IDEOGRAM_JSON_PROMPT = """Create an Ideogram 4 training caption for this image as a JSON object.
+Return only valid JSON. Do not wrap it in markdown.
+
+Use this exact top-level shape:
+- high_level_description: a concise but detailed one-paragraph description.
+- style_description: aesthetics, lighting, medium, exactly one of photo or art_style, and color_palette.
+- compositional_deconstruction: background and elements.
+
+For each important visible element, include type ("obj" or "text"), desc, optional text, optional color_palette, and bbox when you can estimate it. Bounding boxes must be [ymin, xmin, ymax, xmax] normalized to 0-1000.
+Preserve important details from any existing caption, but correct it when the image contradicts it."""
+
+IDEOGRAM_JSON_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "high_level_description": {
+            "type": "string",
+            "description": "A concise detailed description of the whole image.",
+        },
+        "style_description": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "aesthetics": {"type": "string"},
+                "lighting": {"type": "string"},
+                "photo": {
+                    "type": "string",
+                    "description": "Photographic qualities. Use this instead of art_style for photographs.",
+                },
+                "medium": {"type": "string"},
+                "art_style": {
+                    "type": "string",
+                    "description": "Artistic style. Use this instead of photo for non-photographs.",
+                },
+                "color_palette": {
+                    "type": "array",
+                    "items": {"type": "string", "pattern": "^#[0-9A-F]{6}$"},
+                    "maxItems": 16,
+                },
+            },
+            "required": ["aesthetics", "lighting", "medium", "color_palette"],
+        },
+        "compositional_deconstruction": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "background": {"type": "string"},
+                "elements": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "type": {"type": "string", "enum": ["obj", "text"]},
+                            "bbox": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 1000,
+                                },
+                                "minItems": 4,
+                                "maxItems": 4,
+                            },
+                            "text": {"type": "string"},
+                            "desc": {"type": "string"},
+                            "color_palette": {
+                                "type": "array",
+                                "items": {"type": "string", "pattern": "^#[0-9A-F]{6}$"},
+                                "maxItems": 5,
+                            },
+                        },
+                        "required": ["type", "desc"],
+                    },
+                },
+            },
+            "required": ["background", "elements"],
+        },
+    },
+    "required": [
+        "high_level_description",
+        "style_description",
+        "compositional_deconstruction",
+    ],
+}
+
+
+def _normalize_caption_extension(value: Optional[str], default: str = "txt") -> str:
+    normalized = (value or default).strip().lstrip(".").lower()
+    return normalized or default
 
 
 class CaptionConfig:
@@ -40,9 +135,15 @@ class CaptionConfig:
         self.qtype = kwargs.get("qtype", "float8")
         self.low_vram = kwargs.get("low_vram", False)
         self.caption_extension = kwargs.get("caption_extension", "txt")
+        self.caption_extension = _normalize_caption_extension(self.caption_extension)
         self.recaption = kwargs.get("recaption", False)
         self.max_res = kwargs.get("max_res", 512)
         self.max_new_tokens = kwargs.get("max_new_tokens", 128)
+        self.output_format = kwargs.get("output_format", "text")
+        self.source_caption_extension = _normalize_caption_extension(
+            kwargs.get("source_caption_extension", "txt")
+        )
+        self.delete_source_caption = kwargs.get("delete_source_caption", False)
         self.caption_prompt = kwargs.get(
             "caption_prompt", "Describe this image in detail."
         )
@@ -169,9 +270,125 @@ class BaseCaptioner(BaseExtensionProcess):
             os.remove(caption_file_path)
         with open(caption_file_path, "w", encoding="utf-8") as f:
             f.write(caption)
+        self.delete_source_caption_for_file(file_path, caption_file_path)
 
     def get_caption_for_file(self, file_path: str) -> str:
         raise NotImplementedError("Captioning not implemented for this captioner")
+
+    def is_ideogram_json_output(self) -> bool:
+        return str(self.caption_config.output_format or "").strip().lower() in {
+            IDEOGRAM_JSON_OUTPUT_FORMAT,
+            "json",
+        }
+
+    def get_source_caption_for_file(self, file_path: str) -> str:
+        if self.encrypted_reader is not None:
+            try:
+                return (
+                    self.encrypted_reader.get_caption(
+                        self.encrypted_items_by_path[file_path]
+                    )
+                    or ""
+                ).strip()
+            except Exception:
+                return ""
+
+        source_ext = self.caption_config.source_caption_extension
+        if not source_ext:
+            return ""
+        source_path = f"{os.path.splitext(file_path)[0]}.{source_ext}"
+        if not os.path.exists(source_path):
+            return ""
+        try:
+            return open(source_path, "r", encoding="utf-8").read().strip()
+        except Exception:
+            return ""
+
+    def build_caption_prompt(self, file_path: str) -> str:
+        if not self.is_ideogram_json_output():
+            return self.caption_config.caption_prompt.strip()
+
+        prompt = (self.caption_config.caption_prompt or "").strip()
+        if not prompt or prompt == "Describe this image in detail.":
+            prompt = DEFAULT_IDEOGRAM_JSON_PROMPT
+
+        source_caption = self.get_source_caption_for_file(file_path)
+        if source_caption:
+            if "{existing_caption}" in prompt:
+                prompt = prompt.replace("{existing_caption}", source_caption)
+            else:
+                prompt = (
+                    f"{prompt}\n\nExisting caption to preserve and refine:\n"
+                    f"{source_caption}"
+                )
+        return prompt
+
+    def normalize_caption_output(self, file_path: str, caption: str) -> str:
+        if not self.is_ideogram_json_output():
+            return str(caption).strip()
+
+        parsed = self._parse_json_caption(str(caption))
+        self._warn_for_ideogram_json_issues(parsed, file_path)
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
+
+    def _parse_json_caption(self, caption: str) -> dict:
+        text = caption.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+            text = re.sub(r"\s*```$", "", text)
+            text = text.strip()
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start < 0 or end <= start:
+                raise ValueError("Captioner did not return a JSON object")
+            parsed = json.loads(text[start : end + 1])
+
+        if isinstance(parsed, dict) and set(parsed.keys()) == {"caption"}:
+            nested = parsed.get("caption")
+            if isinstance(nested, str):
+                parsed = json.loads(nested)
+
+        if not isinstance(parsed, dict):
+            raise ValueError("Captioner returned JSON, but the root value is not an object")
+        return parsed
+
+    def _warn_for_ideogram_json_issues(self, parsed: dict, file_path: str):
+        try:
+            from extensions_built_in.diffusion_models.ideogram4.src.caption_verifier import (
+                CaptionVerifier,
+            )
+
+            warnings = CaptionVerifier().verify(parsed)
+            if warnings:
+                print(
+                    f"Warning: Ideogram JSON caption verifier found issues for {file_path}:"
+                )
+                for warning in warnings:
+                    print(f"  - {warning}")
+        except Exception:
+            return
+
+    def delete_source_caption_for_file(self, file_path: str, saved_caption_path: str):
+        if not self.is_ideogram_json_output():
+            return
+        if not self.caption_config.delete_source_caption:
+            return
+        source_ext = self.caption_config.source_caption_extension
+        output_ext = self.caption_config.caption_extension
+        if not source_ext or source_ext == output_ext:
+            return
+        source_path = f"{os.path.splitext(file_path)[0]}.{source_ext}"
+        if os.path.abspath(source_path) == os.path.abspath(saved_caption_path):
+            return
+        try:
+            if os.path.exists(source_path):
+                os.remove(source_path)
+        except Exception as exc:
+            print(f"Warning: failed to remove source caption {source_path}: {exc}")
 
     def print_and_status_update(self, status: str):
         print(status)

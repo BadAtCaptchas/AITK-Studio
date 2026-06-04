@@ -5,6 +5,7 @@ import { apiClient } from '@/utils/api';
 
 export interface Settings {
   HF_TOKEN: string;
+  OPENROUTER_API_KEY: string;
   TRAINING_FOLDER: string;
   DATASETS_FOLDER: string;
   TRAINING_ADVISOR_ENABLED: string;
@@ -13,6 +14,7 @@ export interface Settings {
 export default function useSettings() {
   const [settings, setSettings] = useState({
     HF_TOKEN: '',
+    OPENROUTER_API_KEY: '',
     TRAINING_FOLDER: '',
     DATASETS_FOLDER: '',
     TRAINING_ADVISOR_ENABLED: 'false',
@@ -26,6 +28,7 @@ export default function useSettings() {
         console.log('Settings:', data);
         setSettings({
           HF_TOKEN: data.HF_TOKEN || '',
+          OPENROUTER_API_KEY: data.OPENROUTER_API_KEY || '',
           TRAINING_FOLDER: data.TRAINING_FOLDER || '',
           DATASETS_FOLDER: data.DATASETS_FOLDER || '',
           TRAINING_ADVISOR_ENABLED: data.TRAINING_ADVISOR_ENABLED === 'true' ? 'true' : 'false',

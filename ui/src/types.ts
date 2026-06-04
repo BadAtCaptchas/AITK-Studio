@@ -580,6 +580,12 @@ export interface CaptionProcessConfig {
     fixed_caption?: string;
     remote_worker_id?: string;
     system_prompt?: string;
+    output_format?: 'text' | 'ideogram_json' | string;
+    source_caption_extension?: string;
+    delete_source_caption?: boolean;
+    convert_destination?: 'current' | 'copy' | string;
+    caption_extension?: string;
+    temperature?: number;
   }
 }
 

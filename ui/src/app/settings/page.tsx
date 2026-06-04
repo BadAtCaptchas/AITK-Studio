@@ -483,6 +483,24 @@ export default function Settings() {
                 </div>
 
                 <div>
+                  <label htmlFor="OPENROUTER_API_KEY" className="block text-sm font-medium mb-2">
+                    OpenRouter API Key
+                    <div className="text-gray-500 text-sm ml-1">
+                      Used for OpenRouter caption jobs. You can also set OPENROUTER_API_KEY in the server environment.
+                    </div>
+                  </label>
+                  <input
+                    type="password"
+                    id="OPENROUTER_API_KEY"
+                    name="OPENROUTER_API_KEY"
+                    value={settings.OPENROUTER_API_KEY}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
+                    placeholder="Enter your OpenRouter API key"
+                  />
+                </div>
+
+                <div>
                   <label htmlFor="TRAINING_FOLDER" className="block text-sm font-medium mb-2">
                     Training Folder Path
                     <div className="text-gray-500 text-sm ml-1">

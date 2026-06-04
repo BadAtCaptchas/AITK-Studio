@@ -144,7 +144,7 @@ class OllamaCaptioner(BaseCaptioner):
 
     def get_caption_for_file(self, file_path: str) -> str:
         model = self.caption_config.model_name_or_path.strip()
-        prompt = self.caption_config.caption_prompt.strip()
+        prompt = self.build_caption_prompt(file_path)
         image_base64 = self._image_to_base64(file_path)
         generate_body = {
             "model": model,
@@ -171,10 +171,10 @@ class OllamaCaptioner(BaseCaptioner):
             options = {"num_predict": self._caption_num_predict(attempt)}
             caption = self._generate_caption_once("generate", {**generate_body, "options": options})
             if caption:
-                return caption
+                return self.normalize_caption_output(file_path, caption)
             caption = self._generate_caption_once("chat", {**chat_body, "options": options})
             if caption:
-                return caption
+                return self.normalize_caption_output(file_path, caption)
             if attempt < 3:
                 time.sleep(2)
 

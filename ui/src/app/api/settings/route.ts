@@ -68,6 +68,8 @@ export async function GET(request: NextRequest) {
     if (!access.authenticated) {
       settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
       settingsObject.HF_TOKEN = '';
+      settingsObject.OPENROUTER_API_KEY_SET = Boolean(settingsObject.OPENROUTER_API_KEY);
+      settingsObject.OPENROUTER_API_KEY = '';
     }
     return NextResponse.json(settingsObject);
   } catch (error) {
@@ -83,7 +85,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { HF_TOKEN, TRAINING_FOLDER, DATASETS_FOLDER, TRAINING_ADVISOR_ENABLED } = body;
+    const { HF_TOKEN, OPENROUTER_API_KEY, TRAINING_FOLDER, DATASETS_FOLDER, TRAINING_ADVISOR_ENABLED } = body;
 
     let normalizedDatasetsFolder = DATASETS_FOLDER;
     if (typeof DATASETS_FOLDER === 'string' && DATASETS_FOLDER !== '') {
@@ -102,6 +104,9 @@ export async function POST(request: NextRequest) {
 
     if (typeof HF_TOKEN === 'string' && (access.authenticated || HF_TOKEN !== '')) {
       settingsToUpdate.HF_TOKEN = HF_TOKEN;
+    }
+    if (typeof OPENROUTER_API_KEY === 'string' && (access.authenticated || OPENROUTER_API_KEY !== '')) {
+      settingsToUpdate.OPENROUTER_API_KEY = OPENROUTER_API_KEY;
     }
 
     await db.settings.upsertMany(settingsToUpdate);

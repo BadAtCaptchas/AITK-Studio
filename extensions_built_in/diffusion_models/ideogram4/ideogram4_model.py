@@ -106,20 +106,23 @@ def patchify_latents(latents: torch.Tensor, patch_size: int = 2) -> torch.Tensor
             f"latent height/width must be divisible by patch_size={patch_size}, "
             f"got {(height, width)}"
         )
+    patch_h = patch_w = patch_size
+    grid_h = height // patch_h
+    grid_w = width // patch_w
     latents = latents.view(
         batch,
         channels,
-        height // patch_size,
-        patch_size,
-        width // patch_size,
-        patch_size,
+        grid_h,
+        patch_h,
+        grid_w,
+        patch_w,
     )
-    latents = latents.permute(0, 1, 3, 5, 2, 4).contiguous()
+    latents = latents.permute(0, 3, 5, 1, 2, 4).contiguous()
     return latents.view(
         batch,
-        channels * patch_size * patch_size,
-        height // patch_size,
-        width // patch_size,
+        patch_h * patch_w * channels,
+        grid_h,
+        grid_w,
     )
 
 
@@ -130,10 +133,11 @@ def unpatchify_latents(latents: torch.Tensor, patch_size: int = 2) -> torch.Tens
             f"latent channels must be divisible by patch_size**2={patch_size * patch_size}, "
             f"got {channels}"
         )
-    ae_channels = channels // (patch_size * patch_size)
-    latents = latents.view(batch, ae_channels, patch_size, patch_size, height, width)
-    latents = latents.permute(0, 1, 4, 2, 5, 3).contiguous()
-    return latents.view(batch, ae_channels, height * patch_size, width * patch_size)
+    patch_h = patch_w = patch_size
+    ae_channels = channels // (patch_h * patch_w)
+    latents = latents.view(batch, patch_h, patch_w, ae_channels, height, width)
+    latents = latents.permute(0, 3, 4, 1, 5, 2).contiguous()
+    return latents.view(batch, ae_channels, height * patch_h, width * patch_w)
 
 
 def pack_latent_tokens(latents: torch.Tensor) -> torch.Tensor:
@@ -434,7 +438,7 @@ class Ideogram4Model(BaseModel):
         self.te_padding_side = "left"
         self.unconditional_transformer = None
         self.caption_verifier = CaptionVerifier()
-        self.latent_space_version = "ideogram4_patched_norm_v1"
+        self.latent_space_version = "ideogram4_reference_patched_norm_v1"
 
     @property
     def text_embedding_space_version(self):
@@ -1024,7 +1028,7 @@ class Ideogram4Model(BaseModel):
         model_timestep = timestep.to(self.device_torch, dtype=torch.float32)
         if model_timestep.ndim == 0:
             model_timestep = model_timestep.unsqueeze(0)
-        model_timestep = model_timestep / 1000.0
+        model_timestep = 1.0 - (model_timestep / 1000.0)
 
         prediction = self.transformer(
             llm_features=llm_features,
@@ -1035,7 +1039,7 @@ class Ideogram4Model(BaseModel):
             indicator=indicator,
         )
         prediction = prediction[:, max_text_tokens:]
-        return unpack_latent_tokens(prediction, latent_h, latent_w)
+        return -unpack_latent_tokens(prediction, latent_h, latent_w)
 
     @torch.no_grad()
     def generate_single_image(

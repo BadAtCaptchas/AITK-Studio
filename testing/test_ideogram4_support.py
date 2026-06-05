@@ -124,6 +124,12 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("Fp8Linear", LORA_SPECIAL_PATH.read_text(encoding="utf-8"))
         self.assertIn("Fp8Linear", NETWORK_MIXINS_PATH.read_text(encoding="utf-8"))
 
+    def test_latent_cache_version_bumped_for_reference_patch_order(self):
+        model_source = (IDEOGRAM_ROOT / "ideogram4_model.py").read_text(encoding="utf-8")
+
+        self.assertIn("ideogram4_reference_patched_norm_v1", model_source)
+        self.assertNotIn("ideogram4_patched_norm_v1\"", model_source)
+
     def test_sample_prompt_cache_uses_model_sample_prepare_hook(self):
         trainer_source = SDTRAINER_PATH.read_text(encoding="utf-8")
 
@@ -518,6 +524,22 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         self.assertEqual(patched.shape, (1, 128, 2, 3))
         self.assertTrue(torch.equal(round_trip, latents))
 
+    def test_patchify_uses_reference_channel_order(self):
+        latents = torch.tensor(
+            [[[[0.0, 1.0], [2.0, 3.0]], [[4.0, 5.0], [6.0, 7.0]]]]
+        )
+
+        patched = patchify_latents(latents)
+
+        self.assertEqual(patched.shape, (1, 8, 1, 1))
+        self.assertTrue(
+            torch.equal(
+                patched[0, :, 0, 0],
+                torch.tensor([0.0, 4.0, 1.0, 5.0, 2.0, 6.0, 3.0, 7.0]),
+            )
+        )
+        self.assertTrue(torch.equal(unpatchify_latents(patched), latents))
+
     def test_text_embedding_space_versions_default_and_ideogram_override(self):
         from toolkit.models.base_model import BaseModel
         from toolkit.stable_diffusion_model import StableDiffusion
@@ -623,6 +645,65 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         expected_legacy[1] = legacy_text[1]
         self.assertEqual(legacy_text_tokens, 3)
         self.assertTrue(torch.equal(legacy_features[:, :3], expected_legacy))
+
+    def test_get_noise_prediction_bridges_toolkit_and_ideogram_conventions_for_quantized_repos(self):
+        from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
+
+        class FakeTransformer:
+            def __init__(self):
+                self.device = torch.device("cpu")
+                self.received_t = None
+
+            def to(self, device):
+                self.device = torch.device(device)
+                return self
+
+            def __call__(
+                self,
+                *,
+                llm_features,
+                x,
+                t,
+                position_ids,
+                segment_ids,
+                indicator,
+            ):
+                self.received_t = t.detach().clone()
+                return x + 10.0
+
+        for repo, quantization in (
+            ("ideogram-ai/ideogram-4-nf4", "nf4"),
+            ("ideogram-ai/ideogram-4-fp8", "fp8"),
+        ):
+            with self.subTest(quantization=quantization):
+                model = object.__new__(Ideogram4Model)
+                model.device_torch = torch.device("cpu")
+                model.model_config = types.SimpleNamespace(
+                    name_or_path=repo,
+                    model_kwargs={"quantization": quantization},
+                )
+                fake_transformer = FakeTransformer()
+                model.model = fake_transformer
+
+                latents = torch.arange(8, dtype=torch.float32).view(1, 8, 1, 1)
+                text_embeddings = AdvancedPromptEmbeds(
+                    text_embeds=[torch.ones(2, 5, dtype=torch.float32)]
+                )
+
+                prediction = model.get_noise_prediction(
+                    latents,
+                    torch.tensor([250.0], dtype=torch.float32),
+                    text_embeddings,
+                )
+
+                self.assertEqual(
+                    infer_ideogram4_quantization(repo, model.model_config.model_kwargs),
+                    quantization,
+                )
+                self.assertTrue(
+                    torch.allclose(fake_transformer.received_t, torch.tensor([0.75]))
+                )
+                self.assertTrue(torch.equal(prediction, -(latents + 10.0)))
 
     def test_autoencoder_exposes_diffusers_style_dtype_and_device(self):
         autoencoder = object.__new__(AutoEncoder)

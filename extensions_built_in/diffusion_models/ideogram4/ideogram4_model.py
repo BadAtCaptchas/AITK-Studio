@@ -15,6 +15,7 @@ from safetensors.torch import load_file, save_file
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 from toolkit.accelerator import unwrap_model
+from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
 from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.models.base_model import BaseModel
@@ -435,6 +436,10 @@ class Ideogram4Model(BaseModel):
         self.caption_verifier = CaptionVerifier()
         self.latent_space_version = "ideogram4_patched_norm_v1"
 
+    @property
+    def text_embedding_space_version(self):
+        return f"{self.arch}_te_v2"
+
     @staticmethod
     def get_train_scheduler():
         return CustomFlowMatchEulerDiscreteScheduler(**scheduler_config)
@@ -444,6 +449,16 @@ class Ideogram4Model(BaseModel):
 
     def _model_kwargs(self) -> dict:
         return self.model_config.model_kwargs or {}
+
+    def _resolve_max_text_tokens(self) -> int:
+        kwargs = self._model_kwargs()
+        raw_value = kwargs.get("max_text_tokens", kwargs.get("max_text_length", None))
+        if raw_value is None:
+            return Ideogram4PipelineConfig.max_text_tokens
+        max_text_tokens = int(raw_value)
+        if max_text_tokens < 1:
+            raise ValueError("Ideogram 4 max_text_tokens must be greater than 0.")
+        return max_text_tokens
 
     def _read_local_meta(self, model_path: str) -> dict:
         if not os.path.isdir(model_path):
@@ -506,7 +521,10 @@ class Ideogram4Model(BaseModel):
             _check_nf4_runtime(self.device_torch)
 
         base_model_path = self._resolve_base_components_path(model_path, quantization)
-        pipeline_config = Ideogram4PipelineConfig(weights_repo=base_model_path)
+        pipeline_config = Ideogram4PipelineConfig(
+            weights_repo=base_model_path,
+            max_text_tokens=self._resolve_max_text_tokens(),
+        )
         local_transformer = (
             os.path.isdir(model_path)
             and os.path.exists(os.path.join(model_path, "transformer"))
@@ -785,7 +803,7 @@ class Ideogram4Model(BaseModel):
             self.prepare_sample_image_config_for_encoding(image_config)
         return super().generate_images(image_configs, sampler=sampler, pipeline=pipeline)
 
-    def get_prompt_embeds(self, prompt: str) -> PromptEmbeds:
+    def get_prompt_embeds(self, prompt: str) -> AdvancedPromptEmbeds:
         if self.pipeline.text_encoder.device != self.device_torch:
             self.pipeline.text_encoder.to(self.device_torch)
 
@@ -793,37 +811,69 @@ class Ideogram4Model(BaseModel):
         for p in prompts:
             self._validate_caption(p)
 
-        tokenized = [self.pipeline._tokenize(p) for p in prompts]
-        batch_size = len(prompts)
-        max_text_tokens = max(num_text for _, num_text in tokenized)
-
-        token_ids = torch.zeros(
-            batch_size, max_text_tokens, dtype=torch.long, device=self.device_torch
-        )
-        text_position_ids = torch.zeros(
-            batch_size,
-            max_text_tokens,
-            3,
-            dtype=torch.long,
-            device=self.device_torch,
-        )
-        indicator = torch.zeros(
-            batch_size, max_text_tokens, dtype=torch.long, device=self.device_torch
-        )
-
-        for batch_idx, (tokens, num_text) in enumerate(tokenized):
-            offset = max_text_tokens - num_text
-            token_ids[batch_idx, offset:] = tokens.to(self.device_torch)
+        text_embeds = []
+        for tokens, num_text in [self.pipeline._tokenize(p) for p in prompts]:
+            token_ids = tokens.to(self.device_torch).unsqueeze(0)
             text_pos = torch.arange(num_text, device=self.device_torch)
-            text_pos_3d = torch.stack([text_pos, text_pos, text_pos], dim=1)
-            text_position_ids[batch_idx, offset:] = text_pos_3d
-            indicator[batch_idx, offset:] = LLM_TOKEN_INDICATOR
+            text_position_ids = torch.stack([text_pos, text_pos, text_pos], dim=1).unsqueeze(0)
+            indicator = torch.full(
+                (1, num_text),
+                LLM_TOKEN_INDICATOR,
+                dtype=torch.long,
+                device=self.device_torch,
+            )
+            llm_features = self.pipeline._encode_text(
+                token_ids, text_position_ids, indicator
+            )
+            text_embeds.append(llm_features[0])
 
-        llm_features = self.pipeline._encode_text(
-            token_ids, text_position_ids, indicator
-        )
-        attention_mask = indicator == LLM_TOKEN_INDICATOR
-        return PromptEmbeds(llm_features, attention_mask=attention_mask)
+        return AdvancedPromptEmbeds(text_embeds=text_embeds)
+
+    def _text_embedding_items(self, text_embeddings):
+        if isinstance(text_embeddings, AdvancedPromptEmbeds):
+            raw_items = text_embeddings.text_embeds
+            if not isinstance(raw_items, (list, tuple)):
+                raw_items = [raw_items]
+            items = []
+            for item in raw_items:
+                item = item.to(self.device_torch)
+                if item.dim() == 2:
+                    items.append(item)
+                elif item.dim() == 3:
+                    items.extend(item[idx] for idx in range(item.shape[0]))
+                else:
+                    raise ValueError(
+                        f"Ideogram 4 text embeddings must be rank 2 or 3, got {tuple(item.shape)}"
+                    )
+            return items
+
+        llm_features = text_embeddings.text_embeds
+        if isinstance(llm_features, (list, tuple)):
+            if len(llm_features) != 1:
+                raise ValueError("Ideogram 4 expected a single legacy text embedding tensor.")
+            llm_features = llm_features[0]
+        llm_features = llm_features.to(self.device_torch)
+        if llm_features.dim() == 2:
+            llm_features = llm_features.unsqueeze(0)
+        if llm_features.dim() != 3:
+            raise ValueError(
+                f"Ideogram 4 text embeddings must be rank 3, got {tuple(llm_features.shape)}"
+            )
+
+        attention_mask = getattr(text_embeddings, "attention_mask", None)
+        if attention_mask is None:
+            return [llm_features[idx] for idx in range(llm_features.shape[0])]
+
+        attention_mask = attention_mask.to(self.device_torch).bool()
+        if attention_mask.dim() == 1:
+            attention_mask = attention_mask.unsqueeze(0)
+        items = []
+        for feature_row, mask_row in zip(llm_features, attention_mask):
+            if mask_row.any():
+                items.append(feature_row[mask_row])
+            else:
+                items.append(feature_row[:1] * 0)
+        return items
 
     def _build_transformer_inputs_from_embeds(
         self,
@@ -833,15 +883,10 @@ class Ideogram4Model(BaseModel):
         *,
         include_text: bool = True,
     ):
-        llm_features = text_embeddings.text_embeds.to(self.device_torch)
-        attention_mask = text_embeddings.attention_mask
-        if attention_mask is None:
-            attention_mask = torch.ones(
-                llm_features.shape[:2], dtype=torch.bool, device=llm_features.device
-            )
-        attention_mask = attention_mask.to(self.device_torch).bool()
-
-        batch_size, max_text_tokens, _ = llm_features.shape
+        text_items = self._text_embedding_items(text_embeddings)
+        batch_size = len(text_items)
+        max_text_tokens = max(item.shape[0] for item in text_items)
+        feature_dim = text_items[0].shape[-1]
         num_image_tokens = latent_h * latent_w
         total_seq_len = max_text_tokens + num_image_tokens if include_text else num_image_tokens
 
@@ -877,14 +922,15 @@ class Ideogram4Model(BaseModel):
             full_llm_features = torch.zeros(
                 batch_size,
                 total_seq_len,
-                llm_features.shape[-1],
-                dtype=llm_features.dtype,
+                feature_dim,
+                dtype=text_items[0].dtype,
                 device=self.device_torch,
             )
-            full_llm_features[:, :max_text_tokens] = llm_features
-            for batch_idx in range(batch_size):
-                num_text = int(attention_mask[batch_idx].sum().item())
+            for batch_idx, item in enumerate(text_items):
+                item = item.to(self.device_torch)
+                num_text = item.shape[0]
                 offset = max_text_tokens - num_text
+                full_llm_features[batch_idx, offset:max_text_tokens] = item
                 text_pos = torch.arange(num_text, device=self.device_torch)
                 text_pos_3d = torch.stack([text_pos, text_pos, text_pos], dim=1)
                 position_ids[batch_idx, offset:max_text_tokens] = text_pos_3d
@@ -900,8 +946,8 @@ class Ideogram4Model(BaseModel):
         neg_llm = torch.zeros(
             batch_size,
             num_image_tokens,
-            llm_features.shape[-1],
-            dtype=llm_features.dtype,
+            feature_dim,
+            dtype=text_items[0].dtype,
             device=self.device_torch,
         )
         return neg_llm, position_ids, segment_ids, indicator, 0
@@ -1009,7 +1055,6 @@ class Ideogram4Model(BaseModel):
         gen_config.height = int(gen_config.height // sc * sc)
         latent_h = gen_config.height // sc
         latent_w = gen_config.width // sc
-        batch_size = conditional_embeds.text_embeds.shape[0]
 
         preset_name = extra.pop("ideogram_preset", None) or extra.pop(
             "sampler_preset", "V4_DEFAULT_20"
@@ -1039,6 +1084,7 @@ class Ideogram4Model(BaseModel):
                 cond, latent_h, latent_w, include_text=True
             )
         )
+        batch_size = llm_features.shape[0]
         neg_llm, neg_position_ids, neg_segment_ids, neg_indicator, _ = (
             self._build_transformer_inputs_from_embeds(
                 cond, latent_h, latent_w, include_text=False

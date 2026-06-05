@@ -244,7 +244,7 @@ class Ideogram4PipelineConfig:
   tokenizer_subfolder: str = "tokenizer"
   patch_size: int = 2
   ae_scale_factor: int = 8
-  max_text_tokens: int = 2048
+  max_text_tokens: int = 3072
 
 
 class Ideogram4Pipeline:

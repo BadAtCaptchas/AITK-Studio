@@ -3,7 +3,7 @@ import shutil
 import sys
 import unittest
 import uuid
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest import mock
 
 import torch
@@ -11,9 +11,21 @@ from PIL import Image
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from toolkit.config_modules import DatasetConfig
-from toolkit.data_loader import AiToolkitDataset
-import toolkit.dataloader_mixins as dataloader_mixins
+torchaudio_module = ModuleType("torchaudio")
+torchaudio_module.save = mock.Mock()
+album_artwork_module = ModuleType("toolkit.audio.album_artwork")
+album_artwork_module.add_album_artwork = mock.Mock()
+
+with mock.patch.dict(
+    "sys.modules",
+    {
+        "torchaudio": torchaudio_module,
+        "toolkit.audio.album_artwork": album_artwork_module,
+    },
+):
+    from toolkit.config_modules import DatasetConfig
+    from toolkit.data_loader import AiToolkitDataset
+    import toolkit.dataloader_mixins as dataloader_mixins
 
 
 class FakeSD:
@@ -33,6 +45,7 @@ class FakeSD:
             is_pixart_sigma=False,
             latent_space_version=None,
         )
+        self.text_embedding_space_version = "sd1"
         self.sample_rate = 48000
         self.te_padding_side = "right"
         self.torch_dtype = torch.float32
@@ -106,6 +119,29 @@ class LatentCacheReuseTest(unittest.TestCase):
         self.assertEqual(resumed_sd.device_state_presets, [])
         self.assertEqual(resumed_sd.restore_calls, 0)
         self.assertTrue(all(file_item.is_latent_cached for file_item in resumed_dataset.file_list))
+
+    def test_text_embedding_cache_path_uses_model_space_version(self):
+        _write_image(os.path.join(self.temp_dir, "a.png"))
+
+        first_sd = FakeSD()
+        first_sd.text_embedding_space_version = "sd1_te_v1"
+        first_dataset = AiToolkitDataset(
+            self._dataset_config(cache_latents_to_disk=False),
+            batch_size=1,
+            sd=first_sd,
+        )
+        first_path = first_dataset.file_list[0].get_text_embedding_path(recalculate=True)
+
+        second_sd = FakeSD()
+        second_sd.text_embedding_space_version = "sd1_te_v2"
+        second_dataset = AiToolkitDataset(
+            self._dataset_config(cache_latents_to_disk=False),
+            batch_size=1,
+            sd=second_sd,
+        )
+        second_path = second_dataset.file_list[0].get_text_embedding_path(recalculate=True)
+
+        self.assertNotEqual(first_path, second_path)
 
     def test_num_repeats_encodes_each_unique_latent_once(self):
         _write_image(os.path.join(self.temp_dir, "a.png"))

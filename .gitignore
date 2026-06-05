@@ -187,5 +187,6 @@ aitk_db.db
 /notes.md
 /data
 .claude
+.playwright-mcp/
 aitk_db.db-wal
 aitk_db.db-shm

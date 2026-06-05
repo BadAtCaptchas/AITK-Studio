@@ -27,6 +27,7 @@ SDTRAINER_PATH = PROJECT_ROOT / "extensions_built_in" / "sd_trainer" / "SDTraine
 try:
     from extensions_built_in.diffusion_models.ideogram4.ideogram4_model import (
         Ideogram4Model,
+        Ideogram4PipelineConfig,
         _load_subfolder_state_dict_local_or_hf,
         dequantize_fp8_linears,
         infer_ideogram4_quantization,
@@ -46,6 +47,7 @@ try:
     IDEOGRAM_IMPORT_ERROR = None
 except ImportError as exc:
     Ideogram4Model = None
+    Ideogram4PipelineConfig = None
     CaptionVerifier = None
     AutoEncoder = None
     Fp8Linear = None
@@ -243,7 +245,45 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         self.assertEqual(patched.shape, (1, 128, 2, 3))
         self.assertTrue(torch.equal(round_trip, latents))
 
+    def test_text_embedding_space_versions_default_and_ideogram_override(self):
+        from toolkit.models.base_model import BaseModel
+        from toolkit.stable_diffusion_model import StableDiffusion
+
+        base_model = object.__new__(BaseModel)
+        base_model.arch = "custom_arch"
+        self.assertEqual(base_model.text_embedding_space_version, "custom_arch")
+
+        sd_model = object.__new__(StableDiffusion)
+        sd_model.arch = "sdxl"
+        self.assertEqual(sd_model.text_embedding_space_version, "sdxl")
+
+        ideogram_model = object.__new__(Ideogram4Model)
+        self.assertEqual(ideogram_model.text_embedding_space_version, "ideogram4_te_v2")
+
+    def test_ideogram4_text_token_cap_defaults_and_overrides(self):
+        self.assertEqual(Ideogram4PipelineConfig().max_text_tokens, 3072)
+
+        model = object.__new__(Ideogram4Model)
+        model.model_config = types.SimpleNamespace(model_kwargs={})
+        self.assertEqual(model._resolve_max_text_tokens(), 3072)
+
+        model.model_config = types.SimpleNamespace(model_kwargs={"max_text_tokens": 4096})
+        self.assertEqual(model._resolve_max_text_tokens(), 4096)
+
+        model.model_config = types.SimpleNamespace(model_kwargs={"max_text_length": 1536})
+        self.assertEqual(model._resolve_max_text_tokens(), 1536)
+
+        model.model_config = types.SimpleNamespace(
+            model_kwargs={"max_text_tokens": 2048, "max_text_length": 1536}
+        )
+        self.assertEqual(model._resolve_max_text_tokens(), 2048)
+
+        model.model_config = types.SimpleNamespace(model_kwargs={"max_text_tokens": 0})
+        with self.assertRaisesRegex(ValueError, "max_text_tokens"):
+            model._resolve_max_text_tokens()
+
     def test_transformer_inputs_pad_llm_features_to_full_sequence(self):
+        from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
         from toolkit.prompt_utils import PromptEmbeds
         from extensions_built_in.diffusion_models.ideogram4.src.constants import (
             OUTPUT_IMAGE_INDICATOR,
@@ -251,17 +291,12 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
 
         model = object.__new__(Ideogram4Model)
         model.device_torch = torch.device("cpu")
-        text = torch.arange(2 * 3 * 5, dtype=torch.float32).view(2, 3, 5)
-        attention_mask = torch.tensor(
-            [
-                [False, True, True],
-                [True, True, True],
-            ]
-        )
+        first = torch.arange(2 * 5, dtype=torch.float32).view(2, 5)
+        second = torch.arange(10, 25, dtype=torch.float32).view(3, 5)
 
         llm_features, position_ids, segment_ids, indicator, max_text_tokens = (
             model._build_transformer_inputs_from_embeds(
-                PromptEmbeds(text, attention_mask=attention_mask),
+                AdvancedPromptEmbeds(text_embeds=[first, second]),
                 latent_h=2,
                 latent_w=4,
                 include_text=True,
@@ -273,13 +308,16 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         self.assertEqual(position_ids.shape, (2, 11, 3))
         self.assertEqual(segment_ids.shape, (2, 11))
         self.assertEqual(indicator.shape, (2, 11))
-        self.assertTrue(torch.equal(llm_features[:, :3], text))
+        expected_text = torch.zeros(2, 3, 5)
+        expected_text[0, 1:] = first
+        expected_text[1] = second
+        self.assertTrue(torch.equal(llm_features[:, :3], expected_text))
         self.assertTrue(torch.equal(llm_features[:, 3:], torch.zeros(2, 8, 5)))
         self.assertTrue(torch.all(indicator[:, 3:] == OUTPUT_IMAGE_INDICATOR))
 
         neg_llm, neg_position_ids, neg_segment_ids, neg_indicator, neg_text_tokens = (
             model._build_transformer_inputs_from_embeds(
-                PromptEmbeds(text, attention_mask=attention_mask),
+                AdvancedPromptEmbeds(text_embeds=[first, second]),
                 latent_h=2,
                 latent_w=4,
                 include_text=False,
@@ -291,6 +329,27 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         self.assertEqual(neg_segment_ids.shape, (2, 8))
         self.assertEqual(neg_indicator.shape, (2, 8))
         self.assertTrue(torch.equal(neg_llm, torch.zeros(2, 8, 5)))
+
+        legacy_text = torch.arange(2 * 3 * 5, dtype=torch.float32).view(2, 3, 5)
+        attention_mask = torch.tensor(
+            [
+                [False, True, True],
+                [True, True, True],
+            ]
+        )
+        legacy_features, _, _, _, legacy_text_tokens = (
+            model._build_transformer_inputs_from_embeds(
+                PromptEmbeds(legacy_text, attention_mask=attention_mask),
+                latent_h=2,
+                latent_w=4,
+                include_text=True,
+            )
+        )
+        expected_legacy = torch.zeros(2, 3, 5)
+        expected_legacy[0, 1:] = legacy_text[0, 1:]
+        expected_legacy[1] = legacy_text[1]
+        self.assertEqual(legacy_text_tokens, 3)
+        self.assertTrue(torch.equal(legacy_features[:, :3], expected_legacy))
 
     def test_autoencoder_exposes_diffusers_style_dtype_and_device(self):
         autoencoder = object.__new__(AutoEncoder)

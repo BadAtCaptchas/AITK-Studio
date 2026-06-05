@@ -2,6 +2,7 @@ import asyncio
 from collections import OrderedDict
 
 import json
+import math
 import os
 import re
 from typing import Literal, Optional
@@ -86,6 +87,8 @@ IDEOGRAM_JSON_ELEMENT_KEY_ORDER_TEXT = (
     "desc",
     "color_palette",
 )
+IDEOGRAM_JSON_STYLE_PALETTE_MAX = 16
+IDEOGRAM_JSON_ELEMENT_PALETTE_MAX = 5
 IDEOGRAM_JSON_PHOTO_CUES = (
     "photo",
     "photograph",
@@ -455,6 +458,10 @@ class BaseCaptioner(BaseExtensionProcess):
             return style_description
 
         normalized = OrderedDict(style_description)
+        if "color_palette" in normalized:
+            normalized["color_palette"] = self._normalize_ideogram_color_palette(
+                normalized["color_palette"], IDEOGRAM_JSON_STYLE_PALETTE_MAX
+            )
         has_photo = "photo" in normalized
         has_art_style = "art_style" in normalized
 
@@ -525,14 +532,68 @@ class BaseCaptioner(BaseExtensionProcess):
         if not isinstance(element, dict):
             return element
 
+        element = OrderedDict(element)
+        if "bbox" in element:
+            element["bbox"] = self._normalize_ideogram_bbox(element["bbox"])
+        if "color_palette" in element:
+            element["color_palette"] = self._normalize_ideogram_color_palette(
+                element["color_palette"], IDEOGRAM_JSON_ELEMENT_PALETTE_MAX
+            )
+
         if element.get("type") == "text":
-            element = OrderedDict(element)
             if "text" not in element:
                 element["text"] = ""
             key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_TEXT
         else:
             key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_OBJ
         return self._ordered_ideogram_dict(element, key_order)
+
+    @staticmethod
+    def _normalize_ideogram_color_palette(palette, max_colors: int):
+        if not isinstance(palette, list):
+            return palette
+
+        normalized = []
+        for color in palette[:max_colors]:
+            if isinstance(color, str):
+                stripped = color.strip()
+                if re.fullmatch(r"#[0-9a-fA-F]{6}", stripped):
+                    normalized.append(stripped.upper())
+                    continue
+            normalized.append(color)
+        return normalized
+
+    @staticmethod
+    def _normalize_ideogram_bbox(bbox):
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            return bbox
+
+        values = []
+        has_unit_scale_hint = False
+        for value in bbox:
+            if isinstance(value, bool):
+                return bbox
+            if isinstance(value, int):
+                number = float(value)
+            elif isinstance(value, float):
+                number = value
+                has_unit_scale_hint = True
+            elif isinstance(value, str):
+                try:
+                    number = float(value.strip())
+                except ValueError:
+                    return bbox
+                has_unit_scale_hint = True
+            else:
+                return bbox
+            if not math.isfinite(number):
+                return bbox
+            values.append(number)
+
+        if has_unit_scale_hint and all(0 <= value <= 1 for value in values):
+            values = [value * 1000 for value in values]
+
+        return [int(round(value)) for value in values]
 
     @staticmethod
     def _ordered_ideogram_dict(source: dict, key_order: tuple[str, ...]) -> OrderedDict:

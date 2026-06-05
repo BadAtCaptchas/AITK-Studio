@@ -375,6 +375,72 @@ class IdeogramJsonCaptionerBehaviorTest(unittest.TestCase):
         self.assertEqual(tuple(element.keys()), ("type", "text", "desc", "color_palette"))
         self.assertEqual(element["text"], "")
 
+    def test_captioner_normalizes_palettes_and_numeric_bboxes(self):
+        captioner = self._json_captioner()
+        raw_caption = {
+            "high_level_description": "A photo collage with two labeled objects.",
+            "style_description": {
+                "aesthetics": "realistic, detailed, commercial",
+                "lighting": "softbox photo lighting",
+                "photo": "50mm product photograph",
+                "medium": "photograph",
+                "color_palette": [
+                    "#ffffff",
+                    "#1a2b3c",
+                    "#445566",
+                    "#778899",
+                    "#aabbcc",
+                    "#ddeeff",
+                    "#010203",
+                    "#040506",
+                    "#070809",
+                    "#0a0b0c",
+                    "#0d0e0f",
+                    "#101112",
+                    "#131415",
+                    "#161718",
+                    "#191a1b",
+                    "#1c1d1e",
+                    "#1f2021",
+                ],
+            },
+            "compositional_deconstruction": {
+                "background": "A bright studio surface.",
+                "elements": [
+                    {
+                        "type": "obj",
+                        "bbox": ["180.2", "260", 760.6, 780.0],
+                        "desc": "A glossy product box.",
+                        "color_palette": [
+                            "#abcdef",
+                            "#123abc",
+                            "#456def",
+                            "#789abc",
+                            "#fedcba",
+                            "#111111",
+                        ],
+                    },
+                    {
+                        "type": "obj",
+                        "bbox": [0.1, 0.2, 0.8, 0.9],
+                        "desc": "A second product box.",
+                    },
+                ],
+            },
+        }
+
+        normalized = captioner.normalize_caption_output("0050.jpg", json.dumps(raw_caption))
+        parsed = json.loads(normalized)
+        first = parsed["compositional_deconstruction"]["elements"][0]
+        second = parsed["compositional_deconstruction"]["elements"][1]
+
+        self.assertEqual(self._caption_warnings(parsed), [])
+        self.assertEqual(len(parsed["style_description"]["color_palette"]), 16)
+        self.assertEqual(parsed["style_description"]["color_palette"][0], "#FFFFFF")
+        self.assertEqual(first["bbox"], [180, 260, 761, 780])
+        self.assertEqual(first["color_palette"], ["#ABCDEF", "#123ABC", "#456DEF", "#789ABC", "#FEDCBA"])
+        self.assertEqual(second["bbox"], [100, 200, 800, 900])
+
     def test_captioner_appends_json_contract_to_custom_json_prompt(self):
         captioner = self._json_captioner()
         captioner.caption_config.caption_prompt = "Focus on the product logo."

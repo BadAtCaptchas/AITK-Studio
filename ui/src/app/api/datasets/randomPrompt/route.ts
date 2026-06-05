@@ -3,7 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { webcrypto } from 'crypto';
 import { getDatasetsRoot } from '@/server/settings';
-import { normalizeRandomPromptCaptionExt, parseRandomPromptCaptionText } from '@/server/randomPromptCaptions';
+import {
+  getRandomPromptCaptionExtCandidates,
+  normalizeRandomPromptCaptionExt,
+  parseRandomPromptCaptionText,
+  parseRandomPromptCaptionTextAuto,
+} from '@/server/randomPromptCaptions';
 import {
   getKeyForRequiredDataset,
   isEncryptedDatasetFolder,
@@ -73,6 +78,16 @@ function captionPathForMedia(mediaPath: string, captionExt: string) {
   return path.join(parsed.dir, `${parsed.name}${captionExt}`);
 }
 
+function findCaptionForMedia(mediaPath: string, captionExt: string) {
+  for (const candidateExt of getRandomPromptCaptionExtCandidates(captionExt)) {
+    const candidatePath = captionPathForMedia(mediaPath, candidateExt);
+    if (fs.existsSync(candidatePath)) {
+      return { path: candidatePath, ext: candidateExt };
+    }
+  }
+  return null;
+}
+
 function considerCandidate(state: RandomPromptState, candidate: RandomPromptCandidate) {
   state.candidateCount += 1;
   if (Math.random() < 1 / state.candidateCount) {
@@ -133,7 +148,7 @@ async function scanEncryptedDatasetFolder(
     let source: RandomPromptCandidate['source'] = 'caption';
 
     if (item.captionObjectPath) {
-      prompt = (await decryptEncryptedCaption(datasetPath, item, keyB64)).trim();
+      prompt = parseRandomPromptCaptionTextAuto(await decryptEncryptedCaption(datasetPath, item, keyB64));
     }
 
     if (!prompt && defaultCaption) {
@@ -177,13 +192,13 @@ function scanDatasetFolder(
     if (!mediaExtensions.includes(path.extname(name).toLowerCase())) continue;
 
     state.scannedMediaCount += 1;
-    const captionPath = captionPathForMedia(itemPath, captionExt);
+    const caption = findCaptionForMedia(itemPath, captionExt);
     let prompt = '';
     let source: RandomPromptCandidate['source'] = 'caption';
-    let selectedCaptionPath: string | undefined = captionPath;
+    let selectedCaptionPath: string | undefined = caption?.path;
 
-    if (fs.existsSync(captionPath)) {
-      prompt = parseRandomPromptCaptionText(fs.readFileSync(captionPath, 'utf-8'), captionExt);
+    if (caption) {
+      prompt = parseRandomPromptCaptionText(fs.readFileSync(caption.path, 'utf-8'), caption.ext);
     }
 
     if (!prompt && defaultCaption) {

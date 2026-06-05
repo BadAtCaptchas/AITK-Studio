@@ -37,7 +37,7 @@ export const defaultIdeogramJsonCaptionPrompt = `Create an Ideogram 4 training c
 Return only valid JSON. Do not wrap it in markdown.
 
 high_level_description should be a concise but detailed one-paragraph description.
-For each important visible element, include type ("obj" or "text"), desc, optional text, optional color_palette, and bbox when you can estimate it.
+For each important visible element, include type ("obj" or "text"), desc, optional color_palette, and bbox when you can estimate it. For text elements, include text with the readable text content when known, or an empty string when unreadable.
 
 Use this exact JSON contract:
 - Top-level key order: high_level_description, style_description, compositional_deconstruction.

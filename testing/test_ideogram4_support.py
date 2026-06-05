@@ -344,6 +344,37 @@ class IdeogramJsonCaptionerBehaviorTest(unittest.TestCase):
             ("type", "bbox", "text", "desc", "color_palette"),
         )
 
+    def test_captioner_adds_empty_text_slot_for_text_elements_without_text(self):
+        captioner = self._json_captioner()
+        raw_caption = {
+            "high_level_description": "A sign with small unreadable labels.",
+            "style_description": {
+                "aesthetics": "graphic, clean, commercial",
+                "lighting": "flat product lighting",
+                "medium": "digital illustration",
+                "art_style": "vector poster",
+                "color_palette": ["#FFFFFF", "#111111"],
+            },
+            "compositional_deconstruction": {
+                "background": "A white background.",
+                "elements": [
+                    {
+                        "type": "text",
+                        "desc": "Small unreadable label text near the corner.",
+                        "color_palette": ["#111111"],
+                    }
+                ],
+            },
+        }
+
+        normalized = captioner.normalize_caption_output("0043.jpg", json.dumps(raw_caption))
+        parsed = json.loads(normalized)
+        element = parsed["compositional_deconstruction"]["elements"][0]
+
+        self.assertEqual(self._caption_warnings(parsed), [])
+        self.assertEqual(tuple(element.keys()), ("type", "text", "desc", "color_palette"))
+        self.assertEqual(element["text"], "")
+
     def test_captioner_appends_json_contract_to_custom_json_prompt(self):
         captioner = self._json_captioner()
         captioner.caption_config.caption_prompt = "Focus on the product logo."

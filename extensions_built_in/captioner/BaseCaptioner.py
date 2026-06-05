@@ -41,7 +41,7 @@ DEFAULT_IDEOGRAM_JSON_PROMPT = """Create an Ideogram 4 training caption for this
 Return only valid JSON. Do not wrap it in markdown.
 
 high_level_description should be a concise but detailed one-paragraph description.
-For each important visible element, include type ("obj" or "text"), desc, optional text, optional color_palette, and bbox when you can estimate it.
+For each important visible element, include type ("obj" or "text"), desc, optional color_palette, and bbox when you can estimate it. For text elements, include text with the readable text content when known, or an empty string when unreadable.
 
 """ + IDEOGRAM_JSON_FORMAT_REQUIREMENTS + """
 
@@ -526,6 +526,9 @@ class BaseCaptioner(BaseExtensionProcess):
             return element
 
         if element.get("type") == "text":
+            element = OrderedDict(element)
+            if "text" not in element:
+                element["text"] = ""
             key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_TEXT
         else:
             key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_OBJ

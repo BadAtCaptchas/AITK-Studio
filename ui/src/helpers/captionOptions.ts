@@ -34,7 +34,23 @@ const defaultExtensions = [...extensionsImage];
 
 export const defaultImageCaptionPrompt = "Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like \"It appears that\" Or \"possibly\". Start out with things like \"A person on the beach\" or \"A black dragon\". No preamble. Just get to the point.";
 export const defaultIdeogramJsonCaptionPrompt = `Create an Ideogram 4 training caption for this image as a JSON object.
-Return only valid JSON. Use high_level_description, style_description, and compositional_deconstruction. Use [ymin, xmin, ymax, xmax] bounding boxes normalized to 0-1000 when useful.
+Return only valid JSON. Do not wrap it in markdown.
+
+high_level_description should be a concise but detailed one-paragraph description.
+For each important visible element, include type ("obj" or "text"), desc, optional text, optional color_palette, and bbox when you can estimate it.
+
+Use this exact JSON contract:
+- Top-level key order: high_level_description, style_description, compositional_deconstruction.
+- For photo captions, style_description key order must be: aesthetics, lighting, photo, medium, color_palette.
+- For non-photo captions, style_description key order must be: aesthetics, lighting, medium, art_style, color_palette.
+- Include exactly one of style_description.photo or style_description.art_style.
+- compositional_deconstruction key order must be: background, elements.
+- Object element key order must be: type, bbox, desc, color_palette.
+- Text element key order must be: type, bbox, text, desc, color_palette.
+- Omit bbox or color_palette only when unavailable; if present, keep them in the listed position.
+- Bounding boxes must be [ymin, xmin, ymax, xmax] normalized to 0-1000.
+- Colors must be uppercase #RRGGBB hex strings.
+
 Preserve and refine this existing caption when present:
 {existing_caption}`;
 

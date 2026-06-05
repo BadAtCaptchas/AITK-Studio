@@ -11,6 +11,7 @@ import { CaptionJobConfig } from '@/types';
 import { handleCaptionerTypeChange } from '@/helpers/captionJobConfig';
 import {
   captionerTypes,
+  defaultImageCaptionPrompt,
   defaultIdeogramJsonCaptionPrompt,
   defaultQtype,
   groupedCaptionerTypes,
@@ -150,7 +151,8 @@ const CaptionSimpleJob: React.FC<Props> = ({
   const setOutputFormat = (value: string) => {
     setJobConfig(value, 'config.process[0].caption.output_format');
     if (value === 'ideogram_json') {
-      if (!captionConfig.caption_prompt || captionConfig.caption_prompt === '') {
+      const currentPrompt = captionConfig.caption_prompt?.trim() || '';
+      if (!currentPrompt || currentPrompt === defaultImageCaptionPrompt || currentPrompt === 'Describe this image in detail.') {
         setJobConfig(defaultIdeogramJsonCaptionPrompt, 'config.process[0].caption.caption_prompt');
       }
       if (!captionConfig.caption_extension) {

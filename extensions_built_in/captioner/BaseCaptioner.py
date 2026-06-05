@@ -25,16 +25,85 @@ AITK_Status = Literal["running", "stopped", "error", "completed"]
 
 IDEOGRAM_JSON_OUTPUT_FORMAT = "ideogram_json"
 
+IDEOGRAM_JSON_FORMAT_REQUIREMENTS = """Use this exact JSON contract:
+- Top-level key order: high_level_description, style_description, compositional_deconstruction.
+- For photo captions, style_description key order must be: aesthetics, lighting, photo, medium, color_palette.
+- For non-photo captions, style_description key order must be: aesthetics, lighting, medium, art_style, color_palette.
+- Include exactly one of style_description.photo or style_description.art_style.
+- compositional_deconstruction key order must be: background, elements.
+- Object element key order must be: type, bbox, desc, color_palette.
+- Text element key order must be: type, bbox, text, desc, color_palette.
+- Omit bbox or color_palette only when unavailable; if present, keep them in the listed position.
+- Bounding boxes must be [ymin, xmin, ymax, xmax] normalized to 0-1000.
+- Colors must be uppercase #RRGGBB hex strings."""
+
 DEFAULT_IDEOGRAM_JSON_PROMPT = """Create an Ideogram 4 training caption for this image as a JSON object.
 Return only valid JSON. Do not wrap it in markdown.
 
-Use this exact top-level shape:
-- high_level_description: a concise but detailed one-paragraph description.
-- style_description: aesthetics, lighting, medium, exactly one of photo or art_style, and color_palette.
-- compositional_deconstruction: background and elements.
+high_level_description should be a concise but detailed one-paragraph description.
+For each important visible element, include type ("obj" or "text"), desc, optional text, optional color_palette, and bbox when you can estimate it.
 
-For each important visible element, include type ("obj" or "text"), desc, optional text, optional color_palette, and bbox when you can estimate it. Bounding boxes must be [ymin, xmin, ymax, xmax] normalized to 0-1000.
+""" + IDEOGRAM_JSON_FORMAT_REQUIREMENTS + """
+
 Preserve important details from any existing caption, but correct it when the image contradicts it."""
+
+DEFAULT_TEXT_CAPTION_PROMPTS = {
+    "Describe this image in detail.",
+    'Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like "It appears that" Or "possibly". Start out with things like "A person on the beach" or "A black dragon". No preamble. Just get to the point.',
+}
+
+IDEOGRAM_JSON_CONTRACT_MARKERS = (
+    "photo, medium, color_palette",
+    "medium, art_style, color_palette",
+    "type, bbox, desc, color_palette",
+)
+
+IDEOGRAM_JSON_TOP_LEVEL_KEY_ORDER = (
+    "high_level_description",
+    "style_description",
+    "compositional_deconstruction",
+)
+IDEOGRAM_JSON_STYLE_KEY_ORDER_PHOTO = (
+    "aesthetics",
+    "lighting",
+    "photo",
+    "medium",
+    "color_palette",
+)
+IDEOGRAM_JSON_STYLE_KEY_ORDER_NON_PHOTO = (
+    "aesthetics",
+    "lighting",
+    "medium",
+    "art_style",
+    "color_palette",
+)
+IDEOGRAM_JSON_COMPOSITION_KEY_ORDER = ("background", "elements")
+IDEOGRAM_JSON_ELEMENT_KEY_ORDER_OBJ = ("type", "bbox", "desc", "color_palette")
+IDEOGRAM_JSON_ELEMENT_KEY_ORDER_TEXT = (
+    "type",
+    "bbox",
+    "text",
+    "desc",
+    "color_palette",
+)
+IDEOGRAM_JSON_PHOTO_CUES = (
+    "photo",
+    "photograph",
+    "photographic",
+    "camera",
+    "lens",
+    "depth of field",
+    "bokeh",
+    "aperture",
+    "shutter",
+    "exposure",
+    "focal length",
+    "35mm",
+    "50mm",
+    "85mm",
+    "dslr",
+    "mirrorless",
+)
 
 IDEOGRAM_JSON_SCHEMA = {
     "type": "object",
@@ -309,8 +378,10 @@ class BaseCaptioner(BaseExtensionProcess):
             return self.caption_config.caption_prompt.strip()
 
         prompt = (self.caption_config.caption_prompt or "").strip()
-        if not prompt or prompt == "Describe this image in detail.":
+        if not prompt or prompt in DEFAULT_TEXT_CAPTION_PROMPTS:
             prompt = DEFAULT_IDEOGRAM_JSON_PROMPT
+        elif not self._caption_prompt_has_ideogram_json_contract(prompt):
+            prompt = f"{prompt}\n\n{IDEOGRAM_JSON_FORMAT_REQUIREMENTS}"
 
         source_caption = self.get_source_caption_for_file(file_path)
         if source_caption:
@@ -328,6 +399,7 @@ class BaseCaptioner(BaseExtensionProcess):
             return str(caption).strip()
 
         parsed = self._parse_json_caption(str(caption))
+        parsed = self._normalize_ideogram_json_caption(parsed)
         self._warn_for_ideogram_json_issues(parsed, file_path)
         return json.dumps(parsed, ensure_ascii=False, indent=2)
 
@@ -355,6 +427,120 @@ class BaseCaptioner(BaseExtensionProcess):
         if not isinstance(parsed, dict):
             raise ValueError("Captioner returned JSON, but the root value is not an object")
         return parsed
+
+    @staticmethod
+    def _caption_prompt_has_ideogram_json_contract(prompt: str) -> bool:
+        normalized = " ".join(prompt.lower().split())
+        return all(marker in normalized for marker in IDEOGRAM_JSON_CONTRACT_MARKERS)
+
+    def _normalize_ideogram_json_caption(self, caption: dict) -> dict:
+        normalized = OrderedDict()
+        for key in IDEOGRAM_JSON_TOP_LEVEL_KEY_ORDER:
+            if key not in caption:
+                continue
+            value = caption[key]
+            if key == "style_description":
+                value = self._normalize_ideogram_style_description(value)
+            elif key == "compositional_deconstruction":
+                value = self._normalize_ideogram_compositional_deconstruction(value)
+            normalized[key] = value
+
+        for key, value in caption.items():
+            if key not in normalized:
+                normalized[key] = value
+        return normalized
+
+    def _normalize_ideogram_style_description(self, style_description):
+        if not isinstance(style_description, dict):
+            return style_description
+
+        normalized = OrderedDict(style_description)
+        has_photo = "photo" in normalized
+        has_art_style = "art_style" in normalized
+
+        if not has_photo and not has_art_style:
+            style_key = (
+                "photo"
+                if self._style_description_has_photo_cues(normalized)
+                else "art_style"
+            )
+            normalized[style_key] = self._infer_style_description_value(
+                normalized, style_key
+            )
+        elif has_photo and has_art_style:
+            style_key = (
+                "photo"
+                if self._style_description_has_photo_cues(normalized)
+                else "art_style"
+            )
+            drop_key = "art_style" if style_key == "photo" else "photo"
+            normalized.pop(drop_key, None)
+
+        if "photo" in normalized and "art_style" not in normalized:
+            key_order = IDEOGRAM_JSON_STYLE_KEY_ORDER_PHOTO
+        elif "art_style" in normalized and "photo" not in normalized:
+            key_order = IDEOGRAM_JSON_STYLE_KEY_ORDER_NON_PHOTO
+        else:
+            return normalized
+
+        return self._ordered_ideogram_dict(normalized, key_order)
+
+    @staticmethod
+    def _style_description_has_photo_cues(style_description: dict) -> bool:
+        text_parts = []
+        for key in ("medium", "photo", "art_style", "aesthetics", "lighting"):
+            value = style_description.get(key)
+            if isinstance(value, str):
+                text_parts.append(value.lower())
+        text = " ".join(text_parts)
+        return any(
+            re.search(rf"(?<![a-z0-9]){re.escape(cue)}(?![a-z0-9])", text)
+            for cue in IDEOGRAM_JSON_PHOTO_CUES
+        )
+
+    @staticmethod
+    def _infer_style_description_value(style_description: dict, style_key: str) -> str:
+        for key in (style_key, "medium", "aesthetics"):
+            value = style_description.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return "photograph" if style_key == "photo" else "artwork"
+
+    def _normalize_ideogram_compositional_deconstruction(self, composition):
+        if not isinstance(composition, dict):
+            return composition
+
+        normalized = OrderedDict(composition)
+        elements = normalized.get("elements")
+        if isinstance(elements, list):
+            normalized["elements"] = [
+                self._normalize_ideogram_element(element) for element in elements
+            ]
+
+        return self._ordered_ideogram_dict(
+            normalized, IDEOGRAM_JSON_COMPOSITION_KEY_ORDER
+        )
+
+    def _normalize_ideogram_element(self, element):
+        if not isinstance(element, dict):
+            return element
+
+        if element.get("type") == "text":
+            key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_TEXT
+        else:
+            key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_OBJ
+        return self._ordered_ideogram_dict(element, key_order)
+
+    @staticmethod
+    def _ordered_ideogram_dict(source: dict, key_order: tuple[str, ...]) -> OrderedDict:
+        ordered = OrderedDict()
+        for key in key_order:
+            if key in source:
+                ordered[key] = source[key]
+        for key, value in source.items():
+            if key not in ordered:
+                ordered[key] = value
+        return ordered
 
     def _warn_for_ideogram_json_issues(self, parsed: dict, file_path: str):
         try:

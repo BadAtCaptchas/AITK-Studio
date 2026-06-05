@@ -1,4 +1,6 @@
+import importlib.util
 import json
+import sys
 import tempfile
 import types
 import unittest
@@ -22,6 +24,8 @@ MEMORY_PROFILE_PATH = PROJECT_ROOT / "ui" / "src" / "utils" / "memoryProfiles.ts
 AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
 ADVISOR_PATH = PROJECT_ROOT / "ui" / "src" / "server" / "trainingAdvisor.ts"
 SDTRAINER_PATH = PROJECT_ROOT / "extensions_built_in" / "sd_trainer" / "SDTrainer.py"
+BASE_CAPTIONER_PATH = PROJECT_ROOT / "extensions_built_in" / "captioner" / "BaseCaptioner.py"
+CAPTION_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "helpers" / "captionOptions.ts"
 
 
 try:
@@ -144,6 +148,28 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("const ideogram4Archs = ['ideogram4', 'ideogram4:fp8']", profiles)
         self.assertIn("ideogram", advisor)
 
+    def test_caption_json_prompts_document_canonical_key_order(self):
+        backend_prompt_source = BASE_CAPTIONER_PATH.read_text(encoding="utf-8")
+        ui_prompt_source = CAPTION_OPTIONS_PATH.read_text(encoding="utf-8")
+
+        for source in (backend_prompt_source, ui_prompt_source):
+            self.assertIn(
+                "style_description key order must be: aesthetics, lighting, photo, medium, color_palette",
+                source,
+            )
+            self.assertIn(
+                "style_description key order must be: aesthetics, lighting, medium, art_style, color_palette",
+                source,
+            )
+            self.assertIn(
+                "Object element key order must be: type, bbox, desc, color_palette",
+                source,
+            )
+            self.assertIn(
+                "Text element key order must be: type, bbox, text, desc, color_palette",
+                source,
+            )
+
     def test_example_configs_use_json_caption_defaults(self):
         examples = [
             ("train_lora_ideogram4_48gb.yaml", "ideogram-ai/ideogram-4-nf4", "nf4"),
@@ -179,6 +205,156 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
             full_config["config"]["process"][0]["model"]["model_kwargs"][
                 "dequantize_fp8_transformer"
             ]
+        )
+
+
+class IdeogramJsonCaptionerBehaviorTest(unittest.TestCase):
+    def _base_captioner_import_stubs(self) -> dict[str, types.ModuleType]:
+        torchaudio_module = types.ModuleType("torchaudio")
+        torchaudio_module.load = mock.Mock()
+
+        jobs_module = types.ModuleType("jobs")
+        process_module = types.ModuleType("jobs.process")
+        process_module.BaseExtensionProcess = type("BaseExtensionProcess", (), {})
+        jobs_module.process = process_module
+
+        exceptions_module = types.ModuleType("toolkit.exceptions")
+        exceptions_module.JobStopRequested = type("JobStopRequested", (Exception,), {})
+
+        encrypted_module = types.ModuleType("toolkit.encrypted_dataset")
+        encrypted_module.EncryptedDatasetReader = object
+        encrypted_module.is_encrypted_dataset_path = lambda *_args, **_kwargs: False
+
+        train_tools_module = types.ModuleType("toolkit.train_tools")
+        train_tools_module.get_torch_dtype = lambda *_args, **_kwargs: None
+
+        ui_database_module = types.ModuleType("toolkit.ui_database")
+        ui_database_module.UIJobStore = type(
+            "UIJobStore",
+            (),
+            {"__init__": lambda self, *_args, **_kwargs: None, "available": False},
+        )
+
+        return {
+            "torchaudio": torchaudio_module,
+            "jobs": jobs_module,
+            "jobs.process": process_module,
+            "toolkit.exceptions": exceptions_module,
+            "toolkit.encrypted_dataset": encrypted_module,
+            "toolkit.train_tools": train_tools_module,
+            "toolkit.ui_database": ui_database_module,
+        }
+
+    def _json_captioner(self):
+        try:
+            from extensions_built_in.captioner.BaseCaptioner import BaseCaptioner
+        except ModuleNotFoundError as exc:
+            if exc.name not in {"torchaudio", "diffusers"}:
+                raise
+            sys.modules.pop("extensions_built_in.captioner.BaseCaptioner", None)
+            with mock.patch.dict("sys.modules", self._base_captioner_import_stubs()):
+                from extensions_built_in.captioner.BaseCaptioner import BaseCaptioner
+
+        captioner = object.__new__(BaseCaptioner)
+        captioner.caption_config = types.SimpleNamespace(output_format="ideogram_json")
+        captioner.encrypted_reader = None
+        return captioner
+
+    def _caption_warnings(self, caption: dict) -> list[str]:
+        verifier_path = IDEOGRAM_ROOT / "src" / "caption_verifier.py"
+        spec = importlib.util.spec_from_file_location(
+            "ideogram_caption_verifier_test", verifier_path
+        )
+        assert spec is not None and spec.loader is not None
+        verifier_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier_module)
+
+        return verifier_module.CaptionVerifier().verify(caption)
+
+    def test_captioner_normalizes_reported_openrouter_json_shape(self):
+        captioner = self._json_captioner()
+        raw_caption = {
+            "high_level_description": "A realistic photo of a red chair in a sunlit room.",
+            "style_description": {
+                "aesthetics": "clean, realistic, detailed",
+                "lighting": "soft daylight from a window",
+                "medium": "photograph",
+                "color_palette": ["#F1E6D2", "#8A1F16"],
+            },
+            "compositional_deconstruction": {
+                "background": "A neutral interior wall and wood floor.",
+                "elements": [
+                    {
+                        "type": "obj",
+                        "desc": "A red chair centered in the frame.",
+                        "bbox": [180, 260, 760, 780],
+                        "color_palette": ["#8A1F16", "#3A241B"],
+                    }
+                ],
+            },
+        }
+
+        normalized = captioner.normalize_caption_output("0001.jpg", json.dumps(raw_caption))
+        parsed = json.loads(normalized)
+
+        self.assertEqual(self._caption_warnings(parsed), [])
+        self.assertEqual(
+            tuple(parsed["style_description"].keys()),
+            ("aesthetics", "lighting", "photo", "medium", "color_palette"),
+        )
+        self.assertEqual(
+            tuple(parsed["compositional_deconstruction"]["elements"][0].keys()),
+            ("type", "bbox", "desc", "color_palette"),
+        )
+
+    def test_captioner_infers_art_style_and_orders_text_elements(self):
+        captioner = self._json_captioner()
+        raw_caption = {
+            "high_level_description": "A poster-style illustration with bold text.",
+            "style_description": {
+                "aesthetics": "graphic, flat, colorful",
+                "lighting": "even poster lighting",
+                "medium": "digital illustration",
+                "color_palette": ["#102A43", "#F0B429"],
+            },
+            "compositional_deconstruction": {
+                "background": "A flat navy background.",
+                "elements": [
+                    {
+                        "type": "text",
+                        "desc": "Large yellow headline text.",
+                        "color_palette": ["#F0B429"],
+                        "text": "SALE",
+                        "bbox": [120, 220, 340, 780],
+                    }
+                ],
+            },
+        }
+
+        normalized = captioner.normalize_caption_output("0002.jpg", json.dumps(raw_caption))
+        parsed = json.loads(normalized)
+
+        self.assertEqual(self._caption_warnings(parsed), [])
+        self.assertEqual(
+            tuple(parsed["style_description"].keys()),
+            ("aesthetics", "lighting", "medium", "art_style", "color_palette"),
+        )
+        self.assertEqual(
+            tuple(parsed["compositional_deconstruction"]["elements"][0].keys()),
+            ("type", "bbox", "text", "desc", "color_palette"),
+        )
+
+    def test_captioner_appends_json_contract_to_custom_json_prompt(self):
+        captioner = self._json_captioner()
+        captioner.caption_config.caption_prompt = "Focus on the product logo."
+        captioner.caption_config.source_caption_extension = "txt"
+
+        prompt = captioner.build_caption_prompt("missing.jpg")
+
+        self.assertIn("Focus on the product logo.", prompt)
+        self.assertIn(
+            "Object element key order must be: type, bbox, desc, color_palette",
+            prompt,
         )
 
 

@@ -4,6 +4,7 @@ import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
+import { resolveCaptionWritePath } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: Request) {
@@ -40,10 +41,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Image does not exist' }, { status: 404 });
     }
 
-    // check for caption
-    const captionPath = resolvedImagePath.replace(/\.[^/.]+$/, '') + '.txt';
+    const captionText = typeof caption === 'string' ? caption : String(caption ?? '');
+    const captionPath = resolveCaptionWritePath(resolvedImagePath, captionText);
     // save caption to file
-    fs.writeFileSync(captionPath, caption);
+    fs.writeFileSync(captionPath, captionText);
 
     return NextResponse.json({ success: true });
   } catch (error) {

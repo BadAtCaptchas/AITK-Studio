@@ -1,10 +1,10 @@
 /* eslint-disable */
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
+import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: NextRequest) {
@@ -45,9 +45,8 @@ export async function POST(request: NextRequest) {
     if (!isAllowed) continue;
     if (findEncryptedDatasetRoot(resolvedFilePath, allowedRoot)) continue;
 
-    const captionPath = resolvedFilePath.replace(/\.[^/.]+$/, '') + '.txt';
     try {
-      captions[imgPath] = fs.existsSync(captionPath) ? fs.readFileSync(captionPath, 'utf-8') : '';
+      captions[imgPath] = readCaptionSidecar(resolvedFilePath);
     } catch {
       captions[imgPath] = '';
     }

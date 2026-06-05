@@ -1,10 +1,10 @@
 /* eslint-disable */
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
+import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: NextRequest) {
@@ -59,20 +59,7 @@ export async function POST(request: NextRequest) {
       return new NextResponse('Encrypted captions are not served through this route', { status: 403 });
     }
 
-    // caption name is the filepath without extension but with .txt
-    const captionPath = resolvedFilePath.replace(/\.[^/.]+$/, '') + '.txt';
-
-    // Check if file exists
-    if (!fs.existsSync(captionPath)) {
-      // send back blank string if caption file does not exist
-      return new NextResponse('');
-    }
-
-    // Read caption file
-    const caption = fs.readFileSync(captionPath, 'utf-8');
-
-    // Return caption
-    return new NextResponse(caption);
+    return new NextResponse(readCaptionSidecar(resolvedFilePath));
   } catch (error) {
     console.error('Error getting caption:', error);
     return new NextResponse('Error getting caption', { status: 500 });

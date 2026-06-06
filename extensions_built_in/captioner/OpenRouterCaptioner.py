@@ -11,14 +11,17 @@ from typing import Optional
 from .BaseCaptioner import BaseCaptioner, CaptionConfig, IDEOGRAM_JSON_SCHEMA
 
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_API_KEY_ENV_NAMES = ("OPENROUTER_API_KEY", "AITK_OPENROUTER_API_KEY")
+
+
 class OpenRouterCaptionConfig(CaptionConfig):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.system_prompt = kwargs.get("system_prompt", "")
-        self.api_key_env = kwargs.get("api_key_env", "OPENROUTER_API_KEY")
-        self.base_url = kwargs.get(
-            "base_url", "https://openrouter.ai/api/v1"
-        ).rstrip("/")
+        # Never trust job configuration for secret source selection or API destination.
+        self.api_key_env = OPENROUTER_API_KEY_ENV_NAMES[0]
+        self.base_url = OPENROUTER_BASE_URL
         self.site_url = kwargs.get("site_url", "")
         self.app_title = kwargs.get("app_title", "AI Toolkit Captioner")
         self.temperature: Optional[float] = kwargs.get("temperature", 0.2)
@@ -38,12 +41,7 @@ class OpenRouterCaptioner(BaseCaptioner):
                 "OpenRouter captioning is not supported for encrypted datasets. "
                 "Caption an unencrypted copy, then encrypt the finished dataset if needed."
             )
-        env_names = [
-            self.caption_config.api_key_env,
-            "OPENROUTER_API_KEY",
-            "AITK_OPENROUTER_API_KEY",
-        ]
-        for env_name in env_names:
+        for env_name in OPENROUTER_API_KEY_ENV_NAMES:
             value = os.environ.get(env_name, "").strip()
             if value:
                 self.api_key = value

@@ -116,6 +116,7 @@ export const defaultJobConfig: JobConfig = {
           qtype_te: 'qfloat8',
           arch: 'flex1',
           low_vram: false,
+          base_lora_strength: 1.0,
           model_kwargs: {},
         },
         sample: defaultSampleConfig,
@@ -156,6 +157,8 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
       false) as boolean;
     delete jobConfig.config.process[0].model.auto_memory;
   }
+
+  jobConfig.config.process[0].model.base_lora_strength ??= 1.0;
 
   if (jobConfig.config.process[0].model.layer_offloading) {
     const memoryProfile = getLayerOffloadingMemoryProfile(jobConfig.config.process[0].model.arch);

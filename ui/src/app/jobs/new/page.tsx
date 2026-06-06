@@ -316,6 +316,23 @@ export default function TrainingForm() {
     if (!modelConfig?.name_or_path?.trim()) {
       messages.push({ level: 'error', message: 'Select or enter a base model path.' });
     }
+    const baseLoraPath = modelConfig?.base_lora_path?.trim();
+    if (baseLoraPath) {
+      if (modelConfig?.inference_lora_path?.trim()) {
+        messages.push({
+          level: 'error',
+          message: 'Base LoRA Path cannot be used with sample-time Inference LoRA Path.',
+        });
+      }
+      const baseLoraName = baseLoraPath.split(/[\\/]/).pop() || baseLoraPath;
+      if (/\.[^./\\]+$/.test(baseLoraName) && !baseLoraName.toLowerCase().endsWith('.safetensors')) {
+        messages.push({ level: 'error', message: 'Base LoRA Path must be a .safetensors adapter.' });
+      }
+      const baseLoraStrength = Number(modelConfig?.base_lora_strength ?? 1.0);
+      if (!Number.isFinite(baseLoraStrength)) {
+        messages.push({ level: 'error', message: 'Base LoRA Strength must be a finite number.' });
+      }
+    }
     if (!datasetsConfig.length) {
       messages.push({ level: 'error', message: 'Add at least one dataset.' });
     }

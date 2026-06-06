@@ -684,6 +684,13 @@ class ModelConfig:
         self._original_refiner_name_or_path = self.refiner_name_or_path
         self.refiner_start_at = kwargs.get('refiner_start_at', 0.5)
         self.lora_path = kwargs.get('lora_path', None)
+        self.base_lora_path = kwargs.get('base_lora_path', None)
+        if self.base_lora_path == '':
+            self.base_lora_path = None
+        base_lora_strength = kwargs.get('base_lora_strength', 1.0)
+        if base_lora_strength is None:
+            base_lora_strength = 1.0
+        self.base_lora_strength = float(base_lora_strength)
         # mainly for decompression loras for distilled models
         self.assistant_lora_path = kwargs.get('assistant_lora_path', None)
         self.inference_lora_path = kwargs.get('inference_lora_path', None)
@@ -1467,6 +1474,16 @@ def validate_configs(
         if model_config.assistant_lora_path is not None:
             raise ValueError("Cannot use accuracy recovery adapter and assistant lora at the same time. "
                              "Please set one of them to None.")
+
+    if model_config.base_lora_path is not None:
+        if model_config.inference_lora_path is not None:
+            raise ValueError(
+                "Cannot use model.base_lora_path and model.inference_lora_path together. "
+                "model.base_lora_path is fused into the frozen training base; "
+                "model.inference_lora_path is sample-time only."
+            )
+        if not math.isfinite(model_config.base_lora_strength):
+            raise ValueError("model.base_lora_strength must be a finite number.")
 
     if (
         network_config is None

@@ -169,6 +169,8 @@ class BaseModel:
         self.sample_prompts_cache = None
         
         self.accuracy_recovery_adapter: Union[None, 'LoRASpecialNetwork'] = None
+        self._base_lora_fused = False
+        self._fused_base_lora_networks = []
         self.is_multistage = False
         # a list of multistage boundaries starting with train step 1000 to first idx
         self.multistage_boundaries: List[float] = [0.0]

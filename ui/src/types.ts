@@ -481,6 +481,8 @@ export interface ModelConfig {
   refiner_name_or_path?: string;
   te_name_or_path?: string;
   lora_path?: string;
+  base_lora_path?: string;
+  base_lora_strength?: number;
   inference_lora_path?: string;
   low_vram: boolean;
   model_kwargs: { [key: string]: any };

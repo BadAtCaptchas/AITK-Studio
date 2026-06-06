@@ -1,11 +1,10 @@
 import os
 from typing import List, Optional
 
-import huggingface_hub
 import torch
 import yaml
-from toolkit.config_modules import GenerateImageConfig, ModelConfig, NetworkConfig
-from toolkit.lora_special import LoRASpecialNetwork
+from toolkit.base_lora import fuse_base_lora_into_model, load_lora_network_for_model
+from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.models.base_model import BaseModel
 from toolkit.basic import flush
 from toolkit.prompt_utils import PromptEmbeds
@@ -16,7 +15,6 @@ from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
 from toolkit.memory_management import attach_layer_offloading
-from safetensors.torch import load_file
 from ..flux2.sega import normalize_sega_config
 from .sega import (
     apply_zimage_sega_rope_scale,
@@ -73,80 +71,27 @@ class ZImageModel(BaseModel):
 
     def load_training_adapter(self, transformer: ZImageTransformer2DModel):
         self.print_and_status_update("Loading assistant LoRA")
-        lora_path = self.model_config.assistant_lora_path
-        if not os.path.exists(lora_path):
-            # assume it is a hub path
-            lora_splits = lora_path.split("/")
-            if len(lora_splits) != 3:
-                raise ValueError(
-                    f"Assistant LoRA path {lora_path} is not a valid local path or hub path."
-                )
-            repo_id = "/".join(lora_splits[:2])
-            filename = lora_splits[2]
-            try:
-                lora_path = huggingface_hub.hf_hub_download(
-                    repo_id=repo_id,
-                    filename=filename,
-                )
-                # upgrade path to
-                self.model_config.assistant_lora_path = lora_path
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to download assistant LoRA from {lora_path}: {e}"
-                )
-        # load the adapter and merge it in. We will inference with a -1.0 multiplier so the adapter effects only work during training.
-        lora_state_dict = load_file(lora_path)
-        dim = int(
-            lora_state_dict[
-                "diffusion_model.layers.0.attention.to_k.lora_A.weight"
-            ].shape[0]
-        )
-
-        new_sd = {}
-        for key, value in lora_state_dict.items():
-            new_key = key.replace("diffusion_model.", "transformer.")
-            new_sd[new_key] = value
-        lora_state_dict = new_sd
-
-        network_config = {
-            "type": "lora",
-            "linear": dim,
-            "linear_alpha": dim,
-            "transformer_only": True,
-        }
-
-        network_config = NetworkConfig(**network_config)
-        LoRASpecialNetwork.LORA_PREFIX_UNET = "lora_transformer"
-        network = LoRASpecialNetwork(
-            text_encoder=None,
-            unet=transformer,
-            lora_dim=network_config.linear,
-            multiplier=1.0,
-            alpha=network_config.linear_alpha,
-            train_unet=True,
-            train_text_encoder=False,
-            network_config=network_config,
-            network_type=network_config.type,
-            transformer_only=network_config.transformer_only,
-            is_transformer=True,
-            target_lin_modules=self.target_lora_modules,
+        loaded = load_lora_network_for_model(
+            base_model=self,
+            model_to_train=transformer,
+            path=self.model_config.assistant_lora_path,
+            label="Assistant LoRA",
             is_assistant_adapter=True,
             is_ara=True,
-            base_model=self,
         )
-        network.apply_to(None, transformer, apply_text_encoder=False, apply_unet=True)
+        self.model_config.assistant_lora_path = loaded.path
+        network = loaded.network
         self.print_and_status_update("Merging in assistant LoRA")
-        network.force_to(self.device_torch, dtype=self.torch_dtype)
-        network._update_torch_multiplier()
-        network.load_weights(lora_state_dict)
 
         network.merge_in(merge_weight=1.0)
+        if not network.is_merged_in:
+            raise ValueError("Assistant LoRA could not be merged into the loaded Z-Image model.")
 
         # mark it as not merged so inference ignores it.
         network.is_merged_in = False
 
         # add the assistant so sampler will activate it while sampling
-        self.assistant_lora: LoRASpecialNetwork = network
+        self.assistant_lora = network
 
         # deactivate lora during training
         self.assistant_lora.multiplier = -1.0
@@ -191,6 +136,15 @@ class ZImageModel(BaseModel):
             )
 
         # load assistant lora if specified
+        if self.model_config.base_lora_path is not None:
+            self.print_and_status_update("Fusing Base LoRA")
+            result = fuse_base_lora_into_model(self, transformer)
+            if result is not None:
+                self.print_and_status_update(
+                    f"Fused Base LoRA into training base: {result.path} "
+                    f"(strength={result.strength}, modules={result.num_modules})"
+                )
+
         if self.model_config.assistant_lora_path is not None:
             self.load_training_adapter(transformer)
             # set qtype to be float8 if it is qfloat8

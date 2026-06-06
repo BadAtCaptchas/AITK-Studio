@@ -24,6 +24,8 @@ from huggingface_hub import HfApi, get_token, interpreter_login
 from toolkit.memory_management import MemoryManager
 
 from toolkit.basic import value_map
+from toolkit.base_lora import fuse_base_lora_into_model
+from toolkit.base_lora_metadata import add_base_lora_metadata
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.data_loader import get_dataloader_from_datasets, trigger_dataloader_setup_epoch
@@ -492,6 +494,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             "training_info": self.get_training_info()
         })
         o_dict['ss_base_model_version'] = self.sd.get_base_model_version()
+        add_base_lora_metadata(o_dict, self.model_config)
 
         # o_dict = add_base_model_info_to_meta(
         #     o_dict,
@@ -1937,6 +1940,22 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.hook_after_sd_init_before_load()
         # run base sd process run
         self.sd.load_model()
+        if (
+            getattr(self.sd.model_config, "base_lora_path", None) is not None
+            and not getattr(self.sd, "_base_lora_fused", False)
+        ):
+            if getattr(self.sd.model_config, "quantize", False) or getattr(self.sd.model_config, "layer_offloading", False):
+                raise ValueError(
+                    "model.base_lora_path must be merged before quantization or layer offloading. "
+                    "This model loader did not pre-fuse the Base LoRA; disable quantize/layer_offloading "
+                    "or use a loader with pre-quantization Base LoRA support."
+                )
+            result = fuse_base_lora_into_model(self.sd)
+            if result is not None:
+                print_acc(
+                    f"Fused Base LoRA into training base: {result.path} "
+                    f"(strength={result.strength}, modules={result.num_modules})"
+                )
         warn_fp8_training_without_dequantize = getattr(
             self.sd, "warn_if_fp8_training_without_dequantize", None
         )

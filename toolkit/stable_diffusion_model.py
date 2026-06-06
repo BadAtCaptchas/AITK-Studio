@@ -22,6 +22,7 @@ from tqdm import tqdm
 from torchvision.transforms import Resize, transforms
 
 from toolkit.assistant_lora import load_assistant_lora_from_path
+from toolkit.base_lora import resolve_lora_path
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.dequantize import patch_dequantization_on_save
@@ -208,6 +209,8 @@ class StableDiffusion:
         self.is_transformer = False
         
         self.sample_prompts_cache = None
+        self._base_lora_fused = False
+        self._fused_base_lora_networks = []
         
         self.is_multistage = False
         # a list of multistage boundaries starting with train step 1000 to first idx
@@ -288,6 +291,70 @@ class StableDiffusion:
         if self.is_flux or self.is_v3:
             divisibility = divisibility * 2
         return divisibility * 2 # todo remove this
+
+    def _fuse_loaded_lora(self, pipe, strength: float):
+        try:
+            pipe.fuse_lora(lora_scale=float(strength))
+        except TypeError as e:
+            if float(strength) != 1.0:
+                raise ValueError(
+                    "model.base_lora_strength requires a diffusers version whose fuse_lora supports lora_scale."
+                ) from e
+            pipe.fuse_lora()
+
+    def _fuse_pipeline_lora(self, pipe, lora_path: str, adapter_name: str, strength: float, label: str) -> str:
+        resolved_path = resolve_lora_path(lora_path, label=label)
+        pipe.load_lora_weights(resolved_path, adapter_name=adapter_name, use_safetensors=True)
+        self._fuse_loaded_lora(pipe, strength)
+        pipe.unload_lora_weights()
+        return resolved_path
+
+    def _fuse_flux_lora(self, pipe, transformer, lora_path: str, adapter_name: str, strength: float, dtype, label: str) -> str:
+        resolved_path = resolve_lora_path(lora_path, label=label)
+        if self.low_vram:
+            # We cannot fuse the loras all at once without OOMing in low-VRAM mode.
+            lora_state_dict = load_file(resolved_path)
+            single_transformer_lora = {}
+            single_block_key = "transformer.single_transformer_blocks."
+            double_transformer_lora = {}
+            double_block_key = "transformer.transformer_blocks."
+            for key, value in lora_state_dict.items():
+                if single_block_key in key:
+                    single_transformer_lora[key] = value
+                elif double_block_key in key:
+                    double_transformer_lora[key] = value
+                else:
+                    raise ValueError(f"Unknown lora key: {key}. Cannot load this lora in low vram mode")
+
+            transformer.transformer_blocks = transformer.transformer_blocks.to(
+                self.quantize_device, dtype=dtype
+            )
+            pipe.load_lora_weights(double_transformer_lora, adapter_name=f"{adapter_name}_double")
+            self._fuse_loaded_lora(pipe, strength)
+            pipe.unload_lora_weights()
+            transformer.transformer_blocks = transformer.transformer_blocks.to(
+                'cpu', dtype=dtype
+            )
+
+            transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
+                self.quantize_device, dtype=dtype
+            )
+            pipe.load_lora_weights(single_transformer_lora, adapter_name=f"{adapter_name}_single")
+            self._fuse_loaded_lora(pipe, strength)
+            pipe.unload_lora_weights()
+            transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
+                'cpu', dtype=dtype
+            )
+
+            del single_transformer_lora
+            del double_transformer_lora
+            del lora_state_dict
+            flush()
+        else:
+            pipe.load_lora_weights(resolved_path, adapter_name=adapter_name, use_safetensors=True)
+            self._fuse_loaded_lora(pipe, strength)
+            pipe.unload_lora_weights()
+        return resolved_path
         
 
     def load_model(self):
@@ -402,7 +469,7 @@ class StableDiffusion:
                 transformer.to(self.quantize_device, dtype=dtype)
             flush()
             
-            if self.model_config.lora_path is not None:
+            if self.model_config.lora_path is not None or self.model_config.base_lora_path is not None:
                 raise ValueError("LoRA is not supported for SD3 models currently")
             
             if self.model_config.quantize:
@@ -711,7 +778,7 @@ class StableDiffusion:
                     # trigger it to get merged in
                     self.model_config.lora_path = load_lora_path
 
-            if self.model_config.lora_path is not None:
+            if self.model_config.lora_path is not None or self.model_config.base_lora_path is not None:
                 print_acc("Fusing in LoRA")
                 # need the pipe for peft
                 pipe: FluxPipeline = FluxPipeline(
@@ -723,59 +790,27 @@ class StableDiffusion:
                     vae=None,
                     transformer=transformer,
                 )
-                if self.low_vram:
-                    # we cannot fuse the loras all at once without ooming in lowvram mode, so we have to do it in parts
-                    # we can do it on the cpu but it takes about 5-10 mins vs seconds on the gpu
-                    # we are going to separate it into the two transformer blocks one at a time
-
-                    lora_state_dict = load_file(self.model_config.lora_path)
-                    single_transformer_lora = {}
-                    single_block_key = "transformer.single_transformer_blocks."
-                    double_transformer_lora = {}
-                    double_block_key = "transformer.transformer_blocks."
-                    for key, value in lora_state_dict.items():
-                        if single_block_key in key:
-                            single_transformer_lora[key] = value
-                        elif double_block_key in key:
-                            double_transformer_lora[key] = value
-                        else:
-                            raise ValueError(f"Unknown lora key: {key}. Cannot load this lora in low vram mode")
-
-                    # double blocks
-                    transformer.transformer_blocks = transformer.transformer_blocks.to(
-                        self.quantize_device, dtype=dtype
+                if self.model_config.lora_path is not None:
+                    self.model_config.lora_path = self._fuse_flux_lora(
+                        pipe,
+                        transformer,
+                        self.model_config.lora_path,
+                        "lora1",
+                        1.0,
+                        dtype,
+                        "LoRA",
                     )
-                    pipe.load_lora_weights(double_transformer_lora, adapter_name=f"lora1_double")
-                    pipe.fuse_lora()
-                    pipe.unload_lora_weights()
-                    transformer.transformer_blocks = transformer.transformer_blocks.to(
-                        'cpu', dtype=dtype
+                if self.model_config.base_lora_path is not None:
+                    self._fuse_flux_lora(
+                        pipe,
+                        transformer,
+                        self.model_config.base_lora_path,
+                        "base_lora",
+                        self.model_config.base_lora_strength,
+                        dtype,
+                        "Base LoRA",
                     )
-
-                    # single blocks
-                    transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
-                        self.quantize_device, dtype=dtype
-                    )
-                    pipe.load_lora_weights(single_transformer_lora, adapter_name=f"lora1_single")
-                    pipe.fuse_lora()
-                    pipe.unload_lora_weights()
-                    transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
-                        'cpu', dtype=dtype
-                    )
-
-                    # cleanup
-                    del single_transformer_lora
-                    del double_transformer_lora
-                    del lora_state_dict
-                    flush()
-
-                else:
-                    # need the pipe to do this unfortunately for now
-                    # we have to fuse in the weights before quantizing
-                    pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1", use_safetensors=True)
-                    pipe.fuse_lora()
-                    # unfortunately, not an easier way with peft
-                    pipe.unload_lora_weights()
+                    self._base_lora_fused = True
             flush()
             
             if self.model_config.quantize:
@@ -919,7 +954,7 @@ class StableDiffusion:
             if self.model_config.assistant_lora_path is not None or self.model_config.inference_lora_path is not None:
                 raise ValueError("Assistant LoRA is not supported for Lumina2 models currently")
 
-            if self.model_config.lora_path is not None:
+            if self.model_config.lora_path is not None or self.model_config.base_lora_path is not None:
                 raise ValueError("Loading LoRA is not supported for Lumina2 models currently")
             
             flush()
@@ -1073,10 +1108,23 @@ class StableDiffusion:
 
         # load any loras we have
         if self.model_config.lora_path is not None and not self.is_flux and not self.is_lumina2:
-            pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1", use_safetensors=True)
-            pipe.fuse_lora()
-            # unfortunately, not an easier way with peft
-            pipe.unload_lora_weights()
+            self.model_config.lora_path = self._fuse_pipeline_lora(
+                pipe,
+                self.model_config.lora_path,
+                "lora1",
+                1.0,
+                "LoRA",
+            )
+
+        if self.model_config.base_lora_path is not None and not self.is_flux and not self.is_lumina2:
+            self._fuse_pipeline_lora(
+                pipe,
+                self.model_config.base_lora_path,
+                "base_lora",
+                self.model_config.base_lora_strength,
+                "Base LoRA",
+            )
+            self._base_lora_fused = True
 
         self.tokenizer = tokenizer
         self.text_encoder = text_encoder

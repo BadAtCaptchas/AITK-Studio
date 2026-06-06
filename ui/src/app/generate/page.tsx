@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@headlessui/react';
 import { ArrowRight, FileJson, ImagePlus, Layers, Loader2, Upload, Wand2, X } from 'lucide-react';
@@ -32,11 +32,15 @@ type GeneratedLora = {
   label: string;
   path: string;
   filename: string;
-  jobId: string;
-  jobName: string;
-  jobStatus: string;
+  source: 'job' | 'uploaded';
+  jobId?: string;
+  jobName?: string;
+  jobStatus?: string;
   updatedAt: string;
   sizeBytes: number;
+  triggerWords?: string[];
+  triggerWordSource?: 'metadata' | 'user' | 'none';
+  originalFilename?: string;
   model?: Partial<ModelConfig> & Record<string, unknown>;
 };
 
@@ -299,9 +303,23 @@ function cleanModelConfig(modelConfig: GeneratorModelConfig, useLora: boolean, l
   return model;
 }
 
+function formatLoraSource(lora: GeneratedLora) {
+  return lora.source === 'uploaded' ? 'Uploaded' : lora.jobName || 'Training job';
+}
+
+function formatMegabytes(bytes: number) {
+  return `${Math.max(1, Math.round(bytes / 1024 / 1024))} MB`;
+}
+
+function promptHasAnyTrigger(prompt: string, triggerWords: string[]) {
+  const lowerPrompt = prompt.toLowerCase();
+  return triggerWords.some(word => lowerPrompt.includes(word.toLowerCase()));
+}
+
 export default function GeneratePage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const loraFileInputRef = useRef<HTMLInputElement | null>(null);
   const inlineAbortControllerRef = useRef<AbortController | null>(null);
   const statusResetTimeoutRef = useRef<number | null>(null);
   const { settings, isSettingsLoaded } = useSettings();
@@ -313,6 +331,10 @@ export default function GeneratePage() {
   const [loraPath, setLoraPath] = useState('');
   const [loras, setLoras] = useState<GeneratedLora[]>([]);
   const [loraStatus, setLoraStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [loraUploadStatus, setLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const [loraUploadProgress, setLoraUploadProgress] = useState(0);
+  const [loraUploadTriggerWords, setLoraUploadTriggerWords] = useState('');
+  const [loraUploadMessage, setLoraUploadMessage] = useState('');
   const [prompts, setPrompts] = useState('photo of a cinematic portrait, detailed lighting');
   const [jsonPromptItems, setJsonPromptItems] = useState<PromptImageSettings[] | null>(null);
   const [importSummary, setImportSummary] = useState('');
@@ -348,19 +370,21 @@ export default function GeneratePage() {
     }
   }, [gpuIDs, gpuList, isGPUInfoLoaded]);
 
-  useEffect(() => {
+  const refreshLoras = useCallback(async () => {
     setLoraStatus('loading');
-    apiClient
-      .get('/api/generate/loras')
-      .then(res => {
-        setLoras(res.data.loras || []);
-        setLoraStatus('success');
-      })
-      .catch(error => {
-        console.error('Error fetching LoRAs:', error);
-        setLoraStatus('error');
-      });
+    try {
+      const res = await apiClient.get('/api/generate/loras');
+      setLoras(res.data.loras || []);
+      setLoraStatus('success');
+    } catch (error) {
+      console.error('Error fetching LoRAs:', error);
+      setLoraStatus('error');
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshLoras();
+  }, [refreshLoras]);
 
   useEffect(() => {
     return () => {
@@ -446,6 +470,7 @@ export default function GeneratePage() {
     const lora = loras.find(item => item.path === value);
     if (lora) {
       applyLoraModelDefaults(lora);
+      setLoraUploadTriggerWords(lora.triggerWords?.join(', ') || '');
     }
   };
 
@@ -454,7 +479,75 @@ export default function GeneratePage() {
     if (checked && !loraPath && loras[0]) {
       setLoraPath(loras[0].path);
       applyLoraModelDefaults(loras[0]);
+      setLoraUploadTriggerWords(loras[0].triggerWords?.join(', ') || '');
     }
+  };
+
+  const handleLoraUpload = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.safetensors')) {
+      setLoraUploadStatus('error');
+      setLoraUploadMessage('LoRA upload must be a .safetensors file.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (loraUploadTriggerWords.trim()) {
+      formData.append('trigger_words', loraUploadTriggerWords.trim());
+    }
+
+    setLoraUploadStatus('uploading');
+    setLoraUploadProgress(0);
+    setLoraUploadMessage('');
+    try {
+      const res = await apiClient.post('/api/generate/loras/upload', formData, {
+        onUploadProgress: progressEvent => {
+          if (!progressEvent.total) return;
+          setLoraUploadProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
+        },
+      });
+      const uploaded = res.data.lora as GeneratedLora;
+      setLoras(current => [uploaded, ...current.filter(item => item.path !== uploaded.path)]);
+      setUseLora(true);
+      setLoraPath(uploaded.path);
+      applyLoraModelDefaults(uploaded);
+      if (!loraUploadTriggerWords.trim() && uploaded.triggerWords?.length) {
+        setLoraUploadTriggerWords(uploaded.triggerWords.join(', '));
+      }
+      setLoraUploadStatus('success');
+      setLoraUploadMessage(
+        uploaded.triggerWords?.length
+          ? `Uploaded with trigger: ${uploaded.triggerWords.join(', ')}`
+          : 'Uploaded. No trigger metadata found.',
+      );
+      void refreshLoras();
+    } catch (error: any) {
+      console.error('Error uploading LoRA:', error);
+      setLoraUploadStatus('error');
+      setLoraUploadMessage(error.response?.data?.error || 'Failed to upload LoRA.');
+    } finally {
+      setLoraUploadProgress(0);
+      if (loraFileInputRef.current) {
+        loraFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const insertSelectedLoraTrigger = () => {
+    const triggerWords = selectedLora?.triggerWords?.filter(Boolean) ?? [];
+    if (triggerWords.length === 0) return;
+
+    const triggerText = triggerWords.join(', ');
+    setPrompts(current => {
+      const lines = current.split(/\r?\n/);
+      if (lines.length === 0 || lines.every(line => !line.trim())) return triggerText;
+      return lines.map(line => {
+        if (!line.trim() || promptHasAnyTrigger(line, triggerWords)) return line;
+        return `${triggerText}, ${line}`;
+      }).join('\n');
+    });
+    setJsonPromptItems(null);
+    setImportSummary('');
   };
 
   const handleArchChange = (archName: string) => {
@@ -970,6 +1063,17 @@ export default function GeneratePage() {
                 <h2 className="font-medium text-gray-100">Model</h2>
               </div>
 
+              <input
+                ref={loraFileInputRef}
+                type="file"
+                accept=".safetensors"
+                className="hidden"
+                onChange={event => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleLoraUpload(file);
+                }}
+              />
+
               <div className="mb-4 grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -993,27 +1097,85 @@ export default function GeneratePage() {
                       : 'border-gray-700 bg-gray-950 text-gray-300 hover:border-gray-500'
                   }`}
                 >
-                  Created LoRA
+                  LoRA
                 </button>
               </div>
 
               <div className="space-y-3">
                 {useLora && (
-                  <CreatableSelectInput
-                    label="LoRA"
-                    value={loraPath}
-                    onChange={handleLoraPathChange}
-                    options={loraOptions}
-                    placeholder="Path or Hugging Face repo"
-                  />
+                  <div className="space-y-2">
+                    <CreatableSelectInput
+                      label="LoRA"
+                      value={loraPath}
+                      onChange={handleLoraPathChange}
+                      options={loraOptions}
+                      placeholder="Path or Hugging Face repo"
+                    />
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                      <TextInput
+                        label="Trigger Words"
+                        value={loraUploadTriggerWords}
+                        onChange={setLoraUploadTriggerWords}
+                        placeholder="optional"
+                      />
+                      <Button
+                        type="button"
+                        className="operator-button mt-7 h-9 px-3"
+                        onClick={() => loraFileInputRef.current?.click()}
+                        disabled={isBusy || loraUploadStatus === 'uploading'}
+                        title="Upload LoRA"
+                        aria-label="Upload LoRA"
+                      >
+                        {loraUploadStatus === 'uploading' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        <span className="hidden sm:inline">
+                          {loraUploadStatus === 'uploading' ? `${loraUploadProgress}%` : 'Upload'}
+                        </span>
+                      </Button>
+                    </div>
+                    {loraUploadMessage && (
+                      <div
+                        className={`border px-3 py-2 text-xs ${
+                          loraUploadStatus === 'error'
+                            ? 'border-red-900 bg-red-950/30 text-red-300'
+                            : 'border-gray-800 bg-gray-950 text-gray-300'
+                        }`}
+                      >
+                        {loraUploadMessage}
+                      </div>
+                    )}
+                  </div>
                 )}
                 {useLora && selectedLora && (
                   <div className="border border-gray-800 bg-gray-950 px-3 py-2 text-xs text-gray-400">
                     <div className="truncate">{selectedLora.path}</div>
-                    <div className="mt-1 flex gap-3">
-                      <span>{selectedLora.jobName}</span>
-                      <span>{Math.max(1, Math.round(selectedLora.sizeBytes / 1024 / 1024))} MB</span>
+                    <div className="mt-1 flex flex-wrap gap-3">
+                      <span>{formatLoraSource(selectedLora)}</span>
+                      <span>{formatMegabytes(selectedLora.sizeBytes)}</span>
                     </div>
+                    {selectedLora.triggerWords && selectedLora.triggerWords.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-gray-500">Trigger</span>
+                        {selectedLora.triggerWords.map(word => (
+                          <button
+                            type="button"
+                            key={word}
+                            className="border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200 hover:border-gray-500"
+                            onClick={() => setLoraUploadTriggerWords(word)}
+                          >
+                            {word}
+                          </button>
+                        ))}
+                        <Button type="button" className="operator-button px-2 py-1 text-xs" onClick={insertSelectedLoraTrigger}>
+                          Insert
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-gray-500">No trigger metadata</div>
+                    )}
                   </div>
                 )}
                 {useLora && loraStatus === 'success' && loras.length === 0 && (

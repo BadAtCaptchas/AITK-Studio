@@ -77,6 +77,7 @@ const MODEL_REFERENCE_PATHS = [
   ['model', 'refiner_name_or_path'],
   ['model', 'vae_path'],
   ['model', 'lora_path'],
+  ['model', 'base_lora_path'],
   ['model', 'assistant_lora_path'],
   ['model', 'inference_lora_path'],
   ['model', 'unet_path'],

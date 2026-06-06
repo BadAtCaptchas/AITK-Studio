@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   modelArchs,
   ModelArch,
@@ -30,7 +30,7 @@ import {
   SliderInput,
 } from '@/components/formInputs';
 import Card from '@/components/Card';
-import { X, Copy, Loader2, Shuffle } from 'lucide-react';
+import { X, Copy, Loader2, Shuffle, Upload } from 'lucide-react';
 import AddSingleImageModal, { openAddImageModal } from '@/components/AddSingleImageModal';
 import SampleControlImage from '@/components/SampleControlImage';
 import { FlipHorizontal2, FlipVertical2 } from 'lucide-react';
@@ -97,6 +97,9 @@ export default function SimpleJob({
 }: Props) {
   const [randomPromptLoadingIndex, setRandomPromptLoadingIndex] = useState<number | null>(null);
   const [encryptedKeyRefreshKey, setEncryptedKeyRefreshKey] = useState(0);
+  const baseLoraFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [baseLoraUploadStatus, setBaseLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const [baseLoraUploadMessage, setBaseLoraUploadMessage] = useState('');
 
   const modelArch = useMemo(() => {
     return modelArchs.find(a => a.name === jobConfig.config.process[0].model.arch) as ModelArch;
@@ -317,6 +320,42 @@ export default function SimpleJob({
     }
   };
 
+  const handleBaseLoraUpload = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.safetensors')) {
+      setBaseLoraUploadStatus('error');
+      setBaseLoraUploadMessage('Base LoRA upload must be a .safetensors file.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    setBaseLoraUploadStatus('uploading');
+    setBaseLoraUploadMessage('');
+    try {
+      const response = await apiClient.post('/api/generate/loras/upload', formData);
+      const uploaded = response.data?.lora;
+      if (!uploaded?.path) {
+        throw new Error('Upload did not return a LoRA path.');
+      }
+      setJobConfig(uploaded.path, 'config.process[0].model.base_lora_path');
+      const triggerWords = Array.isArray(uploaded.triggerWords) ? uploaded.triggerWords.filter(Boolean) : [];
+      setBaseLoraUploadStatus('success');
+      setBaseLoraUploadMessage(
+        triggerWords.length > 0
+          ? `Uploaded. Trigger metadata: ${triggerWords.join(', ')}`
+          : 'Uploaded. No trigger metadata found.',
+      );
+    } catch (error: any) {
+      setBaseLoraUploadStatus('error');
+      setBaseLoraUploadMessage(error?.response?.data?.error || error?.message || 'Could not upload Base LoRA.');
+    } finally {
+      if (baseLoraFileInputRef.current) {
+        baseLoraFileInputRef.current.value = '';
+      }
+    }
+  };
+
   const numTrainingCols = useMemo(() => {
     let count = 4;
     if (!disableSections.includes('train.diff_output_preservation')) {
@@ -411,6 +450,16 @@ export default function SimpleJob({
         onSubmit={handleSubmit}
         className={`relative space-y-4 ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
       >
+        <input
+          ref={baseLoraFileInputRef}
+          type="file"
+          accept=".safetensors"
+          className="hidden"
+          onChange={event => {
+            const file = event.target.files?.[0];
+            if (file) void handleBaseLoraUpload(file);
+          }}
+        />
         {isLoading && (
           <div className="absolute inset-0 z-50 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
@@ -498,6 +547,54 @@ export default function SimpleJob({
                   }}
                   placeholder=""
                 />
+              )}
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-[1.2fr_0.45fr]">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                  <TextInput
+                    label="Base LoRA Path"
+                    value={jobConfig.config.process[0].model.base_lora_path ?? ''}
+                    docKey="config.process[0].model.base_lora_path"
+                    onChange={(value: string | undefined) => {
+                      if (value?.trim() === '') {
+                        value = undefined;
+                      }
+                      setJobConfig(value, 'config.process[0].model.base_lora_path');
+                    }}
+                    placeholder=""
+                  />
+                  <button
+                    type="button"
+                    className="operator-icon-button mt-7 h-9 w-9"
+                    onClick={() => baseLoraFileInputRef.current?.click()}
+                    disabled={baseLoraUploadStatus === 'uploading'}
+                    title="Upload Base LoRA"
+                    aria-label="Upload Base LoRA"
+                  >
+                    {baseLoraUploadStatus === 'uploading' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                <NumberInput
+                  label="Strength"
+                  value={jobConfig.config.process[0].model.base_lora_strength ?? 1.0}
+                  onChange={value => setJobConfig(value ?? 1.0, 'config.process[0].model.base_lora_strength')}
+                  placeholder="eg. 1.0"
+                  required
+                />
+              </div>
+              {baseLoraUploadMessage && (
+                <div
+                  className={`border px-3 py-2 text-xs ${
+                    baseLoraUploadStatus === 'error'
+                      ? 'border-red-900 bg-red-950/30 text-red-300'
+                      : 'border-gray-800 bg-gray-950 text-gray-300'
+                  }`}
+                >
+                  {baseLoraUploadMessage}
+                </div>
               )}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
                 {modelArch?.additionalSections?.includes('model.low_vram') && (

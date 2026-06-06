@@ -574,6 +574,7 @@ function AnnotationLayer({
             key={box.elementIndex}
             onPointerDown={event => beginBoxDrag(event, box, 'move')}
             className={classNames('absolute border-2', {
+              'pointer-events-none': drawingType,
               'shadow-[0_0_0_1px_rgba(255,255,255,0.75)]': selected,
             })}
             style={{

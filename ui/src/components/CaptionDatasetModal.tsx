@@ -17,12 +17,14 @@ import CaptionSimpleJob from '@/components/CaptionSimpleJob';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import { SelectInput } from '@/components/formInputs';
 import { Loader2 } from 'lucide-react';
+import { defaultIdeogramJsonCaptionPrompt } from '@/helpers/captionOptions';
 
 export interface CaptionDatasetModalState {
   datasetPath: string;
   jobId?: string | null;
   cloneId?: string | null;
   encryptedDatasetKeyB64?: string | null;
+  preset?: 'ideogram_json' | null;
   onClose?: () => void;
 }
 
@@ -31,7 +33,12 @@ export const captionDatasetModalState = createGlobalState<CaptionDatasetModalSta
 export const openCaptionDatasetModal = (
   datasetPath: string,
   onClose?: () => void,
-  options?: { jobId?: string | null; cloneId?: string | null; encryptedDatasetKeyB64?: string | null },
+  options?: {
+    jobId?: string | null;
+    cloneId?: string | null;
+    encryptedDatasetKeyB64?: string | null;
+    preset?: 'ideogram_json' | null;
+  },
 ) => {
   captionDatasetModalState.set({
     datasetPath,
@@ -39,6 +46,7 @@ export const openCaptionDatasetModal = (
     jobId: options?.jobId ?? null,
     cloneId: options?.cloneId ?? null,
     encryptedDatasetKeyB64: options?.encryptedDatasetKeyB64 ?? null,
+    preset: options?.preset ?? null,
   });
 };
 
@@ -67,6 +75,14 @@ export const CaptionDatasetModal: React.FC = () => {
     // set the path_to_caption
     if (modalInfo?.datasetPath) {
       setJobConfig(modalInfo.datasetPath, 'config.process[0].caption.path_to_caption');
+    }
+    if (modalInfo?.preset === 'ideogram_json') {
+      setJobConfig('ideogram_json', 'config.process[0].caption.output_format');
+      setJobConfig(defaultIdeogramJsonCaptionPrompt, 'config.process[0].caption.caption_prompt');
+      setJobConfig('json', 'config.process[0].caption.caption_extension');
+      setJobConfig('txt', 'config.process[0].caption.source_caption_extension');
+      setJobConfig('copy', 'config.process[0].caption.convert_destination');
+      setJobConfig(1024, 'config.process[0].caption.max_new_tokens');
     }
   }, [modalInfo]);
 

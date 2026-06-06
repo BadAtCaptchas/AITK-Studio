@@ -4,11 +4,8 @@ import { useEffect, useState, use, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
 import { FaChevronLeft } from 'react-icons/fa';
-import { VirtuosoGrid } from 'react-virtuoso';
 import { Pencil } from 'lucide-react';
-import DatasetImageCard from '@/components/DatasetImageCard';
-import DatasetImageViewer from '@/components/DatasetImageViewer';
-import EncryptedDatasetItemCard from '@/components/EncryptedDatasetItemCard';
+import DatasetImageStudio, { type DatasetStudioItem } from '@/components/DatasetImageStudio';
 import { Button } from '@headlessui/react';
 import AddImagesModal, { openImagesModal, useOpenImagesModalOnDrag } from '@/components/AddImagesModal';
 import { Modal } from '@/components/Modal';
@@ -19,6 +16,7 @@ import useSettings from '@/hooks/useSettings';
 import { pathJoin } from '@/utils/basic';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
 import { PageNotice } from '@/components/OperatorPrimitives';
+import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import type { EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
 import {
   arrayBufferToBase64,
@@ -54,14 +52,10 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
   const [unlockPassword, setUnlockPassword] = useState('');
   const [unlockKeyFile, setUnlockKeyFile] = useState<File | null>(null);
   const [unlockError, setUnlockError] = useState<string | null>(null);
-  const [selectedImgPath, setSelectedImgPath] = useState<string | null>(null);
-  const [captionRefreshKeys, setCaptionRefreshKeys] = useState<Record<string, number>>({});
-  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renameDatasetName, setRenameDatasetName] = useState(datasetName);
   const [isRenamingDataset, setIsRenamingDataset] = useState(false);
   const [renameDatasetError, setRenameDatasetError] = useState('');
-  const scrollParentCallback = useCallback((el: HTMLDivElement | null) => setScrollParent(el), []);
 
   const refreshImageList = (dbName: string) => {
     setStatus('loading');
@@ -72,7 +66,6 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
         if (data.encrypted) {
           setEncryptedManifest(data.manifest);
           setImgList([]);
-          setSelectedImgPath(null);
           setStatus('success');
           return;
         }
@@ -156,7 +149,28 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
     }
   };
 
-  const imgPaths = useMemo(() => imgList.map(img => img.img_path), [imgList]);
+  const datasetPath = useMemo(
+    () => (settings?.DATASETS_FOLDER ? pathJoin(settings.DATASETS_FOLDER, datasetName) : datasetName),
+    [datasetName, settings?.DATASETS_FOLDER],
+  );
+
+  const plainStudioItems = useMemo<DatasetStudioItem[]>(
+    () => imgList.map(img => ({ kind: 'plain' as const, path: img.img_path })),
+    [imgList],
+  );
+
+  const encryptedStudioItems = useMemo<DatasetStudioItem[]>(
+    () => (encryptedCatalog?.items || []).map(item => ({ kind: 'encrypted' as const, item })),
+    [encryptedCatalog?.items],
+  );
+
+  const openJsonConversion = useCallback(() => {
+    if (isRemoteDataset) return;
+    openCaptionDatasetModal(datasetPath, () => refreshImageList(datasetName), {
+      encryptedDatasetKeyB64: encryptedRawKeyB64 || undefined,
+      preset: 'ideogram_json',
+    });
+  }, [datasetName, datasetPath, encryptedRawKeyB64, isRemoteDataset]);
 
   useEffect(() => {
     if (datasetName) {
@@ -335,16 +349,17 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
 
   return (
     <>
-      <TopBar>
+      <TopBar className="h-14 bg-[#070b10]">
         <div className="flex-shrink-0">
           <Button className="operator-icon-button" onClick={() => history.back()} title="Back">
             <FaChevronLeft />
           </Button>
         </div>
-        <div className="min-w-0 flex-shrink">
-          <h1 className="truncate text-base font-semibold">
-            <span className="hidden sm:inline">Dataset: </span>
-            {datasetName}
+        <div className="min-w-0 flex-shrink text-sm">
+          <h1 className="truncate font-semibold text-gray-100">
+            <span className="hidden text-gray-400 sm:inline">AI Toolkit / Datasets / </span>
+            <span>{datasetName}</span>
+            <span className="hidden text-gray-500 sm:inline"> / Edit Dataset</span>
             {isRemoteDataset ? <span className="ml-2 text-xs text-blue-300">Remote</span> : null}
           </h1>
         </div>
@@ -381,7 +396,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
           </Button>
         </div>
       </TopBar>
-      <MainContent ref={scrollParentCallback}>
+      <MainContent className="overflow-hidden !px-0 pt-14 sm:!px-0">
         {encryptedManifest && !encryptedCatalog && (
           <div className="mx-auto mt-10 max-w-md border border-gray-700 bg-gray-900 p-5 text-gray-200">
             <h2 className="text-base font-semibold">Encrypted Dataset Locked</h2>
@@ -421,45 +436,42 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
             This encrypted dataset is empty. Add images to make it available for training.
           </PageNotice>
         )}
-        {status === 'success' && imgList.length > 0 && scrollParent && (
-          <VirtuosoGrid
-            totalCount={imgList.length}
-            customScrollParent={scrollParent}
-            overscan={400}
-            listClassName="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
-            itemContent={index => {
-              const img = imgList[index];
-              if (!img) return null;
-              return (
-                <DatasetImageCard
-                  alt="image"
-                  isAutoCaptioning={isAutoCaptioning}
-                  imageUrl={img.img_path}
-                  onDelete={() => refreshImageList(datasetName)}
-                  onImageClick={() => setSelectedImgPath(img.img_path)}
-                  captionRefreshKey={captionRefreshKeys[img.img_path] || 0}
-                  observerRoot={scrollParent}
-                />
-              );
-            }}
-            computeItemKey={index => imgList[index]?.img_path ?? index}
+        {status === 'success' && plainStudioItems.length > 0 && (
+          <DatasetImageStudio
+            datasetName={datasetName}
+            workerID={workerID}
+            datasetPath={!isRemoteDataset ? datasetPath : null}
+            items={plainStudioItems}
+            isAutoCaptioning={isAutoCaptioning}
+            onRefresh={() => refreshImageList(datasetName)}
+            onAddImages={() =>
+              openImagesModal(datasetName, () => refreshImageList(datasetName), {
+                ...encryptedUploadOptions,
+                workerID,
+              })
+            }
+            onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
           />
         )}
-        {status === 'success' && encryptedCatalog && encryptedKey && encryptedCatalog.items.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {encryptedCatalog.items.map(item => (
-              <EncryptedDatasetItemCard
-                key={item.id}
-                datasetName={datasetName}
-                workerID={workerID}
-                item={item}
-                cryptoKey={encryptedKey}
-                isAutoCaptioning={isAutoCaptioning}
-                onSaveCaption={saveEncryptedCaption}
-                onDelete={deleteEncryptedItem}
-              />
-            ))}
-          </div>
+        {status === 'success' && encryptedCatalog && encryptedKey && encryptedStudioItems.length > 0 && (
+          <DatasetImageStudio
+            datasetName={datasetName}
+            workerID={workerID}
+            datasetPath={!isRemoteDataset ? datasetPath : null}
+            items={encryptedStudioItems}
+            isAutoCaptioning={isAutoCaptioning}
+            encryptedKey={encryptedKey}
+            encryptedRawKeyB64={encryptedRawKeyB64}
+            onRefresh={() => refreshImageList(datasetName)}
+            onAddImages={() =>
+              openImagesModal(datasetName, () => refreshImageList(datasetName), {
+                ...encryptedUploadOptions,
+                workerID,
+              })
+            }
+            onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
+            onSaveEncryptedCaption={saveEncryptedCaption}
+          />
         )}
       </MainContent>
       <Modal
@@ -492,13 +504,6 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
         </form>
       </Modal>
       <AddImagesModal />
-      <DatasetImageViewer
-        imgPath={selectedImgPath}
-        imageList={imgPaths}
-        onChange={setSelectedImgPath}
-        refreshImages={() => refreshImageList(datasetName)}
-        onCaptionSaved={path => setCaptionRefreshKeys(prev => ({ ...prev, [path]: (prev[path] || 0) + 1 }))}
-      />
     </>
   );
 }

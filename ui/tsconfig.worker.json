@@ -21,6 +21,7 @@
         "cron/**/*.ts",
         "src/paths.ts",
         "src/utils/basic.ts",
+        "src/utils/ideogramCaption.ts",
         "src/utils/folderImport.ts",
         "src/utils/webauthnPrfCrypto.ts",
         "src/utils/trainingPhaseSummary.ts",

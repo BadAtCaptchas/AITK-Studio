@@ -16,7 +16,7 @@ function safeDatasetCopyName(baseName: string, suffix: string) {
     .replace(/[^a-zA-Z0-9._-]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 40);
-  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const stamp = new Date().toISOString().replace(/-|:|T|Z|\./g, '').slice(0, 14);
   return `${safeBase || 'dataset'}_${safeSuffix || 'copy'}_${stamp}`;
 }
 

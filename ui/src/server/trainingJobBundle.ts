@@ -2,8 +2,8 @@ import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
-import { db } from '@/server/db';
+import { getDatasetsRoot, getTrainingFolder } from './settings';
+import { db } from './db';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
   TRAINING_JOB_EXPORT_VERSION,
@@ -17,7 +17,7 @@ import {
   shouldIncludeDatasetExportPath,
   shouldIncludeTrainingExportPath,
   type TrainingJobExportManifest,
-} from '@/server/trainingJobTransfer';
+} from './trainingJobTransfer';
 
 type ArchiveFileEntry = {
   sourcePath: string;

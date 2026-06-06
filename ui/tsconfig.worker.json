@@ -13,6 +13,7 @@
         "allowSyntheticDefaultImports": true,
         "paths": {
             "@/*": [
+                "./src/*",
                 "./cron/*"
             ]
         }
@@ -36,6 +37,8 @@
         "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
         "src/server/randomPromptCaptions.ts",
-        "src/server/trainingAdvisor.ts"
+        "src/server/trainingAdvisor.ts",
+        "src/server/jobStart.ts",
+        "src/server/trainingJobRestart.ts"
     ]
 }

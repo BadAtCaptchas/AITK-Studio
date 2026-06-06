@@ -1131,6 +1131,18 @@ export const db = {
       }
       return readSqliteMetrics(logPath, options);
     },
+
+    async deleteForJob(jobID: string): Promise<void> {
+      if (!isMongoProvider()) {
+        return;
+      }
+
+      const mongo = await getMongoDb();
+      await Promise.all([
+        mongoCollection(mongo, 'metrics').deleteMany({ job_id: jobID }),
+        mongoCollection(mongo, 'metric_keys').deleteMany({ job_id: jobID }),
+      ]);
+    },
   },
 
   async prepare() {

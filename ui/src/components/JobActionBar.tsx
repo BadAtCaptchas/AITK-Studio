@@ -16,6 +16,7 @@ import { openConfirm } from '@/components/ConfirmModal';
 import type { Job } from '@/types';
 import {
   startJob,
+  restartJobFromScratch,
   stopJob,
   deleteJob,
   getAvaliableJobActions,
@@ -143,7 +144,8 @@ export default function JobActionBar({
   hideView,
   autoStartQueue = false,
 }: JobActionBarProps) {
-  const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
+  const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue, canRestartFromScratch } =
+    getAvaliableJobActions(job);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
   const [captionResultSyncing, setCaptionResultSyncing] = useState(false);
@@ -338,6 +340,25 @@ export default function JobActionBar({
       console.error('Error requesting checkpoint save:', error);
       alert(getApiErrorMessage(error, 'Failed to request a checkpoint save.'));
     }
+  };
+
+  const handleRestartFromScratch = () => {
+    if (!canRestartFromScratch) return;
+
+    openConfirm({
+      title: 'Restart From Scratch',
+      message: `Restart "${job.name}" from scratch? This will permanently delete its checkpoints, samples, logs, and training metrics. The job config and datasets will remain.`,
+      type: 'danger',
+      confirmText: 'Restart From Scratch',
+      onConfirm: async () => {
+        try {
+          await restartJobFromScratch(job.id);
+          onRefresh?.();
+        } catch (error) {
+          alert(getApiErrorMessage(error, 'Failed to restart job from scratch.'));
+        }
+      },
+    });
   };
 
   const handleRetryRemoteCaptionResult = async () => {
@@ -594,6 +615,17 @@ export default function JobActionBar({
                   <CloudDownload className="w-4 h-4" />
                 )}
                 {remoteCaptionDownloadStatus === 'failed' ? 'Retry Caption Sync' : 'Sync Caption Result'}
+              </div>
+            </MenuItem>
+          )}
+          {canRestartFromScratch && (
+            <MenuItem>
+              <div
+                className="cursor-pointer rounded px-4 py-1 text-rose-200 hover:bg-rose-950/60 hover:text-rose-100 flex items-center gap-2"
+                onClick={handleRestartFromScratch}
+              >
+                <RefreshCcw className="w-4 h-4" />
+                Restart From Scratch
               </div>
             </MenuItem>
           )}

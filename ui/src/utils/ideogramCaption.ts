@@ -19,6 +19,13 @@ export type GeneratedBoxPatch = {
   bbox: [number, number, number, number];
 };
 
+export type GeneratedElementBox = {
+  type: IdeogramElementType;
+  bbox: [number, number, number, number];
+  desc: string;
+  text?: string;
+};
+
 export type IdeogramCaptionParse =
   | {
       kind: 'ideogram';
@@ -128,6 +135,10 @@ function hasUsableSpan(box: NormalizedBox, minSpan: number) {
   return box.x2 - box.x1 >= minSpan && box.y2 - box.y1 >= minSpan;
 }
 
+function cleanGeneratedText(value: unknown) {
+  return typeof value === 'string' ? value.trim().slice(0, 240) : '';
+}
+
 export function normalizeGeneratedBoxPatches(
   value: unknown,
   elementCount: number,
@@ -147,6 +158,36 @@ export function normalizeGeneratedBoxPatches(
   });
 
   return Array.from(byElementIndex.values()).sort((left, right) => left.elementIndex - right.elementIndex);
+}
+
+export function normalizeGeneratedElementBoxes(
+  value: unknown,
+  minSpan = 1,
+  maxElements = 20,
+): GeneratedElementBox[] {
+  const rawElements: unknown[] =
+    isRecord(value) && Array.isArray(value.generatedElements)
+      ? value.generatedElements
+      : isRecord(value) && Array.isArray(value.elements)
+        ? value.elements
+        : Array.isArray(value)
+          ? value
+          : [];
+
+  return rawElements
+    .flatMap<GeneratedElementBox>(rawElement => {
+      if (!isRecord(rawElement)) return [];
+      const box = arrayToBox(rawElement.bbox);
+      if (!box || !hasUsableSpan(box, minSpan)) return [];
+      const type: IdeogramElementType = rawElement.type === 'text' ? 'text' : 'obj';
+      const desc = cleanGeneratedText(rawElement.desc || rawElement.description || rawElement.label);
+      const text = cleanGeneratedText(rawElement.text || rawElement.visibleText);
+      if (type === 'text') {
+        return [{ type, bbox: boxToArray(box), text, desc: desc || text }];
+      }
+      return [{ type, bbox: boxToArray(box), desc: desc || text || 'Visible object' }];
+    })
+    .slice(0, maxElements);
 }
 
 export function boxToRect(box: NormalizedBox) {
@@ -271,6 +312,32 @@ export function applyGeneratedBoxPatches(data: Record<string, any>, patches: Gen
     if (box) updateIdeogramElementBox(data, patch.elementIndex, box);
   });
   return normalizedPatches.length;
+}
+
+export function appendGeneratedIdeogramElements(data: Record<string, any>, generatedElements: GeneratedElementBox[]) {
+  const elements = getIdeogramElements(data);
+  const startIndex = elements.length;
+  const normalizedElements = normalizeGeneratedElementBoxes({ generatedElements }, 2);
+  normalizedElements.forEach(element => {
+    if (element.type === 'text') {
+      elements.push({
+        type: 'text',
+        bbox: element.bbox,
+        text: element.text || '',
+        desc: element.desc || element.text || '',
+      });
+    } else {
+      elements.push({
+        type: 'obj',
+        bbox: element.bbox,
+        desc: element.desc || 'Visible object',
+      });
+    }
+  });
+  return {
+    count: normalizedElements.length,
+    firstElementIndex: normalizedElements.length > 0 ? startIndex : null,
+  };
 }
 
 export function updateIdeogramElementField(

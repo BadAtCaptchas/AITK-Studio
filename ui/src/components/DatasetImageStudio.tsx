@@ -56,16 +56,19 @@ import {
 } from '@/utils/annotationGeometry';
 import {
   addIdeogramElement,
+  appendGeneratedIdeogramElements,
   applyGeneratedBoxPatches,
   boxToRect,
   cloneIdeogramData,
   deleteIdeogramElement,
   extractIdeogramBoxes,
+  normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
   rectToBox,
   serializeIdeogramCaption,
   type GeneratedBoxPatch,
+  type GeneratedElementBox,
   type IdeogramBox,
   type IdeogramElementType,
   type NormalizedBox,
@@ -971,11 +974,9 @@ export default function DatasetImageStudio({
       ? 'Auto Boxes works on images only.'
       : !isIdeogram
         ? 'Auto Boxes requires Ideogram JSON.'
-        : captionParse.elements.length === 0
-          ? 'Add at least one object or text element first.'
-          : selectedItem?.kind === 'encrypted' && !encryptedKey
-            ? 'Unlock the encrypted dataset first.'
-            : '';
+        : selectedItem?.kind === 'encrypted' && !encryptedKey
+          ? 'Unlock the encrypted dataset first.'
+          : '';
   const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !isAutoCaptioning;
 
   useEffect(() => {
@@ -1225,20 +1226,28 @@ export default function DatasetImageStudio({
         return;
       }
 
-      const patches = normalizeGeneratedBoxPatches(
-        { boxes: response.data?.boxes },
-        captionParse.kind === 'ideogram' ? captionParse.elements.length : 0,
-        2,
-      );
-      if (patches.length === 0) {
+      const elementCount = captionParse.kind === 'ideogram' ? captionParse.elements.length : 0;
+      const patches =
+        elementCount > 0 ? normalizeGeneratedBoxPatches({ boxes: response.data?.boxes }, elementCount, 2) : [];
+      const generatedElements =
+        elementCount === 0 ? normalizeGeneratedElementBoxes({ generatedElements: response.data?.generatedElements }, 2, 20) : [];
+      if (patches.length === 0 && generatedElements.length === 0) {
         throw new Error('OpenRouter did not return any usable boxes.');
       }
 
       let appliedCount = 0;
+      const nextSelection =
+        generatedElements.length > 0 ? elementCount : selectedElementIndex ?? patches[0]?.elementIndex ?? null;
       mutateCaption(data => {
-        appliedCount = applyGeneratedBoxPatches(data, patches as GeneratedBoxPatch[]);
-      }, selectedElementIndex ?? patches[0]?.elementIndex ?? null);
-      setAutoBoxMessage(`${appliedCount || patches.length} box${(appliedCount || patches.length) === 1 ? '' : 'es'} ${response.data?.refined ? 'refined' : 'generated'}.`);
+        if (generatedElements.length > 0) {
+          const result = appendGeneratedIdeogramElements(data, generatedElements as GeneratedElementBox[]);
+          appliedCount = result.count;
+        } else {
+          appliedCount = applyGeneratedBoxPatches(data, patches as GeneratedBoxPatch[]);
+        }
+      }, nextSelection);
+      const count = appliedCount || patches.length || generatedElements.length;
+      setAutoBoxMessage(`${count} box${count === 1 ? '' : 'es'} ${response.data?.refined ? 'refined' : 'generated'}.`);
     } catch (error) {
       console.error('Auto Boxes failed:', error);
       setAutoBoxMessage(responseErrorMessage(error, 'Auto Boxes failed. Please try again.'));

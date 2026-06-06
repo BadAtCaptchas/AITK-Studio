@@ -5,9 +5,11 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   addIdeogramElement,
+  appendGeneratedIdeogramElements,
   applyGeneratedBoxPatches,
   boxToArray,
   deleteIdeogramElement,
+  normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
   rectToBox,
@@ -116,4 +118,33 @@ test('generated box patches clamp, filter, dedupe, and preserve bbox-only edits'
     'desc',
     'color_palette',
   ]);
+});
+
+test('generated element boxes can append layers for empty captions', () => {
+  const caption = sampleCaption();
+  caption.compositional_deconstruction.elements = [];
+
+  const generatedElements = normalizeGeneratedElementBoxes(
+    {
+      generatedElements: [
+        { type: 'obj', bbox: [100.4, -20, 650, 1200], desc: 'Yellow taxi.' },
+        { type: 'text', bbox: [20, 30, 90, 220], text: 'TAXI', desc: 'Roof sign.' },
+        { type: 'obj', bbox: [200, 200, 200, 260], desc: 'flat bad box' },
+      ],
+    },
+    2,
+  );
+
+  assert.deepEqual(generatedElements, [
+    { type: 'obj', bbox: [100, 0, 650, 1000], desc: 'Yellow taxi.' },
+    { type: 'text', bbox: [20, 30, 90, 220], text: 'TAXI', desc: 'Roof sign.' },
+  ]);
+  const result = appendGeneratedIdeogramElements(caption, generatedElements);
+  assert.deepEqual(result, { count: 2, firstElementIndex: 0 });
+
+  const parsed = JSON.parse(serializeIdeogramCaption(caption));
+  assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[0]), ['type', 'bbox', 'desc']);
+  assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[1]), ['type', 'bbox', 'text', 'desc']);
+  assert.equal(parsed.compositional_deconstruction.elements[0].desc, 'Yellow taxi.');
+  assert.equal(parsed.compositional_deconstruction.elements[1].text, 'TAXI');
 });

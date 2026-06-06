@@ -1,6 +1,8 @@
 import {
+  normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
+  type GeneratedElementBox,
   type GeneratedBoxPatch,
 } from '../utils/ideogramCaption';
 
@@ -60,8 +62,38 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
         required: ['elementIndex', 'bbox'],
       },
     },
+    generatedElements: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['obj', 'text'],
+            description: 'Ideogram element type. Use text only for visible glyphs, signs, labels, or readable text regions.',
+          },
+          bbox: {
+            type: 'array',
+            description: 'Bounding box as [ymin, xmin, ymax, xmax], normalized to 0-1000.',
+            items: { type: 'integer', minimum: 0, maximum: 1000 },
+            minItems: 4,
+            maxItems: 4,
+          },
+          desc: {
+            type: 'string',
+            description: 'Short object or region description. For text, describe where the text appears.',
+          },
+          text: {
+            type: 'string',
+            description: 'Visible text content for text elements. Use an empty string for ordinary object elements.',
+          },
+        },
+        required: ['type', 'bbox', 'desc', 'text'],
+      },
+    },
   },
-  required: ['boxes'],
+  required: ['boxes', 'generatedElements'],
 };
 
 function isRecord(value: unknown): value is Record<string, any> {
@@ -99,17 +131,53 @@ function imageSizeLine(imageSize?: ImageSize | null) {
   return 'Image pixel size: unknown.';
 }
 
-export function buildOpenRouterBoxPrompt(caption: string, imageSize?: ImageSize | null, previousBoxes?: GeneratedBoxPatch[]) {
+function captionSceneContext(parsed: Extract<ReturnType<typeof parseIdeogramCaption>, { kind: 'ideogram' }>) {
+  return {
+    highLevelDescription: cleanString(parsed.data.high_level_description),
+    background: cleanString(parsed.data.compositional_deconstruction?.background),
+  };
+}
+
+export function buildOpenRouterBoxPrompt(
+  caption: string,
+  imageSize?: ImageSize | null,
+  previousBoxes?: GeneratedBoxPatch[],
+  previousGeneratedElements?: GeneratedElementBox[],
+) {
   const parsed = parseIdeogramCaption(caption);
   if (parsed.kind !== 'ideogram') {
     throw new Error('Auto Boxes requires an Ideogram JSON caption.');
   }
-  if (parsed.elements.length === 0) {
-    throw new Error('Auto Boxes requires at least one caption element.');
-  }
 
   const elements = summarizeElements(parsed.elements);
-  const previous = previousBoxes?.length ? `\nCurrent proposed boxes to correct:\n${JSON.stringify({ boxes: previousBoxes }, null, 2)}\n` : '';
+  const previous = previousBoxes?.length
+    ? `\nCurrent proposed boxes to correct:\n${JSON.stringify({ boxes: previousBoxes, generatedElements: [] }, null, 2)}\n`
+    : previousGeneratedElements?.length
+      ? `\nCurrent proposed generated elements to correct:\n${JSON.stringify({ boxes: [], generatedElements: previousGeneratedElements }, null, 2)}\n`
+      : '';
+
+  if (parsed.elements.length === 0) {
+    return [
+      'Create Ideogram caption elements with accurate bounding boxes for this image.',
+      imageSizeLine(imageSize),
+      '',
+      'The caption currently has no compositional_deconstruction.elements, so generate new elements for the most important visible regions.',
+      'Scene context:',
+      JSON.stringify(captionSceneContext(parsed), null, 2),
+      '',
+      'Coordinate contract:',
+      '- Return [ymin, xmin, ymax, xmax] integers normalized to 0-1000.',
+      '- Fit the visible extent of the object or text region tightly.',
+      '- Do not add padding for aesthetics.',
+      '- If an object is occluded or cropped, box only the visible part.',
+      '- Use type "text" only for readable text glyphs, signs, labels, or UI text regions; put the visible glyph text in text.',
+      '- Use type "obj" for ordinary objects and leave text as an empty string.',
+      '- Prefer 3-10 salient regions. Do not cover the entire image unless the whole image is a single object.',
+      '- Return boxes: [] because there are no existing element indexes to patch.',
+      previous,
+      'Return only JSON with both keys: boxes and generatedElements.',
+    ].join('\n');
+  }
 
   return [
     'Create accurate bounding boxes for existing Ideogram caption elements in this image.',
@@ -122,6 +190,7 @@ export function buildOpenRouterBoxPrompt(caption: string, imageSize?: ImageSize 
     '- If an object is occluded or cropped, box only the visible part.',
     '- For text elements, box the visible text glyphs or sign/label area, not the larger object holding it.',
     '- Keep every elementIndex exactly as provided. Do not create, remove, reorder, or rename elements.',
+    '- Return generatedElements: [] because existing caption elements are being patched.',
     '- If a currentBbox exists, use it only as a rough hint; correct it when the image contradicts it.',
     previous,
     'Existing caption elements:',
@@ -238,32 +307,57 @@ function parseBoxResponse(content: string, elementCount: number) {
   return boxes;
 }
 
+function parseGeneratedElementResponse(content: string) {
+  const parsed = parseJsonObject(content);
+  const generatedElements = normalizeGeneratedElementBoxes(parsed, 2, 20);
+  if (generatedElements.length === 0) {
+    throw new Error('OpenRouter did not return any usable generated elements.');
+  }
+  return generatedElements;
+}
+
 export async function generateOpenRouterBoxPatches(options: GenerateOpenRouterBoxPatchesOptions) {
   const apiKey = options.apiKey.trim();
   if (!apiKey) throw new Error('OpenRouter API key is missing. Add it in Settings.');
 
   const parsed = parseIdeogramCaption(options.caption);
   if (parsed.kind !== 'ideogram') throw new Error('Auto Boxes requires an Ideogram JSON caption.');
-  if (parsed.elements.length === 0) throw new Error('Auto Boxes requires at least one caption element.');
 
   const model = normalizeOpenRouterBoxModel(options.model);
   const fetchImpl = options.fetchImpl || fetch;
   const firstPrompt = buildOpenRouterBoxPrompt(options.caption, options.imageSize);
   const first = await callOpenRouterBoxes({ apiKey, imageDataUrl: options.imageDataUrl, model, prompt: firstPrompt, fetchImpl });
-  let boxes = parseBoxResponse(first.content, parsed.elements.length);
+  let boxes: GeneratedBoxPatch[] = [];
+  let generatedElements: GeneratedElementBox[] = [];
+  if (parsed.elements.length > 0) {
+    boxes = parseBoxResponse(first.content, parsed.elements.length);
+  } else {
+    generatedElements = parseGeneratedElementResponse(first.content);
+  }
   let usage = first.usage;
   let refined = false;
 
   if (options.refine) {
-    const refinePrompt = buildOpenRouterBoxPrompt(options.caption, options.imageSize, boxes);
+    const refinePrompt = buildOpenRouterBoxPrompt(options.caption, options.imageSize, boxes, generatedElements);
     const second = await callOpenRouterBoxes({ apiKey, imageDataUrl: options.imageDataUrl, model, prompt: refinePrompt, fetchImpl });
-    const refinedBoxes = parseBoxResponse(second.content, parsed.elements.length);
-    if (refinedBoxes.length > 0) {
-      boxes = refinedBoxes;
+    if (parsed.elements.length > 0) {
+      const refinedBoxes = parseBoxResponse(second.content, parsed.elements.length);
+      if (refinedBoxes.length > 0) {
+        boxes = refinedBoxes;
+        refined = true;
+      }
+    } else {
+      const refinedGeneratedElements = parseGeneratedElementResponse(second.content);
+      if (refinedGeneratedElements.length > 0) {
+        generatedElements = refinedGeneratedElements;
+        refined = true;
+      }
+    }
+    if (refined) {
       refined = true;
     }
     usage = mergeUsage(usage, second.usage);
   }
 
-  return { boxes, model, refined, usage };
+  return { boxes, generatedElements, model, refined, usage };
 }

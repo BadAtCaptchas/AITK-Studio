@@ -3,8 +3,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { generateOpenRouterBoxPatches } from '@/server/openRouterBoxes';
+import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
 import { isPathInside, realpathForPath } from '@/server/remoteCaptionSecurity';
 import { getDatasetsRoot, getOpenRouterApiKey } from '@/server/settings';
+import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export const runtime = 'nodejs';
 
@@ -25,6 +27,10 @@ function dataUrlFromBytes(bytes: Buffer, mimeType: string) {
   return `data:${mimeType};base64,${bytes.toString('base64')}`;
 }
 
+function imageMimeForPath(filepath: string) {
+  return IMAGE_MIME_BY_EXT[path.extname(filepath).toLowerCase()] || null;
+}
+
 function boolFromValue(value: unknown) {
   return value === true || value === 'true' || value === '1';
 }
@@ -37,6 +43,21 @@ function numberFromValue(value: unknown) {
 async function plainImageDataUrl(imgPath: unknown) {
   if (typeof imgPath !== 'string' || !imgPath.trim()) {
     throw new Error('imgPath is required.');
+  }
+
+  const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
+  if (remoteAsset) {
+    if (remoteAsset.type !== 'img') {
+      throw new Error('Auto Boxes works on image assets only.');
+    }
+    const worker = await getRemoteWorker(remoteAsset.workerID);
+    const remoteResponse = await remoteFetch(worker, `/api/img/${encodeURIComponent(remoteAsset.path)}`);
+    const responseMime = remoteResponse.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() || '';
+    const mimeType = ALLOWED_UPLOAD_MIMES.has(responseMime) ? responseMime : imageMimeForPath(remoteAsset.path);
+    if (!mimeType) {
+      throw new Error('Auto Boxes supports JPG, PNG, WebP, GIF, and BMP images.');
+    }
+    return dataUrlFromBytes(Buffer.from(await remoteResponse.arrayBuffer()), mimeType);
   }
 
   const datasetsRoot = await getDatasetsRoot();
@@ -58,8 +79,7 @@ async function plainImageDataUrl(imgPath: unknown) {
     throw new Error('Image file was not found.');
   }
 
-  const ext = path.extname(realImagePath).toLowerCase();
-  const mimeType = IMAGE_MIME_BY_EXT[ext];
+  const mimeType = imageMimeForPath(realImagePath);
   if (!mimeType) {
     throw new Error('Auto Boxes supports JPG, PNG, WebP, GIF, and BMP images.');
   }

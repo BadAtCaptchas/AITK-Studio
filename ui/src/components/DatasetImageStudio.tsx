@@ -10,10 +10,14 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  EyeOff,
   FileJson2,
   Hand,
   Keyboard,
+  Layers,
   Loader2,
+  Lock,
   Maximize2,
   MoreVertical,
   MousePointer2,
@@ -25,6 +29,7 @@ import {
   Trash2,
   Type,
   Undo2,
+  Unlock,
   WandSparkles,
   ZoomIn,
 } from 'lucide-react';
@@ -40,6 +45,15 @@ import {
   randomId,
 } from '@/utils/encryptedDatasets';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
+import {
+  chooseDragTarget,
+  cycleHitSelection,
+  detectResizeHandle,
+  hitTestBoxes,
+  RESIZE_HANDLES,
+  resizeOrMoveBox,
+  type DragHandle,
+} from '@/utils/annotationGeometry';
 import {
   addIdeogramElement,
   applyGeneratedBoxPatches,
@@ -73,7 +87,6 @@ export type DatasetStudioItem =
     };
 
 type ToolMode = 'box' | 'text' | 'select' | 'move' | 'pan';
-type DragHandle = 'move' | 'nw' | 'ne' | 'sw' | 'se';
 type CaptionTab = 'caption' | 'json';
 type ImageSize = { width: number; height: number };
 
@@ -160,27 +173,6 @@ function resolveBoxColor(box: IdeogramBox, index: number, selected: boolean) {
   if (selected) return '#22D3EE';
   if (box.type === 'text') return '#F59E0B';
   return box.color || BOX_COLORS[index % BOX_COLORS.length];
-}
-
-function resizeOrMoveBox(box: NormalizedBox, dx: number, dy: number, handle: DragHandle): NormalizedBox {
-  let { x1, y1, x2, y2 } = box;
-  if (handle === 'move') {
-    const width = x2 - x1;
-    const height = y2 - y1;
-    x1 = Math.max(0, Math.min(1000 - width, x1 + dx));
-    y1 = Math.max(0, Math.min(1000 - height, y1 + dy));
-    return { x1, y1, x2: x1 + width, y2: y1 + height };
-  }
-
-  if (handle.includes('w')) x1 = Math.max(0, Math.min(x2 - MIN_BOX_SPAN, x1 + dx));
-  if (handle.includes('e')) x2 = Math.min(1000, Math.max(x1 + MIN_BOX_SPAN, x2 + dx));
-  if (handle.includes('n')) y1 = Math.max(0, Math.min(y2 - MIN_BOX_SPAN, y1 + dy));
-  if (handle.includes('s')) y2 = Math.min(1000, Math.max(y1 + MIN_BOX_SPAN, y2 + dy));
-  return { x1, y1, x2, y2 };
-}
-
-function boxContainsPoint(box: NormalizedBox, point: { x: number; y: number }) {
-  return point.x >= box.x1 && point.x <= box.x2 && point.y >= box.y1 && point.y <= box.y2;
 }
 
 function ToolButton({
@@ -454,30 +446,91 @@ function StudioMedia({
   );
 }
 
+function handleCursor(handle: DragHandle | null) {
+  if (!handle) return 'default';
+  if (handle === 'move') return 'move';
+  if (handle === 'n' || handle === 's') return 'ns-resize';
+  if (handle === 'e' || handle === 'w') return 'ew-resize';
+  if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
+  return 'nwse-resize';
+}
+
+function handleClassName(handle: Exclude<DragHandle, 'move'>) {
+  return classNames('absolute rounded-sm border border-gray-950 bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.35)]', {
+    'left-0 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2': handle === 'nw',
+    'left-1/2 top-0 h-2 w-5 -translate-x-1/2 -translate-y-1/2': handle === 'n',
+    'right-0 top-0 h-3 w-3 translate-x-1/2 -translate-y-1/2': handle === 'ne',
+    'right-0 top-1/2 h-5 w-2 -translate-y-1/2 translate-x-1/2': handle === 'e',
+    'bottom-0 right-0 h-3 w-3 translate-x-1/2 translate-y-1/2': handle === 'se',
+    'bottom-0 left-1/2 h-2 w-5 -translate-x-1/2 translate-y-1/2': handle === 's',
+    'bottom-0 left-0 h-3 w-3 -translate-x-1/2 translate-y-1/2': handle === 'sw',
+    'left-0 top-1/2 h-5 w-2 -translate-x-1/2 -translate-y-1/2': handle === 'w',
+  });
+}
+
+function layerLabelForElement(element: any, index: number) {
+  const type = element?.type === 'text' ? 'text' : 'obj';
+  const value = type === 'text' ? element?.text || element?.desc : element?.desc;
+  const label = value == null ? '' : String(value).trim();
+  return label || (type === 'text' ? `Text ${index + 1}` : `Object ${index + 1}`);
+}
+
 function AnnotationLayer({
   boxes,
   activeTool,
   selectedElementIndex,
+  hiddenElementIndexes,
+  lockedElementIndexes,
   onSelect,
   onCreate,
   onChangeBox,
+  onOverlapStackChange,
 }: {
   boxes: IdeogramBox[];
   activeTool: ToolMode;
   selectedElementIndex: number | null;
+  hiddenElementIndexes: Set<number>;
+  lockedElementIndexes: Set<number>;
   onSelect: (elementIndex: number | null) => void;
   onCreate: (type: IdeogramElementType, box: NormalizedBox) => void;
   onChangeBox: (elementIndex: number, box: NormalizedBox) => void;
+  onOverlapStackChange: (elementIndexes: number[]) => void;
 }) {
   const layerRef = useRef<HTMLDivElement>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const [dragPreview, setDragPreview] = useState<{ elementIndex: number; box: NormalizedBox } | null>(null);
   const [newBoxPreview, setNewBoxPreview] = useState<NormalizedBox | null>(null);
-  const [stackPicker, setStackPicker] = useState<{ x: number; y: number; boxes: IdeogramBox[] } | null>(null);
+  const [cursor, setCursor] = useState('default');
+  const [cycleToast, setCycleToast] = useState<{ x: number; y: number; count: number; index: number } | null>(null);
   const drawingType: IdeogramElementType | null = activeTool === 'box' ? 'obj' : activeTool === 'text' ? 'text' : null;
 
+  const visibleBoxes = useMemo(
+    () => boxes.filter(box => !hiddenElementIndexes.has(box.elementIndex)),
+    [boxes, hiddenElementIndexes],
+  );
+  const selectedBox = visibleBoxes.find(box => box.elementIndex === selectedElementIndex) || null;
+
+  const orderedBoxes = useMemo(
+    () =>
+      [...visibleBoxes].sort((left, right) => {
+        if (left.elementIndex === selectedElementIndex) return 1;
+        if (right.elementIndex === selectedElementIndex) return -1;
+        return left.elementIndex - right.elementIndex;
+      }),
+    [selectedElementIndex, visibleBoxes],
+  );
+
   useEffect(() => {
-    setStackPicker(null);
-  }, [activeTool, boxes]);
+    onOverlapStackChange([]);
+    setCycleToast(null);
+  }, [activeTool, boxes, hiddenElementIndexes, onOverlapStackChange]);
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
 
   const pointToNorm = useCallback((clientX: number, clientY: number) => {
     const rect = layerRef.current?.getBoundingClientRect();
@@ -488,127 +541,212 @@ function AnnotationLayer({
     };
   }, []);
 
-  const beginBoxDrag = (event: ReactPointerEvent<HTMLElement>, box: IdeogramBox, handle: DragHandle) => {
-    if (drawingType) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setStackPicker(null);
-
-    const start = pointToNorm(event.clientX, event.clientY);
-    if (!start) return;
-    const layerRect = layerRef.current?.getBoundingClientRect();
-    const pickerPosition = layerRect
-      ? {
-          x: Math.max(8, Math.min(layerRect.width - 220, event.clientX - layerRect.left + 8)),
-          y: Math.max(8, Math.min(layerRect.height - 160, event.clientY - layerRect.top + 8)),
-        }
-      : null;
-    const originalSelectedElementIndex = selectedElementIndex;
-    const hitStack =
-      handle === 'move'
-        ? boxes
-            .filter(candidate => boxContainsPoint(candidate, start))
-            .reverse()
-        : [];
-    const selectedHit =
-      handle === 'move' && originalSelectedElementIndex != null
-        ? hitStack.find(candidate => candidate.elementIndex === originalSelectedElementIndex)
-        : null;
-    const dragBox = selectedHit || hitStack[0] || box;
-
-    onSelect(dragBox.elementIndex);
-
-    const startBox = { x1: dragBox.x1, y1: dragBox.y1, x2: dragBox.x2, y2: dragBox.y2 };
-    let latest = startBox;
-    let moved = false;
-
-    const onMove = (moveEvent: PointerEvent) => {
-      const point = pointToNorm(moveEvent.clientX, moveEvent.clientY);
-      if (!point) return;
-      const dx = point.x - start.x;
-      const dy = point.y - start.y;
-      moved = moved || Math.abs(dx) > CLICK_DRAG_TOLERANCE || Math.abs(dy) > CLICK_DRAG_TOLERANCE;
-      latest = resizeOrMoveBox(startBox, dx, dy, handle);
-      setDragPreview({ elementIndex: dragBox.elementIndex, box: latest });
+  const pointToLayer = useCallback((clientX: number, clientY: number) => {
+    const rect = layerRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      x: Math.max(8, Math.min(rect.width - 64, clientX - rect.left + 10)),
+      y: Math.max(8, Math.min(rect.height - 32, clientY - rect.top + 10)),
     };
+  }, []);
 
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      setDragPreview(null);
-      if (!moved && handle === 'move' && hitStack.length > 1) {
-        if (pickerPosition) {
-          setStackPicker({ ...pickerPosition, boxes: hitStack });
-        }
+  const handleTolerance = useCallback(() => {
+    const rect = layerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return { x: 24, y: 24 };
+    return {
+      x: Math.max(12, (16 / rect.width) * 1000),
+      y: Math.max(12, (16 / rect.height) * 1000),
+    };
+  }, []);
+
+  const showCycleToast = useCallback(
+    (clientX: number, clientY: number, hits: IdeogramBox[], selected: number | null) => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      if (hits.length <= 1 || selected == null) {
+        setCycleToast(null);
         return;
       }
-      if (moved) onChangeBox(dragBox.elementIndex, latest);
-    };
+      const layerPoint = pointToLayer(clientX, clientY);
+      if (!layerPoint) return;
+      const index = Math.max(0, hits.findIndex(box => box.elementIndex === selected));
+      setCycleToast({ ...layerPoint, count: hits.length, index: index + 1 });
+      toastTimerRef.current = window.setTimeout(() => setCycleToast(null), 900);
+    },
+    [pointToLayer],
+  );
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  };
-
-  const beginDraw = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.currentTarget !== event.target) return;
-    setStackPicker(null);
-    if (!drawingType) {
-      onSelect(null);
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const start = pointToNorm(event.clientX, event.clientY);
-    if (!start) return;
-    let latest: NormalizedBox = { y1: start.y, x1: start.x, y2: start.y, x2: start.x };
-    setNewBoxPreview(latest);
-
-    const onMove = (moveEvent: PointerEvent) => {
-      const point = pointToNorm(moveEvent.clientX, moveEvent.clientY);
-      if (!point) return;
-      latest = rectToBox({
-        x: Math.min(start.x, point.x),
-        y: Math.min(start.y, point.y),
-        w: Math.abs(point.x - start.x),
-        h: Math.abs(point.y - start.y),
-      });
-      setNewBoxPreview(latest);
-    };
-
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      setNewBoxPreview(null);
-      if (latest.x2 - latest.x1 >= MIN_BOX_SPAN && latest.y2 - latest.y1 >= MIN_BOX_SPAN) {
-        onCreate(drawingType, latest);
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (drawingType) {
+        setCursor('crosshair');
+        return;
       }
-    };
+      const point = pointToNorm(event.clientX, event.clientY);
+      if (!point) return;
+      const handle =
+        selectedBox && !lockedElementIndexes.has(selectedBox.elementIndex)
+          ? detectResizeHandle(selectedBox, point, handleTolerance())
+          : null;
+      if (handle) {
+        setCursor(handleCursor(handle));
+        return;
+      }
+      const hits = hitTestBoxes(visibleBoxes, point, {
+        includeLocked: true,
+        hiddenElementIndexes,
+      });
+      const target = chooseDragTarget(hits, selectedElementIndex, lockedElementIndexes);
+      setCursor(target ? 'move' : hits.length > 0 ? 'pointer' : 'default');
+    },
+    [drawingType, handleTolerance, hiddenElementIndexes, lockedElementIndexes, pointToNorm, selectedBox, selectedElementIndex, visibleBoxes],
+  );
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  };
+  const beginDraw = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, type: IdeogramElementType) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const start = pointToNorm(event.clientX, event.clientY);
+      if (!start) return;
+      let latest: NormalizedBox = { y1: start.y, x1: start.x, y2: start.y, x2: start.x };
+      setNewBoxPreview(latest);
+
+      const onMove = (moveEvent: PointerEvent) => {
+        const point = pointToNorm(moveEvent.clientX, moveEvent.clientY);
+        if (!point) return;
+        latest = rectToBox({
+          x: Math.min(start.x, point.x),
+          y: Math.min(start.y, point.y),
+          w: Math.abs(point.x - start.x),
+          h: Math.abs(point.y - start.y),
+        });
+        setNewBoxPreview(latest);
+      };
+
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        setNewBoxPreview(null);
+        if (latest.x2 - latest.x1 >= MIN_BOX_SPAN && latest.y2 - latest.y1 >= MIN_BOX_SPAN) {
+          onCreate(type, latest);
+        }
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [onCreate, pointToNorm],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      if (drawingType) {
+        beginDraw(event, drawingType);
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const start = pointToNorm(event.clientX, event.clientY);
+      if (!start) return;
+
+      const handle =
+        selectedBox && !lockedElementIndexes.has(selectedBox.elementIndex)
+          ? detectResizeHandle(selectedBox, start, handleTolerance())
+          : null;
+      const hits = hitTestBoxes(visibleBoxes, start, {
+        includeLocked: true,
+        hiddenElementIndexes,
+      }) as IdeogramBox[];
+      onOverlapStackChange(hits.map(box => box.elementIndex));
+
+      if (!handle && hits.length === 0) {
+        onSelect(null);
+        return;
+      }
+
+      if (!handle && hits.length > 0 && !chooseDragTarget(hits, selectedElementIndex, lockedElementIndexes)) {
+        const nextSelection = cycleHitSelection(hits, selectedElementIndex, event.shiftKey ? -1 : 1);
+        onSelect(nextSelection);
+        showCycleToast(event.clientX, event.clientY, hits, nextSelection);
+        return;
+      }
+
+      const dragBox = handle && selectedBox ? selectedBox : chooseDragTarget(hits, selectedElementIndex, lockedElementIndexes);
+      if (!dragBox) return;
+      const dragHandle: DragHandle = handle || 'move';
+      onSelect(dragBox.elementIndex);
+
+      const startBox = { x1: dragBox.x1, y1: dragBox.y1, x2: dragBox.x2, y2: dragBox.y2 };
+      let latest = startBox;
+      let moved = false;
+
+      const onMove = (moveEvent: PointerEvent) => {
+        const point = pointToNorm(moveEvent.clientX, moveEvent.clientY);
+        if (!point) return;
+        const dx = point.x - start.x;
+        const dy = point.y - start.y;
+        moved = moved || Math.abs(dx) > CLICK_DRAG_TOLERANCE || Math.abs(dy) > CLICK_DRAG_TOLERANCE;
+        latest = resizeOrMoveBox(startBox, dx, dy, dragHandle, MIN_BOX_SPAN);
+        setDragPreview({ elementIndex: dragBox.elementIndex, box: latest });
+      };
+
+      const onUp = (upEvent: PointerEvent) => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        setDragPreview(null);
+        if (moved) {
+          onChangeBox(dragBox.elementIndex, latest);
+          return;
+        }
+        if (!handle) {
+          const nextSelection = cycleHitSelection(hits, selectedElementIndex, upEvent.shiftKey ? -1 : 1);
+          onSelect(nextSelection);
+          showCycleToast(upEvent.clientX, upEvent.clientY, hits, nextSelection);
+        }
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [
+      beginDraw,
+      drawingType,
+      handleTolerance,
+      hiddenElementIndexes,
+      lockedElementIndexes,
+      onChangeBox,
+      onOverlapStackChange,
+      onSelect,
+      pointToNorm,
+      selectedBox,
+      selectedElementIndex,
+      showCycleToast,
+      visibleBoxes,
+    ],
+  );
 
   return (
     <div
       ref={layerRef}
-      onPointerDown={beginDraw}
-      className={classNames('absolute inset-0 touch-none', {
-        'cursor-crosshair': drawingType,
-        'cursor-default': !drawingType,
-      })}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      className="absolute inset-0 touch-none"
+      style={{ cursor: drawingType ? 'crosshair' : cursor }}
     >
-      {boxes.map((box, index) => {
+      {orderedBoxes.map(box => {
+        const sourceIndex = boxes.findIndex(candidate => candidate.elementIndex === box.elementIndex);
         const preview = dragPreview?.elementIndex === box.elementIndex ? dragPreview.box : box;
         const selected = selectedElementIndex === box.elementIndex;
-        const color = resolveBoxColor(box, index, selected);
+        const locked = lockedElementIndexes.has(box.elementIndex);
+        const color = resolveBoxColor(box, sourceIndex, selected);
         return (
           <div
             key={box.elementIndex}
-            onPointerDown={event => beginBoxDrag(event, box, 'move')}
-            className={classNames('absolute border-2', {
-              'pointer-events-none': drawingType,
-              'shadow-[0_0_0_1px_rgba(255,255,255,0.75)]': selected,
+            className={classNames('pointer-events-none absolute border-2', {
+              'shadow-[0_0_0_1px_rgba(255,255,255,0.75),0_0_0_4px_rgba(34,211,238,0.18)]': selected,
+              'border-dashed opacity-75': locked && !selected,
+              'opacity-55': selectedElementIndex != null && !selected,
             })}
             style={{
               left: `${preview.x1 / 10}%`,
@@ -616,36 +754,26 @@ function AnnotationLayer({
               width: `${Math.max(0, preview.x2 - preview.x1) / 10}%`,
               height: `${Math.max(0, preview.y2 - preview.y1) / 10}%`,
               borderColor: color,
+              zIndex: selected ? 20 : sourceIndex + 1,
             }}
           >
             <span
               title={box.label}
-              className="absolute left-0 top-0 max-w-[12rem] truncate px-1 py-0.5 text-[10px] font-semibold leading-none text-gray-950"
+              className="absolute left-0 top-0 flex max-w-[12rem] items-center gap-1 truncate px-1 py-0.5 text-[10px] font-semibold leading-none text-gray-950"
               style={{ backgroundColor: color }}
             >
-              {box.label || (box.type === 'text' ? 'text' : 'object')}
+              {locked && <Lock className="h-2.5 w-2.5" />}
+              <span className="truncate">{box.label || (box.type === 'text' ? 'text' : 'object')}</span>
             </span>
             {selected &&
-              (['nw', 'ne', 'sw', 'se'] as const).map(handle => (
-                <button
-                  key={handle}
-                  type="button"
-                  aria-label={`Resize ${handle}`}
-                  onPointerDown={event => beginBoxDrag(event, { ...box, ...preview }, handle)}
-                  className={classNames('absolute h-3 w-3 rounded-sm border border-gray-950 bg-white', {
-                    'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize': handle === 'nw',
-                    'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize': handle === 'ne',
-                    'bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize': handle === 'sw',
-                    'bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize': handle === 'se',
-                  })}
-                />
-              ))}
+              !locked &&
+              RESIZE_HANDLES.map(handle => <span key={handle} aria-hidden="true" className={handleClassName(handle)} />)}
           </div>
         );
       })}
       {newBoxPreview && (
         <div
-          className="absolute border-2 border-dashed border-white bg-white/10"
+          className="pointer-events-none absolute border-2 border-dashed border-white bg-white/10"
           style={{
             left: `${newBoxPreview.x1 / 10}%`,
             top: `${newBoxPreview.y1 / 10}%`,
@@ -654,39 +782,128 @@ function AnnotationLayer({
           }}
         />
       )}
-      {stackPicker && (
+      {cycleToast && (
         <div
-          className="absolute z-30 w-56 overflow-hidden rounded-md border border-gray-700 bg-gray-950/95 text-xs text-gray-100 shadow-2xl backdrop-blur"
-          style={{ left: stackPicker.x, top: stackPicker.y }}
-          onPointerDown={event => event.stopPropagation()}
+          className="pointer-events-none absolute z-40 rounded-md border border-blue-400/40 bg-gray-950/90 px-2 py-1 text-[11px] font-semibold text-blue-100 shadow-xl"
+          style={{ left: cycleToast.x, top: cycleToast.y }}
         >
-          <div className="border-b border-gray-800 px-3 py-2 font-semibold text-gray-300">Select Region</div>
-          <div className="max-h-56 overflow-y-auto">
-            {stackPicker.boxes.map((box, index) => {
-              const selected = selectedElementIndex === box.elementIndex;
-              const color = resolveBoxColor(box, boxes.findIndex(candidate => candidate.elementIndex === box.elementIndex), selected);
-              return (
-                <button
-                  key={box.elementIndex}
-                  type="button"
-                  className={classNames('flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-800', {
-                    'bg-blue-600/25 text-blue-100': selected,
-                  })}
-                  onClick={() => {
-                    onSelect(box.elementIndex);
-                    setStackPicker(null);
-                  }}
-                >
-                  <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
-                  <span className="min-w-0 flex-1 truncate">{box.label || (box.type === 'text' ? 'Text region' : 'Object')}</span>
-                  <span className="text-[10px] text-gray-500">#{index + 1}</span>
-                </button>
-              );
-            })}
-          </div>
+          {cycleToast.index}/{cycleToast.count}
         </div>
       )}
     </div>
+  );
+}
+
+function LayersPanel({
+  elements,
+  boxes,
+  selectedElementIndex,
+  hiddenElementIndexes,
+  lockedElementIndexes,
+  onSelect,
+  onToggleHidden,
+  onToggleLocked,
+}: {
+  elements: any[];
+  boxes: IdeogramBox[];
+  selectedElementIndex: number | null;
+  hiddenElementIndexes: Set<number>;
+  lockedElementIndexes: Set<number>;
+  onSelect: (elementIndex: number) => void;
+  onToggleHidden: (elementIndex: number) => void;
+  onToggleLocked: (elementIndex: number) => void;
+}) {
+  const rowRefs = useRef(new Map<number, HTMLButtonElement | null>());
+  const rows = useMemo(
+    () =>
+      elements
+        .map((element, elementIndex) => ({
+          element,
+          elementIndex,
+          box: boxes.find(candidate => candidate.elementIndex === elementIndex) || null,
+        }))
+        .reverse(),
+    [boxes, elements],
+  );
+
+  useEffect(() => {
+    if (selectedElementIndex == null) return;
+    rowRefs.current.get(selectedElementIndex)?.scrollIntoView({ block: 'nearest' });
+  }, [selectedElementIndex]);
+
+  return (
+    <section className="overflow-hidden rounded-md border border-gray-800 bg-gray-950/80">
+      <div className="flex h-12 items-center justify-between border-b border-gray-800 px-4">
+        <div className="flex items-center gap-2">
+          <Layers className="h-4 w-4 text-blue-300" />
+          <h3 className="text-sm font-semibold text-gray-100">Layers</h3>
+        </div>
+        <span className="text-xs text-gray-500">{elements.length}</span>
+      </div>
+      <div className="max-h-56 overflow-y-auto">
+        {rows.length === 0 ? (
+          <div className="px-4 py-3 text-sm text-gray-500">No layers</div>
+        ) : (
+          rows.map(({ element, elementIndex, box }) => {
+            const selected = selectedElementIndex === elementIndex;
+            const hidden = hiddenElementIndexes.has(elementIndex);
+            const locked = lockedElementIndexes.has(elementIndex);
+            const type: IdeogramElementType = element?.type === 'text' ? 'text' : 'obj';
+            const sourceIndex = boxes.findIndex(candidate => candidate.elementIndex === elementIndex);
+            const color = box ? resolveBoxColor(box, sourceIndex, selected) : BOX_COLORS[elementIndex % BOX_COLORS.length];
+            return (
+              <div
+                key={elementIndex}
+                className={classNames('group grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 border-b border-gray-900 px-2 py-1.5 last:border-b-0', {
+                  'bg-blue-600/20': selected,
+                  'opacity-50': hidden,
+                })}
+              >
+                <button
+                  type="button"
+                  title={hidden ? 'Show layer' : 'Hide layer'}
+                  onClick={() => onToggleHidden(elementIndex)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                >
+                  {hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+                <button
+                  ref={node => {
+                    rowRefs.current.set(elementIndex, node);
+                  }}
+                  type="button"
+                  onClick={() => onSelect(elementIndex)}
+                  className="grid min-w-0 grid-cols-[auto_auto_1fr] items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-gray-800"
+                >
+                  {type === 'text' ? <Type className="h-3.5 w-3.5 text-amber-300" /> : <SquareDashed className="h-3.5 w-3.5 text-cyan-300" />}
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-gray-100">{layerLabelForElement(element, elementIndex)}</span>
+                    <span className="block truncate text-[11px] text-gray-500">
+                      {type === 'text' ? 'Text' : 'Object'} · {box ? 'Box' : 'No box'} · #{elementIndex + 1}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  title={locked ? 'Unlock layer' : 'Lock layer'}
+                  onClick={() => onToggleLocked(elementIndex)}
+                  className={classNames('flex h-8 w-8 items-center justify-center rounded-md hover:bg-gray-800 hover:text-gray-100', {
+                    'text-amber-300': locked,
+                    'text-gray-500': !locked,
+                  })}
+                >
+                  {locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                </button>
+                <span className="rounded border border-gray-800 px-1.5 py-0.5 text-[10px] uppercase text-gray-500">
+                  {type === 'text' ? 'TXT' : 'OBJ'}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -720,6 +937,9 @@ export default function DatasetImageStudio({
   const [autoBoxMessage, setAutoBoxMessage] = useState('');
   const [encryptedOpenRouterConfirmed, setEncryptedOpenRouterConfirmed] = useState(false);
   const [selectedImageSize, setSelectedImageSize] = useState<ImageSize | null>(null);
+  const [hiddenLayerIndexes, setHiddenLayerIndexes] = useState<Set<number>>(() => new Set());
+  const [lockedLayerIndexes, setLockedLayerIndexes] = useState<Set<number>>(() => new Set());
+  const [overlapElementStack, setOverlapElementStack] = useState<number[]>([]);
   const [encryptedCaptionPaths, setEncryptedCaptionPaths] = useState<Record<string, string>>({});
   const captionCacheRef = useRef(new Map<string, { caption: string; saved: string; loaded: boolean }>());
   const saveCaptionRef = useRef<() => Promise<void>>(async () => undefined);
@@ -766,6 +986,9 @@ export default function DatasetImageStudio({
     selectedKeyRef.current = selectedKey;
     setAutoBoxMessage('');
     setSelectedImageSize(null);
+    setHiddenLayerIndexes(new Set());
+    setLockedLayerIndexes(new Set());
+    setOverlapElementStack([]);
   }, [selectedKey]);
 
   useEffect(() => {
@@ -837,6 +1060,25 @@ export default function DatasetImageStudio({
     if (!isIdeogram || selectedElementIndex == null) return;
     if (!captionParse.elements[selectedElementIndex]) setSelectedElementIndex(null);
   }, [captionParse, isIdeogram, selectedElementIndex]);
+
+  useEffect(() => {
+    if (!isIdeogram) {
+      setHiddenLayerIndexes(new Set());
+      setLockedLayerIndexes(new Set());
+      setOverlapElementStack([]);
+      return;
+    }
+    const elementCount = captionParse.elements.length;
+    setHiddenLayerIndexes(previous => {
+      const next = new Set([...previous].filter(elementIndex => elementIndex < elementCount));
+      return next.size === previous.size ? previous : next;
+    });
+    setLockedLayerIndexes(previous => {
+      const next = new Set([...previous].filter(elementIndex => elementIndex < elementCount));
+      return next.size === previous.size ? previous : next;
+    });
+    setOverlapElementStack(previous => previous.filter(elementIndex => elementIndex < elementCount));
+  }, [captionParse, isIdeogram]);
 
   useEffect(() => {
     if (!selectedKey || autoSelectKeyRef.current === selectedKey) return;
@@ -1062,6 +1304,47 @@ export default function DatasetImageStudio({
     [mutateCaption],
   );
 
+  const handleToggleLayerHidden = useCallback((elementIndex: number) => {
+    setHiddenLayerIndexes(previous => {
+      const next = new Set(previous);
+      if (next.has(elementIndex)) {
+        next.delete(elementIndex);
+      } else {
+        next.add(elementIndex);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleLayerLocked = useCallback((elementIndex: number) => {
+    setLockedLayerIndexes(previous => {
+      const next = new Set(previous);
+      if (next.has(elementIndex)) {
+        next.delete(elementIndex);
+      } else {
+        next.add(elementIndex);
+      }
+      return next;
+    });
+  }, []);
+
+  const cycleOverlapSelection = useCallback(
+    (direction: 1 | -1) => {
+      if (overlapElementStack.length === 0) return;
+      setSelectedElementIndex(current => {
+        const currentIndex = current == null ? -1 : overlapElementStack.indexOf(current);
+        const nextIndex =
+          currentIndex < 0
+            ? direction > 0
+              ? 0
+              : overlapElementStack.length - 1
+            : (currentIndex + direction + overlapElementStack.length) % overlapElementStack.length;
+        return overlapElementStack[nextIndex] ?? current;
+      });
+    },
+    [overlapElementStack],
+  );
+
   const handleDeleteSelectedElement = useCallback(() => {
     if (selectedElementIndex == null) return;
     mutateCaption(data => deleteIdeogramElement(data, selectedElementIndex), null);
@@ -1115,6 +1398,9 @@ export default function DatasetImageStudio({
       if (isTyping) return;
       if (event.key === 'ArrowLeft') selectIndex(selectedIndex - 1);
       if (event.key === 'ArrowRight') selectIndex(selectedIndex + 1);
+      if (event.key === 'Escape') setSelectedElementIndex(null);
+      if (event.key === '[') cycleOverlapSelection(-1);
+      if (event.key === ']') cycleOverlapSelection(1);
       if (event.key === 'Delete' || event.key === 'Backspace') handleDeleteSelectedElement();
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
@@ -1127,7 +1413,7 @@ export default function DatasetImageStudio({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleDeleteSelectedElement, redo, saveCaption, selectIndex, selectedIndex, undo]);
+  }, [cycleOverlapSelection, handleDeleteSelectedElement, redo, saveCaption, selectIndex, selectedIndex, undo]);
 
   const thumbRange = useMemo(() => {
     const half = Math.floor(THUMB_WINDOW / 2);
@@ -1258,9 +1544,12 @@ export default function DatasetImageStudio({
                   boxes={boxes}
                   activeTool={activeTool}
                   selectedElementIndex={selectedElementIndex}
+                  hiddenElementIndexes={hiddenLayerIndexes}
+                  lockedElementIndexes={lockedLayerIndexes}
                   onSelect={setSelectedElementIndex}
                   onCreate={handleCreateBox}
                   onChangeBox={handleChangeBox}
+                  onOverlapStackChange={setOverlapElementStack}
                 />
               )}
             </StudioMedia>
@@ -1342,7 +1631,19 @@ export default function DatasetImageStudio({
 
         <aside className="flex max-h-[34dvh] min-h-[190px] flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-[#080d12] xl:max-h-none xl:min-h-0 xl:w-[410px] xl:border-l xl:border-t-0">
           <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto p-2 md:p-3">
-            <section className="overflow-hidden rounded-md border border-gray-800 bg-gray-950/80">
+            {canAnnotate && captionParse.kind === 'ideogram' && (
+              <LayersPanel
+                elements={captionParse.elements}
+                boxes={boxes}
+                selectedElementIndex={selectedElementIndex}
+                hiddenElementIndexes={hiddenLayerIndexes}
+                lockedElementIndexes={lockedLayerIndexes}
+                onSelect={setSelectedElementIndex}
+                onToggleHidden={handleToggleLayerHidden}
+                onToggleLocked={handleToggleLayerLocked}
+              />
+            )}
+            <section className={classNames('overflow-hidden rounded-md border border-gray-800 bg-gray-950/80', canAnnotate ? 'mt-3' : '')}>
               <div className="flex h-12 items-center justify-between border-b border-gray-800 px-4">
                 <h3 className="text-sm font-semibold text-gray-100">Object Details</h3>
                 <ChevronDown className="h-4 w-4 text-gray-500" />

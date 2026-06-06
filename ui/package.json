@@ -18,6 +18,7 @@
     "test:dataset-combine": "tsc -p tsconfig.worker.json && node --test scripts/datasetCombine.test.mjs",
     "test:dataset-rename": "tsc -p tsconfig.worker.json && node --test scripts/datasetRename.test.mjs",
     "test:folder-import": "tsc -p tsconfig.worker.json && node --test scripts/folderImport.test.mjs",
+    "test:annotation-geometry": "tsc -p tsconfig.worker.json && node --test scripts/annotationGeometry.test.mjs",
     "test:ideogram-caption": "tsc -p tsconfig.worker.json && node --test scripts/ideogramCaption.test.mjs",
     "test:openrouter-boxes": "tsc -p tsconfig.worker.json && node --test scripts/openRouterBoxes.test.mjs",
     "test:encrypted-dataset-secrets": "tsc -p tsconfig.worker.json && node --test scripts/encryptedDatasetSecrets.test.mjs scripts/encryptedDatasets.test.mjs",

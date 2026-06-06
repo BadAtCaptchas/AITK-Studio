@@ -94,6 +94,7 @@ type DatasetImageStudioProps = {
 const MIN_BOX_SPAN = 8;
 const MAX_HISTORY = 50;
 const THUMB_WINDOW = 11;
+const CLICK_DRAG_TOLERANCE = 4;
 const BOX_COLORS = ['#22D3EE', '#F59E0B', '#A3E635', '#FB7185', '#818CF8', '#34D399'];
 
 function itemKey(item: DatasetStudioItem) {
@@ -161,6 +162,10 @@ function resizeOrMoveBox(box: NormalizedBox, dx: number, dy: number, handle: Dra
   if (handle.includes('n')) y1 = Math.max(0, Math.min(y2 - MIN_BOX_SPAN, y1 + dy));
   if (handle.includes('s')) y2 = Math.min(1000, Math.max(y1 + MIN_BOX_SPAN, y2 + dy));
   return { x1, y1, x2, y2 };
+}
+
+function boxContainsPoint(box: NormalizedBox, point: { x: number; y: number }) {
+  return point.x >= box.x1 && point.x <= box.x2 && point.y >= box.y1 && point.y <= box.y2;
 }
 
 function ToolButton({
@@ -462,25 +467,50 @@ function AnnotationLayer({
     if (drawingType) return;
     event.preventDefault();
     event.stopPropagation();
-    onSelect(box.elementIndex);
 
     const start = pointToNorm(event.clientX, event.clientY);
     if (!start) return;
-    const startBox = { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 };
+    const originalSelectedElementIndex = selectedElementIndex;
+    const hitStack =
+      handle === 'move'
+        ? boxes
+            .filter(candidate => boxContainsPoint(candidate, start))
+            .reverse()
+        : [];
+    const selectedHit =
+      handle === 'move' && originalSelectedElementIndex != null
+        ? hitStack.find(candidate => candidate.elementIndex === originalSelectedElementIndex)
+        : null;
+    const dragBox = selectedHit || hitStack[0] || box;
+
+    onSelect(dragBox.elementIndex);
+
+    const startBox = { x1: dragBox.x1, y1: dragBox.y1, x2: dragBox.x2, y2: dragBox.y2 };
     let latest = startBox;
+    let moved = false;
 
     const onMove = (moveEvent: PointerEvent) => {
       const point = pointToNorm(moveEvent.clientX, moveEvent.clientY);
       if (!point) return;
-      latest = resizeOrMoveBox(startBox, point.x - start.x, point.y - start.y, handle);
-      setDragPreview({ elementIndex: box.elementIndex, box: latest });
+      const dx = point.x - start.x;
+      const dy = point.y - start.y;
+      moved = moved || Math.abs(dx) > CLICK_DRAG_TOLERANCE || Math.abs(dy) > CLICK_DRAG_TOLERANCE;
+      latest = resizeOrMoveBox(startBox, dx, dy, handle);
+      setDragPreview({ elementIndex: dragBox.elementIndex, box: latest });
     };
 
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       setDragPreview(null);
-      onChangeBox(box.elementIndex, latest);
+      if (!moved && handle === 'move' && hitStack.length > 1) {
+        const anchorElementIndex = originalSelectedElementIndex ?? dragBox.elementIndex;
+        const anchorIndex = hitStack.findIndex(candidate => candidate.elementIndex === anchorElementIndex);
+        const nextIndex = anchorIndex >= 0 ? (anchorIndex + 1) % hitStack.length : 0;
+        onSelect(hitStack[nextIndex].elementIndex);
+        return;
+      }
+      if (moved) onChangeBox(dragBox.elementIndex, latest);
     };
 
     window.addEventListener('pointermove', onMove);

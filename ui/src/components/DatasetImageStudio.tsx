@@ -179,6 +179,27 @@ function normalizeHexColor(value: unknown) {
   return HEX_COLOR_PATTERN.test(color) ? color : null;
 }
 
+function componentToHex(value: number) {
+  return Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0').toUpperCase();
+}
+
+function sampleImageColorAt(image: HTMLImageElement, clientX: number, clientY: number) {
+  const rect = image.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0 || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+
+  const x = Math.max(0, Math.min(image.naturalWidth - 1, Math.floor(((clientX - rect.left) / rect.width) * image.naturalWidth)));
+  const y = Math.max(0, Math.min(image.naturalHeight - 1, Math.floor(((clientY - rect.top) / rect.height) * image.naturalHeight)));
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) return null;
+
+  context.drawImage(image, x, y, 1, 1, 0, 0, 1, 1);
+  const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+  return `#${componentToHex(red)}${componentToHex(green)}${componentToHex(blue)}`;
+}
+
 function resolveBoxColor(box: IdeogramBox, index: number, selected: boolean) {
   if (selected) return '#22D3EE';
   if (box.type === 'text') return '#F59E0B';
@@ -360,6 +381,9 @@ function StudioMedia({
   children,
   zoom,
   onNaturalSizeChange,
+  isSamplingColor,
+  onSampleColor,
+  onCancelColorSample,
 }: {
   item: DatasetStudioItem;
   datasetName: string;
@@ -368,6 +392,9 @@ function StudioMedia({
   children: React.ReactNode;
   zoom: number;
   onNaturalSizeChange?: (size: ImageSize | null) => void;
+  isSamplingColor?: boolean;
+  onSampleColor?: (color: string) => void;
+  onCancelColorSample?: () => void;
 }) {
   const encryptedItem = item.kind === 'encrypted' ? item.item : null;
   const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, cryptoKey, encryptedItem);
@@ -375,6 +402,7 @@ function StudioMedia({
   const src = item.kind === 'plain' ? getMediaUrl(item.path) : url;
   const name = itemName(item);
   const { ref: frameRef, size: frameSize } = useElementSize<HTMLDivElement>();
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
@@ -433,6 +461,7 @@ function StudioMedia({
       >
         {src ? (
           <img
+            ref={imageRef}
             src={src}
             alt={name}
             draggable={false}
@@ -451,6 +480,33 @@ function StudioMedia({
           />
         ) : null}
         {fittedSize ? children : null}
+        {fittedSize && isSamplingColor && (
+          <div
+            className="absolute inset-0 z-50 cursor-crosshair bg-cyan-400/5"
+            onPointerDown={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              const image = imageRef.current;
+              if (!image) return;
+              try {
+                const color = sampleImageColorAt(image, event.clientX, event.clientY);
+                if (color) onSampleColor?.(color);
+              } catch (error) {
+                console.error('Image color sample failed:', error);
+              }
+            }}
+            onDoubleClick={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              onCancelColorSample?.();
+            }}
+          >
+            <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-2 rounded-md border border-cyan-400/40 bg-gray-950/90 px-2 py-1 text-xs font-medium text-cyan-100 shadow-xl">
+              <Pipette className="h-3.5 w-3.5" />
+              Pick color
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -950,7 +1006,7 @@ export default function DatasetImageStudio({
   const [hiddenLayerIndexes, setHiddenLayerIndexes] = useState<Set<number>>(() => new Set());
   const [lockedLayerIndexes, setLockedLayerIndexes] = useState<Set<number>>(() => new Set());
   const [overlapElementStack, setOverlapElementStack] = useState<number[]>([]);
-  const [isEyeDropperSupported, setIsEyeDropperSupported] = useState(false);
+  const [activePaletteSamplerIndex, setActivePaletteSamplerIndex] = useState<number | null>(null);
   const [encryptedCaptionPaths, setEncryptedCaptionPaths] = useState<Record<string, string>>({});
   const captionCacheRef = useRef(new Map<string, { caption: string; saved: string; loaded: boolean }>());
   const saveCaptionRef = useRef<() => Promise<void>>(async () => undefined);
@@ -993,16 +1049,13 @@ export default function DatasetImageStudio({
   }, [captionText]);
 
   useEffect(() => {
-    setIsEyeDropperSupported(typeof window !== 'undefined' && 'EyeDropper' in window);
-  }, []);
-
-  useEffect(() => {
     selectedKeyRef.current = selectedKey;
     setAutoBoxMessage('');
     setSelectedImageSize(null);
     setHiddenLayerIndexes(new Set());
     setLockedLayerIndexes(new Set());
     setOverlapElementStack([]);
+    setActivePaletteSamplerIndex(null);
   }, [selectedKey]);
 
   useEffect(() => {
@@ -1407,20 +1460,22 @@ export default function DatasetImageStudio({
     [handleSelectedPaletteChange, selectedPalette],
   );
 
-  const handlePickPaletteColor = useCallback(
-    async (index: number) => {
-      const EyeDropperConstructor = typeof window !== 'undefined' ? (window as any).EyeDropper : null;
-      if (!isEyeDropperSupported || !EyeDropperConstructor) {
-        return;
-      }
-      try {
-        const result = await new EyeDropperConstructor().open();
-        handleSelectedPaletteColorChange(index, result?.sRGBHex || '');
-      } catch (error) {
-        if ((error as Error)?.name !== 'AbortError') console.error('Color dropper failed:', error);
-      }
+  const handleStartPaletteSample = useCallback((index: number) => {
+    setActivePaletteSamplerIndex(index);
+    setActiveTool('select');
+  }, []);
+
+  const handleCancelPaletteSample = useCallback(() => {
+    setActivePaletteSamplerIndex(null);
+  }, []);
+
+  const handleSamplePaletteColor = useCallback(
+    (color: string) => {
+      if (activePaletteSamplerIndex == null) return;
+      handleSelectedPaletteColorChange(activePaletteSamplerIndex, color);
+      setActivePaletteSamplerIndex(null);
     },
-    [handleSelectedPaletteColorChange, isEyeDropperSupported],
+    [activePaletteSamplerIndex, handleSelectedPaletteColorChange],
   );
 
   const handleCaptionDescriptionChange = useCallback(
@@ -1447,7 +1502,13 @@ export default function DatasetImageStudio({
       if (isTyping) return;
       if (event.key === 'ArrowLeft') selectIndex(selectedIndex - 1);
       if (event.key === 'ArrowRight') selectIndex(selectedIndex + 1);
-      if (event.key === 'Escape') setSelectedElementIndex(null);
+      if (event.key === 'Escape') {
+        if (activePaletteSamplerIndex != null) {
+          handleCancelPaletteSample();
+        } else {
+          setSelectedElementIndex(null);
+        }
+      }
       if (event.key === '[') cycleOverlapSelection(-1);
       if (event.key === ']') cycleOverlapSelection(1);
       if (event.key === 'Delete' || event.key === 'Backspace') handleDeleteSelectedElement();
@@ -1462,7 +1523,17 @@ export default function DatasetImageStudio({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cycleOverlapSelection, handleDeleteSelectedElement, redo, saveCaption, selectIndex, selectedIndex, undo]);
+  }, [
+    activePaletteSamplerIndex,
+    cycleOverlapSelection,
+    handleCancelPaletteSample,
+    handleDeleteSelectedElement,
+    redo,
+    saveCaption,
+    selectIndex,
+    selectedIndex,
+    undo,
+  ]);
 
   const thumbRange = useMemo(() => {
     const half = Math.floor(THUMB_WINDOW / 2);
@@ -1586,6 +1657,9 @@ export default function DatasetImageStudio({
               cryptoKey={encryptedKey}
               zoom={zoom}
               onNaturalSizeChange={setSelectedImageSize}
+              isSamplingColor={activePaletteSamplerIndex != null}
+              onSampleColor={handleSamplePaletteColor}
+              onCancelColorSample={handleCancelPaletteSample}
             >
               {canAnnotate && (
                 <AnnotationLayer
@@ -1851,10 +1925,14 @@ export default function DatasetImageStudio({
                       <div className="flex flex-wrap gap-2">
                         {selectedPalette.map((rawColor: string, index: number) => {
                           const color = normalizeHexColor(rawColor) || BOX_COLORS[index % BOX_COLORS.length];
+                          const sampling = activePaletteSamplerIndex === index;
                           return (
                             <div
                               key={`${rawColor}-${index}`}
-                              className="inline-flex h-9 items-center gap-1 rounded-md border border-gray-800 bg-gray-900 px-1.5"
+                              className={classNames('inline-flex h-9 items-center gap-1 rounded-md border bg-gray-900 px-1.5', {
+                                'border-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.25)]': sampling,
+                                'border-gray-800': !sampling,
+                              })}
                             >
                               <span
                                 className="h-6 w-6 flex-shrink-0 rounded border border-gray-700"
@@ -1864,25 +1942,15 @@ export default function DatasetImageStudio({
                               <span className="w-[4.5rem] font-mono text-[11px] text-gray-400">{color}</span>
                               <button
                                 type="button"
-                                disabled={!isEyeDropperSupported}
-                                title={isEyeDropperSupported ? `Pick ${color} from screen` : 'Color dropper is not supported in this browser'}
-                                onClick={() => void handlePickPaletteColor(index)}
-                                className="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-35"
+                                title={sampling ? 'Cancel color sample' : `Sample ${color} from image`}
+                                onClick={() => (sampling ? handleCancelPaletteSample() : handleStartPaletteSample(index))}
+                                className={classNames('flex h-7 w-7 items-center justify-center rounded hover:bg-gray-800', {
+                                  'bg-cyan-500/20 text-cyan-100': sampling,
+                                  'text-gray-400 hover:text-gray-100': !sampling,
+                                })}
                               >
                                 <Pipette className="h-3.5 w-3.5" />
                               </button>
-                              <label
-                                title={`Choose ${color}`}
-                                className="relative flex h-7 w-7 cursor-pointer items-center justify-center overflow-hidden rounded text-gray-400 hover:bg-gray-800 hover:text-gray-100"
-                              >
-                                <span className="h-3.5 w-3.5 rounded-sm border border-gray-600" style={{ backgroundColor: color }} />
-                                <input
-                                  type="color"
-                                  value={color}
-                                  onChange={event => handleSelectedPaletteColorChange(index, event.target.value)}
-                                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                                />
-                              </label>
                               <button
                                 type="button"
                                 title={`Remove ${color}`}

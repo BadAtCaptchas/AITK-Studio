@@ -14,6 +14,11 @@ export type IdeogramBox = NormalizedBox & {
   color: string;
 };
 
+export type GeneratedBoxPatch = {
+  elementIndex: number;
+  bbox: [number, number, number, number];
+};
+
 export type IdeogramCaptionParse =
   | {
       kind: 'ideogram';
@@ -117,6 +122,31 @@ export function arrayToBox(value: unknown): NormalizedBox | null {
 export function boxToArray(box: NormalizedBox): [number, number, number, number] {
   const normalized = normalizeBox(box);
   return [normalized.y1, normalized.x1, normalized.y2, normalized.x2];
+}
+
+function hasUsableSpan(box: NormalizedBox, minSpan: number) {
+  return box.x2 - box.x1 >= minSpan && box.y2 - box.y1 >= minSpan;
+}
+
+export function normalizeGeneratedBoxPatches(
+  value: unknown,
+  elementCount: number,
+  minSpan = 1,
+): GeneratedBoxPatch[] {
+  const rawBoxes = isRecord(value) && Array.isArray(value.boxes) ? value.boxes : Array.isArray(value) ? value : [];
+  const byElementIndex = new Map<number, GeneratedBoxPatch>();
+
+  rawBoxes.forEach(rawBox => {
+    if (!isRecord(rawBox)) return;
+    const elementIndex = Number(rawBox.elementIndex);
+    if (!Number.isInteger(elementIndex) || elementIndex < 0 || elementIndex >= elementCount) return;
+
+    const box = arrayToBox(rawBox.bbox);
+    if (!box || !hasUsableSpan(box, minSpan)) return;
+    byElementIndex.set(elementIndex, { elementIndex, bbox: boxToArray(box) });
+  });
+
+  return Array.from(byElementIndex.values()).sort((left, right) => left.elementIndex - right.elementIndex);
 }
 
 export function boxToRect(box: NormalizedBox) {
@@ -231,6 +261,16 @@ export function updateIdeogramElementBox(data: Record<string, any>, elementIndex
   const element = getIdeogramElements(data)[elementIndex];
   if (!isRecord(element)) return;
   element.bbox = boxToArray(box);
+}
+
+export function applyGeneratedBoxPatches(data: Record<string, any>, patches: GeneratedBoxPatch[]) {
+  const elements = getIdeogramElements(data);
+  const normalizedPatches = normalizeGeneratedBoxPatches({ boxes: patches }, elements.length);
+  normalizedPatches.forEach(patch => {
+    const box = arrayToBox(patch.bbox);
+    if (box) updateIdeogramElementBox(data, patch.elementIndex, box);
+  });
+  return normalizedPatches.length;
 }
 
 export function updateIdeogramElementField(

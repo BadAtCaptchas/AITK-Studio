@@ -5,8 +5,10 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   addIdeogramElement,
+  applyGeneratedBoxPatches,
   boxToArray,
   deleteIdeogramElement,
+  normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
   rectToBox,
   serializeIdeogramCaption,
@@ -78,4 +80,40 @@ test('caption mutation helpers add, edit, delete, and serialize in schema order'
     'color_palette',
   ]);
   assert.deepEqual(parsed.compositional_deconstruction.elements[0].bbox, [10, 20, 300, 400]);
+});
+
+test('generated box patches clamp, filter, dedupe, and preserve bbox-only edits', () => {
+  const caption = sampleCaption();
+  caption.compositional_deconstruction.elements.push({
+    type: 'text',
+    text: 'TAXI',
+    desc: 'Roof text.',
+    bbox: [1, 1, 2, 2],
+  });
+
+  const patches = normalizeGeneratedBoxPatches(
+    {
+      boxes: [
+        { elementIndex: 0, bbox: [100.4, -20, 650, 1200] },
+        { elementIndex: 1, bbox: [200, 200, 200, 260] },
+        { elementIndex: 99, bbox: [0, 0, 100, 100] },
+        { elementIndex: 0, bbox: [120, 220, 640, 820] },
+      ],
+    },
+    caption.compositional_deconstruction.elements.length,
+    2,
+  );
+
+  assert.deepEqual(patches, [{ elementIndex: 0, bbox: [120, 220, 640, 820] }]);
+  assert.equal(applyGeneratedBoxPatches(caption, patches), 1);
+
+  const parsed = JSON.parse(serializeIdeogramCaption(caption));
+  assert.deepEqual(parsed.compositional_deconstruction.elements[0].bbox, [120, 220, 640, 820]);
+  assert.equal(parsed.compositional_deconstruction.elements[0].desc, 'Yellow taxi.');
+  assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[0]), [
+    'type',
+    'bbox',
+    'desc',
+    'color_palette',
+  ]);
 });

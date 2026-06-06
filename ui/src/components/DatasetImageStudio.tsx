@@ -42,13 +42,16 @@ import {
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import {
   addIdeogramElement,
+  applyGeneratedBoxPatches,
   boxToRect,
   cloneIdeogramData,
   deleteIdeogramElement,
   extractIdeogramBoxes,
+  normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
   rectToBox,
   serializeIdeogramCaption,
+  type GeneratedBoxPatch,
   type IdeogramBox,
   type IdeogramElementType,
   type NormalizedBox,
@@ -72,6 +75,7 @@ export type DatasetStudioItem =
 type ToolMode = 'box' | 'text' | 'select' | 'move' | 'pan';
 type DragHandle = 'move' | 'nw' | 'ne' | 'sw' | 'se';
 type CaptionTab = 'caption' | 'json';
+type ImageSize = { width: number; height: number };
 
 type DatasetImageStudioProps = {
   datasetName: string;
@@ -96,6 +100,10 @@ const MAX_HISTORY = 50;
 const THUMB_WINDOW = 11;
 const CLICK_DRAG_TOLERANCE = 4;
 const BOX_COLORS = ['#22D3EE', '#F59E0B', '#A3E635', '#FB7185', '#818CF8', '#34D399'];
+const OPENROUTER_BOX_MODELS = [
+  { value: 'x-ai/grok-4.3', label: 'x-ai/grok-4.3' },
+  { value: 'x-ai/grok-4-fast', label: 'x-ai/grok-4-fast' },
+];
 
 function itemKey(item: DatasetStudioItem) {
   return item.kind === 'plain' ? item.path : item.item.id;
@@ -139,6 +147,13 @@ function captionResponseToText(value: unknown) {
   if (value == null) return '';
   if (typeof value === 'string') return value;
   return JSON.stringify(value, null, 2);
+}
+
+function responseErrorMessage(error: any, fallback: string) {
+  const responseError = error?.response?.data?.error;
+  if (typeof responseError === 'string' && responseError.trim()) return responseError;
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
 }
 
 function resolveBoxColor(box: IdeogramBox, index: number, selected: boolean) {
@@ -342,6 +357,7 @@ function StudioMedia({
   cryptoKey,
   children,
   zoom,
+  onNaturalSizeChange,
 }: {
   item: DatasetStudioItem;
   datasetName: string;
@@ -349,6 +365,7 @@ function StudioMedia({
   cryptoKey?: CryptoKey | null;
   children: React.ReactNode;
   zoom: number;
+  onNaturalSizeChange?: (size: ImageSize | null) => void;
 }) {
   const encryptedItem = item.kind === 'encrypted' ? item.item : null;
   const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, cryptoKey, encryptedItem);
@@ -360,7 +377,8 @@ function StudioMedia({
 
   useEffect(() => {
     setNaturalSize(null);
-  }, [src]);
+    onNaturalSizeChange?.(null);
+  }, [onNaturalSizeChange, src]);
 
   const fittedSize = useMemo(() => {
     if (!naturalSize || frameSize.width <= 0 || frameSize.height <= 0) return null;
@@ -419,7 +437,9 @@ function StudioMedia({
             onLoad={event => {
               const { naturalWidth, naturalHeight } = event.currentTarget;
               if (naturalWidth > 0 && naturalHeight > 0) {
-                setNaturalSize({ width: naturalWidth, height: naturalHeight });
+                const nextSize = { width: naturalWidth, height: naturalHeight };
+                setNaturalSize(nextSize);
+                onNaturalSizeChange?.(nextSize);
               }
             }}
             className={classNames('block select-none object-contain', {
@@ -694,10 +714,18 @@ export default function DatasetImageStudio({
   const [zoom, setZoom] = useState(1);
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
+  const [autoBoxModel, setAutoBoxModel] = useState('x-ai/grok-4.3');
+  const [autoBoxRefine, setAutoBoxRefine] = useState(false);
+  const [isGeneratingBoxes, setIsGeneratingBoxes] = useState(false);
+  const [autoBoxMessage, setAutoBoxMessage] = useState('');
+  const [encryptedOpenRouterConfirmed, setEncryptedOpenRouterConfirmed] = useState(false);
+  const [selectedImageSize, setSelectedImageSize] = useState<ImageSize | null>(null);
   const [encryptedCaptionPaths, setEncryptedCaptionPaths] = useState<Record<string, string>>({});
   const captionCacheRef = useRef(new Map<string, { caption: string; saved: string; loaded: boolean }>());
   const saveCaptionRef = useRef<() => Promise<void>>(async () => undefined);
   const autoSelectKeyRef = useRef('');
+  const latestCaptionRef = useRef('');
+  const selectedKeyRef = useRef('');
 
   useEffect(() => {
     setSelectedIndex(index => clampIndex(index, items.length));
@@ -717,6 +745,28 @@ export default function DatasetImageStudio({
   const captionStatus = statusForCaption(captionText, isCaptionLoaded);
   const canAnnotate = isIdeogram && selectedKind === 'image' && isCaptionLoaded;
   const canConvertDataset = Boolean(datasetPath && onConvertDatasetToJson);
+  const autoBoxDisabledReason = !isCaptionLoaded
+    ? 'Load the caption first.'
+    : selectedKind !== 'image'
+      ? 'Auto Boxes works on images only.'
+      : !isIdeogram
+        ? 'Auto Boxes requires Ideogram JSON.'
+        : captionParse.elements.length === 0
+          ? 'Add at least one object or text element first.'
+          : selectedItem?.kind === 'encrypted' && !encryptedKey
+            ? 'Unlock the encrypted dataset first.'
+            : '';
+  const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !isAutoCaptioning;
+
+  useEffect(() => {
+    latestCaptionRef.current = captionText;
+  }, [captionText]);
+
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey;
+    setAutoBoxMessage('');
+    setSelectedImageSize(null);
+  }, [selectedKey]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -867,6 +917,109 @@ export default function DatasetImageStudio({
     },
     [captionText],
   );
+
+  const handleGenerateAutoBoxes = useCallback(async () => {
+    if (!selectedItem || autoBoxDisabledReason || isGeneratingBoxes) return;
+
+    const requestCaption = captionText;
+    const requestKey = selectedKey;
+    const imageWidth = selectedImageSize?.width || null;
+    const imageHeight = selectedImageSize?.height || null;
+
+    setIsGeneratingBoxes(true);
+    setAutoBoxMessage('');
+    try {
+      let response;
+      if (selectedItem.kind === 'plain') {
+        response = await apiClient.post(
+          '/api/datasets/openrouter-boxes',
+          {
+            imgPath: selectedItem.path,
+            caption: requestCaption,
+            model: autoBoxModel,
+            refine: autoBoxRefine,
+            imageWidth,
+            imageHeight,
+          },
+          { timeout: 0 },
+        );
+      } else {
+        if (!encryptedKey) throw new Error('Unlock the encrypted dataset first.');
+        if (!encryptedOpenRouterConfirmed) {
+          const confirmed = window.confirm(
+            'Auto Boxes will send this decrypted image to OpenRouter to generate bounding boxes. Continue?',
+          );
+          if (!confirmed) {
+            setAutoBoxMessage('Auto Boxes canceled.');
+            return;
+          }
+          setEncryptedOpenRouterConfirmed(true);
+        }
+
+        const encryptedResponse = await apiClient.post(
+          '/api/datasets/encrypted/object',
+          { datasetName, worker_id: workerID, objectPath: selectedItem.item.objectPath },
+          { responseType: 'blob' },
+        );
+        const decrypted = await decryptEncryptedObjectBlob(encryptedKey, selectedItem.item.objectPath, encryptedResponse.data as Blob);
+        const imageBlob = new Blob([decrypted], { type: selectedItem.item.mimeType || 'image/jpeg' });
+        const formData = new FormData();
+        formData.append('image', imageBlob, selectedItem.item.name || 'encrypted-image');
+        formData.append('caption', requestCaption);
+        formData.append('model', autoBoxModel);
+        formData.append('refine', autoBoxRefine ? 'true' : 'false');
+        formData.append('encryptedConfirmed', 'true');
+        if (imageWidth) formData.append('imageWidth', String(imageWidth));
+        if (imageHeight) formData.append('imageHeight', String(imageHeight));
+
+        response = await apiClient.post('/api/datasets/openrouter-boxes', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 0,
+        });
+      }
+
+      if (selectedKeyRef.current !== requestKey || latestCaptionRef.current !== requestCaption) {
+        setAutoBoxMessage('Caption changed while Auto Boxes was running. Rerun Auto Boxes to apply fresh boxes.');
+        return;
+      }
+
+      const patches = normalizeGeneratedBoxPatches(
+        { boxes: response.data?.boxes },
+        captionParse.kind === 'ideogram' ? captionParse.elements.length : 0,
+        2,
+      );
+      if (patches.length === 0) {
+        throw new Error('OpenRouter did not return any usable boxes.');
+      }
+
+      let appliedCount = 0;
+      mutateCaption(data => {
+        appliedCount = applyGeneratedBoxPatches(data, patches as GeneratedBoxPatch[]);
+      }, selectedElementIndex ?? patches[0]?.elementIndex ?? null);
+      setAutoBoxMessage(`${appliedCount || patches.length} box${(appliedCount || patches.length) === 1 ? '' : 'es'} ${response.data?.refined ? 'refined' : 'generated'}.`);
+    } catch (error) {
+      console.error('Auto Boxes failed:', error);
+      setAutoBoxMessage(responseErrorMessage(error, 'Auto Boxes failed. Please try again.'));
+    } finally {
+      setIsGeneratingBoxes(false);
+    }
+  }, [
+    autoBoxDisabledReason,
+    autoBoxModel,
+    autoBoxRefine,
+    captionParse,
+    captionText,
+    datasetName,
+    encryptedKey,
+    encryptedOpenRouterConfirmed,
+    isGeneratingBoxes,
+    mutateCaption,
+    selectedElementIndex,
+    selectedImageSize,
+    selectedItem,
+    selectedKey,
+    workerID,
+  ]);
 
   const undo = useCallback(() => {
     setUndoStack(previous => {
@@ -1092,7 +1245,14 @@ export default function DatasetImageStudio({
             <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-gray-800 bg-gray-950/80 px-2 py-1 text-xs text-gray-300 backdrop-blur">
               {selectedName}
             </div>
-            <StudioMedia item={selectedItem} datasetName={datasetName} workerID={workerID} cryptoKey={encryptedKey} zoom={zoom}>
+            <StudioMedia
+              item={selectedItem}
+              datasetName={datasetName}
+              workerID={workerID}
+              cryptoKey={encryptedKey}
+              zoom={zoom}
+              onNaturalSizeChange={setSelectedImageSize}
+            >
               {canAnnotate && (
                 <AnnotationLayer
                   boxes={boxes}
@@ -1188,6 +1348,59 @@ export default function DatasetImageStudio({
                 <ChevronDown className="h-4 w-4 text-gray-500" />
               </div>
               <div className="space-y-4 p-4">
+                {canAnnotate && (
+                  <div className="space-y-3 rounded-md border border-cyan-500/25 bg-cyan-950/10 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-cyan-100">
+                          <WandSparkles className="h-4 w-4 text-cyan-300" />
+                          Auto Boxes
+                        </div>
+                        <div className="mt-1 truncate text-xs text-gray-500">
+                          {selectedImageSize ? `${selectedImageSize.width} x ${selectedImageSize.height}` : 'Image size pending'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!canGenerateAutoBoxes}
+                        onClick={() => void handleGenerateAutoBoxes()}
+                        title={autoBoxDisabledReason || 'Generate boxes with OpenRouter'}
+                        className="inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
+                      >
+                        {isGeneratingBoxes ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
+                        Generate
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                      <label>
+                        <span className="mb-1 block text-xs text-gray-500">Model</span>
+                        <select
+                          value={autoBoxModel}
+                          onChange={event => setAutoBoxModel(event.target.value)}
+                          className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-cyan-500"
+                        >
+                          {OPENROUTER_BOX_MODELS.map(model => (
+                            <option key={model.value} value={model.value}>
+                              {model.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex h-9 items-center gap-2 self-end rounded-md border border-gray-800 bg-gray-900 px-3 text-sm text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={autoBoxRefine}
+                          onChange={event => setAutoBoxRefine(event.target.checked)}
+                          className="h-4 w-4"
+                        />
+                        Refine pass
+                      </label>
+                    </div>
+                    {(autoBoxMessage || autoBoxDisabledReason) && (
+                      <div className="text-xs text-gray-400">{autoBoxMessage || autoBoxDisabledReason}</div>
+                    )}
+                  </div>
+                )}
                 {!isCaptionLoaded ? (
                   <div className="flex items-center gap-2 text-sm text-gray-400">
                     <Loader2 className="h-4 w-4 animate-spin" />

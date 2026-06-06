@@ -454,6 +454,24 @@ class Ideogram4Model(BaseModel):
     def _model_kwargs(self) -> dict:
         return self.model_config.model_kwargs or {}
 
+    def warn_if_fp8_training_without_dequantize(self) -> None:
+        if getattr(self, "quantization", None) != "fp8":
+            return
+        if self._model_kwargs().get("dequantize_fp8_transformer", False):
+            return
+        if getattr(self, "_warned_fp8_training_without_dequantize", False):
+            return
+        warnings.warn(
+            "Ideogram 4 FP8 training is using the lower-VRAM weight-only "
+            "transformer path. That path dequantizes Fp8Linear weights during "
+            "forward, so the first training step can appear stuck at 0%. On "
+            "48GB GPUs such as L40, set "
+            "model_kwargs.dequantize_fp8_transformer: true to dequantize the "
+            "conditional transformer once before training.",
+            stacklevel=2,
+        )
+        self._warned_fp8_training_without_dequantize = True
+
     def _resolve_max_text_tokens(self) -> int:
         kwargs = self._model_kwargs()
         raw_value = kwargs.get("max_text_tokens", kwargs.get("max_text_length", None))

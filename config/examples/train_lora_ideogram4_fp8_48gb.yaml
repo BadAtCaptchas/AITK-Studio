@@ -46,6 +46,7 @@ config:
         low_vram: true
         model_kwargs:
           quantization: "fp8"
+          dequantize_fp8_transformer: true
           require_json_captions: true
           caption_strict: false
       sample:

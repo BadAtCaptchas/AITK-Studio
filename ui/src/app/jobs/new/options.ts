@@ -902,6 +902,7 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].model.model_kwargs': [
         {
           quantization: 'fp8',
+          dequantize_fp8_transformer: true,
           require_json_captions: true,
           caption_strict: false,
         },

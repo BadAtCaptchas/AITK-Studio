@@ -25,6 +25,7 @@ MEMORY_PROFILE_PATH = PROJECT_ROOT / "ui" / "src" / "utils" / "memoryProfiles.ts
 AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
 ADVISOR_PATH = PROJECT_ROOT / "ui" / "src" / "server" / "trainingAdvisor.ts"
 SDTRAINER_PATH = PROJECT_ROOT / "extensions_built_in" / "sd_trainer" / "SDTrainer.py"
+BASE_SD_TRAIN_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
 BASE_CAPTIONER_PATH = PROJECT_ROOT / "extensions_built_in" / "captioner" / "BaseCaptioner.py"
 CAPTION_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "helpers" / "captionOptions.ts"
 
@@ -189,6 +190,19 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
 
         self.assertIn("prepare_sample_image_config_for_encoding", trainer_source)
 
+    def test_fp8_training_dequantize_warning_is_training_scoped(self):
+        model_source = (IDEOGRAM_ROOT / "ideogram4_model.py").read_text(encoding="utf-8")
+        trainer_source = BASE_SD_TRAIN_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("def warn_if_fp8_training_without_dequantize", model_source)
+        self.assertIn('getattr(self, "quantization", None) != "fp8"', model_source)
+        self.assertIn(
+            'self._model_kwargs().get("dequantize_fp8_transformer", False)',
+            model_source,
+        )
+        self.assertIn("first training step can appear stuck at 0%", model_source)
+        self.assertIn("warn_if_fp8_training_without_dequantize", trainer_source)
+
     def test_ui_defaults_memory_profile_and_auto_profile(self):
         options = UI_OPTIONS_PATH.read_text(encoding="utf-8")
         memory = MEMORY_PROFILE_PATH.read_text(encoding="utf-8")
@@ -203,6 +217,7 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("'config.process[0].model.name_or_path': ['ideogram-ai/ideogram-4-fp8', defaultNameOrPath]", options)
         self.assertIn("require_json_captions: true", options)
         self.assertIn("caption_strict: false", options)
+        self.assertIn("dequantize_fp8_transformer: true", options)
         self.assertIn("'ideogram4'", memory)
         self.assertIn("id: 'ideogram4-balanced-lora'", profiles)
         self.assertIn("const ideogram4Archs = ['ideogram4', 'ideogram4:fp8']", profiles)
@@ -255,6 +270,10 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
                 self.assertFalse(process["train"]["train_text_encoder"])
                 self.assertEqual(process["sample"]["sample_steps"], 20)
                 self.assertIn('"compositional_deconstruction"', process["sample"]["prompts"][0])
+                if filename == "train_lora_ideogram4_fp8_48gb.yaml":
+                    self.assertTrue(
+                        model["model_kwargs"]["dequantize_fp8_transformer"]
+                    )
 
         full_config = yaml.safe_load(
             (PROJECT_ROOT / "config" / "examples" / "train_full_fine_tune_ideogram4.yaml").read_text(
@@ -956,6 +975,41 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "caption verifier"):
             model._validate_caption("{}")
+
+    def test_fp8_training_without_dequantize_warns_once(self):
+        model = object.__new__(Ideogram4Model)
+        model.quantization = "fp8"
+        model.model_config = types.SimpleNamespace(model_kwargs={"quantization": "fp8"})
+
+        with self.assertWarnsRegex(UserWarning, "first training step can appear stuck"):
+            model.warn_if_fp8_training_without_dequantize()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model.warn_if_fp8_training_without_dequantize()
+
+        self.assertEqual(caught, [])
+
+    def test_fp8_training_dequantize_warning_is_scoped(self):
+        cases = [
+            ("nf4", {"quantization": "nf4"}),
+            (
+                "fp8",
+                {"quantization": "fp8", "dequantize_fp8_transformer": True},
+            ),
+        ]
+
+        for quantization, model_kwargs in cases:
+            with self.subTest(quantization=quantization):
+                model = object.__new__(Ideogram4Model)
+                model.quantization = quantization
+                model.model_config = types.SimpleNamespace(model_kwargs=model_kwargs)
+
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    model.warn_if_fp8_training_without_dequantize()
+
+                self.assertEqual(caught, [])
 
     def test_dequantize_fp8_linears_replaces_buffers_with_trainable_linears(self):
         fp8 = Fp8Linear(3, 2, bias=True, compute_dtype=torch.float32)

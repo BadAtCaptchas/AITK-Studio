@@ -1937,6 +1937,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.hook_after_sd_init_before_load()
         # run base sd process run
         self.sd.load_model()
+        warn_fp8_training_without_dequantize = getattr(
+            self.sd, "warn_if_fp8_training_without_dequantize", None
+        )
+        if callable(warn_fp8_training_without_dequantize):
+            warn_fp8_training_without_dequantize()
         if hasattr(self.sd, 'set_moe_aux_loss_alpha'):
             self.sd.set_moe_aux_loss_alpha(self.train_config.moe_aux_loss_alpha)
         

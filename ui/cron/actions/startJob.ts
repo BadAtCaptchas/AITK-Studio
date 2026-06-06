@@ -7,6 +7,7 @@ import { TOOLKIT_ROOT, getHFToken, getOpenRouterApiKey, getTrainingFolder } from
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
+import { resolvePathWithinRoot } from '../../src/server/pathSafety';
 import {
   getEncryptedDatasetsForJobConfig,
   getKeyForRequiredDataset,
@@ -99,7 +100,11 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const tensorBoardEnabled = isTensorBoardEnabled();
       const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
-      const trainingFolder = path.join(trainingRoot, job.name);
+      const trainingFolder = resolvePathWithinRoot(trainingRoot, job.name);
+      if (!trainingFolder) {
+        throw new Error('Invalid job path');
+      }
+
       if (!fs.existsSync(trainingFolder)) {
         fs.mkdirSync(trainingFolder, { recursive: true });
       }

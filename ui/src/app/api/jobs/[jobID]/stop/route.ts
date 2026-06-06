@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
+import { requireApiAuth } from '@/server/apiAuth';
 import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
 
 const isWindows = process.platform === 'win32';
 
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
+  const accessResponse = requireApiAuth(request);
+  if (accessResponse) {
+    return accessResponse;
+  }
+
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);

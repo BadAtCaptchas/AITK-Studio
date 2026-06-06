@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
+import { requireApiAuth } from '@/server/apiAuth';
 import fsp from 'fs/promises';
 import { createRemoteTrainingJobBundle } from '@/server/trainingJobBundle';
 import {
@@ -27,20 +28,6 @@ import {
 import { isSecureRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
 import { startJobNow } from '../../../../../../cron/actions/startJob';
 import type { EncryptedDatasetStartKey, JobStartRequest } from '@/types';
-
-function ensureApiAccess(request: NextRequest): NextResponse | null {
-  const tokenToUse = process.env.AI_TOOLKIT_AUTH;
-  if (!tokenToUse) {
-    return null;
-  }
-
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  return null;
-}
 
 function isValidJobId(jobID: string) {
   return /^[a-zA-Z0-9_-]+$/.test(jobID);
@@ -81,7 +68,7 @@ async function handleStart(
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
   durableEncryptedDatasetKeys = false,
 ) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = requireApiAuth(request);
   if (accessResponse) {
     return accessResponse;
   }

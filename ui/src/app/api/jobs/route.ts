@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
+import { optionalApiAuth, requireApiAuth } from '@/server/apiAuth';
+import { isSafePathSegment } from '@/server/pathSafety';
 import { withComfyInstallProgress } from '@/server/comfyInstallProgress';
 import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
 import { reconcileLocalJobProcess } from '@/server/jobProcess';
@@ -14,21 +16,6 @@ import {
 } from '@/server/remoteClient';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 import type { Job } from '@/types';
-
-
-function ensureApiAccess(request: Request): NextResponse | null {
-  const tokenToUse = process.env.AI_TOOLKIT_AUTH;
-  if (!tokenToUse) {
-    return null;
-  }
-
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  return null;
-}
 
 function isSafeJobConfig(jobConfig: unknown) {
   if (!jobConfig || typeof jobConfig !== 'object') {
@@ -60,24 +47,12 @@ function normalizeWorkerId(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : 'local';
 }
 
-function isValidJobName(name: unknown) {
-  if (typeof name !== 'string' || name.trim().length === 0) {
-    return false;
-  }
-
-  if (name === '.' || name.includes('..')) {
-    return false;
-  }
-
-  return name === name.split('/').pop() && name === name.split('\\').pop();
-}
-
 async function withJobProgress(job: Job) {
   return withComfyInstallProgress(await withHFDownloadProgress(job));
 }
 
 export async function GET(request: Request) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = optionalApiAuth(request);
   if (accessResponse) {
     return accessResponse;
   }
@@ -125,7 +100,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = requireApiAuth(request);
   if (accessResponse) {
     return accessResponse;
   }
@@ -135,7 +110,7 @@ export async function POST(request: Request) {
     const { id, name, job_config } = body;
     const worker_id = normalizeWorkerId(body.worker_id);
 
-    if (!isValidJobName(name)) {
+    if (!isSafePathSegment(name)) {
       return NextResponse.json({ error: 'Invalid job name' }, { status: 400 });
     }
     let gpu_ids: string = body.gpu_ids;

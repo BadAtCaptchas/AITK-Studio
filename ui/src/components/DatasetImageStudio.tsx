@@ -766,7 +766,6 @@ export default function DatasetImageStudio({
       }
       setSavedCaption(value);
       captionCacheRef.current.set(selectedKey, { caption: value, saved: value, loaded: true });
-      onRefresh?.();
     } catch (error) {
       console.error('Caption save failed:', error);
       alert('Failed to save caption. Please try again.');
@@ -780,7 +779,6 @@ export default function DatasetImageStudio({
     isCaptionLoaded,
     isDirty,
     isSaving,
-    onRefresh,
     onSaveEncryptedCaption,
     selectedItem,
     selectedKey,

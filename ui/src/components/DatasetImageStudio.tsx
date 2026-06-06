@@ -452,7 +452,12 @@ function AnnotationLayer({
   const layerRef = useRef<HTMLDivElement>(null);
   const [dragPreview, setDragPreview] = useState<{ elementIndex: number; box: NormalizedBox } | null>(null);
   const [newBoxPreview, setNewBoxPreview] = useState<NormalizedBox | null>(null);
+  const [stackPicker, setStackPicker] = useState<{ x: number; y: number; boxes: IdeogramBox[] } | null>(null);
   const drawingType: IdeogramElementType | null = activeTool === 'box' ? 'obj' : activeTool === 'text' ? 'text' : null;
+
+  useEffect(() => {
+    setStackPicker(null);
+  }, [activeTool, boxes]);
 
   const pointToNorm = useCallback((clientX: number, clientY: number) => {
     const rect = layerRef.current?.getBoundingClientRect();
@@ -467,9 +472,17 @@ function AnnotationLayer({
     if (drawingType) return;
     event.preventDefault();
     event.stopPropagation();
+    setStackPicker(null);
 
     const start = pointToNorm(event.clientX, event.clientY);
     if (!start) return;
+    const layerRect = layerRef.current?.getBoundingClientRect();
+    const pickerPosition = layerRect
+      ? {
+          x: Math.max(8, Math.min(layerRect.width - 220, event.clientX - layerRect.left + 8)),
+          y: Math.max(8, Math.min(layerRect.height - 160, event.clientY - layerRect.top + 8)),
+        }
+      : null;
     const originalSelectedElementIndex = selectedElementIndex;
     const hitStack =
       handle === 'move'
@@ -504,10 +517,9 @@ function AnnotationLayer({
       window.removeEventListener('pointerup', onUp);
       setDragPreview(null);
       if (!moved && handle === 'move' && hitStack.length > 1) {
-        const anchorElementIndex = originalSelectedElementIndex ?? dragBox.elementIndex;
-        const anchorIndex = hitStack.findIndex(candidate => candidate.elementIndex === anchorElementIndex);
-        const nextIndex = anchorIndex >= 0 ? (anchorIndex + 1) % hitStack.length : 0;
-        onSelect(hitStack[nextIndex].elementIndex);
+        if (pickerPosition) {
+          setStackPicker({ ...pickerPosition, boxes: hitStack });
+        }
         return;
       }
       if (moved) onChangeBox(dragBox.elementIndex, latest);
@@ -519,6 +531,7 @@ function AnnotationLayer({
 
   const beginDraw = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.currentTarget !== event.target) return;
+    setStackPicker(null);
     if (!drawingType) {
       onSelect(null);
       return;
@@ -620,6 +633,38 @@ function AnnotationLayer({
             height: `${Math.max(0, newBoxPreview.y2 - newBoxPreview.y1) / 10}%`,
           }}
         />
+      )}
+      {stackPicker && (
+        <div
+          className="absolute z-30 w-56 overflow-hidden rounded-md border border-gray-700 bg-gray-950/95 text-xs text-gray-100 shadow-2xl backdrop-blur"
+          style={{ left: stackPicker.x, top: stackPicker.y }}
+          onPointerDown={event => event.stopPropagation()}
+        >
+          <div className="border-b border-gray-800 px-3 py-2 font-semibold text-gray-300">Select Region</div>
+          <div className="max-h-56 overflow-y-auto">
+            {stackPicker.boxes.map((box, index) => {
+              const selected = selectedElementIndex === box.elementIndex;
+              const color = resolveBoxColor(box, boxes.findIndex(candidate => candidate.elementIndex === box.elementIndex), selected);
+              return (
+                <button
+                  key={box.elementIndex}
+                  type="button"
+                  className={classNames('flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-800', {
+                    'bg-blue-600/25 text-blue-100': selected,
+                  })}
+                  onClick={() => {
+                    onSelect(box.elementIndex);
+                    setStackPicker(null);
+                  }}
+                >
+                  <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="min-w-0 flex-1 truncate">{box.label || (box.type === 'text' ? 'Text region' : 'Object')}</span>
+                  <span className="text-[10px] text-gray-500">#{index + 1}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );

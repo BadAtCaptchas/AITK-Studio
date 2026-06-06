@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 import unittest
+import warnings
 from pathlib import Path
 from typing import get_args
 from unittest import mock
@@ -62,6 +63,59 @@ except ImportError as exc:
 def require_ideogram_imports():
     if IDEOGRAM_IMPORT_ERROR is not None:
         raise unittest.SkipTest(str(IDEOGRAM_IMPORT_ERROR))
+
+
+COMFY_IDEOGRAM_JSON_CAPTION = {
+    "high_level_description": "A surreal streetwear mixed-media collage poster featuring a relaxed skateboarder mid-air against a vibrant blue sky, backed by giant puffy 3D letters spelling 'COMFY'. The composition blends retro magazine cutout aesthetics with grunge elements like torn paper banners and distressed red stamps, conveying an effortless, cozy vibe.",
+    "style_description": {
+        "aesthetics": "Retro magazine cutout style, mixed-media digital collage, high-contrast streetwear graphic, featuring rough ripped paper edges and distressed grunge textures.",
+        "lighting": "High-contrast flash mixed with harsh midday sunlight on the skater cutout, contrasting with flat, bright graphic lighting on the 3D typography.",
+        "photo": "Vintage grainy 35mm film with distressed halftone scan textures and subtle light leaks.",
+        "medium": "Mixed-media digital collage",
+        "color_palette": ["#1E73BE", "#FDFDFD", "#C82A2A", "#657C9C", "#EFEFEF"],
+    },
+    "compositional_deconstruction": {
+        "background": "A vibrant, clear blue sky layered with a vintage grainy film texture and subtle halftone dot patterns, transitioning down to an implied pale gray concrete ramp at the very bottom edge.",
+        "elements": [
+            {
+                "type": "obj",
+                "bbox": [128, 149, 354, 810],
+                "desc": "Massive 3D puffy, inflatable white typography spelling 'COMFY'. The letters stretch across the upper half of the canvas, acting as a surreal, soft cloud-like backdrop.",
+                "color_palette": ["#FDFDFD", "#E0E0E0", "#D3DBE2"],
+            },
+            {
+                "type": "obj",
+                "bbox": [459, 37, 727, 264],
+                "desc": "A cluster of oversized, distressed red stamped circles and dots, applied loosely to the midground like a grunge ink stamp, partially obscuring the bottom left of the text.",
+                "color_palette": ["#C82A2A", "#A11D1D"],
+            },
+            {
+                "type": "obj",
+                "bbox": [23, 366, 153, 666],
+                "desc": "A vertically oriented, torn paper side banner pinned to the left edge. The rough-edged paper displays the bold, stamped text 'STAY COZY' in high-contrast black ink.",
+                "color_palette": ["#EFEFEF", "#1A1A1A", "#C82A2A"],
+            },
+            {
+                "type": "obj",
+                "bbox": [287, 210, 756, 819],
+                "desc": "A sharp photographic cutout of a skateboarder mid-air in a relaxed pose. He wears loose-fitting washed denim jeans and a plain white tee, appearing to effortlessly float above the concrete ramp. A distinct white cutout border surrounds his silhouette.",
+                "color_palette": ["#FDFDFD", "#657C9C", "#2B2B2B", "#DCA57D"],
+            },
+            {
+                "type": "obj",
+                "bbox": [773, 39, 973, 187],
+                "desc": "A surreal, miniature floating skateboard cutout, positioned playfully in the upper right sky as if defying gravity.",
+                "color_palette": ["#D2A679", "#2B2B2B", "#C82A2A"],
+            },
+            {
+                "type": "obj",
+                "bbox": [105, 830, 905, 980],
+                "desc": "A wide, horizontal strip of heavily textured torn paper spanning the lower third of the composition. It features the bold typographic phrase 'BEYOND THE COMFORT ZONE' intermixed with 'EFFORTLESS RIDE' alongside ripped edges that reveal the background.",
+                "color_palette": ["#EFEFEF", "#1A1A1A", "#999999"],
+            },
+        ],
+    },
+}
 
 
 class Ideogram4StaticSupportTest(unittest.TestCase):
@@ -276,6 +330,89 @@ class IdeogramJsonCaptionerBehaviorTest(unittest.TestCase):
         spec.loader.exec_module(verifier_module)
 
         return verifier_module.CaptionVerifier().verify(caption)
+
+    def test_full_comfy_caption_normalizes_without_data_loss(self):
+        captioner = self._json_captioner()
+
+        normalized = captioner.normalize_caption_output(
+            "comfy.jpg",
+            json.dumps(COMFY_IDEOGRAM_JSON_CAPTION),
+        )
+        parsed = json.loads(normalized)
+
+        self.assertEqual(self._caption_warnings(parsed), [])
+        self.assertEqual(parsed, COMFY_IDEOGRAM_JSON_CAPTION)
+        self.assertEqual(
+            tuple(parsed.keys()),
+            (
+                "high_level_description",
+                "style_description",
+                "compositional_deconstruction",
+            ),
+        )
+        self.assertEqual(
+            tuple(parsed["style_description"].keys()),
+            ("aesthetics", "lighting", "photo", "medium", "color_palette"),
+        )
+        elements = parsed["compositional_deconstruction"]["elements"]
+        self.assertEqual(len(elements), 6)
+        self.assertEqual(
+            tuple(elements[0].keys()), ("type", "bbox", "desc", "color_palette")
+        )
+        self.assertEqual(elements[0]["bbox"], [128, 149, 354, 810])
+        self.assertEqual(
+            elements[3]["color_palette"],
+            ["#FDFDFD", "#657C9C", "#2B2B2B", "#DCA57D"],
+        )
+
+    def test_preserves_existing_ideogram_json_source_caption(self):
+        caption_text = json.dumps(COMFY_IDEOGRAM_JSON_CAPTION, indent=2)
+
+        for source_ext in ("txt", "json"):
+            with self.subTest(source_ext=source_ext):
+                captioner = self._json_captioner()
+                captioner.caption_config.source_caption_extension = source_ext
+                with tempfile.TemporaryDirectory() as tmp:
+                    media_path = Path(tmp) / "0001.jpg"
+                    media_path.write_bytes(b"fake image bytes")
+                    media_path.with_suffix(f".{source_ext}").write_text(
+                        caption_text, encoding="utf-8"
+                    )
+
+                    preserved = captioner.get_preserved_ideogram_json_caption_for_file(
+                        str(media_path)
+                    )
+
+                self.assertIsNotNone(preserved)
+                parsed = json.loads(preserved)
+                self.assertEqual(self._caption_warnings(parsed), [])
+                self.assertEqual(parsed, COMFY_IDEOGRAM_JSON_CAPTION)
+
+    def test_invalid_legacy_json_source_falls_back_to_captioner(self):
+        captioner = self._json_captioner()
+        captioner.caption_config.source_caption_extension = "txt"
+        model_caption = json.dumps(COMFY_IDEOGRAM_JSON_CAPTION)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            media_path = Path(tmp) / "0001.jpg"
+            media_path.write_bytes(b"fake image bytes")
+            media_path.with_suffix(".txt").write_text(
+                json.dumps({"caption": "legacy plain prompt"}), encoding="utf-8"
+            )
+            captioner.file_paths = [str(media_path)]
+            captioner.is_ui_captioner = False
+            captioner.is_stopping = False
+            captioner.get_caption_for_file = mock.Mock(return_value=model_caption)
+            captioner.save_caption_for_file = mock.Mock()
+
+            captioner.run_caption_loop()
+
+            captioner.get_caption_for_file.assert_called_once_with(str(media_path))
+            captioner.save_caption_for_file.assert_called_once_with(
+                str(media_path), model_caption
+            )
+            self.assertEqual(captioner.caption_success_count, 1)
+            self.assertEqual(captioner.caption_failure_count, 0)
 
     def test_captioner_normalizes_reported_openrouter_json_shape(self):
         captioner = self._json_captioner()
@@ -733,6 +870,20 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must be JSON"):
             model._validate_caption("plain text prompt")
+
+    def test_full_comfy_caption_is_valid_for_training(self):
+        model = object.__new__(Ideogram4Model)
+        model.model_config = types.SimpleNamespace(model_kwargs={})
+        model.caption_verifier = CaptionVerifier()
+
+        caption = json.dumps(COMFY_IDEOGRAM_JSON_CAPTION, ensure_ascii=False)
+
+        self.assertEqual(CaptionVerifier().verify(COMFY_IDEOGRAM_JSON_CAPTION), [])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model._validate_caption(caption)
+
+        self.assertEqual(caught, [])
 
     def test_plain_sample_prompts_are_wrapped_without_relaxing_training_captions(self):
         model = object.__new__(Ideogram4Model)

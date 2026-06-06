@@ -1,6 +1,7 @@
 import asyncio
 from collections import OrderedDict
 
+import importlib.util
 import json
 import math
 import os
@@ -295,7 +296,11 @@ class BaseCaptioner(BaseExtensionProcess):
                 if self.is_stopping:
                     break
             try:
-                file_caption = self.get_caption_for_file(file_path)
+                file_caption = self.get_preserved_ideogram_json_caption_for_file(
+                    file_path
+                )
+                if file_caption is None:
+                    file_caption = self.get_caption_for_file(file_path)
                 if file_caption is None or str(file_caption).strip() == "":
                     self.caption_failure_count += 1
                     print(f"Error captioning file {file_path}: captioner returned no text")
@@ -372,7 +377,8 @@ class BaseCaptioner(BaseExtensionProcess):
         if not os.path.exists(source_path):
             return ""
         try:
-            return open(source_path, "r", encoding="utf-8").read().strip()
+            with open(source_path, "r", encoding="utf-8") as f:
+                return f.read().strip()
         except Exception:
             return ""
 
@@ -405,6 +411,25 @@ class BaseCaptioner(BaseExtensionProcess):
         parsed = self._normalize_ideogram_json_caption(parsed)
         self._warn_for_ideogram_json_issues(parsed, file_path)
         return json.dumps(parsed, ensure_ascii=False, indent=2)
+
+    def get_preserved_ideogram_json_caption_for_file(
+        self, file_path: str
+    ) -> Optional[str]:
+        if not self.is_ideogram_json_output():
+            return None
+
+        source_caption = self.get_source_caption_for_file(file_path)
+        if not source_caption:
+            return None
+
+        try:
+            parsed = self._parse_json_caption(source_caption)
+            parsed = self._normalize_ideogram_json_caption(parsed)
+            if self._ideogram_caption_verifier().verify(parsed):
+                return None
+            return json.dumps(parsed, ensure_ascii=False, indent=2)
+        except Exception:
+            return None
 
     def _parse_json_caption(self, caption: str) -> dict:
         text = caption.strip()
@@ -606,13 +631,37 @@ class BaseCaptioner(BaseExtensionProcess):
                 ordered[key] = value
         return ordered
 
-    def _warn_for_ideogram_json_issues(self, parsed: dict, file_path: str):
+    @staticmethod
+    def _ideogram_caption_verifier():
         try:
             from extensions_built_in.diffusion_models.ideogram4.src.caption_verifier import (
                 CaptionVerifier,
             )
 
-            warnings = CaptionVerifier().verify(parsed)
+            return CaptionVerifier()
+        except Exception:
+            verifier_path = os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "diffusion_models",
+                "ideogram4",
+                "src",
+                "caption_verifier.py",
+            )
+            spec = importlib.util.spec_from_file_location(
+                "aitk_ideogram_caption_verifier", verifier_path
+            )
+            if spec is None or spec.loader is None:
+                raise RuntimeError(
+                    f"Could not load Ideogram caption verifier at {verifier_path}"
+                )
+            verifier_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(verifier_module)
+            return verifier_module.CaptionVerifier()
+
+    def _warn_for_ideogram_json_issues(self, parsed: dict, file_path: str):
+        try:
+            warnings = self._ideogram_caption_verifier().verify(parsed)
             if warnings:
                 print(
                     f"Warning: Ideogram JSON caption verifier found issues for {file_path}:"

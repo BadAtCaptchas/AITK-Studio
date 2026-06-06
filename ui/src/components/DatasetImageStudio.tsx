@@ -22,6 +22,7 @@ import {
   MoreVertical,
   MousePointer2,
   Move,
+  Pipette,
   Redo2,
   Save,
   SquareDashed,
@@ -116,6 +117,7 @@ const MAX_HISTORY = 50;
 const THUMB_WINDOW = 11;
 const CLICK_DRAG_TOLERANCE = 4;
 const BOX_COLORS = ['#22D3EE', '#F59E0B', '#A3E635', '#FB7185', '#818CF8', '#34D399'];
+const HEX_COLOR_PATTERN = /^#[0-9A-F]{6}$/;
 const OPENROUTER_BOX_MODELS = [
   { value: 'x-ai/grok-4.3', label: 'x-ai/grok-4.3' },
   { value: 'x-ai/grok-4-fast', label: 'x-ai/grok-4-fast' },
@@ -170,6 +172,11 @@ function responseErrorMessage(error: any, fallback: string) {
   if (typeof responseError === 'string' && responseError.trim()) return responseError;
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+function normalizeHexColor(value: unknown) {
+  const color = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  return HEX_COLOR_PATTERN.test(color) ? color : null;
 }
 
 function resolveBoxColor(box: IdeogramBox, index: number, selected: boolean) {
@@ -943,6 +950,7 @@ export default function DatasetImageStudio({
   const [hiddenLayerIndexes, setHiddenLayerIndexes] = useState<Set<number>>(() => new Set());
   const [lockedLayerIndexes, setLockedLayerIndexes] = useState<Set<number>>(() => new Set());
   const [overlapElementStack, setOverlapElementStack] = useState<number[]>([]);
+  const [isEyeDropperSupported, setIsEyeDropperSupported] = useState(false);
   const [encryptedCaptionPaths, setEncryptedCaptionPaths] = useState<Record<string, string>>({});
   const captionCacheRef = useRef(new Map<string, { caption: string; saved: string; loaded: boolean }>());
   const saveCaptionRef = useRef<() => Promise<void>>(async () => undefined);
@@ -964,6 +972,7 @@ export default function DatasetImageStudio({
   const selectedElement =
     isIdeogram && selectedElementIndex != null ? captionParse.elements[selectedElementIndex] ?? null : null;
   const selectedBox = boxes.find(box => box.elementIndex === selectedElementIndex) || null;
+  const selectedPalette = Array.isArray(selectedElement?.color_palette) ? selectedElement.color_palette : [];
   const isDirty = captionText.trim() !== savedCaption.trim();
   const captionStatus = statusForCaption(captionText, isCaptionLoaded);
   const canAnnotate = isIdeogram && selectedKind === 'image' && isCaptionLoaded;
@@ -982,6 +991,10 @@ export default function DatasetImageStudio({
   useEffect(() => {
     latestCaptionRef.current = captionText;
   }, [captionText]);
+
+  useEffect(() => {
+    setIsEyeDropperSupported(typeof window !== 'undefined' && 'EyeDropper' in window);
+  }, []);
 
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
@@ -1383,6 +1396,33 @@ export default function DatasetImageStudio({
     [mutateCaption, selectedElementIndex],
   );
 
+  const handleSelectedPaletteColorChange = useCallback(
+    (index: number, color: string) => {
+      const normalized = normalizeHexColor(color);
+      if (!normalized) return;
+      const nextPalette = [...selectedPalette];
+      nextPalette[index] = normalized;
+      handleSelectedPaletteChange(nextPalette);
+    },
+    [handleSelectedPaletteChange, selectedPalette],
+  );
+
+  const handlePickPaletteColor = useCallback(
+    async (index: number) => {
+      const EyeDropperConstructor = typeof window !== 'undefined' ? (window as any).EyeDropper : null;
+      if (!isEyeDropperSupported || !EyeDropperConstructor) {
+        return;
+      }
+      try {
+        const result = await new EyeDropperConstructor().open();
+        handleSelectedPaletteColorChange(index, result?.sRGBHex || '');
+      } catch (error) {
+        if ((error as Error)?.name !== 'AbortError') console.error('Color dropper failed:', error);
+      }
+    },
+    [handleSelectedPaletteColorChange, isEyeDropperSupported],
+  );
+
   const handleCaptionDescriptionChange = useCallback(
     (value: string) => {
       if (!isIdeogram) {
@@ -1438,7 +1478,6 @@ export default function DatasetImageStudio({
       ? captionParse.data.high_level_description
       : captionText;
   const selectedRect = selectedBox ? boxToRect(selectedBox) : null;
-  const selectedPalette = Array.isArray(selectedElement?.color_palette) ? selectedElement.color_palette : [];
 
   if (items.length === 0) {
     return (
@@ -1810,16 +1849,51 @@ export default function DatasetImageStudio({
                     <div>
                       <span className="mb-2 block text-xs text-gray-400">Color Palette</span>
                       <div className="flex flex-wrap gap-2">
-                        {selectedPalette.map((color: string, index: number) => (
-                          <button
-                            key={`${color}-${index}`}
-                            type="button"
-                            title={`Remove ${color}`}
-                            onClick={() => handleSelectedPaletteChange(selectedPalette.filter((_: string, i: number) => i !== index))}
-                            className="h-8 w-8 rounded-md border border-gray-700"
-                            style={{ backgroundColor: color }}
-                          />
-                        ))}
+                        {selectedPalette.map((rawColor: string, index: number) => {
+                          const color = normalizeHexColor(rawColor) || BOX_COLORS[index % BOX_COLORS.length];
+                          return (
+                            <div
+                              key={`${rawColor}-${index}`}
+                              className="inline-flex h-9 items-center gap-1 rounded-md border border-gray-800 bg-gray-900 px-1.5"
+                            >
+                              <span
+                                className="h-6 w-6 flex-shrink-0 rounded border border-gray-700"
+                                style={{ backgroundColor: color }}
+                                title={color}
+                              />
+                              <span className="w-[4.5rem] font-mono text-[11px] text-gray-400">{color}</span>
+                              <button
+                                type="button"
+                                disabled={!isEyeDropperSupported}
+                                title={isEyeDropperSupported ? `Pick ${color} from screen` : 'Color dropper is not supported in this browser'}
+                                onClick={() => void handlePickPaletteColor(index)}
+                                className="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-35"
+                              >
+                                <Pipette className="h-3.5 w-3.5" />
+                              </button>
+                              <label
+                                title={`Choose ${color}`}
+                                className="relative flex h-7 w-7 cursor-pointer items-center justify-center overflow-hidden rounded text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                              >
+                                <span className="h-3.5 w-3.5 rounded-sm border border-gray-600" style={{ backgroundColor: color }} />
+                                <input
+                                  type="color"
+                                  value={color}
+                                  onChange={event => handleSelectedPaletteColorChange(index, event.target.value)}
+                                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                title={`Remove ${color}`}
+                                onClick={() => handleSelectedPaletteChange(selectedPalette.filter((_: string, i: number) => i !== index))}
+                                className="flex h-7 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-800 hover:text-rose-300"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
                         <button
                           type="button"
                           onClick={() => handleSelectedPaletteChange([...selectedPalette, BOX_COLORS[selectedPalette.length % BOX_COLORS.length]])}

@@ -1012,7 +1012,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if latest_path is None and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
             # set pretrained lora path as load path if we do not have a checkpoint to resume from
             pretrained_path = self.network_config.pretrained_lora_path
-            if not str(pretrained_path).lower().endswith(".safetensors"):
+            if os.path.splitext(str(pretrained_path))[1] != ".safetensors":
                 print_acc(
                     f"Pretrained lora path from config must be a .safetensors file: {pretrained_path}"
                 )

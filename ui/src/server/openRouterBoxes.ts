@@ -1,5 +1,6 @@
 import {
   boxToArray,
+  normalizeIdeogramColorPalette,
   normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
@@ -71,8 +72,14 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
             minItems: 4,
             maxItems: 4,
           },
+          color_palette: {
+            type: 'array',
+            description: 'Dominant visible colors for this element as #RRGGBB hex strings.',
+            items: { type: 'string' },
+            maxItems: 5,
+          },
         },
-        required: ['elementIndex', 'bbox_px'],
+        required: ['elementIndex', 'bbox_px', 'color_palette'],
       },
     },
     generatedElements: {
@@ -108,8 +115,14 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
             type: 'string',
             description: 'Visible text content for text elements. Use an empty string for ordinary object elements.',
           },
+          color_palette: {
+            type: 'array',
+            description: 'Dominant visible colors for this element as #RRGGBB hex strings.',
+            items: { type: 'string' },
+            maxItems: 5,
+          },
         },
-        required: ['type', 'bbox_px', 'desc', 'text'],
+        required: ['type', 'bbox_px', 'desc', 'text', 'color_palette'],
       },
     },
   },
@@ -133,12 +146,14 @@ function summarizeElements(elements: any[], imageSize: RequiredImageSize) {
   return elements.map((element, index) => {
     const type = element?.type === 'text' ? 'text' : 'obj';
     const currentBboxPx = Array.isArray(element?.bbox) ? normalizedBboxToPixelArray(element.bbox, imageSize) : null;
+    const currentColorPalette = normalizeIdeogramColorPalette(element?.color_palette);
     return {
       elementIndex: index,
       type,
       description: cleanString(element?.desc),
       ...(type === 'text' ? { visibleText: cleanString(element?.text) } : {}),
       ...(currentBboxPx ? { currentBbox_px: currentBboxPx } : {}),
+      ...(currentColorPalette.length > 0 ? { currentColorPalette } : {}),
     };
   });
 }
@@ -202,6 +217,10 @@ function rawPixelBbox(raw: Record<string, any>) {
   return raw.bbox_px || raw.bboxPx || raw.bbox;
 }
 
+function rawColorPalette(raw: Record<string, any>) {
+  return raw.color_palette || raw.colorPalette || raw.palette || raw.colors;
+}
+
 function pixelGeneratedBoxPatches(
   value: unknown,
   elementCount: number,
@@ -213,7 +232,14 @@ function pixelGeneratedBoxPatches(
     if (!isRecord(rawBox)) return [];
     const bbox = pixelBboxToNormalizedArray(rawPixelBbox(rawBox), imageSize);
     if (!bbox) return [];
-    return [{ elementIndex: rawBox.elementIndex, bbox }];
+    const colorPalette = normalizeIdeogramColorPalette(rawColorPalette(rawBox));
+    return [
+      {
+        elementIndex: rawBox.elementIndex,
+        bbox,
+        ...(colorPalette.length > 0 ? { color_palette: colorPalette } : {}),
+      },
+    ];
   });
   return normalizeGeneratedBoxPatches({ boxes }, elementCount, minSpan);
 }
@@ -243,6 +269,7 @@ function pixelGeneratedElementBoxes(
         bbox,
         desc: rawElement.desc || rawElement.description || rawElement.label,
         text: rawElement.text || rawElement.visibleText || '',
+        color_palette: normalizeIdeogramColorPalette(rawColorPalette(rawElement)),
       },
     ];
   });
@@ -252,7 +279,15 @@ function pixelGeneratedElementBoxes(
 function normalizedPatchesToPixelPrompt(patches: GeneratedBoxPatch[], imageSize: RequiredImageSize) {
   return patches.flatMap(patch => {
     const bbox_px = normalizedBboxToPixelArray(patch.bbox, imageSize);
-    return bbox_px ? [{ elementIndex: patch.elementIndex, bbox_px }] : [];
+    return bbox_px
+      ? [
+          {
+            elementIndex: patch.elementIndex,
+            bbox_px,
+            ...(patch.color_palette?.length ? { color_palette: patch.color_palette } : {}),
+          },
+        ]
+      : [];
   });
 }
 
@@ -306,6 +341,8 @@ export function buildOpenRouterBoxPrompt(
       '- If an object is occluded or cropped, box only the visible part.',
       '- Use type "text" only for readable text glyphs, signs, labels, or UI text regions; put the visible glyph text in text.',
       '- Use type "obj" for ordinary objects and leave text as an empty string.',
+      '- Return color_palette as up to 5 dominant visible colors for each generated element, ordered by prominence, using #RRGGBB hex strings.',
+      '- Use color_palette: [] only when no reliable color can be identified for that element.',
       '- Prefer 3-10 salient regions. Do not cover the entire image unless the whole image is a single object.',
       '- Return boxes: [] because there are no existing element indexes to patch.',
       previous,
@@ -324,6 +361,9 @@ export function buildOpenRouterBoxPrompt(
     '- Do not add padding for aesthetics.',
     '- If an object is occluded or cropped, box only the visible part.',
     '- For text elements, box the visible text glyphs or sign/label area, not the larger object holding it.',
+    '- Return color_palette as up to 5 dominant visible colors for each existing element, ordered by prominence, using #RRGGBB hex strings.',
+    '- For text elements, include visible glyph, fill, stroke, shadow, or sign/background colors that belong to that selected text target.',
+    '- Use color_palette: [] only when no reliable color can be identified for that element.',
     '- Keep every elementIndex exactly as provided. Do not create, remove, reorder, or rename elements.',
     '- Return generatedElements: [] because existing caption elements are being patched.',
     '- If a currentBbox_px exists, use it only as a rough hint; correct it when the image contradicts it.',

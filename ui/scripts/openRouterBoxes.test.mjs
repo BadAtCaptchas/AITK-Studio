@@ -73,6 +73,7 @@ test('buildOpenRouterBoxPrompt includes indexed element context and image dimens
   const prompt = buildOpenRouterBoxPrompt(sampleCaption(), { width: 1280, height: 720 });
   assert.match(prompt, /Image pixel size: 1280 x 720/);
   assert.match(prompt, /bbox_px/);
+  assert.match(prompt, /color_palette/);
   assert.match(prompt, /currentBbox_px/);
   assert.match(prompt, /"elementIndex": 0/);
   assert.match(prompt, /Yellow taxi/);
@@ -84,6 +85,7 @@ test('buildOpenRouterBoxPrompt can request new elements when none exist', () => 
   const prompt = buildOpenRouterBoxPrompt(emptyElementCaption(), { width: 1280, height: 720 });
   assert.match(prompt, /currently has no compositional_deconstruction\.elements/);
   assert.match(prompt, /generatedElements/);
+  assert.match(prompt, /color_palette/);
   assert.match(prompt, /Return boxes: \[\]/);
 });
 
@@ -94,10 +96,11 @@ test('generateOpenRouterBoxPatches defaults to grok 4.3 and filters malformed bo
       {
         content: {
           boxes: [
-            { elementIndex: 0, bbox_px: [100, 380, 640, 1640] },
-            { elementIndex: 1, bbox_px: [200, 400, 200, 520] },
-            { elementIndex: 99, bbox_px: [0, 0, 100, 100] },
+            { elementIndex: 0, bbox_px: [100, 380, 640, 1640], color_palette: ['#facc15', '#111111', 'bad'] },
+            { elementIndex: 1, bbox_px: [200, 400, 200, 520], color_palette: ['#FFFFFF'] },
+            { elementIndex: 99, bbox_px: [0, 0, 100, 100], color_palette: ['#000000'] },
           ],
+          generatedElements: [],
         },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       },
@@ -115,12 +118,23 @@ test('generateOpenRouterBoxPatches defaults to grok 4.3 and filters malformed bo
 
   assert.equal(result.model, 'x-ai/grok-4.3');
   assert.equal(result.refined, false);
-  assert.deepEqual(result.boxes, [{ elementIndex: 0, bbox: [100, 190, 640, 820] }]);
+  assert.deepEqual(result.boxes, [{ elementIndex: 0, bbox: [100, 190, 640, 820], color_palette: ['#FACC15', '#111111'] }]);
   assert.equal(result.usage.total_tokens, 15);
   assert.equal(calls[0].provider.require_parameters, true);
   assert.equal(calls[0].response_format.json_schema.strict, true);
   assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['boxes', 'generatedElements']);
-  assert.deepEqual(calls[0].response_format.json_schema.schema.properties.boxes.items.required, ['elementIndex', 'bbox_px']);
+  assert.deepEqual(calls[0].response_format.json_schema.schema.properties.boxes.items.required, [
+    'elementIndex',
+    'bbox_px',
+    'color_palette',
+  ]);
+  assert.deepEqual(calls[0].response_format.json_schema.schema.properties.generatedElements.items.required, [
+    'type',
+    'bbox_px',
+    'desc',
+    'text',
+    'color_palette',
+  ]);
 });
 
 test('generateOpenRouterBoxPatches falls back for retired models and can run a refinement pass', async () => {
@@ -128,11 +142,11 @@ test('generateOpenRouterBoxPatches falls back for retired models and can run a r
   const fetchImpl = mockFetchForResponses(
     [
       {
-        content: { boxes: [{ elementIndex: 0, bbox_px: [100, 380, 640, 1640] }] },
+        content: { boxes: [{ elementIndex: 0, bbox_px: [100, 380, 640, 1640], color_palette: ['#FACC15'] }], generatedElements: [] },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       },
       {
-        content: { boxes: [{ elementIndex: 0, bbox_px: [110, 400, 630, 1620] }] },
+        content: { boxes: [{ elementIndex: 0, bbox_px: [110, 400, 630, 1620], color_palette: ['#FDE047'] }], generatedElements: [] },
         usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
       },
     ],
@@ -152,7 +166,7 @@ test('generateOpenRouterBoxPatches falls back for retired models and can run a r
   assert.equal(calls.length, 2);
   assert.equal(result.model, 'x-ai/grok-4.3');
   assert.equal(result.refined, true);
-  assert.deepEqual(result.boxes, [{ elementIndex: 0, bbox: [110, 200, 630, 810] }]);
+  assert.deepEqual(result.boxes, [{ elementIndex: 0, bbox: [110, 200, 630, 810], color_palette: ['#FDE047'] }]);
   assert.equal(result.usage.prompt_tokens, 22);
   assert.equal(result.usage.total_tokens, 33);
   assert.match(calls[1].messages[0].content[0].text, /Current proposed boxes to correct/);
@@ -166,9 +180,15 @@ test('generateOpenRouterBoxPatches can create elements when caption has no eleme
         content: {
           boxes: [],
           generatedElements: [
-            { type: 'obj', bbox_px: [100, 380, 640, 1640], desc: 'Yellow taxi.', text: '' },
-            { type: 'text', bbox_px: [60, 720, 120, 1040], desc: 'Taxi roof sign.', text: 'TAXI' },
-            { type: 'obj', bbox_px: [200, 400, 200, 520], desc: 'flat bad box', text: '' },
+            { type: 'obj', bbox_px: [100, 380, 640, 1640], desc: 'Yellow taxi.', text: '', color_palette: ['#FACC15'] },
+            {
+              type: 'text',
+              bbox_px: [60, 720, 120, 1040],
+              desc: 'Taxi roof sign.',
+              text: 'TAXI',
+              color_palette: ['#111111', '#FACC15'],
+            },
+            { type: 'obj', bbox_px: [200, 400, 200, 520], desc: 'flat bad box', text: '', color_palette: ['#FFFFFF'] },
           ],
         },
       },
@@ -186,8 +206,8 @@ test('generateOpenRouterBoxPatches can create elements when caption has no eleme
 
   assert.deepEqual(result.boxes, []);
   assert.deepEqual(result.generatedElements, [
-    { type: 'obj', bbox: [100, 190, 640, 820], desc: 'Yellow taxi.' },
-    { type: 'text', bbox: [60, 360, 120, 520], desc: 'Taxi roof sign.', text: 'TAXI' },
+    { type: 'obj', bbox: [100, 190, 640, 820], desc: 'Yellow taxi.', color_palette: ['#FACC15'] },
+    { type: 'text', bbox: [60, 360, 120, 520], desc: 'Taxi roof sign.', text: 'TAXI', color_palette: ['#111111', '#FACC15'] },
   ]);
   assert.match(calls[0].messages[0].content[0].text, /generate new elements/i);
 });
@@ -199,14 +219,14 @@ test('generateOpenRouterBoxPatches can refine generated elements', async () => {
       {
         content: {
           boxes: [],
-          generatedElements: [{ type: 'obj', bbox_px: [100, 380, 640, 1640], desc: 'Yellow taxi.', text: '' }],
+          generatedElements: [{ type: 'obj', bbox_px: [100, 380, 640, 1640], desc: 'Yellow taxi.', text: '', color_palette: ['#FACC15'] }],
         },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       },
       {
         content: {
           boxes: [],
-          generatedElements: [{ type: 'obj', bbox_px: [110, 400, 630, 1620], desc: 'Yellow taxi.', text: '' }],
+          generatedElements: [{ type: 'obj', bbox_px: [110, 400, 630, 1620], desc: 'Yellow taxi.', text: '', color_palette: ['#FDE047'] }],
         },
         usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
       },
@@ -224,7 +244,9 @@ test('generateOpenRouterBoxPatches can refine generated elements', async () => {
   });
 
   assert.equal(result.refined, true);
-  assert.deepEqual(result.generatedElements, [{ type: 'obj', bbox: [110, 200, 630, 810], desc: 'Yellow taxi.' }]);
+  assert.deepEqual(result.generatedElements, [
+    { type: 'obj', bbox: [110, 200, 630, 810], desc: 'Yellow taxi.', color_palette: ['#FDE047'] },
+  ]);
   assert.equal(result.usage.total_tokens, 33);
   assert.match(calls[1].messages[0].content[0].text, /Current proposed generated elements to correct/);
 });

@@ -17,6 +17,7 @@ export type IdeogramBox = NormalizedBox & {
 export type GeneratedBoxPatch = {
   elementIndex: number;
   bbox: [number, number, number, number];
+  color_palette?: string[];
 };
 
 export type GeneratedElementBox = {
@@ -24,6 +25,7 @@ export type GeneratedElementBox = {
   bbox: [number, number, number, number];
   desc: string;
   text?: string;
+  color_palette?: string[];
 };
 
 export type IdeogramCaptionParse =
@@ -139,6 +141,19 @@ function cleanGeneratedText(value: unknown) {
   return typeof value === 'string' ? value.trim().slice(0, 240) : '';
 }
 
+export function normalizeIdeogramColorPalette(value: unknown, maxColors = 5) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const colors: string[] = [];
+  value.forEach(item => {
+    const color = typeof item === 'string' ? item.trim().toUpperCase() : '';
+    if (!/^#[0-9A-F]{6}$/.test(color) || seen.has(color)) return;
+    seen.add(color);
+    colors.push(color);
+  });
+  return colors.slice(0, maxColors);
+}
+
 export function normalizeGeneratedBoxPatches(
   value: unknown,
   elementCount: number,
@@ -154,7 +169,12 @@ export function normalizeGeneratedBoxPatches(
 
     const box = arrayToBox(rawBox.bbox);
     if (!box || !hasUsableSpan(box, minSpan)) return;
-    byElementIndex.set(elementIndex, { elementIndex, bbox: boxToArray(box) });
+    const colorPalette = normalizeIdeogramColorPalette(rawBox.color_palette || rawBox.colorPalette || rawBox.palette || rawBox.colors);
+    byElementIndex.set(elementIndex, {
+      elementIndex,
+      bbox: boxToArray(box),
+      ...(colorPalette.length > 0 ? { color_palette: colorPalette } : {}),
+    });
   });
 
   return Array.from(byElementIndex.values()).sort((left, right) => left.elementIndex - right.elementIndex);
@@ -182,10 +202,28 @@ export function normalizeGeneratedElementBoxes(
       const type: IdeogramElementType = rawElement.type === 'text' ? 'text' : 'obj';
       const desc = cleanGeneratedText(rawElement.desc || rawElement.description || rawElement.label);
       const text = cleanGeneratedText(rawElement.text || rawElement.visibleText);
+      const colorPalette = normalizeIdeogramColorPalette(
+        rawElement.color_palette || rawElement.colorPalette || rawElement.palette || rawElement.colors,
+      );
       if (type === 'text') {
-        return [{ type, bbox: boxToArray(box), text, desc: desc || text }];
+        return [
+          {
+            type,
+            bbox: boxToArray(box),
+            text,
+            desc: desc || text,
+            ...(colorPalette.length > 0 ? { color_palette: colorPalette } : {}),
+          },
+        ];
       }
-      return [{ type, bbox: boxToArray(box), desc: desc || text || 'Visible object' }];
+      return [
+        {
+          type,
+          bbox: boxToArray(box),
+          desc: desc || text || 'Visible object',
+          ...(colorPalette.length > 0 ? { color_palette: colorPalette } : {}),
+        },
+      ];
     })
     .slice(0, maxElements);
 }
@@ -321,6 +359,7 @@ export function applyGeneratedBoxPatches(data: Record<string, any>, patches: Gen
   normalizedPatches.forEach(patch => {
     const box = arrayToBox(patch.bbox);
     if (box) updateIdeogramElementBox(data, patch.elementIndex, box);
+    if (patch.color_palette?.length) updateIdeogramElementPalette(data, patch.elementIndex, patch.color_palette);
   });
   return normalizedPatches.length;
 }
@@ -336,12 +375,14 @@ export function appendGeneratedIdeogramElements(data: Record<string, any>, gener
         bbox: element.bbox,
         text: element.text || '',
         desc: element.desc || element.text || '',
+        ...(element.color_palette?.length ? { color_palette: element.color_palette } : {}),
       });
     } else {
       elements.push({
         type: 'obj',
         bbox: element.bbox,
         desc: element.desc || 'Visible object',
+        ...(element.color_palette?.length ? { color_palette: element.color_palette } : {}),
       });
     }
   });
@@ -387,10 +428,7 @@ export function updateIdeogramElementType(data: Record<string, any>, elementInde
 export function updateIdeogramElementPalette(data: Record<string, any>, elementIndex: number, colors: string[]) {
   const element = getIdeogramElements(data)[elementIndex];
   if (!isRecord(element)) return;
-  const cleanColors = colors
-    .map(color => color.trim().toUpperCase())
-    .filter(color => /^#[0-9A-F]{6}$/.test(color))
-    .slice(0, 5);
+  const cleanColors = normalizeIdeogramColorPalette(colors);
   if (cleanColors.length === 0) {
     delete element.color_palette;
   } else {

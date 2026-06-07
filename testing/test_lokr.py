@@ -142,6 +142,14 @@ class LokrModuleTest(unittest.TestCase):
         self.assertEqual(factorization(360, 16), (15, 24))
         self.assertEqual(legacy_factorization(128, 16), (16, 8))
 
+    def test_linear_shape_uses_weight_shape_when_metadata_mismatches(self):
+        module = torch.nn.Linear(1, 4, bias=False)
+        module.out_features = 8
+
+        lokr = make_lokr(module, factor=2)
+
+        self.assertEqual(tuple(lokr.get_weight(module.weight.shape).shape), tuple(module.weight.shape))
+
     def test_rank_dropout_one_drops_all_weight_rows(self):
         module = make_lokr(rank_dropout=1.0)
         module.train()

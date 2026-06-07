@@ -139,13 +139,11 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.shape = tuple(org_module.weight.shape)
         self.module_type, self.op, self.extra_args = self._get_module_ops(org_module)
         if self.module_type == "linear":
-            in_dim = org_module.in_features
-            out_dim = org_module.out_features
+            out_dim, in_dim = self.shape
             kernel_size = ()
         elif self.module_type.startswith("conv"):
-            in_dim = org_module.in_channels
-            out_dim = org_module.out_channels
-            kernel_size = _as_kernel_tuple(org_module.kernel_size)
+            out_dim, in_dim = self.shape[:2]
+            kernel_size = _as_kernel_tuple(self.shape[2:])
         else:
             raise ValueError(f"{org_module.__class__.__name__} is not supported in LoKr.")
 

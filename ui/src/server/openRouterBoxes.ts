@@ -14,7 +14,7 @@ type ImageSize = {
   height?: number | null;
 };
 
-type OpenRouterUsage = {
+export type OpenRouterUsage = {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
@@ -96,7 +96,7 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
   required: ['boxes', 'generatedElements'],
 };
 
-function isRecord(value: unknown): value is Record<string, any> {
+export function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -105,7 +105,7 @@ export function normalizeOpenRouterBoxModel(value: unknown) {
   return OPENROUTER_BOX_MODELS.includes(model as any) ? model : DEFAULT_OPENROUTER_BOX_MODEL;
 }
 
-function cleanString(value: unknown) {
+export function cleanString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
@@ -122,7 +122,7 @@ function summarizeElements(elements: any[]) {
   });
 }
 
-function imageSizeLine(imageSize?: ImageSize | null) {
+export function imageSizeLine(imageSize?: ImageSize | null) {
   const width = Number(imageSize?.width);
   const height = Number(imageSize?.height);
   if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
@@ -200,7 +200,7 @@ export function buildOpenRouterBoxPrompt(
   ].join('\n');
 }
 
-function extractMessageText(data: any) {
+export function extractMessageText(data: any) {
   const choice = Array.isArray(data?.choices) ? data.choices[0] : null;
   const message = isRecord(choice?.message) ? choice.message : null;
   const content = message?.content;
@@ -215,7 +215,7 @@ function extractMessageText(data: any) {
   return '';
 }
 
-function parseJsonObject(text: string) {
+export function parseJsonObject(text: string) {
   try {
     return JSON.parse(text);
   } catch {

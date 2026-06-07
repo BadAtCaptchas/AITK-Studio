@@ -541,6 +541,12 @@ function layerLabelForElement(element: any, index: number) {
   return label || (type === 'text' ? `Text ${index + 1}` : `Object ${index + 1}`);
 }
 
+function layerCaptionTargetText(element: any) {
+  const desc = typeof element?.desc === 'string' ? element.desc.trim() : '';
+  const text = typeof element?.text === 'string' ? element.text.trim() : '';
+  return element?.type === 'text' ? text || desc : desc || text;
+}
+
 function reindexLayerIndexSetAfterDelete(indexes: Set<number>, deletedIndex: number) {
   const next = new Set<number>();
   indexes.forEach(index => {
@@ -1022,6 +1028,8 @@ export default function DatasetImageStudio({
   const [autoBoxRefine, setAutoBoxRefine] = useState(false);
   const [isGeneratingBoxes, setIsGeneratingBoxes] = useState(false);
   const [autoBoxMessage, setAutoBoxMessage] = useState('');
+  const [isCaptioningLayer, setIsCaptioningLayer] = useState(false);
+  const [layerCaptionMessage, setLayerCaptionMessage] = useState('');
   const [encryptedOpenRouterConfirmed, setEncryptedOpenRouterConfirmed] = useState(false);
   const [selectedImageSize, setSelectedImageSize] = useState<ImageSize | null>(null);
   const [hiddenLayerIndexes, setHiddenLayerIndexes] = useState<Set<number>>(() => new Set());
@@ -1034,6 +1042,7 @@ export default function DatasetImageStudio({
   const autoSelectKeyRef = useRef('');
   const latestCaptionRef = useRef('');
   const selectedKeyRef = useRef('');
+  const selectedElementIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     setSelectedIndex(index => clampIndex(index, items.length));
@@ -1063,21 +1072,46 @@ export default function DatasetImageStudio({
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
           : '';
-  const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !isAutoCaptioning;
+  const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !isCaptioningLayer && !isAutoCaptioning;
+  const selectedLayerHasCaptionTarget = Boolean(selectedBox || layerCaptionTargetText(selectedElement));
+  const layerCaptionDisabledReason = !isCaptionLoaded
+    ? 'Load the caption first.'
+    : selectedKind !== 'image'
+      ? 'Caption Layer works on images only.'
+      : !isIdeogram
+        ? 'Caption Layer requires Ideogram JSON.'
+        : selectedItem?.kind === 'encrypted' && !encryptedKey
+          ? 'Unlock the encrypted dataset first.'
+          : !selectedElement || selectedElementIndex == null
+            ? 'Select a layer.'
+            : !selectedLayerHasCaptionTarget
+              ? 'Add a layer label or draw a box first.'
+              : '';
+  const canCaptionSelectedLayer =
+    !layerCaptionDisabledReason && !isCaptioningLayer && !isGeneratingBoxes && !isAutoCaptioning;
 
   useEffect(() => {
     latestCaptionRef.current = captionText;
   }, [captionText]);
 
   useEffect(() => {
+    selectedElementIndexRef.current = selectedElementIndex;
+  }, [selectedElementIndex]);
+
+  useEffect(() => {
     selectedKeyRef.current = selectedKey;
     setAutoBoxMessage('');
+    setLayerCaptionMessage('');
     setSelectedImageSize(null);
     setHiddenLayerIndexes(new Set());
     setLockedLayerIndexes(new Set());
     setOverlapElementStack([]);
     setActivePaletteSamplerIndex(null);
   }, [selectedKey]);
+
+  useEffect(() => {
+    setLayerCaptionMessage('');
+  }, [selectedElementIndex]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -1359,6 +1393,111 @@ export default function DatasetImageStudio({
     workerID,
   ]);
 
+  const handleCaptionSelectedLayer = useCallback(async () => {
+    if (!selectedItem || layerCaptionDisabledReason || isCaptioningLayer || selectedElementIndex == null || !selectedElement) return;
+
+    const requestCaption = captionText;
+    const requestKey = selectedKey;
+    const requestElementIndex = selectedElementIndex;
+    const requestElement = selectedElement;
+    const imageWidth = selectedImageSize?.width || null;
+    const imageHeight = selectedImageSize?.height || null;
+
+    setIsCaptioningLayer(true);
+    setLayerCaptionMessage('');
+    try {
+      let response;
+      if (selectedItem.kind === 'plain') {
+        response = await apiClient.post(
+          '/api/datasets/openrouter-layer-caption',
+          {
+            imgPath: selectedItem.path,
+            caption: requestCaption,
+            elementIndex: requestElementIndex,
+            model: autoBoxModel,
+            imageWidth,
+            imageHeight,
+          },
+          { timeout: 0 },
+        );
+      } else {
+        if (!encryptedKey) throw new Error('Unlock the encrypted dataset first.');
+        if (!encryptedOpenRouterConfirmed) {
+          const confirmed = window.confirm(
+            'Caption Layer will send this decrypted image to OpenRouter to caption the selected layer. Continue?',
+          );
+          if (!confirmed) {
+            setLayerCaptionMessage('Caption Layer canceled.');
+            return;
+          }
+          setEncryptedOpenRouterConfirmed(true);
+        }
+
+        const encryptedResponse = await apiClient.post(
+          '/api/datasets/encrypted/object',
+          { datasetName, worker_id: workerID, objectPath: selectedItem.item.objectPath },
+          { responseType: 'blob' },
+        );
+        const decrypted = await decryptEncryptedObjectBlob(encryptedKey, selectedItem.item.objectPath, encryptedResponse.data as Blob);
+        const imageBlob = new Blob([decrypted], { type: selectedItem.item.mimeType || 'image/jpeg' });
+        const formData = new FormData();
+        formData.append('image', imageBlob, selectedItem.item.name || 'encrypted-image');
+        formData.append('caption', requestCaption);
+        formData.append('elementIndex', String(requestElementIndex));
+        formData.append('model', autoBoxModel);
+        formData.append('encryptedConfirmed', 'true');
+        if (imageWidth) formData.append('imageWidth', String(imageWidth));
+        if (imageHeight) formData.append('imageHeight', String(imageHeight));
+
+        response = await apiClient.post('/api/datasets/openrouter-layer-caption', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 0,
+        });
+      }
+
+      if (
+        selectedKeyRef.current !== requestKey ||
+        latestCaptionRef.current !== requestCaption ||
+        selectedElementIndexRef.current !== requestElementIndex
+      ) {
+        setLayerCaptionMessage('Layer changed while Caption Layer was running. Rerun it for the current layer.');
+        return;
+      }
+
+      const desc = typeof response.data?.desc === 'string' ? response.data.desc.trim() : '';
+      const text = typeof response.data?.text === 'string' ? response.data.text.trim() : '';
+      if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
+
+      mutateCaption(data => {
+        updateIdeogramElementField(data, requestElementIndex, 'desc', desc);
+        if (requestElement?.type === 'text' && text && !String(requestElement.text || '').trim()) {
+          updateIdeogramElementField(data, requestElementIndex, 'text', text);
+        }
+      }, requestElementIndex);
+      setLayerCaptionMessage('Layer caption updated.');
+    } catch (error) {
+      console.error('Caption Layer failed:', error);
+      setLayerCaptionMessage(responseErrorMessage(error, 'Caption Layer failed. Please try again.'));
+    } finally {
+      setIsCaptioningLayer(false);
+    }
+  }, [
+    autoBoxModel,
+    captionText,
+    datasetName,
+    encryptedKey,
+    encryptedOpenRouterConfirmed,
+    isCaptioningLayer,
+    layerCaptionDisabledReason,
+    mutateCaption,
+    selectedElement,
+    selectedElementIndex,
+    selectedImageSize,
+    selectedItem,
+    selectedKey,
+    workerID,
+  ]);
+
   const undo = useCallback(() => {
     setUndoStack(previous => {
       const nextCaption = previous[previous.length - 1];
@@ -1593,6 +1732,9 @@ export default function DatasetImageStudio({
     isIdeogram && typeof captionParse.data.high_level_description === 'string'
       ? captionParse.data.high_level_description
       : captionText;
+  const selectedLayerColor =
+    selectedBox?.color || (selectedElementIndex != null ? BOX_COLORS[selectedElementIndex % BOX_COLORS.length] : BOX_COLORS[0]);
+  const layerCaptionStatus = layerCaptionMessage || (selectedElement && layerCaptionDisabledReason ? layerCaptionDisabledReason : '');
   const selectedRect = selectedBox ? boxToRect(selectedBox) : null;
 
   if (items.length === 0) {
@@ -1894,13 +2036,13 @@ export default function DatasetImageStudio({
                       Convert dataset to JSON
                     </button>
                   </div>
-                ) : selectedElement && selectedBox ? (
+                ) : selectedElement ? (
                   <>
                     <div className="grid grid-cols-[1fr_auto] gap-3">
                       <label className="min-w-0">
                         <span className="mb-1 block text-xs text-gray-400">Label</span>
                         <div className="flex items-center gap-2">
-                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: selectedBox.color }} />
+                          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: selectedLayerColor }} />
                           <input
                             value={selectedElement.type === 'text' ? selectedElement.text || '' : selectedElement.desc || ''}
                             onChange={event =>
@@ -1910,7 +2052,7 @@ export default function DatasetImageStudio({
                           />
                         </div>
                       </label>
-                      <div className="pt-6 text-xs text-gray-500">ID: {String(selectedElementIndex).padStart(3, '0')}</div>
+                      <div className="pt-6 text-xs text-gray-500">ID: {String(selectedElementIndex ?? 0).padStart(3, '0')}</div>
                     </div>
                     <div>
                       <span className="mb-2 block text-xs text-gray-400">Type</span>
@@ -1922,6 +2064,19 @@ export default function DatasetImageStudio({
                           Text
                         </SegmentedButton>
                       </div>
+                    </div>
+                    <div className="flex min-h-9 items-center justify-between gap-3">
+                      <div className="min-w-0 truncate text-xs text-gray-500">{layerCaptionStatus}</div>
+                      <button
+                        type="button"
+                        disabled={!canCaptionSelectedLayer}
+                        onClick={() => void handleCaptionSelectedLayer()}
+                        title={isCaptioningLayer ? 'Captioning layer' : layerCaptionDisabledReason || 'Caption selected layer with OpenRouter'}
+                        className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
+                      >
+                        {isCaptioningLayer ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
+                        Caption Layer
+                      </button>
                     </div>
                     {selectedRect && (
                       <div>
@@ -1937,7 +2092,7 @@ export default function DatasetImageStudio({
                                 value={selectedRect[field]}
                                 onChange={event => {
                                   const nextRect = { ...selectedRect, [field]: Number(event.target.value) };
-                                  handleChangeBox(selectedBox.elementIndex, rectToBox(nextRect));
+                                  if (selectedElementIndex != null) handleChangeBox(selectedElementIndex, rectToBox(nextRect));
                                 }}
                                 className="min-w-0 flex-1 bg-transparent text-right text-sm text-gray-100 outline-none"
                               />
@@ -2020,7 +2175,7 @@ export default function DatasetImageStudio({
                   </>
                 ) : (
                   <div className="rounded-md border border-gray-800 bg-gray-900/60 p-3 text-sm text-gray-400">
-                    Select a box, or use Box/Text to draw a new region.
+                    Select a layer, or use Box/Text to draw a new region.
                   </div>
                 )}
               </div>

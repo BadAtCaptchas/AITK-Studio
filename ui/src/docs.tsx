@@ -265,6 +265,137 @@ const docs: { [key: string]: ConfigDoc } = {
       </>
     ),
   },
+  'config.process[0].network.lokr_factor': {
+    title: 'LoKr Factor',
+    tooltip: 'Controls the Kronecker factorization shape; use -1 for automatic factorization.',
+    description: (
+      <>
+        Controls the Kronecker factorization shape used by LoKr. Use <code>-1</code> for automatic factorization, or set
+        a specific factor such as <code>8</code> or <code>16</code> when you want a known LoKr layout.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_options': {
+    title: 'LoKr Options',
+    tooltip: 'Advanced LoKr behavior controls for capacity, scaling, compatibility, and quantized layers.',
+    description: (
+      <>
+        Advanced LyCORIS LoKr settings. The defaults are conservative; only change these when you are matching an
+        existing LoKr recipe, importing older weights, or intentionally experimenting with LoKr capacity, scaling, or
+        quantized-layer behavior.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_full_matrix': {
+    title: 'Full Matrix',
+    tooltip: 'Stores the larger Kronecker block as a full matrix; usually larger, sometimes higher capacity.',
+    description: (
+      <>
+        Stores the larger LoKr Kronecker block as a full matrix instead of decomposing it. This can increase capacity
+        but usually makes the adapter larger. The old <code>lokr_full_rank</code> option maps to this behavior.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_use_tucker': {
+    title: 'Tucker Conv',
+    tooltip: 'Uses Tucker decomposition for non-1x1 convolution LoKr weights.',
+    description: (
+      <>
+        Uses Tucker decomposition for convolution kernels larger than 1x1. This is LyCORIS <code>use_tucker</code> and
+        is mainly useful when training convolution layers with LoKr.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_use_scalar': {
+    title: 'Scalar',
+    tooltip: 'Trains an extra scalar multiplier in front of the LoKr weight difference.',
+    description: (
+      <>
+        Trains an additional scalar multiplier in front of the LoKr weight difference and uses the LyCORIS scalar
+        initialization path. It gives the adapter another learned strength control.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_decompose_both': {
+    title: 'Decompose Both',
+    tooltip: 'Low-rank decomposes both Kronecker blocks; smaller adapters, potentially less capacity.',
+    description: (
+      <>
+        Low-rank decomposes both LoKr Kronecker blocks instead of only decomposing the larger block. This can shrink the
+        adapter, but it can also reduce capacity.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_weight_decompose': {
+    title: 'DoRA',
+    tooltip: 'Enables DoRA-style weight decomposition with a learned magnitude scale.',
+    description: (
+      <>
+        Enables LyCORIS weight decomposition, also known as DoRA. The adapter learns a magnitude scale in addition to
+        the LoKr direction, which may improve stability for some recipes.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_wd_on_output': {
+    title: 'DoRA On Output',
+    tooltip: 'When DoRA is enabled, scales output channels instead of the input side.',
+    description: (
+      <>
+        Chooses the normalization axis for LoKr DoRA. When enabled, DoRA scales output channels; when disabled, it scales
+        the input side. This only applies when DoRA is enabled.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_bypass_mode': {
+    title: 'Bypass Mode',
+    tooltip: 'Computes base and LoKr delta outputs separately, useful for quantized or low-bit layers.',
+    description: (
+      <>
+        Computes the base layer output and LoKr delta output separately instead of building a merged weight for the
+        forward pass. This is intended for quantized or low-bit layers where merging can be awkward.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_rs_lora': {
+    title: 'Rank-Stabilized',
+    tooltip: 'Uses sqrt(rank) scaling so higher ranks start less weakly.',
+    description: (
+      <>
+        Uses rank-stabilized scaling for the LoKr alpha ratio, dividing by the square root of rank instead of rank. This
+        can make higher-rank adapters behave less weakly at initialization.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_rank_dropout_scale': {
+    title: 'Rank Dropout Scale',
+    tooltip: 'Rescales remaining rows during rank dropout to preserve expected adapter strength.',
+    description: (
+      <>
+        Rescales the remaining LoKr rows during rank dropout so the expected adapter strength stays closer to the
+        no-dropout value. This only matters when rank dropout is configured.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_unbalanced_factorization': {
+    title: 'Unbalanced Factor',
+    tooltip: 'Swaps output factor order for specific LyCORIS layouts or checkpoint compatibility.',
+    description: (
+      <>
+        Swaps the output-side LoKr factor order after factorization. This changes how the Kronecker blocks are shaped
+        and is mostly useful for matching specific LyCORIS experiments or checkpoints.
+      </>
+    ),
+  },
+  'config.process[0].network.lokr_legacy_factorization': {
+    title: 'Legacy Factor',
+    tooltip: 'Uses the older AI Toolkit LoKr factor ordering for older configs or checkpoints.',
+    description: (
+      <>
+        Uses the older AI Toolkit LoKr factor ordering instead of the current LyCORIS-style factorization. Enable this
+        when you need compatibility with older LoKr checkpoints or older local configs.
+      </>
+    ),
+  },
   'train.diff_output_preservation': {
     title: 'Differential Output Preservation',
     description: (

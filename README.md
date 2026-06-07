@@ -428,7 +428,7 @@ train:
       loss_type: mse
 ```
 
-Phase overrides inherit from the top-level `train` block. Supported phase-local overrides include learning rates, optimizer, optimizer params, LR scheduler params, timestep type/bias, loss type, denoising min/max, SNR settings, and prompt/noise multipliers. Model, network, dataset, save, sample, batch size, gradient accumulation, dtype, cache, LoRA rank, and LoKr factor settings stay top-level only for the whole run.
+Phase overrides inherit from the top-level `train` block. Supported phase-local overrides include learning rates, optimizer, optimizer params, LR scheduler params, timestep type/bias, loss type, denoising min/max, SNR settings, and prompt/noise multipliers. Model, network, dataset, save, sample, batch size, gradient accumulation, dtype, cache, LoRA rank, and LoKr rank/factor/advanced settings stay top-level only for the whole run.
 
 At each phase boundary the trainer saves by default, rebuilds the optimizer and LR scheduler, clears gradients, and continues. Phase changes only happen after a completed optimizer update, so boundaries defer cleanly during gradient accumulation. Checkpoints store the current phase index/name and phase-local step so resumes return to the correct phase.
 
@@ -671,13 +671,35 @@ if will be ignored.
 
 ## LoKr Training
 
-To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Guidelines.md). To train a LoKr model, you can adjust the network type in the config file like so:
+To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Guidelines.md) and the LyCORIS [network arguments](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Network-Args.md). To train a LoKr model, change the network type in the config file:
 
 ```yaml
       network:
         type: "lokr"
-        lokr_full_rank: true
+        linear: 16
+        linear_alpha: 16
         lokr_factor: 8
+        lokr_full_matrix: false
 ```
 
-Everything else should work the same including layer targeting.
+`linear` and `linear_alpha` are the LoKr dimension and alpha. `lokr_factor` maps to LyCORIS `factor`; use `-1` for automatic factorization. `lokr_full_matrix` forces the second Kronecker block to be stored as a full matrix and is normally left off unless you explicitly want that larger model. The older `lokr_full_rank` key is still accepted for compatibility and also enables full-matrix mode.
+
+Current LoKr options can be set either from the UI (`New Job` -> `Target Type: LoKr`) or in YAML:
+
+```yaml
+      network:
+        type: "lokr"
+        linear: 16
+        linear_alpha: 16
+        lokr_factor: 8
+        lokr_use_tucker: true
+        lokr_use_scalar: false
+        lokr_decompose_both: false
+        lokr_weight_decompose: false
+        lokr_bypass_mode: false
+        lokr_rs_lora: false
+```
+
+Supported advanced keys include `lokr_use_tucker`, `lokr_use_scalar`, `lokr_decompose_both`, `lokr_rank_dropout_scale`, `lokr_weight_decompose`, `lokr_wd_on_output`, `lokr_full_matrix`, `lokr_bypass_mode`, `lokr_rs_lora`, `lokr_unbalanced_factorization`, and `lokr_legacy_factorization`. The loader also accepts upstream-style aliases such as `use_tucker`, `use_scalar`, `decompose_both`, `rank_dropout_scale`, `weight_decompose`, `dora_wd`, `wd_on_output`, `full_matrix`, `bypass_mode`, `rs_lora`, `unbalanced_factorization`, and `legacy_factorization`.
+
+Everything else should work the same, including layer targeting with `network_kwargs`.

@@ -40,6 +40,17 @@ CONV_MODULES = [
     'LoRACompatibleConv',
     'QConv2d',
 ]
+LOKR_CONV_MODULES = [
+    *CONV_MODULES,
+    'Conv1d',
+    'Conv3d',
+]
+
+
+def _is_unit_kernel(kernel_size):
+    if isinstance(kernel_size, int):
+        kernel_size = (kernel_size,)
+    return all(size == 1 for size in kernel_size)
 
 class IdentityModule(torch.nn.Module):
     def forward(self, x):
@@ -347,6 +358,8 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
             skipped = []
             attached_module_ids = set()
             lora_shape_dict = {}
+            is_lokr_network = self.network_type.lower() == "lokr"
+            conv_modules = LOKR_CONV_MODULES if is_lokr_network else CONV_MODULES
             for name, module in root_module.named_modules():
                 module_name = module.__class__.__name__
                 is_target_module = module_name in target_replace_modules
@@ -359,8 +372,8 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                 if is_target_module:
                     for child_name, child_module in module.named_modules():
                         is_linear = child_module.__class__.__name__ in LINEAR_MODULES
-                        is_conv2d = child_module.__class__.__name__ in CONV_MODULES
-                        is_conv2d_1x1 = is_conv2d and child_module.kernel_size == (1, 1)
+                        is_conv = child_module.__class__.__name__ in conv_modules
+                        is_conv_1x1 = is_conv and _is_unit_kernel(child_module.kernel_size)
 
 
                         lora_name = [prefix, name, child_name]
@@ -415,7 +428,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                                     if "single_blocks" not in lora_name and "double_blocks" not in lora_name:
                                         skip = True
 
-                        if (is_linear or is_conv2d) and not skip:
+                        if (is_linear or is_conv) and not skip:
                             if id(child_module) in attached_module_ids:
                                 continue
 
@@ -433,7 +446,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                                     alpha = modules_alpha[lora_name]
                             else:
                                 # 通常、すべて対象とする
-                                if is_linear or is_conv2d_1x1:
+                                if is_linear or is_conv_1x1:
                                     dim = self.lora_dim
                                     alpha = self.alpha
                                 elif self.conv_lora_dim is not None:
@@ -442,7 +455,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
 
                             if dim is None or dim == 0:
                                 # skipした情報を出力
-                                if is_linear or is_conv2d_1x1 or (
+                                if is_linear or is_conv_1x1 or (
                                         self.conv_lora_dim is not None or conv_block_dims is not None):
                                     skipped.append(lora_name)
                                 continue
@@ -450,7 +463,20 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                             module_kwargs = {}
                             
                             if self.network_type.lower() == "lokr":
-                                module_kwargs["factor"] = self.network_config.lokr_factor
+                                module_kwargs.update({
+                                    "factor": self.network_config.lokr_factor,
+                                    "use_tucker": self.network_config.lokr_use_tucker,
+                                    "use_scalar": self.network_config.lokr_use_scalar,
+                                    "decompose_both": self.network_config.lokr_decompose_both,
+                                    "rank_dropout_scale": self.network_config.lokr_rank_dropout_scale,
+                                    "weight_decompose": self.network_config.lokr_weight_decompose,
+                                    "wd_on_out": self.network_config.lokr_wd_on_output,
+                                    "full_matrix": self.network_config.lokr_full_matrix,
+                                    "bypass_mode": self.network_config.lokr_bypass_mode,
+                                    "rs_lora": self.network_config.lokr_rs_lora,
+                                    "unbalanced_factorization": self.network_config.lokr_unbalanced_factorization,
+                                    "legacy_factorization": self.network_config.lokr_legacy_factorization,
+                                })
                             
                             if self.is_ara:
                                 module_kwargs["is_ara"] = True
@@ -614,5 +640,22 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                 all_params.append({"lr": unet_lr, "params": list(self.unet_conv_out.parameters())})
 
         return all_params
+
+    def apply_max_norm_regularization(self, max_norm_value, device):
+        if self.network_type.lower() != "lokr":
+            return super().apply_max_norm_regularization(max_norm_value, device)
+
+        key_scaled = 0
+        norms = []
+        for module in self.get_all_modules():
+            scaled, norm = module.apply_max_norm(max_norm_value, device)
+            if scaled is None:
+                continue
+            key_scaled += int(bool(scaled))
+            norms.append(norm)
+
+        if key_scaled == 0:
+            return key_scaled, 0, 0
+        return key_scaled, sum(norms) / len(norms), max(norms)
 
 

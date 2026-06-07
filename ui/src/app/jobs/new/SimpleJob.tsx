@@ -122,8 +122,10 @@ export default function SimpleJob({
   }, [modelArch, jobType]);
 
   const isVideoModel = !!(modelArch?.group === 'video');
-  const networkType = jobConfig.config.process[0].network?.type ?? 'lora';
+  const networkConfig = jobConfig.config.process[0].network;
+  const networkType = networkConfig?.type ?? 'lora';
   const supportsNormalNetworkDropout = networkType !== 'lokr';
+  const lokrFullMatrix = !!(networkConfig?.lokr_full_matrix || networkConfig?.lokr_full_rank);
   const isAudioModel = !!(modelArch?.group === 'audio');
   const autoTrain = !!jobConfig.config.process[0].train.auto_train;
   const trainConfig = jobConfig.config.process[0].train;
@@ -709,18 +711,99 @@ export default function SimpleJob({
                 ]}
               />
               {networkType == 'lokr' && (
-                <SelectInput
-                  label="LoKr Factor"
-                  value={`${jobConfig.config.process[0].network?.lokr_factor ?? -1}`}
-                  onChange={value => setJobConfig(parseInt(value), 'config.process[0].network.lokr_factor')}
-                  options={[
-                    { value: '-1', label: 'Auto' },
-                    { value: '4', label: '4' },
-                    { value: '8', label: '8' },
-                    { value: '16', label: '16' },
-                    { value: '32', label: '32' },
-                  ]}
-                />
+                <>
+                  <SelectInput
+                    label="LoKr Factor"
+                    docKey="config.process[0].network.lokr_factor"
+                    value={`${networkConfig?.lokr_factor ?? -1}`}
+                    onChange={value => setJobConfig(parseInt(value), 'config.process[0].network.lokr_factor')}
+                    options={[
+                      { value: '-1', label: 'Auto' },
+                      { value: '4', label: '4' },
+                      { value: '8', label: '8' },
+                      { value: '16', label: '16' },
+                      { value: '32', label: '32' },
+                    ]}
+                  />
+                  <FormGroup
+                    label="LoKr Options"
+                    docKey="config.process[0].network.lokr_options"
+                    className="pt-1"
+                  >
+                    <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                      <Checkbox
+                        label="Full Matrix"
+                        docKey="config.process[0].network.lokr_full_matrix"
+                        checked={lokrFullMatrix}
+                        onChange={value => {
+                          setJobConfig(value, 'config.process[0].network.lokr_full_matrix');
+                          setJobConfig(value, 'config.process[0].network.lokr_full_rank');
+                        }}
+                      />
+                      <Checkbox
+                        label="Tucker Conv"
+                        docKey="config.process[0].network.lokr_use_tucker"
+                        checked={!!networkConfig?.lokr_use_tucker}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_use_tucker')}
+                      />
+                      <Checkbox
+                        label="Scalar"
+                        docKey="config.process[0].network.lokr_use_scalar"
+                        checked={!!networkConfig?.lokr_use_scalar}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_use_scalar')}
+                      />
+                      <Checkbox
+                        label="Decompose Both"
+                        docKey="config.process[0].network.lokr_decompose_both"
+                        checked={!!networkConfig?.lokr_decompose_both}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_decompose_both')}
+                      />
+                      <Checkbox
+                        label="DoRA"
+                        docKey="config.process[0].network.lokr_weight_decompose"
+                        checked={!!networkConfig?.lokr_weight_decompose}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_weight_decompose')}
+                      />
+                      <Checkbox
+                        label="DoRA On Output"
+                        docKey="config.process[0].network.lokr_wd_on_output"
+                        checked={networkConfig?.lokr_wd_on_output ?? true}
+                        disabled={!networkConfig?.lokr_weight_decompose}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_wd_on_output')}
+                      />
+                      <Checkbox
+                        label="Bypass Mode"
+                        docKey="config.process[0].network.lokr_bypass_mode"
+                        checked={!!networkConfig?.lokr_bypass_mode}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_bypass_mode')}
+                      />
+                      <Checkbox
+                        label="Rank-Stabilized"
+                        docKey="config.process[0].network.lokr_rs_lora"
+                        checked={!!networkConfig?.lokr_rs_lora}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_rs_lora')}
+                      />
+                      <Checkbox
+                        label="Rank Dropout Scale"
+                        docKey="config.process[0].network.lokr_rank_dropout_scale"
+                        checked={!!networkConfig?.lokr_rank_dropout_scale}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_rank_dropout_scale')}
+                      />
+                      <Checkbox
+                        label="Unbalanced Factor"
+                        docKey="config.process[0].network.lokr_unbalanced_factorization"
+                        checked={!!networkConfig?.lokr_unbalanced_factorization}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_unbalanced_factorization')}
+                      />
+                      <Checkbox
+                        label="Legacy Factor"
+                        docKey="config.process[0].network.lokr_legacy_factorization"
+                        checked={!!networkConfig?.lokr_legacy_factorization}
+                        onChange={value => setJobConfig(value, 'config.process[0].network.lokr_legacy_factorization')}
+                      />
+                    </div>
+                  </FormGroup>
+                </>
               )}
               {networkType == 'lora' && (
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">

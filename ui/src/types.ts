@@ -308,6 +308,17 @@ export interface NetworkConfig {
   dropout?: number;
   lokr_full_rank: boolean;
   lokr_factor: number;
+  lokr_use_tucker?: boolean;
+  lokr_use_scalar?: boolean;
+  lokr_decompose_both?: boolean;
+  lokr_rank_dropout_scale?: boolean;
+  lokr_weight_decompose?: boolean;
+  lokr_wd_on_output?: boolean;
+  lokr_full_matrix?: boolean;
+  lokr_bypass_mode?: boolean;
+  lokr_rs_lora?: boolean;
+  lokr_unbalanced_factorization?: boolean;
+  lokr_legacy_factorization?: boolean;
   network_kwargs: {
     ignore_if_contains: string[];
     only_if_contains?: string[];
@@ -643,6 +654,7 @@ export interface CaptionJobConfig {
 export interface ConfigDoc {
   title: string | React.ReactNode;
   description: React.ReactNode;
+  tooltip?: string;
 }
 
 export interface SelectOption {

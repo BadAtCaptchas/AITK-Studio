@@ -328,7 +328,7 @@ class ToolkitModuleMixin:
         #     return self.dora_forward(x, *args, **kwargs)
         
         if self.__class__.__name__ == "LokrModule":
-            return self._call_forward(x)
+            return self._call_forward(x, *args, **kwargs)
 
         org_forwarded = self.org_forward(x, *args, **kwargs)
 
@@ -741,8 +741,18 @@ class ToolkitNetworkMixin:
                 
                 # patch lokr, not sure why we need to but whatever
                 if self.network_type.lower() == "lokr":
-                    load_key = load_key.replace('$$lokr_w1', '.lokr_w1')
-                    load_key = load_key.replace('$$lokr_w2', '.lokr_w2')
+                    for lokr_key in (
+                            'lokr_w1',
+                            'lokr_w1_a',
+                            'lokr_w1_b',
+                            'lokr_w2',
+                            'lokr_w2_a',
+                            'lokr_w2_b',
+                            'lokr_t1',
+                            'lokr_t2',
+                            'dora_scale',
+                    ):
+                        load_key = load_key.replace(f'$${lokr_key}', f'.{lokr_key}')
                     if load_key.endswith('$$alpha'):
                         load_key = load_key[:-7] + '.alpha'
             

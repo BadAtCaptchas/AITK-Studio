@@ -211,6 +211,12 @@ class LoRMConfig:
 NetworkType = Literal['lora', 'locon', 'lorm', 'lokr']
 
 
+def _config_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 class NetworkConfig:
     def __init__(self, **kwargs):
         self.type: NetworkType = kwargs.get('type', 'lora')
@@ -233,7 +239,20 @@ class NetworkConfig:
         if self.type.lower() == 'lokr' and self.dropout:
             # LoKr currently ignores normal dropout; normalize early to avoid per-module warnings.
             self.dropout = None
-        self.network_kwargs: dict = kwargs.get('network_kwargs', {})
+        self.network_kwargs: dict = kwargs.get('network_kwargs', {}) or {}
+
+        def get_lokr_value(name, default=None, *aliases):
+            keys = (name, *aliases)
+            for key in keys:
+                if key in kwargs:
+                    return kwargs[key]
+            for key in keys:
+                if key in self.network_kwargs:
+                    return self.network_kwargs[key]
+            return default
+
+        def get_lokr_bool(name, default=False, *aliases):
+            return _config_bool(get_lokr_value(name, default, *aliases))
 
         self.lorm_config: Union[LoRMConfig, None] = None
         lorm = kwargs.get('lorm', None)
@@ -257,6 +276,34 @@ class NetworkConfig:
             self.conv_alpha = 9999999999
         # -1 automatically finds the largest factor
         self.lokr_factor = kwargs.get('lokr_factor', -1)
+
+        disable_conv_cp = get_lokr_bool('disable_conv_cp', True)
+        self.lokr_use_tucker = (
+            get_lokr_bool('lokr_use_tucker', False, 'use_tucker')
+            or get_lokr_bool('use_cp', False)
+            or get_lokr_bool('use_conv_cp', False)
+            or not disable_conv_cp
+        )
+        self.lokr_use_scalar = get_lokr_bool('lokr_use_scalar', False, 'use_scalar')
+        self.lokr_decompose_both = get_lokr_bool('lokr_decompose_both', False, 'decompose_both')
+        self.lokr_rank_dropout_scale = get_lokr_bool(
+            'lokr_rank_dropout_scale', False, 'rank_dropout_scale'
+        )
+        self.lokr_weight_decompose = get_lokr_bool(
+            'lokr_weight_decompose', False, 'weight_decompose', 'dora_wd'
+        )
+        self.lokr_wd_on_output = get_lokr_bool('lokr_wd_on_output', True, 'wd_on_output')
+        self.lokr_full_matrix = get_lokr_bool('lokr_full_matrix', False, 'full_matrix')
+        self.lokr_bypass_mode = get_lokr_bool('lokr_bypass_mode', False, 'bypass_mode')
+        self.lokr_rs_lora = get_lokr_bool('lokr_rs_lora', False, 'rs_lora')
+        self.lokr_unbalanced_factorization = get_lokr_bool(
+            'lokr_unbalanced_factorization', False, 'unbalanced_factorization'
+        )
+        self.lokr_legacy_factorization = get_lokr_bool(
+            'lokr_legacy_factorization', False, 'legacy_factorization'
+        )
+        if self.lokr_full_rank and self.type.lower() == 'lokr':
+            self.lokr_full_matrix = True
         
         # Use the old lokr format
         self.old_lokr_format = kwargs.get('old_lokr_format', False)

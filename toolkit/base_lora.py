@@ -90,6 +90,9 @@ def _strip_lora_suffix(key: str) -> Optional[str]:
         ".lora_up.",
         ".lokr_w1",
         ".lokr_w2",
+        ".lokr_t1",
+        ".lokr_t2",
+        ".dora_scale",
     ]
     for suffix in suffixes:
         if suffix in key:
@@ -103,10 +106,14 @@ def _infer_network_config(state_dict: Dict[str, torch.Tensor]) -> Tuple[NetworkC
 
     keys = list(state_dict.keys())
     lowered_keys = [key.lower() for key in keys]
-    if any("dora" in key or "magnitude" in key for key in lowered_keys):
+    is_lokr = any("lokr_" in key or ".lokr" in key for key in lowered_keys)
+    has_non_lokr_dora = any(
+        "magnitude" in key or ("dora" in key and "dora_scale" not in key)
+        for key in lowered_keys
+    )
+    if has_non_lokr_dora:
         raise ValueError("model.base_lora_path only supports mergeable LoRA/LoKr adapters. DoRA is not supported.")
 
-    is_lokr = any("lokr_" in key or ".lokr" in key for key in lowered_keys)
     network_kwargs: Dict[str, Any] = {}
     only_if_contains = []
     for key in keys:
@@ -119,17 +126,36 @@ def _infer_network_config(state_dict: Dict[str, torch.Tensor]) -> Tuple[NetworkC
 
     if is_lokr:
         largest_factor = 0
+        inferred_rank = None
+        has_w1_a = any("lokr_w1_a" in key for key in lowered_keys)
+        has_w2_a = any("lokr_w2_a" in key for key in lowered_keys)
+        has_tucker = any("lokr_t2" in key for key in lowered_keys)
+        has_dora_scale = any("dora_scale" in key for key in lowered_keys)
         for key, value in state_dict.items():
             if "lokr_w1" in key:
                 largest_factor = max(largest_factor, int(value.shape[0]))
+            if inferred_rank is None and "lokr_w1_a" in key:
+                inferred_rank = int(value.shape[1])
+            if inferred_rank is None and "lokr_w2_a" in key:
+                inferred_rank = int(value.shape[0] if has_tucker else value.shape[1])
         if largest_factor <= 0:
             raise ValueError("Could not infer LoKr factor from base LoRA file.")
-        config = NetworkConfig(
-            type="lokr",
-            lokr_full_rank=True,
-            lokr_factor=largest_factor,
-            transformer_only=False,
-        )
+        config_kwargs = {
+            "type": "lokr",
+            "lokr_factor": largest_factor,
+            "lokr_use_tucker": has_tucker,
+            "lokr_decompose_both": has_w1_a,
+            "lokr_weight_decompose": has_dora_scale,
+            "lokr_legacy_factorization": True,
+            "transformer_only": False,
+        }
+        if inferred_rank is None:
+            config_kwargs["lokr_full_rank"] = True
+        else:
+            config_kwargs["linear"] = inferred_rank
+            config_kwargs["linear_alpha"] = inferred_rank
+            config_kwargs["lokr_full_matrix"] = not has_w1_a and not has_w2_a
+        config = NetworkConfig(**config_kwargs)
     else:
         linear_dim = None
         for key, value in state_dict.items():
@@ -293,4 +319,3 @@ def fuse_base_lora_into_model(
     )
     setattr(base_model, "_base_lora_fused", True)
     return result
-

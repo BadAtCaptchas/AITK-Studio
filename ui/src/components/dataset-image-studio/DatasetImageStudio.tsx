@@ -32,12 +32,12 @@ import {
   updateIdeogramHighLevelDescription,
 } from '@/utils/ideogramCaption';
 import { AnnotationLayer } from './AnnotationLayer';
-import { BOX_COLORS, MAX_HISTORY, THUMB_WINDOW } from './constants';
+import { BOX_COLORS, MAX_HISTORY } from './constants';
+import { ImageNavigator } from './ImageNavigator';
 import { CaptionEditorPanel, ObjectDetailsPanel } from './InspectorPanels';
 import { LayersPanel } from './LayersPanel';
 import { StudioMedia } from './StudioMedia';
 import { StudioToolbar } from './StudioToolbar';
-import { ThumbnailStrip } from './ThumbnailStrip';
 import { ToolRail } from './ToolRail';
 import { appendImageSizeFields, createEncryptedImageFormData } from './openRouterMedia';
 import type { CaptionCacheEntry, CaptionTab, DatasetImageStudioProps, ImageSize, ToolMode } from './types';
@@ -95,11 +95,21 @@ export default function DatasetImageStudio({
   const [overlapElementStack, setOverlapElementStack] = useState<number[]>([]);
   const [activePaletteSamplerIndex, setActivePaletteSamplerIndex] = useState<number | null>(null);
   const [encryptedCaptionPaths, setEncryptedCaptionPaths] = useState<Record<string, string>>({});
+  const [captionCacheVersion, setCaptionCacheVersion] = useState(0);
   const captionCacheRef = useRef(new Map<string, CaptionCacheEntry>());
   const saveCaptionRef = useRef<() => Promise<void>>(async () => undefined);
   const autoSelectKeyRef = useRef('');
   const latestCaptionRef = useRef('');
   const selectedKeyRef = useRef('');
+
+  const writeCaptionCache = useCallback((key: string, entry: CaptionCacheEntry) => {
+    captionCacheRef.current.set(key, entry);
+    setCaptionCacheVersion(version => version + 1);
+  }, []);
+
+  const bumpCaptionCacheVersion = useCallback(() => {
+    setCaptionCacheVersion(version => version + 1);
+  }, []);
 
   useEffect(() => {
     setSelectedIndex(index => clampIndex(index, items.length));
@@ -216,12 +226,12 @@ export default function DatasetImageStudio({
         setCaptionText(text);
         setSavedCaption(text);
         setIsCaptionLoaded(true);
-        captionCacheRef.current.set(selectedKey, { caption: text, saved: text, loaded: true });
+        writeCaptionCache(selectedKey, { caption: text, saved: text, loaded: true });
       } catch (error) {
         if (!cancelled) {
           console.error('Caption load failed:', error);
           setIsCaptionLoaded(true);
-          captionCacheRef.current.set(selectedKey, { caption: '', saved: '', loaded: true });
+          writeCaptionCache(selectedKey, { caption: '', saved: '', loaded: true });
         }
       }
     }
@@ -230,12 +240,12 @@ export default function DatasetImageStudio({
     return () => {
       cancelled = true;
     };
-  }, [datasetName, encryptedKey, selectedItem, selectedKey, workerID]);
+  }, [datasetName, encryptedKey, selectedItem, selectedKey, workerID, writeCaptionCache]);
 
   useEffect(() => {
     if (!selectedKey) return;
-    captionCacheRef.current.set(selectedKey, { caption: captionText, saved: savedCaption, loaded: isCaptionLoaded });
-  }, [captionText, isCaptionLoaded, savedCaption, selectedKey]);
+    writeCaptionCache(selectedKey, { caption: captionText, saved: savedCaption, loaded: isCaptionLoaded });
+  }, [captionText, isCaptionLoaded, savedCaption, selectedKey, writeCaptionCache]);
 
   useEffect(() => {
     if (!isIdeogram || selectedElementIndex == null) return;
@@ -284,7 +294,7 @@ export default function DatasetImageStudio({
         setEncryptedCaptionPaths(previous => ({ ...previous, [key]: targetCaptionPath }));
       }
       setSavedCaption(value);
-      captionCacheRef.current.set(selectedKey, { caption: value, saved: value, loaded: true });
+      writeCaptionCache(selectedKey, { caption: value, saved: value, loaded: true });
     } catch (error) {
       console.error('Caption save failed:', error);
       alert('Failed to save caption. Please try again.');
@@ -301,6 +311,7 @@ export default function DatasetImageStudio({
     onSaveEncryptedCaption,
     selectedItem,
     selectedKey,
+    writeCaptionCache,
   ]);
 
   useEffect(() => {
@@ -840,14 +851,6 @@ export default function DatasetImageStudio({
     undo,
   ]);
 
-  const thumbRange = useMemo(() => {
-    const half = Math.floor(THUMB_WINDOW / 2);
-    let start = Math.max(0, selectedIndex - half);
-    let end = Math.min(items.length, start + THUMB_WINDOW);
-    start = Math.max(0, end - THUMB_WINDOW);
-    return { start, end };
-  }, [items.length, selectedIndex]);
-
   const highLevelDescription =
     isIdeogram && typeof captionParse.data.high_level_description === 'string'
       ? captionParse.data.high_level_description
@@ -934,14 +937,15 @@ export default function DatasetImageStudio({
                 )}
               </StudioMedia>
             </div>
-            <ThumbnailStrip
+            <ImageNavigator
               items={items}
-              thumbRange={thumbRange}
               selectedIndex={selectedIndex}
               datasetName={datasetName}
               workerID={workerID}
               encryptedKey={encryptedKey}
               captionCache={captionCacheRef.current}
+              captionCacheVersion={captionCacheVersion}
+              onCaptionCacheChange={bumpCaptionCacheVersion}
               onSelectIndex={selectIndex}
             />
           </main>

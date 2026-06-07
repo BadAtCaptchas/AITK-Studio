@@ -25,6 +25,7 @@
         "src/utils/jobDatasetDefaults.ts",
         "src/utils/remoteDatasetRefs.ts",
         "src/utils/annotationGeometry.ts",
+        "src/utils/datasetImageNavigator.ts",
         "src/utils/ideogramCaption.ts",
         "src/utils/folderImport.ts",
         "src/utils/webauthnPrfCrypto.ts",

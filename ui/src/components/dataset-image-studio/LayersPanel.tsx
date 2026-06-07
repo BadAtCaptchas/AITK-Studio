@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import classNames from 'classnames';
-import { Eye, EyeOff, Layers, Lock, SquareDashed, Trash2, Type, Unlock } from 'lucide-react';
+import { Copy, Eye, EyeOff, Layers, Lock, SquareDashed, Trash2, Type, Unlock } from 'lucide-react';
 import type { IdeogramBox, IdeogramElementType } from '@/utils/ideogramCaption';
 import { BOX_COLORS } from './constants';
 import { layerLabelForElement, resolveBoxColor } from './utils';
@@ -16,6 +16,7 @@ export function LayersPanel({
   onSelect,
   onToggleHidden,
   onToggleLocked,
+  onDuplicate,
   onDelete,
 }: {
   elements: any[];
@@ -26,6 +27,7 @@ export function LayersPanel({
   onSelect: (elementIndex: number) => void;
   onToggleHidden: (elementIndex: number) => void;
   onToggleLocked: (elementIndex: number) => void;
+  onDuplicate: (elementIndex: number) => void;
   onDelete: (elementIndex: number) => void;
 }) {
   const rowRefs = useRef(new Map<number, HTMLButtonElement | null>());
@@ -70,7 +72,7 @@ export function LayersPanel({
             return (
               <div
                 key={elementIndex}
-                className={classNames('group grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-2 border-b border-gray-900 px-2 py-1.5 last:border-b-0', {
+                className={classNames('group grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-2 border-b border-gray-900 px-2 py-1.5 last:border-b-0', {
                   'bg-blue-600/20': selected,
                   'opacity-50': hidden,
                 })}
@@ -114,6 +116,15 @@ export function LayersPanel({
                 <span className="rounded border border-gray-800 px-1.5 py-0.5 text-[10px] uppercase text-gray-500">
                   {type === 'text' ? 'TXT' : 'OBJ'}
                 </span>
+                <button
+                  type="button"
+                  title={`Duplicate ${label}`}
+                  aria-label={`Duplicate ${label}`}
+                  onClick={() => onDuplicate(elementIndex)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-800 hover:text-gray-100"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
                 <button
                   type="button"
                   title={`Delete ${label}`}

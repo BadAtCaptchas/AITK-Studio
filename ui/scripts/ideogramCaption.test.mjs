@@ -9,6 +9,7 @@ const {
   applyGeneratedBoxPatches,
   boxToArray,
   deleteIdeogramElement,
+  duplicateIdeogramElement,
   normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
@@ -82,6 +83,41 @@ test('caption mutation helpers add, edit, delete, and serialize in schema order'
     'color_palette',
   ]);
   assert.deepEqual(parsed.compositional_deconstruction.elements[0].bbox, [10, 20, 300, 400]);
+});
+
+test('duplicateIdeogramElement inserts a deep-cloned layer above the source', () => {
+  const caption = sampleCaption();
+  caption.compositional_deconstruction.elements.push({
+    type: 'text',
+    bbox: [20, 30, 90, 220],
+    text: 'TAXI',
+    desc: 'Roof sign.',
+    color_palette: ['#F59E0B'],
+  });
+
+  const duplicateIndex = duplicateIdeogramElement(caption, 0);
+  assert.equal(duplicateIndex, 1);
+  assert.equal(caption.compositional_deconstruction.elements.length, 3);
+  assert.deepEqual(caption.compositional_deconstruction.elements[1], caption.compositional_deconstruction.elements[0]);
+  assert.deepEqual(caption.compositional_deconstruction.elements[2].bbox, [20, 30, 90, 220]);
+
+  caption.compositional_deconstruction.elements[1].color_palette[0] = '#FFFFFF';
+  caption.compositional_deconstruction.elements[1].desc = 'Copied taxi.';
+  assert.equal(caption.compositional_deconstruction.elements[0].color_palette[0], '#22D3EE');
+  assert.equal(caption.compositional_deconstruction.elements[0].desc, 'Yellow taxi.');
+
+  assert.equal(duplicateIdeogramElement(caption, -1), null);
+  assert.equal(duplicateIdeogramElement(caption, 99), null);
+  assert.equal(caption.compositional_deconstruction.elements.length, 3);
+
+  const parsed = JSON.parse(serializeIdeogramCaption(caption));
+  assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[1]), [
+    'type',
+    'bbox',
+    'desc',
+    'color_palette',
+  ]);
+  assert.equal(parsed.compositional_deconstruction.elements[1].desc, 'Copied taxi.');
 });
 
 test('generated box patches clamp, filter, dedupe, and preserve bbox-only edits', () => {

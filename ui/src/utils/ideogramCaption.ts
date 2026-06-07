@@ -298,6 +298,17 @@ export function deleteIdeogramElement(data: Record<string, any>, elementIndex: n
   elements.splice(elementIndex, 1);
 }
 
+export function duplicateIdeogramElement(data: Record<string, any>, sourceIndex: number) {
+  const elements = getIdeogramElements(data);
+  const source = elements[sourceIndex];
+  if (!isRecord(source)) return null;
+
+  const duplicate = JSON.parse(JSON.stringify(source));
+  const duplicateIndex = sourceIndex + 1;
+  elements.splice(duplicateIndex, 0, duplicate);
+  return duplicateIndex;
+}
+
 export function updateIdeogramElementBox(data: Record<string, any>, elementIndex: number, box: NormalizedBox) {
   const element = getIdeogramElements(data)[elementIndex];
   if (!isRecord(element)) return;

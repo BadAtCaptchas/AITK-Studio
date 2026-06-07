@@ -149,3 +149,11 @@ export function reindexLayerIndexSetAfterDelete(indexes: Set<number>, deletedInd
   });
   return next;
 }
+
+export function reindexLayerIndexSetAfterInsert(indexes: Set<number>, insertedIndex: number) {
+  const next = new Set<number>();
+  indexes.forEach(index => {
+    next.add(index >= insertedIndex ? index + 1 : index);
+  });
+  return next;
+}

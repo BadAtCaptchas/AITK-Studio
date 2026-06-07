@@ -16,6 +16,7 @@ import {
   boxToRect,
   cloneIdeogramData,
   deleteIdeogramElement,
+  duplicateIdeogramElement,
   normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
@@ -52,6 +53,7 @@ import {
   normalizeHexColor,
   pendingCaptionLayerStillMatches,
   reindexLayerIndexSetAfterDelete,
+  reindexLayerIndexSetAfterInsert,
   responseErrorMessage,
   statusForCaption,
 } from './utils';
@@ -683,6 +685,21 @@ export default function DatasetImageStudio({
     [overlapElementStack],
   );
 
+  const handleDuplicateElement = useCallback(
+    (elementIndex: number) => {
+      const elementCount = captionParse.kind === 'ideogram' ? captionParse.elements.length : 0;
+      if (elementIndex < 0 || elementIndex >= elementCount) return;
+      const duplicateIndex = elementIndex + 1;
+      mutateCaption(data => {
+        duplicateIdeogramElement(data, elementIndex);
+      }, duplicateIndex);
+      setHiddenLayerIndexes(previous => reindexLayerIndexSetAfterInsert(previous, duplicateIndex));
+      setLockedLayerIndexes(previous => reindexLayerIndexSetAfterInsert(previous, duplicateIndex));
+      setOverlapElementStack([]);
+    },
+    [captionParse, mutateCaption],
+  );
+
   const handleDeleteElement = useCallback(
     (elementIndex: number) => {
       const elementCount = captionParse.kind === 'ideogram' ? captionParse.elements.length : 0;
@@ -941,6 +958,7 @@ export default function DatasetImageStudio({
                   onSelect={setSelectedElementIndex}
                   onToggleHidden={handleToggleLayerHidden}
                   onToggleLocked={handleToggleLayerLocked}
+                  onDuplicate={handleDuplicateElement}
                   onDelete={handleDeleteElement}
                 />
               )}

@@ -34,6 +34,10 @@ def _prod(values):
     return result
 
 
+def _is_floating_dtype(dtype):
+    return isinstance(dtype, torch.dtype) and torch.empty((), dtype=dtype).is_floating_point()
+
+
 def factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
     """
     Return two factors of dimension, preferring a value close to factor.
@@ -412,6 +416,21 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             return self._dequantize_tensor(bias).detach()
         return None
 
+    def _compute_dtype(self, *preferred_tensors):
+        module = self.org_module[0]
+        compute_dtype = getattr(module, "compute_dtype", None)
+        if _is_floating_dtype(compute_dtype):
+            return compute_dtype
+        for tensor in preferred_tensors:
+            dtype = getattr(tensor, "dtype", None)
+            if _is_floating_dtype(dtype):
+                return dtype
+        for tensor in (self._w1(), self._w2()):
+            dtype = getattr(tensor, "dtype", None)
+            if _is_floating_dtype(dtype):
+                return dtype
+        return torch.float32
+
     def _call_forward(self, x, *args, **kwargs):
         if self.module_dropout and self.training:
             if torch.rand(1, device=x.device) < self.module_dropout:
@@ -428,11 +447,13 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
         orig_dtype = x.dtype
         orig_weight = self.get_orig_weight(x.device)
-        lokr_weight = self.get_weight(orig_weight).to(dtype=orig_weight.dtype)
+        compute_dtype = self._compute_dtype(orig_weight, x)
+        orig_weight = orig_weight.to(dtype=compute_dtype)
+        lokr_weight = self.get_weight(orig_weight).to(dtype=compute_dtype)
         lokr_weight = lokr_weight * self.scalar.to(lokr_weight.device, dtype=lokr_weight.dtype)
 
-        if x.dtype != orig_weight.dtype:
-            x = x.to(dtype=orig_weight.dtype)
+        if x.dtype != compute_dtype:
+            x = x.to(dtype=compute_dtype)
 
         if self.wd:
             weight = self.apply_weight_decompose(orig_weight + lokr_weight, multiplier)
@@ -443,7 +464,9 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         if bias is not None:
             bias = bias.to(weight.device, dtype=weight.dtype)
         output = self.op(x, weight.view(self.shape), bias, **self.extra_args)
-        return output.to(orig_dtype)
+        if _is_floating_dtype(orig_dtype):
+            return output.to(orig_dtype)
+        return output
 
     def _bypass_w2(self):
         if self.use_w2:

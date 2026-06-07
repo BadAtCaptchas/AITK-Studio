@@ -150,6 +150,22 @@ class LokrModuleTest(unittest.TestCase):
 
         self.assertEqual(tuple(lokr.get_weight(module.weight.shape).shape), tuple(module.weight.shape))
 
+    def test_forward_promotes_byte_backed_weight_to_compute_dtype(self):
+        module = torch.nn.Linear(4, 4, bias=True)
+        weight = module.weight.detach()
+        del module.weight
+        module.register_buffer("weight", torch.ones_like(weight, dtype=torch.uint8))
+        module.compute_dtype = torch.float32
+
+        lokr = make_lokr(module)
+        lokr.org_forward = module.forward
+        x = torch.ones(2, 4, dtype=torch.uint8)
+
+        output = lokr._call_forward(x)
+
+        self.assertEqual(output.dtype, torch.float32)
+        self.assertEqual(tuple(output.shape), (2, 4))
+
     def test_rank_dropout_one_drops_all_weight_rows(self):
         module = make_lokr(rank_dropout=1.0)
         module.train()

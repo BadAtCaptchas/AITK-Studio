@@ -116,11 +116,41 @@ class QuantizedModelCache:
     def get_cache_dir(self, component: str, cache_key: str) -> str:
         return os.path.join(self.cache_root, component, cache_key)
 
+    def get_metadata_path(self, component: str, cache_key: str) -> str:
+        return os.path.join(
+            self.get_cache_dir(component, cache_key),
+            CACHE_METADATA_NAME,
+        )
+
     def has_entry(self, component: str, cache_key: str) -> bool:
         cache_dir = self.get_cache_dir(component, cache_key)
         return os.path.exists(os.path.join(cache_dir, CACHE_WEIGHTS_NAME)) and os.path.exists(
             os.path.join(cache_dir, CACHE_QMAP_NAME)
         )
+
+    def load_metadata(self, component: str, cache_key: str) -> Dict[str, Any]:
+        metadata_path = self.get_metadata_path(component, cache_key)
+        if not os.path.exists(metadata_path):
+            return {}
+        with open(metadata_path, "r", encoding="utf-8") as metadata_file:
+            return json.load(metadata_file)
+
+    def update_metadata(
+        self,
+        component: str,
+        cache_key: str,
+        extra_metadata: Dict[str, Any],
+    ) -> None:
+        metadata_path = self.get_metadata_path(component, cache_key)
+        if not os.path.exists(metadata_path):
+            return
+
+        metadata_payload = self.load_metadata(component, cache_key)
+        metadata_payload.update(_normalize(extra_metadata))
+        tmp_path = f"{metadata_path}.tmp-{os.getpid()}"
+        with open(tmp_path, "w", encoding="utf-8") as metadata_file:
+            json.dump(metadata_payload, metadata_file, indent=2, sort_keys=True)
+        os.replace(tmp_path, metadata_path)
 
     def load(
         self,
@@ -132,7 +162,6 @@ class QuantizedModelCache:
         cache_dir = self.get_cache_dir(component, cache_key)
         weights_path = os.path.join(cache_dir, CACHE_WEIGHTS_NAME)
         qmap_path = os.path.join(cache_dir, CACHE_QMAP_NAME)
-        metadata_path = os.path.join(cache_dir, CACHE_METADATA_NAME)
 
         with open(qmap_path, "r", encoding="utf-8") as qmap_file:
             qmap = json.load(qmap_file)
@@ -140,10 +169,7 @@ class QuantizedModelCache:
         requantize(model, state_dict=state_dict, quantization_map=qmap, device=device)
         model.eval()
 
-        if os.path.exists(metadata_path):
-            with open(metadata_path, "r", encoding="utf-8") as metadata_file:
-                return json.load(metadata_file)
-        return {}
+        return self.load_metadata(component, cache_key)
 
     def save(
         self,
@@ -186,4 +212,3 @@ class QuantizedModelCache:
         except Exception:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
-

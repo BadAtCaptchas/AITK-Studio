@@ -144,6 +144,8 @@ model:
 
 The cache is used for `optimum.quanto` qtypes such as `qfloat8`. It is skipped for torchao qtypes and for FLUX.2 transformer loads that use an accuracy recovery adapter.
 
+For offline runs, set `HF_HUB_OFFLINE=1` or `TRANSFORMERS_OFFLINE=1`. FLUX.2 Klein Qwen3 quantized cache entries store the text encoder config with the cached weights, so later cache hits do not need to contact Hugging Face. Older cache entries may need one online rebuild if neither the source model config nor the tokenizer is already cached locally.
+
 ### Layer offloading
 
 Layer offloading can reduce peak VRAM by keeping part of a supported model in CPU RAM. The default backend is `block`, which offloads deterministic whole transformer/text-encoder blocks and prefetches them back to CUDA as needed. The older per-Linear/Conv offloader remains available as `legacy` for fallback cases.

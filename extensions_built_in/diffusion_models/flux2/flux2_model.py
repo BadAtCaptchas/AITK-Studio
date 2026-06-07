@@ -9,6 +9,7 @@ from toolkit.memory_management import attach_layer_offloading
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.models.base_model import BaseModel
 from toolkit.basic import flush
+from toolkit.hf_offline import is_hf_offline_mode
 from toolkit.prompt_utils import PromptEmbeds
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
@@ -335,11 +336,14 @@ class Flux2Model(BaseModel):
 
         if not os.path.exists(transformer_path):
             # assume it is from the hub
-            transformer_path = huggingface_hub.hf_hub_download(
-                repo_id=model_path,
-                filename=self.flux2_te_filename,
-                token=HF_TOKEN,
-            )
+            download_kwargs = {
+                "repo_id": model_path,
+                "filename": self.flux2_te_filename,
+                "token": HF_TOKEN,
+            }
+            if is_hf_offline_mode():
+                download_kwargs["local_files_only"] = True
+            transformer_path = huggingface_hub.hf_hub_download(**download_kwargs)
 
         loaded_transformer_from_cache = False
         if self.model_config.quantize:
@@ -404,11 +408,14 @@ class Flux2Model(BaseModel):
                     vae_path = "/".join(vae_path.split("/")[:-1])
             p = vae_path if vae_path is not None else model_path
             # assume it is from the hub
-            vae_path = huggingface_hub.hf_hub_download(
-                repo_id=p,
-                filename=vae_filename,
-                token=HF_TOKEN,
-            )
+            download_kwargs = {
+                "repo_id": p,
+                "filename": vae_filename,
+                "token": HF_TOKEN,
+            }
+            if is_hf_offline_mode():
+                download_kwargs["local_files_only"] = True
+            vae_path = huggingface_hub.hf_hub_download(**download_kwargs)
         
         vae_state_dict = load_file(vae_path, device="cpu")
         

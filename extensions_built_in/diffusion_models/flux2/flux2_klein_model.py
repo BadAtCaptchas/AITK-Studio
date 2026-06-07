@@ -8,6 +8,7 @@ from toolkit.util.quantize import quantize, get_qtype
 from toolkit.config_modules import ModelConfig
 from toolkit.memory_management import attach_layer_offloading
 from toolkit.basic import flush
+from toolkit.hf_offline import is_hf_offline_mode
 from toolkit.quantized_cache import quantized_cache_key
 from .flux2_model import Flux2Model
 from .src.model import Klein9BParams, Klein4BParams
@@ -15,6 +16,14 @@ from .src.model import Klein9BParams, Klein4BParams
 
 def _hf_token():
     return os.getenv("HF_TOKEN") or None
+
+
+def _config_from_cache_dict(config_dict):
+    model_type = config_dict.get("model_type")
+    if not model_type:
+        raise ValueError("Cached Qwen3 config is missing model_type")
+    config_class = type(AutoConfig.for_model(model_type))
+    return config_class.from_dict(config_dict)
 
 
 def _qwen3_from_config(config):
@@ -134,26 +143,43 @@ class Flux2KleinModel(Flux2Model):
             self.print_and_status_update(
                 f"Loading Qwen3 quantized cache from {source['label']}"
             )
-            config_kwargs = {"local_files_only": True}
-            if source["text_encoder_subfolder"] is not None:
-                config_kwargs["subfolder"] = source["text_encoder_subfolder"]
-            config = AutoConfig.from_pretrained(
-                source["text_encoder_path"],
-                token=_hf_token(),
-                **config_kwargs,
-            )
+            metadata = cache.load_metadata("flux2_text_encoder", cache_key)
+            config_dict = metadata.get("text_encoder_config")
+            if config_dict is not None:
+                config = _config_from_cache_dict(config_dict)
+            else:
+                config_kwargs = {"local_files_only": True}
+                if source["text_encoder_subfolder"] is not None:
+                    config_kwargs["subfolder"] = source["text_encoder_subfolder"]
+                config = AutoConfig.from_pretrained(
+                    source["text_encoder_path"],
+                    token=_hf_token(),
+                    **config_kwargs,
+                )
             with init_empty_weights():
                 text_encoder = _qwen3_from_config(config)
-            cache.load(
+            metadata = cache.load(
                 text_encoder,
                 "flux2_text_encoder",
                 cache_key,
                 device=torch.device("cpu"),
             )
+            if metadata.get("text_encoder_config") is None:
+                cache.update_metadata(
+                    "flux2_text_encoder",
+                    cache_key,
+                    {"text_encoder_config": config.to_dict()},
+                )
             text_encoder._aitk_loaded_from_quantized_cache = True
             text_encoder._aitk_qwen_source = source
             return text_encoder
         except Exception as e:
+            if is_hf_offline_mode():
+                raise RuntimeError(
+                    "Failed to load Qwen3 quantized cache while Hugging Face "
+                    "offline mode is enabled. Rebuild the cache once online, or "
+                    "make sure the source model config is already cached locally."
+                ) from e
             self.print_and_status_update(
                 f"Failed to load Qwen3 quantized cache, rebuilding: {e}"
             )
@@ -170,15 +196,19 @@ class Flux2KleinModel(Flux2Model):
             self.print_and_status_update(
                 f"Saving Qwen3 quantized cache for {source['label']}"
             )
+            config = getattr(text_encoder, "config", None)
+            extra_metadata = {
+                "source_path": source["text_encoder_path"],
+                "source_subfolder": source["text_encoder_subfolder"],
+            }
+            if config is not None and hasattr(config, "to_dict"):
+                extra_metadata["text_encoder_config"] = config.to_dict()
             self._get_quantized_cache().save(
                 text_encoder,
                 "flux2_text_encoder",
                 cache_key,
                 key_payload,
-                extra_metadata={
-                    "source_path": source["text_encoder_path"],
-                    "source_subfolder": source["text_encoder_subfolder"],
-                },
+                extra_metadata=extra_metadata,
             )
         except Exception as e:
             self.print_and_status_update(f"Failed to save Qwen3 quantized cache: {e}")
@@ -187,6 +217,8 @@ class Flux2KleinModel(Flux2Model):
         text_encoder_kwargs = {"torch_dtype": dtype}
         if source["text_encoder_subfolder"] is not None:
             text_encoder_kwargs["subfolder"] = source["text_encoder_subfolder"]
+        if is_hf_offline_mode():
+            text_encoder_kwargs["local_files_only"] = True
         return Qwen3ForCausalLM.from_pretrained(
             source["text_encoder_path"],
             token=_hf_token(),
@@ -197,15 +229,16 @@ class Flux2KleinModel(Flux2Model):
         tokenizer_kwargs = {}
         if source["tokenizer_subfolder"] is not None:
             tokenizer_kwargs["subfolder"] = source["tokenizer_subfolder"]
+        local_only = local_files_only or is_hf_offline_mode()
         try:
             return Qwen2TokenizerFast.from_pretrained(
                 source["tokenizer_path"],
-                local_files_only=local_files_only,
+                local_files_only=local_only,
                 token=_hf_token(),
                 **tokenizer_kwargs,
             )
         except Exception:
-            if not local_files_only:
+            if not local_only or is_hf_offline_mode():
                 raise
             return Qwen2TokenizerFast.from_pretrained(
                 source["tokenizer_path"],

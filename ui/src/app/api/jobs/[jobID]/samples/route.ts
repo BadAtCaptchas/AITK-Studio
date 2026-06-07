@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { getTrainingFolder } from '@/server/settings';
@@ -6,7 +6,12 @@ import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
 
-export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
+function isPathInsideRoot(root: string, filepath: string) {
+  const relativePath = path.relative(root, filepath);
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+export async function GET(_request: Request, { params }: { params: { jobID: string } }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
@@ -37,20 +42,33 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
   // setup the training
   const trainingFolder = await getTrainingFolder();
 
-  const samplesFolder = path.join(trainingFolder, job.name, 'samples');
-  if (!fs.existsSync(samplesFolder)) {
+  const canonicalTrainingFolder = await fs.promises.realpath(path.resolve(trainingFolder)).catch(() => null);
+  const samplesFolder = path.resolve(trainingFolder, job.name, 'samples');
+  const canonicalSamplesFolder = await fs.promises.realpath(samplesFolder).catch(() => null);
+  if (
+    !canonicalTrainingFolder ||
+    !canonicalSamplesFolder ||
+    !isPathInsideRoot(canonicalTrainingFolder, canonicalSamplesFolder)
+  ) {
     return NextResponse.json({ samples: [] });
   }
 
-  // find all img (png, jpg, jpeg) files in the samples folder
+  const allowedSampleExtensions = new Set([
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.webp',
+    '.mp4',
+    '.mp3',
+    '.wav',
+    '.flac',
+    '.ogg',
+  ]);
+
   const samples = fs
-    .readdirSync(samplesFolder)
-    .filter(file => {
-      return file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg') || file.endsWith('.webp') || file.endsWith('.mp4') || file.endsWith('mp3') || file.endsWith('wav') || file.endsWith('flac') || file.endsWith('ogg');
-    })
-    .map(file => {
-      return path.join(samplesFolder, file);
-    })
+    .readdirSync(canonicalSamplesFolder, { withFileTypes: true })
+    .filter(entry => entry.isFile() && allowedSampleExtensions.has(path.extname(entry.name).toLowerCase()))
+    .map(entry => `/api/jobs/${encodeURIComponent(job.id)}/samples/${encodeURIComponent(entry.name)}`)
     .sort();
 
   return NextResponse.json({ samples });

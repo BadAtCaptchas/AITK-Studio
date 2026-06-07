@@ -72,8 +72,14 @@ const OPENROUTER_LAYER_CAPTION_RESPONSE_SCHEMA = {
       minItems: 4,
       maxItems: 4,
     },
+    color_palette: {
+      type: 'array',
+      description: 'Dominant visible colors for only the selected layer target as #RRGGBB hex strings.',
+      items: { type: 'string' },
+      maxItems: 5,
+    },
   },
-  required: ['desc', 'text', 'bbox_px'],
+  required: ['desc', 'text', 'bbox_px', 'color_palette'],
 };
 
 function selectedLayerInfo(caption: string, elementIndex: number): SelectedLayerInfo {
@@ -139,6 +145,9 @@ export function buildOpenRouterLayerCaptionPrompt(caption: string, elementIndex:
     '- Return desc as a concise visual description of only the selected layer target.',
     '- For text layers, return text as the readable glyph text if visible; use an empty string if uncertain.',
     '- For object layers, return text as an empty string.',
+    '- Return color_palette as up to 5 dominant visible colors for only the selected target, ordered by prominence, using #RRGGBB hex strings.',
+    '- For text layers, include visible glyph, fill, stroke, shadow, or sign/background colors that belong to the selected text target.',
+    '- Use color_palette: [] only when no reliable color can be identified.',
     '- Do not include markdown, quotes around the whole answer, or explanatory prose outside JSON.',
     '',
     'Scene context:',
@@ -222,6 +231,23 @@ function rawPixelBbox(raw: Record<string, any>) {
   return raw.bbox_px || raw.bboxPx || raw.bbox;
 }
 
+function rawColorPalette(raw: Record<string, any>) {
+  return raw.color_palette || raw.colorPalette || raw.palette || raw.colors;
+}
+
+function normalizeLayerColorPalette(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const colors: string[] = [];
+  value.forEach(item => {
+    const color = typeof item === 'string' ? item.trim().toUpperCase() : '';
+    if (!/^#[0-9A-F]{6}$/.test(color) || seen.has(color)) return;
+    seen.add(color);
+    colors.push(color);
+  });
+  return colors.slice(0, 5);
+}
+
 function parseLayerCaptionResponse(
   content: string,
   type: LayerType,
@@ -235,10 +261,12 @@ function parseLayerCaptionResponse(
   if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
   const bbox = usableCaptionBox(rawPixelBbox(parsed), imageSize);
   if (requiresBbox && !bbox) throw new Error('OpenRouter did not return a usable layer box.');
+  const colorPalette = normalizeLayerColorPalette(rawColorPalette(parsed));
   return {
     desc,
     ...(type === 'text' && text ? { text } : {}),
     ...(bbox ? { bbox } : {}),
+    color_palette: colorPalette,
   };
 }
 

@@ -56,6 +56,7 @@ test('buildOpenRouterLayerCaptionPrompt targets an existing bbox when present', 
   assert.match(prompt, /Image pixel size: 1280 x 720/);
   assert.match(prompt, /Target bbox_px: \[86,256,446,1024\]/);
   assert.match(prompt, /bbox_px/);
+  assert.match(prompt, /color_palette/);
   assert.match(prompt, /Yellow taxi/);
   assert.doesNotMatch(prompt, /No bbox exists/);
 });
@@ -80,7 +81,12 @@ test('generateOpenRouterLayerCaption parses text-layer captions and strict schem
   const fetchImpl = mockFetchForResponses(
     [
       {
-        content: { desc: 'A yellow taxi roof sign with black letters.', text: 'TAXI', bbox_px: [80, 900, 150, 1220] },
+        content: {
+          desc: 'A yellow taxi roof sign with black letters.',
+          text: 'TAXI',
+          bbox_px: [80, 900, 150, 1220],
+          color_palette: ['#facc15', '#111111', 'invalid', '#FACC15', '#FFFFFF', '#22D3EE', '#EF4444'],
+        },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       },
     ],
@@ -101,13 +107,15 @@ test('generateOpenRouterLayerCaption parses text-layer captions and strict schem
     desc: 'A yellow taxi roof sign with black letters.',
     text: 'TAXI',
     bbox: [80, 450, 150, 610],
+    color_palette: ['#FACC15', '#111111', '#FFFFFF', '#22D3EE', '#EF4444'],
     model: 'x-ai/grok-4.3',
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   });
   assert.equal(calls[0].provider.require_parameters, true);
   assert.equal(calls[0].response_format.json_schema.strict, true);
   assert.equal(calls[0].response_format.json_schema.name, 'dataset_layer_caption');
-  assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['desc', 'text', 'bbox_px']);
+  assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['desc', 'text', 'bbox_px', 'color_palette']);
+  assert.equal(calls[0].response_format.json_schema.schema.properties.color_palette.maxItems, 5);
 });
 
 test('generateOpenRouterLayerCaption ignores returned visible text for object layers', async () => {
@@ -118,13 +126,21 @@ test('generateOpenRouterLayerCaption ignores returned visible text for object la
     elementIndex: 0,
     imageSize: { width: 2000, height: 1000 },
     fetchImpl: mockFetchForResponses([
-      { content: { desc: 'A yellow taxi cab viewed from the side.', text: 'TAXI', bbox_px: [120, 400, 620, 1600] } },
+      {
+        content: {
+          desc: 'A yellow taxi cab viewed from the side.',
+          text: 'TAXI',
+          bbox_px: [120, 400, 620, 1600],
+          color_palette: ['#FACC15', '#111111'],
+        },
+      },
     ]),
   });
 
   assert.equal(result.model, 'x-ai/grok-4.3');
   assert.equal(result.desc, 'A yellow taxi cab viewed from the side.');
   assert.deepEqual(result.bbox, [120, 200, 620, 800]);
+  assert.deepEqual(result.color_palette, ['#FACC15', '#111111']);
   assert.equal(Object.prototype.hasOwnProperty.call(result, 'text'), false);
 });
 
@@ -137,7 +153,9 @@ test('generateOpenRouterLayerCaption requires a usable bbox for no-box layers', 
         caption: sampleCaption(),
         elementIndex: 1,
         imageSize: { width: 2000, height: 1000 },
-        fetchImpl: mockFetchForResponses([{ content: { desc: 'A yellow taxi roof sign.', text: 'TAXI', bbox_px: [10, 20, 10, 40] } }]),
+        fetchImpl: mockFetchForResponses([
+          { content: { desc: 'A yellow taxi roof sign.', text: 'TAXI', bbox_px: [10, 20, 10, 40], color_palette: [] } },
+        ]),
       }),
     /usable layer box/,
   );

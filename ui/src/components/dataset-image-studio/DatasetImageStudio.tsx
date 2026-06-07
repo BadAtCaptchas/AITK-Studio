@@ -568,6 +568,12 @@ export default function DatasetImageStudio({
 
       const desc = typeof response.data?.desc === 'string' ? response.data.desc.trim() : '';
       const text = typeof response.data?.text === 'string' ? response.data.text.trim() : '';
+      const colorPalette = Array.isArray(response.data?.color_palette)
+        ? response.data.color_palette.flatMap((color: unknown) => {
+            const normalized = normalizeHexColor(color);
+            return normalized ? [normalized] : [];
+          })
+        : [];
       const currentHasBox = Boolean(arrayToBox(currentElement?.bbox));
       const generatedBox = currentHasBox ? null : arrayToBox(response.data?.bbox);
       if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
@@ -580,6 +586,9 @@ export default function DatasetImageStudio({
         }
         if (!currentHasBox && generatedBox) {
           updateIdeogramElementBox(data, requestElementIndex, generatedBox);
+        }
+        if (colorPalette.length > 0) {
+          updateIdeogramElementPalette(data, requestElementIndex, colorPalette);
         }
       });
       setLayerCaptionMessageForKey(

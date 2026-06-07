@@ -541,6 +541,15 @@ function layerLabelForElement(element: any, index: number) {
   return label || (type === 'text' ? `Text ${index + 1}` : `Object ${index + 1}`);
 }
 
+function reindexLayerIndexSetAfterDelete(indexes: Set<number>, deletedIndex: number) {
+  const next = new Set<number>();
+  indexes.forEach(index => {
+    if (index < deletedIndex) next.add(index);
+    if (index > deletedIndex) next.add(index - 1);
+  });
+  return next;
+}
+
 function AnnotationLayer({
   boxes,
   activeTool,
@@ -869,6 +878,7 @@ function LayersPanel({
   onSelect,
   onToggleHidden,
   onToggleLocked,
+  onDelete,
 }: {
   elements: any[];
   boxes: IdeogramBox[];
@@ -878,6 +888,7 @@ function LayersPanel({
   onSelect: (elementIndex: number) => void;
   onToggleHidden: (elementIndex: number) => void;
   onToggleLocked: (elementIndex: number) => void;
+  onDelete: (elementIndex: number) => void;
 }) {
   const rowRefs = useRef(new Map<number, HTMLButtonElement | null>());
   const rows = useMemo(
@@ -917,10 +928,11 @@ function LayersPanel({
             const type: IdeogramElementType = element?.type === 'text' ? 'text' : 'obj';
             const sourceIndex = boxes.findIndex(candidate => candidate.elementIndex === elementIndex);
             const color = box ? resolveBoxColor(box, sourceIndex, selected) : BOX_COLORS[elementIndex % BOX_COLORS.length];
+            const label = layerLabelForElement(element, elementIndex);
             return (
               <div
                 key={elementIndex}
-                className={classNames('group grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 border-b border-gray-900 px-2 py-1.5 last:border-b-0', {
+                className={classNames('group grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-2 border-b border-gray-900 px-2 py-1.5 last:border-b-0', {
                   'bg-blue-600/20': selected,
                   'opacity-50': hidden,
                 })}
@@ -944,7 +956,7 @@ function LayersPanel({
                   {type === 'text' ? <Type className="h-3.5 w-3.5 text-amber-300" /> : <SquareDashed className="h-3.5 w-3.5 text-cyan-300" />}
                   <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-gray-100">{layerLabelForElement(element, elementIndex)}</span>
+                    <span className="block truncate text-sm font-medium text-gray-100">{label}</span>
                     <span className="block truncate text-[11px] text-gray-500">
                       {type === 'text' ? 'Text' : 'Object'} · {box ? 'Box' : 'No box'} · #{elementIndex + 1}
                     </span>
@@ -964,6 +976,15 @@ function LayersPanel({
                 <span className="rounded border border-gray-800 px-1.5 py-0.5 text-[10px] uppercase text-gray-500">
                   {type === 'text' ? 'TXT' : 'OBJ'}
                 </span>
+                <button
+                  type="button"
+                  title={`Delete ${label}`}
+                  aria-label={`Delete ${label}`}
+                  onClick={() => onDelete(elementIndex)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-red-950/40 hover:text-red-300 focus:bg-red-950/40 focus:text-red-300"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             );
           })
@@ -1420,10 +1441,34 @@ export default function DatasetImageStudio({
     [overlapElementStack],
   );
 
+  const handleDeleteElement = useCallback(
+    (elementIndex: number) => {
+      const elementCount = captionParse.kind === 'ideogram' ? captionParse.elements.length : 0;
+      if (elementIndex < 0 || elementIndex >= elementCount) return;
+      const nextSelection =
+        selectedElementIndex == null
+          ? null
+          : selectedElementIndex === elementIndex
+            ? elementCount > 1
+              ? Math.min(elementIndex, elementCount - 2)
+              : null
+            : selectedElementIndex > elementIndex
+              ? selectedElementIndex - 1
+              : selectedElementIndex;
+      mutateCaption(data => deleteIdeogramElement(data, elementIndex), nextSelection);
+      setHiddenLayerIndexes(previous => reindexLayerIndexSetAfterDelete(previous, elementIndex));
+      setLockedLayerIndexes(previous => reindexLayerIndexSetAfterDelete(previous, elementIndex));
+      setOverlapElementStack(previous =>
+        previous.flatMap(index => (index === elementIndex ? [] : [index > elementIndex ? index - 1 : index])),
+      );
+    },
+    [captionParse, mutateCaption, selectedElementIndex],
+  );
+
   const handleDeleteSelectedElement = useCallback(() => {
     if (selectedElementIndex == null) return;
-    mutateCaption(data => deleteIdeogramElement(data, selectedElementIndex), null);
-  }, [mutateCaption, selectedElementIndex]);
+    handleDeleteElement(selectedElementIndex);
+  }, [handleDeleteElement, selectedElementIndex]);
 
   const handleSelectedFieldChange = useCallback(
     (field: 'desc' | 'text', value: string) => {
@@ -1763,6 +1808,7 @@ export default function DatasetImageStudio({
                 onSelect={setSelectedElementIndex}
                 onToggleHidden={handleToggleLayerHidden}
                 onToggleLocked={handleToggleLayerLocked}
+                onDelete={handleDeleteElement}
               />
             )}
             <section className={classNames('overflow-hidden rounded-md border border-gray-800 bg-gray-950/80', canAnnotate ? 'mt-3' : '')}>

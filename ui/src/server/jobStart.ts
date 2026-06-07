@@ -274,14 +274,25 @@ export async function startPreparedJob(
       let remoteJobId = job.remote_job_id;
 
       if (!remoteJobId) {
-        const bundle = await createRemoteTrainingJobBundle(jobID, { includeDatasets: true, checkpointMode: 'all' });
+        const bundle = await createRemoteTrainingJobBundle(jobID, {
+          includeDatasets: true,
+          checkpointMode: 'all',
+          targetWorker: worker,
+        });
         try {
           const imported = await uploadBundleToWorker(worker, bundle.zipPath, job.gpu_ids);
           remoteJobId = imported.job.id;
+          const localJobConfig = {
+            ...jobConfig,
+            config: {
+              ...(jobConfig?.config || {}),
+              name: imported.job.name,
+            },
+          };
           await db.jobs.update(jobID, {
             name: imported.job.name,
             gpu_ids: imported.job.gpu_ids,
-            job_config: imported.job.job_config,
+            job_config: JSON.stringify(localJobConfig),
             remote_job_id: imported.job.id,
             remote_error: [...bundle.warnings, ...(imported.warnings || [])].join('\n') || null,
             remote_sync_at: new Date(),

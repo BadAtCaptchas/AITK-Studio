@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import { db, type WorkerNodeRecord } from './db';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
 import { getJobRemoteCaptionState } from './remoteCaptionJobs';
+import { collectSameWorkerRemoteDatasetReferences } from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
 
 export class RemoteClientError extends Error {
@@ -133,6 +134,10 @@ function remoteJobPatch(
     remote_error: null,
   };
 
+  if (existingLocalJob && shouldPreserveLocalRemoteDatasetRefs(existingLocalJob, workerId)) {
+    patch.job_config = existingLocalJob.job_config;
+  }
+
   if (existingLocalJob && getJobRemoteCaptionState(existingLocalJob)) {
     patch.name = existingLocalJob.name;
     patch.job_config = existingLocalJob.job_config;
@@ -140,6 +145,14 @@ function remoteJobPatch(
   }
 
   return patch;
+}
+
+function shouldPreserveLocalRemoteDatasetRefs(existingLocalJob: Job, workerId: string) {
+  try {
+    return collectSameWorkerRemoteDatasetReferences(JSON.parse(existingLocalJob.job_config), workerId).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job, localJobId?: string) {

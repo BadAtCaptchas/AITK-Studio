@@ -4,6 +4,8 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from './settings';
 import { db } from './db';
+import type { WorkerNodeRecord } from './db';
+import { rewriteSameWorkerRemoteDatasetRefsForWorker } from './remoteDatasetPaths';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
   TRAINING_JOB_EXPORT_VERSION,
@@ -73,7 +75,7 @@ async function writeZip(outputPath: string, entries: ArchiveFileEntry[], jsonEnt
 
 export async function createRemoteTrainingJobBundle(
   jobID: string,
-  options: { includeDatasets?: boolean; checkpointMode?: 'latest' | 'all' } = {},
+  options: { includeDatasets?: boolean; checkpointMode?: 'latest' | 'all'; targetWorker?: WorkerNodeRecord } = {},
 ) {
   const includeDatasets = options.includeDatasets !== false;
   const checkpointMode = options.checkpointMode || 'all';
@@ -89,7 +91,10 @@ export async function createRemoteTrainingJobBundle(
     throw error;
   }
 
-  const jobConfig = JSON.parse(job.job_config);
+  const sourceJobConfig = JSON.parse(job.job_config);
+  const targetJobConfig = options.targetWorker
+    ? await rewriteSameWorkerRemoteDatasetRefsForWorker(sourceJobConfig, options.targetWorker)
+    : sourceJobConfig;
   const trainingRoot = await getTrainingFolder();
   const datasetsRoot = await getDatasetsRoot();
   const jobFolder = path.join(trainingRoot, job.name);
@@ -105,7 +110,7 @@ export async function createRemoteTrainingJobBundle(
   }
 
   const { mappings: datasetMappings, warnings: datasetWarnings } = await collectDatasetArchiveMappings(
-    jobConfig,
+    sourceJobConfig,
     includeDatasets,
     datasetsRoot,
   );
@@ -138,7 +143,7 @@ export async function createRemoteTrainingJobBundle(
       mappings: datasetMappings,
     },
     models: {
-      references: collectModelReferences(jobConfig),
+      references: collectModelReferences(sourceJobConfig),
     },
     warnings,
   };
@@ -192,7 +197,7 @@ export async function createRemoteTrainingJobBundle(
     [
       { archivePath: 'manifest.json', value: manifest },
       { archivePath: 'job.json', value: jobJson },
-      { archivePath: 'job_config.json', value: jobConfig },
+      { archivePath: 'job_config.json', value: targetJobConfig },
     ],
   );
 

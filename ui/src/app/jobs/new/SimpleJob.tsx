@@ -35,6 +35,7 @@ import AddSingleImageModal, { openAddImageModal } from '@/components/AddSingleIm
 import SampleControlImage from '@/components/SampleControlImage';
 import { FlipHorizontal2, FlipVertical2 } from 'lucide-react';
 import { handleModelArchChange } from './utils';
+import { applySelectedDatasetDefaults } from '@/utils/jobDatasetDefaults';
 import { IoFlaskSharp } from 'react-icons/io5';
 import { isMac } from '@/helpers/basic';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
@@ -1537,7 +1538,7 @@ export default function SimpleJob({
               <button
                 type="button"
                 onClick={() => {
-                  const newDataset = objectCopy(defaultDatasetConfig);
+                  const newDataset = applySelectedDatasetDefaults(objectCopy(defaultDatasetConfig), modelArch?.defaults);
                   // automaticallt add the controls for a new dataset
                   const controls = modelArch?.controls ?? [];
                   newDataset.controls = controls;

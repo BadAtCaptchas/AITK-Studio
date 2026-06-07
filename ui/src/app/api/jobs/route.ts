@@ -12,6 +12,7 @@ import {
   syncRemoteJob,
   syncRemoteJobs,
 } from '@/server/remoteClient';
+import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 import type { Job } from '@/types';
 
@@ -186,20 +187,20 @@ export async function POST(request: Request) {
       let remotePatch: any = {};
       if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
         const worker = await getRemoteWorker(worker_id);
+        const remoteJobConfig = await rewriteSameWorkerRemoteDatasetRefsForWorker(job_config, worker);
         const remoteJob = await remoteJson<any>(worker, '/api/jobs', {
           method: 'POST',
           body: JSON.stringify({
             id: existing.remote_job_id,
             name,
             gpu_ids,
-            job_config,
+            job_config: remoteJobConfig,
             ...extra,
           }),
         });
         remotePatch = {
           name: remoteJob.name,
           gpu_ids: remoteJob.gpu_ids,
-          job_config: remoteJob.job_config,
           remote_sync_at: new Date(),
           remote_error: null,
         };

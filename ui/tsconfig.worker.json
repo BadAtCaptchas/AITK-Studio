@@ -22,6 +22,8 @@
         "cron/**/*.ts",
         "src/paths.ts",
         "src/utils/basic.ts",
+        "src/utils/jobDatasetDefaults.ts",
+        "src/utils/remoteDatasetRefs.ts",
         "src/utils/annotationGeometry.ts",
         "src/utils/ideogramCaption.ts",
         "src/utils/folderImport.ts",

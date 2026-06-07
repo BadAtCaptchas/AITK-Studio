@@ -866,6 +866,8 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].sample.height': [1024, 1024],
       'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
       'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
+      'config.process[0].datasets[x].caption_dropout_rate': [0, 0.05],
+      'config.process[0].datasets[x].shuffle_tokens': [false, undefined],
       'config.process[0].model.model_kwargs': [
         {
           quantization: 'nf4',
@@ -899,6 +901,8 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].sample.height': [1024, 1024],
       'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
       'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
+      'config.process[0].datasets[x].caption_dropout_rate': [0, 0.05],
+      'config.process[0].datasets[x].shuffle_tokens': [false, undefined],
       'config.process[0].model.model_kwargs': [
         {
           quantization: 'fp8',

@@ -32,6 +32,7 @@ import {
   makeRemoteDatasetRef,
   parseRemoteDatasetRef,
   remoteDatasetRememberKey,
+  shouldImportRemoteDatasetForWorker,
 } from '@/utils/remoteDatasetRefs';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -231,7 +232,7 @@ export default function TrainingForm() {
     return promise;
   };
 
-  const importRemoteDatasetsForJobConfig = async (rawConfig: JobConfig) => {
+  const importRemoteDatasetsForJobConfig = async (rawConfig: JobConfig, targetWorkerID: string) => {
     const nextConfig = objectCopy(rawConfig) as JobConfig;
     const importCache = new Map<string, Promise<{ name: string; path: string }>>();
     const datasetPathFields = [
@@ -251,13 +252,27 @@ export default function TrainingForm() {
       for (const dataset of processConfig.datasets || []) {
         for (const field of datasetPathFields) {
           const current = (dataset as any)[field];
-          if (typeof current === 'string' && parseRemoteDatasetRef(current)) {
+          if (
+            typeof current === 'string' &&
+            shouldImportRemoteDatasetForWorker(
+              current,
+              targetWorkerID,
+              datasetOptions.find(option => option.value === current)?.encrypted === true,
+            )
+          ) {
             const imported = await importRemoteDatasetForJob(current, importCache);
             (dataset as any)[field] = imported.path;
           } else if (Array.isArray(current)) {
             const nextValues = [];
             for (const value of current) {
-              if (typeof value === 'string' && parseRemoteDatasetRef(value)) {
+              if (
+                typeof value === 'string' &&
+                shouldImportRemoteDatasetForWorker(
+                  value,
+                  targetWorkerID,
+                  datasetOptions.find(option => option.value === value)?.encrypted === true,
+                )
+              ) {
                 const imported = await importRemoteDatasetForJob(value, importCache);
                 nextValues.push(imported.path);
               } else {
@@ -278,8 +293,9 @@ export default function TrainingForm() {
 
     const nextConfig = objectCopy(rawConfig) as JobConfig;
     for (const processConfig of nextConfig.config?.process ?? []) {
+      const processSections = processConfig as Record<string, any>;
       for (const key of ['sample', 'first_sample', 'generate'] as const) {
-        const generationConfig = processConfig[key] as any;
+        const generationConfig = processSections[key];
         if (generationConfig?.backend === 'comfy' && generationConfig?.comfy?.mode === 'managed') {
           generationConfig.comfy.managed_install = true;
         }
@@ -402,7 +418,7 @@ export default function TrainingForm() {
     setStatus('saving');
 
     try {
-      const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings);
+      const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings, workerID);
       setJobConfig(preparedJobConfig);
       const res = await apiClient.post('/api/jobs', {
         id: runId,

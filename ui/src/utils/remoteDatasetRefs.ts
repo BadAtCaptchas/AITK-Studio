@@ -40,6 +40,18 @@ export function parseRemoteDatasetRef(value: string | null | undefined): RemoteD
   }
 }
 
+export function shouldImportRemoteDatasetForWorker(
+  value: string | null | undefined,
+  targetWorkerID: string | null | undefined,
+  encrypted = false,
+) {
+  const parsed = parseRemoteDatasetRef(value);
+  if (!parsed) return false;
+  if (encrypted) return true;
+  if (!targetWorkerID || targetWorkerID === 'local') return true;
+  return parsed.workerID !== targetWorkerID;
+}
+
 export function makeRemoteDatasetAssetRef(
   workerID: string,
   type: RemoteDatasetAssetType,

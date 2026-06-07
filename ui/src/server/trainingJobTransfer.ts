@@ -2,6 +2,8 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { TOOLKIT_ROOT } from '../paths';
+import type { DatasetSummary } from '../types';
+import { parseRemoteDatasetRef } from '../utils/remoteDatasetRefs';
 
 export const TRAINING_JOB_EXPORT_FORMAT = 'ai-toolkit-training-job-export';
 export const TRAINING_JOB_EXPORT_VERSION = 1;
@@ -57,6 +59,11 @@ export type TrainingJobExportManifest = {
 export type DatasetReference = {
   configPath: string;
   value: string;
+};
+
+export type SameWorkerRemoteDatasetReference = DatasetReference & {
+  datasetName: string;
+  workerID: string;
 };
 
 const DATASET_PATH_FIELDS = [
@@ -161,6 +168,58 @@ export function collectDatasetReferences(jobConfig: any): DatasetReference[] {
   });
 
   return refs;
+}
+
+export function collectSameWorkerRemoteDatasetReferences(
+  jobConfig: any,
+  workerID: string,
+): SameWorkerRemoteDatasetReference[] {
+  return collectDatasetReferences(jobConfig)
+    .map(ref => {
+      const parsed = parseRemoteDatasetRef(ref.value);
+      if (!parsed || parsed.workerID !== workerID) return null;
+      return {
+        ...ref,
+        workerID: parsed.workerID,
+        datasetName: parsed.datasetName,
+      };
+    })
+    .filter(Boolean) as SameWorkerRemoteDatasetReference[];
+}
+
+export function rewriteSameWorkerRemoteDatasetRefs(
+  rawJobConfig: any,
+  options: {
+    workerID: string;
+    workerName?: string;
+    datasets: DatasetSummary[];
+    allowEncrypted?: boolean;
+  },
+) {
+  const refs = collectSameWorkerRemoteDatasetReferences(rawJobConfig, options.workerID);
+  if (refs.length === 0) return rawJobConfig;
+
+  const jobConfig = cloneJson(rawJobConfig);
+  const datasetByName = new Map(options.datasets.map(dataset => [dataset.name, dataset]));
+  const workerLabel = options.workerName || options.workerID;
+
+  for (const ref of refs) {
+    const dataset = datasetByName.get(ref.datasetName);
+    if (!dataset) {
+      throw new Error(`Remote dataset "${ref.datasetName}" was not found on worker "${workerLabel}".`);
+    }
+    if (dataset.encrypted && !options.allowEncrypted) {
+      throw new Error(
+        `Encrypted remote dataset "${ref.datasetName}" must be imported before it can be used on worker "${workerLabel}".`,
+      );
+    }
+    if (!dataset.path) {
+      throw new Error(`Remote dataset "${ref.datasetName}" on worker "${workerLabel}" did not report a local path.`);
+    }
+    setConfigPathValue(jobConfig, ref.configPath, dataset.path);
+  }
+
+  return jobConfig;
 }
 
 export async function collectDatasetArchiveMappings(jobConfig: any, includeDatasets: boolean, datasetsRoot: string) {

@@ -56,13 +56,17 @@ class OpenRouterCaptioner(BaseCaptioner):
             f"Using OpenRouter model {self.caption_config.model_name_or_path}"
         )
 
-    def _image_to_data_url(self, file_path: str) -> str:
+    def _image_to_data_url(self, file_path: str) -> tuple[str, tuple[int, int]]:
         image = self.load_pil_image(
             file_path, max_res=self.caption_config.max_res
         ).convert("RGB")
+        image_size = image.size
         buffer = io.BytesIO()
         image.save(buffer, format="JPEG", quality=95, optimize=True)
-        return f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+        return (
+            f"data:image/jpeg;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}",
+            image_size,
+        )
 
     def _headers(self) -> dict:
         headers = {
@@ -117,7 +121,8 @@ class OpenRouterCaptioner(BaseCaptioner):
             return "\n".join(parts).strip()
         return ""
 
-    def _build_payload(self, file_path: str) -> dict:
+    def _build_payload(self, file_path: str) -> tuple[dict, tuple[int, int]]:
+        image_data_url, image_size = self._image_to_data_url(file_path)
         messages = []
         if self.caption_config.system_prompt.strip():
             messages.append(
@@ -130,7 +135,7 @@ class OpenRouterCaptioner(BaseCaptioner):
                     {"type": "text", "text": self.build_caption_prompt(file_path)},
                     {
                         "type": "image_url",
-                        "image_url": {"url": self._image_to_data_url(file_path)},
+                        "image_url": {"url": image_data_url},
                     },
                 ],
             }
@@ -153,15 +158,15 @@ class OpenRouterCaptioner(BaseCaptioner):
                 },
             }
             payload["provider"] = {"require_parameters": True}
-        return payload
+        return payload, image_size
 
     def get_caption_for_file(self, file_path: str) -> str:
-        payload = self._build_payload(file_path)
+        payload, image_size = self._build_payload(file_path)
         for attempt in range(1, 4):
             data = self._request_json(payload)
             caption = self._message_content_text(data)
             if caption:
-                return self.normalize_caption_output(file_path, caption)
+                return self.normalize_caption_output(file_path, caption, image_size=image_size)
             if attempt < 3:
                 time.sleep(2)
         raise RuntimeError(

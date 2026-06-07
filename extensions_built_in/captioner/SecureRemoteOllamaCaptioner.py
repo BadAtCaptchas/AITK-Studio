@@ -41,11 +41,12 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
         self.ensure_remote_model()
         self.remote_model_ready = True
 
-    def _image_to_base64(self, file_path: str) -> str:
+    def _image_to_base64(self, file_path: str) -> tuple[str, tuple[int, int]]:
         image = self.load_pil_image(file_path, max_res=self.caption_config.max_res).convert("RGB")
+        image_size = image.size
         buffer = io.BytesIO()
         image.save(buffer, format="JPEG", quality=95, optimize=True)
-        return base64.b64encode(buffer.getvalue()).decode("ascii")
+        return base64.b64encode(buffer.getvalue()).decode("ascii"), image_size
 
     def _item_id_for_file(self, file_path: str) -> str:
         digest = hashlib.sha256(f"{self.job_id or self.job.name}:{file_path}:{uuid.uuid4()}".encode("utf-8")).hexdigest()
@@ -188,15 +189,16 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
     def get_caption_for_file(self, file_path: str) -> str:
         item_id = self._item_id_for_file(file_path)
         job_id = self.job_id or self.job.name
+        image_base64, image_size = self._image_to_base64(file_path)
         payload = {
             "model": self.caption_config.model_name_or_path,
             "prompt": self.build_caption_prompt(file_path),
             "systemPrompt": self.caption_config.system_prompt,
-            "imageBase64": self._image_to_base64(file_path),
+            "imageBase64": image_base64,
             "maxNewTokens": self.caption_config.max_new_tokens,
         }
         request_envelope = encrypt_secure_caption_json(self.remote_token, "request", job_id, item_id, payload)
         response_envelope = self._post_secure_caption(request_envelope)
         response_payload = decrypt_secure_caption_json(self.remote_token, "response", response_envelope)
         caption = str(response_payload.get("caption", "")).strip()
-        return self.normalize_caption_output(file_path, caption) if caption else None
+        return self.normalize_caption_output(file_path, caption, image_size=image_size) if caption else None

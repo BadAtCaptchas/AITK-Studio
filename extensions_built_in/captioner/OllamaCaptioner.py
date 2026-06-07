@@ -86,11 +86,12 @@ class OllamaCaptioner(BaseCaptioner):
         )
         self.print_and_status_update("Ollama model is ready")
 
-    def _image_to_base64(self, file_path: str) -> str:
+    def _image_to_base64(self, file_path: str) -> tuple[str, tuple[int, int]]:
         image = self.load_pil_image(file_path, max_res=self.caption_config.max_res).convert("RGB")
+        image_size = image.size
         buffer = io.BytesIO()
         image.save(buffer, format="JPEG", quality=95, optimize=True)
-        return base64.b64encode(buffer.getvalue()).decode("ascii")
+        return base64.b64encode(buffer.getvalue()).decode("ascii"), image_size
 
     def _caption_num_predict(self, attempt: int) -> int:
         requested = self.caption_config.max_new_tokens or 0
@@ -145,7 +146,7 @@ class OllamaCaptioner(BaseCaptioner):
     def get_caption_for_file(self, file_path: str) -> str:
         model = self.caption_config.model_name_or_path.strip()
         prompt = self.build_caption_prompt(file_path)
-        image_base64 = self._image_to_base64(file_path)
+        image_base64, image_size = self._image_to_base64(file_path)
         generate_body = {
             "model": model,
             "prompt": prompt,
@@ -171,10 +172,10 @@ class OllamaCaptioner(BaseCaptioner):
             options = {"num_predict": self._caption_num_predict(attempt)}
             caption = self._generate_caption_once("generate", {**generate_body, "options": options})
             if caption:
-                return self.normalize_caption_output(file_path, caption)
+                return self.normalize_caption_output(file_path, caption, image_size=image_size)
             caption = self._generate_caption_once("chat", {**chat_body, "options": options})
             if caption:
-                return self.normalize_caption_output(file_path, caption)
+                return self.normalize_caption_output(file_path, caption, image_size=image_size)
             if attempt < 3:
                 time.sleep(2)
 

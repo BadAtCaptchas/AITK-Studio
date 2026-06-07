@@ -72,6 +72,8 @@ function mockFetchForResponses(responses, calls = []) {
 test('buildOpenRouterBoxPrompt includes indexed element context and image dimensions', () => {
   const prompt = buildOpenRouterBoxPrompt(sampleCaption(), { width: 1280, height: 720 });
   assert.match(prompt, /Image pixel size: 1280 x 720/);
+  assert.match(prompt, /bbox_px/);
+  assert.match(prompt, /currentBbox_px/);
   assert.match(prompt, /"elementIndex": 0/);
   assert.match(prompt, /Yellow taxi/);
   assert.match(prompt, /visibleText/);
@@ -92,9 +94,9 @@ test('generateOpenRouterBoxPatches defaults to grok 4.3 and filters malformed bo
       {
         content: {
           boxes: [
-            { elementIndex: 0, bbox: [100, 190, 640, 820] },
-            { elementIndex: 1, bbox: [200, 200, 200, 260] },
-            { elementIndex: 99, bbox: [0, 0, 100, 100] },
+            { elementIndex: 0, bbox_px: [100, 380, 640, 1640] },
+            { elementIndex: 1, bbox_px: [200, 400, 200, 520] },
+            { elementIndex: 99, bbox_px: [0, 0, 100, 100] },
           ],
         },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
@@ -107,6 +109,7 @@ test('generateOpenRouterBoxPatches defaults to grok 4.3 and filters malformed bo
     apiKey: 'test-key',
     imageDataUrl: 'data:image/jpeg;base64,abc',
     caption: sampleCaption(),
+    imageSize: { width: 2000, height: 1000 },
     fetchImpl,
   });
 
@@ -117,6 +120,7 @@ test('generateOpenRouterBoxPatches defaults to grok 4.3 and filters malformed bo
   assert.equal(calls[0].provider.require_parameters, true);
   assert.equal(calls[0].response_format.json_schema.strict, true);
   assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['boxes', 'generatedElements']);
+  assert.deepEqual(calls[0].response_format.json_schema.schema.properties.boxes.items.required, ['elementIndex', 'bbox_px']);
 });
 
 test('generateOpenRouterBoxPatches falls back for retired models and can run a refinement pass', async () => {
@@ -124,11 +128,11 @@ test('generateOpenRouterBoxPatches falls back for retired models and can run a r
   const fetchImpl = mockFetchForResponses(
     [
       {
-        content: { boxes: [{ elementIndex: 0, bbox: [100, 190, 640, 820] }] },
+        content: { boxes: [{ elementIndex: 0, bbox_px: [100, 380, 640, 1640] }] },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       },
       {
-        content: { boxes: [{ elementIndex: 0, bbox: [110, 200, 630, 810] }] },
+        content: { boxes: [{ elementIndex: 0, bbox_px: [110, 400, 630, 1620] }] },
         usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
       },
     ],
@@ -141,6 +145,7 @@ test('generateOpenRouterBoxPatches falls back for retired models and can run a r
     caption: sampleCaption(),
     model: 'x-ai/grok-4-fast',
     refine: true,
+    imageSize: { width: 2000, height: 1000 },
     fetchImpl,
   });
 
@@ -161,9 +166,9 @@ test('generateOpenRouterBoxPatches can create elements when caption has no eleme
         content: {
           boxes: [],
           generatedElements: [
-            { type: 'obj', bbox: [100, 190, 640, 820], desc: 'Yellow taxi.', text: '' },
-            { type: 'text', bbox: [60, 360, 120, 520], desc: 'Taxi roof sign.', text: 'TAXI' },
-            { type: 'obj', bbox: [200, 200, 200, 260], desc: 'flat bad box', text: '' },
+            { type: 'obj', bbox_px: [100, 380, 640, 1640], desc: 'Yellow taxi.', text: '' },
+            { type: 'text', bbox_px: [60, 720, 120, 1040], desc: 'Taxi roof sign.', text: 'TAXI' },
+            { type: 'obj', bbox_px: [200, 400, 200, 520], desc: 'flat bad box', text: '' },
           ],
         },
       },
@@ -175,6 +180,7 @@ test('generateOpenRouterBoxPatches can create elements when caption has no eleme
     apiKey: 'test-key',
     imageDataUrl: 'data:image/jpeg;base64,abc',
     caption: emptyElementCaption(),
+    imageSize: { width: 2000, height: 1000 },
     fetchImpl,
   });
 
@@ -193,14 +199,14 @@ test('generateOpenRouterBoxPatches can refine generated elements', async () => {
       {
         content: {
           boxes: [],
-          generatedElements: [{ type: 'obj', bbox: [100, 190, 640, 820], desc: 'Yellow taxi.', text: '' }],
+          generatedElements: [{ type: 'obj', bbox_px: [100, 380, 640, 1640], desc: 'Yellow taxi.', text: '' }],
         },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       },
       {
         content: {
           boxes: [],
-          generatedElements: [{ type: 'obj', bbox: [110, 200, 630, 810], desc: 'Yellow taxi.', text: '' }],
+          generatedElements: [{ type: 'obj', bbox_px: [110, 400, 630, 1620], desc: 'Yellow taxi.', text: '' }],
         },
         usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
       },
@@ -213,6 +219,7 @@ test('generateOpenRouterBoxPatches can refine generated elements', async () => {
     imageDataUrl: 'data:image/jpeg;base64,abc',
     caption: emptyElementCaption(),
     refine: true,
+    imageSize: { width: 2000, height: 1000 },
     fetchImpl,
   });
 
@@ -240,6 +247,7 @@ test('generateOpenRouterBoxPatches rejects missing key and unusable model output
         apiKey: 'test-key',
         imageDataUrl: 'data:image/jpeg;base64,abc',
         caption: sampleCaption(),
+        imageSize: { width: 2000, height: 1000 },
         fetchImpl: mockFetchForResponses([{ content: { boxes: [] } }]),
       }),
     /usable boxes/,

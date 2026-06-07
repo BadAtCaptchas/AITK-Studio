@@ -1,4 +1,5 @@
 import {
+  boxToArray,
   normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   parseIdeogramCaption,
@@ -12,6 +13,11 @@ export const OPENROUTER_BOX_MODELS = ['x-ai/grok-4.3'] as const;
 type ImageSize = {
   width?: number | null;
   height?: number | null;
+};
+
+type RequiredImageSize = {
+  width: number;
+  height: number;
 };
 
 export type OpenRouterUsage = {
@@ -53,13 +59,20 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
           },
           bbox: {
             type: 'array',
-            description: 'Bounding box as [ymin, xmin, ymax, xmax], normalized to 0-1000.',
-            items: { type: 'integer', minimum: 0, maximum: 1000 },
+            description: 'Deprecated compatibility field. Use bbox_px.',
+            items: { type: 'integer', minimum: 0 },
+            minItems: 4,
+            maxItems: 4,
+          },
+          bbox_px: {
+            type: 'array',
+            description: 'Bounding box as [ymin, xmin, ymax, xmax] in image pixels.',
+            items: { type: 'integer', minimum: 0 },
             minItems: 4,
             maxItems: 4,
           },
         },
-        required: ['elementIndex', 'bbox'],
+        required: ['elementIndex', 'bbox_px'],
       },
     },
     generatedElements: {
@@ -75,8 +88,15 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
           },
           bbox: {
             type: 'array',
-            description: 'Bounding box as [ymin, xmin, ymax, xmax], normalized to 0-1000.',
-            items: { type: 'integer', minimum: 0, maximum: 1000 },
+            description: 'Deprecated compatibility field. Use bbox_px.',
+            items: { type: 'integer', minimum: 0 },
+            minItems: 4,
+            maxItems: 4,
+          },
+          bbox_px: {
+            type: 'array',
+            description: 'Bounding box as [ymin, xmin, ymax, xmax] in image pixels.',
+            items: { type: 'integer', minimum: 0 },
             minItems: 4,
             maxItems: 4,
           },
@@ -89,7 +109,7 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
             description: 'Visible text content for text elements. Use an empty string for ordinary object elements.',
           },
         },
-        required: ['type', 'bbox', 'desc', 'text'],
+        required: ['type', 'bbox_px', 'desc', 'text'],
       },
     },
   },
@@ -109,15 +129,16 @@ export function cleanString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function summarizeElements(elements: any[]) {
+function summarizeElements(elements: any[], imageSize: RequiredImageSize) {
   return elements.map((element, index) => {
     const type = element?.type === 'text' ? 'text' : 'obj';
+    const currentBboxPx = Array.isArray(element?.bbox) ? normalizedBboxToPixelArray(element.bbox, imageSize) : null;
     return {
       elementIndex: index,
       type,
       description: cleanString(element?.desc),
       ...(type === 'text' ? { visibleText: cleanString(element?.text) } : {}),
-      ...(Array.isArray(element?.bbox) ? { currentBbox: element.bbox } : {}),
+      ...(currentBboxPx ? { currentBbox_px: currentBboxPx } : {}),
     };
   });
 }
@@ -129,6 +150,117 @@ export function imageSizeLine(imageSize?: ImageSize | null) {
     return `Image pixel size: ${Math.round(width)} x ${Math.round(height)}.`;
   }
   return 'Image pixel size: unknown.';
+}
+
+export function requireImageSize(imageSize?: ImageSize | null): RequiredImageSize {
+  const width = Number(imageSize?.width);
+  const height = Number(imageSize?.height);
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+    throw new Error('Image width and height are required before generating boxes.');
+  }
+  return { width: Math.round(width), height: Math.round(height) };
+}
+
+function numberTuple4(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const values = value.map(item => (typeof item === 'number' && Number.isFinite(item) ? item : null));
+  if (values.some(item => item == null)) return null;
+  return values as [number, number, number, number];
+}
+
+export function pixelBboxToNormalizedArray(
+  value: unknown,
+  imageSize: RequiredImageSize,
+): [number, number, number, number] | null {
+  const values = numberTuple4(value);
+  if (!values) return null;
+  const [y1, x1, y2, x2] = values;
+  return boxToArray({
+    y1: (y1 / imageSize.height) * 1000,
+    x1: (x1 / imageSize.width) * 1000,
+    y2: (y2 / imageSize.height) * 1000,
+    x2: (x2 / imageSize.width) * 1000,
+  });
+}
+
+export function normalizedBboxToPixelArray(
+  value: unknown,
+  imageSize: RequiredImageSize,
+): [number, number, number, number] | null {
+  const values = numberTuple4(value);
+  if (!values) return null;
+  const [y1, x1, y2, x2] = values;
+  return [
+    Math.round((y1 / 1000) * imageSize.height),
+    Math.round((x1 / 1000) * imageSize.width),
+    Math.round((y2 / 1000) * imageSize.height),
+    Math.round((x2 / 1000) * imageSize.width),
+  ];
+}
+
+function rawPixelBbox(raw: Record<string, any>) {
+  return raw.bbox_px || raw.bboxPx || raw.bbox;
+}
+
+function pixelGeneratedBoxPatches(
+  value: unknown,
+  elementCount: number,
+  imageSize: RequiredImageSize,
+  minSpan = 1,
+): GeneratedBoxPatch[] {
+  const rawBoxes = isRecord(value) && Array.isArray(value.boxes) ? value.boxes : Array.isArray(value) ? value : [];
+  const boxes = rawBoxes.flatMap(rawBox => {
+    if (!isRecord(rawBox)) return [];
+    const bbox = pixelBboxToNormalizedArray(rawPixelBbox(rawBox), imageSize);
+    if (!bbox) return [];
+    return [{ elementIndex: rawBox.elementIndex, bbox }];
+  });
+  return normalizeGeneratedBoxPatches({ boxes }, elementCount, minSpan);
+}
+
+function pixelGeneratedElementBoxes(
+  value: unknown,
+  imageSize: RequiredImageSize,
+  minSpan = 1,
+  maxElements = 20,
+): GeneratedElementBox[] {
+  const rawElements: unknown[] =
+    isRecord(value) && Array.isArray(value.generatedElements)
+      ? value.generatedElements
+      : isRecord(value) && Array.isArray(value.elements)
+        ? value.elements
+        : Array.isArray(value)
+          ? value
+          : [];
+
+  const generatedElements = rawElements.flatMap(rawElement => {
+    if (!isRecord(rawElement)) return [];
+    const bbox = pixelBboxToNormalizedArray(rawPixelBbox(rawElement), imageSize);
+    if (!bbox) return [];
+    return [
+      {
+        type: rawElement.type,
+        bbox,
+        desc: rawElement.desc || rawElement.description || rawElement.label,
+        text: rawElement.text || rawElement.visibleText || '',
+      },
+    ];
+  });
+  return normalizeGeneratedElementBoxes({ generatedElements }, minSpan, maxElements);
+}
+
+function normalizedPatchesToPixelPrompt(patches: GeneratedBoxPatch[], imageSize: RequiredImageSize) {
+  return patches.flatMap(patch => {
+    const bbox_px = normalizedBboxToPixelArray(patch.bbox, imageSize);
+    return bbox_px ? [{ elementIndex: patch.elementIndex, bbox_px }] : [];
+  });
+}
+
+function normalizedElementsToPixelPrompt(elements: GeneratedElementBox[], imageSize: RequiredImageSize) {
+  return elements.flatMap(element => {
+    const bbox_px = normalizedBboxToPixelArray(element.bbox, imageSize);
+    return bbox_px ? [{ ...element, bbox_px, bbox: undefined }] : [];
+  });
 }
 
 function captionSceneContext(parsed: Extract<ReturnType<typeof parseIdeogramCaption>, { kind: 'ideogram' }>) {
@@ -144,29 +276,31 @@ export function buildOpenRouterBoxPrompt(
   previousBoxes?: GeneratedBoxPatch[],
   previousGeneratedElements?: GeneratedElementBox[],
 ) {
+  const requiredImageSize = requireImageSize(imageSize);
   const parsed = parseIdeogramCaption(caption);
   if (parsed.kind !== 'ideogram') {
     throw new Error('Auto Boxes requires an Ideogram JSON caption.');
   }
 
-  const elements = summarizeElements(parsed.elements);
+  const elements = summarizeElements(parsed.elements, requiredImageSize);
   const previous = previousBoxes?.length
-    ? `\nCurrent proposed boxes to correct:\n${JSON.stringify({ boxes: previousBoxes, generatedElements: [] }, null, 2)}\n`
+    ? `\nCurrent proposed boxes to correct:\n${JSON.stringify({ boxes: normalizedPatchesToPixelPrompt(previousBoxes, requiredImageSize), generatedElements: [] }, null, 2)}\n`
     : previousGeneratedElements?.length
-      ? `\nCurrent proposed generated elements to correct:\n${JSON.stringify({ boxes: [], generatedElements: previousGeneratedElements }, null, 2)}\n`
+      ? `\nCurrent proposed generated elements to correct:\n${JSON.stringify({ boxes: [], generatedElements: normalizedElementsToPixelPrompt(previousGeneratedElements, requiredImageSize) }, null, 2)}\n`
       : '';
 
   if (parsed.elements.length === 0) {
     return [
       'Create Ideogram caption elements with accurate bounding boxes for this image.',
-      imageSizeLine(imageSize),
+      imageSizeLine(requiredImageSize),
       '',
       'The caption currently has no compositional_deconstruction.elements, so generate new elements for the most important visible regions.',
       'Scene context:',
       JSON.stringify(captionSceneContext(parsed), null, 2),
       '',
       'Coordinate contract:',
-      '- Return [ymin, xmin, ymax, xmax] integers normalized to 0-1000.',
+      '- Return bbox_px as [ymin, xmin, ymax, xmax] integers in image pixels.',
+      `- Pixel coordinates must be relative to the submitted ${requiredImageSize.width} x ${requiredImageSize.height} image.`,
       '- Fit the visible extent of the object or text region tightly.',
       '- Do not add padding for aesthetics.',
       '- If an object is occluded or cropped, box only the visible part.',
@@ -181,17 +315,18 @@ export function buildOpenRouterBoxPrompt(
 
   return [
     'Create accurate bounding boxes for existing Ideogram caption elements in this image.',
-    imageSizeLine(imageSize),
+    imageSizeLine(requiredImageSize),
     '',
     'Coordinate contract:',
-    '- Return [ymin, xmin, ymax, xmax] integers normalized to 0-1000.',
+    '- Return bbox_px as [ymin, xmin, ymax, xmax] integers in image pixels.',
+    `- Pixel coordinates must be relative to the submitted ${requiredImageSize.width} x ${requiredImageSize.height} image.`,
     '- Fit the visible extent of the named object or text region tightly.',
     '- Do not add padding for aesthetics.',
     '- If an object is occluded or cropped, box only the visible part.',
     '- For text elements, box the visible text glyphs or sign/label area, not the larger object holding it.',
     '- Keep every elementIndex exactly as provided. Do not create, remove, reorder, or rename elements.',
     '- Return generatedElements: [] because existing caption elements are being patched.',
-    '- If a currentBbox exists, use it only as a rough hint; correct it when the image contradicts it.',
+    '- If a currentBbox_px exists, use it only as a rough hint; correct it when the image contradicts it.',
     previous,
     'Existing caption elements:',
     JSON.stringify(elements, null, 2),
@@ -298,18 +433,18 @@ async function callOpenRouterBoxes({
   return { content, usage: isRecord(data?.usage) ? data.usage : undefined };
 }
 
-function parseBoxResponse(content: string, elementCount: number) {
+function parseBoxResponse(content: string, elementCount: number, imageSize: RequiredImageSize) {
   const parsed = parseJsonObject(content);
-  const boxes = normalizeGeneratedBoxPatches(parsed, elementCount, 2);
+  const boxes = pixelGeneratedBoxPatches(parsed, elementCount, imageSize, 2);
   if (boxes.length === 0) {
     throw new Error('OpenRouter did not return any usable boxes.');
   }
   return boxes;
 }
 
-function parseGeneratedElementResponse(content: string) {
+function parseGeneratedElementResponse(content: string, imageSize: RequiredImageSize) {
   const parsed = parseJsonObject(content);
-  const generatedElements = normalizeGeneratedElementBoxes(parsed, 2, 20);
+  const generatedElements = pixelGeneratedElementBoxes(parsed, imageSize, 2, 20);
   if (generatedElements.length === 0) {
     throw new Error('OpenRouter did not return any usable generated elements.');
   }
@@ -323,31 +458,32 @@ export async function generateOpenRouterBoxPatches(options: GenerateOpenRouterBo
   const parsed = parseIdeogramCaption(options.caption);
   if (parsed.kind !== 'ideogram') throw new Error('Auto Boxes requires an Ideogram JSON caption.');
 
+  const imageSize = requireImageSize(options.imageSize);
   const model = normalizeOpenRouterBoxModel(options.model);
   const fetchImpl = options.fetchImpl || fetch;
-  const firstPrompt = buildOpenRouterBoxPrompt(options.caption, options.imageSize);
+  const firstPrompt = buildOpenRouterBoxPrompt(options.caption, imageSize);
   const first = await callOpenRouterBoxes({ apiKey, imageDataUrl: options.imageDataUrl, model, prompt: firstPrompt, fetchImpl });
   let boxes: GeneratedBoxPatch[] = [];
   let generatedElements: GeneratedElementBox[] = [];
   if (parsed.elements.length > 0) {
-    boxes = parseBoxResponse(first.content, parsed.elements.length);
+    boxes = parseBoxResponse(first.content, parsed.elements.length, imageSize);
   } else {
-    generatedElements = parseGeneratedElementResponse(first.content);
+    generatedElements = parseGeneratedElementResponse(first.content, imageSize);
   }
   let usage = first.usage;
   let refined = false;
 
   if (options.refine) {
-    const refinePrompt = buildOpenRouterBoxPrompt(options.caption, options.imageSize, boxes, generatedElements);
+    const refinePrompt = buildOpenRouterBoxPrompt(options.caption, imageSize, boxes, generatedElements);
     const second = await callOpenRouterBoxes({ apiKey, imageDataUrl: options.imageDataUrl, model, prompt: refinePrompt, fetchImpl });
     if (parsed.elements.length > 0) {
-      const refinedBoxes = parseBoxResponse(second.content, parsed.elements.length);
+      const refinedBoxes = parseBoxResponse(second.content, parsed.elements.length, imageSize);
       if (refinedBoxes.length > 0) {
         boxes = refinedBoxes;
         refined = true;
       }
     } else {
-      const refinedGeneratedElements = parseGeneratedElementResponse(second.content);
+      const refinedGeneratedElements = parseGeneratedElementResponse(second.content, imageSize);
       if (refinedGeneratedElements.length > 0) {
         generatedElements = refinedGeneratedElements;
         refined = true;

@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
       refine = boolFromValue(formData.get('refine'));
       imageWidth = positiveNumberFromValue(formData.get('imageWidth'));
       imageHeight = positiveNumberFromValue(formData.get('imageHeight'));
+      if (!imageWidth || !imageHeight) {
+        throw new Error('Image width and height are required for Auto Boxes.');
+      }
       imageDataUrl = await encryptedOpenRouterUploadImageDataUrl(formData, 'Auto Boxes');
     } else {
       const body = await request.json();
@@ -36,6 +39,9 @@ export async function POST(request: NextRequest) {
       refine = body?.refine === true;
       imageWidth = positiveNumberFromValue(body?.imageWidth);
       imageHeight = positiveNumberFromValue(body?.imageHeight);
+      if (!imageWidth || !imageHeight) {
+        throw new Error('Image width and height are required for Auto Boxes.');
+      }
       imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Auto Boxes');
     }
 

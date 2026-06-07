@@ -34,6 +34,9 @@ export async function POST(request: NextRequest) {
       elementIndex = requiredElementIndex(formData.get('elementIndex'));
       imageWidth = positiveNumberFromValue(formData.get('imageWidth'));
       imageHeight = positiveNumberFromValue(formData.get('imageHeight'));
+      if (!imageWidth || !imageHeight) {
+        throw new Error('Image width and height are required for Caption Layer.');
+      }
       imageDataUrl = await encryptedOpenRouterUploadImageDataUrl(formData, 'Caption Layer');
     } else {
       const body = await request.json();
@@ -42,6 +45,9 @@ export async function POST(request: NextRequest) {
       elementIndex = requiredElementIndex(body?.elementIndex);
       imageWidth = positiveNumberFromValue(body?.imageWidth);
       imageHeight = positiveNumberFromValue(body?.imageHeight);
+      if (!imageWidth || !imageHeight) {
+        throw new Error('Image width and height are required for Caption Layer.');
+      }
       imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Caption Layer');
     }
 

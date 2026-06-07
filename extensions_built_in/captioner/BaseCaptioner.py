@@ -36,7 +36,8 @@ IDEOGRAM_JSON_FORMAT_REQUIREMENTS = """Use this exact JSON contract:
 - Object element key order must be: type, bbox, desc, color_palette.
 - Text element key order must be: type, bbox, text, desc, color_palette.
 - Omit bbox or color_palette only when unavailable; if present, keep them in the listed position.
-- Bounding boxes must be [ymin, xmin, ymax, xmax] normalized to 0-1000.
+- Bounding boxes must be [ymin, xmin, ymax, xmax] normalized to 0-1000, not pixels.
+- Do not use pixel coordinates for bbox values.
 - Colors must be uppercase #RRGGBB hex strings."""
 
 DEFAULT_IDEOGRAM_JSON_PROMPT = """Create an Ideogram 4 training caption for this image as a JSON object.
@@ -403,12 +404,17 @@ class BaseCaptioner(BaseExtensionProcess):
                 )
         return prompt
 
-    def normalize_caption_output(self, file_path: str, caption: str) -> str:
+    def normalize_caption_output(
+        self,
+        file_path: str,
+        caption: str,
+        image_size: Optional[tuple[int, int]] = None,
+    ) -> str:
         if not self.is_ideogram_json_output():
             return str(caption).strip()
 
         parsed = self._parse_json_caption(str(caption))
-        parsed = self._normalize_ideogram_json_caption(parsed)
+        parsed = self._normalize_ideogram_json_caption(parsed, image_size=image_size)
         self._warn_for_ideogram_json_issues(parsed, file_path)
         return json.dumps(parsed, ensure_ascii=False, indent=2)
 
@@ -461,7 +467,9 @@ class BaseCaptioner(BaseExtensionProcess):
         normalized = " ".join(prompt.lower().split())
         return all(marker in normalized for marker in IDEOGRAM_JSON_CONTRACT_MARKERS)
 
-    def _normalize_ideogram_json_caption(self, caption: dict) -> dict:
+    def _normalize_ideogram_json_caption(
+        self, caption: dict, image_size: Optional[tuple[int, int]] = None
+    ) -> dict:
         normalized = OrderedDict()
         for key in IDEOGRAM_JSON_TOP_LEVEL_KEY_ORDER:
             if key not in caption:
@@ -470,7 +478,9 @@ class BaseCaptioner(BaseExtensionProcess):
             if key == "style_description":
                 value = self._normalize_ideogram_style_description(value)
             elif key == "compositional_deconstruction":
-                value = self._normalize_ideogram_compositional_deconstruction(value)
+                value = self._normalize_ideogram_compositional_deconstruction(
+                    value, image_size=image_size
+                )
             normalized[key] = value
 
         for key, value in caption.items():
@@ -538,7 +548,9 @@ class BaseCaptioner(BaseExtensionProcess):
                 return value.strip()
         return "photograph" if style_key == "photo" else "artwork"
 
-    def _normalize_ideogram_compositional_deconstruction(self, composition):
+    def _normalize_ideogram_compositional_deconstruction(
+        self, composition, image_size: Optional[tuple[int, int]] = None
+    ):
         if not isinstance(composition, dict):
             return composition
 
@@ -546,20 +558,25 @@ class BaseCaptioner(BaseExtensionProcess):
         elements = normalized.get("elements")
         if isinstance(elements, list):
             normalized["elements"] = [
-                self._normalize_ideogram_element(element) for element in elements
+                self._normalize_ideogram_element(element, image_size=image_size)
+                for element in elements
             ]
 
         return self._ordered_ideogram_dict(
             normalized, IDEOGRAM_JSON_COMPOSITION_KEY_ORDER
         )
 
-    def _normalize_ideogram_element(self, element):
+    def _normalize_ideogram_element(
+        self, element, image_size: Optional[tuple[int, int]] = None
+    ):
         if not isinstance(element, dict):
             return element
 
         element = OrderedDict(element)
         if "bbox" in element:
-            element["bbox"] = self._normalize_ideogram_bbox(element["bbox"])
+            element["bbox"] = self._normalize_ideogram_bbox(
+                element["bbox"], image_size=image_size
+            )
         if "color_palette" in element:
             element["color_palette"] = self._normalize_ideogram_color_palette(
                 element["color_palette"], IDEOGRAM_JSON_ELEMENT_PALETTE_MAX
@@ -589,7 +606,7 @@ class BaseCaptioner(BaseExtensionProcess):
         return normalized
 
     @staticmethod
-    def _normalize_ideogram_bbox(bbox):
+    def _normalize_ideogram_bbox(bbox, image_size: Optional[tuple[int, int]] = None):
         if not isinstance(bbox, list) or len(bbox) != 4:
             return bbox
 
@@ -617,8 +634,35 @@ class BaseCaptioner(BaseExtensionProcess):
 
         if has_unit_scale_hint and all(0 <= value <= 1 for value in values):
             values = [value * 1000 for value in values]
+        elif BaseCaptioner._looks_like_pixel_bbox(values, image_size):
+            width, height = image_size
+            values = [
+                (values[0] / height) * 1000,
+                (values[1] / width) * 1000,
+                (values[2] / height) * 1000,
+                (values[3] / width) * 1000,
+            ]
 
         return [int(round(value)) for value in values]
+
+    @staticmethod
+    def _looks_like_pixel_bbox(
+        values: list[float], image_size: Optional[tuple[int, int]]
+    ) -> bool:
+        if image_size is None:
+            return False
+        width, height = image_size
+        if width <= 0 or height <= 0:
+            return False
+        if all(0 <= value <= 1000 for value in values):
+            return False
+
+        ymin, xmin, ymax, xmax = values
+        y_low = min(ymin, ymax)
+        y_high = max(ymin, ymax)
+        x_low = min(xmin, xmax)
+        x_high = max(xmin, xmax)
+        return 0 <= y_low <= height and y_high <= height and 0 <= x_low <= width and x_high <= width
 
     @staticmethod
     def _ordered_ideogram_dict(source: dict, key_order: tuple[str, ...]) -> OrderedDict:

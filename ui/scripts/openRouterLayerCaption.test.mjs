@@ -54,7 +54,8 @@ function mockFetchForResponses(responses, calls = []) {
 test('buildOpenRouterLayerCaptionPrompt targets an existing bbox when present', () => {
   const prompt = buildOpenRouterLayerCaptionPrompt(sampleCaption(), 0, { width: 1280, height: 720 });
   assert.match(prompt, /Image pixel size: 1280 x 720/);
-  assert.match(prompt, /Target bbox: \[120,200,620,800\]/);
+  assert.match(prompt, /Target bbox_px: \[86,256,446,1024\]/);
+  assert.match(prompt, /bbox_px/);
   assert.match(prompt, /Yellow taxi/);
   assert.doesNotMatch(prompt, /No bbox exists/);
 });
@@ -79,7 +80,7 @@ test('generateOpenRouterLayerCaption parses text-layer captions and strict schem
   const fetchImpl = mockFetchForResponses(
     [
       {
-        content: { desc: 'A yellow taxi roof sign with black letters.', text: 'TAXI', bbox: [80, 450, 150, 610] },
+        content: { desc: 'A yellow taxi roof sign with black letters.', text: 'TAXI', bbox_px: [80, 900, 150, 1220] },
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       },
     ],
@@ -92,6 +93,7 @@ test('generateOpenRouterLayerCaption parses text-layer captions and strict schem
     caption: sampleCaption(),
     elementIndex: 1,
     model: 'x-ai/grok-4-fast',
+    imageSize: { width: 2000, height: 1000 },
     fetchImpl,
   });
 
@@ -105,7 +107,7 @@ test('generateOpenRouterLayerCaption parses text-layer captions and strict schem
   assert.equal(calls[0].provider.require_parameters, true);
   assert.equal(calls[0].response_format.json_schema.strict, true);
   assert.equal(calls[0].response_format.json_schema.name, 'dataset_layer_caption');
-  assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['desc', 'text', 'bbox']);
+  assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['desc', 'text', 'bbox_px']);
 });
 
 test('generateOpenRouterLayerCaption ignores returned visible text for object layers', async () => {
@@ -114,8 +116,9 @@ test('generateOpenRouterLayerCaption ignores returned visible text for object la
     imageDataUrl: 'data:image/jpeg;base64,abc',
     caption: sampleCaption(),
     elementIndex: 0,
+    imageSize: { width: 2000, height: 1000 },
     fetchImpl: mockFetchForResponses([
-      { content: { desc: 'A yellow taxi cab viewed from the side.', text: 'TAXI', bbox: [120, 200, 620, 800] } },
+      { content: { desc: 'A yellow taxi cab viewed from the side.', text: 'TAXI', bbox_px: [120, 400, 620, 1600] } },
     ]),
   });
 
@@ -133,7 +136,8 @@ test('generateOpenRouterLayerCaption requires a usable bbox for no-box layers', 
         imageDataUrl: 'data:image/jpeg;base64,abc',
         caption: sampleCaption(),
         elementIndex: 1,
-        fetchImpl: mockFetchForResponses([{ content: { desc: 'A yellow taxi roof sign.', text: 'TAXI', bbox: [10, 10, 10, 20] } }]),
+        imageSize: { width: 2000, height: 1000 },
+        fetchImpl: mockFetchForResponses([{ content: { desc: 'A yellow taxi roof sign.', text: 'TAXI', bbox_px: [10, 20, 10, 40] } }]),
       }),
     /usable layer box/,
   );

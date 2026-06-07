@@ -133,7 +133,9 @@ export default function DatasetImageStudio({
         ? 'Auto Boxes requires Ideogram JSON.'
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
-          : '';
+          : !selectedImageSize
+            ? 'Image size pending.'
+            : '';
   const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !hasCurrentImageCaptioningLayer && !isAutoCaptioning;
   const selectedLayerHasCaptionTarget = Boolean(selectedBox || layerCaptionTargetText(selectedElement));
   const layerCaptionDisabledReason = !isCaptionLoaded
@@ -144,11 +146,13 @@ export default function DatasetImageStudio({
         ? 'Caption Layer requires Ideogram JSON.'
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
-          : !selectedElement || selectedElementIndex == null
-            ? 'Select a layer.'
-            : !selectedLayerHasCaptionTarget
-              ? 'Add a layer label or draw a box first.'
-              : '';
+          : !selectedImageSize
+            ? 'Image size pending.'
+            : !selectedElement || selectedElementIndex == null
+              ? 'Select a layer.'
+              : !selectedLayerHasCaptionTarget
+                ? 'Add a layer label or draw a box first.'
+                : '';
   const canCaptionSelectedLayer =
     !layerCaptionDisabledReason && !selectedLayerIsCaptioning && !isGeneratingBoxes && !isAutoCaptioning;
 

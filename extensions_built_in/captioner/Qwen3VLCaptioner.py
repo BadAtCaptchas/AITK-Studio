@@ -89,7 +89,7 @@ class Qwen3VLCaptioner(BaseCaptioner):
                 clean_up_tokenization_spaces=False,
             )
 
-            return self.normalize_caption_output(file_path, output_text[0])
+            return self.normalize_caption_output(file_path, output_text[0], image_size=img.size)
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
             return None

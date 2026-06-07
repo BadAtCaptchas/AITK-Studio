@@ -603,6 +603,43 @@ class IdeogramJsonCaptionerBehaviorTest(unittest.TestCase):
         self.assertEqual(first["color_palette"], ["#ABCDEF", "#123ABC", "#456DEF", "#789ABC", "#FEDCBA"])
         self.assertEqual(second["bbox"], [100, 200, 800, 900])
 
+    def test_captioner_conservatively_rescales_unambiguous_pixel_bboxes(self):
+        captioner = self._json_captioner()
+        raw_caption = {
+            "high_level_description": "A studio image with two products.",
+            "style_description": {
+                "aesthetics": "clean",
+                "lighting": "softbox lighting",
+                "photo": "product photo",
+                "medium": "photograph",
+                "color_palette": ["#FFFFFF"],
+            },
+            "compositional_deconstruction": {
+                "background": "A white studio backdrop.",
+                "elements": [
+                    {
+                        "type": "obj",
+                        "bbox": [90, 320, 810, 1280],
+                        "desc": "A product box reported in pixel coordinates.",
+                    },
+                    {
+                        "type": "obj",
+                        "bbox": [120, 200, 850, 950],
+                        "desc": "An already normalized product box.",
+                    },
+                ],
+            },
+        }
+
+        normalized = captioner.normalize_caption_output(
+            "0060.jpg", json.dumps(raw_caption), image_size=(1600, 900)
+        )
+        parsed = json.loads(normalized)
+        elements = parsed["compositional_deconstruction"]["elements"]
+
+        self.assertEqual(elements[0]["bbox"], [100, 200, 900, 800])
+        self.assertEqual(elements[1]["bbox"], [120, 200, 850, 950])
+
     def test_captioner_appends_json_contract_to_custom_json_prompt(self):
         captioner = self._json_captioner()
         captioner.caption_config.caption_prompt = "Focus on the product logo."

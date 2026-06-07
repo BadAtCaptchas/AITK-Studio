@@ -60,6 +60,7 @@ import {
   appendGeneratedIdeogramElements,
   applyGeneratedBoxPatches,
   arrayToBox,
+  boxToArray,
   boxToRect,
   cloneIdeogramData,
   deleteIdeogramElement,
@@ -548,6 +549,38 @@ function layerCaptionTargetText(element: any) {
   return element?.type === 'text' ? text || desc : desc || text;
 }
 
+const LAYER_CAPTION_KEY_SEPARATOR = '\u0000';
+
+function layerCaptionRequestKey(itemKey: string, elementIndex: number) {
+  return `${itemKey}${LAYER_CAPTION_KEY_SEPARATOR}${elementIndex}`;
+}
+
+function isLayerCaptionRequestForItem(requestKey: string, itemKey: string) {
+  return requestKey.startsWith(`${itemKey}${LAYER_CAPTION_KEY_SEPARATOR}`);
+}
+
+function layerFieldValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function layerTypeForElement(element: any): IdeogramElementType {
+  return element?.type === 'text' ? 'text' : 'obj';
+}
+
+function layerBoxKey(value: unknown) {
+  const box = arrayToBox(value);
+  return box ? boxToArray(box).join(',') : '';
+}
+
+function pendingCaptionLayerStillMatches(currentElement: any, requestElement: any) {
+  if (!currentElement || !requestElement) return false;
+  if (layerTypeForElement(currentElement) !== layerTypeForElement(requestElement)) return false;
+  if (layerFieldValue(currentElement.desc) !== layerFieldValue(requestElement.desc)) return false;
+  if (layerFieldValue(currentElement.text) !== layerFieldValue(requestElement.text)) return false;
+  const requestBoxKey = layerBoxKey(requestElement.bbox);
+  return !requestBoxKey || layerBoxKey(currentElement.bbox) === requestBoxKey;
+}
+
 function reindexLayerIndexSetAfterDelete(indexes: Set<number>, deletedIndex: number) {
   const next = new Set<number>();
   indexes.forEach(index => {
@@ -1029,8 +1062,8 @@ export default function DatasetImageStudio({
   const [autoBoxRefine, setAutoBoxRefine] = useState(false);
   const [isGeneratingBoxes, setIsGeneratingBoxes] = useState(false);
   const [autoBoxMessage, setAutoBoxMessage] = useState('');
-  const [isCaptioningLayer, setIsCaptioningLayer] = useState(false);
-  const [layerCaptionMessage, setLayerCaptionMessage] = useState('');
+  const [captioningLayerKeys, setCaptioningLayerKeys] = useState<Set<string>>(() => new Set());
+  const [layerCaptionMessages, setLayerCaptionMessages] = useState<Record<string, string>>({});
   const [encryptedOpenRouterConfirmed, setEncryptedOpenRouterConfirmed] = useState(false);
   const [selectedImageSize, setSelectedImageSize] = useState<ImageSize | null>(null);
   const [hiddenLayerIndexes, setHiddenLayerIndexes] = useState<Set<number>>(() => new Set());
@@ -1043,7 +1076,6 @@ export default function DatasetImageStudio({
   const autoSelectKeyRef = useRef('');
   const latestCaptionRef = useRef('');
   const selectedKeyRef = useRef('');
-  const selectedElementIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     setSelectedIndex(index => clampIndex(index, items.length));
@@ -1059,6 +1091,13 @@ export default function DatasetImageStudio({
   const selectedElement =
     isIdeogram && selectedElementIndex != null ? captionParse.elements[selectedElementIndex] ?? null : null;
   const selectedBox = boxes.find(box => box.elementIndex === selectedElementIndex) || null;
+  const selectedLayerCaptionKey =
+    selectedKey && selectedElementIndex != null ? layerCaptionRequestKey(selectedKey, selectedElementIndex) : '';
+  const selectedLayerIsCaptioning = Boolean(selectedLayerCaptionKey && captioningLayerKeys.has(selectedLayerCaptionKey));
+  const hasCurrentImageCaptioningLayer = Boolean(
+    selectedKey && Array.from(captioningLayerKeys).some(requestKey => isLayerCaptionRequestForItem(requestKey, selectedKey)),
+  );
+  const selectedLayerCaptionMessage = selectedLayerCaptionKey ? layerCaptionMessages[selectedLayerCaptionKey] || '' : '';
   const selectedPalette = Array.isArray(selectedElement?.color_palette) ? selectedElement.color_palette : [];
   const isDirty = captionText.trim() !== savedCaption.trim();
   const captionStatus = statusForCaption(captionText, isCaptionLoaded);
@@ -1073,7 +1112,7 @@ export default function DatasetImageStudio({
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
           : '';
-  const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !isCaptioningLayer && !isAutoCaptioning;
+  const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !hasCurrentImageCaptioningLayer && !isAutoCaptioning;
   const selectedLayerHasCaptionTarget = Boolean(selectedBox || layerCaptionTargetText(selectedElement));
   const layerCaptionDisabledReason = !isCaptionLoaded
     ? 'Load the caption first.'
@@ -1089,30 +1128,21 @@ export default function DatasetImageStudio({
               ? 'Add a layer label or draw a box first.'
               : '';
   const canCaptionSelectedLayer =
-    !layerCaptionDisabledReason && !isCaptioningLayer && !isGeneratingBoxes && !isAutoCaptioning;
+    !layerCaptionDisabledReason && !selectedLayerIsCaptioning && !isGeneratingBoxes && !isAutoCaptioning;
 
   useEffect(() => {
     latestCaptionRef.current = captionText;
   }, [captionText]);
 
   useEffect(() => {
-    selectedElementIndexRef.current = selectedElementIndex;
-  }, [selectedElementIndex]);
-
-  useEffect(() => {
     selectedKeyRef.current = selectedKey;
     setAutoBoxMessage('');
-    setLayerCaptionMessage('');
     setSelectedImageSize(null);
     setHiddenLayerIndexes(new Set());
     setLockedLayerIndexes(new Set());
     setOverlapElementStack([]);
     setActivePaletteSamplerIndex(null);
   }, [selectedKey]);
-
-  useEffect(() => {
-    setLayerCaptionMessage('');
-  }, [selectedElementIndex]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -1277,11 +1307,57 @@ export default function DatasetImageStudio({
       if (next === captionText) return;
       setUndoStack(previous => [...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)), captionText]);
       setRedoStack([]);
+      latestCaptionRef.current = next;
       setCaptionText(next);
       if (nextSelectedElementIndex !== undefined) setSelectedElementIndex(nextSelectedElementIndex);
     },
     [captionText],
   );
+
+  const mutateLatestCaption = useCallback(
+    (mutator: (data: Record<string, any>) => void, nextSelectedElementIndex?: number | null) => {
+      const currentCaption = latestCaptionRef.current;
+      const parsed = parseIdeogramCaption(currentCaption);
+      if (parsed.kind !== 'ideogram') return false;
+      const data = cloneIdeogramData(parsed.data);
+      mutator(data);
+      const next = serializeIdeogramCaption(data);
+      if (next === currentCaption) return false;
+      setUndoStack(previous => [...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)), currentCaption]);
+      setRedoStack([]);
+      latestCaptionRef.current = next;
+      setCaptionText(next);
+      if (nextSelectedElementIndex !== undefined) setSelectedElementIndex(nextSelectedElementIndex);
+      return true;
+    },
+    [],
+  );
+
+  const setLayerCaptionMessageForKey = useCallback((requestLayerKey: string, message: string) => {
+    setLayerCaptionMessages(previous => {
+      if (!requestLayerKey) return previous;
+      if (!message) {
+        if (!Object.prototype.hasOwnProperty.call(previous, requestLayerKey)) return previous;
+        const next = { ...previous };
+        delete next[requestLayerKey];
+        return next;
+      }
+      return { ...previous, [requestLayerKey]: message };
+    });
+  }, []);
+
+  const setLayerCaptioningForKey = useCallback((requestLayerKey: string, isPending: boolean) => {
+    setCaptioningLayerKeys(previous => {
+      if (!requestLayerKey) return previous;
+      const next = new Set(previous);
+      if (isPending) {
+        next.add(requestLayerKey);
+      } else {
+        next.delete(requestLayerKey);
+      }
+      return next;
+    });
+  }, []);
 
   const handleGenerateAutoBoxes = useCallback(async () => {
     if (!selectedItem || autoBoxDisabledReason || isGeneratingBoxes) return;
@@ -1395,18 +1471,21 @@ export default function DatasetImageStudio({
   ]);
 
   const handleCaptionSelectedLayer = useCallback(async () => {
-    if (!selectedItem || layerCaptionDisabledReason || isCaptioningLayer || selectedElementIndex == null || !selectedElement) return;
+    if (!selectedItem || layerCaptionDisabledReason || selectedLayerIsCaptioning || selectedElementIndex == null || !selectedElement) {
+      return;
+    }
 
     const requestCaption = captionText;
     const requestKey = selectedKey;
     const requestElementIndex = selectedElementIndex;
+    const requestLayerKey = layerCaptionRequestKey(requestKey, requestElementIndex);
     const requestElement = selectedElement;
     const requestHadBox = Boolean(selectedBox);
     const imageWidth = selectedImageSize?.width || null;
     const imageHeight = selectedImageSize?.height || null;
 
-    setIsCaptioningLayer(true);
-    setLayerCaptionMessage('');
+    setLayerCaptioningForKey(requestLayerKey, true);
+    setLayerCaptionMessageForKey(requestLayerKey, '');
     try {
       let response;
       if (selectedItem.kind === 'plain') {
@@ -1429,7 +1508,7 @@ export default function DatasetImageStudio({
             'Caption Layer will send this decrypted image to OpenRouter to caption the selected layer. Continue?',
           );
           if (!confirmed) {
-            setLayerCaptionMessage('Caption Layer canceled.');
+            setLayerCaptionMessageForKey(requestLayerKey, 'Caption Layer canceled.');
             return;
           }
           setEncryptedOpenRouterConfirmed(true);
@@ -1457,36 +1536,42 @@ export default function DatasetImageStudio({
         });
       }
 
-      if (
-        selectedKeyRef.current !== requestKey ||
-        latestCaptionRef.current !== requestCaption ||
-        selectedElementIndexRef.current !== requestElementIndex
-      ) {
-        setLayerCaptionMessage('Layer changed while Caption Layer was running. Rerun it for the current layer.');
+      if (selectedKeyRef.current !== requestKey) {
+        return;
+      }
+      const latestParsed = parseIdeogramCaption(latestCaptionRef.current);
+      const currentElement =
+        latestParsed.kind === 'ideogram' ? latestParsed.elements[requestElementIndex] ?? null : null;
+      if (!pendingCaptionLayerStillMatches(currentElement, requestElement)) {
+        setLayerCaptionMessageForKey(requestLayerKey, 'Layer changed while Caption Layer was running. Rerun it.');
         return;
       }
 
       const desc = typeof response.data?.desc === 'string' ? response.data.desc.trim() : '';
       const text = typeof response.data?.text === 'string' ? response.data.text.trim() : '';
-      const generatedBox = requestHadBox ? null : arrayToBox(response.data?.bbox);
+      const currentHasBox = Boolean(arrayToBox(currentElement?.bbox));
+      const generatedBox = currentHasBox ? null : arrayToBox(response.data?.bbox);
       if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
-      if (!requestHadBox && !generatedBox) throw new Error('OpenRouter did not return a usable layer box.');
+      if (!currentHasBox && !generatedBox) throw new Error('OpenRouter did not return a usable layer box.');
 
-      mutateCaption(data => {
+      const updated = mutateLatestCaption(data => {
         updateIdeogramElementField(data, requestElementIndex, 'desc', desc);
-        if (requestElement?.type === 'text' && text && !String(requestElement.text || '').trim()) {
+        if (requestElement?.type === 'text' && text && !String(currentElement?.text || '').trim()) {
           updateIdeogramElementField(data, requestElementIndex, 'text', text);
         }
-        if (!requestHadBox && generatedBox) {
+        if (!currentHasBox && generatedBox) {
           updateIdeogramElementBox(data, requestElementIndex, generatedBox);
         }
-      }, requestElementIndex);
-      setLayerCaptionMessage(requestHadBox ? 'Layer caption updated.' : 'Layer caption and box updated.');
+      });
+      setLayerCaptionMessageForKey(
+        requestLayerKey,
+        updated ? (requestHadBox || currentHasBox ? 'Layer caption updated.' : 'Layer caption and box updated.') : '',
+      );
     } catch (error) {
       console.error('Caption Layer failed:', error);
-      setLayerCaptionMessage(responseErrorMessage(error, 'Caption Layer failed. Please try again.'));
+      setLayerCaptionMessageForKey(requestLayerKey, responseErrorMessage(error, 'Caption Layer failed. Please try again.'));
     } finally {
-      setIsCaptioningLayer(false);
+      setLayerCaptioningForKey(requestLayerKey, false);
     }
   }, [
     autoBoxModel,
@@ -1494,15 +1579,17 @@ export default function DatasetImageStudio({
     datasetName,
     encryptedKey,
     encryptedOpenRouterConfirmed,
-    isCaptioningLayer,
     layerCaptionDisabledReason,
-    mutateCaption,
+    mutateLatestCaption,
     selectedElement,
     selectedElementIndex,
     selectedImageSize,
     selectedBox,
     selectedItem,
     selectedKey,
+    selectedLayerIsCaptioning,
+    setLayerCaptioningForKey,
+    setLayerCaptionMessageForKey,
     workerID,
   ]);
 
@@ -1511,6 +1598,7 @@ export default function DatasetImageStudio({
       const nextCaption = previous[previous.length - 1];
       if (!nextCaption) return previous;
       setRedoStack(redo => [captionText, ...redo].slice(0, MAX_HISTORY));
+      latestCaptionRef.current = nextCaption;
       setCaptionText(nextCaption);
       return previous.slice(0, -1);
     });
@@ -1521,6 +1609,7 @@ export default function DatasetImageStudio({
       const nextCaption = previous[0];
       if (!nextCaption) return previous;
       setUndoStack(undoStackValue => [...undoStackValue.slice(Math.max(0, undoStackValue.length - MAX_HISTORY + 1)), captionText]);
+      latestCaptionRef.current = nextCaption;
       setCaptionText(nextCaption);
       return previous.slice(1);
     });
@@ -1673,6 +1762,7 @@ export default function DatasetImageStudio({
   const handleCaptionDescriptionChange = useCallback(
     (value: string) => {
       if (!isIdeogram) {
+        latestCaptionRef.current = value;
         setCaptionText(value);
         return;
       }
@@ -1742,7 +1832,9 @@ export default function DatasetImageStudio({
       : captionText;
   const selectedLayerColor =
     selectedBox?.color || (selectedElementIndex != null ? BOX_COLORS[selectedElementIndex % BOX_COLORS.length] : BOX_COLORS[0]);
-  const layerCaptionStatus = layerCaptionMessage || (selectedElement && layerCaptionDisabledReason ? layerCaptionDisabledReason : '');
+  const layerCaptionStatus =
+    (selectedLayerIsCaptioning ? 'Captioning layer...' : selectedLayerCaptionMessage) ||
+    (selectedElement && layerCaptionDisabledReason ? layerCaptionDisabledReason : '');
   const selectedRect = selectedBox ? boxToRect(selectedBox) : null;
 
   if (items.length === 0) {
@@ -2079,10 +2171,14 @@ export default function DatasetImageStudio({
                         type="button"
                         disabled={!canCaptionSelectedLayer}
                         onClick={() => void handleCaptionSelectedLayer()}
-                        title={isCaptioningLayer ? 'Captioning layer' : layerCaptionDisabledReason || 'Caption selected layer with OpenRouter'}
+                        title={
+                          selectedLayerIsCaptioning
+                            ? 'Captioning layer'
+                            : layerCaptionDisabledReason || 'Caption selected layer with OpenRouter'
+                        }
                         className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
                       >
-                        {isCaptioningLayer ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
+                        {selectedLayerIsCaptioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
                         Caption Layer
                       </button>
                     </div>
@@ -2234,7 +2330,10 @@ export default function DatasetImageStudio({
                       value={captionText}
                       rows={10}
                       readOnly={isAutoCaptioning || !isCaptionLoaded}
-                      onChange={event => setCaptionText(event.target.value)}
+                      onChange={event => {
+                        latestCaptionRef.current = event.target.value;
+                        setCaptionText(event.target.value);
+                      }}
                       className="h-64 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 font-mono text-xs leading-relaxed text-gray-100 outline-none focus:border-blue-500 disabled:opacity-50"
                     />
                   </label>

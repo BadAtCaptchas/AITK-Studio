@@ -31,6 +31,14 @@ function ensureApiAccess(request: Request): NextResponse | null {
   return null;
 }
 
+function hasForbiddenOpenRouterFields(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  return 'api_key_env' in value || 'base_url' in value;
+}
+
 function isSafeJobConfig(jobConfig: unknown) {
   if (!jobConfig || typeof jobConfig !== 'object') {
     return false;
@@ -42,7 +50,25 @@ function isSafeJobConfig(jobConfig: unknown) {
   }
 
   const processList = (config as Record<string, unknown>).process;
-  return Array.isArray(processList) && processList.length > 0;
+  if (!Array.isArray(processList) || processList.length === 0) {
+    return false;
+  }
+
+  return processList.every(processConfig => {
+    if (!processConfig || typeof processConfig !== 'object') {
+      return false;
+    }
+
+    const processRecord = processConfig as Record<string, unknown>;
+    if (processRecord.type !== 'OpenRouterCaptioner') {
+      return true;
+    }
+
+    return (
+      !hasForbiddenOpenRouterFields(processRecord) &&
+      !hasForbiddenOpenRouterFields(processRecord.caption)
+    );
+  });
 }
 
 function isValidGpuIds(gpuIds: unknown) {

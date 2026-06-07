@@ -9,6 +9,18 @@ const publicReadMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
 const remoteDatasetAssetsRoute = '/api/remote-datasets/assets';
 const remoteDatasetAssetSignatureContext = 'remote-dataset-asset-v1';
 
+function isPublicSampleMediaRoute(pathname: string) {
+  const segments = pathname.split('/').filter(Boolean);
+  return (
+    segments.length === 5 &&
+    segments[0] === 'api' &&
+    segments[1] === 'jobs' &&
+    segments[2].length > 0 &&
+    segments[3] === 'samples' &&
+    segments[4].length > 0
+  );
+}
+
 function isRemoteDatasetAssetType(type: string) {
   return type === 'img' || type === 'file' || type === 'audio-art';
 }
@@ -78,7 +90,10 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // allow public read routes to pass through
-  if (publicReadMethods.has(request.method) && publicReadRoutePrefixes.some(route => pathname.startsWith(route))) {
+  if (
+    publicReadMethods.has(request.method) &&
+    (publicReadRoutePrefixes.some(route => pathname.startsWith(route)) || isPublicSampleMediaRoute(pathname))
+  ) {
     return NextResponse.next();
   }
   if (

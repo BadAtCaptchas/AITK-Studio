@@ -55,8 +55,15 @@ const OPENROUTER_LAYER_CAPTION_RESPONSE_SCHEMA = {
       type: 'string',
       description: 'Readable visible text for text layers, or an empty string for object layers.',
     },
+    bbox: {
+      type: 'array',
+      description: 'Bounding box for the selected layer target as [ymin, xmin, ymax, xmax], normalized to 0-1000.',
+      items: { type: 'integer', minimum: 0, maximum: 1000 },
+      minItems: 4,
+      maxItems: 4,
+    },
   },
-  required: ['desc', 'text'],
+  required: ['desc', 'text', 'bbox'],
 };
 
 function selectedLayerInfo(caption: string, elementIndex: number): SelectedLayerInfo {
@@ -103,8 +110,8 @@ export function buildOpenRouterLayerCaptionPrompt(caption: string, elementIndex:
     ...(selected.bbox ? { bbox: selected.bbox } : { targetClue: selected.targetClue }),
   };
   const targetLine = selected.bbox
-    ? `Target bbox: ${JSON.stringify(selected.bbox)} as [ymin, xmin, ymax, xmax] normalized to 0-1000. Describe only the content inside that region.`
-    : `No bbox exists for the selected layer. Identify the visible subject that best matches this selected-layer clue: ${JSON.stringify(selected.targetClue)}.`;
+    ? `Target bbox: ${JSON.stringify(selected.bbox)} as [ymin, xmin, ymax, xmax] normalized to 0-1000. Describe only the content inside that region and return this target bbox.`
+    : `No bbox exists for the selected layer. Identify the visible subject that best matches this selected-layer clue, then return a tight bbox around only that target: ${JSON.stringify(selected.targetClue)}.`;
 
   return [
     'Caption only one selected Ideogram JSON caption layer in this image.',
@@ -113,7 +120,9 @@ export function buildOpenRouterLayerCaptionPrompt(caption: string, elementIndex:
     '',
     'Rules:',
     '- Do not caption the whole image.',
-    '- Do not alter, mention, or create bounding boxes.',
+    '- Return bbox as [ymin, xmin, ymax, xmax] integers normalized to 0-1000.',
+    '- Fit bbox tightly around only the selected target; if it is cropped or occluded, box only the visible part.',
+    '- If a target bbox was provided, keep bbox focused on that same selected region.',
     '- Return desc as a concise visual description of only the selected layer target.',
     '- For text layers, return text as the readable glyph text if visible; use an empty string if uncertain.',
     '- For object layers, return text as an empty string.',
@@ -153,7 +162,7 @@ async function callOpenRouterLayerCaption({
       model,
       stream: false,
       temperature: 0,
-      max_tokens: 500,
+      max_tokens: 600,
       provider: { require_parameters: true },
       response_format: {
         type: 'json_schema',
@@ -189,15 +198,24 @@ async function callOpenRouterLayerCaption({
   return { content, usage: isRecord(data?.usage) ? data.usage : undefined };
 }
 
-function parseLayerCaptionResponse(content: string, type: LayerType) {
+function usableCaptionBox(value: unknown) {
+  const box = arrayToBox(value);
+  if (!box || box.x2 - box.x1 < 2 || box.y2 - box.y1 < 2) return null;
+  return boxToArray(box);
+}
+
+function parseLayerCaptionResponse(content: string, type: LayerType, requiresBbox: boolean) {
   const parsed = parseJsonObject(content);
   if (!isRecord(parsed)) throw new Error('OpenRouter did not return a JSON object.');
   const text = cleanString(parsed.text || parsed.visibleText).slice(0, 240);
   const desc = (cleanString(parsed.desc || parsed.description || parsed.caption) || (type === 'text' && text ? `Visible text: ${text}` : '')).slice(0, 600);
   if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
+  const bbox = usableCaptionBox(parsed.bbox);
+  if (requiresBbox && !bbox) throw new Error('OpenRouter did not return a usable layer box.');
   return {
     desc,
     ...(type === 'text' && text ? { text } : {}),
+    ...(bbox ? { bbox } : {}),
   };
 }
 
@@ -217,7 +235,7 @@ export async function generateOpenRouterLayerCaption(options: GenerateOpenRouter
     fetchImpl,
   });
   return {
-    ...parseLayerCaptionResponse(result.content, selected.type),
+    ...parseLayerCaptionResponse(result.content, selected.type, !selected.bbox),
     model,
     usage: result.usage,
   };

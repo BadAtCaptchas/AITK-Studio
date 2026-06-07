@@ -59,6 +59,7 @@ import {
   addIdeogramElement,
   appendGeneratedIdeogramElements,
   applyGeneratedBoxPatches,
+  arrayToBox,
   boxToRect,
   cloneIdeogramData,
   deleteIdeogramElement,
@@ -1400,6 +1401,7 @@ export default function DatasetImageStudio({
     const requestKey = selectedKey;
     const requestElementIndex = selectedElementIndex;
     const requestElement = selectedElement;
+    const requestHadBox = Boolean(selectedBox);
     const imageWidth = selectedImageSize?.width || null;
     const imageHeight = selectedImageSize?.height || null;
 
@@ -1466,15 +1468,20 @@ export default function DatasetImageStudio({
 
       const desc = typeof response.data?.desc === 'string' ? response.data.desc.trim() : '';
       const text = typeof response.data?.text === 'string' ? response.data.text.trim() : '';
+      const generatedBox = requestHadBox ? null : arrayToBox(response.data?.bbox);
       if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
+      if (!requestHadBox && !generatedBox) throw new Error('OpenRouter did not return a usable layer box.');
 
       mutateCaption(data => {
         updateIdeogramElementField(data, requestElementIndex, 'desc', desc);
         if (requestElement?.type === 'text' && text && !String(requestElement.text || '').trim()) {
           updateIdeogramElementField(data, requestElementIndex, 'text', text);
         }
+        if (!requestHadBox && generatedBox) {
+          updateIdeogramElementBox(data, requestElementIndex, generatedBox);
+        }
       }, requestElementIndex);
-      setLayerCaptionMessage('Layer caption updated.');
+      setLayerCaptionMessage(requestHadBox ? 'Layer caption updated.' : 'Layer caption and box updated.');
     } catch (error) {
       console.error('Caption Layer failed:', error);
       setLayerCaptionMessage(responseErrorMessage(error, 'Caption Layer failed. Please try again.'));
@@ -1493,6 +1500,7 @@ export default function DatasetImageStudio({
     selectedElement,
     selectedElementIndex,
     selectedImageSize,
+    selectedBox,
     selectedItem,
     selectedKey,
     workerID,

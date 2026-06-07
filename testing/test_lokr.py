@@ -135,6 +135,66 @@ def make_lokr(module=None, **kwargs):
     return lokr
 
 
+class ByteBackedLinear(torch.nn.Module):
+    def __init__(self, in_features=4, out_features=4):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.compute_dtype = torch.float32
+        self.register_buffer("weight", torch.ones(out_features, in_features, dtype=torch.uint8))
+        self.bias = torch.nn.Parameter(torch.zeros(out_features, dtype=torch.float32), requires_grad=False)
+
+    def forward(self, x):
+        return torch.nn.functional.linear(x.to(self.compute_dtype), self.weight.to(self.compute_dtype), self.bias)
+
+
+class Fp8Linear(torch.nn.Module):
+    def __init__(self, in_features=4, out_features=3):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.compute_dtype = torch.float32
+        logical_weight = torch.arange(out_features * in_features, dtype=torch.float32).reshape(out_features, in_features)
+        self.register_buffer("weight", logical_weight.reshape(-1, 1))
+        self.register_buffer("weight_scale", torch.ones(out_features, dtype=torch.float32))
+        self.bias = torch.nn.Parameter(torch.zeros(out_features, dtype=torch.float32), requires_grad=False)
+
+    def forward(self, x):
+        weight = self.weight.reshape(self.out_features, self.in_features).to(x.dtype)
+        return torch.nn.functional.linear(x, weight, self.bias.to(x.dtype))
+
+
+class FakeNf4Weight:
+    quant_state = True
+
+    def __init__(self, tensor):
+        self.tensor = tensor
+        self.shape = (tensor.numel() // 2, 1)
+
+    @property
+    def device(self):
+        return self.tensor.device
+
+    def to(self, device):
+        return FakeNf4Weight(self.tensor.to(device))
+
+    def dequantize(self):
+        return self.tensor
+
+
+class Linear4bit(torch.nn.Module):
+    def __init__(self, in_features=4, out_features=3):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.compute_dtype = torch.float32
+        self.weight = FakeNf4Weight(torch.ones(out_features, in_features, dtype=torch.float32))
+        self.bias = None
+
+    def forward(self, x):
+        return torch.nn.functional.linear(x.to(self.compute_dtype), self.weight.dequantize())
+
+
 class LokrModuleTest(unittest.TestCase):
     def test_factorization_matches_current_upstream(self):
         self.assertEqual(factorization(128, 16), (8, 16))
@@ -151,11 +211,7 @@ class LokrModuleTest(unittest.TestCase):
         self.assertEqual(tuple(lokr.get_weight(module.weight.shape).shape), tuple(module.weight.shape))
 
     def test_forward_promotes_byte_backed_weight_to_compute_dtype(self):
-        module = torch.nn.Linear(4, 4, bias=True)
-        weight = module.weight.detach()
-        del module.weight
-        module.register_buffer("weight", torch.ones_like(weight, dtype=torch.uint8))
-        module.compute_dtype = torch.float32
+        module = ByteBackedLinear()
 
         lokr = make_lokr(module)
         lokr.org_forward = module.forward
@@ -165,6 +221,50 @@ class LokrModuleTest(unittest.TestCase):
 
         self.assertEqual(output.dtype, torch.float32)
         self.assertEqual(tuple(output.shape), (2, 4))
+
+    def test_bypass_forward_promotes_byte_backed_input_to_compute_dtype(self):
+        module = ByteBackedLinear()
+        lokr = make_lokr(module, bypass_mode=True)
+        lokr.org_forward = module.forward
+        x = torch.ones(2, 4, dtype=torch.uint8)
+
+        output = lokr._call_forward(x)
+
+        self.assertEqual(output.dtype, torch.float32)
+        self.assertEqual(tuple(output.shape), (2, 4))
+
+    def test_forward_uses_logical_shape_for_flat_fp8_weight(self):
+        module = Fp8Linear()
+        lokr = make_lokr(module)
+        lokr.org_forward = module.forward
+        x = torch.ones(2, module.in_features, dtype=torch.float32)
+
+        output = lokr._call_forward(x)
+
+        self.assertEqual(lokr.shape, (module.out_features, module.in_features))
+        self.assertEqual(tuple(output.shape), (2, module.out_features))
+        self.assertTrue(torch.allclose(output, module.forward(x)))
+
+    def test_get_orig_weight_dequantizes_nf4_style_weight(self):
+        module = Linear4bit()
+        lokr = make_lokr(module)
+        x = torch.ones(2, module.in_features, dtype=torch.float32)
+
+        weight = lokr.get_orig_weight(x.device)
+
+        self.assertEqual(lokr.shape, (module.out_features, module.in_features))
+        self.assertEqual(tuple(weight.shape), (module.out_features, module.in_features))
+        self.assertTrue(torch.allclose(weight, module.weight.dequantize()))
+
+    def test_weight_decompose_returns_adapted_output_only(self):
+        module = torch.nn.Linear(4, 4, bias=True)
+        lokr = make_lokr(module, weight_decompose=True)
+        lokr.org_forward = module.forward
+        x = torch.randn(2, 4)
+
+        output = lokr._call_forward(x)
+
+        self.assertTrue(torch.allclose(output, module.forward(x), atol=1e-5))
 
     def test_rank_dropout_one_drops_all_weight_rows(self):
         module = make_lokr(rank_dropout=1.0)

@@ -138,10 +138,11 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.bypass_mode = _as_bool(bypass_mode)
         self.legacy_factorization = _as_bool(legacy_factorization)
         self.unbalanced_factorization = _as_bool(unbalanced_factorization)
+        self.org_module = [org_module]
         self.can_merge_in = is_mergeable_lora_target(org_module)
 
-        self.shape = tuple(org_module.weight.shape)
         self.module_type, self.op, self.extra_args = self._get_module_ops(org_module)
+        self.shape = self._get_weight_shape(org_module, self.module_type)
         if self.module_type == "linear":
             out_dim, in_dim = self.shape
             kernel_size = ()
@@ -198,7 +199,6 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self._init_weights(_as_bool(use_scalar))
 
         self.multiplier: Union[float, List[float]] = multiplier
-        self.org_module = [org_module]
         self.register_load_state_dict_post_hook(self.load_weight_hook)
 
         weight = self.get_weight(self.shape)
@@ -221,6 +221,17 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
                 "groups": org_module.groups,
             }
         return "unknown", None, {}
+
+    @staticmethod
+    def _get_weight_shape(org_module, module_type):
+        if module_type == "linear":
+            logical_shape = (int(org_module.out_features), int(org_module.in_features))
+            storage_shape = tuple(org_module.weight.shape)
+            quantized_linear = org_module.__class__.__name__ in {"Fp8Linear", "Linear4bit", "Linear8bitLt", "QLinear"}
+            if quantized_linear or _prod(logical_shape) == _prod(storage_shape):
+                return logical_shape
+            return storage_shape
+        return tuple(org_module.weight.shape)
 
     def _make_weights(self, decompose_both: bool):
         shape = self.lokr_shape
@@ -272,7 +283,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             torch.nn.init.kaiming_uniform_(self.lokr_w1_b, a=math.sqrt(5))
 
     def _init_weight_decompose(self, org_module):
-        org_weight = self._dequantize_tensor(org_module.weight).detach().cpu().float()
+        org_weight = self.get_orig_weight(org_module.weight.device).detach().cpu().float()
         self.dora_norm_dims = org_weight.dim() - 1
         if self.wd_on_out:
             dora_scale = torch.norm(
@@ -296,6 +307,11 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
     def _dequantize_tensor(tensor):
         if isinstance(tensor, (QTensor, QBytesTensor, AffineQuantizedTensor)):
             return tensor.dequantize().data
+        dequantize = getattr(tensor, "dequantize", None)
+        is_bnb_quantized = tensor.__class__.__name__ == "Params4bit" or getattr(tensor, "quant_state", None) is not None
+        is_torch_quantized = isinstance(tensor, torch.Tensor) and getattr(tensor, "is_quantized", False)
+        if callable(dequantize) and (is_bnb_quantized or is_torch_quantized):
+            return dequantize().data
         return tensor.data if hasattr(tensor, "data") else tensor
 
     def apply_to(self):
@@ -403,10 +419,20 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.org_module[0].load_state_dict(org_sd)
 
     def get_orig_weight(self, device):
-        weight = self.org_module[0].weight
+        module = self.org_module[0]
+        weight = module.weight
         if weight.device != device:
             weight = weight.to(device)
-        return self._dequantize_tensor(weight).detach()
+        weight = self._dequantize_tensor(weight).detach()
+        if tuple(weight.shape) != self.shape and weight.numel() == _prod(self.shape):
+            weight = weight.reshape(self.shape)
+        weight_scale = getattr(module, "weight_scale", None)
+        if self.module_type == "linear" and weight_scale is not None and weight.shape == self.shape:
+            compute_dtype = self._compute_dtype(weight)
+            weight = weight.to(dtype=compute_dtype)
+            scale = weight_scale.to(weight.device, dtype=compute_dtype).view(-1, *[1] * (weight.dim() - 1))
+            weight = weight * scale
+        return weight
 
     def get_orig_bias(self, device):
         if hasattr(self.org_module[0], "bias") and self.org_module[0].bias is not None:
@@ -436,37 +462,43 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             if torch.rand(1, device=x.device) < self.module_dropout:
                 return self.org_forward(x, *args, **kwargs)
 
-        if isinstance(x, (QTensor, QBytesTensor)):
-            x = x.dequantize()
-
         multiplier = self.network_ref().torch_multiplier
         multiplier = torch.mean(multiplier)
 
         if self.bypass_mode:
             return self.bypass_forward(x, multiplier, *args, **kwargs)
 
-        orig_dtype = x.dtype
-        orig_weight = self.get_orig_weight(x.device)
-        compute_dtype = self._compute_dtype(orig_weight, x)
-        orig_weight = orig_weight.to(dtype=compute_dtype)
-        lokr_weight = self.get_weight(orig_weight).to(dtype=compute_dtype)
+        base = self.org_forward(x, *args, **kwargs)
+        if isinstance(base, (QTensor, QBytesTensor)):
+            base = base.dequantize()
+
+        lora_x = x.dequantize() if isinstance(x, (QTensor, QBytesTensor)) else x
+        compute_dtype = self._compute_dtype(base, lora_x)
+        lokr_weight = self.get_weight(self.shape).to(lora_x.device, dtype=compute_dtype)
         lokr_weight = lokr_weight * self.scalar.to(lokr_weight.device, dtype=lokr_weight.dtype)
 
-        if x.dtype != compute_dtype:
-            x = x.to(dtype=compute_dtype)
+        if lora_x.dtype != compute_dtype:
+            lora_x = lora_x.to(dtype=compute_dtype)
 
         if self.wd:
+            orig_weight = self.get_orig_weight(lora_x.device).to(dtype=compute_dtype)
             weight = self.apply_weight_decompose(orig_weight + lokr_weight, multiplier)
+            bias = self.get_orig_bias(lora_x.device)
+            if bias is not None:
+                bias = bias.to(weight.device, dtype=weight.dtype)
+            output = self.op(lora_x, weight.view(self.shape), bias, **self.extra_args)
+            if _is_floating_dtype(base.dtype):
+                output = output.to(base.dtype)
+            return output
         else:
-            weight = orig_weight + lokr_weight * multiplier
+            if isinstance(multiplier, torch.Tensor):
+                multiplier = multiplier.to(lokr_weight.device, dtype=lokr_weight.dtype)
+            delta = lokr_weight * multiplier
+            output = self.op(lora_x, delta.view(self.shape), None, **self.extra_args)
 
-        bias = self.get_orig_bias(x.device)
-        if bias is not None:
-            bias = bias.to(weight.device, dtype=weight.dtype)
-        output = self.op(x, weight.view(self.shape), bias, **self.extra_args)
-        if _is_floating_dtype(orig_dtype):
-            return output.to(orig_dtype)
-        return output
+        if _is_floating_dtype(base.dtype):
+            output = output.to(base.dtype)
+        return base + output
 
     def _bypass_w2(self):
         if self.use_w2:
@@ -495,7 +527,16 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             a, b, t = self._bypass_w2()
             ba = None
 
-        c = self._w1()
+        if ba is not None:
+            ba = ba.to(h.device, dtype=h.dtype)
+        if a is not None:
+            a = a.to(h.device, dtype=h.dtype)
+        if b is not None:
+            b = b.to(h.device, dtype=h.dtype)
+        if t is not None:
+            t = t.to(h.device, dtype=h.dtype)
+
+        c = self._w1().to(h.device, dtype=h.dtype)
         uq = c.size(1)
 
         if is_conv:
@@ -537,7 +578,16 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
     def bypass_forward(self, x, scale=1, *args, **kwargs):
         base = self.org_forward(x, *args, **kwargs)
-        return base + self.bypass_forward_diff(x, scale=scale).to(base.dtype)
+        if isinstance(base, (QTensor, QBytesTensor)):
+            base = base.dequantize()
+        lora_x = x.dequantize() if isinstance(x, (QTensor, QBytesTensor)) else x
+        compute_dtype = self._compute_dtype(base, lora_x)
+        if lora_x.dtype != compute_dtype:
+            lora_x = lora_x.to(dtype=compute_dtype)
+        diff = self.bypass_forward_diff(lora_x, scale=scale)
+        if _is_floating_dtype(base.dtype):
+            diff = diff.to(base.dtype)
+        return base + diff
 
     def load_weight_hook(self, module, incompatible_keys):
         missing_keys = incompatible_keys.missing_keys

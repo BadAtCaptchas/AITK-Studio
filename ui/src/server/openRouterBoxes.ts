@@ -7,7 +7,7 @@ import {
 } from '../utils/ideogramCaption';
 
 export const DEFAULT_OPENROUTER_BOX_MODEL = 'x-ai/grok-4.3';
-export const OPENROUTER_BOX_MODELS = ['x-ai/grok-4.3', 'x-ai/grok-4-fast'] as const;
+export const OPENROUTER_BOX_MODELS = ['x-ai/grok-4.3'] as const;
 
 type ImageSize = {
   width?: number | null;

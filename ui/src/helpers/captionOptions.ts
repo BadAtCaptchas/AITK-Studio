@@ -175,7 +175,6 @@ export const captionerTypes: CaptionOption[] = [
         },
         name_or_path_options: [
             { value: 'x-ai/grok-4.3', label: 'x-ai/grok-4.3 (recommended, $1.25/M in, $2.50/M out)' },
-            { value: 'x-ai/grok-4-fast', label: 'x-ai/grok-4-fast (cheaper, $0.20/M in, $0.50/M out)' },
         ],
         additionalSections: [
             'caption.caption_prompt',

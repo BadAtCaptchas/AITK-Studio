@@ -119,7 +119,7 @@ test('generateOpenRouterBoxPatches defaults to grok 4.3 and filters malformed bo
   assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['boxes', 'generatedElements']);
 });
 
-test('generateOpenRouterBoxPatches can run a refinement pass and sum usage', async () => {
+test('generateOpenRouterBoxPatches falls back for retired models and can run a refinement pass', async () => {
   const calls = [];
   const fetchImpl = mockFetchForResponses(
     [
@@ -145,7 +145,7 @@ test('generateOpenRouterBoxPatches can run a refinement pass and sum usage', asy
   });
 
   assert.equal(calls.length, 2);
-  assert.equal(result.model, 'x-ai/grok-4-fast');
+  assert.equal(result.model, 'x-ai/grok-4.3');
   assert.equal(result.refined, true);
   assert.deepEqual(result.boxes, [{ elementIndex: 0, bbox: [110, 200, 630, 810] }]);
   assert.equal(result.usage.prompt_tokens, 22);

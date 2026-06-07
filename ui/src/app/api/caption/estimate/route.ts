@@ -20,11 +20,6 @@ const FALLBACK_OPENROUTER_PRICING: Record<string, { prompt: number; completion: 
     completion: 0.0000025,
     name: 'xAI: Grok 4.3',
   },
-  'x-ai/grok-4-fast': {
-    prompt: 0.0000002,
-    completion: 0.0000005,
-    name: 'xAI: Grok 4 Fast',
-  },
 };
 
 function normalizeExtension(value: unknown, fallback: string) {

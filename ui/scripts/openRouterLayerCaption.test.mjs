@@ -99,7 +99,7 @@ test('generateOpenRouterLayerCaption parses text-layer captions and strict schem
     desc: 'A yellow taxi roof sign with black letters.',
     text: 'TAXI',
     bbox: [80, 450, 150, 610],
-    model: 'x-ai/grok-4-fast',
+    model: 'x-ai/grok-4.3',
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   });
   assert.equal(calls[0].provider.require_parameters, true);

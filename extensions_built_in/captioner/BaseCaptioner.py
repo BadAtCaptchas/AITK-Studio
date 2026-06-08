@@ -1,11 +1,12 @@
 import asyncio
 from collections import OrderedDict
+import ast
+import re
 
 import importlib.util
 import json
 import math
 import os
-import re
 from typing import Literal, Optional
 import threading
 import time
@@ -453,7 +454,15 @@ class BaseCaptioner(BaseExtensionProcess):
             end = text.rfind("}")
             if start < 0 or end <= start:
                 raise ValueError("Captioner did not return a JSON object")
-            parsed = json.loads(text[start : end + 1])
+            candidate = text[start : end + 1]
+            repaired = self._repair_json_candidate(candidate)
+            try:
+                parsed = json.loads(repaired)
+            except json.JSONDecodeError:
+                try:
+                    parsed = ast.literal_eval(repaired)
+                except (SyntaxError, ValueError) as exc:
+                    raise ValueError(f"Captioner returned invalid JSON: {exc}") from exc
 
         if isinstance(parsed, dict) and set(parsed.keys()) == {"caption"}:
             nested = parsed.get("caption")
@@ -463,6 +472,12 @@ class BaseCaptioner(BaseExtensionProcess):
         if not isinstance(parsed, dict):
             raise ValueError("Captioner returned JSON, but the root value is not an object")
         return parsed
+
+    @staticmethod
+    def _repair_json_candidate(value: str) -> str:
+        repaired = value
+        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+        return repaired
 
     @staticmethod
     def _caption_prompt_has_ideogram_json_contract(prompt: str) -> bool:
@@ -557,6 +572,15 @@ class BaseCaptioner(BaseExtensionProcess):
             return composition
 
         normalized = OrderedDict(composition)
+        if "background" in normalized and not isinstance(normalized["background"], str):
+            background = normalized["background"]
+            if isinstance(background, list):
+                normalized["background"] = " ".join(
+                    part.strip() for part in background if isinstance(part, str) and part.strip()
+                ).strip()
+            else:
+                normalized["background"] = str(background)
+
         elements = normalized.get("elements")
         if isinstance(elements, list):
             normalized["elements"] = [

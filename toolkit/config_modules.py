@@ -705,6 +705,50 @@ class TrainConfig:
 ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ideogram4']
 LayerOffloadingBackend = Literal['block', 'legacy']
 
+_FLEX_GUIDANCE_BYPASS_REFS = (
+    'ostris/flex.1-alpha',
+    'flex.1-alpha',
+    'ostris/flex.2-preview',
+    'flex.2-preview',
+)
+
+_OFFICIAL_FLUX_NO_GUIDANCE_BYPASS_REFS = (
+    'black-forest-labs/flux.1-dev',
+    'flux.1-dev',
+    'black-forest-labs/flux.1-schnell',
+    'flux.1-schnell',
+    'black-forest-labs/flux.1-kontext-dev',
+    'flux.1-kontext-dev',
+)
+
+
+def _normalize_model_ref(value: Optional[str]) -> str:
+    return str(value or '').strip().replace('\\', '/').lower()
+
+
+def _matches_known_model_ref(model_ref: str, refs: Tuple[str, ...]) -> bool:
+    return any(ref in model_ref for ref in refs)
+
+
+def get_flux_guidance_bypass_policy(model_config: "ModelConfig") -> str:
+    if getattr(model_config, 'use_flux_cfg', False):
+        return 'required'
+
+    arch = str(getattr(model_config, 'arch', '') or '').strip().lower()
+    base_arch = arch.split(':', 1)[0]
+    model_ref = _normalize_model_ref(getattr(model_config, 'name_or_path', None))
+
+    if base_arch in {'flex1', 'flex2'} or _matches_known_model_ref(model_ref, _FLEX_GUIDANCE_BYPASS_REFS):
+        return 'required'
+
+    if (
+        base_arch in {'flux', 'flux_kontext'}
+        or _matches_known_model_ref(model_ref, _OFFICIAL_FLUX_NO_GUIDANCE_BYPASS_REFS)
+    ):
+        return 'forbidden'
+
+    return 'unspecified'
+
 
 class ModelConfig:
     def __init__(self, **kwargs):
@@ -1513,6 +1557,13 @@ def validate_configs(
         if model_config.use_flux_cfg:
             # bypass the embedding
             train_config.bypass_guidance_embedding = True
+    flux_guidance_bypass_policy = get_flux_guidance_bypass_policy(model_config)
+    if flux_guidance_bypass_policy == 'forbidden' and train_config.bypass_guidance_embedding:
+        raise ValueError(
+            "train.bypass_guidance_embedding must be false for official FLUX.1-dev, "
+            "FLUX.1-schnell, and FLUX.1-Kontext models. This setting is only for "
+            "Flex-style models; remove it or set it to false."
+        )
     if train_config.bypass_guidance_embedding and train_config.do_guidance_loss:
         raise ValueError("Cannot bypass guidance embedding and do guidance loss at the same time. "
                          "Please set bypass_guidance_embedding to False or do_guidance_loss to False.")

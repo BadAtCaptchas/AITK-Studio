@@ -76,6 +76,7 @@ function baseConfig(datasetPath) {
           ],
           train: {
             batch_size: 1,
+            bypass_guidance_embedding: true,
             steps: 300,
             gradient_accumulation: 1,
             train_unet: true,
@@ -138,6 +139,56 @@ function baseConfig(datasetPath) {
 function findingIds(result) {
   return new Set(result.findings.map(finding => finding.id));
 }
+
+test('preflight reports official FLUX guidance bypass mismatch', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  const process = config.config.process[0];
+  process.model.arch = 'flux';
+  process.model.name_or_path = 'black-forest-labs/FLUX.1-dev';
+  process.train.bypass_guidance_embedding = true;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.bypass_guidance_embedding.flux'));
+});
+
+test('preflight reports Flex guidance bypass mismatch', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  config.config.process[0].train.bypass_guidance_embedding = false;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.bypass_guidance_embedding.flex'));
+});
+
+test('preflight accepts matching Flux and Flex guidance bypass settings', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const fluxConfig = baseConfig(dataset);
+  const fluxProcess = fluxConfig.config.process[0];
+  fluxProcess.model.arch = 'flux_kontext';
+  fluxProcess.model.name_or_path = 'black-forest-labs/FLUX.1-Kontext-dev';
+  fluxProcess.train.bypass_guidance_embedding = false;
+
+  const fluxIds = findingIds(analyzeTrainingAdvisor(fluxConfig, { scanFileLimit: 20 }));
+  assert.ok(!fluxIds.has('train.bypass_guidance_embedding.flux'));
+
+  const flexConfig = baseConfig(dataset);
+  const flexIds = findingIds(analyzeTrainingAdvisor(flexConfig, { scanFileLimit: 20 }));
+  assert.ok(!flexIds.has('train.bypass_guidance_embedding.flex'));
+});
 
 test('preflight reports missing and empty captions', () => {
   const dataset = makeDataset({

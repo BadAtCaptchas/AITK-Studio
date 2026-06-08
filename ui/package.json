@@ -11,6 +11,7 @@
     "update_db": "node scripts/prepare-db.mjs",
     "test:metrics": "tsc -p tsconfig.worker.json && node --test scripts/metricsDownsample.test.mjs",
     "test:advisor": "tsc -p tsconfig.worker.json && node --test scripts/trainingAdvisor.test.mjs",
+    "test:flux-guidance": "tsc -p tsconfig.worker.json && node --test scripts/fluxGuidancePolicy.test.mjs",
     "test:tensorboard": "tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
     "test:remote": "tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs",
     "test:basic": "tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs",

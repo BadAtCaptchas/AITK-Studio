@@ -13,6 +13,7 @@ import type {
   ProcessConfig,
   TrainingPhaseConfig,
 } from '../types';
+import { getFluxGuidanceBypassPolicy } from '../utils/fluxGuidancePolicy';
 
 export type AdvisorMetricPoint = {
   step: number;
@@ -520,6 +521,48 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const arch = String(processConfig.model?.arch ?? '');
   const baseArch = arch.split(':')[0];
   const networkType = String(processConfig.network?.type ?? '');
+  const guidanceBypassPolicy = getFluxGuidanceBypassPolicy({
+    arch,
+    name_or_path: processConfig.model?.name_or_path,
+    use_flux_cfg: processConfig.model?.use_flux_cfg,
+  });
+  const bypassesGuidanceEmbedding = train?.bypass_guidance_embedding === true;
+  if (guidanceBypassPolicy === 'forbidden' && bypassesGuidanceEmbedding) {
+    addFinding(
+      findings,
+      'critical',
+      'preflight',
+      'config',
+      'train.bypass_guidance_embedding.flux',
+      'Flux guidance bypass is enabled',
+      'This job targets official FLUX.1-dev, FLUX.1-schnell, or FLUX.1-Kontext, but train.bypass_guidance_embedding is true.',
+      'Set train.bypass_guidance_embedding to false for official FLUX.1 and Kontext training.',
+      undefined,
+      [
+        'config.process[0].model.arch',
+        'config.process[0].model.name_or_path',
+        'config.process[0].train.bypass_guidance_embedding',
+      ],
+    );
+  }
+  if (guidanceBypassPolicy === 'required' && !bypassesGuidanceEmbedding) {
+    addFinding(
+      findings,
+      'critical',
+      'preflight',
+      'config',
+      'train.bypass_guidance_embedding.flex',
+      'Flex guidance bypass is disabled',
+      'This job targets Flex.1 or Flex.2, but train.bypass_guidance_embedding is not enabled.',
+      'Set train.bypass_guidance_embedding to true for Flex.1 and Flex.2 training.',
+      undefined,
+      [
+        'config.process[0].model.arch',
+        'config.process[0].model.name_or_path',
+        'config.process[0].train.bypass_guidance_embedding',
+      ],
+    );
+  }
   const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx|ideogram/i.test(arch);
   const warnLr = sensitiveArch ? 1e-4 : 3e-4;
   const criticalLr = sensitiveArch ? 3e-4 : 1e-3;

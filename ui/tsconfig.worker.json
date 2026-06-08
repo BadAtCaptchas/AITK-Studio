@@ -22,6 +22,7 @@
         "cron/**/*.ts",
         "src/paths.ts",
         "src/utils/basic.ts",
+        "src/utils/fluxGuidancePolicy.ts",
         "src/utils/jobDatasetDefaults.ts",
         "src/utils/remoteDatasetRefs.ts",
         "src/utils/annotationGeometry.ts",

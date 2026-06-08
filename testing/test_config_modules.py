@@ -1,6 +1,7 @@
 import unittest
 import types
 import importlib.util
+import sys
 from importlib.machinery import ModuleSpec
 from unittest import mock
 
@@ -27,10 +28,16 @@ torchao_module.__spec__ = ModuleSpec("torchao", loader=None)
 torchao_quantization_module.__spec__ = ModuleSpec("torchao.quantization", loader=None)
 torchao_quant_primitives_module.__spec__ = ModuleSpec("torchao.quantization.quant_primitives", loader=None)
 torchao_quant_primitives_module._DTYPE_TO_BIT_WIDTH = {}
+memory_management_module = types.ModuleType("toolkit.memory_management")
+memory_management_module.__path__ = []
+memory_offload_module = types.ModuleType("toolkit.memory_management.offload")
+memory_offload_module.is_block_offload_arch_supported = mock.Mock(return_value=False)
 mocked_modules.update({
     "torchao": torchao_module,
     "torchao.quantization": torchao_quantization_module,
     "torchao.quantization.quant_primitives": torchao_quant_primitives_module,
+    "toolkit.memory_management": memory_management_module,
+    "toolkit.memory_management.offload": memory_offload_module,
 })
 
 with mock.patch.dict(
@@ -39,6 +46,9 @@ with mock.patch.dict(
 ):
     from toolkit.config_modules import NetworkConfig, ModelConfig, SaveConfig, TrainConfig, validate_configs
     from toolkit.base_lora_metadata import add_base_lora_metadata
+
+sys.modules["toolkit.memory_management"] = memory_management_module
+sys.modules["toolkit.memory_management.offload"] = memory_offload_module
 
 
 
@@ -136,6 +146,72 @@ class BaseLoraConfigTest(unittest.TestCase):
         self.assertTrue(meta["aitk_trained_on_adapted_base"])
         self.assertEqual(meta["aitk_base_lora_path"], "C:/models/upstream.safetensors")
         self.assertEqual(meta["aitk_base_lora_strength"], "0.5")
+
+
+class FluxGuidanceBypassConfigTest(unittest.TestCase):
+    def test_validate_accepts_official_flux_without_guidance_bypass(self):
+        cases = [
+            ("flux", "black-forest-labs/FLUX.1-dev"),
+            ("flux", "black-forest-labs/FLUX.1-schnell"),
+            ("flux_kontext", "black-forest-labs/FLUX.1-Kontext-dev"),
+        ]
+
+        for arch, name_or_path in cases:
+            with self.subTest(name_or_path=name_or_path):
+                validate_configs(
+                    TrainConfig(bypass_guidance_embedding=False),
+                    ModelConfig(arch=arch, name_or_path=name_or_path),
+                    SaveConfig(save_format="diffusers"),
+                    [],
+                    NetworkConfig(type="lora"),
+                )
+
+    def test_validate_rejects_official_flux_guidance_bypass(self):
+        cases = [
+            ("flux", "black-forest-labs/FLUX.1-dev"),
+            ("flux", "black-forest-labs/FLUX.1-schnell"),
+            ("flux_kontext", "black-forest-labs/FLUX.1-Kontext-dev"),
+        ]
+
+        for arch, name_or_path in cases:
+            with self.subTest(name_or_path=name_or_path):
+                with self.assertRaisesRegex(ValueError, "bypass_guidance_embedding.*official FLUX"):
+                    validate_configs(
+                        TrainConfig(bypass_guidance_embedding=True),
+                        ModelConfig(arch=arch, name_or_path=name_or_path),
+                        SaveConfig(save_format="diffusers"),
+                        [],
+                        NetworkConfig(type="lora"),
+                    )
+
+    def test_validate_accepts_flex_guidance_bypass(self):
+        cases = [
+            ("flex1", "ostris/Flex.1-alpha"),
+            ("flex2", "ostris/Flex.2-preview"),
+        ]
+
+        for arch, name_or_path in cases:
+            with self.subTest(name_or_path=name_or_path):
+                validate_configs(
+                    TrainConfig(bypass_guidance_embedding=True),
+                    ModelConfig(arch=arch, name_or_path=name_or_path),
+                    SaveConfig(save_format="diffusers"),
+                    [],
+                    NetworkConfig(type="lora"),
+                )
+
+    def test_validate_preserves_use_flux_cfg_guidance_bypass(self):
+        train_config = TrainConfig(bypass_guidance_embedding=False)
+
+        validate_configs(
+            train_config,
+            ModelConfig(arch="flux", name_or_path="black-forest-labs/FLUX.1-dev", use_flux_cfg=True),
+            SaveConfig(save_format="diffusers"),
+            [],
+            NetworkConfig(type="lora"),
+        )
+
+        self.assertTrue(train_config.bypass_guidance_embedding)
 
 
 class SegaDistillConfigTest(unittest.TestCase):

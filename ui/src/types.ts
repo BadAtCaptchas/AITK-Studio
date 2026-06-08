@@ -487,6 +487,7 @@ export interface ModelConfig {
   qtype_te: string;
   quantize_kwargs?: QuantizeKwargsConfig;
   arch: string;
+  use_flux_cfg?: boolean;
   extras_name_or_path?: string;
   vae_path?: string;
   refiner_name_or_path?: string;

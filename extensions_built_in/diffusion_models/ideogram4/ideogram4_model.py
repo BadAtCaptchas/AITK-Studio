@@ -18,6 +18,7 @@ from toolkit.accelerator import unwrap_model
 from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
 from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.memory_management import attach_layer_offloading
 from toolkit.models.base_model import BaseModel
 from toolkit.prompt_utils import PromptEmbeds
 from toolkit.samplers.custom_flowmatch_sampler import (
@@ -626,10 +627,39 @@ class Ideogram4Model(BaseModel):
         autoencoder.requires_grad_(False)
         autoencoder.eval()
 
-        if self.model_config.low_vram:
+        if (
+            self.model_config.layer_offloading
+            and self.model_config.layer_offloading_transformer_percent > 0
+        ):
+            attach_layer_offloading(
+                self,
+                conditional_transformer,
+                self.device_torch,
+                offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component="transformer",
+                block_paths=self.get_transformer_block_names(),
+                ignore_modules=[
+                    conditional_transformer.rotary_emb.inv_freq,
+                    conditional_transformer.input_proj,
+                    conditional_transformer.llm_cond_proj,
+                ],
+            )
+        elif self.model_config.low_vram:
             conditional_transformer.to("cpu")
         else:
             conditional_transformer.to(self.device_torch)
+
+        if (
+            self.model_config.layer_offloading
+            and self.model_config.layer_offloading_text_encoder_percent > 0
+        ):
+            attach_layer_offloading(
+                self,
+                text_encoder,
+                self.device_torch,
+                offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                component="text_encoder",
+            )
 
         self.noise_scheduler = Ideogram4Model.get_train_scheduler()
         self.vae = autoencoder

@@ -1,6 +1,87 @@
 import unittest
+import sys
+import types
 
 import torch
+
+diffusers_module = types.ModuleType("diffusers")
+diffusers_module.UNet2DConditionModel = type("UNet2DConditionModel", (), {})
+diffusers_module.PixArtTransformer2DModel = type("PixArtTransformer2DModel", (), {})
+diffusers_module.AuraFlowTransformer2DModel = type("AuraFlowTransformer2DModel", (), {})
+diffusers_module.WanTransformer3DModel = type("WanTransformer3DModel", (), {})
+sys.modules.setdefault("diffusers", diffusers_module)
+transformers_module = types.ModuleType("transformers")
+transformers_module.CLIPTextModel = type("CLIPTextModel", (), {})
+sys.modules.setdefault("transformers", transformers_module)
+optimum_module = types.ModuleType("optimum")
+quanto_module = types.ModuleType("optimum.quanto")
+quanto_module.QTensor = type("QTensor", (), {})
+quanto_module.QBytesTensor = type("QBytesTensor", (), {})
+sys.modules.setdefault("optimum", optimum_module)
+sys.modules.setdefault("optimum.quanto", quanto_module)
+torchaudio_module = types.ModuleType("torchaudio")
+torchaudio_module.save = lambda *args, **kwargs: None
+sys.modules.setdefault("torchaudio", torchaudio_module)
+album_artwork_module = types.ModuleType("toolkit.audio.album_artwork")
+album_artwork_module.add_album_artwork = lambda *args, **kwargs: None
+sys.modules.setdefault("toolkit.audio.album_artwork", album_artwork_module)
+config_modules_module = types.ModuleType("toolkit.config_modules")
+
+
+class NetworkConfig(types.SimpleNamespace):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.old_lokr_format = kwargs.get("old_lokr_format", False)
+
+
+config_modules_module.NetworkConfig = NetworkConfig
+sys.modules.setdefault("toolkit.config_modules", config_modules_module)
+lokr_module = types.ModuleType("toolkit.models.lokr")
+lokr_module.LokrModule = type("LokrModule", (torch.nn.Module,), {})
+sys.modules.setdefault("toolkit.models.lokr", lokr_module)
+dora_module = types.ModuleType("toolkit.models.DoRA")
+dora_module.DoRAModule = type("DoRAModule", (torch.nn.Module,), {})
+sys.modules.setdefault("toolkit.models.DoRA", dora_module)
+lorm_module = types.ModuleType("toolkit.lorm")
+lorm_module.count_parameters = lambda module: sum(
+    p.numel() for p in module.parameters()
+) if hasattr(module, "parameters") else 0
+lorm_module.extract_conv = lambda *args, **kwargs: {}
+lorm_module.extract_linear = lambda *args, **kwargs: {}
+sys.modules.setdefault("toolkit.lorm", lorm_module)
+metadata_module = types.ModuleType("toolkit.metadata")
+metadata_module.add_model_hash_to_meta = lambda state_dict, meta: meta
+sys.modules.setdefault("toolkit.metadata", metadata_module)
+saving_module = types.ModuleType("toolkit.saving")
+saving_module.get_lora_keymap_from_model_keymap = lambda keymap: keymap
+sys.modules.setdefault("toolkit.saving", saving_module)
+kohya_lora_module = types.ModuleType("toolkit.kohya_lora")
+
+
+class LoRANetwork(torch.nn.Module):
+    UNET_TARGET_REPLACE_MODULE = ["UNet2DConditionModel"]
+    UNET_TARGET_REPLACE_MODULE_CONV2D_3X3 = ["UNet2DConditionModel"]
+    TEXT_ENCODER_TARGET_REPLACE_MODULE = ["CLIPAttention", "CLIPMLP"]
+
+    def prepare_optimizer_params(self, *args, **kwargs):
+        return []
+
+    def apply_max_norm_regularization(self, *args, **kwargs):
+        return None
+
+    def apply_to(
+        self,
+        text_encoder,
+        unet,
+        apply_text_encoder=True,
+        apply_unet=True,
+    ):
+        for lora_module in self.get_all_modules():
+            lora_module.apply_to()
+
+
+kohya_lora_module.LoRANetwork = LoRANetwork
+sys.modules.setdefault("toolkit.kohya_lora", kohya_lora_module)
 
 from toolkit.config_modules import NetworkConfig
 from toolkit.lora_special import LoRASpecialNetwork

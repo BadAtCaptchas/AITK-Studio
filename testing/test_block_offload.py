@@ -4,7 +4,11 @@ from types import SimpleNamespace
 import torch
 
 from toolkit.memory_management.block_offload import BlockOffloadManager, LayerOffloadStrategy
-from toolkit.memory_management.offload import resolve_layer_offloading_backend
+from toolkit.memory_management.manager import MemoryManager
+from toolkit.memory_management.offload import (
+    is_block_offload_arch_supported,
+    resolve_layer_offloading_backend,
+)
 
 
 class TinyBlockModel(torch.nn.Module):
@@ -172,6 +176,50 @@ class BlockOffloadManagerTest(unittest.TestCase):
             resolve_layer_offloading_backend(config, model, torch.device("cpu"), ["blocks"]),
             "legacy",
         )
+
+    def test_ideogram_is_block_offload_supported(self):
+        self.assertTrue(is_block_offload_arch_supported("ideogram4"))
+        self.assertTrue(is_block_offload_arch_supported("ideogram4:fp8"))
+
+    def test_legacy_memory_manager_detach_restores_cpu_toy_module(self):
+        model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU())
+        input_tensor = torch.ones(1, 4)
+        expected = model(input_tensor)
+
+        MemoryManager.attach(model, torch.device("cpu"))
+        self.assertTrue(hasattr(model, "_memory_manager"))
+        self.assertTrue(hasattr(model[0], "_layer_memory_manager"))
+        self.assertTrue(hasattr(model[0], "_memory_management_device"))
+
+        managed = model(input_tensor)
+        self.assertTrue(torch.allclose(managed, expected))
+
+        MemoryManager.detach(model)
+
+        self.assertFalse(hasattr(model, "_memory_manager"))
+        self.assertFalse(hasattr(model, "_mm_to"))
+        self.assertFalse(hasattr(model[0], "_layer_memory_manager"))
+        self.assertFalse(hasattr(model[0], "_memory_management_device"))
+        self.assertTrue(torch.allclose(model(input_tensor), expected))
+
+    def test_memory_manager_detach_calls_block_manager(self):
+        class FakeBlockManager:
+            def __init__(self):
+                self.called = False
+
+            def detach(self):
+                self.called = True
+
+        model = torch.nn.Linear(4, 4)
+        manager = FakeBlockManager()
+        model._block_offload_manager = manager
+        model._aitk_layer_offloading_backend = "block"
+
+        MemoryManager.detach(model)
+
+        self.assertTrue(manager.called)
+        self.assertFalse(hasattr(model, "_block_offload_manager"))
+        self.assertFalse(hasattr(model, "_aitk_layer_offloading_backend"))
 
 
 if __name__ == "__main__":

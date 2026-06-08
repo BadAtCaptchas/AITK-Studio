@@ -7,6 +7,7 @@ Compares speed (ms/step) and peak VRAM across:
   - Adafactor
   - Automagic v1
   - Automagic v2 (only optimizer using fused-backward)
+  - Automagic v3 (fused-backward)
   - Prodigy
 """
 import contextlib
@@ -15,6 +16,7 @@ import io
 import os
 import sys
 import time
+import unittest
 
 import torch
 import torch.nn as nn
@@ -121,6 +123,8 @@ def benchmark(results: list, label: str, opt_factory):
     except torch.cuda.OutOfMemoryError:
         results.append({"label": label, "ms": float("inf"), "peak": float("inf"), "ok": False})
     finally:
+        for handle in getattr(opt, "_hook_handles", []):
+            handle.remove()
         del opt, model
         gc.collect()
         torch.cuda.empty_cache()
@@ -152,6 +156,23 @@ def print_table(results: list):
     print(line_top)
 
 
+class OptimizerRegistryTest(unittest.TestCase):
+    def test_get_optimizer_can_select_automagic3(self):
+        from toolkit.optimizer import get_optimizer
+        from toolkit.optimizers.automagic3 import Automagic3
+
+        param = torch.nn.Parameter(torch.ones(2, 2))
+        opt = get_optimizer(
+            [param],
+            optimizer_type="automagic3",
+            learning_rate=1e-6,
+        )
+
+        self.assertIsInstance(opt, Automagic3)
+        for handle in getattr(opt, "_hook_handles", []):
+            handle.remove()
+
+
 def main():
     n_params = sum(p.numel() for p in build_model().parameters())
     dtype_name = str(DTYPE).replace("torch.", "")
@@ -163,6 +184,7 @@ def main():
 
     from toolkit.optimizers.automagic import Automagic
     from toolkit.optimizers.automagic2 import Automagic2
+    from toolkit.optimizers.automagic3 import Automagic3
     from toolkit.optimizers.adafactor import Adafactor
     from prodigyopt import Prodigy
     import bitsandbytes as bnb
@@ -178,6 +200,8 @@ def main():
               lambda p: Automagic(p, lr=1e-4))
     benchmark(results, "Automagic v2",
               lambda p: Automagic2(p, lr=1e-4))
+    benchmark(results, "Automagic v3",
+              lambda p: Automagic3(p, lr=1e-4))
     benchmark(results, "Prodigy",
               lambda p: Prodigy(p, lr=1.0, eps=1e-6))
 

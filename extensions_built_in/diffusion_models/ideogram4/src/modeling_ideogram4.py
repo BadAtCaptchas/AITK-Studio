@@ -85,6 +85,9 @@ class Ideogram4MRoPE(nn.Module):
     assert position_ids.ndim == 3 and position_ids.shape[-1] == 3
     batch_size, seq_len, _ = position_ids.shape
 
+    if self.inv_freq.device != position_ids.device:
+      self.inv_freq = self.inv_freq.to(position_ids.device)
+
     # (3, B, inv_freq_size, L)
     pos = position_ids.permute(2, 0, 1).to(dtype=torch.float32)  # type: ignore[arg-type]
     inv_freq = self.inv_freq.to(dtype=torch.float32)[None, None, :, None].expand(

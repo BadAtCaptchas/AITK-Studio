@@ -28,6 +28,7 @@ SDTRAINER_PATH = PROJECT_ROOT / "extensions_built_in" / "sd_trainer" / "SDTraine
 BASE_SD_TRAIN_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
 BASE_CAPTIONER_PATH = PROJECT_ROOT / "extensions_built_in" / "captioner" / "BaseCaptioner.py"
 CAPTION_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "helpers" / "captionOptions.ts"
+MEMORY_OFFLOAD_PATH = PROJECT_ROOT / "toolkit" / "memory_management" / "offload.py"
 
 
 try:
@@ -178,6 +179,28 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
     def test_lora_allowlists_include_fp8_linear(self):
         self.assertIn("Fp8Linear", LORA_SPECIAL_PATH.read_text(encoding="utf-8"))
         self.assertIn("Fp8Linear", NETWORK_MIXINS_PATH.read_text(encoding="utf-8"))
+
+    def test_ideogram_layer_offloading_contract_is_wired(self):
+        model_source = (IDEOGRAM_ROOT / "ideogram4_model.py").read_text(encoding="utf-8")
+        offload_source = MEMORY_OFFLOAD_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("from toolkit.memory_management import attach_layer_offloading", model_source)
+        self.assertIn("attach_layer_offloading(", model_source)
+        self.assertIn('component="transformer"', model_source)
+        self.assertIn("block_paths=self.get_transformer_block_names()", model_source)
+        self.assertIn("conditional_transformer.rotary_emb.inv_freq", model_source)
+        self.assertIn("conditional_transformer.input_proj", model_source)
+        self.assertIn("conditional_transformer.llm_cond_proj", model_source)
+        self.assertIn('component="text_encoder"', model_source)
+        self.assertIn('"ideogram4"', offload_source)
+
+    def test_rotary_inv_freq_follows_position_id_device(self):
+        transformer_source = (
+            IDEOGRAM_ROOT / "src" / "modeling_ideogram4.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("self.inv_freq.device != position_ids.device", transformer_source)
+        self.assertIn("self.inv_freq.to(position_ids.device)", transformer_source)
 
     def test_latent_cache_version_bumped_for_reference_patch_order(self):
         model_source = (IDEOGRAM_ROOT / "ideogram4_model.py").read_text(encoding="utf-8")

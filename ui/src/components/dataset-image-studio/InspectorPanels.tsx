@@ -4,7 +4,7 @@ import classNames from 'classnames';
 import { Button } from '@headlessui/react';
 import { CheckCircle2, ChevronDown, FileJson2, Loader2, Pipette, Save, Trash2, WandSparkles } from 'lucide-react';
 import { rectToBox, type IdeogramElementType, type NormalizedBox } from '@/utils/ideogramCaption';
-import { BOX_COLORS, OPENROUTER_BOX_MODELS } from './constants';
+import { AUTO_BOX_PROVIDERS, BOX_COLORS, OLLAMA_VISION_MODELS, OPENROUTER_BOX_MODELS } from './constants';
 import { SegmentedButton } from './StudioControls';
 import type { BoxRect, CaptionStatus, CaptionTab, ImageSize } from './types';
 import { normalizeHexColor } from './utils';
@@ -16,7 +16,11 @@ export function ObjectDetailsPanel({
   selectedImageSize,
   canGenerateAutoBoxes,
   autoBoxDisabledReason,
+  autoBoxProvider,
+  autoBoxProviderLabel,
   autoBoxModel,
+  remoteWorkerId,
+  remoteWorkerOptions,
   autoBoxRefine,
   isGeneratingBoxes,
   autoBoxMessage,
@@ -32,7 +36,9 @@ export function ObjectDetailsPanel({
   layerCaptionDisabledReason,
   onConvertDatasetToJson,
   onGenerateAutoBoxes,
+  onAutoBoxProviderChange,
   onAutoBoxModelChange,
+  onRemoteWorkerChange,
   onAutoBoxRefineChange,
   onSelectedFieldChange,
   onSelectedTypeChange,
@@ -48,7 +54,11 @@ export function ObjectDetailsPanel({
   selectedImageSize: ImageSize | null;
   canGenerateAutoBoxes: boolean;
   autoBoxDisabledReason: string;
+  autoBoxProvider: string;
+  autoBoxProviderLabel: string;
   autoBoxModel: string;
+  remoteWorkerId: string;
+  remoteWorkerOptions: Array<{ value: string; label: string }>;
   autoBoxRefine: boolean;
   isGeneratingBoxes: boolean;
   autoBoxMessage: string;
@@ -64,7 +74,9 @@ export function ObjectDetailsPanel({
   layerCaptionDisabledReason: string;
   onConvertDatasetToJson?: () => void;
   onGenerateAutoBoxes: () => void;
+  onAutoBoxProviderChange: (value: string) => void;
   onAutoBoxModelChange: (value: string) => void;
+  onRemoteWorkerChange: (value: string) => void;
   onAutoBoxRefineChange: (value: boolean) => void;
   onSelectedFieldChange: (field: 'desc' | 'text', value: string) => void;
   onSelectedTypeChange: (type: IdeogramElementType) => void;
@@ -74,6 +86,9 @@ export function ObjectDetailsPanel({
   onCancelPaletteSample: () => void;
   onCaptionSelectedLayer: () => void;
 }) {
+  const autoBoxModelOptions = autoBoxProvider === 'openrouter' ? OPENROUTER_BOX_MODELS : OLLAMA_VISION_MODELS;
+  const autoBoxModelListId = `auto-box-models-${autoBoxProvider}`;
+
   return (
     <section className={classNames('overflow-hidden rounded-md border border-gray-800 bg-gray-950/80', canAnnotate ? 'mt-3' : '')}>
       <div className="flex h-12 items-center justify-between border-b border-gray-800 px-4">
@@ -97,28 +112,60 @@ export function ObjectDetailsPanel({
                 type="button"
                 disabled={!canGenerateAutoBoxes}
                 onClick={onGenerateAutoBoxes}
-                title={autoBoxDisabledReason || 'Generate boxes with OpenRouter'}
+                title={autoBoxDisabledReason || `Generate boxes with ${autoBoxProviderLabel}`}
                 className="inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
               >
                 {isGeneratingBoxes ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
                 Generate
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <label>
-                <span className="mb-1 block text-xs text-gray-500">Model</span>
+                <span className="mb-1 block text-xs text-gray-500">Provider</span>
                 <select
-                  value={autoBoxModel}
-                  onChange={event => onAutoBoxModelChange(event.target.value)}
+                  value={autoBoxProvider}
+                  onChange={event => onAutoBoxProviderChange(event.target.value)}
                   className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-cyan-500"
                 >
-                  {OPENROUTER_BOX_MODELS.map(model => (
-                    <option key={model.value} value={model.value}>
-                      {model.label}
+                  {AUTO_BOX_PROVIDERS.map(provider => (
+                    <option key={provider.value} value={provider.value}>
+                      {provider.label}
                     </option>
                   ))}
                 </select>
               </label>
+              <label>
+                <span className="mb-1 block text-xs text-gray-500">Model</span>
+                <input
+                  value={autoBoxModel}
+                  list={autoBoxModelListId}
+                  onChange={event => onAutoBoxModelChange(event.target.value)}
+                  className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-cyan-500"
+                />
+                <datalist id={autoBoxModelListId}>
+                  {autoBoxModelOptions.map(model => (
+                    <option key={model.value} value={model.value}>
+                      {model.label}
+                    </option>
+                  ))}
+                </datalist>
+              </label>
+              {autoBoxProvider === 'remote_ollama' && (
+                <label>
+                  <span className="mb-1 block text-xs text-gray-500">Worker</span>
+                  <select
+                    value={remoteWorkerId}
+                    onChange={event => onRemoteWorkerChange(event.target.value)}
+                    className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-cyan-500"
+                  >
+                    {remoteWorkerOptions.map(worker => (
+                      <option key={worker.value} value={worker.value}>
+                        {worker.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="flex h-9 items-center gap-2 self-end rounded-md border border-gray-800 bg-gray-900 px-3 text-sm text-gray-300">
                 <input
                   type="checkbox"
@@ -129,6 +176,11 @@ export function ObjectDetailsPanel({
                 Refine pass
               </label>
             </div>
+            {autoBoxProvider !== 'openrouter' && (
+              <div className="text-xs text-amber-200">
+                Use vision models only. Smaller models may produce invalid JSON, miss NSFW details, or create weak boxes.
+              </div>
+            )}
             {(autoBoxMessage || autoBoxDisabledReason) && (
               <div className="text-xs text-gray-400">{autoBoxMessage || autoBoxDisabledReason}</div>
             )}
@@ -191,7 +243,7 @@ export function ObjectDetailsPanel({
                 type="button"
                 disabled={!canCaptionSelectedLayer}
                 onClick={onCaptionSelectedLayer}
-                title={selectedLayerIsCaptioning ? 'Captioning layer' : layerCaptionDisabledReason || 'Caption selected layer with OpenRouter'}
+                title={selectedLayerIsCaptioning ? 'Captioning layer' : layerCaptionDisabledReason || `Caption selected layer with ${autoBoxProviderLabel}`}
                 className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
               >
                 {selectedLayerIsCaptioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}

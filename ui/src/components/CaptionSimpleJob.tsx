@@ -15,6 +15,7 @@ import {
   defaultIdeogramJsonCaptionPrompt,
   defaultQtype,
   groupedCaptionerTypes,
+  legacyDefaultImageCaptionPrompt,
   maxNewTokensOptions,
   maxResOptions,
   quantizationOptions,
@@ -152,7 +153,12 @@ const CaptionSimpleJob: React.FC<Props> = ({
     setJobConfig(value, 'config.process[0].caption.output_format');
     if (value === 'ideogram_json') {
       const currentPrompt = captionConfig.caption_prompt?.trim() || '';
-      if (!currentPrompt || currentPrompt === defaultImageCaptionPrompt || currentPrompt === 'Describe this image in detail.') {
+      if (
+        !currentPrompt ||
+        currentPrompt === defaultImageCaptionPrompt ||
+        currentPrompt === legacyDefaultImageCaptionPrompt ||
+        currentPrompt === 'Describe this image in detail.'
+      ) {
         setJobConfig(defaultIdeogramJsonCaptionPrompt, 'config.process[0].caption.caption_prompt');
       }
       if (!captionConfig.caption_extension) {
@@ -163,6 +169,9 @@ const CaptionSimpleJob: React.FC<Props> = ({
       }
       if (!captionConfig.convert_destination) {
         setJobConfig('current', 'config.process[0].caption.convert_destination');
+      }
+      if (!captionConfig.max_res || captionConfig.max_res < 1024) {
+        setJobConfig(1024, 'config.process[0].caption.max_res');
       }
       if (!captionConfig.max_new_tokens || captionConfig.max_new_tokens < 512) {
         setJobConfig(1024, 'config.process[0].caption.max_new_tokens');
@@ -246,6 +255,11 @@ const CaptionSimpleJob: React.FC<Props> = ({
           />
         )}
       </div>
+      {isJsonOutput && (
+        <div className="mt-4 rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+          Convert to JSON requires a vision model. Smaller models may produce invalid JSON, miss NSFW details, or create weak boxes.
+        </div>
+      )}
       {isJsonOutput && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
           <SelectInput

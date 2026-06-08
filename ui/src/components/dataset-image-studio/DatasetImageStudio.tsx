@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
+import useWorkers from '@/hooks/useWorkers';
 import {
   captionObjectPath,
   decryptEncryptedObjectBlob,
@@ -32,7 +33,13 @@ import {
   updateIdeogramHighLevelDescription,
 } from '@/utils/ideogramCaption';
 import { AnnotationLayer } from './AnnotationLayer';
-import { BOX_COLORS, MAX_HISTORY } from './constants';
+import {
+  AUTO_BOX_PROVIDERS,
+  BOX_COLORS,
+  DEFAULT_OLLAMA_VISION_MODEL,
+  DEFAULT_OPENROUTER_BOX_MODEL,
+  MAX_HISTORY,
+} from './constants';
 import { ImageNavigator } from './ImageNavigator';
 import { CaptionEditorPanel, ObjectDetailsPanel } from './InspectorPanels';
 import { LayersPanel } from './LayersPanel';
@@ -46,6 +53,7 @@ import type {
   CaptionCacheEntry,
   CaptionTab,
   DatasetImageStudioProps,
+  DatasetStudioItem,
   DeleteImagesResult,
   ImageSize,
   ToolMode,
@@ -67,6 +75,8 @@ import {
   statusForCaption,
 } from './utils';
 
+type StudioBoxProvider = (typeof AUTO_BOX_PROVIDERS)[number]['value'];
+
 export default function DatasetImageStudio({
   datasetName,
   workerID,
@@ -82,6 +92,7 @@ export default function DatasetImageStudio({
   onBulkEncryptedCaptionAction,
   onSaveEncryptedCaption,
 }: DatasetImageStudioProps) {
+  const { workers } = useWorkers();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [captionText, setCaptionText] = useState('');
   const [savedCaption, setSavedCaption] = useState('');
@@ -95,13 +106,15 @@ export default function DatasetImageStudio({
   const [zoom, setZoom] = useState(1);
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
-  const [autoBoxModel, setAutoBoxModel] = useState('x-ai/grok-4.3');
+  const [autoBoxProvider, setAutoBoxProvider] = useState<StudioBoxProvider>('openrouter');
+  const [autoBoxModel, setAutoBoxModel] = useState(DEFAULT_OPENROUTER_BOX_MODEL);
+  const [remoteOllamaWorkerId, setRemoteOllamaWorkerId] = useState('');
   const [autoBoxRefine, setAutoBoxRefine] = useState(false);
   const [isGeneratingBoxes, setIsGeneratingBoxes] = useState(false);
   const [autoBoxMessage, setAutoBoxMessage] = useState('');
   const [captioningLayerKeys, setCaptioningLayerKeys] = useState<Set<string>>(() => new Set());
   const [layerCaptionMessages, setLayerCaptionMessages] = useState<Record<string, string>>({});
-  const [encryptedOpenRouterConfirmed, setEncryptedOpenRouterConfirmed] = useState(false);
+  const [encryptedProviderConfirmations, setEncryptedProviderConfirmations] = useState<Record<string, boolean>>({});
   const [selectedImageSize, setSelectedImageSize] = useState<ImageSize | null>(null);
   const [hiddenLayerIndexes, setHiddenLayerIndexes] = useState<Set<number>>(() => new Set());
   const [lockedLayerIndexes, setLockedLayerIndexes] = useState<Set<number>>(() => new Set());
@@ -132,6 +145,11 @@ export default function DatasetImageStudio({
   const selectedKey = selectedItem ? itemKey(selectedItem) : '';
   const selectedName = selectedItem ? itemName(selectedItem) : '';
   const selectedKind = selectedItem ? itemKind(selectedItem) : 'image';
+  const remoteWorkerOptions = useMemo(
+    () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
+    [workers],
+  );
+  const autoBoxProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === autoBoxProvider)?.label || 'OpenRouter';
   const captionParse = useMemo(() => parseIdeogramCaption(captionText), [captionText]);
   const isIdeogram = captionParse.kind === 'ideogram';
   const boxes = isIdeogram ? captionParse.boxes : [];
@@ -158,9 +176,11 @@ export default function DatasetImageStudio({
         ? 'Auto Boxes requires Ideogram JSON.'
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
-          : !selectedImageSize
-            ? 'Image size pending.'
-            : '';
+          : autoBoxProvider === 'remote_ollama' && !remoteOllamaWorkerId
+            ? 'Select a remote Ollama worker.'
+            : !selectedImageSize
+              ? 'Image size pending.'
+              : '';
   const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !hasCurrentImageCaptioningLayer && !isAutoCaptioning;
   const selectedLayerHasCaptionTarget = Boolean(selectedBox || layerCaptionTargetText(selectedElement));
   const layerCaptionDisabledReason = !isCaptionLoaded
@@ -171,13 +191,15 @@ export default function DatasetImageStudio({
         ? 'Caption Layer requires Ideogram JSON.'
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
-          : !selectedImageSize
-            ? 'Image size pending.'
-            : !selectedElement || selectedElementIndex == null
-              ? 'Select a layer.'
-              : !selectedLayerHasCaptionTarget
-                ? 'Add a layer label or draw a box first.'
-                : '';
+          : autoBoxProvider === 'remote_ollama' && !remoteOllamaWorkerId
+            ? 'Select a remote Ollama worker.'
+            : !selectedImageSize
+              ? 'Image size pending.'
+              : !selectedElement || selectedElementIndex == null
+                ? 'Select a layer.'
+                : !selectedLayerHasCaptionTarget
+                  ? 'Add a layer label or draw a box first.'
+                  : '';
   const canCaptionSelectedLayer =
     !layerCaptionDisabledReason && !selectedLayerIsCaptioning && !isGeneratingBoxes && !isAutoCaptioning;
 
@@ -194,6 +216,25 @@ export default function DatasetImageStudio({
     setOverlapElementStack([]);
     setActivePaletteSamplerIndex(null);
   }, [selectedKey]);
+
+  useEffect(() => {
+    if (autoBoxProvider !== 'remote_ollama' || remoteOllamaWorkerId || remoteWorkerOptions.length === 0) return;
+    setRemoteOllamaWorkerId(remoteWorkerOptions[0].value);
+  }, [autoBoxProvider, remoteOllamaWorkerId, remoteWorkerOptions]);
+
+  const handleAutoBoxProviderChange = useCallback((value: string) => {
+    const nextProvider = AUTO_BOX_PROVIDERS.some(provider => provider.value === value)
+      ? (value as StudioBoxProvider)
+      : 'openrouter';
+    setAutoBoxProvider(nextProvider);
+    setAutoBoxModel(currentModel => {
+      const trimmed = currentModel.trim();
+      if (nextProvider === 'openrouter') {
+        return !trimmed || trimmed.startsWith('qwen3.5:') ? DEFAULT_OPENROUTER_BOX_MODEL : trimmed;
+      }
+      return !trimmed || trimmed === DEFAULT_OPENROUTER_BOX_MODEL ? DEFAULT_OLLAMA_VISION_MODEL : trimmed;
+    });
+  }, []);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -604,11 +645,13 @@ export default function DatasetImageStudio({
       let response;
       if (selectedItem.kind === 'plain') {
         response = await apiClient.post(
-          '/api/datasets/openrouter-boxes',
+          '/api/datasets/auto-boxes',
           {
             imgPath: selectedItem.path,
             caption: requestCaption,
+            provider: autoBoxProvider,
             model: autoBoxModel,
+            remoteWorkerId: remoteOllamaWorkerId,
             refine: autoBoxRefine,
             imageWidth,
             imageHeight,
@@ -617,24 +660,26 @@ export default function DatasetImageStudio({
         );
       } else {
         if (!encryptedKey) throw new Error('Unlock the encrypted dataset first.');
-        if (!encryptedOpenRouterConfirmed) {
+        if (!encryptedProviderConfirmations[autoBoxProvider]) {
           const confirmed = window.confirm(
-            'Auto Boxes will send this decrypted image to OpenRouter to generate bounding boxes. Continue?',
+            `Auto Boxes will send this decrypted image to ${autoBoxProviderLabel} to generate bounding boxes. Continue?`,
           );
           if (!confirmed) {
             setAutoBoxMessage('Auto Boxes canceled.');
             return;
           }
-          setEncryptedOpenRouterConfirmed(true);
+          setEncryptedProviderConfirmations(previous => ({ ...previous, [autoBoxProvider]: true }));
         }
 
         const formData = await createEncryptedImageFormData({ datasetName, workerID, encryptedKey, item: selectedItem.item });
         formData.append('caption', requestCaption);
+        formData.append('provider', autoBoxProvider);
         formData.append('model', autoBoxModel);
+        formData.append('remoteWorkerId', remoteOllamaWorkerId);
         formData.append('refine', autoBoxRefine ? 'true' : 'false');
         appendImageSizeFields(formData, imageWidth, imageHeight);
 
-        response = await apiClient.post('/api/datasets/openrouter-boxes', formData, {
+        response = await apiClient.post('/api/datasets/auto-boxes', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 0,
         });
@@ -651,7 +696,7 @@ export default function DatasetImageStudio({
       const generatedElements =
         elementCount === 0 ? normalizeGeneratedElementBoxes({ generatedElements: response.data?.generatedElements }, 2, 20) : [];
       if (patches.length === 0 && generatedElements.length === 0) {
-        throw new Error('OpenRouter did not return any usable boxes.');
+        throw new Error(`${autoBoxProviderLabel} did not return any usable boxes.`);
       }
 
       let appliedCount = 0;
@@ -675,15 +720,18 @@ export default function DatasetImageStudio({
     }
   }, [
     autoBoxDisabledReason,
+    autoBoxProvider,
+    autoBoxProviderLabel,
     autoBoxModel,
     autoBoxRefine,
     captionParse,
     captionText,
     datasetName,
     encryptedKey,
-    encryptedOpenRouterConfirmed,
+    encryptedProviderConfirmations,
     isGeneratingBoxes,
     mutateCaption,
+    remoteOllamaWorkerId,
     selectedElementIndex,
     selectedImageSize,
     selectedItem,
@@ -711,12 +759,14 @@ export default function DatasetImageStudio({
       let response;
       if (selectedItem.kind === 'plain') {
         response = await apiClient.post(
-          '/api/datasets/openrouter-layer-caption',
+          '/api/datasets/layer-caption',
           {
             imgPath: selectedItem.path,
             caption: requestCaption,
             elementIndex: requestElementIndex,
+            provider: autoBoxProvider,
             model: autoBoxModel,
+            remoteWorkerId: remoteOllamaWorkerId,
             imageWidth,
             imageHeight,
           },
@@ -724,24 +774,26 @@ export default function DatasetImageStudio({
         );
       } else {
         if (!encryptedKey) throw new Error('Unlock the encrypted dataset first.');
-        if (!encryptedOpenRouterConfirmed) {
+        if (!encryptedProviderConfirmations[autoBoxProvider]) {
           const confirmed = window.confirm(
-            'Caption Layer will send this decrypted image to OpenRouter to caption the selected layer. Continue?',
+            `Caption Layer will send this decrypted image to ${autoBoxProviderLabel} to caption the selected layer. Continue?`,
           );
           if (!confirmed) {
             setLayerCaptionMessageForKey(requestLayerKey, 'Caption Layer canceled.');
             return;
           }
-          setEncryptedOpenRouterConfirmed(true);
+          setEncryptedProviderConfirmations(previous => ({ ...previous, [autoBoxProvider]: true }));
         }
 
         const formData = await createEncryptedImageFormData({ datasetName, workerID, encryptedKey, item: selectedItem.item });
         formData.append('caption', requestCaption);
         formData.append('elementIndex', String(requestElementIndex));
+        formData.append('provider', autoBoxProvider);
         formData.append('model', autoBoxModel);
+        formData.append('remoteWorkerId', remoteOllamaWorkerId);
         appendImageSizeFields(formData, imageWidth, imageHeight);
 
-        response = await apiClient.post('/api/datasets/openrouter-layer-caption', formData, {
+        response = await apiClient.post('/api/datasets/layer-caption', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 0,
         });
@@ -768,8 +820,8 @@ export default function DatasetImageStudio({
         : [];
       const currentHasBox = Boolean(arrayToBox(currentElement?.bbox));
       const generatedBox = currentHasBox ? null : arrayToBox(response.data?.bbox);
-      if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
-      if (!currentHasBox && !generatedBox) throw new Error('OpenRouter did not return a usable layer box.');
+      if (!desc) throw new Error(`${autoBoxProviderLabel} did not return a usable layer caption.`);
+      if (!currentHasBox && !generatedBox) throw new Error(`${autoBoxProviderLabel} did not return a usable layer box.`);
 
       const updated = mutateLatestCaption(data => {
         updateIdeogramElementField(data, requestElementIndex, 'desc', desc);
@@ -795,12 +847,15 @@ export default function DatasetImageStudio({
     }
   }, [
     autoBoxModel,
+    autoBoxProvider,
+    autoBoxProviderLabel,
     captionText,
     datasetName,
     encryptedKey,
-    encryptedOpenRouterConfirmed,
+    encryptedProviderConfirmations,
     layerCaptionDisabledReason,
     mutateLatestCaption,
+    remoteOllamaWorkerId,
     selectedElement,
     selectedElementIndex,
     selectedImageSize,
@@ -1184,7 +1239,11 @@ export default function DatasetImageStudio({
                 selectedImageSize={selectedImageSize}
                 canGenerateAutoBoxes={canGenerateAutoBoxes}
                 autoBoxDisabledReason={autoBoxDisabledReason}
+                autoBoxProvider={autoBoxProvider}
+                autoBoxProviderLabel={autoBoxProviderLabel}
                 autoBoxModel={autoBoxModel}
+                remoteWorkerId={remoteOllamaWorkerId}
+                remoteWorkerOptions={remoteWorkerOptions}
                 autoBoxRefine={autoBoxRefine}
                 isGeneratingBoxes={isGeneratingBoxes}
                 autoBoxMessage={autoBoxMessage}
@@ -1200,7 +1259,9 @@ export default function DatasetImageStudio({
                 layerCaptionDisabledReason={layerCaptionDisabledReason}
                 onConvertDatasetToJson={onConvertDatasetToJson}
                 onGenerateAutoBoxes={() => void handleGenerateAutoBoxes()}
+                onAutoBoxProviderChange={handleAutoBoxProviderChange}
                 onAutoBoxModelChange={setAutoBoxModel}
+                onRemoteWorkerChange={setRemoteOllamaWorkerId}
                 onAutoBoxRefineChange={setAutoBoxRefine}
                 onSelectedFieldChange={handleSelectedFieldChange}
                 onSelectedTypeChange={handleSelectedTypeChange}

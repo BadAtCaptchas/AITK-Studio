@@ -82,6 +82,7 @@ export const CaptionDatasetModal: React.FC = () => {
       setJobConfig('json', 'config.process[0].caption.caption_extension');
       setJobConfig('txt', 'config.process[0].caption.source_caption_extension');
       setJobConfig('copy', 'config.process[0].caption.convert_destination');
+      setJobConfig(1024, 'config.process[0].caption.max_res');
       setJobConfig(1024, 'config.process[0].caption.max_new_tokens');
     }
   }, [modalInfo]);

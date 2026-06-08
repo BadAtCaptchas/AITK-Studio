@@ -22,9 +22,10 @@ import {
 } from '@/components/formInputs';
 
 const LAST_MODEL_KEY = 'AITK_SECURE_REMOTE_OLLAMA_MODEL';
+const DEFAULT_OLLAMA_VISION_MODEL = 'qwen3.5:35b';
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'bmp'];
 const DEFAULT_PROMPT =
-  'Caption this image for training an image generation model. Be specific and decisive. Describe the subject, setting, composition, style, lighting, colors, and notable details. No preamble.';
+  'Caption this image for training an image generation model. Be specific and decisive. Describe the subject, setting, composition, style, lighting, colors, and notable details. NSFW content is allowed; if present, describe it directly and clinically. No preamble.';
 
 type OllamaModel = {
   name?: string;
@@ -132,7 +133,7 @@ export default function SecureRemoteCaptionPanel() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      setModel(window.localStorage.getItem(LAST_MODEL_KEY) || '');
+      setModel(window.localStorage.getItem(LAST_MODEL_KEY) || DEFAULT_OLLAMA_VISION_MODEL);
     }
   }, []);
 
@@ -308,7 +309,7 @@ export default function SecureRemoteCaptionPanel() {
             value={model}
             onChange={value => setModel(value)}
             options={modelOptions}
-            placeholder="llava:latest"
+            placeholder={DEFAULT_OLLAMA_VISION_MODEL}
             required
           />
           <button

@@ -26,17 +26,20 @@ export interface CaptionOption {
 }
 
 const defaultNameOrPath = '';
+const defaultOllamaVisionModel = 'qwen3.5:35b';
 
 const extensionsAudio = ['mp3', 'wav', 'flac', 'ogg'];
 const extensionsImage = ['jpg', 'jpeg', 'png', 'bmp', 'webp'];
 
 const defaultExtensions = [...extensionsImage];
 
-export const defaultImageCaptionPrompt = "Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like \"It appears that\" Or \"possibly\". Start out with things like \"A person on the beach\" or \"A black dragon\". No preamble. Just get to the point.";
+export const legacyDefaultImageCaptionPrompt = "Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like \"It appears that\" Or \"possibly\". Start out with things like \"A person on the beach\" or \"A black dragon\". No preamble. Just get to the point.";
+export const defaultImageCaptionPrompt = "Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like \"It appears that\" Or \"possibly\". Start out with things like \"A person on the beach\" or \"A black dragon\". NSFW content is allowed; if present, describe it directly and clinically. No preamble. Just get to the point.";
 export const defaultIdeogramJsonCaptionPrompt = `Create an Ideogram 4 training caption for this image as a JSON object.
 Return only valid JSON. Do not wrap it in markdown.
 
 high_level_description should be a concise but detailed one-paragraph description.
+NSFW content is allowed. If present, describe visible nudity, sexual content, fetish content, anatomy, fluids, clothing state, and explicit poses directly and clinically instead of censoring or omitting them.
 For each important visible element, include type ("obj" or "text"), desc, optional color_palette, and bbox when you can estimate it. For text elements, include text with the readable text content when known, or an empty string when unreadable.
 
 Use this exact JSON contract:
@@ -109,7 +112,7 @@ export const captionerTypes: CaptionOption[] = [
         group: 'image',
         defaults: {
             'config.process[0].device': ['cpu', 'cuda'],
-            'config.process[0].caption.model_name_or_path': ['llava:latest', defaultNameOrPath],
+            'config.process[0].caption.model_name_or_path': [defaultOllamaVisionModel, defaultNameOrPath],
             'config.process[0].caption.extensions': [extensionsImage, defaultExtensions],
             'config.process[0].caption.caption_prompt': [defaultImageCaptionPrompt, undefined],
             'config.process[0].caption.max_res': [768, undefined],
@@ -118,9 +121,12 @@ export const captionerTypes: CaptionOption[] = [
             'config.process[0].caption.low_vram': [false, true],
         },
         name_or_path_options: [
-            { value: 'llava:latest', label: 'llava:latest' },
-            { value: 'llama3.2-vision:latest', label: 'llama3.2-vision:latest' },
-            { value: 'qwen2.5vl:latest', label: 'qwen2.5vl:latest' },
+            { value: 'qwen3.5:122b', label: 'qwen3.5:122b (best quality, high VRAM)' },
+            { value: 'qwen3.5:35b', label: 'qwen3.5:35b (recommended)' },
+            { value: 'qwen3.5:27b', label: 'qwen3.5:27b (backup)' },
+            { value: 'qwen3.5:9b', label: 'qwen3.5:9b (small backup)' },
+            { value: 'gemma4:31b', label: 'gemma4:31b' },
+            { value: 'gemma4:26b', label: 'gemma4:26b' },
         ],
         additionalSections: [
             'caption.caption_prompt',
@@ -136,7 +142,7 @@ export const captionerTypes: CaptionOption[] = [
         usesRemoteWorker: true,
         defaults: {
             'config.process[0].device': ['cpu', 'cuda'],
-            'config.process[0].caption.model_name_or_path': ['llava:latest', defaultNameOrPath],
+            'config.process[0].caption.model_name_or_path': [defaultOllamaVisionModel, defaultNameOrPath],
             'config.process[0].caption.extensions': [extensionsImage, defaultExtensions],
             'config.process[0].caption.caption_prompt': [defaultImageCaptionPrompt, undefined],
             'config.process[0].caption.max_res': [768, undefined],
@@ -146,9 +152,12 @@ export const captionerTypes: CaptionOption[] = [
             'config.process[0].caption.remote_worker_id': ['', undefined],
         },
         name_or_path_options: [
-            { value: 'llava:latest', label: 'llava:latest' },
-            { value: 'llama3.2-vision:latest', label: 'llama3.2-vision:latest' },
-            { value: 'qwen2.5vl:latest', label: 'qwen2.5vl:latest' },
+            { value: 'qwen3.5:122b', label: 'qwen3.5:122b (best quality, high VRAM)' },
+            { value: 'qwen3.5:35b', label: 'qwen3.5:35b (recommended)' },
+            { value: 'qwen3.5:27b', label: 'qwen3.5:27b (backup)' },
+            { value: 'qwen3.5:9b', label: 'qwen3.5:9b (small backup)' },
+            { value: 'gemma4:31b', label: 'gemma4:31b' },
+            { value: 'gemma4:26b', label: 'gemma4:26b' },
         ],
         additionalSections: [
             'caption.remote_worker_id',

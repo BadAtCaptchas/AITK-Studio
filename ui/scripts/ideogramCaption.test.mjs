@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -183,4 +184,17 @@ test('generated element boxes can append layers for empty captions', () => {
   assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[1]), ['type', 'bbox', 'text', 'desc']);
   assert.equal(parsed.compositional_deconstruction.elements[0].desc, 'Yellow taxi.');
   assert.equal(parsed.compositional_deconstruction.elements[1].text, 'TAXI');
+});
+
+test('Ideogram JSON prompts explicitly allow NSFW captions', () => {
+  const uiPromptSource = fs.readFileSync(new URL('../src/helpers/captionOptions.ts', import.meta.url), 'utf8');
+  const backendPromptSource = fs.readFileSync(
+    new URL('../../extensions_built_in/captioner/BaseCaptioner.py', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(uiPromptSource, /NSFW content is allowed/);
+  assert.match(uiPromptSource, /censoring or omitting/);
+  assert.match(backendPromptSource, /NSFW content is allowed/);
+  assert.match(backendPromptSource, /censoring or omitting/);
 });

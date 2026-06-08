@@ -390,13 +390,13 @@ export function extractMessageText(data: any) {
   return '';
 }
 
-export function parseJsonObject(text: string) {
+export function parseJsonObject(text: string, providerName = 'OpenRouter') {
   try {
     return JSON.parse(text);
   } catch {
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
-    if (start < 0 || end <= start) throw new Error('OpenRouter did not return a JSON object.');
+    if (start < 0 || end <= start) throw new Error(`${providerName} did not return a JSON object.`);
     return JSON.parse(text.slice(start, end + 1));
   }
 }
@@ -473,20 +473,25 @@ async function callOpenRouterBoxes({
   return { content, usage: isRecord(data?.usage) ? data.usage : undefined };
 }
 
-function parseBoxResponse(content: string, elementCount: number, imageSize: RequiredImageSize) {
-  const parsed = parseJsonObject(content);
+export function parseBoxResponse(
+  content: string,
+  elementCount: number,
+  imageSize: RequiredImageSize,
+  providerName = 'OpenRouter',
+) {
+  const parsed = parseJsonObject(content, providerName);
   const boxes = pixelGeneratedBoxPatches(parsed, elementCount, imageSize, 2);
   if (boxes.length === 0) {
-    throw new Error('OpenRouter did not return any usable boxes.');
+    throw new Error(`${providerName} did not return any usable boxes.`);
   }
   return boxes;
 }
 
-function parseGeneratedElementResponse(content: string, imageSize: RequiredImageSize) {
-  const parsed = parseJsonObject(content);
+export function parseGeneratedElementResponse(content: string, imageSize: RequiredImageSize, providerName = 'OpenRouter') {
+  const parsed = parseJsonObject(content, providerName);
   const generatedElements = pixelGeneratedElementBoxes(parsed, imageSize, 2, 20);
   if (generatedElements.length === 0) {
-    throw new Error('OpenRouter did not return any usable generated elements.');
+    throw new Error(`${providerName} did not return any usable generated elements.`);
   }
   return generatedElements;
 }

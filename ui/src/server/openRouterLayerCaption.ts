@@ -33,7 +33,7 @@ type GenerateOpenRouterLayerCaptionOptions = {
 
 type LayerType = 'obj' | 'text';
 
-type SelectedLayerInfo = {
+export type SelectedLayerInfo = {
   type: LayerType;
   description: string;
   visibleText: string;
@@ -82,7 +82,7 @@ const OPENROUTER_LAYER_CAPTION_RESPONSE_SCHEMA = {
   required: ['desc', 'text', 'bbox_px', 'color_palette'],
 };
 
-function selectedLayerInfo(caption: string, elementIndex: number): SelectedLayerInfo {
+export function selectedLayerInfo(caption: string, elementIndex: number): SelectedLayerInfo {
   const parsed = parseIdeogramCaption(caption);
   if (parsed.kind !== 'ideogram') throw new Error('Layer captioning requires an Ideogram JSON caption.');
   if (!Number.isInteger(elementIndex) || elementIndex < 0 || elementIndex >= parsed.elements.length) {
@@ -248,19 +248,20 @@ function normalizeLayerColorPalette(value: unknown) {
   return colors.slice(0, 5);
 }
 
-function parseLayerCaptionResponse(
+export function parseLayerCaptionResponse(
   content: string,
   type: LayerType,
   requiresBbox: boolean,
   imageSize: ReturnType<typeof requireImageSize>,
+  providerName = 'OpenRouter',
 ) {
-  const parsed = parseJsonObject(content);
-  if (!isRecord(parsed)) throw new Error('OpenRouter did not return a JSON object.');
+  const parsed = parseJsonObject(content, providerName);
+  if (!isRecord(parsed)) throw new Error(`${providerName} did not return a JSON object.`);
   const text = cleanString(parsed.text || parsed.visibleText).slice(0, 240);
   const desc = (cleanString(parsed.desc || parsed.description || parsed.caption) || (type === 'text' && text ? `Visible text: ${text}` : '')).slice(0, 600);
-  if (!desc) throw new Error('OpenRouter did not return a usable layer caption.');
+  if (!desc) throw new Error(`${providerName} did not return a usable layer caption.`);
   const bbox = usableCaptionBox(rawPixelBbox(parsed), imageSize);
-  if (requiresBbox && !bbox) throw new Error('OpenRouter did not return a usable layer box.');
+  if (requiresBbox && !bbox) throw new Error(`${providerName} did not return a usable layer box.`);
   const colorPalette = normalizeLayerColorPalette(rawColorPalette(parsed));
   return {
     desc,

@@ -43,6 +43,7 @@
         "src/server/openRouterBoxes.ts",
         "src/server/openRouterLayerCaption.ts",
         "src/server/ollama.ts",
+        "src/server/ollamaVision.ts",
         "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
         "src/server/randomPromptCaptions.ts",

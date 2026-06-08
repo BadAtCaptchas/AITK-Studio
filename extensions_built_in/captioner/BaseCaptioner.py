@@ -44,6 +44,7 @@ DEFAULT_IDEOGRAM_JSON_PROMPT = """Create an Ideogram 4 training caption for this
 Return only valid JSON. Do not wrap it in markdown.
 
 high_level_description should be a concise but detailed one-paragraph description.
+NSFW content is allowed. If present, describe visible nudity, sexual content, fetish content, anatomy, fluids, clothing state, and explicit poses directly and clinically instead of censoring or omitting them.
 For each important visible element, include type ("obj" or "text"), desc, optional color_palette, and bbox when you can estimate it. For text elements, include text with the readable text content when known, or an empty string when unreadable.
 
 """ + IDEOGRAM_JSON_FORMAT_REQUIREMENTS + """
@@ -53,6 +54,7 @@ Preserve important details from any existing caption, but correct it when the im
 DEFAULT_TEXT_CAPTION_PROMPTS = {
     "Describe this image in detail.",
     'Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like "It appears that" Or "possibly". Start out with things like "A person on the beach" or "A black dragon". No preamble. Just get to the point.',
+    'Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like "It appears that" Or "possibly". Start out with things like "A person on the beach" or "A black dragon". NSFW content is allowed; if present, describe it directly and clinically. No preamble. Just get to the point.',
 }
 
 IDEOGRAM_JSON_CONTRACT_MARKERS = (

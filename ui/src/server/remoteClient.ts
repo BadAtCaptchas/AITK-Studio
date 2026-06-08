@@ -26,6 +26,26 @@ export class RemoteClientError extends Error {
   }
 }
 
+type RemoteDiscoveryErrorLogState = {
+  signature: string;
+  lastLoggedAt: number;
+  suppressedCount: number;
+};
+
+const REMOTE_DISCOVERY_ERROR_LOG_INTERVAL_MS = 5 * 60 * 1000;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __remoteDiscoveryErrorLogState: Map<string, RemoteDiscoveryErrorLogState> | undefined;
+}
+
+const remoteDiscoveryErrorLogState =
+  globalThis.__remoteDiscoveryErrorLogState ?? new Map<string, RemoteDiscoveryErrorLogState>();
+
+if (!globalThis.__remoteDiscoveryErrorLogState) {
+  globalThis.__remoteDiscoveryErrorLogState = remoteDiscoveryErrorLogState;
+}
+
 export function isLocalWorker(workerId: string | null | undefined) {
   return !workerId || workerId === 'local';
 }
@@ -257,6 +277,57 @@ export async function syncRemoteJobs(jobs: Job[], alreadySyncedJobIds = new Set<
   return Promise.all(jobs.map(job => (alreadySyncedJobIds.has(job.id) ? job : syncRemoteJob(job))));
 }
 
+function remoteDiscoveryErrorMessage(workerName: string, error: unknown) {
+  if (error instanceof RemoteClientError) {
+    const cloudflareTunnelUnavailable =
+      error.status === 530 &&
+      (/Cloudflare Tunnel error/i.test(error.body) || /Error<\/span>\s*<span>1033<\/span>/i.test(error.body));
+    const detail = cloudflareTunnelUnavailable ? 'Cloudflare tunnel is unavailable' : error.message;
+    return `Failed to discover jobs for worker ${workerName}: ${detail}`;
+  }
+  return `Failed to discover jobs for worker ${workerName}: ${
+    error instanceof Error ? error.message : 'Remote worker discovery failed'
+  }`;
+}
+
+function logRemoteDiscoveryError(workerId: string, workerName: string, error: unknown) {
+  const message = remoteDiscoveryErrorMessage(workerName, error);
+  const signature = error instanceof RemoteClientError ? `${error.status}:${message}` : message;
+  const now = Date.now();
+  const state = remoteDiscoveryErrorLogState.get(workerId);
+
+  if (
+    !state ||
+    state.signature !== signature ||
+    now - state.lastLoggedAt >= REMOTE_DISCOVERY_ERROR_LOG_INTERVAL_MS
+  ) {
+    const suffix = state?.suppressedCount
+      ? ` (${state.suppressedCount} repeated discovery error${state.suppressedCount === 1 ? '' : 's'} suppressed)`
+      : '';
+    console.warn(`${message}${suffix}`);
+    remoteDiscoveryErrorLogState.set(workerId, {
+      signature,
+      lastLoggedAt: now,
+      suppressedCount: 0,
+    });
+    return;
+  }
+
+  state.suppressedCount += 1;
+}
+
+function clearRemoteDiscoveryErrorLog(workerId: string) {
+  const state = remoteDiscoveryErrorLogState.get(workerId);
+  if (state?.suppressedCount) {
+    console.info(
+      `Remote worker discovery recovered for ${workerId} (${state.suppressedCount} repeated discovery error${
+        state.suppressedCount === 1 ? '' : 's'
+      } suppressed)`,
+    );
+  }
+  remoteDiscoveryErrorLogState.delete(workerId);
+}
+
 export async function discoverRemoteJobs(jobType?: string | null) {
   const workers = await db.workerNodes.list({ enabled: true });
   const syncedJobIds = new Set<string>();
@@ -269,8 +340,9 @@ export async function discoverRemoteJobs(jobType?: string | null) {
           (data.jobs || []).map(remoteJob => upsertRemoteJobMirror(worker, remoteJob)),
         );
         syncedJobs.forEach(job => syncedJobIds.add(job.id));
+        clearRemoteDiscoveryErrorLog(workerRecord.id);
       } catch (error) {
-        console.error(`Failed to discover jobs for worker ${workerRecord.name}:`, error);
+        logRemoteDiscoveryError(workerRecord.id, workerRecord.name, error);
       }
     }),
   );

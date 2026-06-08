@@ -55,6 +55,122 @@ test('parseIdeogramCaption distinguishes plain, invalid JSON, and Ideogram JSON'
   assert.equal(parsed.boxes[0].label, 'Yellow taxi.');
 });
 
+test('parseIdeogramCaption normalizes fractional 0..1 boxes to 0..1000 space', () => {
+  const parsed = parseIdeogramCaption(
+    JSON.stringify({
+      compositional_deconstruction: {
+        elements: [
+          {
+            type: 'obj',
+            bbox: [0.1, 0.2, 0.3, 0.4],
+            desc: 'Fractional box',
+          },
+        ],
+      },
+    }),
+  );
+
+  assert.equal(parsed.kind, 'ideogram');
+  assert.deepEqual(parsed.boxes[0], {
+    y1: 100,
+    x1: 200,
+    y2: 300,
+    x2: 400,
+    elementIndex: 0,
+    type: 'obj',
+    label: 'Fractional box',
+    color: '#22D3EE',
+  });
+});
+
+test('parseIdeogramCaption converts bbox_px and bboxPx using image dimensions when provided', () => {
+  const parsed = parseIdeogramCaption(
+    JSON.stringify({
+      compositional_deconstruction: {
+        elements: [
+          {
+            type: 'obj',
+            bbox_px: [50, 100, 250, 400],
+            desc: 'Legacy pixels',
+          },
+          {
+            type: 'text',
+            bboxPx: [50, 100, 250, 400],
+            text: 'Alias pixels',
+          },
+        ],
+      },
+    }),
+    { width: 500, height: 400 },
+  );
+
+  assert.equal(parsed.kind, 'ideogram');
+  assert.deepEqual(parsed.boxes.map(box => [box.y1, box.x1, box.y2, box.x2]), [
+    [125, 200, 625, 800],
+    [125, 200, 625, 800],
+  ]);
+});
+
+test('parseIdeogramCaption normalizes legacy bbox values that exceed 0..1000 when image dimensions are provided', () => {
+  const parsed = parseIdeogramCaption(
+    JSON.stringify({
+      compositional_deconstruction: {
+        elements: [
+          {
+            type: 'obj',
+            bbox: [250, 500, 1250, 1500],
+            desc: 'Out of range',
+          },
+        ],
+      },
+    }),
+    { width: 2000, height: 1000 },
+  );
+
+  assert.equal(parsed.kind, 'ideogram');
+  assert.deepEqual(parsed.boxes.map(box => [box.y1, box.x1, box.y2, box.x2]), [[250, 250, 1000, 750]]);
+});
+
+test('parseIdeogramCaption ignores malformed bbox data instead of throwing', () => {
+  const parsed = parseIdeogramCaption(
+    JSON.stringify({
+      compositional_deconstruction: {
+        elements: [
+          {
+            type: 'obj',
+            bbox: ['bad', 2, 3, 4],
+            desc: 'Bad box',
+          },
+          {
+            type: 'obj',
+            bbox: [10, 20, 30],
+            desc: 'Bad length',
+          },
+          {
+            type: 'obj',
+            bbox_px: [0.1, 0.2, 0.3, 0.4],
+            desc: 'Fractional pixels',
+          },
+        ],
+      },
+    }),
+    { width: 100, height: 100 },
+  );
+
+  assert.equal(parsed.kind, 'ideogram');
+  assert.equal(parsed.boxes.length, 1);
+  assert.deepEqual(parsed.boxes[0], {
+    y1: 100,
+    x1: 200,
+    y2: 300,
+    x2: 400,
+    elementIndex: 2,
+    type: 'obj',
+    label: 'Fractional pixels',
+    color: '#22D3EE',
+  });
+});
+
 test('box helpers clamp and preserve ymin/xmin/ymax/xmax contract', () => {
   assert.deepEqual(boxToArray({ y1: 900.2, x1: -12, y2: 1200, x2: 100.6 }), [900, 0, 1000, 101]);
   assert.deepEqual(rectToBox({ x: 40, y: 60, w: 200, h: 120 }), { y1: 60, x1: 40, y2: 180, x2: 240 });

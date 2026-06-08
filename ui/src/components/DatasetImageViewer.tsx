@@ -49,6 +49,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
   const [isEditingBoxes, setIsEditingBoxes] = useState<boolean>(false);
   const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | null>(null);
   const [isDrawingBox, setIsDrawingBox] = useState<boolean>(false);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const captionRef = useRef<string>('');
   const savedCaptionRef = useRef<string>('');
   const currentImgPathRef = useRef<string | null>(null);
@@ -60,6 +61,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
     setIsEditingBoxes(false);
     setSelectedBoxIndex(null);
     setIsDrawingBox(false);
+    setImageSize(null);
   }, [imgPath]);
 
   // open/close based on external value
@@ -407,8 +409,14 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
   };
 
   const parsedCaptionData = useMemo(() => parseJsonCaption(caption), [caption]);
-  const boundingBoxes = useMemo(() => parseBoundingBoxes(caption), [caption]);
-  const editBoxes = useMemo(() => extractEditableBoxes(parsedCaptionData), [parsedCaptionData]);
+  const boundingBoxes = useMemo(
+    () => parseBoundingBoxes(caption, imageSize ?? undefined),
+    [caption, imageSize],
+  );
+  const editBoxes = useMemo(
+    () => extractEditableBoxes(parsedCaptionData, imageSize ?? undefined),
+    [parsedCaptionData, imageSize],
+  );
   const selectedElement = useMemo(() => {
     if (selectedBoxIndex == null) return null;
     return readCaptionElements(parsedCaptionData)?.[selectedBoxIndex] ?? null;
@@ -469,6 +477,12 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                           alt="Dataset Image"
                           draggable={false}
                           className="block w-auto h-auto max-w-full sm:max-w-[95vw] max-h-[70vh] object-contain select-none !pointer-events-auto"
+                          onLoad={event => {
+                            setImageSize({
+                              width: event.currentTarget.naturalWidth,
+                              height: event.currentTarget.naturalHeight,
+                            });
+                          }}
                         />
                         {isEditingBoxes ? (
                           <BoundingBoxEditor

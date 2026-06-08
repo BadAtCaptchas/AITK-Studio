@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { ReactNode } from 'react';
 import classNames from 'classnames';
+import { arrayToBox } from '@/utils/ideogramCaption';
 
 export interface OverlayBox {
   y1: number;
@@ -36,6 +37,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+type ImageSize = {
+  width: number;
+  height: number;
+};
+
 function readElements(data: unknown): unknown[] | null {
   if (!isRecord(data)) return null;
   const deconstruction = data.compositional_deconstruction;
@@ -43,16 +49,12 @@ function readElements(data: unknown): unknown[] | null {
   return Array.isArray(deconstruction.elements) ? deconstruction.elements : null;
 }
 
-function readBox(raw: unknown): BoxCoords | null {
-  if (!Array.isArray(raw) || raw.length !== 4) return null;
-  const values = raw.map(value => (typeof value === 'number' && Number.isFinite(value) ? value : null));
-  if (values.some(value => value === null)) return null;
-  return normalizeBox({
-    y1: values[0]!,
-    x1: values[1]!,
-    y2: values[2]!,
-    x2: values[3]!,
-  });
+function readBox(raw: Record<string, unknown>, imageSize?: ImageSize): BoxCoords | null {
+  const direct = arrayToBox(raw.bbox, imageSize);
+  if (direct) return direct;
+  const pixel = arrayToBox(raw.bbox_px, imageSize, 'bbox_px');
+  if (pixel) return pixel;
+  return arrayToBox(raw.bboxPx, imageSize, 'bboxPx');
 }
 
 function labelForElement(element: Record<string, unknown>, type: 'obj' | 'text') {
@@ -60,14 +62,14 @@ function labelForElement(element: Record<string, unknown>, type: 'obj' | 'text')
   return value == null ? '' : `${value}`;
 }
 
-export function extractEditableBoxes(data: unknown): EditableBox[] {
+export function extractEditableBoxes(data: unknown, imageSize?: ImageSize): EditableBox[] {
   const elements = readElements(data);
   if (!elements) return [];
 
   const boxes: EditableBox[] = [];
   elements.forEach((rawElement, elementIndex) => {
     if (!isRecord(rawElement)) return;
-    const coords = readBox(rawElement.bbox);
+    const coords = readBox(rawElement, imageSize);
     if (!coords) return;
     const type = rawElement.type === 'text' ? 'text' : 'obj';
     boxes.push({
@@ -80,13 +82,13 @@ export function extractEditableBoxes(data: unknown): EditableBox[] {
   return boxes;
 }
 
-export function parseBoundingBoxes(text: string): OverlayBox[] | null {
-  const parsed = parseCaptionForEditing(text);
+export function parseBoundingBoxes(text: string, imageSize?: ImageSize): OverlayBox[] | null {
+  const parsed = parseCaptionForEditing(text, imageSize);
   if (!parsed) return null;
   return parsed.boxes.map(({ elementIndex: _elementIndex, ...box }) => box);
 }
 
-export function parseCaptionForEditing(text: string): EditableCaptionData | null {
+export function parseCaptionForEditing(text: string, imageSize?: ImageSize): EditableCaptionData | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith('{')) return null;
 
@@ -97,7 +99,7 @@ export function parseCaptionForEditing(text: string): EditableCaptionData | null
     return null;
   }
 
-  const boxes = extractEditableBoxes(data);
+  const boxes = extractEditableBoxes(data, imageSize);
   return boxes.length > 0 ? { data, boxes } : null;
 }
 

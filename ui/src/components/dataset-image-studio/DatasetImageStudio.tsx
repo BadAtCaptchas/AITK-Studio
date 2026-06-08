@@ -150,7 +150,10 @@ export default function DatasetImageStudio({
     [workers],
   );
   const autoBoxProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === autoBoxProvider)?.label || 'OpenRouter';
-  const captionParse = useMemo(() => parseIdeogramCaption(captionText), [captionText]);
+  const captionParse = useMemo(
+    () => parseIdeogramCaption(captionText, selectedImageSize ?? undefined),
+    [captionText, selectedImageSize],
+  );
   const isIdeogram = captionParse.kind === 'ideogram';
   const boxes = isIdeogram ? captionParse.boxes : [];
   const selectedElement =
@@ -571,7 +574,7 @@ export default function DatasetImageStudio({
 
   const mutateCaption = useCallback(
     (mutator: (data: Record<string, any>) => void, nextSelectedElementIndex?: number | null) => {
-      const parsed = parseIdeogramCaption(captionText);
+      const parsed = parseIdeogramCaption(captionText, selectedImageSize ?? undefined);
       if (parsed.kind !== 'ideogram') return;
       const data = cloneIdeogramData(parsed.data);
       mutator(data);
@@ -583,13 +586,13 @@ export default function DatasetImageStudio({
       setCaptionText(next);
       if (nextSelectedElementIndex !== undefined) setSelectedElementIndex(nextSelectedElementIndex);
     },
-    [captionText],
+    [captionText, selectedImageSize],
   );
 
   const mutateLatestCaption = useCallback(
     (mutator: (data: Record<string, any>) => void, nextSelectedElementIndex?: number | null) => {
       const currentCaption = latestCaptionRef.current;
-      const parsed = parseIdeogramCaption(currentCaption);
+      const parsed = parseIdeogramCaption(currentCaption, selectedImageSize ?? undefined);
       if (parsed.kind !== 'ideogram') return false;
       const data = cloneIdeogramData(parsed.data);
       mutator(data);
@@ -602,7 +605,7 @@ export default function DatasetImageStudio({
       if (nextSelectedElementIndex !== undefined) setSelectedElementIndex(nextSelectedElementIndex);
       return true;
     },
-    [],
+    [selectedImageSize],
   );
 
   const setLayerCaptionMessageForKey = useCallback((requestLayerKey: string, message: string) => {
@@ -802,7 +805,7 @@ export default function DatasetImageStudio({
       if (selectedKeyRef.current !== requestKey) {
         return;
       }
-      const latestParsed = parseIdeogramCaption(latestCaptionRef.current);
+      const latestParsed = parseIdeogramCaption(latestCaptionRef.current, selectedImageSize ?? undefined);
       const currentElement =
         latestParsed.kind === 'ideogram' ? latestParsed.elements[requestElementIndex] ?? null : null;
       if (!pendingCaptionLayerStillMatches(currentElement, requestElement)) {

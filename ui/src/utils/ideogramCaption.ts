@@ -28,6 +28,11 @@ export type GeneratedElementBox = {
   color_palette?: string[];
 };
 
+export type ImageSize = {
+  width: number;
+  height: number;
+};
+
 export type IdeogramCaptionParse =
   | {
       kind: 'ideogram';
@@ -77,7 +82,16 @@ function normalizeStyleDescription(value: unknown) {
 
 function normalizeElement(value: unknown) {
   if (!isRecord(value)) return value;
-  if (Array.isArray(value.bbox)) value.bbox = boxToArray(arrayToBox(value.bbox) || { y1: 0, x1: 0, y2: 0, x2: 0 });
+  const rawBoxTuple =
+    value.bbox ?? value.bbox_px ?? value.bboxPx;
+  if (Array.isArray(rawBoxTuple)) {
+    const source = Array.isArray(value.bbox)
+      ? 'bbox'
+      : Array.isArray(value.bbox_px)
+        ? 'bbox_px'
+        : 'bboxPx';
+    value.bbox = boxToArray(arrayToBox(rawBoxTuple, undefined, source) || { y1: 0, x1: 0, y2: 0, x2: 0 });
+  }
   const order = value.type === 'text' ? ELEMENT_TEXT_ORDER : ELEMENT_OBJ_ORDER;
   return orderRecord(value, order);
 }
@@ -116,15 +130,35 @@ export function normalizeBox(box: NormalizedBox): NormalizedBox {
   };
 }
 
-export function arrayToBox(value: unknown): NormalizedBox | null {
+type BoxSource = 'bbox' | 'bbox_px' | 'bboxPx';
+
+function valuesAreFractional(values: number[]) {
+  return values.every(value => value >= 0 && value <= 1);
+}
+
+export function arrayToBox(value: unknown, imageSize?: ImageSize, source: BoxSource = 'bbox'): NormalizedBox | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
   const values = value.map(item => (typeof item === 'number' && Number.isFinite(item) ? item : null));
   if (values.some(item => item == null)) return null;
+  const numericValues = values as number[];
+  const isFractional = valuesAreFractional(numericValues);
+  const bboxExceedsNormalizedRange = numericValues.some(value => value > 1000);
+  const hasImageSize = imageSize && imageSize.width > 0 && imageSize.height > 0;
+  const shouldScaleFromImage = (source !== 'bbox' || bboxExceedsNormalizedRange) && hasImageSize;
+
+  const scaled = numericValues.map((value, index) => {
+    if (isFractional) return value * 1000;
+    if (!shouldScaleFromImage) return value;
+    const divisor = index % 2 === 0 ? imageSize?.height : imageSize?.width;
+    if (!hasImageSize || !Number.isFinite(divisor) || divisor <= 0) return value;
+    return (value / divisor) * 1000;
+  });
+
   return normalizeBox({
-    y1: values[0] as number,
-    x1: values[1] as number,
-    y2: values[2] as number,
-    x2: values[3] as number,
+    y1: scaled[0],
+    x1: scaled[1],
+    y2: scaled[2],
+    x2: scaled[3],
   });
 }
 
@@ -247,7 +281,7 @@ export function rectToBox(rect: { x: number; y: number; w: number; h: number }) 
   });
 }
 
-export function parseIdeogramCaption(text: string): IdeogramCaptionParse {
+export function parseIdeogramCaption(text: string, imageSize?: ImageSize): IdeogramCaptionParse {
   const trimmed = text.trim();
   if (!trimmed.startsWith('{')) return { kind: 'plain' };
 
@@ -272,18 +306,20 @@ export function parseIdeogramCaption(text: string): IdeogramCaptionParse {
     kind: 'ideogram',
     data: parsed,
     elements: composition.elements,
-    boxes: extractIdeogramBoxes(parsed),
+    boxes: extractIdeogramBoxes(parsed, imageSize),
   };
 }
 
-export function extractIdeogramBoxes(data: unknown): IdeogramBox[] {
+export function extractIdeogramBoxes(data: unknown, imageSize?: ImageSize): IdeogramBox[] {
   if (!isRecord(data)) return [];
   const composition = data.compositional_deconstruction;
   if (!isRecord(composition) || !Array.isArray(composition.elements)) return [];
 
   return composition.elements.flatMap((rawElement, elementIndex) => {
     if (!isRecord(rawElement)) return [];
-    const box = arrayToBox(rawElement.bbox);
+    const box = arrayToBox(rawElement.bbox, imageSize) ||
+      arrayToBox(rawElement.bbox_px, imageSize, 'bbox_px') ||
+      arrayToBox(rawElement.bboxPx, imageSize, 'bboxPx');
     if (!box) return [];
     const type: IdeogramElementType = rawElement.type === 'text' ? 'text' : 'obj';
     const labelSource = type === 'text' ? rawElement.text || rawElement.desc : rawElement.desc;

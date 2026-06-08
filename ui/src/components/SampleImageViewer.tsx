@@ -34,6 +34,7 @@ export default function SampleImageViewer({
   const [isOpen, setIsOpen] = useState(Boolean(imgPath));
   const [showingControlIdx, setShowingControlIdx] = useState<number | null>(null);
   const [showBoxes, setShowBoxes] = useState(false);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -49,6 +50,10 @@ export default function SampleImageViewer({
       return () => clearTimeout(t);
     }
   }, [isOpen, imgPath, onChange]);
+
+  useEffect(() => {
+    setImageSize(null);
+  }, [imgPath]);
 
   const onCancel = useCallback(() => {
     setShowingControlIdx(null);
@@ -209,8 +214,8 @@ export default function SampleImageViewer({
   }, [showingControlIdx, controlImages, imgPath]);
 
   const boundingBoxes = useMemo(
-    () => (sampleItem?.prompt ? parseBoundingBoxes(sampleItem.prompt) : null),
-    [sampleItem?.prompt],
+    () => (sampleItem?.prompt ? parseBoundingBoxes(sampleItem.prompt, imageSize ?? undefined) : null),
+    [sampleItem?.prompt, imageSize],
   );
   const canShowBoxes = Boolean(
     boundingBoxes &&
@@ -292,6 +297,12 @@ export default function SampleImageViewer({
                       src={getMediaUrl(displayedImgPath)}
                       alt="Sample Image"
                       className="block w-auto h-auto max-w-[95vw] max-h-[82vh] object-contain"
+                      onLoad={event => {
+                        setImageSize({
+                          width: event.currentTarget.naturalWidth,
+                          height: event.currentTarget.naturalHeight,
+                        });
+                      }}
                     />
                     {showBoxes && canShowBoxes && boundingBoxes && <BoundingBoxOverlay boxes={boundingBoxes} />}
                   </div>

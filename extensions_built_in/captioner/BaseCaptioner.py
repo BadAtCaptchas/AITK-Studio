@@ -739,11 +739,31 @@ class BaseCaptioner(BaseExtensionProcess):
         print(status)
         self.update_status("running", status)
 
+    def encrypted_item_has_output_caption(self, item) -> bool:
+        if not item.captionObjectPath:
+            return False
+        if not self.is_ideogram_json_output():
+            return True
+
+        try:
+            source_caption = (self.encrypted_reader.get_caption(item) or "").strip()
+            if not source_caption:
+                return False
+            parsed = self._parse_json_caption(source_caption)
+            warnings = self._ideogram_caption_verifier().verify(parsed)
+            return not warnings
+        except Exception:
+            return False
+
     def find_files(self):
         if self.encrypted_reader is not None:
             items = self.encrypted_reader.list_items(extensions=self.caption_config.extensions)
             if not self.caption_config.recaption:
-                items = [item for item in items if not item.captionObjectPath]
+                items = [
+                    item
+                    for item in items
+                    if not self.encrypted_item_has_output_caption(item)
+                ]
             self.encrypted_items_by_path = {self.encrypted_reader.virtual_path(item): item for item in items}
             self.file_paths = sorted(self.encrypted_items_by_path.keys())
             print(f"Found {len(self.file_paths)} encrypted files to caption")

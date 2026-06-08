@@ -677,6 +677,51 @@ class IdeogramJsonCaptionerBehaviorTest(unittest.TestCase):
             prompt,
         )
 
+    def test_non_encrypted_json_conversion_includes_existing_text_caption(self):
+        captioner = self._json_captioner()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image_path = root / "image.jpg"
+            image_path.write_bytes(b"not decoded by file discovery")
+            (root / "image.txt").write_text("existing text caption", encoding="utf-8")
+
+            captioner.encrypted_reader = None
+            captioner.file_paths = []
+            captioner.caption_config = types.SimpleNamespace(
+                output_format="ideogram_json",
+                path_to_caption=str(root),
+                extensions=["jpg"],
+                recaption=False,
+                caption_extension="json",
+            )
+
+            captioner.find_files()
+
+        self.assertEqual(captioner.file_paths, [str(image_path)])
+
+    def test_non_encrypted_json_conversion_skips_existing_json_output(self):
+        captioner = self._json_captioner()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image_path = root / "image.jpg"
+            image_path.write_bytes(b"not decoded by file discovery")
+            (root / "image.txt").write_text("existing text caption", encoding="utf-8")
+            (root / "image.json").write_text("{}", encoding="utf-8")
+
+            captioner.encrypted_reader = None
+            captioner.file_paths = []
+            captioner.caption_config = types.SimpleNamespace(
+                output_format="ideogram_json",
+                path_to_caption=str(root),
+                extensions=["jpg"],
+                recaption=False,
+                caption_extension="json",
+            )
+
+            captioner.find_files()
+
+        self.assertEqual(captioner.file_paths, [])
+
 
 class Ideogram4HelperBehaviorTest(unittest.TestCase):
     def setUp(self):

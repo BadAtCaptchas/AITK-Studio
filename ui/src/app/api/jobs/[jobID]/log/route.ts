@@ -3,7 +3,13 @@ import path from 'path';
 import fs from 'fs';
 import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
-import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import {
+  getRemoteWorker,
+  isLocalWorker,
+  isRemoteJobMissingError,
+  markRemoteJobMissing,
+  remoteJson,
+} from '@/server/remoteClient';
 
 const MAX_LOG_BYTES = 200 * 1024;
 const LAUNCH_LOG_FILE = 'launch.log';
@@ -43,6 +49,10 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
       const worker = await getRemoteWorker(job.worker_id);
       return NextResponse.json(await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/log`));
     } catch (error) {
+      if (isRemoteJobMissingError(error)) {
+        await markRemoteJobMissing(job);
+        return NextResponse.json({ log: '' });
+      }
       console.error('Error reading remote log file:', error);
       return NextResponse.json({ error: 'Error reading remote log file' }, { status: 502 });
     }

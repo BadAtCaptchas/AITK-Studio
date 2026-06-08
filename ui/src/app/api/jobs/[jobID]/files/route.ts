@@ -3,7 +3,13 @@ import path from 'path';
 import fs from 'fs';
 import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
-import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import {
+  getRemoteWorker,
+  isLocalWorker,
+  isRemoteJobMissingError,
+  markRemoteJobMissing,
+  remoteJson,
+} from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
 
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
@@ -32,6 +38,10 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
         })),
       });
     } catch (error) {
+      if (isRemoteJobMissingError(error)) {
+        await markRemoteJobMissing(job);
+        return NextResponse.json({ files: [] });
+      }
       console.error('Error reading remote files:', error);
       return NextResponse.json({ error: 'Error reading remote files' }, { status: 502 });
     }

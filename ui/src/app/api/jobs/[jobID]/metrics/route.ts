@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
-import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import {
+  getRemoteWorker,
+  isLocalWorker,
+  isRemoteJobMissingError,
+  markRemoteJobMissing,
+  remoteJson,
+} from '@/server/remoteClient';
 
 export const runtime = 'nodejs';
 
@@ -48,6 +54,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`),
       );
     } catch (error) {
+      if (isRemoteJobMissingError(error)) {
+        await markRemoteJobMissing(job);
+        return NextResponse.json({ keys: [], keyInfo: [], series: {} });
+      }
       console.error('Error reading remote metrics:', error);
       return NextResponse.json({ error: 'Error reading remote metrics' }, { status: 502 });
     }

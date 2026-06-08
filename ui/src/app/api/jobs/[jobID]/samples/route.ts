@@ -3,7 +3,13 @@ import path from 'path';
 import fs from 'fs';
 import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
-import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import {
+  getRemoteWorker,
+  isLocalWorker,
+  isRemoteJobMissingError,
+  markRemoteJobMissing,
+  remoteJson,
+} from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
 
 function isPathInsideRoot(root: string, filepath: string) {
@@ -34,6 +40,10 @@ export async function GET(_request: Request, { params }: { params: { jobID: stri
         samples: (data.samples || []).map(sample => makeRemoteAssetRef(job.id, 'img', sample)),
       });
     } catch (error) {
+      if (isRemoteJobMissingError(error)) {
+        await markRemoteJobMissing(job);
+        return NextResponse.json({ samples: [] });
+      }
       console.error('Error reading remote samples:', error);
       return NextResponse.json({ error: 'Error reading remote samples' }, { status: 502 });
     }

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
-import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
+import {
+  getRemoteWorker,
+  isLocalWorker,
+  isRemoteJobMissingError,
+  markRemoteJobMissing,
+  remoteJson,
+  syncRemoteJob,
+} from '@/server/remoteClient';
 
 export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
   const { jobID } = await params;
@@ -19,6 +26,9 @@ export async function GET(request: NextRequest, { params }: { params: { jobID: s
         const synced = await syncRemoteJob(job);
         return NextResponse.json(synced);
       } catch (error) {
+        if (isRemoteJobMissingError(error)) {
+          return NextResponse.json(await markRemoteJobMissing(job));
+        }
         const message = error instanceof Error ? error.message : 'Failed to mark remote job as stopped';
         await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
         return NextResponse.json({ error: message }, { status: 502 });

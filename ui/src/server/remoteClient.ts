@@ -26,6 +26,9 @@ export class RemoteClientError extends Error {
   }
 }
 
+export const REMOTE_JOB_MISSING_MESSAGE =
+  'Remote job was not found on the worker. It may have been deleted there while the central UI was offline.';
+
 type RemoteDiscoveryErrorLogState = {
   signature: string;
   lastLoggedAt: number;
@@ -127,6 +130,32 @@ export async function fetchRemoteJob(workerId: string, remoteJobId: string) {
 
 async function fetchWorkerJob(worker: WorkerNodeRecord, remoteJobId: string) {
   return remoteJson<Job | null>(worker, `/api/jobs?id=${encodeURIComponent(remoteJobId)}`);
+}
+
+export function isRemoteJobMissingError(error: unknown) {
+  return (
+    error instanceof RemoteClientError &&
+    error.status === 404 &&
+    (/job not found/i.test(error.body) || /job not found/i.test(error.message))
+  );
+}
+
+export function remoteJobMissingUpdate() {
+  return {
+    remote_job_id: null,
+    status: 'error',
+    stop: false,
+    return_to_queue: false,
+    pid: null,
+    speed_string: '',
+    info: 'Remote job was deleted on the worker.',
+    remote_error: REMOTE_JOB_MISSING_MESSAGE,
+    remote_sync_at: new Date(),
+  };
+}
+
+export async function markRemoteJobMissing(localJob: Job) {
+  return db.jobs.update(localJob.id, remoteJobMissingUpdate());
 }
 
 export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string | null) {
@@ -246,10 +275,7 @@ export async function syncRemoteJob(localJob: Job) {
     const worker = await getRemoteWorker(localJob.worker_id);
     const remoteJob = await fetchWorkerJob(worker, localJob.remote_job_id);
     if (!remoteJob) {
-      return db.jobs.update(localJob.id, {
-        remote_error: 'Remote job was not found on the worker.',
-        remote_sync_at: new Date(),
-      });
+      return markRemoteJobMissing(localJob);
     }
 
     const latestLocalJob = await db.jobs.findById(localJob.id);
@@ -266,6 +292,9 @@ export async function syncRemoteJob(localJob: Job) {
     }
     return synced;
   } catch (error) {
+    if (isRemoteJobMissingError(error)) {
+      return markRemoteJobMissing(localJob);
+    }
     return db.jobs.update(localJob.id, {
       remote_sync_at: new Date(),
       remote_error: error instanceof Error ? error.message : 'Remote sync failed',

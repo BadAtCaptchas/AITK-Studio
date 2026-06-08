@@ -184,6 +184,45 @@ class FluxGuidanceBypassConfigTest(unittest.TestCase):
                         NetworkConfig(type="lora"),
                     )
 
+    def test_validate_accepts_ideogram_and_klein_without_guidance_bypass(self):
+        cases = [
+            ("ideogram4", "ideogram-ai/ideogram-4-nf4"),
+            ("ideogram4:fp8", "ideogram-ai/ideogram-4-fp8"),
+            ("flux2_klein_4b", "black-forest-labs/FLUX.2-klein-base-4B"),
+            ("flux2_klein_9b", "black-forest-labs/FLUX.2-klein-base-9B"),
+            ("asymflux2_klein_9b", "Lakonik/AsymFLUX.2-klein-9B"),
+        ]
+
+        for arch, name_or_path in cases:
+            with self.subTest(name_or_path=name_or_path):
+                validate_configs(
+                    TrainConfig(bypass_guidance_embedding=False),
+                    ModelConfig(arch=arch, name_or_path=name_or_path),
+                    SaveConfig(save_format="diffusers"),
+                    [],
+                    NetworkConfig(type="lora"),
+                )
+
+    def test_validate_rejects_ideogram_and_klein_guidance_bypass(self):
+        cases = [
+            ("ideogram4", "ideogram-ai/ideogram-4-nf4"),
+            ("ideogram4:fp8", "ideogram-ai/ideogram-4-fp8"),
+            ("flux2_klein_4b", "black-forest-labs/FLUX.2-klein-base-4B"),
+            ("flux2_klein_9b", "black-forest-labs/FLUX.2-klein-base-9B"),
+            ("asymflux2_klein_9b", "Lakonik/AsymFLUX.2-klein-9B"),
+        ]
+
+        for arch, name_or_path in cases:
+            with self.subTest(name_or_path=name_or_path):
+                with self.assertRaisesRegex(ValueError, "bypass_guidance_embedding.*(Ideogram 4|Klein)"):
+                    validate_configs(
+                        TrainConfig(bypass_guidance_embedding=True),
+                        ModelConfig(arch=arch, name_or_path=name_or_path),
+                        SaveConfig(save_format="diffusers"),
+                        [],
+                        NetworkConfig(type="lora"),
+                    )
+
     def test_validate_accepts_flex_guidance_bypass(self):
         cases = [
             ("flex1", "ostris/Flex.1-alpha"),

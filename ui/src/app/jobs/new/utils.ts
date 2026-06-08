@@ -2,6 +2,7 @@ import { GroupedSelectOption, JobConfig, SelectOption } from '@/types';
 import { modelArchs, ModelArch } from './options';
 import { objectCopy } from '@/utils/basic';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
+import { expectedFluxGuidanceBypass } from '@/utils/fluxGuidancePolicy';
 
 const modelLowVramKey = 'config.process[0].model.low_vram';
 const keepLowVramForSamplesKey = 'config.process[0].sample.keep_low_vram_for_samples';
@@ -167,5 +168,16 @@ export const handleModelArchChange = (
 
   for (const key in newDefaults) {
     setJobConfig(newDefaults[key][0], key);
+  }
+
+  const expectedGuidanceBypass = expectedFluxGuidanceBypass({
+    arch: newArchName,
+    name_or_path:
+      newDefaults['config.process[0].model.name_or_path']?.[0] ??
+      jobConfig.config.process[0].model.name_or_path,
+    use_flux_cfg: jobConfig.config.process[0].model.use_flux_cfg,
+  });
+  if (expectedGuidanceBypass !== null) {
+    setJobConfig(expectedGuidanceBypass, 'config.process[0].train.bypass_guidance_embedding');
   }
 };

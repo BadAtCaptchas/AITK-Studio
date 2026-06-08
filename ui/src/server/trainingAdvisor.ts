@@ -527,16 +527,59 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
     use_flux_cfg: processConfig.model?.use_flux_cfg,
   });
   const bypassesGuidanceEmbedding = train?.bypass_guidance_embedding === true;
+  const isIdeogramGuidanceBypassPolicy =
+    baseArch === 'ideogram4' ||
+    /ideogram-ai[/\\]ideogram-4-(nf4|fp8)|ideogram-4-(nf4|fp8)/i.test(
+      String(processConfig.model?.name_or_path ?? ''),
+    );
+  const isKleinGuidanceBypassPolicy =
+    baseArch === 'flux2_klein_4b' ||
+    baseArch === 'flux2_klein_9b' ||
+    baseArch === 'asymflux2_klein_9b' ||
+    /flux\.2-klein-base-[49]b|asymflux\.2-klein-9b/i.test(
+      String(processConfig.model?.name_or_path ?? ''),
+    );
+  const isOfficialFluxGuidanceBypassPolicy =
+    baseArch === 'flux' ||
+    baseArch === 'flux_kontext' ||
+    /flux\.1-(dev|schnell|kontext(?:-dev)?)/i.test(String(processConfig.model?.name_or_path ?? ''));
   if (guidanceBypassPolicy === 'forbidden' && bypassesGuidanceEmbedding) {
+    const forbiddenGuidanceBypassFinding = isIdeogramGuidanceBypassPolicy
+      ? {
+          id: 'train.bypass_guidance_embedding.ideogram',
+          title: 'Ideogram guidance bypass is enabled',
+          message: 'This job targets Ideogram 4, but train.bypass_guidance_embedding is a Flex-only setting.',
+          recommendation: 'Set train.bypass_guidance_embedding to false for Ideogram 4 training.',
+        }
+      : isKleinGuidanceBypassPolicy
+        ? {
+            id: 'train.bypass_guidance_embedding.klein',
+            title: 'Klein guidance bypass is enabled',
+            message: 'This job targets FLUX.2 Klein or AsymFLUX.2 Klein, but train.bypass_guidance_embedding is a Flex-only setting.',
+            recommendation: 'Set train.bypass_guidance_embedding to false for Klein training.',
+          }
+        : isOfficialFluxGuidanceBypassPolicy
+          ? {
+            id: 'train.bypass_guidance_embedding.flux',
+            title: 'Flux guidance bypass is enabled',
+            message: 'This job targets official FLUX.1-dev, FLUX.1-schnell, or FLUX.1-Kontext, but train.bypass_guidance_embedding is true.',
+            recommendation: 'Set train.bypass_guidance_embedding to false for official FLUX.1 and Kontext training.',
+          }
+          : {
+            id: 'train.bypass_guidance_embedding.non_flex',
+            title: 'Flex guidance bypass is enabled',
+            message: 'This job does not target Flex.1 or Flex.2, but train.bypass_guidance_embedding is enabled.',
+            recommendation: 'Set train.bypass_guidance_embedding to false for non-Flex training.',
+          };
     addFinding(
       findings,
       'critical',
       'preflight',
       'config',
-      'train.bypass_guidance_embedding.flux',
-      'Flux guidance bypass is enabled',
-      'This job targets official FLUX.1-dev, FLUX.1-schnell, or FLUX.1-Kontext, but train.bypass_guidance_embedding is true.',
-      'Set train.bypass_guidance_embedding to false for official FLUX.1 and Kontext training.',
+      forbiddenGuidanceBypassFinding.id,
+      forbiddenGuidanceBypassFinding.title,
+      forbiddenGuidanceBypassFinding.message,
+      forbiddenGuidanceBypassFinding.recommendation,
       undefined,
       [
         'config.process[0].model.arch',

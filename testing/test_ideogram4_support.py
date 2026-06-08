@@ -215,6 +215,7 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("name: 'ideogram4:fp8'", options)
         self.assertIn("label: 'Ideogram 4 FP8'", options)
         self.assertIn("'config.process[0].model.name_or_path': ['ideogram-ai/ideogram-4-fp8', defaultNameOrPath]", options)
+        self.assertIn("'config.process[0].train.bypass_guidance_embedding': [false, false]", options)
         self.assertIn("require_json_captions: true", options)
         self.assertIn("caption_strict: false", options)
         self.assertIn("dequantize_fp8_transformer: true", options)

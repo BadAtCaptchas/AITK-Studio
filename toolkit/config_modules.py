@@ -1,7 +1,7 @@
 import os
 import time
 import math
-from typing import Any, List, Optional, Literal, Tuple, Union, TYPE_CHECKING, Dict
+from typing import Any, List, Optional, Literal, Union, TYPE_CHECKING, Dict
 import random
 
 import torch
@@ -705,46 +705,41 @@ class TrainConfig:
 ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ideogram4']
 LayerOffloadingBackend = Literal['block', 'legacy']
 
-_FLEX_GUIDANCE_BYPASS_REFS = (
-    'ostris/flex.1-alpha',
-    'flex.1-alpha',
-    'ostris/flex.2-preview',
-    'flex.2-preview',
-)
-
-_OFFICIAL_FLUX_NO_GUIDANCE_BYPASS_REFS = (
-    'black-forest-labs/flux.1-dev',
-    'flux.1-dev',
-    'black-forest-labs/flux.1-schnell',
-    'flux.1-schnell',
-    'black-forest-labs/flux.1-kontext-dev',
-    'flux.1-kontext-dev',
-)
-
-
 def _normalize_model_ref(value: Optional[str]) -> str:
     return str(value or '').strip().replace('\\', '/').lower()
 
 
-def _matches_known_model_ref(model_ref: str, refs: Tuple[str, ...]) -> bool:
-    return any(ref in model_ref for ref in refs)
+def _normalize_arch(value: Optional[str]) -> str:
+    return str(value or '').strip().lower().split(':', 1)[0]
+
+
+def _looks_like_flex_ref(model_ref: str) -> bool:
+    return (
+        '/flex.1' in model_ref
+        or model_ref.startswith('flex.1')
+        or '/flex.2' in model_ref
+        or model_ref.startswith('flex.2')
+    )
 
 
 def get_flux_guidance_bypass_policy(model_config: "ModelConfig") -> str:
-    if getattr(model_config, 'use_flux_cfg', False):
-        return 'required'
-
-    arch = str(getattr(model_config, 'arch', '') or '').strip().lower()
-    base_arch = arch.split(':', 1)[0]
+    arch_candidates = {
+        _normalize_arch(getattr(model_config, 'arch_original', None)),
+        _normalize_arch(getattr(model_config, 'arch', None)),
+    }
+    arch_candidates.discard('')
     model_ref = _normalize_model_ref(getattr(model_config, 'name_or_path', None))
 
-    if base_arch in {'flex1', 'flex2'} or _matches_known_model_ref(model_ref, _FLEX_GUIDANCE_BYPASS_REFS):
+    # Keep model.use_flux_cfg's existing Flux behavior: it trains by bypassing the Flux guidance embedding.
+    if getattr(model_config, 'use_flux_cfg', False) and (
+        getattr(model_config, 'is_flux', False) or bool(arch_candidates & {'flux', 'flux_kontext'})
+    ):
         return 'required'
 
-    if (
-        base_arch in {'flux', 'flux_kontext'}
-        or _matches_known_model_ref(model_ref, _OFFICIAL_FLUX_NO_GUIDANCE_BYPASS_REFS)
-    ):
+    if arch_candidates & {'flex1', 'flex2'} or _looks_like_flex_ref(model_ref):
+        return 'required'
+
+    if arch_candidates:
         return 'forbidden'
 
     return 'unspecified'
@@ -837,6 +832,7 @@ class ModelConfig:
         self.te_name_or_path = kwargs.get("te_name_or_path", None)
         
         self.arch: ModelArch = kwargs.get("arch", None)
+        self.arch_original: Optional[str] = self.arch
         
         # auto memory management, only for some models
         self.auto_memory = kwargs.get("auto_memory", False)
@@ -1561,8 +1557,9 @@ def validate_configs(
     if flux_guidance_bypass_policy == 'forbidden' and train_config.bypass_guidance_embedding:
         raise ValueError(
             "train.bypass_guidance_embedding must be false for official FLUX.1-dev, "
-            "FLUX.1-schnell, and FLUX.1-Kontext models. This setting is only for "
-            "Flex-style models; remove it or set it to false."
+            "FLUX.1-schnell, FLUX.1-Kontext, Ideogram 4, and FLUX.2 Klein models. "
+            "This setting is only for Flex-style models or model.use_flux_cfg Flux jobs; "
+            "remove it or set it to false."
         )
     if train_config.bypass_guidance_embedding and train_config.do_guidance_loss:
         raise ValueError("Cannot bypass guidance embedding and do guidance loss at the same time. "

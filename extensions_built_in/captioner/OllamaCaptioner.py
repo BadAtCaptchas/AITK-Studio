@@ -10,6 +10,13 @@ from collections import OrderedDict
 from .BaseCaptioner import BaseCaptioner, CaptionConfig
 
 
+DEFAULT_OLLAMA_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36 AI-Toolkit-OllamaCaptioner"
+)
+
+
 class OllamaCaptionConfig(CaptionConfig):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -24,20 +31,32 @@ class OllamaCaptioner(BaseCaptioner):
         super(OllamaCaptioner, self).__init__(process_id, job, config, **kwargs)
         self.ollama_base_url = ""
         self.ollama_auth_token = ""
+        self.ollama_user_agent = DEFAULT_OLLAMA_USER_AGENT
+        self.ollama_model_ready = False
 
     def load_model(self):
         self.ollama_base_url = os.environ.get("AITK_OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
         self.ollama_auth_token = os.environ.get("AITK_OLLAMA_AUTH_TOKEN", "").strip()
+        self.ollama_user_agent = (
+            os.environ.get("AITK_OLLAMA_USER_AGENT", DEFAULT_OLLAMA_USER_AGENT).strip()
+            or DEFAULT_OLLAMA_USER_AGENT
+        )
+        self.ollama_model_ready = False
         if not self.ollama_base_url:
             raise ValueError("Ollama base URL is missing")
         if not self.caption_config.model_name_or_path:
             raise ValueError("Ollama model is required")
         self.print_and_status_update(f"Using Ollama at {self.ollama_base_url}")
         self.ensure_model()
+        self.ollama_model_ready = True
 
     def _request_json(self, route_path: str, payload: dict = None, timeout: int = 900) -> dict:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
+        headers = {"Accept": "application/json"}
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+        if self.ollama_user_agent:
+            headers["User-Agent"] = self.ollama_user_agent
         if self.ollama_auth_token:
             headers["Authorization"] = f"Bearer {self.ollama_auth_token}"
         request = urllib.request.Request(
@@ -56,7 +75,12 @@ class OllamaCaptioner(BaseCaptioner):
                 message = parsed.get("error") or message
             except Exception:
                 pass
-            raise RuntimeError(f"Ollama request failed: {message}") from exc
+            if exc.code == 403 and "1010" in message:
+                message = (
+                    f"{message}. The remote proxy may be blocking this HTTP client; "
+                    "try setting AITK_OLLAMA_USER_AGENT or using the secure remote Ollama worker."
+                )
+            raise RuntimeError(f"Ollama request to {route_path} failed with HTTP {exc.code}: {message}") from exc
 
     def _normalize_model_name(self, value: str) -> str:
         value = value.strip()
@@ -124,6 +148,8 @@ class OllamaCaptioner(BaseCaptioner):
     def unload_model(self):
         model = self.caption_config.model_name_or_path.strip()
         if not model or not self.ollama_base_url:
+            return False
+        if not self.ollama_model_ready:
             return False
         try:
             self._request_json(

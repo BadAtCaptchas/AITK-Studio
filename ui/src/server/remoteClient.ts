@@ -354,6 +354,13 @@ type FileUploadProgress = {
   total: number;
 };
 
+type RemoteArchiveImportStatus<T> = {
+  uploadID: string;
+  status: 'importing' | 'completed' | 'failed';
+  result: T | null;
+  error: string | null;
+};
+
 const DEFAULT_REMOTE_ARCHIVE_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
 function appendQueryParam(routePath: string, name: string, value?: string | null) {
@@ -377,6 +384,49 @@ function remoteArchiveUploadChunkBytes() {
   return DEFAULT_REMOTE_ARCHIVE_UPLOAD_CHUNK_BYTES;
 }
 
+function isRemoteArchiveImportStatus<T>(value: unknown): value is RemoteArchiveImportStatus<T> {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    'uploadID' in value &&
+    'status' in value &&
+    ((value as { status?: unknown }).status === 'importing' ||
+      (value as { status?: unknown }).status === 'completed' ||
+      (value as { status?: unknown }).status === 'failed')
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForRemoteArchiveImport<T>(worker: WorkerNodeRecord, routePath: string, uploadID: string) {
+  let firstPoll = true;
+  while (true) {
+    if (firstPoll) {
+      firstPoll = false;
+    } else {
+      await sleep(1000);
+    }
+    const status = await remoteJson<RemoteArchiveImportStatus<T>>(
+      worker,
+      appendQueryParams(routePath, {
+        aitk_upload: 'status',
+        uploadID,
+      }),
+    );
+    if (status.status === 'completed') {
+      if (status.result == null) {
+        throw new Error('Remote archive import completed without a result.');
+      }
+      return status.result;
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error || 'Remote archive import failed.');
+    }
+  }
+}
+
 async function remoteZipFileJson<T>(
   worker: WorkerNodeRecord,
   routePath: string,
@@ -384,6 +434,7 @@ async function remoteZipFileJson<T>(
     filePath: string;
     fileName?: string;
     onProgress?: (progress: FileUploadProgress) => void;
+    backgroundComplete?: boolean;
   },
 ) {
   const fileStat = await fs.stat(options.filePath);
@@ -430,16 +481,32 @@ async function remoteZipFileJson<T>(
     reportProgress();
   }
 
-  return remoteJson<T>(worker, appendQueryParams(routePath, {
+  const completeResult = await remoteJson<T | RemoteArchiveImportStatus<T>>(worker, appendQueryParams(routePath, {
     aitk_upload: 'complete',
     uploadID,
     chunksTotal,
+    background: options.backgroundComplete ? '1' : null,
   }), {
     method: 'POST',
     headers: {
       'X-AITK-File-Name': fileName,
     },
   });
+
+  if (options.backgroundComplete && isRemoteArchiveImportStatus<T>(completeResult)) {
+    if (completeResult.status === 'completed') {
+      if (completeResult.result == null) {
+        throw new Error('Remote archive import completed without a result.');
+      }
+      return completeResult.result;
+    }
+    if (completeResult.status === 'failed') {
+      throw new Error(completeResult.error || 'Remote archive import failed.');
+    }
+    return waitForRemoteArchiveImport<T>(worker, routePath, uploadID);
+  }
+
+  return completeResult as T;
 }
 
 export async function uploadBundleToWorker(
@@ -486,6 +553,7 @@ export async function uploadDatasetArchiveToWorker(
       filePath: zipPath,
       fileName: path.basename(zipPath),
       onProgress,
+      backgroundComplete: true,
     },
   );
 }

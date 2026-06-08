@@ -14,9 +14,12 @@ import {
   archiveUploadMode,
   assembleArchiveUploadChunks,
   cleanupOldArchiveUploadChunks,
+  createArchiveUploadImportStatus,
+  getArchiveUploadImportStatus,
   readArchiveUploadChunksTotal,
   readArchiveUploadID,
   saveArchiveUploadChunk,
+  updateArchiveUploadImportStatus,
 } from '@/server/archiveUploadChunks';
 import { isEncryptedDatasetFolder, listDatasetSummaries } from '@/server/encryptedDatasets';
 import { nextAvailablePath, safeNameSegment } from '@/server/trainingJobTransfer';
@@ -63,6 +66,74 @@ async function saveDatasetArchiveUpload(request: NextRequest, uploadPath: string
   return preferredNameRaw;
 }
 
+async function importDatasetArchiveFromZip(
+  uploadPath: string,
+  extractRoot: string,
+  datasetsRoot: string,
+  preferredNameRaw: FormDataEntryValue | string | null,
+) {
+  await extractZipSafely(uploadPath, extractRoot);
+
+  const manifest = await readDatasetExportManifest(extractRoot);
+  const datasetSource = getExtractedDatasetPath(extractRoot, manifest.dataset.archivePath);
+  if (!fs.existsSync(datasetSource) || !fs.statSync(datasetSource).isDirectory()) {
+    const error = new Error('Dataset payload missing from archive');
+    error.name = 'DatasetArchiveImportError';
+    throw error;
+  }
+
+  const preferredName =
+    typeof preferredNameRaw === 'string' && preferredNameRaw.trim()
+      ? safeNameSegment(preferredNameRaw, 'dataset')
+      : manifest.dataset.name || 'dataset';
+  const targetPath = await nextAvailablePath(datasetsRoot, preferredName);
+  await copyArchivePath(datasetSource, targetPath);
+
+  const importedName = path.basename(targetPath);
+  const allDatasets = await listDatasetSummaries(datasetsRoot);
+  const imported = allDatasets.find(dataset => dataset.name === importedName);
+  const dataset: DatasetSummary =
+    imported || {
+      name: importedName,
+      encrypted: isEncryptedDatasetFolder(targetPath),
+      source: 'local',
+      worker_id: 'local',
+      worker_name: 'Local',
+      ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
+      path: targetPath,
+    };
+
+  return {
+    dataset,
+    path: targetPath,
+    manifest,
+    renamed: importedName !== preferredName,
+  };
+}
+
+function isBackgroundImportRequest(request: NextRequest) {
+  return request.nextUrl.searchParams.get('background') === '1';
+}
+
+export async function GET(request: NextRequest) {
+  if (archiveUploadMode(request) !== 'status') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  try {
+    const status = getArchiveUploadImportStatus(readArchiveUploadID(request));
+    if (!status) {
+      return NextResponse.json({ error: 'Archive import status not found' }, { status: 404 });
+    }
+    return NextResponse.json(status);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to read archive import status' },
+      { status: 400 },
+    );
+  }
+}
+
 export async function POST(request: NextRequest) {
   const datasetsRoot = await getDatasetsRoot();
   await fsp.mkdir(datasetsRoot, { recursive: true });
@@ -96,47 +167,40 @@ export async function POST(request: NextRequest) {
         ? request.nextUrl.searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name')
         : await saveDatasetArchiveUpload(request, uploadPath);
     if (uploadMode === 'complete') {
+      if (isBackgroundImportRequest(request)) {
+        const backgroundWorkRoot = workRoot;
+        const chunksTotal = readArchiveUploadChunksTotal(request);
+        workRoot = null;
+        createArchiveUploadImportStatus(importID);
+        void (async () => {
+          try {
+            await assembleArchiveUploadChunks(chunkUploadRoot, importID, chunksTotal, uploadPath);
+            const result = await importDatasetArchiveFromZip(uploadPath, extractRoot, datasetsRoot, preferredNameRaw);
+            updateArchiveUploadImportStatus(importID, { status: 'completed', result });
+          } catch (error) {
+            updateArchiveUploadImportStatus(importID, {
+              status: 'failed',
+              error: error instanceof Error ? error.message : 'Failed to import dataset archive',
+            });
+          } finally {
+            await fsp.rm(backgroundWorkRoot, { recursive: true, force: true }).catch(() => undefined);
+          }
+        })();
+        return NextResponse.json(getArchiveUploadImportStatus(importID));
+      }
       await assembleArchiveUploadChunks(chunkUploadRoot, importID, readArchiveUploadChunksTotal(request), uploadPath);
     }
-    await extractZipSafely(uploadPath, extractRoot);
 
-    const manifest = await readDatasetExportManifest(extractRoot);
-    const datasetSource = getExtractedDatasetPath(extractRoot, manifest.dataset.archivePath);
-    if (!fs.existsSync(datasetSource) || !fs.statSync(datasetSource).isDirectory()) {
-      return NextResponse.json({ error: 'Dataset payload missing from archive' }, { status: 400 });
-    }
-
-    const preferredName =
-      typeof preferredNameRaw === 'string' && preferredNameRaw.trim()
-        ? safeNameSegment(preferredNameRaw, 'dataset')
-        : manifest.dataset.name || 'dataset';
-    const targetPath = await nextAvailablePath(datasetsRoot, preferredName);
-    await copyArchivePath(datasetSource, targetPath);
-
-    const importedName = path.basename(targetPath);
-    const allDatasets = await listDatasetSummaries(datasetsRoot);
-    const imported = allDatasets.find(dataset => dataset.name === importedName);
-    const dataset: DatasetSummary =
-      imported || {
-        name: importedName,
-        encrypted: isEncryptedDatasetFolder(targetPath),
-        source: 'local',
-        worker_id: 'local',
-        worker_name: 'Local',
-        ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
-        path: targetPath,
-      };
-
-    return NextResponse.json({
-      dataset,
-      path: targetPath,
-      manifest,
-      renamed: importedName !== preferredName,
-    });
+    return NextResponse.json(await importDatasetArchiveFromZip(uploadPath, extractRoot, datasetsRoot, preferredNameRaw));
   } catch (error) {
     console.error('Dataset archive import failed:', error);
     const message = error instanceof Error ? error.message : 'Failed to import dataset archive';
-    const status = message === 'file is required' || message.startsWith('Invalid archive upload') ? 400 : 500;
+    const status =
+      message === 'file is required' ||
+      message.startsWith('Invalid archive upload') ||
+      message === 'Dataset payload missing from archive'
+        ? 400
+        : 500;
     return NextResponse.json(
       { error: message },
       { status },

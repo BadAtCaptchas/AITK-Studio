@@ -7,11 +7,33 @@ import type { NextRequest } from 'next/server';
 
 const MAX_UPLOAD_CHUNK_AGE_MS = 24 * 60 * 60 * 1000;
 
-export type ArchiveUploadMode = 'chunk' | 'complete' | null;
+export type ArchiveUploadMode = 'chunk' | 'complete' | 'status' | null;
+export type ArchiveUploadImportStatus<T = unknown> = {
+  uploadID: string;
+  status: 'importing' | 'completed' | 'failed';
+  result: T | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ArchiveUploadImportStatusStore = Map<string, ArchiveUploadImportStatus>;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __archiveUploadImportStatusStore: ArchiveUploadImportStatusStore | undefined;
+}
+
+const archiveUploadImportStatusStore =
+  globalThis.__archiveUploadImportStatusStore ?? new Map<string, ArchiveUploadImportStatus>();
+
+if (!globalThis.__archiveUploadImportStatusStore) {
+  globalThis.__archiveUploadImportStatusStore = archiveUploadImportStatusStore;
+}
 
 export function archiveUploadMode(request: NextRequest): ArchiveUploadMode {
   const mode = request.nextUrl.searchParams.get('aitk_upload');
-  return mode === 'chunk' || mode === 'complete' ? mode : null;
+  return mode === 'chunk' || mode === 'complete' || mode === 'status' ? mode : null;
 }
 
 export function readArchiveUploadID(request: NextRequest) {
@@ -20,6 +42,51 @@ export function readArchiveUploadID(request: NextRequest) {
 
 export function readArchiveUploadChunksTotal(request: NextRequest) {
   return readSafeInteger(request.nextUrl.searchParams.get('chunksTotal') || '', 'chunksTotal', 1);
+}
+
+export function createArchiveUploadImportStatus(uploadID: string) {
+  validateArchiveUploadID(uploadID);
+  const now = new Date().toISOString();
+  const status: ArchiveUploadImportStatus = {
+    uploadID,
+    status: 'importing',
+    result: null,
+    error: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  archiveUploadImportStatusStore.set(uploadID, status);
+  return cloneArchiveUploadImportStatus(status);
+}
+
+export function updateArchiveUploadImportStatus<T>(
+  uploadID: string,
+  patch: Pick<ArchiveUploadImportStatus<T>, 'status'> &
+    Partial<Pick<ArchiveUploadImportStatus<T>, 'result' | 'error'>>,
+) {
+  validateArchiveUploadID(uploadID);
+  const existing = archiveUploadImportStatusStore.get(uploadID);
+  const now = new Date().toISOString();
+  const updated: ArchiveUploadImportStatus<T> = {
+    uploadID,
+    status: patch.status,
+    result: patch.result ?? (existing?.result as T | null) ?? null,
+    error: patch.error ?? null,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  archiveUploadImportStatusStore.set(uploadID, updated as ArchiveUploadImportStatus);
+  return cloneArchiveUploadImportStatus(updated);
+}
+
+export function getArchiveUploadImportStatus<T = unknown>(uploadID: string) {
+  validateArchiveUploadID(uploadID);
+  const status = archiveUploadImportStatusStore.get(uploadID) as ArchiveUploadImportStatus<T> | undefined;
+  return status ? cloneArchiveUploadImportStatus(status) : null;
+}
+
+function cloneArchiveUploadImportStatus<T>(status: ArchiveUploadImportStatus<T>) {
+  return { ...status };
 }
 
 function readArchiveUploadChunkIndex(request: NextRequest) {

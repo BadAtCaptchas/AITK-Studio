@@ -62,11 +62,27 @@ test('dataset archive upload sends a raw zip body to the worker', async () => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    if (requestUrl.searchParams.get('aitk_upload') === 'complete') {
+      return new Response(
+        JSON.stringify({
+          uploadID: requestUrl.searchParams.get('uploadID'),
+          status: 'importing',
+          result: null,
+          error: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     return new Response(
       JSON.stringify({
-        dataset: { name: 'locked', encrypted: true, path: '/remote/datasets/locked' },
-        path: '/remote/datasets/locked',
-        renamed: false,
+        uploadID: requestUrl.searchParams.get('uploadID'),
+        status: 'completed',
+        result: {
+          dataset: { name: 'locked', encrypted: true, path: '/remote/datasets/locked' },
+          path: '/remote/datasets/locked',
+          renamed: false,
+        },
+        error: null,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
@@ -77,12 +93,14 @@ test('dataset archive upload sends a raw zip body to the worker', async () => {
     const result = await uploadDatasetArchiveToWorker(makeWorker(), zipPath, 'locked', item => progress.push(item));
 
     assert.equal(result.path, '/remote/datasets/locked');
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 4);
     assert.equal(requests[0].url.pathname, '/api/datasets/import-archive');
     assert.equal(requests[0].url.searchParams.get('preferredName'), 'locked');
     assert.equal(requests[0].url.searchParams.get('aitk_upload'), 'chunk');
     assert.equal(requests[1].url.searchParams.get('aitk_upload'), 'chunk');
     assert.equal(requests[2].url.searchParams.get('aitk_upload'), 'complete');
+    assert.equal(requests[2].url.searchParams.get('background'), '1');
+    assert.equal(requests[3].url.searchParams.get('aitk_upload'), 'status');
     assert.equal(requests[0].headers.get('content-type'), 'application/octet-stream');
     assert.deepEqual(Buffer.concat([requests[0].body, requests[1].body]), bytes);
     assert.equal(progress[0].loaded, 0);

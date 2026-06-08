@@ -46,6 +46,7 @@ import type {
   CaptionCacheEntry,
   CaptionTab,
   DatasetImageStudioProps,
+  DeleteImagesResult,
   ImageSize,
   ToolMode,
 } from './types';
@@ -77,6 +78,7 @@ export default function DatasetImageStudio({
   onRefresh,
   onAddImages,
   onConvertDatasetToJson,
+  onDeleteImages,
   onBulkEncryptedCaptionAction,
   onSaveEncryptedCaption,
 }: DatasetImageStudioProps) {
@@ -85,6 +87,8 @@ export default function DatasetImageStudio({
   const [savedCaption, setSavedCaption] = useState('');
   const [isCaptionLoaded, setIsCaptionLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeletingImages, setIsDeletingImages] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState('');
   const [activeTool, setActiveTool] = useState<ToolMode>('select');
   const [selectedElementIndex, setSelectedElementIndex] = useState<number | null>(null);
   const [captionTab, setCaptionTab] = useState<CaptionTab>('caption');
@@ -344,6 +348,100 @@ export default function DatasetImageStudio({
     },
     [items.length, saveCaption],
   );
+
+  const imageDeleteResultMessage = useCallback((result: DeleteImagesResult) => {
+    const deleted = result.deleted.toLocaleString();
+    const requested = result.requested.toLocaleString();
+    const failed = result.failed || 0;
+    const skipped = result.skipped || 0;
+    if (failed > 0) {
+      return `${deleted} of ${requested} deleted, ${failed.toLocaleString()} failed.`;
+    }
+    if (skipped > 0) {
+      return `${deleted} deleted, ${skipped.toLocaleString()} already missing.`;
+    }
+    return `${deleted} deleted.`;
+  }, []);
+
+  const applyImageDeleteResult = useCallback(
+    (result: DeleteImagesResult, requestedItems: DatasetStudioItem[]) => {
+      const requestedKeys = requestedItems.map(item => itemKey(item));
+      const removedKeys =
+        result.removedKeys && result.removedKeys.length > 0
+          ? result.removedKeys
+          : result.deleted > 0 && (result.failed || 0) === 0
+            ? requestedKeys
+            : [];
+      if (removedKeys.length === 0) return;
+
+      const removedKeySet = new Set(removedKeys);
+      let cacheChanged = false;
+      removedKeySet.forEach(key => {
+        cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
+      });
+      if (cacheChanged) bumpCaptionCacheVersion();
+
+      const remainingItems = items.filter(item => !removedKeySet.has(itemKey(item)));
+      const currentSelectedKey = selectedKeyRef.current;
+      const currentWasDeleted = removedKeySet.has(currentSelectedKey);
+      const nextSelectedIndex = currentWasDeleted
+        ? clampIndex(Math.min(selectedIndex, remainingItems.length - 1), remainingItems.length)
+        : Math.max(
+            0,
+            remainingItems.findIndex(item => itemKey(item) === currentSelectedKey),
+          );
+
+      if (remainingItems.length === 0 || currentWasDeleted) {
+        latestCaptionRef.current = '';
+        setCaptionText('');
+        setSavedCaption('');
+        setSelectedElementIndex(null);
+        setUndoStack([]);
+        setRedoStack([]);
+      }
+      if (nextSelectedIndex >= 0) setSelectedIndex(nextSelectedIndex);
+    },
+    [bumpCaptionCacheVersion, items, selectedIndex],
+  );
+
+  const handleDeleteImages = useCallback(
+    async (targetItems: DatasetStudioItem[], label = 'selected image(s)'): Promise<DeleteImagesResult> => {
+      if (!onDeleteImages || isDeletingImages) {
+        return { requested: targetItems.length, deleted: 0, failed: targetItems.length };
+      }
+      const uniqueItems = Array.from(new Map(targetItems.map(item => [itemKey(item), item] as const)).values());
+      if (uniqueItems.length === 0) return { requested: 0, deleted: 0 };
+
+      const confirmed = window.confirm(
+        `Delete ${uniqueItems.length.toLocaleString()} ${label}? Associated captions will be removed too.`,
+      );
+      if (!confirmed) return { requested: uniqueItems.length, deleted: 0 };
+
+      setIsDeletingImages(true);
+      setDeleteMessage('');
+      try {
+        await saveCaption();
+        const result = await onDeleteImages(uniqueItems);
+        applyImageDeleteResult(result, uniqueItems);
+        const message = result.message || imageDeleteResultMessage(result);
+        setDeleteMessage(message);
+        return result;
+      } catch (error) {
+        const message = responseErrorMessage(error, 'Failed to delete image(s).');
+        setDeleteMessage(message);
+        alert(message);
+        throw error;
+      } finally {
+        setIsDeletingImages(false);
+      }
+    },
+    [applyImageDeleteResult, imageDeleteResultMessage, isDeletingImages, onDeleteImages, saveCaption],
+  );
+
+  const handleDeleteCurrentImage = useCallback(() => {
+    if (!selectedItem) return;
+    void handleDeleteImages([selectedItem], 'current image');
+  }, [handleDeleteImages, selectedItem]);
 
   const applyBulkCaptionResult = useCallback(
     (result: BulkCaptionActionResult) => {
@@ -987,11 +1085,14 @@ export default function DatasetImageStudio({
         isSaving={isSaving}
         isDirty={isDirty}
         zoom={zoom}
+        isDeletingCurrent={isDeletingImages}
+        canDeleteCurrent={Boolean(onDeleteImages && selectedItem)}
         onPrevious={() => selectIndex(selectedIndex - 1)}
         onNext={() => selectIndex(selectedIndex + 1)}
         onCycleZoom={() => setZoom(value => (value >= 1.5 ? 1 : Number((value + 0.25).toFixed(2))))}
         onPan={() => setActiveTool('pan')}
         onFit={() => setZoom(1)}
+        onDeleteCurrent={handleDeleteCurrentImage}
       />
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -1011,9 +1112,14 @@ export default function DatasetImageStudio({
         <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
           <main className="relative flex min-h-0 flex-1 flex-col bg-[#03070b]">
             <div className="relative flex min-h-[260px] flex-1 items-stretch justify-stretch overflow-hidden">
-              <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-gray-800 bg-gray-950/80 px-2 py-1 text-xs text-gray-300 backdrop-blur">
+              <div className="absolute left-3 top-3 z-10 max-w-[calc(50%-1rem)] truncate rounded-md border border-gray-800 bg-gray-950/80 px-2 py-1 text-xs text-gray-300 backdrop-blur">
                 {selectedName}
               </div>
+              {deleteMessage && (
+                <div className="absolute right-3 top-3 z-10 max-w-[calc(50%-1rem)] truncate rounded-md border border-gray-800 bg-gray-950/80 px-2 py-1 text-xs text-gray-300 backdrop-blur">
+                  {deleteMessage}
+                </div>
+              )}
               <StudioMedia
                 item={selectedItem}
                 datasetName={datasetName}
@@ -1051,6 +1157,7 @@ export default function DatasetImageStudio({
               onCaptionCacheChange={bumpCaptionCacheVersion}
               onSelectIndex={selectIndex}
               onBulkCaptionAction={handleBulkCaptionAction}
+              onDeleteImages={handleDeleteImages}
             />
           </main>
 

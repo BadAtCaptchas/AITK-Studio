@@ -47,6 +47,15 @@ export type BulkCaptionActionResult = {
   removedKeys?: string[];
 };
 
+export type DeleteImagesResult = {
+  requested: number;
+  deleted: number;
+  skipped?: number;
+  failed?: number;
+  removedKeys?: string[];
+  message?: string;
+};
+
 export type DatasetImageStudioProps = {
   datasetName: string;
   workerID: string;
@@ -58,6 +67,7 @@ export type DatasetImageStudioProps = {
   onRefresh?: () => void;
   onAddImages: () => void;
   onConvertDatasetToJson?: () => void;
+  onDeleteImages?: (items: DatasetStudioItem[]) => Promise<DeleteImagesResult>;
   onBulkEncryptedCaptionAction?: (request: BulkCaptionActionRequest) => Promise<BulkCaptionActionResult>;
   onSaveEncryptedCaption?: (
     item: EncryptedDatasetItem,

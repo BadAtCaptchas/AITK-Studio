@@ -4,6 +4,7 @@ import classNames from 'classnames';
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -15,6 +16,7 @@ import {
   Maximize2,
   Minimize2,
   Search,
+  Square,
   Trash2,
   X,
 } from 'lucide-react';
@@ -37,7 +39,14 @@ import {
 } from '@/utils/captionKeywordSearch';
 import { decryptEncryptedObjectBlob } from '@/utils/encryptedDatasets';
 import { extractIdeogramBoxes, parseIdeogramCaption } from '@/utils/ideogramCaption';
-import type { BulkCaptionAction, BulkCaptionActionResult, BulkCaptionMatch, CaptionCacheEntry, DatasetStudioItem } from './types';
+import type {
+  BulkCaptionAction,
+  BulkCaptionActionResult,
+  BulkCaptionMatch,
+  CaptionCacheEntry,
+  DatasetStudioItem,
+  DeleteImagesResult,
+} from './types';
 import { EncryptedThumb, PlainThumb } from './StudioMedia';
 import { captionResponseToText, clampIndex, itemKey, itemName, statusForCaption } from './utils';
 
@@ -96,22 +105,26 @@ function ThumbnailTile({
   item,
   index,
   selected,
+  bulkSelected,
   datasetName,
   workerID,
   encryptedKey,
   captionCache,
   onSelect,
+  onToggleBulkSelect,
   mode,
   tileSize,
 }: {
   item: DatasetStudioItem;
   index: number;
   selected: boolean;
+  bulkSelected?: boolean;
   datasetName: string;
   workerID: string;
   encryptedKey?: CryptoKey | null;
   captionCache: Map<string, CaptionCacheEntry>;
   onSelect: (index: number) => void;
+  onToggleBulkSelect?: (index: number) => void;
   mode: 'compact' | 'drawer';
   tileSize?: { imageHeight: number; tileHeight: number };
 }) {
@@ -123,57 +136,82 @@ function ThumbnailTile({
   const compact = mode === 'compact';
 
   return (
-    <button
-      type="button"
-      title={`${name} - ${status.title}`}
-      onClick={() => onSelect(index)}
+    <div
       className={classNames(
-        'flex-shrink-0 overflow-hidden rounded-md border bg-gray-950 text-left transition-colors',
+        'relative flex-shrink-0 overflow-hidden rounded-md border bg-gray-950 text-left transition-colors',
         compact ? 'h-[70px] w-24 sm:h-[82px] sm:w-28 xl:h-[92px] xl:w-36' : 'w-full',
         {
           'border-blue-500 shadow-[0_0_0_1px_rgba(59,130,246,0.9)]': selected,
-          'border-gray-800 hover:border-gray-700': !selected,
+          'border-cyan-500 shadow-[0_0_0_1px_rgba(6,182,212,0.8)]': !selected && bulkSelected,
+          'border-gray-800 hover:border-gray-700': !selected && !bulkSelected,
         },
       )}
       style={!compact && tileSize ? { height: `${tileSize.tileHeight}px` } : undefined}
     >
-      <div
-        className={classNames('relative overflow-hidden bg-gray-900', compact ? 'h-10 sm:h-12 xl:h-[58px]' : '')}
-        style={!compact && tileSize ? { height: `${tileSize.imageHeight}px` } : undefined}
+      <button
+        type="button"
+        title={`${name} - ${status.title}`}
+        onClick={() => onSelect(index)}
+        className="block h-full w-full text-left"
       >
-        {item.kind === 'plain' ? (
-          <PlainThumb path={item.path} alt={name} />
-        ) : (
-          <EncryptedThumb datasetName={datasetName} workerID={workerID} cryptoKey={encryptedKey} item={item.item} />
-        )}
-        {previewBoxes.length > 0 && (
-          <div className="pointer-events-none absolute inset-0">
-            {previewBoxes.map(box => (
-              <span
-                key={box.elementIndex}
-                className="absolute border border-white/80"
-                style={{
-                  left: `${box.x1 / 10}%`,
-                  top: `${box.y1 / 10}%`,
-                  width: `${(box.x2 - box.x1) / 10}%`,
-                  height: `${(box.y2 - box.y1) / 10}%`,
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-      <div
-        className={classNames(
-          'flex items-center gap-2 overflow-hidden px-2 leading-none text-gray-300',
-          compact ? 'h-6 text-[11px] sm:h-7 sm:text-xs' : 'h-7 text-[11px]',
-        )}
-      >
-        <span className="font-medium text-gray-100">{index + 1}</span>
-        <StatusDot status={status} />
-        <span className="truncate">{status.label}</span>
-      </div>
-    </button>
+        <div
+          className={classNames('relative overflow-hidden bg-gray-900', compact ? 'h-10 sm:h-12 xl:h-[58px]' : '')}
+          style={!compact && tileSize ? { height: `${tileSize.imageHeight}px` } : undefined}
+        >
+          {item.kind === 'plain' ? (
+            <PlainThumb path={item.path} alt={name} />
+          ) : (
+            <EncryptedThumb datasetName={datasetName} workerID={workerID} cryptoKey={encryptedKey} item={item.item} />
+          )}
+          {previewBoxes.length > 0 && (
+            <div className="pointer-events-none absolute inset-0">
+              {previewBoxes.map(box => (
+                <span
+                  key={box.elementIndex}
+                  className="absolute border border-white/80"
+                  style={{
+                    left: `${box.x1 / 10}%`,
+                    top: `${box.y1 / 10}%`,
+                    width: `${(box.x2 - box.x1) / 10}%`,
+                    height: `${(box.y2 - box.y1) / 10}%`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        <div
+          className={classNames(
+            'flex items-center gap-2 overflow-hidden px-2 leading-none text-gray-300',
+            compact ? 'h-6 text-[11px] sm:h-7 sm:text-xs' : 'h-7 text-[11px]',
+          )}
+        >
+          <span className="font-medium text-gray-100">{index + 1}</span>
+          <StatusDot status={status} />
+          <span className="truncate">{status.label}</span>
+        </div>
+      </button>
+      {!compact && onToggleBulkSelect && (
+        <button
+          type="button"
+          title={bulkSelected ? 'Deselect image' : 'Select image'}
+          aria-label={bulkSelected ? 'Deselect image' : 'Select image'}
+          aria-pressed={Boolean(bulkSelected)}
+          onClick={event => {
+            event.stopPropagation();
+            onToggleBulkSelect(index);
+          }}
+          className={classNames(
+            'absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-md border backdrop-blur',
+            bulkSelected
+              ? 'border-cyan-400 bg-cyan-500 text-gray-950'
+              : 'border-gray-700 bg-gray-950/80 text-gray-300 hover:border-gray-500',
+          )}
+        >
+          {bulkSelected ? <Check className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -218,6 +256,7 @@ export function ImageNavigator({
   onCaptionCacheChange,
   onSelectIndex,
   onBulkCaptionAction,
+  onDeleteImages,
 }: {
   items: DatasetStudioItem[];
   selectedIndex: number;
@@ -235,6 +274,7 @@ export function ImageNavigator({
     destinationName?: string;
     matches: BulkCaptionMatch[];
   }) => Promise<BulkCaptionActionResult>;
+  onDeleteImages?: (items: DatasetStudioItem[], label?: string) => Promise<DeleteImagesResult>;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -243,6 +283,9 @@ export function ImageNavigator({
   const [bulkDestinationName, setBulkDestinationName] = useState(`${datasetName}_matches`);
   const [bulkBusyAction, setBulkBusyAction] = useState<BulkCaptionAction | null>(null);
   const [bulkMessage, setBulkMessage] = useState('');
+  const [selectedBulkKeys, setSelectedBulkKeys] = useState<Set<string>>(() => new Set());
+  const [isBulkDeletingImages, setIsBulkDeletingImages] = useState(false);
+  const [deleteSelectionMessage, setDeleteSelectionMessage] = useState('');
   const [filter, setFilter] = useState<DatasetNavigatorFilter>('all');
   const [thumbSize, setThumbSize] = useState<ThumbSize>('md');
   const [jumpText, setJumpText] = useState('');
@@ -271,6 +314,9 @@ export function ImageNavigator({
     setBulkDestinationName(`${datasetName}_matches`);
     setBulkBusyAction(null);
     setBulkMessage('');
+    setSelectedBulkKeys(new Set());
+    setIsBulkDeletingImages(false);
+    setDeleteSelectionMessage('');
     setFilter('all');
   }, [datasetName, items, workerID]);
 
@@ -278,6 +324,14 @@ export function ImageNavigator({
     setLocalCacheVersion(version => version + 1);
     onCaptionCacheChange();
   }, [onCaptionCacheChange]);
+
+  useEffect(() => {
+    const availableKeys = new Set(items.map(item => itemKey(item)));
+    setSelectedBulkKeys(previous => {
+      const next = new Set([...previous].filter(key => availableKeys.has(key)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [items]);
 
   const entries = useMemo(
     () =>
@@ -297,6 +351,17 @@ export function ImageNavigator({
     [entries, filter, searchQuery],
   );
   const filteredIndexes = useMemo(() => filteredEntries.map(entry => entry.index), [filteredEntries]);
+  const selectedBulkItems = useMemo(
+    () => items.filter(item => selectedBulkKeys.has(itemKey(item))),
+    [items, selectedBulkKeys],
+  );
+  const selectedBulkCount = selectedBulkItems.length;
+  const allShownSelected =
+    filteredIndexes.length > 0 &&
+    filteredIndexes.every(index => {
+      const item = items[index];
+      return Boolean(item && selectedBulkKeys.has(itemKey(item)));
+    });
   const statusCounts = useMemo(() => navigatorStatusCounts(entries), [entries]);
   const captionKeywordTerms = useMemo(() => parseCaptionKeywordQuery(captionKeywordQuery), [captionKeywordQuery]);
   const captionPendingCount = useMemo(() => entries.filter(entry => entry.status === 'unknown').length, [entries]);
@@ -352,6 +417,75 @@ export function ImageNavigator({
   const commitScrub = useCallback(() => {
     commitIndex(scrubValue - 1);
   }, [commitIndex, scrubValue]);
+
+  const toggleBulkSelectedIndex = useCallback(
+    (index: number) => {
+      const item = items[index];
+      if (!item) return;
+      const key = itemKey(item);
+      setDeleteSelectionMessage('');
+      setSelectedBulkKeys(previous => {
+        const next = new Set(previous);
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+        return next;
+      });
+    },
+    [items],
+  );
+
+  const selectShownBulkItems = useCallback(() => {
+    setDeleteSelectionMessage('');
+    setSelectedBulkKeys(previous => {
+      const next = new Set(previous);
+      filteredIndexes.forEach(index => {
+        const item = items[index];
+        if (item) next.add(itemKey(item));
+      });
+      return next;
+    });
+  }, [filteredIndexes, items]);
+
+  const clearBulkSelection = useCallback(() => {
+    setDeleteSelectionMessage('');
+    setSelectedBulkKeys(new Set());
+  }, []);
+
+  const runSelectedImageDelete = useCallback(async () => {
+    if (!onDeleteImages || selectedBulkItems.length === 0 || isBulkDeletingImages) return;
+    setIsBulkDeletingImages(true);
+    setDeleteSelectionMessage('');
+    try {
+      const result = await onDeleteImages(selectedBulkItems, 'selected images');
+      const removedKeys = new Set(
+        result.removedKeys ||
+          (result.deleted > 0 && (result.failed || 0) === 0 ? selectedBulkItems.map(item => itemKey(item)) : []),
+      );
+      setSelectedBulkKeys(previous => {
+        const next = new Set(previous);
+        removedKeys.forEach(key => next.delete(key));
+        return next;
+      });
+      const failed = result.failed || 0;
+      const skipped = result.skipped || 0;
+      setDeleteSelectionMessage(
+        result.deleted === 0 && failed === 0 && skipped === 0
+          ? 'No images deleted.'
+          : failed > 0
+          ? `${result.deleted.toLocaleString()} of ${result.requested.toLocaleString()} deleted, ${failed.toLocaleString()} failed.`
+          : skipped > 0
+            ? `${result.deleted.toLocaleString()} deleted, ${skipped.toLocaleString()} already missing.`
+            : `${result.deleted.toLocaleString()} deleted.`,
+      );
+    } catch (error: any) {
+      setDeleteSelectionMessage(error?.response?.data?.error || error?.message || 'Delete failed.');
+    } finally {
+      setIsBulkDeletingImages(false);
+    }
+  }, [isBulkDeletingImages, onDeleteImages, selectedBulkItems]);
 
   const bulkResultMessage = useCallback((result: BulkCaptionActionResult) => {
     if (result.action === 'move') {
@@ -640,6 +774,41 @@ export function ImageNavigator({
           </div>
 
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-900 px-2 py-2 xl:px-3">
+            <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
+              <span className="h-2 w-2 rounded-full bg-cyan-400" />
+              <span>{selectedBulkCount.toLocaleString()} selected</span>
+            </div>
+            <button
+              type="button"
+              disabled={filteredIndexes.length === 0 || allShownSelected}
+              onClick={selectShownBulkItems}
+              className="inline-flex h-9 items-center rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Select Shown
+            </button>
+            <button
+              type="button"
+              disabled={selectedBulkCount === 0}
+              onClick={clearBulkSelection}
+              className="inline-flex h-9 items-center rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              title="Delete selected images"
+              aria-label="Delete selected images"
+              disabled={!onDeleteImages || selectedBulkCount === 0 || isBulkDeletingImages}
+              onClick={() => void runSelectedImageDelete()}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-900/70 bg-rose-950/40 px-3 text-sm text-rose-100 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {isBulkDeletingImages ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete Selected
+            </button>
+            {deleteSelectionMessage && <div className="min-w-[180px] flex-1 text-xs text-gray-400">{deleteSelectionMessage}</div>}
+          </div>
+
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-900 px-2 py-2 xl:px-3">
             <div className="relative min-w-[210px] flex-1 sm:max-w-md">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
               <input
@@ -749,11 +918,13 @@ export function ImageNavigator({
                               item={item}
                               index={index}
                               selected={index === selectedIndex}
+                              bulkSelected={selectedBulkKeys.has(itemKey(item))}
                               datasetName={datasetName}
                               workerID={workerID}
                               encryptedKey={encryptedKey}
                               captionCache={captionCache}
                               onSelect={commitIndex}
+                              onToggleBulkSelect={toggleBulkSelectedIndex}
                               mode="drawer"
                               tileSize={thumbConfig}
                             />

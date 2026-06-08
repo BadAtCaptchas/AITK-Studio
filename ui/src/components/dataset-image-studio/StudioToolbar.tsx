@@ -10,6 +10,7 @@ import {
   Loader2,
   Maximize2,
   MoreVertical,
+  Trash2,
   ZoomIn,
 } from 'lucide-react';
 
@@ -19,22 +20,28 @@ export function StudioToolbar({
   isSaving,
   isDirty,
   zoom,
+  isDeletingCurrent,
+  canDeleteCurrent,
   onPrevious,
   onNext,
   onCycleZoom,
   onPan,
   onFit,
+  onDeleteCurrent,
 }: {
   selectedIndex: number;
   itemCount: number;
   isSaving: boolean;
   isDirty: boolean;
   zoom: number;
+  isDeletingCurrent?: boolean;
+  canDeleteCurrent?: boolean;
   onPrevious: () => void;
   onNext: () => void;
   onCycleZoom: () => void;
   onPan: () => void;
   onFit: () => void;
+  onDeleteCurrent: () => void;
 }) {
   return (
     <div className="operator-scrollbar-none flex h-14 flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-gray-900 bg-[#070b10] px-2 sm:gap-3 sm:px-3">
@@ -93,6 +100,16 @@ export function StudioToolbar({
         onClick={onFit}
       >
         <Maximize2 className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        title="Delete current image"
+        aria-label="Delete current image"
+        disabled={!canDeleteCurrent || isDeletingCurrent}
+        className="flex h-9 w-10 items-center justify-center rounded-md border border-rose-900/70 bg-rose-950/35 text-rose-100 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-45"
+        onClick={onDeleteCurrent}
+      >
+        {isDeletingCurrent ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
       </button>
       <button
         type="button"

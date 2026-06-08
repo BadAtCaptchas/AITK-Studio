@@ -9,6 +9,7 @@ import DatasetImageStudio, {
   type BulkCaptionActionRequest,
   type BulkCaptionActionResult,
   type DatasetStudioItem,
+  type DeleteImagesResult,
 } from '@/components/DatasetImageStudio';
 import { Button } from '@headlessui/react';
 import AddImagesModal, { openImagesModal, useOpenImagesModalOnDrag } from '@/components/AddImagesModal';
@@ -337,21 +338,66 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
     setEncryptedCatalog(nextCatalog);
   };
 
-  const deleteEncryptedItem = async (item: EncryptedDatasetItem) => {
-    if (!encryptedManifest || !encryptedCatalog || !encryptedKey) return;
-    const nextCatalog: EncryptedDatasetCatalog = {
-      ...encryptedCatalog,
-      items: encryptedCatalog.items.filter(existing => existing.id !== item.id),
+  const handleDeleteImages = async (targetItems: DatasetStudioItem[]): Promise<DeleteImagesResult> => {
+    const uniqueItems = Array.from(
+      new Map(
+        targetItems.map(item => [item.kind === 'plain' ? item.path : item.item.id, item] as const),
+      ).values(),
+    );
+    const plainPaths = uniqueItems.flatMap(item => (item.kind === 'plain' ? [item.path] : []));
+    const encryptedItems = uniqueItems.flatMap(item => (item.kind === 'encrypted' ? [item.item] : []));
+    const removedKeys: string[] = [];
+    let deleted = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    if (plainPaths.length > 0) {
+      const response = await apiClient.post('/api/img/delete-bulk', { imgPaths: plainPaths });
+      const data = response.data || {};
+      const removedPaths = Array.isArray(data.removedPaths)
+        ? data.removedPaths.filter((value: unknown): value is string => typeof value === 'string')
+        : [];
+      deleted += Number(data.deleted || 0);
+      skipped += Number(data.skipped || 0);
+      failed += Number(data.failed || 0);
+      removedKeys.push(...removedPaths);
+      if (removedPaths.length > 0) {
+        const removedPathSet = new Set(removedPaths);
+        setImgList(previous => previous.filter(image => !removedPathSet.has(image.img_path)));
+      }
+    }
+
+    if (encryptedItems.length > 0) {
+      if (!encryptedManifest || !encryptedCatalog || !encryptedKey) {
+        throw new Error('Unlock the encrypted dataset first.');
+      }
+      const encryptedIDs = new Set(encryptedItems.map(item => item.id));
+      const nextCatalog: EncryptedDatasetCatalog = {
+        ...encryptedCatalog,
+        items: encryptedCatalog.items.filter(item => !encryptedIDs.has(item.id)),
+      };
+      const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
+      await apiClient.post('/api/datasets/encrypted/update', {
+        datasetName,
+        worker_id: workerID,
+        manifest: nextManifest,
+        deleteObjects: encryptedItems.flatMap(item =>
+          [item.objectPath, item.captionObjectPath].filter((value): value is string => Boolean(value)),
+        ),
+      });
+      setEncryptedManifest(nextManifest);
+      setEncryptedCatalog(nextCatalog);
+      deleted += encryptedItems.length;
+      removedKeys.push(...encryptedItems.map(item => item.id));
+    }
+
+    return {
+      requested: uniqueItems.length,
+      deleted,
+      skipped,
+      failed,
+      removedKeys,
     };
-    const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
-    await apiClient.post('/api/datasets/encrypted/update', {
-      datasetName,
-      worker_id: workerID,
-      manifest: nextManifest,
-      deleteObjects: [item.objectPath, item.captionObjectPath].filter(Boolean),
-    });
-    setEncryptedManifest(nextManifest);
-    setEncryptedCatalog(nextCatalog);
   };
 
   const encryptedObjectUpdate = async (objectPath: string) => {
@@ -623,6 +669,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
               })
             }
             onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
+            onDeleteImages={handleDeleteImages}
           />
         )}
         {status === 'success' && encryptedCatalog && encryptedKey && encryptedStudioItems.length > 0 && (
@@ -642,6 +689,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
               })
             }
             onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
+            onDeleteImages={handleDeleteImages}
             onBulkEncryptedCaptionAction={handleBulkEncryptedCaptionAction}
             onSaveEncryptedCaption={saveEncryptedCaption}
           />

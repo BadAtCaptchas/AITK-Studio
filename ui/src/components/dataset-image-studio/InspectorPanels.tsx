@@ -152,7 +152,7 @@ export function ObjectDetailsPanel({
               </label>
               {autoBoxProvider === 'remote_ollama' && (
                 <label>
-                  <span className="mb-1 block text-xs text-gray-500">Worker</span>
+                  <span className="mb-1 block text-xs text-gray-500">Remote Ollama</span>
                   <select
                     value={remoteWorkerId}
                     onChange={event => onRemoteWorkerChange(event.target.value)}

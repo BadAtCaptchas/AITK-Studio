@@ -14,6 +14,7 @@ import {
 } from '@/server/remoteClient';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
+import { isDirectRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
 import type { Job } from '@/types';
 
 
@@ -160,7 +161,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { id, name, job_config } = body;
-    const worker_id = normalizeWorkerId(body.worker_id);
+    let worker_id = normalizeWorkerId(body.worker_id);
+    if (isDirectRemoteOllamaCaptionJob(job_config)) {
+      worker_id = 'local';
+    }
 
     if (!isValidJobName(name)) {
       return NextResponse.json({ error: 'Invalid job name' }, { status: 400 });

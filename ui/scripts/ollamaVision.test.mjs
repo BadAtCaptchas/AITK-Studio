@@ -11,10 +11,6 @@ const {
   generateRemoteOllamaVisionCaption,
   normalizeOllamaVisionModel,
 } = require('../dist/src/server/ollamaVision.js');
-const {
-  decryptSecureCaptionJson,
-  encryptSecureCaptionJson,
-} = require('../dist/src/server/secureCaptionCrypto.js');
 
 function sampleCaption() {
   return JSON.stringify(
@@ -138,37 +134,56 @@ test('generateOllamaLayerCaption handles no-box targets and color palettes', asy
   assert.deepEqual(result.color_palette, ['#FACC15', '#111111']);
 });
 
-test('generateRemoteOllamaVisionCaption wraps requests in secure envelopes', async () => {
+test('generateRemoteOllamaVisionCaption calls direct Ollama endpoint with optional auth', async () => {
+  const originalFetch = globalThis.fetch;
   const token = 'remote-token';
-  const worker = { id: 'worker-1', name: 'DGX', base_url: 'https://worker.test', api_token: token };
+  const worker = { id: 'worker-1', name: 'DGX', base_url: 'https://ollama.test', auth_token: token };
   const calls = [];
 
-  const caption = await generateRemoteOllamaVisionCaption({
-    remoteWorkerId: 'worker-1',
-    model: '',
-    prompt: 'Return boxes.',
-    imageBase64: 'aW1n',
-    maxNewTokens: 256,
-    getWorkerImpl: async workerId => {
-      assert.equal(workerId, 'worker-1');
-      return worker;
-    },
-    remoteJsonImpl: async (remoteWorker, routePath, init) => {
-      calls.push({ remoteWorker, routePath, init });
-      const requestEnvelope = JSON.parse(init.body);
-      const requestPayload = decryptSecureCaptionJson(token, 'request', requestEnvelope);
-      assert.equal(requestPayload.model, 'qwen3.5:35b');
-      assert.equal(requestPayload.prompt, 'Return boxes.');
-      assert.equal(requestPayload.imageBase64, 'aW1n');
-      assert.match(requestPayload.systemPrompt, /NSFW/);
-      return encryptSecureCaptionJson(token, 'response', requestEnvelope.jobId, requestEnvelope.itemId, {
-        caption: '{"boxes":[],"generatedElements":[]}',
-      });
-    },
-  });
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      const headers = new Headers(init.headers);
+      assert.equal(headers.get('Authorization'), `Bearer ${token}`);
+      if (String(url).endsWith('/api/tags')) {
+        return new Response(JSON.stringify({ models: [{ model: 'qwen3.5:35b' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (String(url).endsWith('/api/generate')) {
+        const body = JSON.parse(init.body);
+        assert.equal(body.model, 'qwen3.5:35b');
+        assert.equal(body.prompt, 'Return boxes.');
+        assert.equal(body.images[0], 'aW1n');
+        assert.match(body.system, /NSFW/);
+        return new Response(JSON.stringify({ response: '{"boxes":[],"generatedElements":[]}' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
 
-  assert.equal(caption, '{"boxes":[],"generatedElements":[]}');
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].routePath, '/api/secure-caption/ollama');
-  assert.equal(calls[0].init.method, 'POST');
+    const caption = await generateRemoteOllamaVisionCaption({
+      remoteWorkerId: 'worker-1',
+      model: '',
+      prompt: 'Return boxes.',
+      imageBase64: 'aW1n',
+      maxNewTokens: 256,
+      getWorkerImpl: async workerId => {
+        assert.equal(workerId, 'worker-1');
+        return worker;
+      },
+    });
+
+    assert.equal(caption, '{"boxes":[],"generatedElements":[]}');
+    assert.deepEqual(
+      calls.map(call => call.url),
+      ['https://ollama.test/api/tags', 'https://ollama.test/api/generate'],
+    );
+    assert.equal(calls[1].init.method, 'POST');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

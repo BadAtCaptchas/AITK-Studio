@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import {
   buildOpenRouterBoxPrompt,
   parseBoxResponse,
@@ -11,12 +10,7 @@ import {
   selectedLayerInfo,
 } from './openRouterLayerCaption';
 import { generateOllamaImageCaption, type OllamaGenerateOptions } from './ollama';
-import { getRemoteWorker, remoteJson } from './remoteClient';
-import {
-  decryptSecureCaptionJson,
-  encryptSecureCaptionJson,
-  type SecureCaptionEnvelope,
-} from './secureCaptionCrypto';
+import { getRemoteOllamaWorker } from './remoteOllamaWorkers';
 import {
   parseIdeogramCaption,
   type GeneratedBoxPatch,
@@ -45,8 +39,6 @@ type ImageSize = {
 };
 
 type OllamaCaptionRunner = (options: OllamaGenerateOptions) => Promise<string>;
-type RemoteWorker = Awaited<ReturnType<typeof getRemoteWorker>>;
-type RemoteJsonImpl = <T>(worker: RemoteWorker, routePath: string, init?: RequestInit) => Promise<T>;
 
 type GenerateOllamaBoxPatchesOptions = {
   imageDataUrl: string;
@@ -59,8 +51,7 @@ type GenerateOllamaBoxPatchesOptions = {
 
 type GenerateRemoteOllamaBoxPatchesOptions = Omit<GenerateOllamaBoxPatchesOptions, 'captionRunner'> & {
   remoteWorkerId?: string | null;
-  getWorkerImpl?: typeof getRemoteWorker;
-  remoteJsonImpl?: RemoteJsonImpl;
+  getWorkerImpl?: typeof getRemoteOllamaWorker;
 };
 
 type GenerateOllamaLayerCaptionOptions = {
@@ -74,8 +65,7 @@ type GenerateOllamaLayerCaptionOptions = {
 
 type GenerateRemoteOllamaLayerCaptionOptions = Omit<GenerateOllamaLayerCaptionOptions, 'captionRunner'> & {
   remoteWorkerId?: string | null;
-  getWorkerImpl?: typeof getRemoteWorker;
-  remoteJsonImpl?: RemoteJsonImpl;
+  getWorkerImpl?: typeof getRemoteOllamaWorker;
 };
 
 type RemoteOllamaVisionCaptionOptions = {
@@ -84,12 +74,7 @@ type RemoteOllamaVisionCaptionOptions = {
   prompt: string;
   imageBase64: string;
   maxNewTokens?: number;
-  getWorkerImpl?: typeof getRemoteWorker;
-  remoteJsonImpl?: RemoteJsonImpl;
-};
-
-type RemoteOllamaCaptionResponse = {
-  caption?: string;
+  getWorkerImpl?: typeof getRemoteOllamaWorker;
 };
 
 function imageBase64FromDataUrl(imageDataUrl: string) {
@@ -130,36 +115,26 @@ export async function generateRemoteOllamaVisionCaption({
   prompt,
   imageBase64,
   maxNewTokens,
-  getWorkerImpl = getRemoteWorker,
-  remoteJsonImpl = remoteJson,
+  getWorkerImpl = getRemoteOllamaWorker,
 }: RemoteOllamaVisionCaptionOptions) {
   const workerId = typeof remoteWorkerId === 'string' ? remoteWorkerId.trim() : '';
   if (!workerId || workerId === 'local') {
     throw new Error('Remote Ollama worker is required.');
   }
   const worker = await getWorkerImpl(workerId);
-  const token = worker.api_token;
-  if (!token) throw new Error('Remote Ollama worker token is missing.');
-
-  const jobId = `studio-${randomUUID()}`;
-  const itemId = `vision-${randomUUID()}`;
-  const requestEnvelope = encryptSecureCaptionJson(token, 'request', jobId, itemId, {
-    model: normalizeOllamaVisionModel(model),
-    prompt,
-    systemPrompt: OLLAMA_JSON_SYSTEM_PROMPT,
-    imageBase64,
-    maxNewTokens,
-  });
-  const responseEnvelope = await remoteJsonImpl<SecureCaptionEnvelope>(worker, '/api/secure-caption/ollama', {
-    method: 'POST',
-    body: JSON.stringify(requestEnvelope),
-  });
-  const responsePayload = decryptSecureCaptionJson<RemoteOllamaCaptionResponse>(
-    token,
-    'response',
-    responseEnvelope,
+  const caption = await generateOllamaImageCaption(
+    {
+      model: normalizeOllamaVisionModel(model),
+      prompt,
+      systemPrompt: OLLAMA_JSON_SYSTEM_PROMPT,
+      imageBase64,
+      maxNewTokens,
+    },
+    {
+      baseUrl: worker.base_url,
+      authToken: 'auth_token' in worker && typeof worker.auth_token === 'string' ? worker.auth_token : '',
+    },
   );
-  const caption = typeof responsePayload.caption === 'string' ? responsePayload.caption.trim() : '';
   if (!caption) throw new Error('Remote Ollama returned an empty response.');
   return caption;
 }
@@ -173,7 +148,6 @@ function remoteCaptionRunner(options: GenerateRemoteOllamaBoxPatchesOptions | Ge
       imageBase64: request.imageBase64,
       maxNewTokens: request.maxNewTokens,
       getWorkerImpl: options.getWorkerImpl,
-      remoteJsonImpl: options.remoteJsonImpl,
     });
 }
 

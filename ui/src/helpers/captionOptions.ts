@@ -8,7 +8,7 @@ type AdditionalSections =
     | 'caption.max_new_tokens'
     | 'caption.fixed_caption'
     | 'caption.system_prompt'
-    | 'caption.remote_worker_id';
+    | 'caption.remote_ollama_worker_id';
 
 export interface CaptionOption {
     name: string;
@@ -18,7 +18,6 @@ export interface CaptionOption {
     usesGpu?: boolean;
     usesQuantization?: boolean;
     usesOpenRouter?: boolean;
-    usesRemoteWorker?: boolean;
     defaults?: { [key: string]: any };
     additionalSections?: AdditionalSections[];
     name_or_path_options?: SelectOption[];
@@ -139,7 +138,6 @@ export const captionerTypes: CaptionOption[] = [
         name: 'SecureRemoteOllamaCaptioner',
         label: 'Remote Ollama',
         group: 'image',
-        usesRemoteWorker: true,
         defaults: {
             'config.process[0].device': ['cpu', 'cuda'],
             'config.process[0].caption.model_name_or_path': [defaultOllamaVisionModel, defaultNameOrPath],
@@ -149,7 +147,7 @@ export const captionerTypes: CaptionOption[] = [
             'config.process[0].caption.max_new_tokens': [180, undefined],
             'config.process[0].caption.quantize': [false, true],
             'config.process[0].caption.low_vram': [false, true],
-            'config.process[0].caption.remote_worker_id': ['', undefined],
+            'config.process[0].caption.remote_ollama_worker_id': ['', undefined],
         },
         name_or_path_options: [
             { value: 'qwen3.5:122b', label: 'qwen3.5:122b (best quality, high VRAM)' },
@@ -160,7 +158,7 @@ export const captionerTypes: CaptionOption[] = [
             { value: 'gemma4:26b', label: 'gemma4:26b' },
         ],
         additionalSections: [
-            'caption.remote_worker_id',
+            'caption.remote_ollama_worker_id',
             'caption.caption_prompt',
             'caption.system_prompt',
             'caption.max_res',

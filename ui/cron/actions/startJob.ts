@@ -16,7 +16,12 @@ import {
   clearDurableEncryptedDatasetKeys,
   getDurableEncryptedDatasetKeys,
 } from '../../src/server/encryptedDatasetSecrets';
-import { getSecureRemoteOllamaWorkerId } from '../../src/server/secureRemoteCaptionJobs';
+import {
+  getDirectRemoteOllamaWorkerId,
+  getSecureRemoteOllamaWorkerId,
+  rewriteDirectRemoteOllamaCaptionersForLocalOllama,
+} from '../../src/server/secureRemoteCaptionJobs';
+import { getRemoteOllamaWorker } from '../../src/server/remoteOllamaWorkers';
 import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
@@ -120,9 +125,17 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
 
       const dbConfig = getDatabaseConfig();
       const jobConfig = JSON.parse(job.job_config);
+      const directRemoteOllamaWorkerId = getDirectRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaWorkerId = getSecureRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaEnv: Record<string, string> = {};
-      if (secureRemoteOllamaWorkerId) {
+      if (directRemoteOllamaWorkerId) {
+        const worker = await getRemoteOllamaWorker(directRemoteOllamaWorkerId);
+        secureRemoteOllamaEnv.AITK_OLLAMA_BASE_URL = worker.base_url;
+        if (worker.auth_token) {
+          secureRemoteOllamaEnv.AITK_OLLAMA_AUTH_TOKEN = worker.auth_token;
+        }
+        rewriteDirectRemoteOllamaCaptionersForLocalOllama(jobConfig);
+      } else if (secureRemoteOllamaWorkerId) {
         const worker = await getSecureRemoteOllamaWorker(secureRemoteOllamaWorkerId);
         secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_BASE_URL = worker.base_url;
         secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_TOKEN = worker.api_token;

@@ -4,6 +4,7 @@ import { flushCache } from '@/server/settings';
 import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
+import { isRemoteOllamaWorkersSettingKey } from '@/server/remoteOllamaWorkers';
 import path from 'path';
 
 type SettingsAccess = {
@@ -50,6 +51,7 @@ export async function GET(request: NextRequest) {
     const settingsObject = settings.reduce((acc: any, setting) => {
       if (isEncryptedDatasetSecretSettingKey(setting.key)) return acc;
       if (isSecureCaptionSystemPromptSettingKey(setting.key)) return acc;
+      if (isRemoteOllamaWorkersSettingKey(setting.key)) return acc;
       acc[setting.key] = setting.value;
       return acc;
     }, {});

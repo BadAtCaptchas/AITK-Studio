@@ -11,8 +11,8 @@ import { pathJoin } from '@/utils/basic';
 import { startJob } from '@/utils/jobs';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import useDatasetList from '@/hooks/useDatasetList';
+import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import useSettings from '@/hooks/useSettings';
-import useWorkers from '@/hooks/useWorkers';
 import {
   Checkbox,
   CreatableSelectInput,
@@ -42,7 +42,7 @@ function modelName(model: OllamaModel) {
 
 export default function SecureRemoteCaptionPanel() {
   const { settings, isSettingsLoaded } = useSettings();
-  const { workers, status: workerStatus } = useWorkers();
+  const { workers, status: workerStatus } = useRemoteOllamaWorkers();
   const { datasets, status: datasetStatus } = useDatasetList();
   const [workerID, setWorkerID] = useState('');
   const [datasetName, setDatasetName] = useState('');
@@ -102,9 +102,7 @@ export default function SecureRemoteCaptionPanel() {
     setModelStatus('loading');
     setModelError('');
     try {
-      const res = await apiClient.get('/api/secure-caption/ollama/models', {
-        params: { worker_id: selectedWorkerID },
-      });
+      const res = await apiClient.get(`/api/ollama-workers/${encodeURIComponent(selectedWorkerID)}/models`);
       setModels(res.data?.models || []);
       setModelStatus('success');
     } catch (error: any) {
@@ -211,10 +209,11 @@ export default function SecureRemoteCaptionPanel() {
           name: 'Secure Remote Ollama Caption',
           process: [
             {
-              type: 'OllamaCaptioner',
+              type: 'SecureRemoteOllamaCaptioner',
               sqlite_db_path: './aitk_db.db',
               device: 'cpu',
               caption: {
+                remote_ollama_worker_id: workerID,
                 model_name_or_path: model.trim(),
                 device: 'cpu',
                 dtype: 'bf16',
@@ -236,7 +235,7 @@ export default function SecureRemoteCaptionPanel() {
       const saved = await apiClient
         .post('/api/jobs', {
           name: jobName,
-          worker_id: workerID,
+          worker_id: 'local',
           gpu_ids: '0',
           job_config: jobConfig,
           job_type: 'caption',
@@ -276,7 +275,7 @@ export default function SecureRemoteCaptionPanel() {
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-gray-100">Secure Remote Captioning</h2>
-          <p className="text-sm text-gray-500">Image captions through a remote worker's local Ollama.</p>
+          <p className="text-sm text-gray-500">Image captions through a direct Remote Ollama endpoint.</p>
         </div>
         {startedJobId && (
           <Link href={`/jobs/${startedJobId}`} className="rounded-md bg-gray-800 px-3 py-1 text-sm text-gray-100">
@@ -288,7 +287,7 @@ export default function SecureRemoteCaptionPanel() {
       <form onSubmit={startSecureCaptionJob} className={`space-y-3 ${isLoading ? 'pointer-events-none opacity-60' : ''}`}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <SelectInput
-            label="Remote Worker"
+            label="Remote Ollama"
             value={workerID}
             onChange={value => setWorkerID(value)}
             options={workerOptions}

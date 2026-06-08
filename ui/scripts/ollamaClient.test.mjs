@@ -66,6 +66,21 @@ test('listOllamaModels reports unreachable Ollama base URL', async () => {
   );
 });
 
+test('listOllamaModels sends optional bearer token', async () => {
+  globalThis.fetch = async (url, init = {}) => {
+    assert.equal(String(url), 'http://ollama.test/api/tags');
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer remote-token');
+    return response({ models: [{ model: 'llava:latest' }] });
+  };
+
+  const models = await ollama.listOllamaModels({
+    baseUrl: 'http://ollama.test',
+    authToken: 'remote-token',
+  });
+
+  assert.deepEqual(models, [{ model: 'llava:latest' }]);
+});
+
 test('startOllamaModelPull warms installed model before reporting ready', async () => {
   const calls = [];
   let resolveWarm;

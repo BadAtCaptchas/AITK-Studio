@@ -1,13 +1,13 @@
 import { db } from '../../src/server/db';
 import type { Job, Queue } from '../../src/types';
 import { reconcileLocalJobProcess } from '../../src/server/jobProcess';
-import { isSecureRemoteOllamaCaptionJob } from '../../src/server/secureRemoteCaptionJobs';
+import { isAnyRemoteOllamaCaptionJob } from '../../src/server/secureRemoteCaptionJobs';
 import startJob from './startJob';
 
 function isSecureRemoteOllamaCaptionJobConfigJson(jobConfigJson: unknown) {
   if (typeof jobConfigJson !== 'string' || !jobConfigJson.trim()) return false;
   try {
-    return isSecureRemoteOllamaCaptionJob(JSON.parse(jobConfigJson));
+    return isAnyRemoteOllamaCaptionJob(JSON.parse(jobConfigJson));
   } catch {
     return false;
   }

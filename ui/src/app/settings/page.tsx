@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from 'react';
 import useSettings from '@/hooks/useSettings';
 import useWorkers from '@/hooks/useWorkers';
+import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
-import type { ComfyInstallProgress, WorkerNode } from '@/types';
+import type { ComfyInstallProgress, RemoteOllamaWorker, WorkerNode } from '@/types';
 import { Checkbox } from '@/components/formInputs';
 import { ComfyInstallProgressBand } from '@/components/ComfyInstallProgress';
 import { Download, Loader2, Power, RefreshCw } from 'lucide-react';
@@ -99,6 +100,14 @@ const emptyWorkerForm = {
   enabled: true,
 };
 
+const emptyOllamaWorkerForm = {
+  id: '',
+  name: '',
+  base_url: '',
+  auth_token: '',
+  enabled: true,
+};
+
 function formatUpdaterTime(value?: string | null) {
   if (!value) return 'Not checked yet';
   const date = new Date(value);
@@ -154,9 +163,12 @@ function workerUpdaterStatusTime(status: WorkerUpdaterStatus) {
 export default function Settings() {
   const { settings, setSettings } = useSettings();
   const { workers, setWorkers, refreshWorkers } = useWorkers();
+  const { workers: ollamaWorkers, refreshWorkers: refreshOllamaWorkers } = useRemoteOllamaWorkers();
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [workerForm, setWorkerForm] = useState(emptyWorkerForm);
   const [workerStatus, setWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
+  const [ollamaWorkerForm, setOllamaWorkerForm] = useState(emptyOllamaWorkerForm);
+  const [ollamaWorkerStatus, setOllamaWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const [cloudflared, setCloudflared] = useState<CloudflaredStatus | null>(null);
   const [cloudflaredAction, setCloudflaredAction] = useState<'idle' | 'starting' | 'downloading' | 'error'>('idle');
   const [cloudflaredActionError, setCloudflaredActionError] = useState('');
@@ -515,6 +527,46 @@ export default function Settings() {
       refreshWorkers();
     } catch (error: any) {
       alert(error.response?.data?.error || 'Failed to delete worker.');
+    }
+  };
+
+  const saveOllamaWorker = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOllamaWorkerStatus('saving');
+    try {
+      await apiClient.post('/api/ollama-workers', ollamaWorkerForm);
+      setOllamaWorkerForm(emptyOllamaWorkerForm);
+      refreshOllamaWorkers();
+      setOllamaWorkerStatus('idle');
+    } catch (error) {
+      console.error('Error saving Remote Ollama worker:', error);
+      setOllamaWorkerStatus('error');
+    }
+  };
+
+  const editOllamaWorker = (worker: RemoteOllamaWorker) => {
+    setOllamaWorkerForm({
+      id: worker.id,
+      name: worker.name,
+      base_url: worker.base_url,
+      auth_token: '',
+      enabled: worker.enabled,
+    });
+  };
+
+  const checkOllamaWorker = async (workerID: string) => {
+    await apiClient.post(`/api/ollama-workers/${workerID}/check`).catch(error => {
+      console.error('Remote Ollama check failed:', error);
+    });
+    refreshOllamaWorkers();
+  };
+
+  const deleteOllamaWorker = async (workerID: string) => {
+    try {
+      await apiClient.delete(`/api/ollama-workers/${workerID}`);
+      refreshOllamaWorkers();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to delete Remote Ollama endpoint.');
     }
   };
 
@@ -893,6 +945,108 @@ export default function Settings() {
                 );
               })}
               {workers.length === 0 && <div className="text-sm text-gray-500">No remote workers configured.</div>}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-100">Remote Ollama</h2>
+                <p className="text-sm text-gray-500">Direct Ollama HTTP endpoints for captioning and image tools.</p>
+              </div>
+            </div>
+
+            <form onSubmit={saveOllamaWorker} className="space-y-3">
+              <input
+                type="text"
+                value={ollamaWorkerForm.name}
+                onChange={e => setOllamaWorkerForm(prev => ({ ...prev, name: e.target.value }))}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+                placeholder="Endpoint name"
+              />
+              <input
+                type="url"
+                value={ollamaWorkerForm.base_url}
+                onChange={e => setOllamaWorkerForm(prev => ({ ...prev, base_url: e.target.value }))}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+                placeholder="http://ollama-host:11434"
+              />
+              <input
+                type="password"
+                value={ollamaWorkerForm.auth_token}
+                onChange={e => setOllamaWorkerForm(prev => ({ ...prev, auth_token: e.target.value }))}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
+                placeholder={ollamaWorkerForm.id ? 'Leave blank to keep existing bearer token' : 'Optional bearer token'}
+              />
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={ollamaWorkerForm.enabled}
+                  onChange={e => setOllamaWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                />
+                Enabled
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={ollamaWorkerStatus === 'saving'}
+                  className="rounded-lg bg-gray-700 px-4 py-2 text-sm hover:bg-gray-600 disabled:opacity-50"
+                >
+                  {ollamaWorkerForm.id ? 'Update Endpoint' : 'Add Endpoint'}
+                </button>
+                {ollamaWorkerForm.id && (
+                  <button
+                    type="button"
+                    onClick={() => setOllamaWorkerForm(emptyOllamaWorkerForm)}
+                    className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {ollamaWorkerStatus === 'error' && <p className="text-sm text-red-400">Failed to save Remote Ollama endpoint.</p>}
+            </form>
+
+            <div className="mt-4 space-y-2">
+              {ollamaWorkers.map(worker => (
+                <div key={worker.id} className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
+                      <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
+                      <div className="mt-1 text-xs text-gray-400">
+                        {worker.last_status}
+                        {typeof worker.model_count === 'number' ? `: ${worker.model_count} model${worker.model_count === 1 ? '' : 's'}` : ''}
+                        {worker.last_error ? `: ${worker.last_error}` : ''}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        className="rounded bg-gray-800 px-2 py-1 text-xs"
+                        onClick={() => checkOllamaWorker(worker.id)}
+                      >
+                        Health
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-gray-800 px-2 py-1 text-xs"
+                        onClick={() => editOllamaWorker(worker)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-red-900 px-2 py-1 text-xs"
+                        onClick={() => deleteOllamaWorker(worker.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {ollamaWorkers.length === 0 && <div className="text-sm text-gray-500">No Remote Ollama endpoints configured.</div>}
             </div>
           </section>
 

@@ -114,7 +114,9 @@ AITK_OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODELS=/workspace/ai-toolkit/ollama
 ```
 
-To use this Pod as a secure remote caption worker, set `AITK_OLLAMA_ENABLED=1`, keep `OLLAMA_HOST` on `127.0.0.1:11434`, and expose only the AI Toolkit UI through RunPod or Cloudflared. The central UI sends encrypted per-image payloads, including dataset-specific system prompts when configured, to the worker UI; datasets are not uploaded or stored on the worker. Missing Ollama models are pulled automatically.
+To use this Pod as a standalone Remote Ollama endpoint, set `AITK_OLLAMA_ENABLED=1` and expose Ollama through a protected HTTP(S) route or trusted private network. Add that Ollama base URL in the central UI under **Settings > Remote Ollama**. The Pod does not need to run the AI Toolkit UI for direct Remote Ollama captioning.
+
+For the older full-worker Toolkit proxy mode, keep `OLLAMA_HOST` on `127.0.0.1:11434` and expose only the AI Toolkit UI through RunPod or Cloudflared. The central UI sends encrypted per-image payloads, including dataset-specific system prompts when configured, to the worker UI; datasets are not uploaded or stored on the worker. Missing Ollama models are pulled automatically.
 
 ## Smoke Checks
 

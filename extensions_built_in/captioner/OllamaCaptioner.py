@@ -23,9 +23,11 @@ class OllamaCaptioner(BaseCaptioner):
     def __init__(self, process_id: int, job, config: OrderedDict, **kwargs):
         super(OllamaCaptioner, self).__init__(process_id, job, config, **kwargs)
         self.ollama_base_url = ""
+        self.ollama_auth_token = ""
 
     def load_model(self):
         self.ollama_base_url = os.environ.get("AITK_OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
+        self.ollama_auth_token = os.environ.get("AITK_OLLAMA_AUTH_TOKEN", "").strip()
         if not self.ollama_base_url:
             raise ValueError("Ollama base URL is missing")
         if not self.caption_config.model_name_or_path:
@@ -35,10 +37,13 @@ class OllamaCaptioner(BaseCaptioner):
 
     def _request_json(self, route_path: str, payload: dict = None, timeout: int = 900) -> dict:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.ollama_auth_token:
+            headers["Authorization"] = f"Bearer {self.ollama_auth_token}"
         request = urllib.request.Request(
             f"{self.ollama_base_url}{route_path}",
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="GET" if payload is None else "POST",
         )
         try:

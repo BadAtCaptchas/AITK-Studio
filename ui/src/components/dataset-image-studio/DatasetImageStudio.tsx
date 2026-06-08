@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
-import useWorkers from '@/hooks/useWorkers';
+import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import {
   captionObjectPath,
   decryptEncryptedObjectBlob,
@@ -92,7 +92,7 @@ export default function DatasetImageStudio({
   onBulkEncryptedCaptionAction,
   onSaveEncryptedCaption,
 }: DatasetImageStudioProps) {
-  const { workers } = useWorkers();
+  const { workers } = useRemoteOllamaWorkers();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [captionText, setCaptionText] = useState('');
   const [savedCaption, setSavedCaption] = useState('');
@@ -177,7 +177,7 @@ export default function DatasetImageStudio({
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
           : autoBoxProvider === 'remote_ollama' && !remoteOllamaWorkerId
-            ? 'Select a remote Ollama worker.'
+            ? 'Select a Remote Ollama endpoint.'
             : !selectedImageSize
               ? 'Image size pending.'
               : '';
@@ -192,7 +192,7 @@ export default function DatasetImageStudio({
         : selectedItem?.kind === 'encrypted' && !encryptedKey
           ? 'Unlock the encrypted dataset first.'
           : autoBoxProvider === 'remote_ollama' && !remoteOllamaWorkerId
-            ? 'Select a remote Ollama worker.'
+            ? 'Select a Remote Ollama endpoint.'
             : !selectedImageSize
               ? 'Image size pending.'
               : !selectedElement || selectedElementIndex == null

@@ -22,6 +22,18 @@ export type OllamaGenerateOptions = {
   maxNewTokens?: number;
 };
 
+export type OllamaEndpointConfig = {
+  baseUrl?: string | null;
+  authToken?: string | null;
+};
+
+export type OllamaEndpoint = string | OllamaEndpointConfig;
+
+type ResolvedOllamaEndpoint = {
+  baseUrl: string;
+  authToken: string;
+};
+
 type OllamaGenerationAttempt = {
   endpoint: 'generate' | 'chat';
   attempt: number;
@@ -57,6 +69,17 @@ export function getOllamaBaseUrl() {
   return trimTrailingSlash(process.env.AITK_OLLAMA_BASE_URL?.trim() || 'http://127.0.0.1:11434');
 }
 
+export function resolveOllamaEndpoint(endpoint?: OllamaEndpoint): ResolvedOllamaEndpoint {
+  if (typeof endpoint === 'string') {
+    return { baseUrl: trimTrailingSlash(endpoint.trim()), authToken: '' };
+  }
+
+  return {
+    baseUrl: trimTrailingSlash(endpoint?.baseUrl?.trim() || getOllamaBaseUrl()),
+    authToken: endpoint?.authToken?.trim() || '',
+  };
+}
+
 function normalizeModelName(value: string) {
   const trimmed = value.trim();
   return trimmed.includes(':') ? trimmed : `${trimmed}:latest`;
@@ -89,13 +112,17 @@ function ollamaFetchErrorMessage(error: unknown) {
 async function fetchOllama(
   path: string,
   init: RequestInit,
-  baseUrl: string,
+  endpoint: OllamaEndpoint | undefined,
   operation: string,
 ): Promise<{ response: Response; url: string }> {
-  const normalizedBaseUrl = trimTrailingSlash(baseUrl);
-  const url = `${normalizedBaseUrl}${path}`;
+  const { baseUrl, authToken } = resolveOllamaEndpoint(endpoint);
+  const url = `${baseUrl}${path}`;
+  const headers = new Headers(init.headers);
+  if (authToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${authToken}`);
+  }
   try {
-    return { response: await fetch(url, init), url };
+    return { response: await fetch(url, { ...init, headers }), url };
   } catch (error) {
     throw new Error(
       `Ollama ${operation} failed at ${url}: ${ollamaFetchErrorMessage(error)}. Confirm Ollama is running and AITK_OLLAMA_BASE_URL points to the remote server's local Ollama.`,
@@ -162,8 +189,8 @@ function captionBodyForAttempt(body: Record<string, unknown>, maxNewTokens: numb
   };
 }
 
-export async function listOllamaModels(baseUrl = getOllamaBaseUrl()) {
-  const { response, url } = await fetchOllama('/api/tags', { cache: 'no-store' }, baseUrl, 'model list');
+export async function listOllamaModels(endpoint?: OllamaEndpoint) {
+  const { response, url } = await fetchOllama('/api/tags', { cache: 'no-store' }, endpoint, 'model list');
   if (!response.ok) {
     await throwOllamaResponseError(response, url, 'model list');
   }
@@ -171,27 +198,28 @@ export async function listOllamaModels(baseUrl = getOllamaBaseUrl()) {
   return Array.isArray(data.models) ? data.models : [];
 }
 
-export async function getOllamaStatus(baseUrl = getOllamaBaseUrl()): Promise<OllamaStatus> {
+export async function getOllamaStatus(endpoint?: OllamaEndpoint): Promise<OllamaStatus> {
+  const { baseUrl } = resolveOllamaEndpoint(endpoint);
   try {
-    const models = await listOllamaModels(baseUrl);
-    return { ok: true, baseUrl: trimTrailingSlash(baseUrl), modelCount: models.length, error: null };
+    const models = await listOllamaModels(endpoint);
+    return { ok: true, baseUrl, modelCount: models.length, error: null };
   } catch (error) {
     return {
       ok: false,
-      baseUrl: trimTrailingSlash(baseUrl),
+      baseUrl,
       modelCount: 0,
       error: error instanceof Error ? error.message : 'Ollama is unavailable',
     };
   }
 }
 
-export async function ensureOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
+export async function ensureOllamaModel(model: string, endpoint?: OllamaEndpoint) {
   const trimmedModel = model.trim();
   if (!trimmedModel) {
     throw new Error('Ollama model is required');
   }
 
-  const models = await listOllamaModels(baseUrl);
+  const models = await listOllamaModels(endpoint);
   if (hasOllamaModel(models, trimmedModel)) {
     return { pulled: false };
   }
@@ -203,7 +231,7 @@ export async function ensureOllamaModel(model: string, baseUrl = getOllamaBaseUr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: trimmedModel, stream: false }),
     },
-    baseUrl,
+    endpoint,
     `model pull for ${trimmedModel}`,
   );
   if (!response.ok) {
@@ -227,12 +255,12 @@ function copyPullState(state: OllamaModelPullStatus): OllamaModelPullStatus {
   return { ...state };
 }
 
-export async function startOllamaModelPull(model: string, baseUrl = getOllamaBaseUrl()): Promise<OllamaModelPullStatus> {
+export async function startOllamaModelPull(model: string, endpoint?: OllamaEndpoint): Promise<OllamaModelPullStatus> {
   const trimmedModel = model.trim();
   if (!trimmedModel) throw new Error('Ollama model is required');
 
-  const normalizedBaseUrl = trimTrailingSlash(baseUrl);
-  const key = modelPullKey(trimmedModel, normalizedBaseUrl);
+  const resolvedEndpoint = resolveOllamaEndpoint(endpoint);
+  const key = modelPullKey(trimmedModel, resolvedEndpoint.baseUrl);
   const pulls = pullStateMap();
   const existing = pulls.get(key);
   if (existing?.status === 'pulling' || existing?.status === 'ready') {
@@ -255,7 +283,7 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
 
   void (async () => {
     try {
-      const models = await listOllamaModels(normalizedBaseUrl);
+      const models = await listOllamaModels(resolvedEndpoint);
       if (!hasOllamaModel(models, trimmedModel)) {
         state.phase = 'pulling';
         state.updatedAt = new Date().toISOString();
@@ -266,7 +294,7 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: trimmedModel, stream: false }),
           },
-          normalizedBaseUrl,
+          resolvedEndpoint,
           `model pull for ${trimmedModel}`,
         );
         if (!response.ok) {
@@ -275,7 +303,7 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
       }
       state.phase = 'warming';
       state.updatedAt = new Date().toISOString();
-      await warmOllamaModel(trimmedModel, normalizedBaseUrl);
+      await warmOllamaModel(trimmedModel, resolvedEndpoint);
       state.status = 'ready';
       state.phase = 'ready';
       state.error = null;
@@ -290,7 +318,7 @@ export async function startOllamaModelPull(model: string, baseUrl = getOllamaBas
   return copyPullState(state);
 }
 
-async function warmOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
+async function warmOllamaModel(model: string, endpoint?: OllamaEndpoint) {
   const { response, url } = await fetchOllama(
     '/api/generate',
     {
@@ -303,7 +331,7 @@ async function warmOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
         keep_alive: '10m',
       }),
     },
-    baseUrl,
+    endpoint,
     `model warm-up for ${model}`,
   );
   if (!response.ok) {
@@ -311,14 +339,14 @@ async function warmOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
   }
 }
 
-export async function generateOllamaImageCaption(options: OllamaGenerateOptions, baseUrl = getOllamaBaseUrl()) {
+export async function generateOllamaImageCaption(options: OllamaGenerateOptions, endpoint?: OllamaEndpoint) {
   const model = options.model.trim();
   const prompt = options.prompt.trim();
   if (!model) throw new Error('Ollama model is required');
   if (!prompt) throw new Error('Caption prompt is required');
   if (!options.imageBase64) throw new Error('Image payload is required');
 
-  await ensureOllamaModel(model, baseUrl);
+  await ensureOllamaModel(model, endpoint);
 
   const generateBody: Record<string, unknown> = {
     model,
@@ -352,7 +380,7 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     const generateAttempt = await runOllamaGenerationAttempt(
       'generate',
       captionBodyForAttempt(generateBody, options.maxNewTokens, attempt),
-      baseUrl,
+      endpoint,
       attempt,
     );
     attempts.push(generateAttempt);
@@ -361,7 +389,7 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     const chatAttempt = await runOllamaGenerationAttempt(
       'chat',
       captionBodyForAttempt(chatBody, options.maxNewTokens, attempt),
-      baseUrl,
+      endpoint,
       attempt,
     );
     attempts.push(chatAttempt);
@@ -389,7 +417,7 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
 async function runOllamaGenerationAttempt(
   endpoint: OllamaGenerationAttempt['endpoint'],
   body: Record<string, unknown>,
-  baseUrl: string,
+  ollamaEndpoint: OllamaEndpoint | undefined,
   attempt: number,
 ): Promise<OllamaGenerationAttempt> {
   const { response, url } = await fetchOllama(
@@ -399,7 +427,7 @@ async function runOllamaGenerationAttempt(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    baseUrl,
+    ollamaEndpoint,
     `${endpoint} caption attempt ${attempt}`,
   );
   if (!response.ok) {
@@ -418,9 +446,10 @@ async function runOllamaGenerationAttempt(
   };
 }
 
-export async function unloadOllamaModel(model: string, baseUrl = getOllamaBaseUrl()) {
+export async function unloadOllamaModel(model: string, endpoint?: OllamaEndpoint) {
   const trimmedModel = model.trim();
   if (!trimmedModel) throw new Error('Ollama model is required');
+  const resolvedEndpoint = resolveOllamaEndpoint(endpoint);
 
   const { response, url } = await fetchOllama(
     '/api/generate',
@@ -434,19 +463,19 @@ export async function unloadOllamaModel(model: string, baseUrl = getOllamaBaseUr
         keep_alive: 0,
       }),
     },
-    baseUrl,
+    resolvedEndpoint,
     `model unload for ${trimmedModel}`,
   );
   if (!response.ok) {
     const message = await readOllamaError(response);
     if (response.status === 404 || message.toLowerCase().includes('not found')) {
-      pullStateMap().delete(modelPullKey(trimmedModel, trimTrailingSlash(baseUrl)));
+      pullStateMap().delete(modelPullKey(trimmedModel, resolvedEndpoint.baseUrl));
       return { unloaded: false, reason: 'model_not_found' };
     }
     throw new Error(`Ollama model unload for ${trimmedModel} failed at ${url}: ${message}`);
   }
 
-  pullStateMap().delete(modelPullKey(trimmedModel, trimTrailingSlash(baseUrl)));
+  pullStateMap().delete(modelPullKey(trimmedModel, resolvedEndpoint.baseUrl));
 
   return { unloaded: true };
 }

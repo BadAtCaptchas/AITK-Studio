@@ -150,6 +150,19 @@ export interface WorkerNode {
   updated_at: DbDate;
 }
 
+export interface RemoteOllamaWorker {
+  id: string;
+  name: string;
+  base_url: string;
+  enabled: boolean;
+  last_status: string;
+  last_error: string | null;
+  last_checked_at: DbDate | null;
+  model_count: number | null;
+  created_at: DbDate;
+  updated_at: DbDate;
+}
+
 export interface Job {
   id: string;
   name: string;
@@ -663,6 +676,7 @@ export interface CaptionProcessConfig {
     max_new_tokens?: number;
     fixed_caption?: string;
     remote_worker_id?: string;
+    remote_ollama_worker_id?: string;
     system_prompt?: string;
     output_format?: 'text' | 'ideogram_json' | string;
     source_caption_extension?: string;

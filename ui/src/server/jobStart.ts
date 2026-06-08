@@ -23,7 +23,7 @@ import {
   isDurableEncryptedDatasetKeySecretError,
   storeDurableEncryptedDatasetKeys,
 } from './encryptedDatasetSecrets';
-import { isSecureRemoteOllamaCaptionJob } from './secureRemoteCaptionJobs';
+import { isAnyRemoteOllamaCaptionJob } from './secureRemoteCaptionJobs';
 import {
   syncRemoteDatasetsForJobConfig,
   type RemoteDatasetSyncMapping,
@@ -88,7 +88,7 @@ export function isValidJobId(jobID: string) {
 function isSecureRemoteOllamaCaptionJobConfigJson(jobConfigJson: unknown) {
   if (typeof jobConfigJson !== 'string' || !jobConfigJson.trim()) return false;
   try {
-    return isSecureRemoteOllamaCaptionJob(JSON.parse(jobConfigJson));
+    return isAnyRemoteOllamaCaptionJob(JSON.parse(jobConfigJson));
   } catch {
     return false;
   }
@@ -484,7 +484,7 @@ export async function startPreparedJob(
     }
   }
 
-  if (isSecureRemoteOllamaCaptionJob(jobConfig)) {
+  if (isAnyRemoteOllamaCaptionJob(jobConfig)) {
     await startJobNow(jobID, {
       encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
     });

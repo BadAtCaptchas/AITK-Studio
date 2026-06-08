@@ -20,7 +20,7 @@ import {
   maxResOptions,
   quantizationOptions,
 } from '@/helpers/captionOptions';
-import useWorkers from '@/hooks/useWorkers';
+import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { apiClient } from '@/utils/api';
 
 type Props = {
@@ -88,13 +88,13 @@ const CaptionSimpleJob: React.FC<Props> = ({
   const usesLocalGpu = selectedCaptionOption?.usesGpu === true;
   const usesQuantization = selectedCaptionOption?.usesQuantization === true;
   const usesOpenRouter = selectedCaptionOption?.usesOpenRouter === true;
-  const usesRemoteWorker = selectedCaptionOption?.usesRemoteWorker === true;
+  const usesRemoteOllama = additionalSections.includes('caption.remote_ollama_worker_id');
   const captionConfig = jobConfig.config.process[0].caption;
   const outputFormat = captionConfig.output_format || 'text';
   const isJsonOutput = outputFormat === 'ideogram_json' || outputFormat === 'json';
-  const { workers } = useWorkers();
+  const { workers } = useRemoteOllamaWorkers();
   const enabledWorkers = useMemo(() => workers.filter(worker => worker.enabled), [workers]);
-  const remoteWorkerOptions = useMemo(
+  const remoteOllamaOptions = useMemo(
     () => enabledWorkers.map(worker => ({ value: worker.id, label: worker.name })),
     [enabledWorkers],
   );
@@ -102,9 +102,9 @@ const CaptionSimpleJob: React.FC<Props> = ({
   const [estimateStatus, setEstimateStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
   useEffect(() => {
-    if (!usesRemoteWorker || captionConfig.remote_worker_id || enabledWorkers.length === 0) return;
-    setJobConfig(enabledWorkers[0].id, 'config.process[0].caption.remote_worker_id');
-  }, [captionConfig.remote_worker_id, enabledWorkers, setJobConfig, usesRemoteWorker]);
+    if (!usesRemoteOllama || captionConfig.remote_ollama_worker_id || enabledWorkers.length === 0) return;
+    setJobConfig(enabledWorkers[0].id, 'config.process[0].caption.remote_ollama_worker_id');
+  }, [captionConfig.remote_ollama_worker_id, enabledWorkers, setJobConfig, usesRemoteOllama]);
 
   useEffect(() => {
     if (!usesOpenRouter || !datasetPath || !captionConfig.model_name_or_path) {
@@ -212,14 +212,14 @@ const CaptionSimpleJob: React.FC<Props> = ({
           OpenRouter cannot caption encrypted datasets. Use a copied unencrypted dataset, then encrypt the completed result.
         </div>
       )}
-      {additionalSections.includes('caption.remote_worker_id') && (
+      {additionalSections.includes('caption.remote_ollama_worker_id') && (
         <div className="mt-4">
           <SelectInput
-            label="Remote Worker"
-            value={captionConfig.remote_worker_id || ''}
-            onChange={value => setJobConfig(value, 'config.process[0].caption.remote_worker_id')}
-            options={remoteWorkerOptions}
-            disabled={remoteWorkerOptions.length === 0}
+            label="Remote Ollama"
+            value={captionConfig.remote_ollama_worker_id || ''}
+            onChange={value => setJobConfig(value, 'config.process[0].caption.remote_ollama_worker_id')}
+            options={remoteOllamaOptions}
+            disabled={remoteOllamaOptions.length === 0}
           />
         </div>
       )}

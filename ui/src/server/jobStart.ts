@@ -24,10 +24,30 @@ import {
   storeDurableEncryptedDatasetKeys,
 } from './encryptedDatasetSecrets';
 import { isSecureRemoteOllamaCaptionJob } from './secureRemoteCaptionJobs';
+import {
+  syncRemoteDatasetsForJobConfig,
+  type RemoteDatasetSyncMapping,
+} from './remoteDatasetSync';
 import { startJobNow } from '../../cron/actions/startJob';
-import type { EncryptedDatasetStartKey, Job } from '../types';
+import type { EncryptedDatasetStartKey, Job, RemoteStartProgress } from '../types';
 
 type RequiredEncryptedDataset = { path: string; name: string };
+type RemoteStartProgressCallback = (
+  progress: Partial<
+    Pick<
+      RemoteStartProgress,
+      | 'status'
+      | 'message'
+      | 'percent'
+      | 'datasetName'
+      | 'bytesProcessed'
+      | 'bytesTotal'
+      | 'warnings'
+      | 'error'
+      | 'remoteJobID'
+    >
+  >,
+) => void;
 
 export type PreparedJobStart = {
   jobID: string;
@@ -206,6 +226,38 @@ async function queueLocalJob(
   return (await db.jobs.findById(jobID)) || job;
 }
 
+function scaleUploadPercent(loaded: number, total: number, start: number, end: number) {
+  if (total <= 0) return start;
+  return start + (end - start) * Math.min(1, loaded / total);
+}
+
+function addRemoteEncryptedDatasetKeyAliases(
+  requiredEncryptedDatasets: RequiredEncryptedDataset[],
+  encryptedKeysForLaunch: EncryptedDatasetStartKey[],
+  datasetMappings: RemoteDatasetSyncMapping[],
+) {
+  if (requiredEncryptedDatasets.length === 0 || datasetMappings.length === 0) return encryptedKeysForLaunch;
+
+  const nextKeys = [...encryptedKeysForLaunch];
+  for (const mapping of datasetMappings) {
+    const requiredDataset = requiredEncryptedDatasets.find(
+      dataset => pathMatches(dataset.path, mapping.localDatasetPath) || dataset.name === mapping.datasetName,
+    );
+    if (!requiredDataset) continue;
+    const keyB64 = getKeyForRequiredDataset(normalizeEncryptedKeyMap(encryptedKeysForLaunch), requiredDataset);
+    if (!keyB64) continue;
+    nextKeys.push({ datasetPath: mapping.remoteDatasetPath, keyB64 });
+    if (mapping.remoteDatasetName !== mapping.datasetName) {
+      nextKeys.push({ datasetPath: mapping.remoteDatasetName, keyB64 });
+    }
+  }
+  return nextKeys;
+}
+
+function pathMatches(left: string, right: string) {
+  return left.replace(/[\\/]+$/, '').toLowerCase() === right.replace(/[\\/]+$/, '').toLowerCase();
+}
+
 export async function assertPreparedJobCanStart(prepared: PreparedJobStart) {
   const { job, requiredEncryptedDatasets, useDurableEncryptedKeys } = prepared;
 
@@ -238,7 +290,7 @@ export async function assertPreparedJobCanStart(prepared: PreparedJobStart) {
 
 export async function startPreparedJob(
   prepared: PreparedJobStart,
-  options: { startQueue?: boolean; queueInfo?: string } = {},
+  options: { startQueue?: boolean; queueInfo?: string; onRemoteStartProgress?: RemoteStartProgressCallback } = {},
 ): Promise<Job> {
   const {
     job,
@@ -252,6 +304,15 @@ export async function startPreparedJob(
   if (!isLocalWorker(job.worker_id)) {
     try {
       const worker = await getRemoteWorker(job.worker_id);
+      const onProgress = options.onRemoteStartProgress;
+      onProgress?.({
+        status: 'preparing',
+        message: `Preparing ${worker.name}`,
+        percent: 2,
+        datasetName: null,
+        bytesProcessed: 0,
+        bytesTotal: 0,
+      });
       if (
         requiredEncryptedDatasets.length > 0 &&
         !worker.base_url.toLowerCase().startsWith('https://') &&
@@ -272,15 +333,67 @@ export async function startPreparedJob(
       }
 
       let remoteJobId = job.remote_job_id;
+      let remoteJobConfig = jobConfig;
+      let remoteEncryptedKeysForLaunch = encryptedKeysForLaunch;
+      let remoteWarnings: string[] = [];
 
       if (!remoteJobId) {
+        const datasetSync = await syncRemoteDatasetsForJobConfig(jobConfig, worker, {
+          onProgress: progress =>
+            onProgress?.({
+              status: progress.status,
+              message: progress.message,
+              percent: progress.percent,
+              datasetName: progress.datasetName,
+              bytesProcessed: progress.bytesProcessed ?? 0,
+              bytesTotal: progress.bytesTotal ?? 0,
+            }),
+        });
+        remoteJobConfig = datasetSync.jobConfig;
+        remoteWarnings = datasetSync.warnings;
+        remoteEncryptedKeysForLaunch = addRemoteEncryptedDatasetKeyAliases(
+          requiredEncryptedDatasets,
+          encryptedKeysForLaunch,
+          datasetSync.mappings,
+        );
+
+        onProgress?.({
+          status: 'zipping-job',
+          message: 'Preparing remote job bundle',
+          percent: 70,
+          datasetName: null,
+          bytesProcessed: 0,
+          bytesTotal: 0,
+          warnings: remoteWarnings,
+        });
         const bundle = await createRemoteTrainingJobBundle(jobID, {
-          includeDatasets: true,
+          includeDatasets: false,
           checkpointMode: 'all',
           targetWorker: worker,
+          targetJobConfig: remoteJobConfig,
         });
         try {
-          const imported = await uploadBundleToWorker(worker, bundle.zipPath, job.gpu_ids);
+          const bundleStat = await fsp.stat(bundle.zipPath);
+          onProgress?.({
+            status: 'uploading-job',
+            message: 'Uploading remote job bundle',
+            percent: 75,
+            datasetName: null,
+            bytesProcessed: 0,
+            bytesTotal: bundleStat.size,
+            warnings: remoteWarnings,
+          });
+          const imported = await uploadBundleToWorker(worker, bundle.zipPath, job.gpu_ids, progress =>
+            onProgress?.({
+              status: 'uploading-job',
+              message: 'Uploading remote job bundle',
+              percent: scaleUploadPercent(progress.loaded, progress.total, 75, 88),
+              datasetName: null,
+              bytesProcessed: progress.loaded,
+              bytesTotal: progress.total,
+              warnings: remoteWarnings,
+            }),
+          );
           remoteJobId = imported.job.id;
           const localJobConfig = {
             ...jobConfig,
@@ -294,20 +407,47 @@ export async function startPreparedJob(
             gpu_ids: imported.job.gpu_ids,
             job_config: JSON.stringify(localJobConfig),
             remote_job_id: imported.job.id,
-            remote_error: [...bundle.warnings, ...(imported.warnings || [])].join('\n') || null,
+            remote_error: [...remoteWarnings, ...bundle.warnings, ...(imported.warnings || [])].join('\n') || null,
             remote_sync_at: new Date(),
+          });
+          remoteWarnings = [...remoteWarnings, ...bundle.warnings, ...(imported.warnings || [])];
+          onProgress?.({
+            status: 'uploading-job',
+            message: 'Remote job uploaded',
+            percent: 89,
+            bytesProcessed: bundleStat.size,
+            bytesTotal: bundleStat.size,
+            warnings: remoteWarnings,
+            remoteJobID: imported.job.id,
           });
         } finally {
           await fsp.rm(bundle.zipPath, { force: true }).catch(() => undefined);
         }
       }
 
+      onProgress?.({
+        status: 'starting',
+        message: 'Starting remote job',
+        percent: 92,
+        datasetName: null,
+        bytesProcessed: 0,
+        bytesTotal: 0,
+        warnings: remoteWarnings,
+        remoteJobID: remoteJobId,
+      });
       await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobId)}/start`, {
         method: 'POST',
         body: JSON.stringify({
-          encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
+          encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? remoteEncryptedKeysForLaunch : undefined,
           durableEncryptedDatasetKeys: useDurableEncryptedKeys,
         }),
+      });
+      onProgress?.({
+        status: 'starting',
+        message: 'Starting remote queue',
+        percent: 96,
+        warnings: remoteWarnings,
+        remoteJobID: remoteJobId,
       });
       await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`);
       await db.queues
@@ -317,13 +457,27 @@ export async function startPreparedJob(
             ? db.queues.update(queue.id, { is_running: true })
             : db.queues.create({ worker_id: job.worker_id, gpu_ids: job.gpu_ids, is_running: true }),
         );
-      return syncRemoteJob({
+      const synced = await syncRemoteJob({
         ...(await db.jobs.findById(jobID))!,
         remote_job_id: remoteJobId,
       });
+      onProgress?.({
+        status: 'completed',
+        message: 'Remote job started',
+        percent: 100,
+        warnings: remoteWarnings,
+        remoteJobID: remoteJobId,
+      });
+      return synced;
     } catch (error) {
       if (error instanceof JobStartError) throw error;
       const message = error instanceof Error ? error.message : 'Failed to start remote job';
+      options.onRemoteStartProgress?.({
+        status: 'failed',
+        message: 'Remote start failed',
+        percent: 100,
+        error: message,
+      });
       await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
       failStart({ error: message }, isRemoteCaptionDispatchError(error) ? error.status : 502);
     }

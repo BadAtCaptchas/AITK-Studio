@@ -3,6 +3,7 @@ import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import { getDisplayPath, getDownloadUrl } from '@/utils/media';
 import type { EncryptedDatasetStartKey } from '@/types';
+import type { RemoteStartProgress } from '@/types';
 import type { AxiosProgressEvent } from 'axios';
 import {
   forgetRememberedEncryptedDatasetKey,
@@ -61,6 +62,8 @@ export type JobModelPrefetchResult = {
 
 export type StartJobOptions = {
   durableEncryptedDatasetKeys?: boolean;
+  background?: boolean;
+  onRemoteStartProgress?: (progress: RemoteStartProgress) => void;
 };
 
 function basenameFromPath(value: string) {
@@ -126,14 +129,39 @@ const runStartLikeJobAction = (
   options: StartJobOptions = {},
 ) => {
   return new Promise<void>((resolve, reject) => {
-    apiClient
-      .post(`/api/jobs/${jobID}/${actionPath}`, {
+    const waitForRemoteStart = async (startID: string) => {
+      while (true) {
+        await new Promise(waitResolve => window.setTimeout(waitResolve, 500));
+        const progress = await getRemoteStartProgress(jobID, startID);
+        options.onRemoteStartProgress?.(progress);
+        if (progress.status === 'completed') return;
+        if (progress.status === 'failed') {
+          throw new Error(progress.error || 'Remote start failed');
+        }
+      }
+    };
+
+    const postStart = async (payload: {
+      encryptedDatasetKeys?: EncryptedDatasetStartKey[];
+      durableEncryptedDatasetKeys?: boolean;
+    }) => {
+      const res = await apiClient.post(`/api/jobs/${jobID}/${actionPath}`, {
+        ...payload,
+        background: options.background === true && actionPath === 'start',
+      });
+      const data = res.data;
+      if (data?.startID && data?.progress) {
+        options.onRemoteStartProgress?.(data.progress);
+        await waitForRemoteStart(data.startID);
+      }
+    };
+
+    postStart({
         encryptedDatasetKeys,
         durableEncryptedDatasetKeys: options.durableEncryptedDatasetKeys === true,
       })
-      .then(res => res.data)
-      .then(data => {
-        console.log(`${successLabel}:`, data);
+      .then(() => {
+        console.log(successLabel);
         resolve();
       })
       .catch(async error => {
@@ -163,14 +191,14 @@ const runStartLikeJobAction = (
               durableEncryptedDatasetKeys,
             };
             try {
-              await apiClient.post(`/api/jobs/${jobID}/${actionPath}`, retryPayload);
+              await postStart(retryPayload);
             } catch (startError: any) {
               if (
                 durableEncryptedDatasetKeys &&
                 isDurableEncryptedKeySecretError(startError) &&
                 promptStartWithoutDurableEncryptedResume(apiErrorMessage(startError))
               ) {
-                await apiClient.post(`/api/jobs/${jobID}/${actionPath}`, {
+                await postStart({
                   ...retryPayload,
                   durableEncryptedDatasetKeys: false,
                 });
@@ -340,6 +368,12 @@ export const importTrainingJob = (
       },
     })
     .then(res => res.data as TrainingJobImportResult);
+};
+
+export const getRemoteStartProgress = (jobID: string, startID: string) => {
+  return apiClient
+    .get(`/api/jobs/${jobID}/start-progress/${startID}`)
+    .then(res => res.data as RemoteStartProgress);
 };
 
 export const downloadJobModelReferences = (jobID: string) => {

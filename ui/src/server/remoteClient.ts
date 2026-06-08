@@ -1,9 +1,17 @@
 import path from 'path';
 import fs from 'fs/promises';
+import { createReadStream, existsSync } from 'fs';
+import { randomUUID } from 'crypto';
+import { Readable } from 'stream';
 import { db, type WorkerNodeRecord } from './db';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
 import { getJobRemoteCaptionState } from './remoteCaptionJobs';
-import { collectSameWorkerRemoteDatasetReferences } from './trainingJobTransfer';
+import {
+  collectDatasetReferences,
+  collectSameWorkerRemoteDatasetReferences,
+  isRemoteReference,
+  resolveConfigPath,
+} from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
 
 export class RemoteClientError extends Error {
@@ -134,7 +142,7 @@ function remoteJobPatch(
     remote_error: null,
   };
 
-  if (existingLocalJob && shouldPreserveLocalRemoteDatasetRefs(existingLocalJob, workerId)) {
+  if (existingLocalJob && shouldPreserveLocalJobConfig(existingLocalJob, workerId)) {
     patch.job_config = existingLocalJob.job_config;
   }
 
@@ -147,9 +155,14 @@ function remoteJobPatch(
   return patch;
 }
 
-function shouldPreserveLocalRemoteDatasetRefs(existingLocalJob: Job, workerId: string) {
+function shouldPreserveLocalJobConfig(existingLocalJob: Job, workerId: string) {
   try {
-    return collectSameWorkerRemoteDatasetReferences(JSON.parse(existingLocalJob.job_config), workerId).length > 0;
+    const jobConfig = JSON.parse(existingLocalJob.job_config);
+    if (collectSameWorkerRemoteDatasetReferences(jobConfig, workerId).length > 0) return true;
+    return collectDatasetReferences(jobConfig).some(ref => {
+      if (isRemoteReference(ref.value)) return false;
+      return existsSync(resolveConfigPath(ref.value));
+    });
   } catch {
     return false;
   }
@@ -264,15 +277,102 @@ export async function discoverRemoteJobs(jobType?: string | null) {
   return syncedJobIds;
 }
 
-export async function uploadBundleToWorker(worker: WorkerNodeRecord, zipPath: string, gpuIds: string) {
-  const form = new FormData();
-  const buffer = await fs.readFile(zipPath);
-  const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
-  form.append('file', blob, path.basename(zipPath));
-  form.append('gpu_ids', gpuIds);
-  return remoteJson<{ job: Job; warnings: string[] }>(worker, '/api/jobs/import', {
+type FileUploadProgress = {
+  loaded: number;
+  total: number;
+};
+
+function escapeMultipartValue(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r|\n/g, '_');
+}
+
+async function remoteMultipartFileJson<T>(
+  worker: WorkerNodeRecord,
+  routePath: string,
+  options: {
+    filePath: string;
+    fileFieldName: string;
+    fileName?: string;
+    contentType?: string;
+    fields?: Record<string, string | undefined | null>;
+    onProgress?: (progress: FileUploadProgress) => void;
+  },
+) {
+  const fileStat = await fs.stat(options.filePath);
+  const fileName = options.fileName || path.basename(options.filePath);
+  const contentType = options.contentType || 'application/octet-stream';
+  const boundary = `----aitk-${randomUUID()}`;
+  const parts: Buffer[] = [];
+
+  Object.entries(options.fields || {}).forEach(([name, value]) => {
+    if (value == null) return;
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMultipartValue(name)}"\r\n\r\n${value}\r\n`,
+      ),
+    );
+  });
+
+  const fileHeader = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMultipartValue(
+      options.fileFieldName,
+    )}"; filename="${escapeMultipartValue(fileName)}"\r\nContent-Type: ${contentType}\r\n\r\n`,
+  );
+  const fileFooter = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const contentLength =
+    parts.reduce((total, part) => total + part.length, 0) + fileHeader.length + fileStat.size + fileFooter.length;
+
+  let uploadedFileBytes = 0;
+  const reportProgress = () => {
+    options.onProgress?.({
+      loaded: Math.min(uploadedFileBytes, fileStat.size),
+      total: fileStat.size,
+    });
+  };
+
+  async function* multipartBody() {
+    for (const part of parts) {
+      yield part;
+    }
+
+    yield fileHeader;
+    reportProgress();
+
+    for await (const chunk of createReadStream(options.filePath)) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      uploadedFileBytes += buffer.length;
+      reportProgress();
+      yield buffer;
+    }
+
+    yield fileFooter;
+    reportProgress();
+  }
+
+  return remoteJson<T>(worker, routePath, {
     method: 'POST',
-    body: form,
+    body: Readable.toWeb(Readable.from(multipartBody())) as unknown as BodyInit,
+    headers: {
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      'Content-Length': String(contentLength),
+    },
+    duplex: 'half',
+  } as RequestInit & { duplex: 'half' });
+}
+
+export async function uploadBundleToWorker(
+  worker: WorkerNodeRecord,
+  zipPath: string,
+  gpuIds: string,
+  onProgress?: (progress: FileUploadProgress) => void,
+) {
+  return remoteMultipartFileJson<{ job: Job; warnings: string[] }>(worker, '/api/jobs/import', {
+    filePath: zipPath,
+    fileFieldName: 'file',
+    fileName: path.basename(zipPath),
+    contentType: 'application/zip',
+    fields: { gpu_ids: gpuIds },
+    onProgress,
   });
 }
 
@@ -290,19 +390,19 @@ export async function uploadDatasetArchiveToWorker(
   worker: WorkerNodeRecord,
   zipPath: string,
   preferredName?: string,
+  onProgress?: (progress: FileUploadProgress) => void,
 ) {
-  const form = new FormData();
-  const buffer = await fs.readFile(zipPath);
-  const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
-  form.append('file', blob, path.basename(zipPath));
-  if (preferredName) form.append('preferredName', preferredName);
-  return remoteJson<{
+  return remoteMultipartFileJson<{
     dataset: { name: string; encrypted: boolean; path?: string };
     path: string;
     renamed: boolean;
   }>(worker, '/api/datasets/import-archive', {
-    method: 'POST',
-    body: form,
+    filePath: zipPath,
+    fileFieldName: 'file',
+    fileName: path.basename(zipPath),
+    contentType: 'application/zip',
+    fields: { preferredName },
+    onProgress,
   });
 }
 

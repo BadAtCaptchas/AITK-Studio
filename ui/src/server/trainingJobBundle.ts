@@ -75,7 +75,12 @@ async function writeZip(outputPath: string, entries: ArchiveFileEntry[], jsonEnt
 
 export async function createRemoteTrainingJobBundle(
   jobID: string,
-  options: { includeDatasets?: boolean; checkpointMode?: 'latest' | 'all'; targetWorker?: WorkerNodeRecord } = {},
+  options: {
+    includeDatasets?: boolean;
+    checkpointMode?: 'latest' | 'all';
+    targetWorker?: WorkerNodeRecord;
+    targetJobConfig?: any;
+  } = {},
 ) {
   const includeDatasets = options.includeDatasets !== false;
   const checkpointMode = options.checkpointMode || 'all';
@@ -92,7 +97,9 @@ export async function createRemoteTrainingJobBundle(
   }
 
   const sourceJobConfig = JSON.parse(job.job_config);
-  const targetJobConfig = options.targetWorker
+  const targetJobConfig = options.targetJobConfig
+    ? options.targetJobConfig
+    : options.targetWorker
     ? await rewriteSameWorkerRemoteDatasetRefsForWorker(sourceJobConfig, options.targetWorker)
     : sourceJobConfig;
   const trainingRoot = await getTrainingFolder();

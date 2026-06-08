@@ -103,6 +103,35 @@ export interface EncryptedDatasetStartKey {
 export interface JobStartRequest {
   encryptedDatasetKeys?: EncryptedDatasetStartKey[];
   durableEncryptedDatasetKeys?: boolean;
+  background?: boolean;
+}
+
+export type RemoteStartProgressStatus =
+  | 'queued'
+  | 'preparing'
+  | 'checking-datasets'
+  | 'zipping-dataset'
+  | 'uploading-dataset'
+  | 'zipping-job'
+  | 'uploading-job'
+  | 'starting'
+  | 'completed'
+  | 'failed';
+
+export interface RemoteStartProgress {
+  startID: string;
+  jobID: string;
+  status: RemoteStartProgressStatus;
+  message: string;
+  percent: number;
+  datasetName: string | null;
+  bytesProcessed: number;
+  bytesTotal: number;
+  warnings: string[];
+  error: string | null;
+  remoteJobID: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface WorkerNode {

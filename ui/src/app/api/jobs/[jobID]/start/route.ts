@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { JobStartError, startJobFromRequest } from '@/server/jobStart';
+import {
+  JobStartError,
+  prepareJobStart,
+  startJobFromRequest,
+  startPreparedJob,
+} from '@/server/jobStart';
+import { isLocalWorker } from '@/server/remoteClient';
+import {
+  createRemoteStartProgress,
+  hasActiveRemoteStartForJob,
+  updateRemoteStartProgress,
+} from '@/server/remoteStartProgress';
 import type { JobStartRequest } from '@/types';
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
@@ -23,6 +34,20 @@ function handleJobStartError(error: unknown) {
   throw error;
 }
 
+function runBackgroundRemoteStart(startID: string, prepared: Awaited<ReturnType<typeof prepareJobStart>>) {
+  void startPreparedJob(prepared, {
+    onRemoteStartProgress: progress => updateRemoteStartProgress(startID, progress),
+  }).catch(error => {
+    const message = error instanceof Error ? error.message : 'Failed to start remote job';
+    updateRemoteStartProgress(startID, {
+      status: 'failed',
+      message: 'Remote start failed',
+      percent: 100,
+      error: message,
+    });
+  });
+}
+
 async function handleStart(
   request: NextRequest,
   { params }: { params: Promise<{ jobID: string }> },
@@ -36,6 +61,28 @@ async function handleStart(
   const { jobID } = await params;
 
   try {
+    if (body.background === true) {
+      const prepared = await prepareJobStart(
+        jobID,
+        body.encryptedDatasetKeys,
+        body.durableEncryptedDatasetKeys === true,
+      );
+      if (!isLocalWorker(prepared.job.worker_id) && prepared.job.job_type === 'train') {
+        if (hasActiveRemoteStartForJob(jobID)) {
+          return NextResponse.json({ error: 'Remote start already in progress' }, { status: 409 });
+        }
+        const progress = createRemoteStartProgress(jobID);
+        runBackgroundRemoteStart(progress.startID, prepared);
+        return NextResponse.json({
+          startID: progress.startID,
+          statusUrl: `/api/jobs/${jobID}/start-progress/${progress.startID}`,
+          progress,
+        });
+      }
+
+      return NextResponse.json(await startPreparedJob(prepared));
+    }
+
     return NextResponse.json(
       await startJobFromRequest(jobID, body.encryptedDatasetKeys, body.durableEncryptedDatasetKeys === true),
     );

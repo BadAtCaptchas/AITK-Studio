@@ -11,11 +11,19 @@ function toPublicWorker(worker: WorkerNodeRecord) {
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ workerID: string }> }) {
   const { workerID } = await params;
-  const jobs = await db.jobs.list({ worker_id: workerID });
-  if (jobs.length > 0) {
-    return NextResponse.json({ error: 'Cannot delete a worker that still has jobs' }, { status: 409 });
+  if (workerID === 'local') {
+    return NextResponse.json({ error: 'The local worker cannot be deleted' }, { status: 400 });
   }
 
+  const activeJobs = await db.jobs.list({ worker_id: workerID, status: ['queued', 'running', 'stopping'] });
+  if (activeJobs.length > 0) {
+    return NextResponse.json(
+      { error: 'Cannot delete a worker with queued, running, or stopping jobs' },
+      { status: 409 },
+    );
+  }
+
+  const deletedQueues = await db.queues.deleteMany({ worker_id: workerID });
   const worker = await db.workerNodes.delete(workerID);
-  return NextResponse.json(worker ? toPublicWorker(worker) : null);
+  return NextResponse.json({ worker: worker ? toPublicWorker(worker) : null, deletedQueues });
 }

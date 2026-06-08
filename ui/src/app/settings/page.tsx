@@ -153,7 +153,7 @@ function workerUpdaterStatusTime(status: WorkerUpdaterStatus) {
 
 export default function Settings() {
   const { settings, setSettings } = useSettings();
-  const { workers, refreshWorkers } = useWorkers();
+  const { workers, setWorkers, refreshWorkers } = useWorkers();
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [workerForm, setWorkerForm] = useState(emptyWorkerForm);
   const [workerStatus, setWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
@@ -502,10 +502,20 @@ export default function Settings() {
   };
 
   const deleteWorker = async (workerID: string) => {
-    await apiClient.delete(`/api/workers/${workerID}`).catch(error => {
+    try {
+      await apiClient.delete(`/api/workers/${workerID}`);
+      clearWorkerUpdaterPoll(workerID);
+      loadedWorkerUpdaterIds.current.delete(workerID);
+      setWorkerUpdater(prev => {
+        const next = { ...prev };
+        delete next[workerID];
+        return next;
+      });
+      setWorkers(prev => prev.filter(worker => worker.id !== workerID));
+      refreshWorkers();
+    } catch (error: any) {
       alert(error.response?.data?.error || 'Failed to delete worker.');
-    });
-    refreshWorkers();
+    }
   };
 
   return (
@@ -803,13 +813,25 @@ export default function Settings() {
                         </div>
                       </div>
                       <div className="flex shrink-0 gap-2">
-                        <button className="rounded bg-gray-800 px-2 py-1 text-xs" onClick={() => checkWorker(worker.id)}>
+                        <button
+                          type="button"
+                          className="rounded bg-gray-800 px-2 py-1 text-xs"
+                          onClick={() => checkWorker(worker.id)}
+                        >
                           Health
                         </button>
-                        <button className="rounded bg-gray-800 px-2 py-1 text-xs" onClick={() => editWorker(worker)}>
+                        <button
+                          type="button"
+                          className="rounded bg-gray-800 px-2 py-1 text-xs"
+                          onClick={() => editWorker(worker)}
+                        >
                           Edit
                         </button>
-                        <button className="rounded bg-red-900 px-2 py-1 text-xs" onClick={() => deleteWorker(worker.id)}>
+                        <button
+                          type="button"
+                          className="rounded bg-red-900 px-2 py-1 text-xs"
+                          onClick={() => deleteWorker(worker.id)}
+                        >
                           Delete
                         </button>
                       </div>

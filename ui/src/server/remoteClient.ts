@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { createReadStream, existsSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { db, type WorkerNodeRecord } from './db';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
@@ -281,10 +282,27 @@ type FileUploadProgress = {
   total: number;
 };
 
+const DEFAULT_REMOTE_ARCHIVE_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+
 function appendQueryParam(routePath: string, name: string, value?: string | null) {
   if (value == null || value === '') return routePath;
   const separator = routePath.includes('?') ? '&' : '?';
   return `${routePath}${separator}${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
+}
+
+function appendQueryParams(routePath: string, params: Record<string, string | number | undefined | null>) {
+  return Object.entries(params).reduce(
+    (nextPath, [name, value]) => appendQueryParam(nextPath, name, value == null ? null : String(value)),
+    routePath,
+  );
+}
+
+function remoteArchiveUploadChunkBytes() {
+  const configured = Number(process.env.AITK_REMOTE_UPLOAD_CHUNK_MB || '');
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(256 * 1024, Math.floor(configured * 1024 * 1024));
+  }
+  return DEFAULT_REMOTE_ARCHIVE_UPLOAD_CHUNK_BYTES;
 }
 
 async function remoteZipFileJson<T>(
@@ -298,7 +316,6 @@ async function remoteZipFileJson<T>(
 ) {
   const fileStat = await fs.stat(options.filePath);
   const fileName = options.fileName || path.basename(options.filePath);
-
   let uploadedFileBytes = 0;
   const reportProgress = () => {
     options.onProgress?.({
@@ -307,26 +324,50 @@ async function remoteZipFileJson<T>(
     });
   };
 
-  async function* fileBody() {
+  const uploadID = randomUUID();
+  const chunkBytes = remoteArchiveUploadChunkBytes();
+  const chunksTotal = Math.max(1, Math.ceil(fileStat.size / chunkBytes));
+  reportProgress();
+
+  for (let chunkIndex = 0; chunkIndex < chunksTotal; chunkIndex += 1) {
+    const start = chunkIndex * chunkBytes;
+    const end = Math.min(fileStat.size, start + chunkBytes) - 1;
+    const chunkSize = Math.max(0, end - start + 1);
+    const body =
+      chunkSize > 0
+        ? Readable.toWeb(createReadStream(options.filePath, { start, end })) as unknown as BodyInit
+        : Readable.toWeb(Readable.from([Buffer.alloc(0)])) as unknown as BodyInit;
+
+    await remoteJson(worker, appendQueryParams(routePath, {
+      aitk_upload: 'chunk',
+      uploadID,
+      chunkIndex,
+      chunksTotal,
+    }), {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(chunkSize),
+        'X-AITK-File-Name': fileName,
+      },
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+
+    uploadedFileBytes = Math.min(fileStat.size, uploadedFileBytes + chunkSize);
     reportProgress();
-    for await (const chunk of createReadStream(options.filePath)) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      yield buffer;
-      uploadedFileBytes += buffer.length;
-      reportProgress();
-    }
   }
 
-  return remoteJson<T>(worker, routePath, {
+  return remoteJson<T>(worker, appendQueryParams(routePath, {
+    aitk_upload: 'complete',
+    uploadID,
+    chunksTotal,
+  }), {
     method: 'POST',
-    body: Readable.toWeb(Readable.from(fileBody())) as unknown as BodyInit,
     headers: {
-      'Content-Type': 'application/zip',
-      'Content-Length': String(fileStat.size),
       'X-AITK-File-Name': fileName,
     },
-    duplex: 'half',
-  } as RequestInit & { duplex: 'half' });
+  });
 }
 
 export async function uploadBundleToWorker(

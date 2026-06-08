@@ -111,6 +111,51 @@ test('parseIdeogramCaption converts bbox_px and bboxPx using image dimensions wh
   ]);
 });
 
+test('parseIdeogramCaption tolerates numeric strings for all supported box keys', () => {
+  const parsed = parseIdeogramCaption(
+    JSON.stringify({
+      compositional_deconstruction: {
+        elements: [
+          {
+            type: 'obj',
+            bbox: ['0.1', '0.2', '0.3', '0.4'],
+            desc: 'String fractional box',
+          },
+          {
+            type: 'obj',
+            bbox_px: ['10', '20', '110', '220'],
+            desc: 'String pixels',
+          },
+        ],
+      },
+    }),
+    { width: 400, height: 200 },
+  );
+
+  assert.equal(parsed.kind, 'ideogram');
+  assert.equal(parsed.boxes.length, 2);
+  assert.deepEqual(parsed.boxes[0], {
+    y1: 100,
+    x1: 200,
+    y2: 300,
+    x2: 400,
+    elementIndex: 0,
+    type: 'obj',
+    label: 'String fractional box',
+    color: '#22D3EE',
+  });
+  assert.deepEqual(parsed.boxes[1], {
+    y1: 50,
+    x1: 50,
+    y2: 550,
+    x2: 550,
+    elementIndex: 1,
+    type: 'obj',
+    label: 'String pixels',
+    color: '#22D3EE',
+  });
+});
+
 test('parseIdeogramCaption normalizes legacy bbox values that exceed 0..1000 when image dimensions are provided', () => {
   const parsed = parseIdeogramCaption(
     JSON.stringify({

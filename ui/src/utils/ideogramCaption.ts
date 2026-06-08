@@ -136,9 +136,18 @@ function valuesAreFractional(values: number[]) {
   return values.every(value => value >= 0 && value <= 1);
 }
 
+function asNormalizedNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export function arrayToBox(value: unknown, imageSize?: ImageSize, source: BoxSource = 'bbox'): NormalizedBox | null {
   if (!Array.isArray(value) || value.length !== 4) return null;
-  const values = value.map(item => (typeof item === 'number' && Number.isFinite(item) ? item : null));
+  const values = value.map(item => asNormalizedNumber(item));
   if (values.some(item => item == null)) return null;
   const numericValues = values as number[];
   const isFractional = valuesAreFractional(numericValues);

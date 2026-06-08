@@ -232,6 +232,7 @@ export const maxNewTokensOptions: SelectOption[] = [
     { value: '256', label: '256' },
     { value: '512', label: '512' },
     { value: '1024', label: '1024' },
+    { value: '2048', label: '2048' },
 ];
 
 export const defaultQtype = 'float8';

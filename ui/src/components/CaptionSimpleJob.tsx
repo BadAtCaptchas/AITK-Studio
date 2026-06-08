@@ -173,8 +173,8 @@ const CaptionSimpleJob: React.FC<Props> = ({
       if (!captionConfig.max_res || captionConfig.max_res < 1024) {
         setJobConfig(1024, 'config.process[0].caption.max_res');
       }
-      if (!captionConfig.max_new_tokens || captionConfig.max_new_tokens < 512) {
-        setJobConfig(1024, 'config.process[0].caption.max_new_tokens');
+      if (!captionConfig.max_new_tokens || captionConfig.max_new_tokens < 2048) {
+        setJobConfig(2048, 'config.process[0].caption.max_new_tokens');
       }
       return;
     }

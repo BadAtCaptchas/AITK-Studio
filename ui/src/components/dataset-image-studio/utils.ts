@@ -1,4 +1,4 @@
-import { isAudio, isVideo } from '@/utils/basic';
+import { isAudio, isImage, isVideo } from '@/utils/basic';
 import { getDisplayPath } from '@/utils/media';
 import {
   arrayToBox,
@@ -22,7 +22,17 @@ export function itemName(item: DatasetStudioItem) {
 }
 
 export function itemKind(item: DatasetStudioItem) {
-  if (item.kind === 'encrypted') return item.item.mediaKind;
+  if (item.kind === 'encrypted') {
+    const mediaKind = typeof item.item.mediaKind === 'string' ? item.item.mediaKind.toLowerCase() : null;
+    if (mediaKind === 'audio' || mediaKind === 'video' || mediaKind === 'image') return mediaKind;
+    const mimeType = (item.item.mimeType || '').toLowerCase();
+    if (mimeType.startsWith('audio/')) return 'audio';
+    if (mimeType.startsWith('video/')) return 'video';
+    if (isAudio(item.item.name) || isAudio(item.item.extension)) return 'audio';
+    if (isVideo(item.item.name) || isVideo(item.item.extension)) return 'video';
+    if (isImage(item.item.name) || isImage(item.item.extension)) return 'image';
+    return 'image';
+  }
   if (isAudio(item.path)) return 'audio';
   if (isVideo(item.path)) return 'video';
   return 'image';

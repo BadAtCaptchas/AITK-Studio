@@ -40,7 +40,15 @@ import { StudioMedia } from './StudioMedia';
 import { StudioToolbar } from './StudioToolbar';
 import { ToolRail } from './ToolRail';
 import { appendImageSizeFields, createEncryptedImageFormData } from './openRouterMedia';
-import type { CaptionCacheEntry, CaptionTab, DatasetImageStudioProps, ImageSize, ToolMode } from './types';
+import type {
+  BulkCaptionActionRequest,
+  BulkCaptionActionResult,
+  CaptionCacheEntry,
+  CaptionTab,
+  DatasetImageStudioProps,
+  ImageSize,
+  ToolMode,
+} from './types';
 import {
   captionResponseToText,
   clampIndex,
@@ -69,6 +77,7 @@ export default function DatasetImageStudio({
   onRefresh,
   onAddImages,
   onConvertDatasetToJson,
+  onBulkEncryptedCaptionAction,
   onSaveEncryptedCaption,
 }: DatasetImageStudioProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -334,6 +343,91 @@ export default function DatasetImageStudio({
       setRedoStack([]);
     },
     [items.length, saveCaption],
+  );
+
+  const applyBulkCaptionResult = useCallback(
+    (result: BulkCaptionActionResult) => {
+      let cacheChanged = false;
+      if (result.updatedCaptions) {
+        Object.entries(result.updatedCaptions).forEach(([key, caption]) => {
+          captionCacheRef.current.set(key, { caption, saved: caption, loaded: true });
+          cacheChanged = true;
+          if (selectedKeyRef.current === key) {
+            latestCaptionRef.current = caption;
+            setCaptionText(caption);
+            setSavedCaption(caption);
+            setIsCaptionLoaded(true);
+            setUndoStack([]);
+            setRedoStack([]);
+          }
+        });
+      }
+      if (result.removedKeys) {
+        result.removedKeys.forEach(key => {
+          cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
+          if (selectedKeyRef.current === key) {
+            latestCaptionRef.current = '';
+            setCaptionText('');
+            setSavedCaption('');
+            setSelectedElementIndex(null);
+            setUndoStack([]);
+            setRedoStack([]);
+          }
+        });
+      }
+      if (cacheChanged) bumpCaptionCacheVersion();
+    },
+    [bumpCaptionCacheVersion],
+  );
+
+  const handleBulkCaptionAction = useCallback(
+    async (request: BulkCaptionActionRequest): Promise<BulkCaptionActionResult> => {
+      if (request.matches.length === 0) {
+        return { action: request.action, found: 0, affected: 0 };
+      }
+
+      await saveCaption();
+      const firstItem = request.matches[0]?.item;
+      let result: BulkCaptionActionResult;
+
+      if (firstItem?.kind === 'encrypted') {
+        if (!onBulkEncryptedCaptionAction) {
+          throw new Error('Encrypted bulk actions are not available for this dataset.');
+        }
+        result = await onBulkEncryptedCaptionAction(request);
+      } else {
+        const plainImgPaths = request.matches.flatMap(match => (match.item.kind === 'plain' ? [match.item.path] : []));
+        const response = await apiClient.post('/api/datasets/caption-bulk', {
+          datasetName,
+          worker_id: workerID,
+          action: request.action,
+          query: request.query,
+          matchMode: request.matchMode,
+          destinationName: request.destinationName,
+          imgPaths: plainImgPaths,
+        });
+        const data = response.data || {};
+        result = {
+          action: request.action,
+          found: Number(data.found || 0),
+          affected: Number(data.affected || 0),
+          deleted: data.deleted,
+          moved: data.moved,
+          updated: data.updated,
+          removedWords: data.removedWords,
+          destinationName: data.destinationName,
+          updatedCaptions: data.updatedCaptions,
+          removedKeys: Array.isArray(data.removedPaths) ? data.removedPaths : undefined,
+        };
+      }
+
+      applyBulkCaptionResult(result);
+      if (request.action === 'delete' || request.action === 'move') {
+        onRefresh?.();
+      }
+      return result;
+    },
+    [applyBulkCaptionResult, datasetName, onBulkEncryptedCaptionAction, onRefresh, saveCaption, workerID],
   );
 
   const mutateCaption = useCallback(
@@ -956,6 +1050,7 @@ export default function DatasetImageStudio({
               captionCacheVersion={captionCacheVersion}
               onCaptionCacheChange={bumpCaptionCacheVersion}
               onSelectIndex={selectIndex}
+              onBulkCaptionAction={handleBulkCaptionAction}
             />
           </main>
 

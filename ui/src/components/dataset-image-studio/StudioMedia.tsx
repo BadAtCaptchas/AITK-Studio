@@ -161,7 +161,9 @@ export function StudioMedia({
 
   const fittedSize = useMemo(() => {
     if (!naturalSize || frameSize.width <= 0 || frameSize.height <= 0) return null;
-    const fitScale = Math.min(frameSize.width / naturalSize.width, frameSize.height / naturalSize.height);
+    const availableWidth = Math.max(1, frameSize.width - 24);
+    const availableHeight = Math.max(1, frameSize.height - 24);
+    const fitScale = Math.min(availableWidth / naturalSize.width, availableHeight / naturalSize.height);
     const scaledWidth = Math.max(1, naturalSize.width * fitScale * zoom);
     const scaledHeight = Math.max(1, naturalSize.height * fitScale * zoom);
     return {
@@ -196,14 +198,18 @@ export function StudioMedia({
   }
 
   return (
-    <div ref={frameRef} className="relative flex h-full w-full min-h-0 items-center justify-center overflow-auto">
+    <div ref={frameRef} className="relative flex h-full w-full min-w-0 min-h-0 items-center justify-center overflow-auto p-3">
       <div
-        className="relative shrink-0 leading-[0]"
+        className={classNames('relative shrink-0 leading-[0]', {
+          'max-h-full max-w-full': !fittedSize || zoom <= 1,
+        })}
         style={
           fittedSize
             ? {
                 width: `${fittedSize.width}px`,
                 height: `${fittedSize.height}px`,
+                maxWidth: zoom <= 1 ? '100%' : undefined,
+                maxHeight: zoom <= 1 ? '100%' : undefined,
               }
             : undefined
         }

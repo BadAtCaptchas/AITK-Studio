@@ -8,11 +8,14 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Eraser,
+  FolderInput,
   Grid2X2,
   Loader2,
   Maximize2,
   Minimize2,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -27,9 +30,14 @@ import {
   parseNavigatorJump,
   type DatasetNavigatorFilter,
 } from '@/utils/datasetImageNavigator';
+import {
+  captionMatchesKeywords,
+  parseCaptionKeywordQuery,
+  type CaptionKeywordMatchMode,
+} from '@/utils/captionKeywordSearch';
 import { decryptEncryptedObjectBlob } from '@/utils/encryptedDatasets';
 import { extractIdeogramBoxes, parseIdeogramCaption } from '@/utils/ideogramCaption';
-import type { CaptionCacheEntry, DatasetStudioItem } from './types';
+import type { BulkCaptionAction, BulkCaptionActionResult, BulkCaptionMatch, CaptionCacheEntry, DatasetStudioItem } from './types';
 import { EncryptedThumb, PlainThumb } from './StudioMedia';
 import { captionResponseToText, clampIndex, itemKey, itemName, statusForCaption } from './utils';
 
@@ -209,6 +217,7 @@ export function ImageNavigator({
   captionCacheVersion,
   onCaptionCacheChange,
   onSelectIndex,
+  onBulkCaptionAction,
 }: {
   items: DatasetStudioItem[];
   selectedIndex: number;
@@ -219,9 +228,21 @@ export function ImageNavigator({
   captionCacheVersion: number;
   onCaptionCacheChange: () => void;
   onSelectIndex: (index: number) => void;
+  onBulkCaptionAction?: (request: {
+    action: BulkCaptionAction;
+    query: string;
+    matchMode: CaptionKeywordMatchMode;
+    destinationName?: string;
+    matches: BulkCaptionMatch[];
+  }) => Promise<BulkCaptionActionResult>;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [captionKeywordQuery, setCaptionKeywordQuery] = useState('');
+  const [captionKeywordMode, setCaptionKeywordMode] = useState<CaptionKeywordMatchMode>('whole-word');
+  const [bulkDestinationName, setBulkDestinationName] = useState(`${datasetName}_matches`);
+  const [bulkBusyAction, setBulkBusyAction] = useState<BulkCaptionAction | null>(null);
+  const [bulkMessage, setBulkMessage] = useState('');
   const [filter, setFilter] = useState<DatasetNavigatorFilter>('all');
   const [thumbSize, setThumbSize] = useState<ThumbSize>('md');
   const [jumpText, setJumpText] = useState('');
@@ -245,6 +266,11 @@ export function ImageNavigator({
     scanStartedRef.current = false;
     setScanState({ status: 'idle', scanned: 0, total: items.length });
     setSearchQuery('');
+    setCaptionKeywordQuery('');
+    setCaptionKeywordMode('whole-word');
+    setBulkDestinationName(`${datasetName}_matches`);
+    setBulkBusyAction(null);
+    setBulkMessage('');
     setFilter('all');
   }, [datasetName, items, workerID]);
 
@@ -272,6 +298,20 @@ export function ImageNavigator({
   );
   const filteredIndexes = useMemo(() => filteredEntries.map(entry => entry.index), [filteredEntries]);
   const statusCounts = useMemo(() => navigatorStatusCounts(entries), [entries]);
+  const captionKeywordTerms = useMemo(() => parseCaptionKeywordQuery(captionKeywordQuery), [captionKeywordQuery]);
+  const captionPendingCount = useMemo(() => entries.filter(entry => entry.status === 'unknown').length, [entries]);
+  const captionKeywordMatches = useMemo<BulkCaptionMatch[]>(() => {
+    if (captionKeywordTerms.length === 0) return [];
+    return entries.flatMap(entry => {
+      const item = items[entry.index];
+      if (!item) return [];
+      const key = itemKey(item);
+      const cached = captionCache.get(key);
+      if (!cached?.loaded) return [];
+      if (!captionMatchesKeywords(cached.caption, captionKeywordTerms, captionKeywordMode)) return [];
+      return [{ key, index: entry.index, item, caption: cached.caption }];
+    });
+  }, [captionCache, captionCacheVersion, captionKeywordMode, captionKeywordTerms, entries, items, localCacheVersion]);
   const thumbConfig = THUMB_SIZE_CONFIG[thumbSize];
   const gridColumns = useMemo(
     () => navigatorColumnCount(gridSize.width, thumbConfig.tileWidth, 8),
@@ -288,6 +328,12 @@ export function ImageNavigator({
   const canGoPrevious = selectedIndex > 0;
   const canGoNext = selectedIndex < items.length - 1;
   const scanProgress = scanState.total > 0 ? Math.round((scanState.scanned / scanState.total) * 100) : 100;
+  const canRunBulkAction =
+    Boolean(onBulkCaptionAction) &&
+    captionKeywordTerms.length > 0 &&
+    captionKeywordMatches.length > 0 &&
+    captionPendingCount === 0 &&
+    !bulkBusyAction;
 
   const commitIndex = useCallback(
     (index: number) => {
@@ -306,6 +352,66 @@ export function ImageNavigator({
   const commitScrub = useCallback(() => {
     commitIndex(scrubValue - 1);
   }, [commitIndex, scrubValue]);
+
+  const bulkResultMessage = useCallback((result: BulkCaptionActionResult) => {
+    if (result.action === 'move') {
+      return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} moved${
+        result.destinationName ? ` to ${result.destinationName}` : ''
+      }.`;
+    }
+    if (result.action === 'delete') {
+      return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} deleted.`;
+    }
+    return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} captions updated${
+      result.removedWords ? `, ${result.removedWords.toLocaleString()} words removed` : ''
+    }.`;
+  }, []);
+
+  const runBulkAction = useCallback(
+    async (action: BulkCaptionAction) => {
+      if (!onBulkCaptionAction || !canRunBulkAction) return;
+      if (action === 'move' && !bulkDestinationName.trim()) {
+        setBulkMessage('Enter a destination dataset name.');
+        return;
+      }
+      if (action === 'delete') {
+        const confirmed = window.confirm(`Delete ${captionKeywordMatches.length.toLocaleString()} matching item(s)?`);
+        if (!confirmed) return;
+      }
+      if (action === 'move') {
+        const confirmed = window.confirm(
+          `Move ${captionKeywordMatches.length.toLocaleString()} matching item(s) to "${bulkDestinationName.trim()}"?`,
+        );
+        if (!confirmed) return;
+      }
+
+      setBulkBusyAction(action);
+      setBulkMessage('');
+      try {
+        const result = await onBulkCaptionAction({
+          action,
+          query: captionKeywordQuery,
+          matchMode: captionKeywordMode,
+          destinationName: action === 'move' ? bulkDestinationName.trim() : undefined,
+          matches: captionKeywordMatches,
+        });
+        setBulkMessage(bulkResultMessage(result));
+      } catch (error: any) {
+        setBulkMessage(error?.response?.data?.error || error?.message || 'Bulk action failed.');
+      } finally {
+        setBulkBusyAction(null);
+      }
+    },
+    [
+      bulkDestinationName,
+      bulkResultMessage,
+      canRunBulkAction,
+      captionKeywordMatches,
+      captionKeywordMode,
+      captionKeywordQuery,
+      onBulkCaptionAction,
+    ],
+  );
 
   const setCacheEntry = useCallback(
     (item: DatasetStudioItem, caption: string) => {
@@ -531,6 +637,94 @@ export function ImageNavigator({
             <IconButton title="Collapse grid" onClick={() => setDrawerOpen(false)}>
               <Minimize2 className="h-4 w-4" />
             </IconButton>
+          </div>
+
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-900 px-2 py-2 xl:px-3">
+            <div className="relative min-w-[210px] flex-1 sm:max-w-md">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+              <input
+                value={captionKeywordQuery}
+                onChange={event => {
+                  setCaptionKeywordQuery(event.target.value);
+                  setBulkMessage('');
+                }}
+                placeholder="Caption keywords"
+                className="h-9 w-full rounded-md border border-gray-800 bg-gray-950 pl-8 pr-8 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              />
+              {captionKeywordQuery && (
+                <button
+                  type="button"
+                  title="Clear caption keywords"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
+                  onClick={() => {
+                    setCaptionKeywordQuery('');
+                    setBulkMessage('');
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <label className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
+              <input
+                type="checkbox"
+                checked={captionKeywordMode === 'partial'}
+                onChange={event => setCaptionKeywordMode(event.target.checked ? 'partial' : 'whole-word')}
+                className="h-4 w-4"
+              />
+              Partial
+            </label>
+
+            <input
+              value={bulkDestinationName}
+              onChange={event => setBulkDestinationName(event.target.value)}
+              className="h-9 min-w-[180px] rounded-md border border-gray-800 bg-gray-950 px-2 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              aria-label="Destination dataset"
+              title="Destination dataset"
+            />
+
+            <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
+              {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />}
+              <span>{captionKeywordMatches.length.toLocaleString()} found</span>
+              {captionPendingCount > 0 && <span className="text-gray-500">{captionPendingCount.toLocaleString()} pending</span>}
+            </div>
+
+            <button
+              type="button"
+              title="Remove words from matching captions"
+              aria-label="Remove words from matching captions"
+              disabled={!canRunBulkAction || bulkBusyAction === 'remove_words'}
+              onClick={() => void runBulkAction('remove_words')}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {bulkBusyAction === 'remove_words' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eraser className="h-4 w-4" />}
+              Remove Words
+            </button>
+            <button
+              type="button"
+              title="Move matching items"
+              aria-label="Move matching items"
+              disabled={!canRunBulkAction || bulkBusyAction === 'move'}
+              onClick={() => void runBulkAction('move')}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {bulkBusyAction === 'move' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}
+              Move
+            </button>
+            <button
+              type="button"
+              title="Delete matching items"
+              aria-label="Delete matching items"
+              disabled={!canRunBulkAction || bulkBusyAction === 'delete'}
+              onClick={() => void runBulkAction('delete')}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-900/70 bg-rose-950/40 px-3 text-sm text-rose-100 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {bulkBusyAction === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete
+            </button>
+
+            {bulkMessage && <div className="min-w-[180px] flex-1 text-xs text-gray-400">{bulkMessage}</div>}
           </div>
 
           <div ref={gridMeasureRef} className="relative min-h-0 flex-1">

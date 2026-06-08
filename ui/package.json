@@ -19,6 +19,7 @@
     "test:dataset-combine": "tsc -p tsconfig.worker.json && node --test scripts/datasetCombine.test.mjs",
     "test:dataset-rename": "tsc -p tsconfig.worker.json && node --test scripts/datasetRename.test.mjs",
     "test:dataset-navigator": "tsc -p tsconfig.worker.json && node --test scripts/datasetImageNavigator.test.mjs",
+    "test:caption-bulk": "tsc -p tsconfig.worker.json && node --test scripts/captionKeywordSearch.test.mjs scripts/datasetCaptionBulk.test.mjs",
     "test:folder-import": "tsc -p tsconfig.worker.json && node --test scripts/folderImport.test.mjs",
     "test:annotation-geometry": "tsc -p tsconfig.worker.json && node --test scripts/annotationGeometry.test.mjs",
     "test:ideogram-caption": "tsc -p tsconfig.worker.json && node --test scripts/ideogramCaption.test.mjs",

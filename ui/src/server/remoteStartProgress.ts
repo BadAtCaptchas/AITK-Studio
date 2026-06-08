@@ -25,8 +25,10 @@ const ACTIVE_REMOTE_START_STATUSES = new Set<RemoteStartProgressStatus>([
   'checking-datasets',
   'zipping-dataset',
   'uploading-dataset',
+  'importing-dataset',
   'zipping-job',
   'uploading-job',
+  'importing-job',
   'starting',
 ]);
 

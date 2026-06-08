@@ -24,7 +24,8 @@ import type { DatasetSummary } from '../types';
 export type RemoteDatasetSyncStatus =
   | 'checking-datasets'
   | 'zipping-dataset'
-  | 'uploading-dataset';
+  | 'uploading-dataset'
+  | 'importing-dataset';
 
 export type RemoteDatasetSyncProgress = {
   status: RemoteDatasetSyncStatus;
@@ -253,9 +254,12 @@ export async function syncRemoteDatasetsForJobConfig(
         });
 
         const imported = await deps.uploadDatasetArchive(worker, zipPath, group.datasetName, progress => {
+          const uploadComplete = progress.total > 0 && progress.loaded >= progress.total;
           options.onProgress?.({
-            status: 'uploading-dataset',
-            message: `Uploading dataset ${group.datasetName}`,
+            status: uploadComplete ? 'importing-dataset' : 'uploading-dataset',
+            message: uploadComplete
+              ? `Importing dataset ${group.datasetName} on worker`
+              : `Uploading dataset ${group.datasetName}`,
             percent: progressForUpload(
               Math.max(uploadIndex, 0),
               missingGroups.length,
@@ -263,8 +267,8 @@ export async function syncRemoteDatasetsForJobConfig(
               progress.total,
             ),
             datasetName: group.datasetName,
-            bytesProcessed: progress.loaded,
-            bytesTotal: progress.total,
+            bytesProcessed: uploadComplete ? 0 : progress.loaded,
+            bytesTotal: uploadComplete ? 0 : progress.total,
           });
         });
 

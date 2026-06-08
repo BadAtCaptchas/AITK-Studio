@@ -112,8 +112,10 @@ export type RemoteStartProgressStatus =
   | 'checking-datasets'
   | 'zipping-dataset'
   | 'uploading-dataset'
+  | 'importing-dataset'
   | 'zipping-job'
   | 'uploading-job'
+  | 'importing-job'
   | 'starting'
   | 'completed'
   | 'failed';

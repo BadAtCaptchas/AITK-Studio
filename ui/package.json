@@ -22,7 +22,7 @@
     "test:folder-import": "tsc -p tsconfig.worker.json && node --test scripts/folderImport.test.mjs",
     "test:annotation-geometry": "tsc -p tsconfig.worker.json && node --test scripts/annotationGeometry.test.mjs",
     "test:ideogram-caption": "tsc -p tsconfig.worker.json && node --test scripts/ideogramCaption.test.mjs",
-    "test:job-datasets": "tsc -p tsconfig.worker.json && node --test scripts/jobDatasetDefaults.test.mjs scripts/remoteDatasetRefs.test.mjs scripts/remoteDatasetSync.test.mjs scripts/remoteStartProgress.test.mjs",
+    "test:job-datasets": "tsc -p tsconfig.worker.json && node --test scripts/jobDatasetDefaults.test.mjs scripts/remoteDatasetRefs.test.mjs scripts/remoteDatasetSync.test.mjs scripts/remoteStartProgress.test.mjs scripts/remoteClientUpload.test.mjs",
     "test:openrouter-boxes": "tsc -p tsconfig.worker.json && node --test scripts/openRouterBoxes.test.mjs",
     "test:openrouter-layer-caption": "tsc -p tsconfig.worker.json && node --test scripts/openRouterLayerCaption.test.mjs",
     "test:encrypted-dataset-secrets": "tsc -p tsconfig.worker.json && node --test scripts/encryptedDatasetSecrets.test.mjs scripts/encryptedDatasets.test.mjs",

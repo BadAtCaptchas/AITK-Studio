@@ -383,17 +383,18 @@ export async function startPreparedJob(
             bytesTotal: bundleStat.size,
             warnings: remoteWarnings,
           });
-          const imported = await uploadBundleToWorker(worker, bundle.zipPath, job.gpu_ids, progress =>
+          const imported = await uploadBundleToWorker(worker, bundle.zipPath, job.gpu_ids, progress => {
+            const uploadComplete = progress.total > 0 && progress.loaded >= progress.total;
             onProgress?.({
-              status: 'uploading-job',
-              message: 'Uploading remote job bundle',
+              status: uploadComplete ? 'importing-job' : 'uploading-job',
+              message: uploadComplete ? 'Importing remote job on worker' : 'Uploading remote job bundle',
               percent: scaleUploadPercent(progress.loaded, progress.total, 75, 88),
               datasetName: null,
-              bytesProcessed: progress.loaded,
-              bytesTotal: progress.total,
+              bytesProcessed: uploadComplete ? 0 : progress.loaded,
+              bytesTotal: uploadComplete ? 0 : progress.total,
               warnings: remoteWarnings,
-            }),
-          );
+            });
+          });
           remoteJobId = imported.job.id;
           const localJobConfig = {
             ...jobConfig,

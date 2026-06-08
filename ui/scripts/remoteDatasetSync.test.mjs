@@ -44,10 +44,13 @@ function makeConfig(folderPath, extra = {}) {
 function makeTempDatasets() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aitk-remote-sync-'));
   const cats = path.join(root, 'cats');
+  const dogs = path.join(root, 'dogs');
   fs.mkdirSync(path.join(cats, 'subdir'), { recursive: true });
+  fs.mkdirSync(dogs, { recursive: true });
   fs.writeFileSync(path.join(cats, 'image.txt'), 'caption');
   fs.writeFileSync(path.join(cats, 'subdir', 'nested.txt'), 'nested');
-  return { root, cats };
+  fs.writeFileSync(path.join(dogs, 'image.txt'), 'caption');
+  return { root, cats, dogs };
 }
 
 function makeDeps(root, remoteDatasets = []) {
@@ -69,6 +72,7 @@ function makeDeps(root, remoteDatasets = []) {
     uploadDatasetArchive: async (_worker, zipPath, preferredName, onProgress) => {
       calls.uploads.push({ zipPath, preferredName });
       const size = fs.statSync(zipPath).size;
+      onProgress?.({ loaded: 0, total: size });
       onProgress?.({ loaded: size, total: size });
       return {
         dataset: { name: preferredName, encrypted: false, path: `/remote/datasets/${preferredName}` },
@@ -121,6 +125,44 @@ test('remote dataset sync uploads missing dataset once and rewrites duplicate re
     assert.deepEqual(result.jobConfig.config.process[0].datasets[0].control_path_1, ['/remote/datasets/cats']);
     assert.equal(result.mappings[0].uploaded, true);
     assert.ok(calls.progress.some(progress => progress.status === 'uploading-dataset'));
+    assert.ok(calls.progress.some(progress => progress.status === 'importing-dataset'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('remote dataset sync uploads multiple missing datasets for one training job', async () => {
+  const { root, cats, dogs } = makeTempDatasets();
+  const { deps, calls } = makeDeps(root, []);
+
+  const config = {
+    config: {
+      process: [
+        {
+          datasets: [
+            { folder_path: cats, control_path_1: [cats] },
+            { folder_path: dogs, control_path_1: [dogs] },
+          ],
+        },
+      ],
+    },
+  };
+
+  try {
+    const result = await syncRemoteDatasetsForJobConfig(config, makeWorker(), {
+      deps,
+      onProgress: progress => calls.progress.push(progress),
+    });
+
+    assert.equal(calls.archives.length, 2);
+    assert.deepEqual(calls.uploads.map(upload => upload.preferredName).sort(), ['cats', 'dogs']);
+    assert.equal(result.jobConfig.config.process[0].datasets[0].folder_path, '/remote/datasets/cats');
+    assert.equal(result.jobConfig.config.process[0].datasets[1].folder_path, '/remote/datasets/dogs');
+    assert.deepEqual(result.jobConfig.config.process[0].datasets[0].control_path_1, ['/remote/datasets/cats']);
+    assert.deepEqual(result.jobConfig.config.process[0].datasets[1].control_path_1, ['/remote/datasets/dogs']);
+    assert.equal(result.mappings.length, 2);
+    assert.equal(result.mappings.every(mapping => mapping.uploaded), true);
+    assert.ok(calls.progress.filter(progress => progress.status === 'importing-dataset').length >= 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

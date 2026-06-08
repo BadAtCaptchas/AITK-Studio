@@ -1,7 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { createReadStream, existsSync } from 'fs';
-import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { db, type WorkerNodeRecord } from './db';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
@@ -282,45 +281,23 @@ type FileUploadProgress = {
   total: number;
 };
 
-function escapeMultipartValue(value: string) {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r|\n/g, '_');
+function appendQueryParam(routePath: string, name: string, value?: string | null) {
+  if (value == null || value === '') return routePath;
+  const separator = routePath.includes('?') ? '&' : '?';
+  return `${routePath}${separator}${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
 }
 
-async function remoteMultipartFileJson<T>(
+async function remoteZipFileJson<T>(
   worker: WorkerNodeRecord,
   routePath: string,
   options: {
     filePath: string;
-    fileFieldName: string;
     fileName?: string;
-    contentType?: string;
-    fields?: Record<string, string | undefined | null>;
     onProgress?: (progress: FileUploadProgress) => void;
   },
 ) {
   const fileStat = await fs.stat(options.filePath);
   const fileName = options.fileName || path.basename(options.filePath);
-  const contentType = options.contentType || 'application/octet-stream';
-  const boundary = `----aitk-${randomUUID()}`;
-  const parts: Buffer[] = [];
-
-  Object.entries(options.fields || {}).forEach(([name, value]) => {
-    if (value == null) return;
-    parts.push(
-      Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMultipartValue(name)}"\r\n\r\n${value}\r\n`,
-      ),
-    );
-  });
-
-  const fileHeader = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMultipartValue(
-      options.fileFieldName,
-    )}"; filename="${escapeMultipartValue(fileName)}"\r\nContent-Type: ${contentType}\r\n\r\n`,
-  );
-  const fileFooter = Buffer.from(`\r\n--${boundary}--\r\n`);
-  const contentLength =
-    parts.reduce((total, part) => total + part.length, 0) + fileHeader.length + fileStat.size + fileFooter.length;
 
   let uploadedFileBytes = 0;
   const reportProgress = () => {
@@ -330,31 +307,23 @@ async function remoteMultipartFileJson<T>(
     });
   };
 
-  async function* multipartBody() {
-    for (const part of parts) {
-      yield part;
-    }
-
-    yield fileHeader;
+  async function* fileBody() {
     reportProgress();
-
     for await (const chunk of createReadStream(options.filePath)) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      yield buffer;
       uploadedFileBytes += buffer.length;
       reportProgress();
-      yield buffer;
     }
-
-    yield fileFooter;
-    reportProgress();
   }
 
   return remoteJson<T>(worker, routePath, {
     method: 'POST',
-    body: Readable.toWeb(Readable.from(multipartBody())) as unknown as BodyInit,
+    body: Readable.toWeb(Readable.from(fileBody())) as unknown as BodyInit,
     headers: {
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      'Content-Length': String(contentLength),
+      'Content-Type': 'application/zip',
+      'Content-Length': String(fileStat.size),
+      'X-AITK-File-Name': fileName,
     },
     duplex: 'half',
   } as RequestInit & { duplex: 'half' });
@@ -366,14 +335,15 @@ export async function uploadBundleToWorker(
   gpuIds: string,
   onProgress?: (progress: FileUploadProgress) => void,
 ) {
-  return remoteMultipartFileJson<{ job: Job; warnings: string[] }>(worker, '/api/jobs/import', {
+  return remoteZipFileJson<{ job: Job; warnings: string[] }>(
+    worker,
+    appendQueryParam('/api/jobs/import', 'gpu_ids', gpuIds),
+    {
     filePath: zipPath,
-    fileFieldName: 'file',
     fileName: path.basename(zipPath),
-    contentType: 'application/zip',
-    fields: { gpu_ids: gpuIds },
     onProgress,
-  });
+    },
+  );
 }
 
 export async function fetchWorkerHealth(worker: WorkerNodeRecord) {
@@ -392,18 +362,19 @@ export async function uploadDatasetArchiveToWorker(
   preferredName?: string,
   onProgress?: (progress: FileUploadProgress) => void,
 ) {
-  return remoteMultipartFileJson<{
+  return remoteZipFileJson<{
     dataset: { name: string; encrypted: boolean; path?: string };
     path: string;
     renamed: boolean;
-  }>(worker, '/api/datasets/import-archive', {
-    filePath: zipPath,
-    fileFieldName: 'file',
-    fileName: path.basename(zipPath),
-    contentType: 'application/zip',
-    fields: { preferredName },
-    onProgress,
-  });
+  }>(
+    worker,
+    appendQueryParam('/api/datasets/import-archive', 'preferredName', preferredName),
+    {
+      filePath: zipPath,
+      fileName: path.basename(zipPath),
+      onProgress,
+    },
+  );
 }
 
 export async function fetchWorkerGpu(worker: WorkerNodeRecord) {

@@ -2,6 +2,8 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { getDatasetsRoot } from '@/server/settings';
 import {
   extractZipSafely,
@@ -20,6 +22,39 @@ async function copyArchivePath(sourcePath: string, targetPath: string) {
   await fsp.cp(sourcePath, targetPath, { recursive: true, force: false, errorOnExist: true });
 }
 
+function isMultipartRequest(request: NextRequest) {
+  return (request.headers.get('content-type') || '').toLowerCase().includes('multipart/form-data');
+}
+
+async function saveDatasetArchiveUpload(request: NextRequest, uploadPath: string) {
+  const url = new URL(request.url);
+  let preferredNameRaw: FormDataEntryValue | string | null =
+    url.searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name');
+
+  await fsp.mkdir(path.dirname(uploadPath), { recursive: true });
+
+  if (isMultipartRequest(request)) {
+    const formData = await request.formData();
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
+      throw new Error('file is required');
+    }
+    preferredNameRaw = formData.get('preferredName') || preferredNameRaw;
+    await fsp.writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
+    return preferredNameRaw;
+  }
+
+  if (!request.body) {
+    throw new Error('file is required');
+  }
+
+  await pipeline(
+    Readable.fromWeb(request.body as any),
+    fs.createWriteStream(uploadPath),
+  );
+  return preferredNameRaw;
+}
+
 export async function POST(request: NextRequest) {
   const datasetsRoot = await getDatasetsRoot();
   await fsp.mkdir(datasetsRoot, { recursive: true });
@@ -30,14 +65,7 @@ export async function POST(request: NextRequest) {
   const extractRoot = path.join(workRoot, 'extract');
 
   try {
-    const formData = await request.formData();
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'file is required' }, { status: 400 });
-    }
-
-    await fsp.mkdir(workRoot, { recursive: true });
-    await fsp.writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
+    const preferredNameRaw = await saveDatasetArchiveUpload(request, uploadPath);
     await extractZipSafely(uploadPath, extractRoot);
 
     const manifest = await readDatasetExportManifest(extractRoot);
@@ -46,7 +74,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Dataset payload missing from archive' }, { status: 400 });
     }
 
-    const preferredNameRaw = formData.get('preferredName');
     const preferredName =
       typeof preferredNameRaw === 'string' && preferredNameRaw.trim()
         ? safeNameSegment(preferredNameRaw, 'dataset')
@@ -76,9 +103,10 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Dataset archive import failed:', error);
+    const status = error instanceof Error && error.message === 'file is required' ? 400 : 500;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to import dataset archive' },
-      { status: 500 },
+      { status },
     );
   } finally {
     await fsp.rm(workRoot, { recursive: true, force: true }).catch(() => undefined);

@@ -450,19 +450,29 @@ class BaseCaptioner(BaseExtensionProcess):
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start < 0 or end <= start:
+            candidate = self._extract_json_candidate(text)
+            if not candidate:
                 raise ValueError("Captioner did not return a JSON object")
-            candidate = text[start : end + 1]
             repaired = self._repair_json_candidate(candidate)
             try:
                 parsed = json.loads(repaired)
             except json.JSONDecodeError:
+                repaired = self._balance_json_text(repaired)
                 try:
-                    parsed = ast.literal_eval(repaired)
-                except (SyntaxError, ValueError) as exc:
-                    raise ValueError(f"Captioner returned invalid JSON: {exc}") from exc
+                    parsed = json.loads(repaired)
+                except json.JSONDecodeError as exc:
+                    try:
+                        parsed = ast.literal_eval(repaired)
+                    except (SyntaxError, ValueError) as literal_error:
+                        raise ValueError(f"Captioner returned invalid JSON: {literal_error}") from exc
+                    except Exception as unexpected_error:
+                        raise ValueError(f"Captioner returned invalid JSON: {unexpected_error}") from exc
+                    if not isinstance(parsed, dict):
+                        raise ValueError(
+                            "Captioner returned JSON, but the root value is not an object"
+                        ) from exc
+            except Exception as exc:
+                raise ValueError(f"Captioner returned invalid JSON: {exc}") from exc
 
         if isinstance(parsed, dict) and set(parsed.keys()) == {"caption"}:
             nested = parsed.get("caption")
@@ -472,6 +482,71 @@ class BaseCaptioner(BaseExtensionProcess):
         if not isinstance(parsed, dict):
             raise ValueError("Captioner returned JSON, but the root value is not an object")
         return parsed
+
+    @staticmethod
+    def _extract_json_candidate(value: str) -> str:
+        start = value.find("{")
+        if start < 0:
+            return ""
+
+        stack: list[str] = []
+        in_string = False
+        escaped = False
+        first_object_started = False
+
+        for index in range(start, len(value)):
+            char = value[index]
+            if not in_string:
+                if char == "{":
+                    stack.append("{")
+                    first_object_started = True
+                elif char == "[":
+                    stack.append("[")
+                elif char == '"':
+                    in_string = True
+                elif char == "}" and stack and stack[-1] == "{":
+                    stack.pop()
+                elif char == "]" and stack and stack[-1] == "[":
+                    stack.pop()
+            else:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+
+            if first_object_started and not stack:
+                return value[start : index + 1]
+
+        if first_object_started:
+            return value[start:]
+
+        return ""
+
+    @staticmethod
+    def _balance_json_text(value: str) -> str:
+        stack: list[str] = []
+        in_string = False
+        escaped = False
+
+        for char in value:
+            if not in_string:
+                if char == '"':
+                    in_string = True
+                elif char == "{":
+                    stack.append("}")
+                elif char == "[":
+                    stack.append("]")
+            else:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+
+        return value + "".join(reversed(stack))
 
     @staticmethod
     def _repair_json_candidate(value: str) -> str:

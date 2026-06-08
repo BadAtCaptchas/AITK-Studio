@@ -124,7 +124,7 @@ class OllamaCaptioner(BaseCaptioner):
 
     def _caption_num_predict(self, attempt: int) -> int:
         requested = self.caption_config.max_new_tokens or 0
-        base_budget = max(1024, int(requested) * 4)
+        base_budget = max(2048, int(requested) * 4)
         return min(4096, base_budget * (2 ** max(0, attempt - 1)))
 
     def _extract_caption(self, data: dict) -> str:

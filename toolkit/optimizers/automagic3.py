@@ -7,10 +7,75 @@ class Automagic3(torch.optim.Optimizer):
     """
     Automagic v3.
 
-    Keeps a learning rate per output row for matrix-like parameters and per
-    element for vector-like parameters. The learning rate moves geometrically
-    based on sign agreement with the previous update, and the parameter update
-    is fused into backward through post-accumulate-grad hooks.
+    A learning rate is kept per row of each parameter: one lr per output
+    channel for >=2D weights (e.g. one lr per output neuron of a Linear layer)
+    and one lr per element for 1D weights (biases, norms). Each step the lr is
+    nudged by how strongly the per-element update direction agrees with the
+    previous step. Agreement is the plain fraction of elements that kept their
+    sign (every element counts equally, regardless of update magnitude) and is
+    used as a proportional signal in [-1, 1] that scales a multiplicative
+    (geometric) bump ``lr *= exp(signal * lr_bump_rate)``, so each step is a fixed
+    fractional move that behaves uniformly across the whole [min_lr, max_lr]
+    range and a full up bump is exactly undone by a full down bump. The lr
+    drifts smoothly, self-stabilises near random agreement, and is clamped to
+    [min_lr, max_lr].
+
+    With ``fused=True`` (default) the step is fused into the backward pass via
+    ``register_post_accumulate_grad_hook``: each parameter is updated and its
+    grad freed as soon as autograd finishes accumulating into it. ``.step()``
+    therefore does no real work and peak VRAM stays low. Note this bypasses the
+    trainer's grad clipping / nan-skip (they run after backward) and is not
+    compatible with multi-backward gradient accumulation.
+
+    With ``fused=False`` it behaves like a traditional optimizer: grads
+    accumulate across backward passes and the update happens in ``.step()``.
+    Low-precision (bf16/fp16) grads are accumulated with stochastic rounding so
+    small per-micro-batch grads aren't lost; fp32 grads accumulate normally.
+
+    Second-moment EMA state is stored in ``p.dtype`` (math runs in fp32 when
+    the state is lower precision). Updates to low-precision (e.g. bf16/fp16)
+    parameters are applied in fp32 and stochastically rounded on write-back.
+
+    Improvements over v2
+    --------------------
+    1. Per-row learning rate (was a single scalar per parameter tensor).
+       v2 kept one lr for an entire weight matrix; v3 keeps one per output
+       channel (per element for 1D params). Plain English: different neurons in
+       the same layer can now learn at different speeds instead of being forced
+       to share one rate, so a layer where some rows have converged and others
+       have not is handled gracefully.
+
+    2. Proportional lr control (was a hard threshold flip). v2 bumped the lr up
+       or down by a fixed amount depending on whether agreement crossed a
+       threshold, which jitters when agreement hovers near the boundary. v3
+       scales the bump by how strongly the directions agree
+       (``2*agreement - 1`` in [-1, 1]). Plain English: the lr nudges gently
+       when the signal is weak and firmly when it is strong, and parks itself
+       instead of oscillating when gradients are basically noise.
+
+    3. Multiplicative (geometric) lr bump (was additive). v2 added/subtracted a
+       fixed absolute amount, so the same bump was a huge relative jump near
+       min_lr and a negligible one near max_lr. v3 multiplies by
+       ``exp(signal * lr_bump_rate)`` -- a fixed *percentage* step. Plain
+       English: the lr moves at the same relative pace whether it is tiny or
+       large, traverses its whole range in a predictable number of steps, and a
+       full up bump is exactly cancelled by a full down bump (no drift). The
+       knob was renamed ``lr_bump`` -> ``lr_bump_rate`` to signal the change.
+
+    4. Stochastic rounding for fp16, not just bf16. v2 only rounded bf16
+       write-backs and let fp16 fall back to round-to-nearest, silently
+       discarding updates smaller than an fp16 ULP. v3 stochastically rounds
+       both (fast bit-trick for bf16/fp16, generic fallback for other low
+       precisions). Plain English: fp16 training no longer throws away small
+       weight updates, so it actually keeps learning instead of stalling.
+
+    5. Faster hot path, identical math. eps is folded into the small reduced
+       row/col vectors instead of the full gradient-square tensor; the lr scale,
+       weight decay and parameter update are fused into one ``addcmul_``; and the
+       sign-agreement is summed straight off the bool mask with no full-size
+       float cast. Plain English: each step issues fewer GPU passes over the
+       weights, so it runs faster (notably in bf16/fp16) without changing the
+       result.
     """
 
     def __init__(
@@ -24,6 +89,7 @@ class Automagic3(torch.optim.Optimizer):
         eps: float = 1e-30,
         clip_threshold: float = 1.0,
         weight_decay: float = 0.0,
+        fused: bool = True,
     ):
         if lr > 1e-3:
             print(f"Warning! Start lr {lr} is very high; forcing to 1e-6.")
@@ -40,12 +106,25 @@ class Automagic3(torch.optim.Optimizer):
         )
         super().__init__(params, defaults)
 
+        self.fused = fused
         self._hook_handles = []
         for group in self.param_groups:
             for p in group["params"]:
-                if p.requires_grad:
+                if not p.requires_grad:
+                    continue
+                if self.fused:
+                    # Fused: update each param the moment its grad is ready.
                     handle = p.register_post_accumulate_grad_hook(
                         self._make_backward_hook(group)
+                    )
+                    self._hook_handles.append(handle)
+                elif p.dtype != torch.float32:
+                    # Non-fused: the actual update happens in .step(); here we
+                    # only stochastically accumulate low-precision grads across
+                    # micro-batches so repeated round-to-nearest doesn't drop
+                    # small grads (fp32 grads accumulate losslessly on their own).
+                    handle = p.register_post_accumulate_grad_hook(
+                        self._make_accum_hook()
                     )
                     self._hook_handles.append(handle)
 
@@ -76,6 +155,35 @@ class Automagic3(torch.optim.Optimizer):
         ulp = torch.exp2(torch.floor(torch.log2(absv))).mul_(finfo.eps)
         noise = torch.rand_like(v).sub_(0.5).mul_(ulp)
         return v.add_(noise).to(dtype)
+
+    @classmethod
+    def _stochastic_copy_(cls, dst: torch.Tensor, src_fp32: torch.Tensor) -> None:
+        # Stochastically round the fp32 ``src`` into the low-precision ``dst`` in
+        # place. Uses the fast mantissa-truncation path for bf16/fp16 and the
+        # generic method otherwise. ``src_fp32`` may be mutated (caller owns it).
+        if dst.dtype == torch.bfloat16:
+            dst.copy_(cls._sr_truncate(src_fp32, 16))
+        elif dst.dtype == torch.float16:
+            dst.copy_(cls._sr_truncate(src_fp32, 13))
+        else:
+            dst.copy_(cls._stochastic_round(src_fp32, dst.dtype))
+
+    def _make_accum_hook(self):
+        # Non-fused grad accumulation for low-precision params: accumulate the
+        # running sum in fp32 then stochastically round it back into the
+        # low-precision ``_accum_grad`` buffer, so small per-micro-batch grads
+        # are not lost to repeated round-to-nearest. .step() consumes the buffer.
+        def _hook(p: torch.Tensor):
+            if p.grad is None:
+                return
+            if hasattr(p, "_accum_grad"):
+                acc = p._accum_grad.to(torch.float32).add_(p.grad.to(torch.float32))
+                self._stochastic_copy_(p._accum_grad, acc)
+            else:
+                p._accum_grad = p.grad.clone()
+            p.grad = None
+
+        return _hook
 
     def _init_state(self, p: torch.Tensor, group: dict) -> None:
         state = self.state[p]
@@ -115,6 +223,17 @@ class Automagic3(torch.optim.Optimizer):
         if grad.dtype != torch.float32:
             grad = grad.to(torch.float32)
 
+        # This step is fused into backward, so the trainer's grad clipping and
+        # nan/inf-skip run too late to protect us -- the weights are already
+        # updated here. A single non-finite gradient would poison the
+        # second-moment EMA (NaN*beta2 + ... stays NaN forever) and corrupt the
+        # weights, which surfaces as the model "randomly" blowing up. Neutralise
+        # non-finite grads in place (we own this fp32 grad) so those elements
+        # contribute nothing this step instead of destroying state. Large but
+        # finite grads are left alone -- the second-moment normalisation already
+        # bounds their effect.
+        grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
+
         beta2 = group["beta2"]
         eps = group["eps"]
         sq = grad * grad
@@ -146,6 +265,11 @@ class Automagic3(torch.optim.Optimizer):
             update = v.add(eps).rsqrt().mul_(grad)
 
         update.div_((self._rms(update) / group["clip_threshold"]).clamp_(min=1.0))
+        # The RMS clip only bounds the aggregate, so a single outlier element can
+        # still survive at ~sqrt(numel)*clip_threshold and hit one weight hard,
+        # distorting the model. Cap each element to clip_threshold (a true
+        # max-norm trust region) so no single weight can take an outsized step.
+        update.clamp_(-group["clip_threshold"], group["clip_threshold"])
 
         cur_polarity = update > 0
         eqb = cur_polarity == state["last_polarity"]
@@ -180,12 +304,7 @@ class Automagic3(torch.optim.Optimizer):
             if wd != 0.0:
                 update.add_(new_p_fp32, alpha=wd)
             new_p_fp32.addcmul_(update, lr_b, value=-1.0)
-            if p.dtype == torch.bfloat16:
-                p.copy_(self._sr_truncate(new_p_fp32, 16))
-            elif p.dtype == torch.float16:
-                p.copy_(self._sr_truncate(new_p_fp32, 13))
-            else:
-                p.copy_(self._stochastic_round(new_p_fp32, p.dtype))
+            self._stochastic_copy_(p, new_p_fp32)
 
         p.grad = None
 
@@ -195,6 +314,22 @@ class Automagic3(torch.optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+        # Fused mode already updated every param in the backward hook; nothing
+        # left to do. Non-fused mode does the real work here.
+        if not self.fused:
+            for group in self.param_groups:
+                for p in group["params"]:
+                    if not p.requires_grad:
+                        continue
+                    # Low-precision grads were stochastically accumulated into
+                    # _accum_grad; hand it back as the grad to update from.
+                    accum = getattr(p, "_accum_grad", None)
+                    if accum is not None:
+                        p.grad = accum
+                        del p._accum_grad
+                    if p.grad is None:
+                        continue
+                    self._update_param(p, group)
         return loss
 
     def get_learning_rates(self) -> List[float]:

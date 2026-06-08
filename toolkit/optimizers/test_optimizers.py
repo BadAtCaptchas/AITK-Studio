@@ -6,8 +6,8 @@ Compares speed (ms/step) and peak VRAM across:
   - AdamW8bit (bitsandbytes)
   - Adafactor
   - Automagic v1
-  - Automagic v2 (only optimizer using fused-backward)
-  - Automagic v3 (fused-backward)
+  - Automagic v2 (fused-backward)
+  - Automagic v3 (fused-backward and traditional/unfused)
   - Prodigy
 """
 import contextlib
@@ -200,8 +200,10 @@ def main():
               lambda p: Automagic(p, lr=1e-4))
     benchmark(results, "Automagic v2",
               lambda p: Automagic2(p, lr=1e-4))
-    benchmark(results, "Automagic v3",
-              lambda p: Automagic3(p, lr=1e-4))
+    benchmark(results, "Automagic v3 fused",
+              lambda p: Automagic3(p, lr=1e-4, fused=True))
+    benchmark(results, "Automagic v3 unfused",
+              lambda p: Automagic3(p, lr=1e-4, fused=False))
     benchmark(results, "Prodigy",
               lambda p: Prodigy(p, lr=1.0, eps=1e-6))
 

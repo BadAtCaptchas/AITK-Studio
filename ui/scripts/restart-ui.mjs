@@ -16,6 +16,8 @@ const RESTART_ERR_LOG = path.join(TMP_ROOT, 'ui-restart-err.log');
 const STOP_GRACE_MS = 4000;
 const RESPONSE_GRACE_MS = 1500;
 const PROJECT_MARKERS = [
+  'scripts/run-app.mjs',
+  'node_modules/next/dist/bin/next',
   'next start',
   'next dev',
   'node_modules',
@@ -25,6 +27,7 @@ const PROJECT_MARKERS = [
   'ts-node-dev',
   'npm run start',
   'npm run dev',
+  'scripts/repo-updater.mjs',
 ];
 
 function nowIso() {
@@ -116,7 +119,11 @@ function commandBelongsToRuntime(commandLine) {
   const uiRoot = normalizeCommandLine(UI_ROOT);
   const toolkitRoot = normalizeCommandLine(TOOLKIT_ROOT);
 
-  if (!command || command.includes('scripts/restart-ui.mjs') || command.includes('scripts/repo-updater.mjs')) {
+  if (!command || command.includes('scripts/restart-ui.mjs')) {
+    return false;
+  }
+
+  if (command.includes(`${toolkitRoot}/run.py`) || /\brun\.py\b/.test(command)) {
     return false;
   }
 
@@ -125,6 +132,18 @@ function commandBelongsToRuntime(commandLine) {
   }
 
   return PROJECT_MARKERS.some(marker => command.includes(marker));
+}
+
+function commandLooksLikeManagedService(commandLine) {
+  const command = normalizeCommandLine(commandLine);
+  return command.includes('tensorboard.main') || (command.includes('cloudflared') && command.includes(' tunnel'));
+}
+
+function processBelongsToRuntime(processInfo) {
+  return Boolean(
+    processInfo &&
+      (commandBelongsToRuntime(processInfo.commandLine) || commandLooksLikeManagedService(processInfo.commandLine)),
+  );
 }
 
 async function listWindowsRuntimePids() {
@@ -209,21 +228,26 @@ function collectRuntimePids(processes, runtime) {
   const runtimeRootPid = Number(runtime?.rootPid);
   const runtimeLauncherPid = Number(runtime?.launcherPid);
   const pids = new Set();
+  const byPid = new Map(processes.map(processInfo => [processInfo.pid, processInfo]));
 
-  if (Number.isInteger(runtimeRootPid) && runtimeRootPid > 0) {
+  if (Number.isInteger(runtimeRootPid) && runtimeRootPid > 0 && processBelongsToRuntime(byPid.get(runtimeRootPid))) {
     pids.add(runtimeRootPid);
   }
 
-  if (Number.isInteger(runtimeLauncherPid) && runtimeLauncherPid > 0) {
+  if (Number.isInteger(runtimeLauncherPid) && runtimeLauncherPid > 0 && processBelongsToRuntime(byPid.get(runtimeLauncherPid))) {
     pids.add(runtimeLauncherPid);
   }
 
   for (const pid of collectDescendantPids(processes, runtimeRootPid)) {
-    pids.add(pid);
+    if (processBelongsToRuntime(byPid.get(pid))) {
+      pids.add(pid);
+    }
   }
 
   for (const pid of collectDescendantPids(processes, runtimeLauncherPid)) {
-    pids.add(pid);
+    if (processBelongsToRuntime(byPid.get(pid))) {
+      pids.add(pid);
+    }
   }
 
   for (const processInfo of processes) {
@@ -242,18 +266,13 @@ async function terminatePids(pids) {
     return;
   }
 
-  if (process.platform === 'win32') {
-    for (const pid of targets) {
-      await run('taskkill.exe', ['/PID', String(pid), '/T', '/F']);
-    }
-    return;
-  }
-
   for (const pid of targets) {
     try {
       process.kill(pid, 'SIGTERM');
-    } catch {
-      // It may already be gone by the time we signal it.
+    } catch (error) {
+      if (error?.code === 'EPERM') {
+        throw new Error(`Permission denied while stopping process ${pid}`);
+      }
     }
   }
 
@@ -269,8 +288,10 @@ async function terminatePids(pids) {
     if (!isPidRunning(pid)) continue;
     try {
       process.kill(pid, 'SIGKILL');
-    } catch {
-      // The process may have already stopped.
+    } catch (error) {
+      if (error?.code === 'EPERM') {
+        throw new Error(`Permission denied while force-stopping process ${pid}`);
+      }
     }
   }
 }

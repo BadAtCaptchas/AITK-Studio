@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const modulePath = require.resolve('../dist/src/server/cloudflared.js');
@@ -161,4 +162,11 @@ test('cloudflared downloader rejects non-HTTPS and untrusted redirect hosts', ()
       new URL('https://release-assets.githubusercontent.com/github-production-release-asset/cloudflared'),
     ),
   );
+});
+
+test('cloudflared launch is managed by the app process', () => {
+  const source = readFileSync(modulePath, 'utf8');
+
+  assert.doesNotMatch(source, /detached:\s*true/);
+  assert.doesNotMatch(source, /\.unref\(/);
 });

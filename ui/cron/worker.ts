@@ -1,12 +1,12 @@
 import processQueue from './actions/processQueue';
 import { disconnectDb } from '../src/server/db';
-import { startTensorBoard } from '../src/server/tensorboard';
+import { startTensorBoard, stopTensorBoard } from '../src/server/tensorboard';
 import { getTrainingFolder } from './paths';
-import { getCloudflaredConfig, startCloudflared } from '../src/server/cloudflared';
+import { getCloudflaredConfig, startCloudflared, stopCloudflared } from '../src/server/cloudflared';
 import { purgeLegacyDurableEncryptedDatasetKeys } from '../src/server/encryptedDatasetSecrets';
 import { syncRemoteCaptionResults } from '../src/server/remoteCaptionResults';
 
-const SHUTDOWN_TIMEOUT_MS = 3000;
+const SHUTDOWN_TIMEOUT_MS = 10000;
 
 class CronWorker {
   interval: number;
@@ -128,6 +128,10 @@ async function shutdown(signal: NodeJS.Signals) {
     if (cronWorker) {
       await waitWithTimeout(cronWorker.stop(), SHUTDOWN_TIMEOUT_MS);
     }
+    await waitWithTimeout(
+      Promise.allSettled([stopTensorBoard(), stopCloudflared()]).then(() => undefined),
+      SHUTDOWN_TIMEOUT_MS,
+    );
     await disconnectDb();
   })();
 

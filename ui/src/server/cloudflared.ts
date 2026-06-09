@@ -438,6 +438,10 @@ async function waitForGeneratedPublicUrl(timeoutMs = 15_000) {
   return null;
 }
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function isPidRunning(pid: number) {
   try {
     process.kill(pid, 0);
@@ -538,7 +542,6 @@ export async function startCloudflared(options: { autoDownload?: boolean } = {})
     buildCloudflaredArgs(config),
     {
       cwd: TOOLKIT_ROOT,
-      detached: true,
       stdio: ['ignore', logOut, logErr],
       windowsHide: true,
     },
@@ -550,23 +553,57 @@ export async function startCloudflared(options: { autoDownload?: boolean } = {})
     throw new Error('cloudflared did not return a process id.');
   }
   await fsp.writeFile(PID_FILE, String(subprocess.pid), 'utf8');
-  subprocess.unref();
   if (config.mode === 'quick') {
     await waitForGeneratedPublicUrl();
   }
   return getCloudflaredStatus();
 }
 
+async function waitForPidExit(pid: number, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidRunning(pid)) {
+      return true;
+    }
+    await sleep(200);
+  }
+  return !isPidRunning(pid);
+}
+
 export async function stopCloudflared() {
   const pid = await readPid();
+  let stopError: string | null = null;
+
   if (pid != null && isPidRunning(pid)) {
     try {
       process.kill(pid, 'SIGTERM');
-    } catch {
-      // Process may exit between the status check and signal.
+    } catch (error) {
+      stopError = error instanceof Error ? error.message : 'cloudflared could not be stopped';
+    }
+
+    if (!stopError && !(await waitForPidExit(pid, 4000))) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (error) {
+        stopError = error instanceof Error ? error.message : 'cloudflared could not be force-stopped';
+      }
+      await waitForPidExit(pid, 1500);
     }
   }
-  await fsp.rm(PID_FILE, { force: true }).catch(() => undefined);
-  await fsp.rm(URL_FILE, { force: true }).catch(() => undefined);
-  return getCloudflaredStatus();
+
+  if (pid == null || !isPidRunning(pid)) {
+    await fsp.rm(PID_FILE, { force: true }).catch(() => undefined);
+    await fsp.rm(URL_FILE, { force: true }).catch(() => undefined);
+  }
+
+  const status = await getCloudflaredStatus();
+  if (!stopError) {
+    return status;
+  }
+
+  return {
+    ...status,
+    message: `cloudflared could not be stopped: ${stopError}`,
+    error: stopError,
+  };
 }

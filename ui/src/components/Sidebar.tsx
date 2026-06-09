@@ -101,7 +101,7 @@ const Sidebar = () => {
       {/* Social links grid */}
       <div className="hidden border-t border-gray-800 px-1 py-1 md:block">
         <div className="grid grid-cols-4 gap-4">
-          <a href="https://discord.gg/VXmU2f5WEU" target="_blank" rel="noreferrer" className={socialsBoxClass}>
+          <a href="https://discord.gg/umF6SfKRtm" target="_blank" rel="noreferrer" className={socialsBoxClass}>
             <FaDiscord className={socialIconClass} />
             {/* <span className="text-xs text-gray-500 mt-1">Discord</span> */}
           </a>

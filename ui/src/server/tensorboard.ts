@@ -10,6 +10,7 @@ const TOOLKIT_ROOT = path.resolve('@', '..', '..');
 const DEFAULT_TENSORBOARD_PORT = 6006;
 const DEFAULT_TENSORBOARD_HOST = '127.0.0.1';
 const TENSORBOARD_STATUS_RUN_NAME = 'aitk_status';
+const TENSORBOARD_PID_PATH = path.join(TOOLKIT_ROOT, '.tmp', 'tensorboard.pid');
 
 let managedTensorBoard: ChildProcess | null = null;
 let startPromise: Promise<TensorBoardStatus> | null = null;
@@ -141,7 +142,7 @@ export function getTensorBoardPublicUrl(port = getTensorBoardPort(), requestUrl?
 }
 
 function isManagedTensorBoardRunning() {
-  return managedTensorBoard !== null && !managedTensorBoard.killed && managedTensorBoard.exitCode === null;
+  return managedTensorBoard !== null && managedTensorBoard.exitCode === null && managedTensorBoard.signalCode === null;
 }
 
 function isPortListening(port: number) {
@@ -167,6 +168,47 @@ function isPortListening(port: number) {
 
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function writeTensorBoardPid(pid: number | undefined) {
+  if (pid == null) {
+    return;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(TENSORBOARD_PID_PATH), { recursive: true });
+    fs.writeFileSync(TENSORBOARD_PID_PATH, `${JSON.stringify({ pid, startedAt: new Date().toISOString() }, null, 2)}\n`);
+  } catch {
+    // PID tracking is best-effort; the worker still owns the child handle.
+  }
+}
+
+function removeTensorBoardPid() {
+  try {
+    fs.rmSync(TENSORBOARD_PID_PATH, { force: true });
+  } catch {
+    // Best-effort cleanup for stale startup detection.
+  }
+}
+
+function waitForChildExit(child: ChildProcess, timeoutMs: number) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise<boolean>(resolve => {
+    const timeout = setTimeout(() => {
+      child.off('exit', handleExit);
+      resolve(false);
+    }, timeoutMs);
+
+    function handleExit() {
+      clearTimeout(timeout);
+      resolve(true);
+    }
+
+    child.once('exit', handleExit);
+  });
 }
 
 async function waitForPort(port: number, timeoutMs = 5000) {
@@ -270,6 +312,40 @@ export async function startTensorBoard(trainingRoot: string) {
   return startPromise;
 }
 
+export async function stopTensorBoard(timeoutMs = 5000) {
+  if (startPromise) {
+    await startPromise.catch(() => undefined);
+  }
+
+  const child = managedTensorBoard;
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    removeTensorBoardPid();
+    managedTensorBoard = null;
+    return;
+  }
+
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // The process may already have exited.
+  }
+
+  const stopped = await waitForChildExit(child, timeoutMs);
+  if (!stopped && child.exitCode === null && child.signalCode === null) {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The process may already have exited or be owned by another user/session.
+    }
+    await waitForChildExit(child, 1500);
+  }
+
+  if (managedTensorBoard === child) {
+    managedTensorBoard = null;
+  }
+  removeTensorBoardPid();
+}
+
 async function startTensorBoardInternal(trainingRoot: string): Promise<TensorBoardStatus> {
   if (!isTensorBoardEnabled()) {
     return getTensorBoardStatus(trainingRoot);
@@ -310,22 +386,27 @@ async function startTensorBoardInternal(trainingRoot: string): Promise<TensorBoa
 
     managedTensorBoard = spawn(launchPythonPath, args, {
       cwd: TOOLKIT_ROOT,
-      detached: true,
       stdio: 'ignore',
       windowsHide: process.platform === 'win32',
       env: {
         ...process.env,
       },
     });
+    const child = managedTensorBoard;
+    writeTensorBoardPid(child.pid);
 
-    managedTensorBoard.once('exit', () => {
-      managedTensorBoard = null;
+    child.once('exit', () => {
+      if (managedTensorBoard === child) {
+        managedTensorBoard = null;
+      }
+      removeTensorBoardPid();
     });
-    managedTensorBoard.once('error', () => {
-      managedTensorBoard = null;
+    child.once('error', () => {
+      if (managedTensorBoard === child) {
+        managedTensorBoard = null;
+      }
+      removeTensorBoardPid();
     });
-
-    managedTensorBoard.unref();
   } catch (error: any) {
     if (getExplicitTensorBoardEnabled() === null) {
       autoDisabledReason = error?.message || 'Failed to start TensorBoard';

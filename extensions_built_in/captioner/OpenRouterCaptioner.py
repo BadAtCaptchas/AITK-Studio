@@ -13,6 +13,8 @@ from .BaseCaptioner import BaseCaptioner, CaptionConfig, IDEOGRAM_JSON_SCHEMA
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_ENV_NAMES = ("OPENROUTER_API_KEY", "AITK_OPENROUTER_API_KEY")
+OPENROUTER_JSON_MIN_TOKENS = 2048
+OPENROUTER_JSON_MAX_RETRY_TOKENS = 8192
 
 
 class OpenRouterCaptionConfig(CaptionConfig):
@@ -135,6 +137,16 @@ class OpenRouterCaptioner(BaseCaptioner):
             return ""
         return self._extract_content_text(message.get("content"))
 
+    def _caption_max_tokens(self, attempt: int = 1) -> int:
+        requested = int(self.caption_config.max_new_tokens or 0)
+        if not self.is_ideogram_json_output():
+            return max(1, requested)
+
+        budget = max(OPENROUTER_JSON_MIN_TOKENS, requested * 4)
+        if attempt > 1:
+            budget *= 2 ** (attempt - 1)
+        return min(budget, OPENROUTER_JSON_MAX_RETRY_TOKENS)
+
     def _build_payload(self, file_path: str) -> tuple[dict, tuple[int, int]]:
         image_data_url, image_size = self._image_to_data_url(file_path)
         messages = []
@@ -158,7 +170,7 @@ class OpenRouterCaptioner(BaseCaptioner):
             "model": self.caption_config.model_name_or_path.strip(),
             "messages": messages,
             "stream": False,
-            "max_tokens": int(self.caption_config.max_new_tokens),
+            "max_tokens": self._caption_max_tokens(),
         }
         if self.caption_config.temperature is not None:
             payload["temperature"] = float(self.caption_config.temperature)
@@ -176,13 +188,25 @@ class OpenRouterCaptioner(BaseCaptioner):
 
     def get_caption_for_file(self, file_path: str) -> str:
         payload, image_size = self._build_payload(file_path)
+        last_error = None
         for attempt in range(1, 4):
+            payload["max_tokens"] = self._caption_max_tokens(attempt)
             data = self._request_json(payload)
             caption = self._message_content_text(data)
             if caption:
-                return self.normalize_caption_output(file_path, caption, image_size=image_size)
+                try:
+                    return self.normalize_caption_output(file_path, caption, image_size=image_size)
+                except ValueError as exc:
+                    last_error = exc
+                    if not self.is_ideogram_json_output() or attempt >= 3:
+                        raise
             if attempt < 3:
                 time.sleep(2)
+        if last_error is not None:
+            raise RuntimeError(
+                f"OpenRouter returned invalid JSON after retries for model "
+                f"'{self.caption_config.model_name_or_path}': {last_error}"
+            ) from last_error
         raise RuntimeError(
             f"OpenRouter returned an empty caption for model '{self.caption_config.model_name_or_path}'. "
             "Confirm the selected model supports image inputs."

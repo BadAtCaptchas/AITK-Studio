@@ -59,6 +59,69 @@ class MixedTensorSubclassModel(torch.nn.Module):
         return x
 
 
+class Fp8Linear(torch.nn.Module):
+    def __init__(self, in_features=4, out_features=3):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.compute_dtype = torch.float32
+        logical_weight = torch.arange(
+            1,
+            out_features * in_features + 1,
+            dtype=torch.float32,
+        ).reshape(out_features, in_features)
+        self.register_buffer("weight", logical_weight.reshape(-1, 1))
+        self.register_buffer(
+            "weight_scale",
+            torch.linspace(0.5, 1.5, out_features, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "bias", torch.linspace(-0.25, 0.25, out_features, dtype=torch.float32)
+        )
+
+    def forward(self, x):
+        weight = self.weight.reshape(self.out_features, self.in_features).to(x.dtype)
+        weight = weight * self.weight_scale.to(x.dtype).unsqueeze(1)
+        bias = self.bias.to(x.dtype)
+        return torch.nn.functional.linear(x, weight, bias)
+
+
+class FakeNf4Weight(torch.Tensor):
+    @staticmethod
+    def __new__(cls, logical_weight):
+        packed = logical_weight.reshape(-1, 1)
+        instance = torch.Tensor._make_subclass(cls, packed, False)
+        instance._logical_weight = logical_weight
+        return instance
+
+    @property
+    def quant_state(self):
+        return True
+
+    def dequantize(self):
+        return self._logical_weight.to(self.device)
+
+
+class Linear4bit(torch.nn.Module):
+    def __init__(self, in_features=4, out_features=3):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.compute_dtype = torch.float32
+        logical_weight = torch.arange(
+            1,
+            out_features * in_features + 1,
+            dtype=torch.float32,
+        ).reshape(out_features, in_features)
+        self.register_buffer("weight", FakeNf4Weight(logical_weight))
+        self.bias = None
+
+    def forward(self, x):
+        return torch.nn.functional.linear(
+            x.to(self.compute_dtype), self.weight.dequantize(), self.bias
+        )
+
+
 class LayerOffloadStrategyTest(unittest.TestCase):
     def test_selects_deterministic_whole_block_suffix(self):
         first = LayerOffloadStrategy((10, 10, 10, 10), 0.7)
@@ -201,6 +264,30 @@ class BlockOffloadManagerTest(unittest.TestCase):
         self.assertFalse(hasattr(model[0], "_layer_memory_manager"))
         self.assertFalse(hasattr(model[0], "_memory_management_device"))
         self.assertTrue(torch.allclose(model(input_tensor), expected))
+
+    def test_legacy_memory_manager_handles_flat_fp8_linear_buffers(self):
+        model = torch.nn.Sequential(Fp8Linear())
+        input_tensor = torch.randn(2, model[0].in_features)
+        expected = model(input_tensor)
+
+        MemoryManager.attach(model, torch.device("cpu"))
+        try:
+            managed = model(input_tensor)
+            self.assertTrue(torch.allclose(managed, expected))
+        finally:
+            MemoryManager.detach(model)
+
+    def test_legacy_memory_manager_handles_nf4_dequantized_weight(self):
+        model = torch.nn.Sequential(Linear4bit())
+        input_tensor = torch.randn(2, model[0].in_features)
+        expected = model(input_tensor)
+
+        MemoryManager.attach(model, torch.device("cpu"))
+        try:
+            managed = model(input_tensor)
+            self.assertTrue(torch.allclose(managed, expected))
+        finally:
+            MemoryManager.detach(model)
 
     def test_memory_manager_detach_calls_block_manager(self):
         class FakeBlockManager:

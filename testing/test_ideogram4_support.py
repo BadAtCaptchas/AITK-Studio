@@ -223,8 +223,16 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
             'self._model_kwargs().get("dequantize_fp8_transformer", False)',
             model_source,
         )
-        self.assertIn("first training step can appear stuck at 0%", model_source)
+        self.assertIn("sample generation can", model_source)
         self.assertIn("warn_if_fp8_training_without_dequantize", trainer_source)
+
+    def test_fp8_dequantize_applies_to_generation_branches(self):
+        model_source = (IDEOGRAM_ROOT / "ideogram4_model.py").read_text(encoding="utf-8")
+
+        self.assertIn("def _dequantize_fp8_transformer_if_requested", model_source)
+        self.assertIn('label="conditional"', model_source)
+        self.assertIn('label="unconditional"', model_source)
+        self.assertIn("sample generation can", model_source)
 
     def test_ui_defaults_memory_profile_and_auto_profile(self):
         options = UI_OPTIONS_PATH.read_text(encoding="utf-8")

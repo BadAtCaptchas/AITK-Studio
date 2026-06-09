@@ -465,10 +465,10 @@ class Ideogram4Model(BaseModel):
         warnings.warn(
             "Ideogram 4 FP8 training is using the lower-VRAM weight-only "
             "transformer path. That path dequantizes Fp8Linear weights during "
-            "forward, so the first training step can appear stuck at 0%. On "
-            "48GB GPUs such as L40, set "
+            "forward, so the first training step and sample generation can "
+            "appear stuck at 0%. On 48GB GPUs such as L40, set "
             "model_kwargs.dequantize_fp8_transformer: true to dequantize the "
-            "conditional transformer once before training.",
+            "FP8 transformers once before training and generation.",
             stacklevel=2,
         )
         self._warned_fp8_training_without_dequantize = True
@@ -532,6 +532,27 @@ class Ideogram4Model(BaseModel):
         del state_dict
         return transformer
 
+    def _dequantize_fp8_transformer_if_requested(
+        self,
+        transformer: Ideogram4Transformer,
+        *,
+        dtype: torch.dtype,
+        label: str,
+    ) -> int:
+        if not self._model_kwargs().get("dequantize_fp8_transformer", False):
+            return 0
+        self.print_and_status_update(f"Dequantizing FP8 {label} transformer")
+        replaced = dequantize_fp8_linears(
+            transformer, dtype=dtype, device=self.device_torch
+        )
+        if replaced == 0:
+            warnings.warn(
+                "dequantize_fp8_transformer was enabled but no Fp8Linear "
+                f"layers were found in the {label} transformer.",
+                stacklevel=2,
+            )
+        return replaced
+
     def load_model(self):
         _warn_if_torch_below_official_requirement()
 
@@ -566,20 +587,10 @@ class Ideogram4Model(BaseModel):
             dtype,
         )
 
-        if (
-            quantization == "fp8"
-            and self._model_kwargs().get("dequantize_fp8_transformer", False)
-        ):
-            self.print_and_status_update("Dequantizing FP8 conditional transformer")
-            replaced = dequantize_fp8_linears(
-                conditional_transformer, dtype=dtype, device=self.device_torch
+        if quantization == "fp8":
+            self._dequantize_fp8_transformer_if_requested(
+                conditional_transformer, dtype=dtype, label="conditional"
             )
-            if replaced == 0:
-                warnings.warn(
-                    "dequantize_fp8_transformer was enabled but no Fp8Linear "
-                    "layers were found in the conditional transformer.",
-                    stacklevel=2,
-                )
 
         self.print_and_status_update("Loading Ideogram 4 unconditional transformer")
         unconditional_transformer = self._load_transformer_from_path(
@@ -587,6 +598,10 @@ class Ideogram4Model(BaseModel):
             pipeline_config.unconditional_index_filename,
             dtype,
         )
+        if quantization == "fp8":
+            self._dequantize_fp8_transformer_if_requested(
+                unconditional_transformer, dtype=dtype, label="unconditional"
+            )
 
         self.print_and_status_update("Loading Qwen3-VL text encoder")
         tokenizer, text_encoder = _load_qwen3_vl_local_or_hf(

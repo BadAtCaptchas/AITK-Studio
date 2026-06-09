@@ -292,6 +292,7 @@ class BaseCaptioner(BaseExtensionProcess):
     def run_caption_loop(self):
         self.caption_success_count = 0
         self.caption_failure_count = 0
+        last_error_message = None
         for file_path in tqdm.tqdm(
             self.file_paths, desc="Captioning files", unit="file"
         ):
@@ -307,18 +308,23 @@ class BaseCaptioner(BaseExtensionProcess):
                     file_caption = self.get_caption_for_file(file_path)
                 if file_caption is None or str(file_caption).strip() == "":
                     self.caption_failure_count += 1
+                    last_error_message = "captioner returned no text"
                     print(f"Error captioning file {file_path}: captioner returned no text")
                     continue
                 self.save_caption_for_file(file_path, str(file_caption).strip())
                 self.caption_success_count += 1
             except Exception as e:
                 self.caption_failure_count += 1
+                last_error_message = str(e)
                 print(f"Error captioning file {file_path}: {e}")
                 continue
         if self.file_paths and self.caption_success_count == 0 and self.caption_failure_count > 0:
-            raise RuntimeError(
+            error_message = (
                 f"Captioning failed: no captions were generated for {self.caption_failure_count} attempted file(s)."
             )
+            if last_error_message:
+                error_message = f"{error_message} Last error: {last_error_message}"
+            raise RuntimeError(error_message)
         if self.caption_failure_count > 0:
             print(
                 f"Captioning completed with {self.caption_failure_count} failed file(s) "

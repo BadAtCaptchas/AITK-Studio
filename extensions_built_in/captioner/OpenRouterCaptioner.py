@@ -103,23 +103,37 @@ class OpenRouterCaptioner(BaseCaptioner):
                 pass
             raise RuntimeError(f"OpenRouter request failed: {message}") from exc
 
+    def _extract_content_text(self, content) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, dict):
+            if isinstance(content.get("text"), str) and content["text"].strip():
+                return content["text"].strip()
+            if isinstance(content.get("value"), str) and content["value"].strip():
+                return content["value"].strip()
+            if content.get("value") is not None:
+                return json.dumps(content["value"], ensure_ascii=False)
+            if content.get("content") is not None:
+                return self._extract_content_text(content["content"])
+            return ""
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                part = self._extract_content_text(item)
+                if part:
+                    parts.append(part)
+            return "\n".join(parts).strip()
+        return ""
+
     def _message_content_text(self, data: dict) -> str:
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             return ""
-        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        choice = choices[0]
+        message = choice.get("message") if isinstance(choice, dict) else None
         if not isinstance(message, dict):
             return ""
-        content = message.get("content")
-        if isinstance(content, str):
-            return content.strip()
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, dict) and isinstance(item.get("text"), str):
-                    parts.append(item["text"])
-            return "\n".join(parts).strip()
-        return ""
+        return self._extract_content_text(message.get("content"))
 
     def _build_payload(self, file_path: str) -> tuple[dict, tuple[int, int]]:
         image_data_url, image_size = self._image_to_data_url(file_path)
@@ -170,5 +184,6 @@ class OpenRouterCaptioner(BaseCaptioner):
             if attempt < 3:
                 time.sleep(2)
         raise RuntimeError(
-            "OpenRouter returned an empty caption. Confirm the selected model supports image inputs."
+            f"OpenRouter returned an empty caption for model '{self.caption_config.model_name_or_path}'. "
+            "Confirm the selected model supports image inputs."
         )

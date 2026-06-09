@@ -79,7 +79,7 @@ Requirements:
 
 Linux:
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 python3 -m venv venv
 source venv/bin/activate
@@ -96,7 +96,7 @@ Windows:
 If you are having issues with Windows. I recommend using the easy install script at [https://github.com/Tavris1/AI-Toolkit-Easy-Install](https://github.com/Tavris1/AI-Toolkit-Easy-Install)
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 python -m venv venv
 .\venv\Scripts\activate
@@ -170,7 +170,7 @@ locates at `./run_mac.zsh` that will install the dependencies locally and run th
 do the following:
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 chmod +x run_mac.zsh
 ./run_mac.zsh
@@ -199,6 +199,30 @@ npm run build_and_start
 ```
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
+
+## Development Utilities
+
+To test uncommitted local changes in another checkout without pushing a branch first, use the git-status sync helper:
+
+```bash
+python scripts/sync_local_changes.py /path/to/other/ai-toolkit
+```
+
+Or from the UI npm scripts:
+
+```bash
+npm --prefix ui run sync:local -- /path/to/other/ai-toolkit
+```
+
+On Windows, this also works with WSL UNC paths:
+
+```powershell
+$env:AITK_DEV_SYNC_TARGET='\\wsl.localhost\Ubuntu\home\<user>\ai-toolkit'
+npm --prefix ui run sync:local -- --dry-run
+npm --prefix ui run sync:local
+```
+
+The helper copies files reported by `git status`, including untracked files, and removes target files for local deletions or rename sources. Use `--tracked-only` to skip untracked files, `--no-delete` to leave target deletions alone, and `--no-verify-target` for non-git target directories.
 
 ## Image generation UI
 
@@ -516,7 +540,7 @@ For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_i
 
 ### Need help or found a bug?
 
-This fork tracks reproducible code bugs in this repository only. If you find a bug in `rmcc3/ai-toolkit`, open a bug report at [github.com/rmcc3/ai-toolkit/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
+This fork tracks reproducible code bugs in this repository only. If you find a bug in `rmcc3/ai-toolkit-revamped`, open a bug report at [github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
 
 Please do not open bug reports here for upstream-only behavior, setup help, usage questions, or feature requests. If the behavior exists only in the original Ostris AI Toolkit, report it upstream.
 
@@ -543,7 +567,7 @@ This fork includes a maintained private RunPod Pod template for the revamped UI.
 ### 1. Setup
 #### ai-toolkit:
 ```
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 git submodule update --init --recursive
 python -m venv venv

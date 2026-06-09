@@ -47,7 +47,7 @@ config:
         model_kwargs:
           quantization: "fp8"
           dequantize_fp8_transformer: true
-          require_json_captions: true
+          require_json_captions: false
           caption_strict: false
       sample:
         sampler: "flowmatch"

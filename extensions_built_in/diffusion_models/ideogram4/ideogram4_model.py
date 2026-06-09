@@ -775,11 +775,22 @@ class Ideogram4Model(BaseModel):
             )
         flush()
 
+    def _warn_natural_caption_quality_once(self) -> None:
+        if getattr(self, "_warned_natural_caption_quality", False):
+            return
+        warnings.warn(
+            "Ideogram 4 was trained on structured JSON captions; natural-language "
+            "captions/prompts are allowed, but training and sample outputs may be "
+            "worse than with Ideogram JSON captions.",
+            stacklevel=2,
+        )
+        self._warned_natural_caption_quality = True
+
     def _validate_caption(self, prompt: str) -> None:
         if prompt.strip() == "":
             return
 
-        require_json = self._model_kwargs().get("require_json_captions", True)
+        require_json = self._model_kwargs().get("require_json_captions", False)
         caption_strict = self._model_kwargs().get("caption_strict", False)
 
         try:
@@ -790,15 +801,14 @@ class Ideogram4Model(BaseModel):
                     "Ideogram 4 training captions must be JSON strings. "
                     f"Invalid JSON: {exc}"
                 ) from exc
-            warnings.warn(
-                "Ideogram 4 was trained on structured JSON captions; this prompt "
-                "is plain text and may sample outside the training distribution.",
-                stacklevel=2,
-            )
+            self._warn_natural_caption_quality_once()
             return
 
-        if not isinstance(parsed, dict) and require_json:
-            raise ValueError("Ideogram 4 captions must be top-level JSON objects.")
+        if not isinstance(parsed, dict):
+            if require_json:
+                raise ValueError("Ideogram 4 captions must be top-level JSON objects.")
+            self._warn_natural_caption_quality_once()
+            return
 
         issues = self.caption_verifier.verify(parsed)
         ensure_ascii_issues = self.caption_verifier.check_ensure_ascii_false(prompt)
@@ -861,7 +871,7 @@ class Ideogram4Model(BaseModel):
     def prepare_sample_image_config_for_encoding(
         self, image_config: GenerateImageConfig
     ) -> None:
-        if self._model_kwargs().get("json_wrap_sample_prompts", True):
+        if self._model_kwargs().get("json_wrap_sample_prompts", False):
             self._normalize_sample_image_config(image_config)
 
     @torch.no_grad()

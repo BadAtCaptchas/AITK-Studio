@@ -46,7 +46,7 @@ config:
         low_vram: true
         model_kwargs:
           quantization: "nf4"
-          require_json_captions: true
+          require_json_captions: false
           caption_strict: false
       sample:
         sampler: "flowmatch"

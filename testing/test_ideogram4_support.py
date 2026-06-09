@@ -247,7 +247,7 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("label: 'Ideogram 4 FP8'", options)
         self.assertIn("'config.process[0].model.name_or_path': ['ideogram-ai/ideogram-4-fp8', defaultNameOrPath]", options)
         self.assertIn("'config.process[0].train.bypass_guidance_embedding': [false, false]", options)
-        self.assertIn("require_json_captions: true", options)
+        self.assertIn("require_json_captions: false", options)
         self.assertIn("caption_strict: false", options)
         self.assertIn("dequantize_fp8_transformer: true", options)
         self.assertIn("'ideogram4'", memory)
@@ -277,7 +277,7 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
                 source,
             )
 
-    def test_example_configs_use_json_caption_defaults(self):
+    def test_example_configs_allow_natural_caption_defaults(self):
         examples = [
             ("train_lora_ideogram4_48gb.yaml", "ideogram-ai/ideogram-4-nf4", "nf4"),
             ("train_lora_ideogram4_fp8_48gb.yaml", "ideogram-ai/ideogram-4-fp8", "fp8"),
@@ -297,7 +297,7 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
                 self.assertEqual(model["arch"], "ideogram4")
                 self.assertEqual(model["name_or_path"], repo)
                 self.assertEqual(model["model_kwargs"]["quantization"], quantization)
-                self.assertTrue(model["model_kwargs"]["require_json_captions"])
+                self.assertFalse(model["model_kwargs"]["require_json_captions"])
                 self.assertFalse(model["model_kwargs"]["caption_strict"])
                 self.assertFalse(process["train"]["train_text_encoder"])
                 self.assertEqual(process["sample"]["sample_steps"], 20)
@@ -989,7 +989,7 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         autoencoder.to(dtype=torch.bfloat16)
         self.assertEqual(autoencoder.dtype, torch.bfloat16)
 
-    def test_caption_validation_requires_non_empty_json_by_default(self):
+    def test_caption_validation_allows_natural_language_by_default(self):
         model = object.__new__(Ideogram4Model)
         model.model_config = types.SimpleNamespace(model_kwargs={})
         model.caption_verifier = CaptionVerifier()
@@ -1001,8 +1001,32 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         model._validate_caption(valid_caption)
         model._validate_caption("")
 
-        with self.assertRaisesRegex(ValueError, "must be JSON"):
+        with self.assertWarnsRegex(UserWarning, "natural-language captions/prompts"):
             model._validate_caption("plain text prompt")
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model._validate_caption("another plain text prompt")
+
+        self.assertEqual(caught, [])
+
+        model = object.__new__(Ideogram4Model)
+        model.model_config = types.SimpleNamespace(model_kwargs={})
+        model.caption_verifier = CaptionVerifier()
+        with self.assertWarnsRegex(UserWarning, "natural-language captions/prompts"):
+            model._validate_caption('["valid JSON, but not an object"]')
+
+    def test_caption_validation_strict_json_opt_in_still_raises(self):
+        model = object.__new__(Ideogram4Model)
+        model.model_config = types.SimpleNamespace(
+            model_kwargs={"require_json_captions": True}
+        )
+        model.caption_verifier = CaptionVerifier()
+
+        with self.assertRaisesRegex(ValueError, "must be JSON"):
+            model._validate_caption("plain training caption")
+        with self.assertRaisesRegex(ValueError, "top-level JSON objects"):
+            model._validate_caption('["valid JSON, but not an object"]')
 
     def test_full_comfy_caption_is_valid_for_training(self):
         model = object.__new__(Ideogram4Model)
@@ -1018,7 +1042,7 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
 
         self.assertEqual(caught, [])
 
-    def test_plain_sample_prompts_are_wrapped_without_relaxing_training_captions(self):
+    def test_plain_sample_prompts_can_still_be_wrapped_explicitly(self):
         model = object.__new__(Ideogram4Model)
         model.model_config = types.SimpleNamespace(model_kwargs={})
         model.caption_verifier = CaptionVerifier()
@@ -1034,9 +1058,6 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         )
         model._validate_caption(wrapped)
 
-        with self.assertRaisesRegex(ValueError, "must be JSON"):
-            model._validate_caption("plain training caption")
-
     def test_json_sample_prompts_are_left_unchanged(self):
         model = object.__new__(Ideogram4Model)
         model.model_config = types.SimpleNamespace(model_kwargs={})
@@ -1048,11 +1069,33 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
 
         self.assertEqual(model._sample_prompt_to_json_caption(prompt), prompt)
 
-    def test_sample_prompt_prepare_hook_wraps_before_cache_encoding(self):
+    def test_sample_prompt_prepare_hook_leaves_plain_prompts_by_default(self):
         from toolkit.config_modules import GenerateImageConfig
 
         model = object.__new__(Ideogram4Model)
         model.model_config = types.SimpleNamespace(model_kwargs={})
+        model.caption_verifier = CaptionVerifier()
+        sample_config = GenerateImageConfig(
+            prompt="plain sample prompt",
+            negative_prompt="plain negative sample prompt",
+            output_path=str(PROJECT_ROOT / "tmp_sample.png"),
+        )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model.prepare_sample_image_config_for_encoding(sample_config)
+
+        self.assertEqual(caught, [])
+        self.assertEqual(sample_config.prompt, "plain sample prompt")
+        self.assertEqual(sample_config.negative_prompt, "plain negative sample prompt")
+
+    def test_sample_prompt_prepare_hook_wraps_when_requested(self):
+        from toolkit.config_modules import GenerateImageConfig
+
+        model = object.__new__(Ideogram4Model)
+        model.model_config = types.SimpleNamespace(
+            model_kwargs={"json_wrap_sample_prompts": True}
+        )
         model.caption_verifier = CaptionVerifier()
         sample_config = GenerateImageConfig(
             prompt="plain sample prompt",

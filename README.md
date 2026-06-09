@@ -41,7 +41,7 @@ GLM-Image is supported for text-to-image sampling and transformer LoRA training 
 
 Ideogram 4 is supported through the built-in `ideogram4` architecture for text-to-image sampling, transformer LoRA training, and full conditional-transformer fine-tuning. Use `ideogram-ai/ideogram-4-nf4` or `ideogram-ai/ideogram-4-fp8`; both are gated Hugging Face models and their weights remain under Ideogram's non-commercial license. The integration vendors the Apache-2.0 official pipeline components locally and does not call external moderation, magic-prompt, or other hosted APIs. Qwen3-VL, the VAE, and the unconditional transformer stay frozen; LoRA and full fine-tune jobs train only the conditional transformer.
 
-Ideogram 4 prompting is JSON-caption-first. Non-empty dataset captions for `arch: ideogram4` must be JSON strings by default; caption schema and key-order issues warn by default, or fail when `model_kwargs.caption_strict: true` is set. Sample prompts may be JSON captions too; plain sample prompts are wrapped locally into a minimal JSON caption before generation, without calling magic-prompt, moderation, or other hosted APIs. NF4 requires CUDA and `bitsandbytes>=0.49.2`. The FP8 model can be used directly on supported GPUs or dequantized for training with `model_kwargs.dequantize_fp8_transformer: true`. AI Toolkit also warns at runtime when the active Torch version is below Ideogram's official `torch>=2.11` requirement.
+Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommended for `arch: ideogram4`, but natural-language captions and sample prompts are allowed by default with a runtime warning that outputs may be worse than with structured Ideogram JSON captions. JSON caption schema and key-order issues warn by default, or fail when `model_kwargs.caption_strict: true` is set; users who want to enforce structured captions can also set `model_kwargs.require_json_captions: true`. Training and sampling do not call magic-prompt, moderation, or other hosted APIs. NF4 requires CUDA and `bitsandbytes>=0.49.2`. The FP8 model can be used directly on supported GPUs or dequantized for training with `model_kwargs.dequantize_fp8_transformer: true`. AI Toolkit also warns at runtime when the active Torch version is below Ideogram's official `torch>=2.11` requirement.
 
 ### Instruction / Edit
 - [black-forest-labs/FLUX.1-Kontext-dev](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev) (FLUX.1-Kontext-dev)
@@ -407,7 +407,7 @@ $env:AI_TOOLKIT_AUTH="super_secure_password"; npm run build_and_start
 2. Edit the file following the comments in the file
 3. Run the file like so `python run.py config/whatever_you_want.yml`
 
-For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.yaml` for NF4 LoRA, `config/examples/train_lora_ideogram4_fp8_48gb.yaml` for FP8 LoRA, or `config/examples/train_full_fine_tune_ideogram4.yaml` for full conditional-transformer fine-tuning. Ideogram 4 dataset captions should be JSON objects serialized as text files; training does not call Ideogram magic-prompt, moderation, or any other hosted API.
+For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.yaml` for NF4 LoRA, `config/examples/train_lora_ideogram4_fp8_48gb.yaml` for FP8 LoRA, or `config/examples/train_full_fine_tune_ideogram4.yaml` for full conditional-transformer fine-tuning. Ideogram 4 dataset captions work as natural text or JSON objects serialized as text files; JSON is recommended for best prompt fidelity, and training does not call Ideogram magic-prompt, moderation, or any other hosted API.
 
 A folder with the name and the training folder from the config file will be created when you start. It will have all 
 checkpoints and images in it. You can stop the training at any time using ctrl+c and when you resume, it will pick back up
@@ -492,7 +492,7 @@ For GLM-Image, the UI defaults Auto learn to `glm-image-balanced-lora` instead o
 - `glm-image-balanced-lora`: LoRA rank/alpha `32`, `adamw8bit`, weighted timesteps, MSE loss, and LR phases `0.00005 -> 0.00003 -> 0.000015` for content, balanced, and style stages.
 - `glm-image-low-vram-lora`: LoRA rank/alpha `16`, dropout `0.05`, `adamw8bit`, weighted timesteps, MSE loss, batch size `1`, gradient accumulation `2`, and LR phases `0.00003 -> 0.00002 -> 0.00001`.
 
-For Ideogram 4 NF4 and FP8, the UI defaults Auto learn to `ideogram4-balanced-lora`. It uses transformer-only LoRA rank/alpha `32`, cached text embeddings, weighted timesteps, JSON-caption-focused phases, and LR phases `0.00004 -> 0.000025 -> 0.00001`.
+For Ideogram 4 NF4 and FP8, the UI defaults Auto learn to `ideogram4-balanced-lora`. It uses transformer-only LoRA rank/alpha `32`, cached text embeddings, weighted timesteps, caption-aware phases, and LR phases `0.00004 -> 0.000025 -> 0.00001`.
 
 You can also save the current auto-learn settings as a custom profile from the same editor. Custom profiles are stored in the browser's local storage.
 

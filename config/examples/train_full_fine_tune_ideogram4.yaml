@@ -43,7 +43,7 @@ config:
         model_kwargs:
           quantization: "fp8"
           dequantize_fp8_transformer: true
-          require_json_captions: true
+          require_json_captions: false
           caption_strict: false
         # To resume a saved full fine-tune, set name_or_path to the saved folder
         # containing transformer/ and aitk_meta.yaml. Frozen support components

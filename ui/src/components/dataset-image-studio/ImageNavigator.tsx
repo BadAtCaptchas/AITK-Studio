@@ -48,7 +48,7 @@ import type {
   DeleteImagesResult,
 } from './types';
 import { EncryptedThumb, PlainThumb } from './StudioMedia';
-import { captionResponseToText, clampIndex, itemKey, itemName, statusForCaption } from './utils';
+import { captionResponseToText, clampIndex, isPlainTextCaptionItem, itemKey, itemName, statusForCaption } from './utils';
 
 type ThumbSize = 'sm' | 'md' | 'lg';
 type ScanState = {
@@ -558,15 +558,29 @@ export function ImageNavigator({
     async (chunk: DatasetStudioItem[], signal: AbortSignal) => {
       const plainItems = chunk.filter((item): item is Extract<DatasetStudioItem, { kind: 'plain' }> => item.kind === 'plain');
       if (plainItems.length === 0) return 0;
-      const response = await apiClient.post(
-        '/api/caption/getBatch',
-        { imgPaths: plainItems.map(item => item.path) },
-        { signal },
+      const directItems = plainItems.filter(isPlainTextCaptionItem);
+      const sidecarItems = plainItems.filter(item => !isPlainTextCaptionItem(item));
+      await Promise.all(
+        directItems.map(async item => {
+          try {
+            const response = await apiClient.post('/api/caption/get', { imgPath: item.path, direct: true }, { signal });
+            setCacheEntry(item, captionResponseToText(response.data));
+          } catch {
+            setCacheEntry(item, '');
+          }
+        }),
       );
-      const captions: Record<string, unknown> = response.data?.captions || {};
-      plainItems.forEach(item => {
-        setCacheEntry(item, captionResponseToText(captions[item.path]));
-      });
+      if (sidecarItems.length > 0) {
+        const response = await apiClient.post(
+          '/api/caption/getBatch',
+          { imgPaths: sidecarItems.map(item => item.path) },
+          { signal },
+        );
+        const captions: Record<string, unknown> = response.data?.captions || {};
+        sidecarItems.forEach(item => {
+          setCacheEntry(item, captionResponseToText(captions[item.path]));
+        });
+      }
       return plainItems.length;
     },
     [setCacheEntry],

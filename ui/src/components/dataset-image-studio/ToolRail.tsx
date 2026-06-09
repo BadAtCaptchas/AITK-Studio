@@ -10,6 +10,7 @@ export function ToolRail({
   hasSelection,
   canUndo,
   canRedo,
+  canShowJson = true,
   onToolChange,
   onDelete,
   onUndo,
@@ -21,6 +22,7 @@ export function ToolRail({
   hasSelection: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  canShowJson?: boolean;
   onToolChange: (tool: ToolMode) => void;
   onDelete: () => void;
   onUndo: () => void;
@@ -63,7 +65,7 @@ export function ToolRail({
       <ToolButton disabled={!canUndo} label="Undo" icon={<Undo2 className="h-5 w-5" />} onClick={onUndo} />
       <ToolButton disabled={!canRedo} label="Redo" icon={<Redo2 className="h-5 w-5" />} onClick={onRedo} />
       <div className="hidden flex-1 md:block" />
-      <ToolButton label="Labels" icon={<Tags className="h-5 w-5" />} onClick={onShowJson} />
+      <ToolButton disabled={!canShowJson} label="Labels" icon={<Tags className="h-5 w-5" />} onClick={onShowJson} />
       <ToolButton label="Shortcuts" icon={<Keyboard className="h-5 w-5" />} />
     </aside>
   );

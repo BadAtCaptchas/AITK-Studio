@@ -3,6 +3,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import {
   DATASET_CAPTION_SIDECAR_EXTENSIONS,
+  DATASET_TEXT_CAPTION_EXTENSIONS,
   captionSidecarPath,
   deleteCaptionSidecars,
   findExistingCaptionSidecar,
@@ -72,6 +73,7 @@ const MEDIA_EXTENSIONS = new Set([
   '.ogg',
   '.m4a',
   '.aac',
+  ...DATASET_TEXT_CAPTION_EXTENSIONS,
 ]);
 
 type ResolvedMedia = {
@@ -109,16 +111,18 @@ function resolveMediaPaths(datasetFolder: string, imgPaths: string[]) {
     }
     const ext = path.extname(resolved).toLowerCase();
     if (!MEDIA_EXTENSIONS.has(ext)) {
-      throw new DatasetCaptionBulkError('Unsupported media path');
+      throw new DatasetCaptionBulkError('Unsupported dataset item path');
     }
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-      throw new DatasetCaptionBulkError('Image does not exist', 404);
+      throw new DatasetCaptionBulkError('Dataset item does not exist', 404);
     }
     return resolved;
   });
 }
 
 function existingCaptionSidecars(mediaPath: string) {
+  if (DATASET_TEXT_CAPTION_EXTENSIONS.includes(path.extname(mediaPath).toLowerCase())) return [];
+
   return DATASET_CAPTION_SIDECAR_EXTENSIONS.flatMap(extension => {
     const candidate = captionSidecarPath(mediaPath, extension);
     return fs.existsSync(candidate) && fs.statSync(candidate).isFile() ? [candidate] : [];
@@ -177,7 +181,9 @@ async function performDelete(matched: ResolvedMedia[]) {
   const removedPaths: string[] = [];
   for (const item of matched) {
     await fsp.unlink(item.path);
-    deleteCaptionSidecars(item.path);
+    if (!DATASET_TEXT_CAPTION_EXTENSIONS.includes(path.extname(item.path).toLowerCase())) {
+      deleteCaptionSidecars(item.path);
+    }
     deleted += 1;
     removedPaths.push(item.path);
   }
@@ -219,7 +225,8 @@ async function performRemoveWords(
   const updatedCaptions: Record<string, string> = {};
 
   for (const item of matched) {
-    const captionPath = findExistingCaptionSidecar(item.path);
+    const isTextFile = DATASET_TEXT_CAPTION_EXTENSIONS.includes(path.extname(item.path).toLowerCase());
+    const captionPath = isTextFile ? item.path : findExistingCaptionSidecar(item.path);
     if (!captionPath) continue;
     const result = removeCaptionKeywords(item.caption, terms, matchMode);
     if (!result.changed) continue;

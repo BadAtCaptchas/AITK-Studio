@@ -1,4 +1,4 @@
-import { isAudio, isImage, isVideo } from '@/utils/basic';
+import { isAudio, isImage, isTextCaption, isVideo } from '@/utils/basic';
 import { getDisplayPath } from '@/utils/media';
 import {
   arrayToBox,
@@ -33,9 +33,14 @@ export function itemKind(item: DatasetStudioItem) {
     if (isImage(item.item.name) || isImage(item.item.extension)) return 'image';
     return 'image';
   }
+  if (isTextCaption(item.path)) return 'text';
   if (isAudio(item.path)) return 'audio';
   if (isVideo(item.path)) return 'video';
   return 'image';
+}
+
+export function isPlainTextCaptionItem(item: DatasetStudioItem | null | undefined) {
+  return item?.kind === 'plain' && itemKind(item) === 'text';
 }
 
 export function clampIndex(value: number, length: number) {

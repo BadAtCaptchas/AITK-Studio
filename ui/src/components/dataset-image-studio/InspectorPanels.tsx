@@ -13,6 +13,7 @@ export function ObjectDetailsPanel({
   canAnnotate,
   isCaptionLoaded,
   canConvertDataset,
+  isPlainTextItem,
   selectedImageSize,
   canGenerateAutoBoxes,
   autoBoxDisabledReason,
@@ -51,6 +52,7 @@ export function ObjectDetailsPanel({
   canAnnotate: boolean;
   isCaptionLoaded: boolean;
   canConvertDataset: boolean;
+  isPlainTextItem: boolean;
   selectedImageSize: ImageSize | null;
   canGenerateAutoBoxes: boolean;
   autoBoxDisabledReason: string;
@@ -190,6 +192,17 @@ export function ObjectDetailsPanel({
           <div className="flex items-center gap-2 text-sm text-gray-400">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading caption
+          </div>
+        ) : isPlainTextItem ? (
+          <div className="space-y-3 rounded-md border border-gray-800 bg-gray-900/60 p-3 text-sm text-gray-300">
+            <div className="flex items-center gap-2 text-gray-100">
+              <FileJson2 className="h-4 w-4 text-blue-300" />
+              Text file editing
+            </div>
+            <p className="text-gray-400">
+              This is a regular text caption file. Caption editing and basic bulk actions are available; JSON boxes,
+              colors, and layer tools remain disabled.
+            </p>
           </div>
         ) : !canAnnotate ? (
           <div className="space-y-3 rounded-md border border-gray-800 bg-gray-900/60 p-3 text-sm text-gray-300">
@@ -357,6 +370,7 @@ export function CaptionEditorPanel({
   captionText,
   highLevelDescription,
   isIdeogram,
+  isPlainTextItem,
   isAutoCaptioning,
   isCaptionLoaded,
   isDirty,
@@ -371,6 +385,7 @@ export function CaptionEditorPanel({
   captionText: string;
   highLevelDescription: string;
   isIdeogram: boolean;
+  isPlainTextItem: boolean;
   isAutoCaptioning: boolean;
   isCaptionLoaded: boolean;
   isDirty: boolean;
@@ -393,16 +408,18 @@ export function CaptionEditorPanel({
         >
           Caption
         </button>
-        <button
-          type="button"
-          onClick={() => onCaptionTabChange('json')}
-          className={classNames('h-12 border-b-2 text-sm font-semibold', {
-            'border-blue-500 text-gray-100': captionTab === 'json',
-            'border-transparent text-gray-400 hover:text-gray-200': captionTab !== 'json',
-          })}
-        >
-          JSON
-        </button>
+        {!isPlainTextItem && (
+          <button
+            type="button"
+            onClick={() => onCaptionTabChange('json')}
+            className={classNames('h-12 border-b-2 text-sm font-semibold', {
+              'border-blue-500 text-gray-100': captionTab === 'json',
+              'border-transparent text-gray-400 hover:text-gray-200': captionTab !== 'json',
+            })}
+          >
+            JSON
+          </button>
+        )}
         <div className="flex-1" />
         <span className={classNames('h-2 w-2 rounded-full', captionStatus.dot)} title={captionStatus.title} />
       </div>

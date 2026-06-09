@@ -65,6 +65,7 @@ import {
   itemKey,
   itemKind,
   itemName,
+  isPlainTextCaptionItem,
   layerCaptionRequestKey,
   layerCaptionTargetText,
   normalizeHexColor,
@@ -169,6 +170,7 @@ export default function DatasetImageStudio({
   const selectedPalette = Array.isArray(selectedElement?.color_palette) ? selectedElement.color_palette : [];
   const isDirty = captionText.trim() !== savedCaption.trim();
   const captionStatus = statusForCaption(captionText, isCaptionLoaded);
+  const isPlainTextItem = isPlainTextCaptionItem(selectedItem);
   const canAnnotate = isIdeogram && selectedKind === 'image' && isCaptionLoaded;
   const canConvertDataset = Boolean(datasetPath && onConvertDatasetToJson);
   const autoBoxDisabledReason = !isCaptionLoaded
@@ -212,13 +214,14 @@ export default function DatasetImageStudio({
 
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
+    if (isPlainTextCaptionItem(selectedItem)) setCaptionTab('caption');
     setAutoBoxMessage('');
     setSelectedImageSize(null);
     setHiddenLayerIndexes(new Set());
     setLockedLayerIndexes(new Set());
     setOverlapElementStack([]);
     setActivePaletteSamplerIndex(null);
-  }, [selectedKey]);
+  }, [selectedItem, selectedKey]);
 
   useEffect(() => {
     if (autoBoxProvider !== 'remote_ollama' || remoteOllamaWorkerId || remoteWorkerOptions.length === 0) return;
@@ -265,7 +268,8 @@ export default function DatasetImageStudio({
         let text = '';
         if (!selectedItem) return;
         if (selectedItem.kind === 'plain') {
-          const response = await apiClient.post('/api/caption/get', { imgPath: selectedItem.path });
+          const direct = isPlainTextCaptionItem(selectedItem);
+          const response = await apiClient.post('/api/caption/get', { imgPath: selectedItem.path, ...(direct ? { direct: true } : {}) });
           text = captionResponseToText(response.data);
         } else if (encryptedKey) {
           const captionPath = selectedItem.item.captionObjectPath;
@@ -337,11 +341,11 @@ export default function DatasetImageStudio({
 
   const saveCaption = useCallback(async () => {
     if (!selectedItem || !isCaptionLoaded || isSaving || !isDirty) return;
-    const value = captionText.trim();
+    const value = isPlainTextCaptionItem(selectedItem) ? captionText : captionText.trim();
     setIsSaving(true);
     try {
       if (selectedItem.kind === 'plain') {
-        await apiClient.post('/api/img/caption', { imgPath: selectedItem.path, caption: value });
+        await apiClient.post('/api/img/caption', { imgPath: selectedItem.path, caption: value, direct: isPlainTextCaptionItem(selectedItem) });
       } else if (encryptedKey && onSaveEncryptedCaption) {
         const key = itemKey(selectedItem);
         const targetCaptionPath =
@@ -456,9 +460,11 @@ export default function DatasetImageStudio({
       const uniqueItems = Array.from(new Map(targetItems.map(item => [itemKey(item), item] as const)).values());
       if (uniqueItems.length === 0) return { requested: 0, deleted: 0 };
 
-      const confirmed = window.confirm(
-        `Delete ${uniqueItems.length.toLocaleString()} ${label}? Associated captions will be removed too.`,
-      );
+      const includesTextFiles = uniqueItems.some(isPlainTextCaptionItem);
+      const suffix = includesTextFiles
+        ? 'Text files will be deleted directly.'
+        : 'Associated captions will be removed too.';
+      const confirmed = window.confirm(`Delete ${uniqueItems.length.toLocaleString()} ${label}? ${suffix}`);
       if (!confirmed) return { requested: uniqueItems.length, deleted: 0 };
 
       setIsDeletingImages(true);
@@ -484,7 +490,7 @@ export default function DatasetImageStudio({
 
   const handleDeleteCurrentImage = useCallback(() => {
     if (!selectedItem) return;
-    void handleDeleteImages([selectedItem], 'current image');
+    void handleDeleteImages([selectedItem], isPlainTextCaptionItem(selectedItem) ? 'current text file' : 'current image');
   }, [handleDeleteImages, selectedItem]);
 
   const applyBulkCaptionResult = useCallback(
@@ -1128,7 +1134,7 @@ export default function DatasetImageStudio({
   if (items.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
-        <div className="border border-dashed border-gray-700 bg-gray-900/60 px-6 py-5 text-sm">No media found.</div>
+        <div className="border border-dashed border-gray-700 bg-gray-900/60 px-6 py-5 text-sm">No editable media or text files found.</div>
       </div>
     );
   }
@@ -1160,11 +1166,14 @@ export default function DatasetImageStudio({
           hasSelection={selectedElementIndex != null}
           canUndo={undoStack.length > 0}
           canRedo={redoStack.length > 0}
+          canShowJson={!isPlainTextItem}
           onToolChange={setActiveTool}
           onDelete={handleDeleteSelectedElement}
           onUndo={undo}
           onRedo={redo}
-          onShowJson={() => setCaptionTab('json')}
+          onShowJson={() => {
+            if (!isPlainTextItem) setCaptionTab('json');
+          }}
         />
 
         <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
@@ -1239,6 +1248,7 @@ export default function DatasetImageStudio({
                 canAnnotate={canAnnotate}
                 isCaptionLoaded={isCaptionLoaded}
                 canConvertDataset={canConvertDataset}
+                isPlainTextItem={isPlainTextItem}
                 selectedImageSize={selectedImageSize}
                 canGenerateAutoBoxes={canGenerateAutoBoxes}
                 autoBoxDisabledReason={autoBoxDisabledReason}
@@ -1281,6 +1291,7 @@ export default function DatasetImageStudio({
                 captionText={captionText}
                 highLevelDescription={highLevelDescription}
                 isIdeogram={isIdeogram}
+                isPlainTextItem={isPlainTextItem}
                 isAutoCaptioning={isAutoCaptioning}
                 isCaptionLoaded={isCaptionLoaded}
                 isDirty={isDirty}

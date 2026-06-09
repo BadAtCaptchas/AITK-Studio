@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Pipette } from 'lucide-react';
+import { FileText, Loader2, Pipette } from 'lucide-react';
 import classNames from 'classnames';
 import AudioPlayer from '@/components/AudioPlayer';
 import type { EncryptedDatasetItem } from '@/types';
 import { apiClient } from '@/utils/api';
-import { isAudio, isVideo } from '@/utils/basic';
+import { isAudio, isTextCaption, isVideo } from '@/utils/basic';
 import { decryptEncryptedObjectBlob } from '@/utils/encryptedDatasets';
 import { getMediaUrl } from '@/utils/media';
 import { itemKind, itemName, sampleImageColorAt } from './utils';
@@ -88,6 +88,14 @@ function useElementSize<T extends HTMLElement>() {
 }
 
 export function PlainThumb({ path, alt }: { path: string; alt: string }) {
+  if (isTextCaption(path)) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gray-900 text-[10px] text-gray-400">
+        <FileText className="h-4 w-4 text-blue-300" />
+        <span className="max-w-full truncate px-1">Text</span>
+      </div>
+    );
+  }
   if (isAudio(path)) {
     return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>;
   }
@@ -193,6 +201,19 @@ export function StudioMedia({
     return (
       <div className="flex h-full w-full items-center justify-center overflow-hidden">
         <video src={src} className="h-full w-full object-contain" controls loop />
+      </div>
+    );
+  }
+
+  if (kind === 'text') {
+    return (
+      <div className="flex h-full w-full items-center justify-center p-6 text-center text-gray-300">
+        <div className="max-w-md rounded-md border border-gray-800 bg-gray-950/80 px-6 py-5">
+          <FileText className="mx-auto mb-3 h-10 w-10 text-blue-300" />
+          <div className="text-sm font-semibold text-gray-100">Text Caption File</div>
+          <div className="mt-2 break-all text-xs text-gray-500">{name}</div>
+          <p className="mt-3 text-xs text-gray-400">Edit the file contents in the caption panel. JSON-only box and layer tools are disabled.</p>
+        </div>
       </div>
     );
   }

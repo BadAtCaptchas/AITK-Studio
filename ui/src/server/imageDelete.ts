@@ -1,7 +1,7 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { deleteCaptionSidecars } from './captionFiles';
+import { DATASET_TEXT_CAPTION_EXTENSIONS, deleteCaptionSidecars } from './captionFiles';
 import { findEncryptedDatasetRoot } from './encryptedDatasets';
 
 export type ImageDeleteItemResult = {
@@ -44,6 +44,7 @@ const MEDIA_EXTENSIONS = new Set([
   '.wav',
   '.flac',
   '.ogg',
+  ...DATASET_TEXT_CAPTION_EXTENSIONS,
 ]);
 
 function isPathInside(parent: string, child: string) {
@@ -99,7 +100,10 @@ export async function deletePlainImagePaths(
         continue;
       }
       await fsp.unlink(item.normalized);
-      deleteCaptionSidecars(item.normalized);
+      const extension = path.extname(item.normalized).toLowerCase();
+      if (!DATASET_TEXT_CAPTION_EXTENSIONS.includes(extension)) {
+        deleteCaptionSidecars(item.normalized);
+      }
       removedPaths.push(item.imgPath);
       results.push({ imgPath: item.imgPath, deleted: true });
     } catch (error) {

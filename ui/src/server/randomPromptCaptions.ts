@@ -21,24 +21,50 @@ function isStructuredJsonCaption(parsed: Record<string, unknown>) {
   );
 }
 
+function parseJsonPromptValue(value: unknown, depth = 0): string {
+  if (typeof value === 'string') return parseJsonPromptString(value, depth + 1);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+
+  const caption = (value as { caption?: unknown }).caption;
+  if (typeof caption === 'string') return parseJsonPromptString(caption, depth + 1);
+
+  const parsedObject = value as Record<string, unknown>;
+  return isStructuredJsonCaption(parsedObject) ? JSON.stringify(parsedObject) : '';
+}
+
+function parseJsonPromptText(jsonText: string, depth = 0): string {
+  try {
+    return parseJsonPromptValue(JSON.parse(jsonText) as unknown, depth + 1);
+  } catch {
+    return '';
+  }
+}
+
+function parseEscapedJsonPromptText(jsonText: string, depth = 0): string {
+  try {
+    const unescapedText = JSON.parse(`"${jsonText}"`) as unknown;
+    return typeof unescapedText === 'string' && unescapedText !== jsonText
+      ? parseJsonPromptText(unescapedText, depth + 1)
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+function parseJsonPromptString(value: string, depth = 0): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (depth > 4) return trimmed;
+
+  return parseJsonPromptText(trimmed, depth + 1) || parseEscapedJsonPromptText(trimmed, depth + 1) || trimmed;
+}
+
 export function parseRandomPromptCaptionText(captionText: string, captionExt: string) {
   const normalizedExt = normalizeRandomPromptCaptionExt(captionExt);
   const trimmedCaption = captionText.trim();
   if (normalizedExt !== '.json') return trimmedCaption;
 
-  try {
-    const parsed = JSON.parse(captionText) as unknown;
-    if (typeof parsed === 'string') return parsed.trim();
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '';
-
-    const caption = (parsed as { caption?: unknown }).caption;
-    if (typeof caption === 'string') return caption.trim();
-
-    const parsedObject = parsed as Record<string, unknown>;
-    return isStructuredJsonCaption(parsedObject) ? JSON.stringify(parsedObject) : '';
-  } catch {
-    return '';
-  }
+  return parseJsonPromptText(trimmedCaption) || parseEscapedJsonPromptText(trimmedCaption);
 }
 
 export function parseRandomPromptCaptionTextAuto(captionText: string) {

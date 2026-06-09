@@ -11,6 +11,30 @@ const {
   parseRandomPromptCaptionText,
 } = require('../dist/src/server/randomPromptCaptions.js');
 
+function sampleIdeogramCaption() {
+  return {
+    high_level_description: 'A realistic product photo on a white table.',
+    style_description: {
+      aesthetics: 'clean, detailed, commercial',
+      lighting: 'soft studio lighting',
+      photo: 'studio product photograph',
+      medium: 'photograph',
+      color_palette: ['#FFFFFF', '#222222'],
+    },
+    compositional_deconstruction: {
+      background: 'A bright white table surface.',
+      elements: [
+        {
+          type: 'obj',
+          desc: 'A black camera body centered on the table.',
+          bbox: [120, 240, 780, 840],
+          color_palette: ['#222222'],
+        },
+      ],
+    },
+  };
+}
+
 test('random prompt caption extension normalization preserves supported training captions', () => {
   assert.deepEqual(
     Array.from(RANDOM_PROMPT_CAPTION_EXTENSIONS).sort(),
@@ -49,34 +73,53 @@ test('random prompt JSON captions return the caption field only', () => {
 });
 
 test('random prompt JSON captions preserve structured Ideogram captions', () => {
-  const ideogramCaption = {
-    high_level_description: 'A realistic product photo on a white table.',
-    style_description: {
-      aesthetics: 'clean, detailed, commercial',
-      lighting: 'soft studio lighting',
-      photo: 'studio product photograph',
-      medium: 'photograph',
-      color_palette: ['#FFFFFF', '#222222'],
-    },
-    compositional_deconstruction: {
-      background: 'A bright white table surface.',
-      elements: [
-        {
-          type: 'obj',
-          desc: 'A black camera body centered on the table.',
-          bbox: [120, 240, 780, 840],
-          color_palette: ['#222222'],
-        },
-      ],
-    },
-  };
+  const ideogramCaption = sampleIdeogramCaption();
   const parsed = parseRandomPromptCaptionText(JSON.stringify(ideogramCaption, null, 2), 'json');
 
   assert.deepEqual(JSON.parse(parsed), ideogramCaption);
+});
+
+test('random prompt JSON captions unwrap nested structured Ideogram strings', () => {
+  const ideogramCaption = sampleIdeogramCaption();
+
+  const rawStringCaption = parseRandomPromptCaptionText(JSON.stringify(JSON.stringify(ideogramCaption)), 'json');
+  const captionFieldCaption = parseRandomPromptCaptionText(
+    JSON.stringify({ caption: JSON.stringify(ideogramCaption) }),
+    'json',
+  );
+
+  assert.deepEqual(JSON.parse(rawStringCaption), ideogramCaption);
+  assert.deepEqual(JSON.parse(captionFieldCaption), ideogramCaption);
+  assert.equal(rawStringCaption.includes('\\"high_level_description\\"'), false);
+  assert.equal(captionFieldCaption.includes('\\"high_level_description\\"'), false);
+});
+
+test('random prompt JSON captions unwrap double-escaped structured Ideogram strings', () => {
+  const ideogramCaption = sampleIdeogramCaption();
+  const escapedIdeogramCaption = JSON.stringify(ideogramCaption).replace(/"/g, '\\"');
+
+  const rawEscapedCaption = parseRandomPromptCaptionText(escapedIdeogramCaption, 'json');
+  const captionFieldCaption = parseRandomPromptCaptionText(
+    JSON.stringify({ caption: escapedIdeogramCaption }),
+    'json',
+  );
+
+  assert.deepEqual(JSON.parse(rawEscapedCaption), ideogramCaption);
+  assert.deepEqual(JSON.parse(captionFieldCaption), ideogramCaption);
+  assert.equal(rawEscapedCaption.includes('\\"high_level_description\\"'), false);
+  assert.equal(captionFieldCaption.includes('\\"high_level_description\\"'), false);
 });
 
 test('random prompt auto parsing supports encrypted JSON and plain text captions', () => {
   assert.equal(parseRandomPromptCaptionTextAuto(JSON.stringify({ caption: 'encrypted json prompt' })), 'encrypted json prompt');
   assert.equal(parseRandomPromptCaptionTextAuto('encrypted plain prompt'), 'encrypted plain prompt');
   assert.equal(parseRandomPromptCaptionTextAuto(JSON.stringify({ caption_short: 'short only' })), '');
+});
+
+test('random prompt auto parsing unwraps encrypted nested structured Ideogram strings', () => {
+  const ideogramCaption = sampleIdeogramCaption();
+  const parsed = parseRandomPromptCaptionTextAuto(JSON.stringify({ caption: JSON.stringify(ideogramCaption) }));
+
+  assert.deepEqual(JSON.parse(parsed), ideogramCaption);
+  assert.equal(parsed.includes('\\"high_level_description\\"'), false);
 });

@@ -206,6 +206,60 @@ def _is_float8_dtype(dtype: Optional[torch.dtype]) -> bool:
     return dtype is not None and str(dtype).startswith("torch.float8")
 
 
+def _is_bnb_4bit_tensor(t: Optional[torch.Tensor]) -> bool:
+    if t is None:
+        return False
+    try:
+        if t.__class__.__name__ == "Params4bit":
+            return True
+    except Exception:
+        pass
+    try:
+        quant_state = getattr(t, "quant_state", None)
+        if quant_state is not None and (
+            getattr(t, "bnb_quantized", False)
+            or getattr(t, "quant_type", None) in {"nf4", "fp4"}
+            or getattr(quant_state, "quant_type", None) in {"nf4", "fp4"}
+        ):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _dequantize_bnb_4bit(
+    weight: torch.Tensor, device: torch.device
+) -> Optional[torch.Tensor]:
+    quant_state = getattr(weight, "quant_state", None)
+    if quant_state is None:
+        return None
+
+    try:
+        quant_state.to(device)
+    except Exception:
+        pass
+
+    data = getattr(weight, "data", weight)
+    if not isinstance(data, torch.Tensor):
+        data = weight
+    data = _safe_to_device(data, device)
+
+    # Test doubles can provide the same contract without importing bitsandbytes.
+    dequantize_4bit = getattr(quant_state, "dequantize_4bit", None)
+    if callable(dequantize_4bit):
+        try:
+            return dequantize_4bit(data)
+        except Exception:
+            pass
+
+    try:
+        import bitsandbytes as bnb  # type: ignore
+
+        return bnb.functional.dequantize_4bit(data, quant_state)
+    except Exception:
+        return None
+
+
 def _linear_logical_shape(module: nn.Module) -> Optional[Tuple[int, int]]:
     try:
         return (int(module.out_features), int(module.in_features))
@@ -219,8 +273,12 @@ def _reshape_to_logical_linear_shape(
     if logical_shape is None:
         return weight
     try:
+        current_shape = tuple(weight.shape)
+        transposed_shape = (logical_shape[1], logical_shape[0])
+        if current_shape != logical_shape and current_shape == transposed_shape:
+            return weight.t()
         if (
-            tuple(weight.shape) != logical_shape
+            current_shape != logical_shape
             and weight.numel() == _prod(logical_shape)
         ):
             return weight.reshape(logical_shape)
@@ -240,18 +298,34 @@ def _materialize_linear_weight(
     weight = _safe_to_device(weight_cpu, device)
 
     if is_quantized or _is_quantized_tensor(weight):
-        dequantize = getattr(weight, "dequantize", None)
-        if callable(dequantize):
-            try:
-                weight = dequantize()
-            except Exception:
-                pass
+        bnb_4bit_weight = _is_bnb_4bit_tensor(weight)
+        bnb_dequantized = (
+            _dequantize_bnb_4bit(weight, device) if bnb_4bit_weight else None
+        )
+        if bnb_dequantized is not None:
+            weight = bnb_dequantized
+        else:
+            dequantize = getattr(weight, "dequantize", None)
+            if callable(dequantize):
+                try:
+                    weight = dequantize()
+                except Exception:
+                    pass
         if _is_quantized_tensor(weight) or not getattr(
             getattr(weight, "dtype", None), "is_floating_point", False
         ):
             weight = _safe_to(weight, dtype=torch.float32, non_blocking=True)
 
     weight = _reshape_to_logical_linear_shape(weight, logical_shape)
+    if (
+        logical_shape is not None
+        and _is_quantized_tensor(weight_cpu)
+        and tuple(weight.shape) != logical_shape
+    ):
+        raise RuntimeError(
+            "Could not materialize quantized Linear weight for legacy layer "
+            f"offloading: got shape {tuple(weight.shape)}, expected {logical_shape}."
+        )
 
     should_cast = (
         is_quantized

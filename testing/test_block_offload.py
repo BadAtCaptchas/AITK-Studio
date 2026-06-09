@@ -102,23 +102,70 @@ class FakeNf4Weight(torch.Tensor):
         return self._logical_weight.to(self.device)
 
 
+class FakeBnbQuantState:
+    quant_type = "nf4"
+
+    def __init__(self, logical_weight):
+        self.logical_weight = logical_weight
+
+    def to(self, device):
+        self.logical_weight = self.logical_weight.to(device)
+        return self
+
+    def dequantize_4bit(self, data):
+        return self.logical_weight.t().to(data.device)
+
+
+class Params4bit(torch.nn.Parameter):
+    @staticmethod
+    def __new__(cls, logical_weight):
+        packed = torch.zeros(
+            1,
+            logical_weight.numel() // 2,
+            dtype=torch.uint8,
+            device=logical_weight.device,
+        )
+        instance = torch.Tensor._make_subclass(cls, packed, False)
+        instance.quant_state = FakeBnbQuantState(logical_weight)
+        instance.bnb_quantized = True
+        instance.quant_type = "nf4"
+        instance.quant_storage = torch.uint8
+        instance.data = packed
+        return instance
+
+    def to(self, *args, **kwargs):
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
+        logical_weight = self.quant_state.logical_weight
+        if device is not None:
+            logical_weight = logical_weight.to(device)
+        return type(self)(logical_weight)
+
+
 class Linear4bit(torch.nn.Module):
-    def __init__(self, in_features=4, out_features=3):
+    def __init__(self, in_features=4, out_features=3, *, packed_params=False):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.compute_dtype = torch.float32
+        self.packed_params = packed_params
         logical_weight = torch.arange(
             1,
             out_features * in_features + 1,
             dtype=torch.float32,
         ).reshape(out_features, in_features)
-        self.register_buffer("weight", FakeNf4Weight(logical_weight))
+        if packed_params:
+            self.weight = Params4bit(logical_weight)
+        else:
+            self.register_buffer("weight", FakeNf4Weight(logical_weight))
         self.bias = None
 
     def forward(self, x):
+        if self.packed_params:
+            weight = self.weight.quant_state.logical_weight.to(x.device)
+        else:
+            weight = self.weight.dequantize()
         return torch.nn.functional.linear(
-            x.to(self.compute_dtype), self.weight.dequantize(), self.bias
+            x.to(self.compute_dtype), weight, self.bias
         )
 
 
@@ -279,6 +326,18 @@ class BlockOffloadManagerTest(unittest.TestCase):
 
     def test_legacy_memory_manager_handles_nf4_dequantized_weight(self):
         model = torch.nn.Sequential(Linear4bit())
+        input_tensor = torch.randn(2, model[0].in_features)
+        expected = model(input_tensor)
+
+        MemoryManager.attach(model, torch.device("cpu"))
+        try:
+            managed = model(input_tensor)
+            self.assertTrue(torch.allclose(managed, expected))
+        finally:
+            MemoryManager.detach(model)
+
+    def test_legacy_memory_manager_handles_bnb_nf4_packed_params4bit(self):
+        model = torch.nn.Sequential(Linear4bit(packed_params=True))
         input_tensor = torch.randn(2, model[0].in_features)
         expected = model(input_tensor)
 

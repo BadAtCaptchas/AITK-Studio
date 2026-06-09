@@ -29,7 +29,7 @@ const GIT_TIMEOUT_MS = 10000;
 const GIT_UPDATE_TIMEOUT_MS = 120000;
 const HTTP_TIMEOUT_MS = 30000;
 const MAX_OUTPUT_LENGTH = 1024 * 1024;
-const RECENT_COMMIT_COUNT = 30;
+const RECENT_COMMIT_COUNT = 20;
 
 let nextCheckTimer = null;
 let requestPollTimer = null;

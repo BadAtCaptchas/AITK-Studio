@@ -236,7 +236,7 @@ export default function Dashboard() {
             value={filterText}
             onChange={event => setFilterText(event.target.value)}
             placeholder="Filter by name, status, worker..."
-            className="h-9 w-full rounded-md border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-blue-600"
+            className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-blue-600"
           />
         </label>
         {gpuList.length > 0 && (
@@ -258,7 +258,7 @@ export default function Dashboard() {
             aria-label={isImporting ? 'Importing training job' : 'Import training job'}
           >
             {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            <span className="hidden sm:inline">{isImporting ? 'Importing...' : 'Import Training Job'}</span>
+            <span className="hidden sm:inline">{isImporting ? 'Importing...' : 'Import'}</span>
           </Button>
         </div>
         <div className="mr-2">
@@ -269,7 +269,7 @@ export default function Dashboard() {
             aria-label="Secure remote captioning"
           >
             <CloudDownload className="h-4 w-4" />
-            <span className="hidden sm:inline">Secure Remote Captioning</span>
+            <span className="hidden xl:inline">Remote Captioning</span>
           </Link>
         </div>
         <div>
@@ -280,7 +280,7 @@ export default function Dashboard() {
             aria-label="New training job"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">New Training Job</span>
+            <span className="hidden sm:inline">New Job</span>
           </Link>
         </div>
       </TopBar>
@@ -291,7 +291,7 @@ export default function Dashboard() {
         className="hidden"
         onChange={handleFileSelected}
       />
-      <MainContent className="bg-[#02060a] px-0 pt-12 sm:px-0">
+      <MainContent className="bg-gray-950 px-0 pt-12 sm:px-0">
         {importStatus && (
           <section
             role="status"

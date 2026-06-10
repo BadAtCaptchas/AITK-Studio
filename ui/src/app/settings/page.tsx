@@ -7,9 +7,27 @@ import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import type { ComfyInstallProgress, RemoteOllamaWorker, WorkerNode } from '@/types';
-import { Checkbox } from '@/components/formInputs';
 import { ComfyInstallProgressBand } from '@/components/ComfyInstallProgress';
-import { Download, Loader2, Power, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  Box,
+  CheckCircle2,
+  ChevronDown,
+  Cloud,
+  Database,
+  Download,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  KeyRound,
+  Loader2,
+  Power,
+  RefreshCw,
+  Save,
+  ServerCog,
+  TerminalSquare,
+  UsersRound,
+} from 'lucide-react';
 
 type ComfyManagedInstallStatus = {
   installed: boolean;
@@ -160,6 +178,74 @@ function workerUpdaterStatusTime(status: WorkerUpdaterStatus) {
   return Number.isFinite(time) ? time : null;
 }
 
+type SettingsSectionKey = 'essentials' | 'access' | 'storage' | 'workers' | 'comfy' | 'advanced';
+
+const sectionNav: Array<{ id: SettingsSectionKey; label: string }> = [
+  { id: 'essentials', label: 'Essentials' },
+  { id: 'access', label: 'Access' },
+  { id: 'storage', label: 'Storage' },
+  { id: 'workers', label: 'Workers' },
+  { id: 'comfy', label: 'Managed ComfyUI' },
+  { id: 'advanced', label: 'Advanced' },
+];
+
+function FieldShell({
+  id,
+  label,
+  detail,
+  children,
+}: {
+  id: string;
+  label: string;
+  detail: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-gray-900 pb-4 last:border-b-0 last:pb-0">
+      <label htmlFor={id} className="block text-sm font-semibold text-gray-100">
+        {label}
+      </label>
+      <div className="mt-1 text-sm text-gray-500">{detail}</div>
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function StatusDot({ tone = 'ok' }: { tone?: 'ok' | 'warn' | 'idle' }) {
+  return (
+    <span
+      className={
+        tone === 'ok'
+          ? 'h-1.5 w-1.5 rounded-full bg-emerald-400'
+          : tone === 'warn'
+            ? 'h-1.5 w-1.5 rounded-full bg-amber-400'
+            : 'h-1.5 w-1.5 rounded-full bg-gray-600'
+      }
+    />
+  );
+}
+
+function SettingSwitch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 flex-none items-center rounded-full border border-gray-700 transition-colors ${
+        checked ? 'bg-cyan-500/90' : 'bg-gray-700'
+      }`}
+    >
+      <span className="sr-only">Toggle setting</span>
+      <span
+        className={`h-5 w-5 rounded-full bg-white transition-transform ${
+          checked ? 'translate-x-[1.3rem]' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
+
 export default function Settings() {
   const { settings, setSettings } = useSettings();
   const { workers, setWorkers, refreshWorkers } = useWorkers();
@@ -177,6 +263,9 @@ export default function Settings() {
   const [comfyInstallAction, setComfyInstallAction] = useState<'idle' | 'installing' | 'error'>('idle');
   const [comfyInstallActionError, setComfyInstallActionError] = useState('');
   const [workerUpdater, setWorkerUpdater] = useState<Record<string, WorkerUpdaterUiState>>({});
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>('essentials');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [showSecrets, setShowSecrets] = useState({ hf: false, openRouter: false });
   const workerUpdaterPolls = useRef<Record<string, number>>({});
   const comfyInstallPoll = useRef<number | null>(null);
   const loadedWorkerUpdaterIds = useRef<Set<string>>(new Set());
@@ -570,558 +659,661 @@ export default function Settings() {
     }
   };
 
+  const jumpToSection = (section: SettingsSectionKey) => {
+    setActiveSection(section);
+    if (section === 'workers' || section === 'comfy' || section === 'advanced') setAdvancedOpen(true);
+    const target = section === 'access' || section === 'storage' ? 'essentials' : section;
+    window.requestAnimationFrame(() => {
+      document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const activeWorkers = workers.filter(worker => worker.enabled).length;
+  const firstOllamaWorker = ollamaWorkers.find(worker => worker.enabled) || ollamaWorkers[0] || null;
+  const ollamaModelCount = ollamaWorkers.reduce((sum, worker) => sum + (typeof worker.model_count === 'number' ? worker.model_count : 0), 0);
+  const hasHealthyOllama = Boolean(firstOllamaWorker && !firstOllamaWorker.last_error);
+  const saveStatusLabel = status === 'saving' ? 'Saving' : status === 'error' ? 'Needs review' : 'Saved';
+  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || 'local';
+
   return (
     <>
-      <TopBar>
-        <div>
-          <h1 className="text-lg">Settings</h1>
+      <TopBar className="h-24 !overflow-hidden border-gray-900 bg-gray-950 px-4 sm:px-7">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold text-gray-100">Settings</h1>
+          <p className="mt-0.5 hidden truncate text-sm text-gray-500 sm:block">
+            Configure access, storage, workers, and managed runtimes.
+          </p>
         </div>
-        <div className="flex-1"></div>
-      </TopBar>
-      <MainContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div>
-              <div className="space-y-4">
-                <div>
-                  <label htmlFor="HF_TOKEN" className="block text-sm font-medium mb-2">
-                    Hugging Face Token
-                    <div className="text-gray-500 text-sm ml-1">
-                      Create a Read token on{' '}
-                      <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer">
-                        {' '}
-                        Huggingface
-                      </a>{' '}
-                      if you need to access gated/private models.
-                    </div>
-                  </label>
-                  <input
-                    type="password"
-                    id="HF_TOKEN"
-                    name="HF_TOKEN"
-                    value={settings.HF_TOKEN}
-                    onChange={handleChange}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
-                    placeholder="Enter your Hugging Face token"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="OPENROUTER_API_KEY" className="block text-sm font-medium mb-2">
-                    OpenRouter API Key
-                    <div className="text-gray-500 text-sm ml-1">
-                      Used for OpenRouter caption jobs. You can also set OPENROUTER_API_KEY in the server environment.
-                    </div>
-                  </label>
-                  <input
-                    type="password"
-                    id="OPENROUTER_API_KEY"
-                    name="OPENROUTER_API_KEY"
-                    value={settings.OPENROUTER_API_KEY}
-                    onChange={handleChange}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
-                    placeholder="Enter your OpenRouter API key"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="TRAINING_FOLDER" className="block text-sm font-medium mb-2">
-                    Training Folder Path
-                    <div className="text-gray-500 text-sm ml-1">
-                      We will store your training information here. Must be an absolute path. If blank, it will default
-                      to the output folder in the project root.
-                    </div>
-                  </label>
-                  <input
-                    type="text"
-                    id="TRAINING_FOLDER"
-                    name="TRAINING_FOLDER"
-                    value={settings.TRAINING_FOLDER}
-                    onChange={handleChange}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
-                    placeholder="Enter training folder path"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="DATASETS_FOLDER" className="block text-sm font-medium mb-2">
-                    Dataset Folder Path
-                    <div className="text-gray-500 text-sm ml-1">
-                      Where we store and find your datasets.{' '}
-                      <span className="text-orange-800">
-                        Warning: This software may modify datasets so it is recommended you keep a backup somewhere else
-                        or have a dedicated folder for this software.
-                      </span>
-                    </div>
-                  </label>
-                  <input
-                    type="text"
-                    id="DATASETS_FOLDER"
-                    name="DATASETS_FOLDER"
-                    value={settings.DATASETS_FOLDER}
-                    onChange={handleChange}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-gray-600 focus:border-transparent"
-                    placeholder="Enter datasets folder path"
-                  />
-                </div>
-
-                <div className="rounded-lg border border-gray-800 bg-gray-900/70 p-4">
-                  <Checkbox
-                    checked={settings.TRAINING_ADVISOR_ENABLED === 'true'}
-                    onChange={checked =>
-                      setSettings(prev => ({ ...prev, TRAINING_ADVISOR_ENABLED: checked ? 'true' : 'false' }))
-                    }
-                    label={
-                      <span>
-                        Training Advisor (experimental)
-                        <span className="mt-1 block text-xs font-normal text-gray-500">
-                          Enable advisor checks on training forms and completed job pages.
-                        </span>
-                      </span>
-                    }
-                  />
-                </div>
-
-                <div className="rounded-lg border border-gray-800 bg-gray-900/70 p-4">
-                  <Checkbox
-                    checked={settings.COMFY_AUTO_INSTALL === 'true'}
-                    onChange={checked => setSettings(prev => ({ ...prev, COMFY_AUTO_INSTALL: checked ? 'true' : 'false' }))}
-                    label={
-                      <span>
-                        Auto-install managed ComfyUI
-                        <span className="mt-1 block text-xs font-normal text-gray-500">
-                          When a job uses the managed ComfyUI backend, allow AI Toolkit to download and install its
-                          isolated ComfyUI copy if it is missing.
-                        </span>
-                      </span>
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
+        <div className="ml-auto flex flex-none items-center gap-2">
+          <span
+            className={`hidden h-9 items-center gap-2 border px-3 text-sm sm:inline-flex ${
+              status === 'error'
+                ? 'border-rose-500/35 bg-rose-950/20 text-rose-200'
+                : status === 'saving'
+                  ? 'border-cyan-500/35 bg-cyan-950/20 text-cyan-100'
+                  : 'border-cyan-500/25 bg-cyan-950/20 text-gray-300'
+            }`}
+          >
+            {status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 text-cyan-300" />}
+            {saveStatusLabel}
+          </span>
           <button
             type="submit"
+            form="settings-form"
             disabled={status === 'saving'}
-            className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Save settings"
+            title="Save settings"
+            className="inline-flex h-9 w-10 items-center justify-center gap-2 border border-cyan-500 bg-cyan-500 px-0 text-sm font-semibold text-gray-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-4"
           >
-            {status === 'saving' ? 'Saving...' : 'Save Settings'}
+            {status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            <span className="hidden sm:inline">Save changes</span>
           </button>
+        </div>
+      </TopBar>
 
-          {status === 'success' && <p className="text-green-500 text-center">Settings saved successfully!</p>}
-          {status === 'error' && <p className="text-red-500 text-center">Error saving settings. Please try again.</p>}
-        </form>
+      <MainContent className="bg-gray-950 px-0 pt-24">
+        <form id="settings-form" onSubmit={handleSubmit} className="min-h-full">
+          <div className="grid min-h-[calc(100dvh-4rem)] grid-cols-1 xl:grid-cols-[210px_minmax(0,1fr)_360px]">
+            <aside className="hidden border-r border-gray-900 px-5 py-6 xl:block">
+              <nav className="sticky top-6 space-y-1">
+                {sectionNav.map(section => {
+                  const active = activeSection === section.id;
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => jumpToSection(section.id)}
+                      className={`flex h-11 w-full items-center border-l-2 px-3 text-left text-sm transition-colors ${
+                        active
+                          ? 'border-cyan-400 bg-gray-900/55 text-cyan-200'
+                          : 'border-transparent text-gray-400 hover:bg-gray-900/35 hover:text-gray-200'
+                      }`}
+                    >
+                      {section.label}
+                    </button>
+                  );
+                })}
+              </nav>
+            </aside>
 
-        <section className="mt-8 rounded-xl border border-gray-800 bg-gray-900 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-gray-100">Managed ComfyUI</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                Download and install the trainer-owned ComfyUI copy now. Native generation stays the default unless a
-                job explicitly selects the ComfyUI backend.
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={installComfyNow}
-                disabled={comfyInstallAction === 'installing' || comfyInstall?.installing}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm hover:bg-blue-600 disabled:opacity-50"
-              >
-                {comfyInstallAction === 'installing' || comfyInstall?.installing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                {comfyInstallAction === 'installing' || comfyInstall?.installing
-                  ? 'Installing...'
-                  : comfyInstall?.installed
-                    ? 'Refresh Install'
-                    : 'Download / Install Now'}
-              </button>
-              <button
-                type="button"
-                onClick={refreshComfyInstall}
-                className="inline-flex items-center gap-2 rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </button>
-            </div>
-          </div>
+            <div className="min-w-0 px-4 py-6 sm:px-6 xl:px-7">
+              <div className="mx-auto max-w-3xl xl:mx-0">
+                <div className="operator-scrollbar-none mb-5 flex gap-1 overflow-x-auto xl:hidden">
+                  {sectionNav.map(section => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => jumpToSection(section.id)}
+                      className={`h-9 flex-none border-b-2 px-3 text-sm ${
+                        activeSection === section.id
+                          ? 'border-cyan-400 text-cyan-100'
+                          : 'border-transparent text-gray-400'
+                      }`}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
 
-          <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3 text-sm">
-            <div>Status: {comfyInstall?.message || 'Not checked'}</div>
-            <div>Installed: {comfyInstall?.installed ? 'Yes' : 'No'}</div>
-            <div>Root: {comfyInstall?.root || 'Not set'}</div>
-            <div>Log: {comfyInstall?.logPath || 'Not set'}</div>
-            {comfyInstall?.pid && <div>Installer PID: {comfyInstall.pid}</div>}
-            {comfyInstall?.error && <div className="mt-2 text-red-400">{comfyInstall.error}</div>}
-            {comfyInstallAction === 'error' && <div className="mt-2 text-red-400">{comfyInstallActionError}</div>}
-          </div>
+                <section id="essentials" className="scroll-mt-20">
+                  <div className="mb-6">
+                    <h2 className="text-base font-semibold text-gray-100">Essentials</h2>
+                    <p className="mt-1 text-sm text-gray-500">Core configuration for tokens and storage paths.</p>
+                  </div>
 
-          <div className="mt-4">
-            <ComfyInstallProgressBand progress={comfyInstall?.progress || null} />
-          </div>
-        </section>
-
-        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <section className="rounded-xl border border-gray-800 bg-gray-900 p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-100">Remote Workers</h2>
-                <p className="text-sm text-gray-500">Central UI sends bundled jobs to these authenticated workers.</p>
-              </div>
-            </div>
-
-            <form onSubmit={saveWorker} className="space-y-3">
-              <input
-                type="text"
-                value={workerForm.name}
-                onChange={e => setWorkerForm(prev => ({ ...prev, name: e.target.value }))}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
-                placeholder="Worker name"
-              />
-              <input
-                type="url"
-                value={workerForm.base_url}
-                onChange={e => setWorkerForm(prev => ({ ...prev, base_url: e.target.value }))}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
-                placeholder="https://worker.example.com"
-              />
-              <input
-                type="password"
-                value={workerForm.api_token}
-                onChange={e => setWorkerForm(prev => ({ ...prev, api_token: e.target.value }))}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
-                placeholder={workerForm.id ? 'Leave blank to keep existing API token' : 'Worker AI_TOOLKIT_AUTH token'}
-              />
-              <label className="flex items-center gap-2 text-sm text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={workerForm.enabled}
-                  onChange={e => setWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                />
-                Enabled
-              </label>
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={workerStatus === 'saving'}
-                  className="rounded-lg bg-gray-700 px-4 py-2 text-sm hover:bg-gray-600 disabled:opacity-50"
-                >
-                  {workerForm.id ? 'Update Worker' : 'Add Worker'}
-                </button>
-                {workerForm.id && (
-                  <button
-                    type="button"
-                    onClick={() => setWorkerForm(emptyWorkerForm)}
-                    className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-              {workerStatus === 'error' && <p className="text-sm text-red-400">Failed to save worker.</p>}
-            </form>
-
-            <div className="mt-5 space-y-2">
-              {workers.map(worker => {
-                const updater = workerUpdater[worker.id] || {};
-                const updaterStatus = updater.status;
-                const updaterAction = updater.action || 'idle';
-                const updaterBusy = workerUpdaterBusy(worker.id);
-                const canApplyWorkerUpdate = Boolean(
-                  worker.enabled && updaterStatus?.canApplyUpdate && updaterStatus.state === 'update_available',
-                );
-                const restartSuggested = Boolean(updaterStatus?.needsRestart || updaterStatus?.state === 'updated');
-                const updaterLabel =
-                  updaterAction === 'checking'
-                    ? 'Checking'
-                    : updaterAction === 'updating'
-                      ? 'Updating'
-                      : updaterAction === 'restarting'
-                        ? 'Restarting'
-                        : workerUpdaterLabel(updaterStatus, updater.error);
-                const updaterDetail =
-                  updaterAction === 'checking'
-                    ? 'Waiting for worker updater'
-                    : updaterAction === 'updating'
-                      ? 'Waiting for worker update'
-                      : updaterAction === 'restarting'
-                        ? 'Worker may disconnect while it rebuilds'
-                        : workerUpdaterDetail(updaterStatus, updater.error);
-
-                return (
-                  <div key={worker.id} className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
-                        <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
-                        <div className="mt-1 text-xs text-gray-400">
-                          {worker.last_status}
-                          {worker.last_error ? `: ${worker.last_error}` : ''}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 gap-2">
+                  <div className="space-y-4">
+                    <FieldShell
+                      id="HF_TOKEN"
+                      label="Hugging Face token"
+                      detail="Required to access gated or private models."
+                    >
+                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                        <KeyRound className="ml-3 h-4 w-4 text-gray-600" />
+                        <input
+                          type={showSecrets.hf ? 'text' : 'password'}
+                          id="HF_TOKEN"
+                          name="HF_TOKEN"
+                          value={settings.HF_TOKEN}
+                          onChange={handleChange}
+                          className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          placeholder="Enter your Hugging Face token"
+                        />
                         <button
                           type="button"
-                          className="rounded bg-gray-800 px-2 py-1 text-xs"
-                          onClick={() => checkWorker(worker.id)}
+                          onClick={() => setShowSecrets(prev => ({ ...prev, hf: !prev.hf }))}
+                          className="flex h-full w-10 items-center justify-center border-l border-gray-800 text-gray-400 hover:text-gray-100"
+                          title={showSecrets.hf ? 'Hide token' : 'Show token'}
                         >
-                          Health
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded bg-gray-800 px-2 py-1 text-xs"
-                          onClick={() => editWorker(worker)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded bg-red-900 px-2 py-1 text-xs"
-                          onClick={() => deleteWorker(worker.id)}
-                        >
-                          Delete
+                          {showSecrets.hf ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
                       </div>
+                    </FieldShell>
+
+                    <FieldShell
+                      id="OPENROUTER_API_KEY"
+                      label="OpenRouter API key"
+                      detail="Used for OpenRouter caption jobs."
+                    >
+                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                        <KeyRound className="ml-3 h-4 w-4 text-gray-600" />
+                        <input
+                          type={showSecrets.openRouter ? 'text' : 'password'}
+                          id="OPENROUTER_API_KEY"
+                          name="OPENROUTER_API_KEY"
+                          value={settings.OPENROUTER_API_KEY}
+                          onChange={handleChange}
+                          className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          placeholder="Enter your OpenRouter API key"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSecrets(prev => ({ ...prev, openRouter: !prev.openRouter }))}
+                          className="flex h-full w-10 items-center justify-center border-l border-gray-800 text-gray-400 hover:text-gray-100"
+                          title={showSecrets.openRouter ? 'Hide API key' : 'Show API key'}
+                        >
+                          {showSecrets.openRouter ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </FieldShell>
+
+                    <FieldShell
+                      id="TRAINING_FOLDER"
+                      label="Training folder"
+                      detail="Where training outputs and logs are stored."
+                    >
+                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                        <input
+                          type="text"
+                          id="TRAINING_FOLDER"
+                          name="TRAINING_FOLDER"
+                          value={settings.TRAINING_FOLDER}
+                          onChange={handleChange}
+                          className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          placeholder="Enter training folder path"
+                        />
+                        <button
+                          type="button"
+                          className="flex h-full w-12 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
+                          title="Training folder"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </FieldShell>
+
+                    <FieldShell
+                      id="DATASETS_FOLDER"
+                      label="Dataset folder"
+                      detail="Where datasets are stored and discovered."
+                    >
+                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                        <input
+                          type="text"
+                          id="DATASETS_FOLDER"
+                          name="DATASETS_FOLDER"
+                          value={settings.DATASETS_FOLDER}
+                          onChange={handleChange}
+                          className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          placeholder="Enter datasets folder path"
+                        />
+                        <button
+                          type="button"
+                          className="flex h-full w-12 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
+                          title="Dataset folder"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2 border border-amber-700/45 bg-amber-950/15 px-3 py-2 text-xs text-amber-200">
+                        <AlertTriangle className="h-4 w-4 flex-none" />
+                        Keep a backup elsewhere. Changes to datasets by this software are not reversible.
+                      </div>
+                    </FieldShell>
+                  </div>
+                </section>
+
+                <section className="mt-7 border-t border-gray-900 pt-6">
+                  <div className="mb-3">
+                    <h2 className="text-base font-semibold text-gray-100">Automation</h2>
+                    <p className="mt-1 text-sm text-gray-500">Optional behaviors that streamline your workflow.</p>
+                  </div>
+                  <div className="border border-gray-900">
+                    <div className="flex items-center gap-3 border-b border-gray-900 px-3 py-3">
+                      <TerminalSquare className="h-5 w-5 flex-none text-gray-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-gray-100">Training Advisor (experimental)</div>
+                        <div className="mt-0.5 text-xs text-gray-500">Enable advisor checks on training forms and completed job pages.</div>
+                      </div>
+                      <SettingSwitch
+                        checked={settings.TRAINING_ADVISOR_ENABLED === 'true'}
+                        onChange={checked => setSettings(prev => ({ ...prev, TRAINING_ADVISOR_ENABLED: checked ? 'true' : 'false' }))}
+                      />
                     </div>
-
-                    <div className="mt-3 rounded border border-gray-800 bg-gray-900/70 px-3 py-2">
-                      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-                        <div className="min-w-0">
-                          <div className="truncate text-xs font-medium text-gray-200">
-                            Updater: {updaterLabel}
-                          </div>
-                          <div className="mt-0.5 truncate text-xs text-gray-500">{updaterDetail}</div>
-                        </div>
-                        <div className="flex shrink-0 flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => checkWorkerUpdates(worker.id)}
-                            disabled={!worker.enabled || updaterBusy}
-                            className="inline-flex items-center gap-1 rounded bg-gray-800 px-2 py-1 text-xs hover:bg-gray-700 disabled:opacity-50"
-                            title="Check worker updates"
-                          >
-                            <RefreshCw className={`h-3.5 w-3.5 ${updaterAction === 'checking' ? 'animate-spin' : ''}`} />
-                            Check
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => updateRemoteWorker(worker.id)}
-                            disabled={!canApplyWorkerUpdate || updaterBusy}
-                            className="inline-flex items-center gap-1 rounded bg-amber-900/70 px-2 py-1 text-xs text-amber-100 hover:bg-amber-800 disabled:opacity-50"
-                            title={updaterStatus?.applyUpdateUnavailableReason || 'Update worker'}
-                          >
-                            {updaterAction === 'updating' ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Download className="h-3.5 w-3.5" />
-                            )}
-                            Update
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => restartRemoteWorker(worker.id)}
-                            disabled={!worker.enabled || updaterBusy}
-                            className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-cyan-800 disabled:opacity-50 ${
-                              restartSuggested ? 'bg-cyan-900/80 text-cyan-100' : 'bg-gray-800 text-gray-200'
-                            }`}
-                            title="Restart worker"
-                          >
-                            {updaterAction === 'restarting' ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Power className="h-3.5 w-3.5" />
-                            )}
-                            Restart
-                          </button>
-                        </div>
+                    <div className="flex items-center gap-3 px-3 py-3">
+                      <Cloud className="h-5 w-5 flex-none text-gray-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-gray-100">Auto-install managed ComfyUI</div>
+                        <div className="mt-0.5 text-xs text-gray-500">Automatically install the trainer-managed ComfyUI backend when required.</div>
                       </div>
+                      <SettingSwitch
+                        checked={settings.COMFY_AUTO_INSTALL === 'true'}
+                        onChange={checked => setSettings(prev => ({ ...prev, COMFY_AUTO_INSTALL: checked ? 'true' : 'false' }))}
+                      />
                     </div>
                   </div>
-                );
-              })}
-              {workers.length === 0 && <div className="text-sm text-gray-500">No remote workers configured.</div>}
-            </div>
-          </section>
+                </section>
 
-          <section className="rounded-xl border border-gray-800 bg-gray-900 p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-100">Remote Ollama</h2>
-                <p className="text-sm text-gray-500">Direct Ollama HTTP endpoints for captioning and image tools.</p>
-              </div>
-            </div>
-
-            <form onSubmit={saveOllamaWorker} className="space-y-3">
-              <input
-                type="text"
-                value={ollamaWorkerForm.name}
-                onChange={e => setOllamaWorkerForm(prev => ({ ...prev, name: e.target.value }))}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
-                placeholder="Endpoint name"
-              />
-              <input
-                type="url"
-                value={ollamaWorkerForm.base_url}
-                onChange={e => setOllamaWorkerForm(prev => ({ ...prev, base_url: e.target.value }))}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
-                placeholder="http://ollama-host:11434"
-              />
-              <input
-                type="password"
-                value={ollamaWorkerForm.auth_token}
-                onChange={e => setOllamaWorkerForm(prev => ({ ...prev, auth_token: e.target.value }))}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2"
-                placeholder={ollamaWorkerForm.id ? 'Leave blank to keep existing bearer token' : 'Optional bearer token'}
-              />
-              <label className="flex items-center gap-2 text-sm text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={ollamaWorkerForm.enabled}
-                  onChange={e => setOllamaWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                />
-                Enabled
-              </label>
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={ollamaWorkerStatus === 'saving'}
-                  className="rounded-lg bg-gray-700 px-4 py-2 text-sm hover:bg-gray-600 disabled:opacity-50"
-                >
-                  {ollamaWorkerForm.id ? 'Update Endpoint' : 'Add Endpoint'}
-                </button>
-                {ollamaWorkerForm.id && (
+                <section id="advanced" className="mt-5 scroll-mt-20">
                   <button
                     type="button"
-                    onClick={() => setOllamaWorkerForm(emptyOllamaWorkerForm)}
-                    className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+                    onClick={() => {
+                      setAdvancedOpen(open => !open);
+                      setActiveSection('advanced');
+                    }}
+                    className="flex w-full items-center justify-between border border-gray-900 bg-gray-900/30 px-4 py-4 text-left transition-colors hover:bg-gray-900/50"
                   >
-                    Cancel
+                    <span>
+                      <span className="block text-sm font-semibold text-gray-100">Advanced configuration</span>
+                      <span className="mt-1 block text-sm text-gray-500">Low-level settings for power users.</span>
+                    </span>
+                    <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
                   </button>
-                )}
-              </div>
-              {ollamaWorkerStatus === 'error' && <p className="text-sm text-red-400">Failed to save Remote Ollama endpoint.</p>}
-            </form>
 
-            <div className="mt-4 space-y-2">
-              {ollamaWorkers.map(worker => (
-                <div key={worker.id} className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
-                      <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
-                      <div className="mt-1 text-xs text-gray-400">
-                        {worker.last_status}
-                        {typeof worker.model_count === 'number' ? `: ${worker.model_count} model${worker.model_count === 1 ? '' : 's'}` : ''}
-                        {worker.last_error ? `: ${worker.last_error}` : ''}
-                      </div>
+                  {advancedOpen && (
+                    <div className="mt-5 space-y-5">
+                      <section id="comfy" className="scroll-mt-20 border-y border-gray-900 py-5">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h2 className="text-base font-semibold text-gray-100">Managed ComfyUI</h2>
+                            <p className="mt-1 text-sm text-gray-500">Download and install the trainer-owned ComfyUI copy.</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={installComfyNow}
+                              disabled={comfyInstallAction === 'installing' || comfyInstall?.installing}
+                              className="inline-flex h-9 items-center gap-2 border border-cyan-800 bg-cyan-950/40 px-3 text-sm text-cyan-100 hover:bg-cyan-900 disabled:opacity-50"
+                            >
+                              {comfyInstallAction === 'installing' || comfyInstall?.installing ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Download className="h-4 w-4" />
+                              )}
+                              {comfyInstallAction === 'installing' || comfyInstall?.installing
+                                ? 'Installing'
+                                : comfyInstall?.installed
+                                  ? 'Refresh install'
+                                  : 'Download install'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={refreshComfyInstall}
+                              className="inline-flex h-9 items-center gap-2 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-300 hover:bg-gray-900"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                              Refresh
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-4 border border-gray-900 bg-gray-950 px-3 py-3 text-sm text-gray-300">
+                          <div>Status: {comfyInstall?.message || 'Not checked'}</div>
+                          <div>Installed: {comfyInstall?.installed ? 'Yes' : 'No'}</div>
+                          <div className="truncate">Root: {comfyInstall?.root || 'Not set'}</div>
+                          <div className="truncate">Log: {comfyInstall?.logPath || 'Not set'}</div>
+                          {comfyInstall?.pid && <div>Installer PID: {comfyInstall.pid}</div>}
+                          {comfyInstall?.error && <div className="mt-2 text-rose-400">{comfyInstall.error}</div>}
+                          {comfyInstallAction === 'error' && <div className="mt-2 text-rose-400">{comfyInstallActionError}</div>}
+                        </div>
+                        <div className="mt-3">
+                          <ComfyInstallProgressBand progress={comfyInstall?.progress || null} />
+                        </div>
+                      </section>
+
+                      <section id="workers" className="scroll-mt-20 border-y border-gray-900 py-5">
+                        <div className="mb-4">
+                          <h2 className="text-base font-semibold text-gray-100">Remote Workers</h2>
+                          <p className="mt-1 text-sm text-gray-500">Central UI sends bundled jobs to these authenticated workers.</p>
+                        </div>
+                        <form onSubmit={saveWorker} className="grid gap-3 sm:grid-cols-2">
+                          <input
+                            type="text"
+                            value={workerForm.name}
+                            onChange={e => setWorkerForm(prev => ({ ...prev, name: e.target.value }))}
+                            className="h-10 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                            placeholder="Worker name"
+                          />
+                          <input
+                            type="url"
+                            value={workerForm.base_url}
+                            onChange={e => setWorkerForm(prev => ({ ...prev, base_url: e.target.value }))}
+                            className="h-10 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                            placeholder="https://worker.example.com"
+                          />
+                          <input
+                            type="password"
+                            value={workerForm.api_token}
+                            onChange={e => setWorkerForm(prev => ({ ...prev, api_token: e.target.value }))}
+                            className="h-10 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 sm:col-span-2"
+                            placeholder={workerForm.id ? 'Leave blank to keep existing API token' : 'Worker AI_TOOLKIT_AUTH token'}
+                          />
+                          <label className="flex items-center gap-2 text-sm text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={workerForm.enabled}
+                              onChange={e => setWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                              className="h-4 w-4 accent-cyan-500"
+                            />
+                            Enabled
+                          </label>
+                          <div className="flex justify-end gap-2">
+                            {workerForm.id && (
+                              <button
+                                type="button"
+                                onClick={() => setWorkerForm(emptyWorkerForm)}
+                                className="h-9 border border-gray-800 px-3 text-sm text-gray-300 hover:bg-gray-900"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                            <button
+                              type="submit"
+                              disabled={workerStatus === 'saving'}
+                              className="h-9 border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 hover:bg-gray-800 disabled:opacity-50"
+                            >
+                              {workerForm.id ? 'Update worker' : 'Add worker'}
+                            </button>
+                          </div>
+                          {workerStatus === 'error' && <p className="text-sm text-rose-400 sm:col-span-2">Failed to save worker.</p>}
+                        </form>
+
+                        <div className="mt-5 divide-y divide-gray-900 border-y border-gray-900">
+                          {workers.map(worker => {
+                            const updater = workerUpdater[worker.id] || {};
+                            const updaterStatus = updater.status;
+                            const updaterAction = updater.action || 'idle';
+                            const updaterBusy = workerUpdaterBusy(worker.id);
+                            const canApplyWorkerUpdate = Boolean(
+                              worker.enabled && updaterStatus?.canApplyUpdate && updaterStatus.state === 'update_available',
+                            );
+                            const restartSuggested = Boolean(updaterStatus?.needsRestart || updaterStatus?.state === 'updated');
+                            const updaterLabel =
+                              updaterAction === 'checking'
+                                ? 'Checking'
+                                : updaterAction === 'updating'
+                                  ? 'Updating'
+                                  : updaterAction === 'restarting'
+                                    ? 'Restarting'
+                                    : workerUpdaterLabel(updaterStatus, updater.error);
+                            const updaterDetail =
+                              updaterAction === 'checking'
+                                ? 'Waiting for worker updater'
+                                : updaterAction === 'updating'
+                                  ? 'Waiting for worker update'
+                                  : updaterAction === 'restarting'
+                                    ? 'Worker may disconnect while it rebuilds'
+                                    : workerUpdaterDetail(updaterStatus, updater.error);
+
+                            return (
+                              <div key={worker.id} className="py-3">
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
+                                    <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
+                                    <div className="mt-1 text-xs text-gray-400">
+                                      {worker.last_status}
+                                      {worker.last_error ? `: ${worker.last_error}` : ''}
+                                    </div>
+                                    <div className="mt-2 text-xs text-gray-500">
+                                      Updater: {updaterLabel} · {updaterDetail}
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <button type="button" className="h-8 border border-gray-800 px-2 text-xs text-gray-300" onClick={() => checkWorker(worker.id)}>
+                                      Health
+                                    </button>
+                                    <button type="button" className="h-8 border border-gray-800 px-2 text-xs text-gray-300" onClick={() => editWorker(worker)}>
+                                      Edit
+                                    </button>
+                                    <button type="button" className="h-8 border border-gray-800 px-2 text-xs text-gray-300" onClick={() => checkWorkerUpdates(worker.id)} disabled={!worker.enabled || updaterBusy}>
+                                      Check
+                                    </button>
+                                    <button type="button" className="h-8 border border-amber-800 px-2 text-xs text-amber-100 disabled:opacity-45" onClick={() => updateRemoteWorker(worker.id)} disabled={!canApplyWorkerUpdate || updaterBusy}>
+                                      Update
+                                    </button>
+                                    <button type="button" className={`h-8 border px-2 text-xs disabled:opacity-45 ${restartSuggested ? 'border-cyan-700 text-cyan-100' : 'border-gray-800 text-gray-300'}`} onClick={() => restartRemoteWorker(worker.id)} disabled={!worker.enabled || updaterBusy}>
+                                      {updaterAction === 'restarting' ? 'Restarting' : 'Restart'}
+                                    </button>
+                                    <button type="button" className="h-8 border border-rose-900 px-2 text-xs text-rose-200" onClick={() => deleteWorker(worker.id)}>
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {workers.length === 0 && <div className="py-3 text-sm text-gray-500">No remote workers configured.</div>}
+                        </div>
+                      </section>
+
+                      <section className="grid gap-5 lg:grid-cols-2">
+                        <div className="border-y border-gray-900 py-5">
+                          <h2 className="text-base font-semibold text-gray-100">Remote Ollama</h2>
+                          <p className="mt-1 text-sm text-gray-500">Direct Ollama HTTP endpoints for captioning and image tools.</p>
+                          <form onSubmit={saveOllamaWorker} className="mt-4 space-y-3">
+                            <input
+                              type="text"
+                              value={ollamaWorkerForm.name}
+                              onChange={e => setOllamaWorkerForm(prev => ({ ...prev, name: e.target.value }))}
+                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                              placeholder="Endpoint name"
+                            />
+                            <input
+                              type="url"
+                              value={ollamaWorkerForm.base_url}
+                              onChange={e => setOllamaWorkerForm(prev => ({ ...prev, base_url: e.target.value }))}
+                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                              placeholder="http://ollama-host:11434"
+                            />
+                            <input
+                              type="password"
+                              value={ollamaWorkerForm.auth_token}
+                              onChange={e => setOllamaWorkerForm(prev => ({ ...prev, auth_token: e.target.value }))}
+                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                              placeholder={ollamaWorkerForm.id ? 'Leave blank to keep existing bearer token' : 'Optional bearer token'}
+                            />
+                            <div className="flex items-center justify-between gap-2">
+                              <label className="flex items-center gap-2 text-sm text-gray-300">
+                                <input
+                                  type="checkbox"
+                                  checked={ollamaWorkerForm.enabled}
+                                  onChange={e => setOllamaWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                                  className="h-4 w-4 accent-cyan-500"
+                                />
+                                Enabled
+                              </label>
+                              <div className="flex gap-2">
+                                {ollamaWorkerForm.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setOllamaWorkerForm(emptyOllamaWorkerForm)}
+                                    className="h-9 border border-gray-800 px-3 text-sm text-gray-300"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                                <button
+                                  type="submit"
+                                  disabled={ollamaWorkerStatus === 'saving'}
+                                  className="h-9 border border-gray-700 bg-gray-900 px-3 text-sm text-gray-100 disabled:opacity-50"
+                                >
+                                  {ollamaWorkerForm.id ? 'Update endpoint' : 'Add endpoint'}
+                                </button>
+                              </div>
+                            </div>
+                            {ollamaWorkerStatus === 'error' && <p className="text-sm text-rose-400">Failed to save Remote Ollama endpoint.</p>}
+                          </form>
+                          <div className="mt-4 divide-y divide-gray-900 border-y border-gray-900">
+                            {ollamaWorkers.map(worker => (
+                              <div key={worker.id} className="flex items-start justify-between gap-3 py-3">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
+                                  <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
+                                  <div className="mt-1 text-xs text-gray-400">
+                                    {worker.last_status}
+                                    {typeof worker.model_count === 'number' ? `: ${worker.model_count} model${worker.model_count === 1 ? '' : 's'}` : ''}
+                                    {worker.last_error ? `: ${worker.last_error}` : ''}
+                                  </div>
+                                </div>
+                                <div className="flex flex-none gap-2">
+                                  <button type="button" className="h-8 border border-gray-800 px-2 text-xs" onClick={() => checkOllamaWorker(worker.id)}>Health</button>
+                                  <button type="button" className="h-8 border border-gray-800 px-2 text-xs" onClick={() => editOllamaWorker(worker)}>Edit</button>
+                                  <button type="button" className="h-8 border border-rose-900 px-2 text-xs text-rose-200" onClick={() => deleteOllamaWorker(worker.id)}>Delete</button>
+                                </div>
+                              </div>
+                            ))}
+                            {ollamaWorkers.length === 0 && <div className="py-3 text-sm text-gray-500">No Remote Ollama endpoints configured.</div>}
+                          </div>
+                        </div>
+
+                        <div className="border-y border-gray-900 py-5">
+                          <h2 className="text-base font-semibold text-gray-100">Cloudflared</h2>
+                          <p className="mt-1 text-sm text-gray-500">Managed tunnel status from AITK_CLOUDFLARED_* variables.</p>
+                          <div className="mt-4 space-y-1 border border-gray-900 bg-gray-950 px-3 py-3 text-sm text-gray-300">
+                            <div>Status: {cloudflared?.message || 'Unknown'}</div>
+                            <div>Mode: {cloudflared ? (cloudflared.mode === 'named' ? 'Named tunnel' : 'Quick tunnel') : 'Unknown'}</div>
+                            <div>Detected: {cloudflared?.detected ? 'Yes' : 'No'}</div>
+                            <div className="truncate">Public URL: {cloudflared?.publicUrl || (cloudflared?.running ? 'Waiting for cloudflared' : 'Not set')}</div>
+                            <div className="truncate">Target URL: {cloudflared?.targetUrl || 'Not set'}</div>
+                            {cloudflared?.error && <div className="mt-2 text-rose-400">{cloudflared.error}</div>}
+                            {cloudflaredAction === 'error' && <div className="mt-2 text-rose-400">{cloudflaredActionError}</div>}
+                          </div>
+                          <div className="mt-3 flex items-center justify-between gap-3 border border-gray-900 px-3 py-3">
+                            <div>
+                              <div className="text-sm font-medium text-gray-100">Auto-download missing cloudflared</div>
+                              <div className="mt-0.5 text-xs text-gray-500">Use the official Cloudflare release for this OS.</div>
+                            </div>
+                            <SettingSwitch checked={cloudflaredAutoDownload} onChange={setAutoDownloadCloudflared} />
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onClick={startCloudflared} disabled={cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'} className="h-9 border border-emerald-800 px-3 text-sm text-emerald-100 disabled:opacity-50">
+                              {cloudflaredAction === 'starting' ? 'Starting' : 'Start'}
+                            </button>
+                            <button type="button" onClick={downloadCloudflared} disabled={!cloudflared?.downloadAvailable || cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'} className="inline-flex h-9 items-center gap-2 border border-cyan-800 px-3 text-sm text-cyan-100 disabled:opacity-50">
+                              {cloudflaredAction === 'downloading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                              Download
+                            </button>
+                            <button type="button" onClick={() => apiClient.delete('/api/cloudflared').finally(refreshCloudflared)} className="h-9 border border-rose-900 px-3 text-sm text-rose-200">
+                              Stop
+                            </button>
+                            <button type="button" onClick={refreshCloudflared} className="h-9 border border-gray-800 px-3 text-sm text-gray-300">
+                              Refresh
+                            </button>
+                          </div>
+                        </div>
+                      </section>
                     </div>
-                    <div className="flex shrink-0 gap-2">
-                      <button
-                        type="button"
-                        className="rounded bg-gray-800 px-2 py-1 text-xs"
-                        onClick={() => checkOllamaWorker(worker.id)}
-                      >
-                        Health
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded bg-gray-800 px-2 py-1 text-xs"
-                        onClick={() => editOllamaWorker(worker)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded bg-red-900 px-2 py-1 text-xs"
-                        onClick={() => deleteOllamaWorker(worker.id)}
-                      >
-                        Delete
-                      </button>
+                  )}
+                </section>
+              </div>
+            </div>
+
+            <aside className="hidden border-l border-gray-900 px-6 py-6 xl:block">
+              <div className="sticky top-6">
+                <h2 className="text-base font-semibold text-gray-100">System status</h2>
+                <p className="mt-1 text-sm text-gray-500">Overview of key services and runtimes.</p>
+
+                <div className="mt-8 space-y-6">
+                  <div className="border-b border-gray-900 pb-5">
+                    <div className="flex items-center gap-3">
+                      <Box className="h-5 w-5 text-gray-300" />
+                      <div className="min-w-0 flex-1 text-sm font-semibold text-gray-100">Managed ComfyUI</div>
+                      <StatusDot tone={comfyInstall?.installed ? 'ok' : 'idle'} />
+                      <span className="text-xs text-gray-400">{comfyInstall?.installed ? 'Installed' : 'Not installed'}</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-[6rem_1fr] gap-y-2 pl-8 text-sm">
+                      <div className="text-gray-500">Backend</div>
+                      <div className="truncate text-right text-gray-300">aitk_comfy</div>
+                      <div className="text-gray-500">Root</div>
+                      <div className="truncate text-right text-gray-300">{comfyInstall?.root || 'Not set'}</div>
+                    </div>
+                  </div>
+
+                  <div className="border-b border-gray-900 pb-5">
+                    <div className="flex items-center gap-3">
+                      <UsersRound className="h-5 w-5 text-gray-300" />
+                      <div className="min-w-0 flex-1 text-sm font-semibold text-gray-100">Remote workers</div>
+                      <StatusDot tone={activeWorkers > 0 ? 'ok' : 'idle'} />
+                      <span className="text-xs text-gray-400">{activeWorkers > 0 ? 'Connected' : 'Not configured'}</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-[7rem_1fr] gap-y-2 pl-8 text-sm">
+                      <div className="text-gray-500">Active workers</div>
+                      <div className="text-right text-gray-300">{activeWorkers}</div>
+                    </div>
+                  </div>
+
+                  <div className="border-b border-gray-900 pb-5">
+                    <div className="flex items-center gap-3">
+                      <ServerCog className="h-5 w-5 text-gray-300" />
+                      <div className="min-w-0 flex-1 text-sm font-semibold text-gray-100">Ollama endpoint</div>
+                      <StatusDot tone={hasHealthyOllama ? 'ok' : 'idle'} />
+                      <span className="text-xs text-gray-400">{hasHealthyOllama ? 'Healthy' : 'Not configured'}</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-[5rem_1fr] gap-y-2 pl-8 text-sm">
+                      <div className="text-gray-500">Endpoint</div>
+                      <div className="truncate text-right text-gray-300">{firstOllamaWorker?.base_url || 'Not set'}</div>
+                      <div className="text-gray-500">Models</div>
+                      <div className="text-right text-gray-300">{ollamaModelCount || '-'}</div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <Database className="h-5 w-5 text-gray-300" />
+                      <div className="min-w-0 flex-1 text-sm font-semibold text-gray-100">Updates</div>
+                      <StatusDot tone="ok" />
+                      <span className="text-xs text-gray-400">Ready</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-[5rem_1fr] gap-y-2 pl-8 text-sm">
+                      <div className="text-gray-500">AI Toolkit</div>
+                      <div className="text-right text-gray-300">v{appVersion}</div>
+                      <div className="text-gray-500">Settings</div>
+                      <div className="text-right text-gray-300">{saveStatusLabel}</div>
                     </div>
                   </div>
                 </div>
-              ))}
-              {ollamaWorkers.length === 0 && <div className="text-sm text-gray-500">No Remote Ollama endpoints configured.</div>}
-            </div>
-          </section>
 
-          <section className="rounded-xl border border-gray-800 bg-gray-900 p-4">
-            <h2 className="text-base font-semibold text-gray-100">Cloudflared</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Managed tunnel status comes from AITK_CLOUDFLARED_* environment variables.
-            </p>
-            <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3 text-sm">
-              <div>Status: {cloudflared?.message || 'Unknown'}</div>
-              <div>Mode: {cloudflared ? (cloudflared.mode === 'named' ? 'Named tunnel' : 'Quick tunnel') : 'Unknown'}</div>
-              <div>Binary: {cloudflared?.bin || 'Not checked'}</div>
-              <div>Detected: {cloudflared?.detected ? 'Yes' : 'No'}</div>
-              <div>Public URL: {cloudflared?.publicUrl || (cloudflared?.running ? 'Waiting for cloudflared' : 'Not set')}</div>
-              <div>Target URL: {cloudflared?.targetUrl || 'Not set'}</div>
-              <div>Metrics: {cloudflared?.metricsAddr || 'Not set'}</div>
-              {!cloudflared?.detected && cloudflared?.downloadAvailable && (
-                <div className="mt-2 text-amber-300">cloudflared can be downloaded to {cloudflared.installPath}.</div>
-              )}
-              {cloudflared?.error && <div className="mt-2 text-red-400">{cloudflared.error}</div>}
-              {cloudflaredAction === 'error' && <div className="mt-2 text-red-400">{cloudflaredActionError}</div>}
-            </div>
-            <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3">
-              <Checkbox
-                checked={cloudflaredAutoDownload}
-                onChange={setAutoDownloadCloudflared}
-                label={
-                  <span>
-                    Auto-download missing cloudflared
-                    <span className="mt-1 block text-xs font-normal text-gray-500">
-                      Uses the official Cloudflare GitHub release for this OS and stores it in the local bin folder.
-                    </span>
-                  </span>
-                }
-              />
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={startCloudflared}
-                disabled={cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'}
-                className="rounded-lg bg-green-700 px-4 py-2 text-sm hover:bg-green-600"
-              >
-                {cloudflaredAction === 'starting' ? 'Starting...' : 'Start'}
-              </button>
-              <button
-                type="button"
-                onClick={downloadCloudflared}
-                disabled={!cloudflared?.downloadAvailable || cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm hover:bg-blue-600 disabled:opacity-50"
-              >
-                {cloudflaredAction === 'downloading' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                Download
-              </button>
-              <button
-                type="button"
-                onClick={() => apiClient.delete('/api/cloudflared').finally(refreshCloudflared)}
-                className="rounded-lg bg-red-900 px-4 py-2 text-sm hover:bg-red-800"
-              >
-                Stop
-              </button>
-              <button
-                type="button"
-                onClick={refreshCloudflared}
-                className="rounded-lg bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
-              >
-                Refresh
-              </button>
-            </div>
-          </section>
-        </div>
+                <div className="mt-8 space-y-2">
+                  <button
+                    type="button"
+                    onClick={installComfyNow}
+                    disabled={comfyInstallAction === 'installing' || comfyInstall?.installing}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 border border-gray-800 text-sm text-gray-200 hover:bg-gray-900 disabled:opacity-50"
+                  >
+                    {comfyInstallAction === 'installing' || comfyInstall?.installing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    Refresh install
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      refreshComfyInstall();
+                      refreshWorkers();
+                      refreshOllamaWorkers();
+                      refreshCloudflared();
+                    }}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 border border-gray-800 text-sm text-gray-200 hover:bg-gray-900"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Refresh status
+                  </button>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </form>
       </MainContent>
     </>
   );

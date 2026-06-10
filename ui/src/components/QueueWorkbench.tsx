@@ -11,18 +11,15 @@ import {
   CheckCircle2,
   CircleDashed,
   Clock3,
-  Cpu,
   GripVertical,
   History,
   Info,
   ListFilter,
   Loader2,
-  MoreVertical,
   PauseCircle,
   Play,
   PlayCircle,
   RefreshCcw,
-  Rocket,
   Settings,
   SlidersHorizontal,
   X,
@@ -191,8 +188,8 @@ function WorkerHero({
 }) {
   const queueRunning = queue?.is_running === true;
   const running = group.jobs.filter(job => job.status === 'running').length;
-  const waiting = group.jobs.filter(job => job.status === 'queued').length;
-  const total = group.jobs.length;
+  const queued = group.jobs.filter(job => job.status === 'queued').length;
+  const activeTotal = group.jobs.length;
 
   const toggleQueue = async () => {
     if (!group.gpuIDs || isBusy) return;
@@ -205,54 +202,48 @@ function WorkerHero({
   };
 
   return (
-    <section className="overflow-hidden border border-gray-800 bg-[#0b1118]">
-      <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex h-11 w-11 flex-none items-center justify-center rounded-md border border-gray-700 bg-gray-950/80 text-blue-200">
-            <Cpu className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="truncate text-base font-semibold text-gray-100">{group.name}</h2>
-              {group.gpuIDs && (
-                <span className="rounded-md border border-gray-700 bg-gray-950 px-2 py-0.5 text-xs text-gray-300">
-                  GPU {group.gpuIDs}
-                </span>
-              )}
-              <MoreVertical className="h-4 w-4 text-gray-500" />
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <QueueStateBadge running={queueRunning} />
-              <span className="text-sm text-gray-400">
-                {queueRunning ? 'Jobs run in queue order on this worker.' : 'Start the queue to process waiting jobs.'}
+    <section className="border-y border-gray-900 py-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+            <h2 className="truncate text-base font-semibold text-gray-100">{group.name}</h2>
+            {group.gpuIDs && (
+              <span className="border border-gray-800 bg-gray-950 px-2 py-0.5 text-xs text-gray-400">
+                GPU {group.gpuIDs}
               </span>
-            </div>
+            )}
+            <QueueStateBadge running={queueRunning} />
+          </div>
+          <div className="mt-1 text-sm text-gray-500">
+            {queueRunning ? 'Processing jobs in queue order.' : 'Queue is stopped. Start it when work is ready.'}
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 text-center sm:min-w-[260px]">
-          <div className="border-r border-gray-800 px-3">
-            <div className="text-lg font-semibold text-gray-100">{running}</div>
-            <div className="text-xs text-gray-500">Running</div>
+        <div className="grid grid-cols-3 gap-4 text-sm sm:min-w-[250px]">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">Running</div>
+            <div className="mt-1 text-gray-100">{running}</div>
           </div>
-          <div className="border-r border-gray-800 px-3">
-            <div className="text-lg font-semibold text-gray-100">{waiting}</div>
-            <div className="text-xs text-gray-500">Waiting</div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">Queued</div>
+            <div className="mt-1 text-gray-100">{queued}</div>
           </div>
-          <div className="px-3">
-            <div className="text-lg font-semibold text-gray-100">{total}</div>
-            <div className="text-xs text-gray-500">Total Jobs</div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">Active</div>
+            <div className="mt-1 text-gray-100">{activeTotal}</div>
           </div>
         </div>
 
-        <div className="grid gap-2 sm:min-w-[180px]">
+        <div className="flex flex-wrap gap-2 lg:flex-none">
           <button
             type="button"
             disabled={!group.gpuIDs || isBusy}
             onClick={() => void toggleQueue()}
             className={classNames(
-              'inline-flex h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-              queueRunning ? 'bg-rose-700 hover:bg-rose-600' : 'bg-blue-600 hover:bg-blue-500',
+              'inline-flex h-9 items-center justify-center gap-2 border px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+              queueRunning
+                ? 'border-rose-800 bg-rose-950/50 text-rose-100 hover:bg-rose-900'
+                : 'border-blue-700 bg-blue-950/60 text-blue-100 hover:bg-blue-900',
             )}
           >
             {isBusy ? (
@@ -267,7 +258,7 @@ function WorkerHero({
           <button
             type="button"
             onClick={onRefresh}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-gray-800 bg-gray-950/80 text-sm text-gray-200 hover:bg-gray-900"
+            className="inline-flex h-9 items-center justify-center gap-2 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-300 hover:bg-gray-900"
           >
             <RefreshCcw className="h-4 w-4" />
             Refresh
@@ -280,18 +271,15 @@ function WorkerHero({
 
 function QueueEmptyState({ queueRunning }: { queueRunning: boolean }) {
   return (
-    <div className="border-t border-gray-800 px-4 py-5 sm:pl-14">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-gray-700 text-gray-500">
-          <CircleDashed className="h-5 w-5" />
-        </div>
+    <div className="border-b border-gray-900 px-3 py-4">
+      <div className="flex items-center gap-3 text-sm">
+        <CircleDashed className="h-5 w-5 flex-none text-gray-600" />
         <div className="min-w-0">
-          <div className="font-medium text-gray-100">No jobs waiting on this GPU</div>
+          <div className="font-medium text-gray-100">No queued jobs on this GPU</div>
           <div className="mt-1 text-sm text-gray-400">
-            {queueRunning ? 'Add a training job to keep this worker busy.' : 'Start the queue or add a training job.'}
+            {queueRunning ? 'Add a training job to keep this worker busy.' : 'Add a training job to build the queue.'}
           </div>
         </div>
-        <Rocket className="ml-auto hidden h-6 w-6 text-gray-700 sm:block" />
       </div>
     </div>
   );
@@ -300,7 +288,6 @@ function QueueEmptyState({ queueRunning }: { queueRunning: boolean }) {
 function QueueJobCard({
   job,
   index,
-  showTimeline = true,
   selected,
   dragTarget,
   reorderBusy,
@@ -329,136 +316,117 @@ function QueueJobCard({
   const canDrag = job.status === 'queued' && !reorderBusy;
 
   return (
-    <div className={classNames('relative', showTimeline && 'pl-10')}>
-      {showTimeline && (
-        <>
-          <div className="absolute left-[0.95rem] top-0 h-full w-px bg-gray-800" />
-          <div
-            className={classNames(
-              'absolute left-0 top-6 z-[1] flex h-8 w-8 items-center justify-center rounded-full border bg-[#070b10] text-sm font-semibold',
-              job.status === 'error' || job.status === 'failed'
-                ? 'border-rose-500 text-rose-100'
-                : selected
-                  ? 'border-blue-400 text-blue-100'
-                  : 'border-gray-700 text-gray-300',
-            )}
-          >
-            {index + 1}
-          </div>
-        </>
-      )}
-      <div
-        role="button"
-        tabIndex={0}
-        draggable={canDrag}
-        onClick={() => onSelect(job.id)}
-        onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === ' ') onSelect(job.id);
-        }}
-        onDragStart={event => {
-          if (!canDrag) {
-            event.preventDefault();
-            return;
-          }
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData('text/plain', job.id);
-          onDragStart(job.id);
-        }}
-        onDragOver={event => onDragOver(job.id, event)}
-        onDrop={event => {
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      draggable={canDrag}
+      onClick={() => onSelect(job.id)}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') onSelect(job.id);
+      }}
+      onDragStart={event => {
+        if (!canDrag) {
           event.preventDefault();
-          event.stopPropagation();
-          onDrop(job.id);
-        }}
-        onDragEnd={onDragEnd}
-        className={classNames(
-          'group select-none overflow-hidden border-b border-l-2 border-r-0 border-t-0 border-gray-800 px-4 outline-none transition-colors hover:bg-gray-900/45',
-          showTimeline ? 'py-4' : 'py-3',
-          statusAccent(job),
-          selected && (showTimeline ? 'border-l-blue-500 bg-blue-950/20' : 'bg-blue-950/10'),
-          dragTarget && 'bg-blue-950/25',
-          canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+          return;
+        }
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', job.id);
+        onDragStart(job.id);
+      }}
+      onDragOver={event => onDragOver(job.id, event)}
+      onDrop={event => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDrop(job.id);
+      }}
+      onDragEnd={onDragEnd}
+      style={
+        selected
+          ? {
+              backgroundColor: dragTarget ? 'rgba(8, 145, 178, 0.14)' : 'rgba(8, 145, 178, 0.08)',
+            }
+          : undefined
+      }
+      className={classNames(
+        'group grid select-none gap-3 border-b border-l-2 border-gray-900 px-3 py-3 outline-none transition-[background-color,border-color,box-shadow] hover:bg-gray-900/35 lg:grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_auto] lg:items-center',
+        statusAccent(job),
+        selected &&
+          'shadow-[inset_2px_0_0_rgba(34,211,238,0.95),inset_0_0_0_1px_rgba(34,211,238,0.18)]',
+        dragTarget && !selected && 'bg-blue-950/20',
+        canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span className={classNames('w-6 flex-none text-right text-xs tabular-nums', selected ? 'text-cyan-200' : 'text-gray-600')}>
+          {index + 1}
+        </span>
+        {canDrag ? (
+          <GripVertical
+            aria-label="Drag to reorder"
+            className="h-4 w-4 flex-none text-gray-600 group-hover:text-gray-400"
+          />
+        ) : (
+          <span className="hidden w-4 flex-none sm:block" />
         )}
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={classNames('truncate text-sm font-semibold', selected ? 'text-white' : 'text-gray-100')}>
+              {title}
+            </span>
+            <span
+              className={classNames(
+                'border bg-gray-950 px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
+                selected ? 'border-cyan-500/30 text-cyan-100' : 'border-gray-800 text-gray-500',
+              )}
+            >
+              {prefix}
+            </span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+            <span>Added {formatRelative(job.created_at)}</span>
+            <span>ID {shortID(job.id)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="min-w-0 pl-9 lg:pl-0">
+        <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+          <span>Steps</span>
+          <span className="text-gray-300">{totalSteps ? `${job.step} / ${totalSteps}` : `Step ${job.step}`}</span>
+        </div>
+        {totalSteps ? <ProgressBar value={getProgress(job)} className="mt-2" /> : null}
+      </div>
+
+      <div className="min-w-0 pl-9 text-sm lg:pl-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <StatusBadge status={job.status} />
+          <span className="text-xs text-gray-500">
+            {job.worker_id === 'local' ? 'Local' : 'Remote'} / GPU {job.gpu_ids || '-'}
+          </span>
+          <span className="text-xs text-gray-500">{formatRelative(job.updated_at)}</span>
+        </div>
+        <div className="mt-1 min-w-0 overflow-hidden text-gray-400">
+          {job.comfy_install_progress ? (
+            <div className="min-w-0 max-w-full [&>div]:min-w-0 [&>div]:max-w-full">
+              <ComfyInstallProgressInline progress={job.comfy_install_progress} fallback={job.info} />
+            </div>
+          ) : job.hf_download_progress ? (
+            <div className="min-w-0 max-w-full [&>div]:min-w-0 [&>div]:max-w-full">
+              <HFDownloadProgressInline progress={job.hf_download_progress} fallback={job.info || 'No details yet'} />
+            </div>
+          ) : (
+            <span className="block truncate">{job.info || 'No details yet'}</span>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="flex-none pl-9 lg:pl-0"
+        onClick={event => event.stopPropagation()}
+        onKeyDown={event => event.stopPropagation()}
       >
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              {!showTimeline && (
-                <span className="w-5 flex-none text-right text-xs tabular-nums text-gray-600">{index + 1}</span>
-              )}
-              {canDrag && (
-                <GripVertical
-                  aria-label="Drag to reorder"
-                  className="h-4 w-4 flex-none text-gray-600 group-hover:text-gray-400"
-                />
-              )}
-              <span className="truncate text-base font-semibold text-gray-100">{title}</span>
-              <span className="rounded-md border border-gray-700 bg-gray-950 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">
-                {prefix}
-              </span>
-            </div>
-            <div className="mt-2 text-xs text-gray-500">Added {formatRelative(job.created_at)}</div>
-          </div>
-          <div className="flex flex-none items-center gap-2">
-            <span className="text-xs text-gray-500">{formatRelative(job.updated_at)}</span>
-            <ArrowRight className="h-4 w-4 text-gray-500 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-300" />
-          </div>
-        </div>
-
-        <div
-          className={classNames(
-            'grid gap-4 text-sm md:grid-cols-[1fr_0.55fr_0.45fr_0.75fr_1.8fr] md:items-start',
-            showTimeline ? 'mt-4' : 'mt-3 pl-7',
-          )}
-        >
-          <div className="min-w-0">
-            <div className="text-xs text-gray-500">Steps</div>
-            <div className="mt-1 text-gray-100">{totalSteps ? `${job.step} / ${totalSteps}` : `Step ${job.step}`}</div>
-            {totalSteps ? <ProgressBar value={getProgress(job)} className="mt-2" /> : null}
-          </div>
-          <div className="min-w-0 border-gray-800 md:border-l md:pl-4">
-            <div className="text-xs text-gray-500">Worker</div>
-            <div className="mt-1 truncate text-gray-100">{job.worker_id === 'local' ? 'Local' : 'Remote'}</div>
-          </div>
-          <div className="border-gray-800 md:border-l md:pl-4">
-            <div className="text-xs text-gray-500">GPU</div>
-            <div className="mt-1 text-gray-100">{job.gpu_ids || '-'}</div>
-          </div>
-          <div className="border-gray-800 md:border-l md:pl-4">
-            <div className="text-xs text-gray-500">Status</div>
-            <div className="mt-1">
-              <StatusBadge status={job.status} />
-            </div>
-          </div>
-          <div className="min-w-0 border-gray-800 md:border-l md:pl-4">
-            <div className="text-xs text-gray-500">Info</div>
-            <div className="mt-1 min-w-0 text-gray-300">
-              {job.comfy_install_progress ? (
-                <ComfyInstallProgressInline progress={job.comfy_install_progress} fallback={job.info} />
-              ) : (
-                <HFDownloadProgressInline progress={job.hf_download_progress} fallback={job.info || 'No details yet'} />
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div
-          className={classNames(
-            'mt-4 flex items-center justify-between gap-3 border-t border-gray-800/70 pt-3',
-            !showTimeline && 'pl-7',
-          )}
-        >
-          <div className="min-w-0 truncate text-xs text-gray-500">
-            Position {index + 1} - ID {shortID(job.id)}
-          </div>
-          <div
-            className="flex-none"
-            onClick={event => event.stopPropagation()}
-            onKeyDown={event => event.stopPropagation()}
-          >
-            <JobActionBar job={job} onRefresh={onRefresh} autoStartQueue={false} />
-          </div>
-        </div>
+        <JobActionBar job={job} onRefresh={onRefresh} autoStartQueue={false} />
       </div>
     </div>
   );
@@ -489,7 +457,7 @@ function JobListLane({
 
   if (sortedJobs.length === 0) {
     return (
-      <section className="border border-gray-800 bg-[#080d12] p-4 text-sm text-gray-400">
+      <section className="border-t border-gray-900 py-4 text-sm text-gray-400">
         <div className="font-medium text-gray-200">{title}</div>
         {description && <div className="mt-1">{description}</div>}
       </section>
@@ -497,13 +465,13 @@ function JobListLane({
   }
 
   return (
-    <section className="border border-gray-800 bg-[#080d12]">
-      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-gray-800 px-4 py-3">
+    <section className="border-t border-gray-900">
+      <div className="flex min-w-0 items-start justify-between gap-3 px-3 py-3 sm:items-center">
         <div className="min-w-0">
           <h2 className="truncate text-sm font-semibold text-gray-100">{title}</h2>
           {description && <div className="mt-0.5 truncate text-xs text-gray-500">{description}</div>}
         </div>
-        <span className="rounded-md border border-gray-800 bg-gray-950 px-2 py-0.5 text-xs text-gray-400">
+        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
           {sortedJobs.length} jobs
         </span>
       </div>
@@ -569,14 +537,14 @@ function ActiveQueueLane({
   const hasPendingOrder = pendingReorder?.laneKey === laneKey;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <WorkerHero group={group} queue={queue} isBusy={isSavingOrder} onRefresh={onRefresh} />
-      <section className="border border-gray-800 bg-[#080d12]">
-        <div className="flex min-w-0 flex-col gap-3 border-b border-gray-800 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+      <section className="border-t border-gray-900">
+        <div className="flex min-w-0 flex-col gap-3 px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-2">
             <ListFilter className="h-4 w-4 text-blue-300" />
             <h2 className="truncate text-sm font-semibold text-gray-100">Queue order</h2>
-            <span className="rounded-full border border-gray-800 bg-gray-950 px-2 py-0.5 text-xs text-gray-400">
+            <span className="text-xs text-gray-500">
               {group.jobs.length}
             </span>
           </div>
@@ -656,8 +624,8 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
   const actions = getAvaliableJobActions(job);
 
   return (
-    <aside className="sticky top-3 flex max-h-[calc(100dvh-4.5rem)] min-h-[520px] flex-col overflow-hidden rounded-md border border-gray-800 bg-[#0a1017]">
-      <div className="flex min-w-0 items-start justify-between gap-3 border-b border-gray-800 px-4 py-4">
+    <aside className="sticky top-3 flex max-h-[calc(100dvh-4.5rem)] min-h-[520px] flex-col overflow-hidden border-l border-gray-900 bg-gray-950/45">
+      <div className="flex min-w-0 items-start justify-between gap-3 border-b border-gray-900 px-4 py-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <h2 className="truncate text-base font-semibold text-gray-100">{title}</h2>
@@ -671,7 +639,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
       </div>
 
       <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto">
-        <section className="space-y-3 border-b border-gray-800 px-4 py-4 text-sm">
+        <section className="space-y-3 border-b border-gray-900 px-4 py-3 text-sm">
           <div className="grid grid-cols-[6rem_1fr] gap-y-3">
             <div className="text-gray-500">Worker</div>
             <div className="truncate text-gray-100">{job.worker_id === 'local' ? 'Local' : job.worker_id}</div>
@@ -692,14 +660,14 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
           </div>
         </section>
 
-        <section className="border-b border-gray-800 px-4 py-4">
+        <section className="border-b border-gray-900 px-4 py-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-gray-100">Recent Events</h3>
             <Link href={`/jobs/${job.id}`} className="text-xs text-blue-300 hover:text-blue-200">
               View full log
             </Link>
           </div>
-          <div className="rounded-md border border-gray-800 bg-gray-950/45">
+          <div className="border-y border-gray-900">
             {status === 'loading' ? (
               <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-400">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -709,7 +677,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
               events.map((line, index) => (
                 <div
                   key={`${line}-${index}`}
-                  className="flex min-w-0 items-start gap-2 border-b border-gray-800 px-3 py-2 text-sm last:border-b-0"
+                  className="flex min-w-0 items-start gap-2 border-b border-gray-900 px-0 py-2 text-sm last:border-b-0"
                 >
                   <EventIcon line={line} />
                   <span className="min-w-0 flex-1 truncate text-gray-300">{line}</span>
@@ -719,15 +687,15 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
           </div>
         </section>
 
-        <section className="px-4 py-4">
+        <section className="px-4 py-3">
           <h3 className="mb-3 text-sm font-semibold text-gray-100">Quick Actions</h3>
-          <div className="border-y border-gray-800 py-2">
+          <div className="border-y border-gray-900 py-2">
             <JobActionBar job={job} onRefresh={onRefresh} className="flex-wrap justify-start" autoStartQueue={false} />
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-sm">
             <Link
               href={`/jobs/${job.id}`}
-              className="inline-flex h-9 items-center gap-2 border border-blue-500/40 bg-blue-600/10 px-3 text-blue-100 hover:bg-blue-600/20"
+              className="inline-flex h-9 items-center gap-2 border border-blue-800 bg-blue-950/40 px-3 text-blue-100 hover:bg-blue-900"
             >
               <PlayCircle className="h-4 w-4" />
               View Logs
@@ -747,7 +715,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
               </div>
             )}
           </div>
-          <div className="mt-5 border-t border-gray-800 pt-3 text-sm text-gray-300">
+          <div className="mt-5 border-t border-gray-900 pt-3 text-sm text-gray-300">
             <div className="flex items-center gap-2 font-medium text-gray-100">
               <Info className="h-4 w-4 text-blue-300" />
               Having issues?
@@ -765,7 +733,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
 
 function EmptyInspector() {
   return (
-    <aside className="sticky top-3 flex min-h-[360px] items-center justify-center rounded-md border border-gray-800 bg-[#0a1017] p-6 text-center text-sm text-gray-400">
+    <aside className="sticky top-3 flex min-h-[360px] items-center justify-center border-l border-gray-900 bg-gray-950/45 p-6 text-center text-sm text-gray-400">
       <div>
         <CircleDashed className="mx-auto mb-3 h-8 w-8 text-gray-600" />
         <div className="font-medium text-gray-200">Select a job</div>
@@ -1044,10 +1012,10 @@ export default function QueueWorkbench({ filterText, focusGpuIDs }: QueueWorkben
   }
 
   return (
-    <div className="grid min-h-full gap-3 bg-[#02060a] p-3 xl:grid-cols-[minmax(0,1fr)_380px]">
-      <div className="min-w-0 space-y-3">
-        <section className="overflow-hidden rounded-md border border-gray-800 bg-[#080d12]">
-          <div className="flex min-w-0 flex-col gap-3 border-b border-gray-800 px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="grid min-h-full gap-4 bg-gray-950 p-3 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="min-w-0 space-y-2">
+        <section className="border-b border-gray-900">
+          <div className="flex min-w-0 flex-col gap-3 px-1 py-2 lg:flex-row lg:items-center lg:justify-between">
             <div className="operator-scrollbar-none flex min-w-0 gap-1 overflow-x-auto">
               {tabs.map(tab => {
                 const Icon = tab.icon;
@@ -1058,7 +1026,7 @@ export default function QueueWorkbench({ filterText, focusGpuIDs }: QueueWorkben
                     type="button"
                     onClick={() => setActiveTab(tab.key)}
                     className={classNames(
-                      'inline-flex h-10 flex-none items-center gap-2 border-b-2 px-3 text-sm transition-colors',
+                      'inline-flex h-9 flex-none items-center gap-2 border-b-2 px-3 text-sm transition-colors',
                       active
                         ? 'border-blue-500 text-gray-100'
                         : 'border-transparent text-gray-400 hover:text-gray-200',
@@ -1066,7 +1034,7 @@ export default function QueueWorkbench({ filterText, focusGpuIDs }: QueueWorkben
                   >
                     <Icon className="h-4 w-4" />
                     {tab.label}
-                    <span className="rounded-full border border-gray-800 bg-gray-950 px-2 py-0.5 text-xs text-gray-400">
+                    <span className="text-xs text-gray-500">
                       {tab.count}
                     </span>
                   </button>
@@ -1075,7 +1043,7 @@ export default function QueueWorkbench({ filterText, focusGpuIDs }: QueueWorkben
             </div>
             <div className="flex items-center justify-between gap-3 text-sm text-gray-400">
               <span>{filteredJobs.length} jobs</span>
-              <label className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3">
+              <label className="inline-flex h-9 items-center gap-2 border border-gray-800 bg-gray-950 px-3">
                 <SlidersHorizontal className="h-4 w-4 text-gray-500" />
                 <span className="text-xs text-gray-500">Sort</span>
                 <select

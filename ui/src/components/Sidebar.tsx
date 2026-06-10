@@ -20,7 +20,7 @@ const Sidebar = () => {
   ];
 
   const railButtonClass =
-    'flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-white';
+    'flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-500 transition-colors hover:border-gray-800 hover:bg-gray-900/60 hover:text-gray-100';
 
   const isActive = (href: string) => {
     if (href === '/jobs') {
@@ -30,8 +30,8 @@ const Sidebar = () => {
   };
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-gray-900 bg-[#060a0f] text-gray-100 md:h-screen md:w-[124px] md:border-b-0 md:border-r">
-      <div className="flex h-14 items-center justify-between gap-3 border-b border-gray-900 px-3 md:h-16 md:justify-center md:px-0">
+    <aside className="flex w-full shrink-0 flex-col border-b border-gray-900 bg-gray-950 text-gray-100 md:h-screen md:w-[124px] md:border-b-0 md:border-r">
+      <div className="flex h-14 items-center justify-between gap-3 border-b border-gray-900/80 px-3 md:h-16 md:justify-center md:px-0">
         <Link href="/dashboard" className="flex min-w-0 items-center gap-2 md:flex-col md:gap-1" aria-label="Dashboard">
           <ThemeLogo className="mr-0 h-8" />
           <span className="truncate text-xs font-semibold text-gray-200 md:hidden">AI Toolkit</span>
@@ -43,7 +43,7 @@ const Sidebar = () => {
       </div>
 
       <nav className="operator-scrollbar-none min-w-0 flex-1 overflow-x-auto md:overflow-y-auto md:overflow-x-hidden">
-        <ul className="flex gap-1 px-2 py-2 md:block md:space-y-2 md:px-2 md:py-5">
+        <ul className="flex gap-1 px-2 py-2 md:block md:space-y-1.5 md:px-2 md:py-5">
           {navigation.map(item => {
             const active = isActive(item.href);
             return (
@@ -52,21 +52,21 @@ const Sidebar = () => {
                   href={item.href}
                   aria-current={active ? 'page' : undefined}
                   title={item.name}
-                  className={`flex h-12 min-w-[88px] items-center justify-center gap-2 rounded-md border px-3 text-sm transition-colors md:h-[62px] md:min-w-0 md:flex-col md:gap-1 md:px-1 ${
+                  className={`group flex h-12 min-w-[88px] items-center justify-center gap-2 rounded-sm border px-3 text-sm transition-colors md:h-[62px] md:min-w-0 md:flex-col md:gap-1 md:px-1 ${
                     active
-                      ? 'border-blue-500/60 bg-blue-600/15 text-blue-100 shadow-[inset_3px_0_0_rgba(59,130,246,0.85)]'
-                      : 'border-transparent text-gray-300 hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100'
+                      ? 'border-gray-800 bg-gray-900/45 text-gray-100 shadow-[inset_0_-2px_0_rgba(34,211,238,0.85)] md:shadow-[inset_2px_0_0_rgba(34,211,238,0.85)]'
+                      : 'border-transparent text-gray-400 hover:border-gray-800 hover:bg-gray-900/45 hover:text-gray-200'
                   }`}
                 >
-                  <item.icon className="h-5 w-5 flex-none" />
-                  <span className="truncate text-xs">{item.name}</span>
+                  <item.icon className={`h-5 w-5 flex-none ${active ? 'text-cyan-200' : 'text-gray-500 group-hover:text-gray-300'}`} />
+                  <span className="truncate text-xs font-medium">{item.name}</span>
                 </Link>
               </li>
             );
           })}
         </ul>
       </nav>
-      <div className="hidden border-t border-gray-900 px-2 py-2 md:block">
+      <div className="hidden border-t border-gray-900/80 px-2 py-2 md:block">
         <div className="flex items-center justify-center gap-1.5">
           <a
             href="https://discord.gg/umF6SfKRtm"

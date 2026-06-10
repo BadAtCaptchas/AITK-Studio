@@ -11,6 +11,7 @@ import {
   encryptWithWebAuthnPrfKey,
   webAuthnPrfWrappedKeyAad,
 } from '@/utils/webauthnPrfCrypto';
+import { isFolderImportCaptionSidecarPath } from '@/utils/folderImport';
 
 export const ENCRYPTED_DATASET_FORMAT = 'aitk-encrypted-dataset';
 export const ENCRYPTED_DATASET_VERSION = 1;
@@ -527,7 +528,7 @@ export function pairMediaAndCaptionFiles(files: File[]) {
   const captionByBaseName = new Map<string, File>();
 
   files.forEach(file => {
-    if (/\.txt$/i.test(file.name)) {
+    if (isFolderImportCaptionSidecarPath(file.name)) {
       captionByBaseName.set(getBaseName(file.name).toLowerCase(), file);
       return;
     }

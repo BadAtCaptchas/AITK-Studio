@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { TOOLKIT_ROOT } from '../paths';
 import type { DatasetSummary, EncryptedDatasetManifest, EncryptedDatasetStartKey } from '../types';
+import { DATASET_CAPTION_SIDECAR_EXTENSIONS } from './captionFiles';
 
 export const ENCRYPTED_DATASET_MANIFEST = '.aitk_encrypted_dataset.json';
 const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
@@ -41,12 +42,16 @@ const DATASET_MEDIA_EXTENSIONS = new Set([
   '.ogg',
 ]);
 
-const DATASET_CAPTION_EXTENSIONS = ['.txt', '.caption', '.json', '.sdxl', '.md'];
+const DATASET_CAPTION_EXTENSIONS = DATASET_CAPTION_SIDECAR_EXTENSIONS;
+const DETECTED_CAPTION_MIN_MEDIA_COVERAGE = 0.5;
+const DETECTED_CAPTION_MIN_CAPTION_SHARE = 0.8;
 
 export type DatasetCaptionSummary = {
   itemCount: number;
   captionedItemCount: number;
   missingCaptionCount: number;
+  detectedCaptionExt: string | null;
+  captionExtensionCounts: Record<string, number>;
 };
 
 function isPathInside(parent: string, child: string) {
@@ -62,9 +67,32 @@ function safeIsFile(filePath: string) {
   }
 }
 
-function hasCaptionSidecar(mediaPath: string) {
+function normalizeCaptionExtension(extension: string) {
+  return extension.replace(/^\.+/, '').toLowerCase();
+}
+
+function captionSidecars(mediaPath: string) {
   const parsed = path.parse(mediaPath);
-  return DATASET_CAPTION_EXTENSIONS.some(captionExt => safeIsFile(path.join(parsed.dir, `${parsed.name}${captionExt}`)));
+  return DATASET_CAPTION_EXTENSIONS.filter(captionExt => safeIsFile(path.join(parsed.dir, `${parsed.name}${captionExt}`)));
+}
+
+function detectDominantCaptionExt(summary: Pick<DatasetCaptionSummary, 'itemCount' | 'captionedItemCount' | 'captionExtensionCounts'>) {
+  let bestExtension = '';
+  let bestCount = 0;
+
+  for (const extension of DATASET_CAPTION_EXTENSIONS) {
+    const count = summary.captionExtensionCounts[extension] || 0;
+    if (count > bestCount) {
+      bestExtension = extension;
+      bestCount = count;
+    }
+  }
+
+  if (summary.itemCount === 0 || summary.captionedItemCount === 0 || bestCount === 0) return null;
+  if (bestCount / summary.itemCount < DETECTED_CAPTION_MIN_MEDIA_COVERAGE) return null;
+  if (bestCount / summary.captionedItemCount < DETECTED_CAPTION_MIN_CAPTION_SHARE) return null;
+
+  return normalizeCaptionExtension(bestExtension);
 }
 
 export function summarizePlainDatasetCaptions(datasetFolder: string): DatasetCaptionSummary {
@@ -72,6 +100,8 @@ export function summarizePlainDatasetCaptions(datasetFolder: string): DatasetCap
     itemCount: 0,
     captionedItemCount: 0,
     missingCaptionCount: 0,
+    detectedCaptionExt: null,
+    captionExtensionCounts: {},
   };
   const stack = [datasetFolder];
 
@@ -94,14 +124,19 @@ export function summarizePlainDatasetCaptions(datasetFolder: string): DatasetCap
       if (!entry.isFile() || !DATASET_MEDIA_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
 
       summary.itemCount += 1;
-      if (hasCaptionSidecar(entryPath)) {
+      const sidecars = captionSidecars(entryPath);
+      if (sidecars.length > 0) {
         summary.captionedItemCount += 1;
+        sidecars.forEach(extension => {
+          summary.captionExtensionCounts[extension] = (summary.captionExtensionCounts[extension] || 0) + 1;
+        });
       } else {
         summary.missingCaptionCount += 1;
       }
     }
   }
 
+  summary.detectedCaptionExt = detectDominantCaptionExt(summary);
   return summary;
 }
 
@@ -287,6 +322,7 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
           itemCount: null,
           captionedItemCount: null,
           missingCaptionCount: null,
+          detectedCaptionExt: null,
           source: 'local' as const,
           worker_id: 'local',
           worker_name: 'Local',
@@ -302,6 +338,7 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
         itemCount: captionSummary.itemCount,
         captionedItemCount: captionSummary.captionedItemCount,
         missingCaptionCount: captionSummary.missingCaptionCount,
+        detectedCaptionExt: captionSummary.detectedCaptionExt,
         source: 'local' as const,
         worker_id: 'local',
         worker_name: 'Local',

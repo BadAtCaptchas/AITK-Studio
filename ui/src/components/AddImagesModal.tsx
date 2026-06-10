@@ -13,6 +13,7 @@ import {
   pairMediaAndCaptionFiles,
   readTextFile,
 } from '@/utils/encryptedDatasets';
+import { FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS } from '@/utils/folderImport';
 
 export interface AddImagesModalState {
   datasetName: string;
@@ -330,7 +331,8 @@ export default function AddImagesModal() {
       'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'],
       'video/*': ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv'],
       'audio/*': ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac'],
-      'text/*': ['.txt'],
+      'application/json': ['.json'],
+      'text/*': FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS.filter(extension => extension !== '.json'),
     }),
     [],
   );
@@ -395,7 +397,7 @@ export default function AddImagesModal() {
                       <>
                         <p className="text-sm text-gray-200 text-center">Drag & drop files here or click to select</p>
                         <p className="text-xs text-gray-400 mt-1">
-                          Images, videos, audio, or matching .txt captions supported
+                          Images, videos, audio, or matching caption sidecars supported
                         </p>
                       </>
                     ) : (

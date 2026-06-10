@@ -1,7 +1,7 @@
 import fs from 'fs';
 
 export const DATASET_CAPTION_SIDECAR_EXTENSIONS = ['.json', '.txt', '.caption', '.sdxl', '.md'];
-export const DATASET_TEXT_CAPTION_EXTENSIONS = ['.txt', '.caption', '.sdxl', '.md'];
+export const DATASET_TEXT_CAPTION_EXTENSIONS = ['.json', '.txt', '.caption', '.sdxl', '.md'];
 
 export function isTextCaptionFilePath(filePath: string) {
   const cleanPath = filePath.split(/[?#]/, 1)[0];

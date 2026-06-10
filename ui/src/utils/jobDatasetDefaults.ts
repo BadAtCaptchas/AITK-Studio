@@ -1,4 +1,5 @@
 const DATASET_DEFAULT_PREFIX = 'config.process[0].datasets[x].';
+const DETECTED_CAPTION_EXTENSIONS = new Set(['txt', 'caption', 'json', 'sdxl', 'md']);
 
 function cloneDefaultValue<T>(value: T): T {
   if (value == null || typeof value !== 'object') return value;
@@ -46,4 +47,10 @@ export function applySelectedDatasetDefaults<T extends Record<string, any>>(
     setPathValue(next, key.slice(DATASET_DEFAULT_PREFIX.length), selectedDefaultValue(value));
   }
   return next;
+}
+
+export function normalizeDetectedCaptionExt(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().replace(/^\.+/, '').toLowerCase();
+  return DETECTED_CAPTION_EXTENSIONS.has(normalized) ? normalized : null;
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { applySelectedDatasetDefaults } from '../dist/src/utils/jobDatasetDefaults.js';
+import { applySelectedDatasetDefaults, normalizeDetectedCaptionExt } from '../dist/src/utils/jobDatasetDefaults.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(__dirname, '..');
@@ -25,6 +25,13 @@ test('applies selected model dataset defaults to a new dataset row', () => {
   assert.equal(next.shuffle_tokens, false);
   assert.equal(dataset.caption_dropout_rate, 0.05);
   assert.equal(dataset.shuffle_tokens, true);
+});
+
+test('normalizes detected dataset caption extensions for job config use', () => {
+  assert.equal(normalizeDetectedCaptionExt('.json'), 'json');
+  assert.equal(normalizeDetectedCaptionExt('TXT'), 'txt');
+  assert.equal(normalizeDetectedCaptionExt('unknown'), null);
+  assert.equal(normalizeDetectedCaptionExt(null), null);
 });
 
 test('Ideogram model options declare JSON-safe dataset defaults', async () => {

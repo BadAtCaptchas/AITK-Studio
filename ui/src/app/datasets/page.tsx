@@ -43,6 +43,8 @@ import {
   folderImportCaptionKey,
   folderImportExtension,
   folderImportRootName,
+  FOLDER_IMPORT_SUPPORTED_EXTENSIONS,
+  isFolderImportCaptionSidecarPath,
   stripFolderImportRoot,
 } from '@/utils/folderImport';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
@@ -187,30 +189,6 @@ type FolderImportEntry = {
 };
 
 type BulkUnlockStatus = 'loading' | 'locked' | 'unlocking' | 'unlocked' | 'error';
-
-const FOLDER_IMPORT_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.webp',
-  '.gif',
-  '.bmp',
-  '.mp4',
-  '.avi',
-  '.mov',
-  '.mkv',
-  '.wmv',
-  '.m4v',
-  '.flv',
-  '.webm',
-  '.mp3',
-  '.wav',
-  '.flac',
-  '.ogg',
-  '.m4a',
-  '.aac',
-  '.txt',
-]);
 
 function cleanClientDatasetName(name: string) {
   return name
@@ -970,7 +948,7 @@ export default function Datasets() {
       .filter(entry => {
         const parts = entry.relativePath.split('/').filter(Boolean);
         if (parts.some(part => part.startsWith('.'))) return false;
-        return FOLDER_IMPORT_EXTENSIONS.has(folderImportExtension(entry.relativePath));
+        return FOLDER_IMPORT_SUPPORTED_EXTENSIONS.has(folderImportExtension(entry.relativePath));
       });
 
     if (entries.length === 0) {
@@ -1061,7 +1039,7 @@ export default function Datasets() {
     const captionFiles = new Map<string, File>();
     entries.forEach((entry, index) => {
       const relativePath = relativePaths[index] || entry.relativePath || entry.file.name;
-      if (/\.txt$/i.test(relativePath)) {
+      if (isFolderImportCaptionSidecarPath(relativePath)) {
         captionFiles.set(folderImportCaptionKey(relativePath), entry.file);
       }
     });

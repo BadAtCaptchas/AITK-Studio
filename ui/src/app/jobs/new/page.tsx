@@ -28,6 +28,7 @@ import {
   getRememberedEncryptedDatasetKey,
   rememberEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
+import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
 import {
   makeRemoteDatasetRef,
   parseRemoteDatasetRef,
@@ -54,7 +55,16 @@ export default function TrainingForm() {
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus } = useDatasetList({ includeRemote: true });
   const [datasetOptions, setDatasetOptions] = useState<
-    Array<SelectOption & { encrypted: boolean; name: string; source: 'local' | 'remote'; worker_id: string; ref: string }>
+    Array<
+      SelectOption & {
+        encrypted: boolean;
+        name: string;
+        source: 'local' | 'remote';
+        worker_id: string;
+        ref: string;
+        detectedCaptionExt?: string | null;
+      }
+    >
   >([]);
   const [showAdvancedView, setShowAdvancedView] = useState(false);
 
@@ -126,6 +136,7 @@ export default function TrainingForm() {
         source,
         worker_id: workerID,
         ref,
+        detectedCaptionExt: dataset.detectedCaptionExt ?? null,
       };
     });
     setDatasetOptions(datasetOptions);
@@ -138,6 +149,10 @@ export default function TrainingForm() {
         for (let i = 0; i < prev.config.process[0].datasets.length; i++) {
           if (prev.config.process[0].datasets[i].folder_path === defaultDatasetPath) {
             updated = setNestedValue(updated, datasetOptions[0].value, `config.process[0].datasets[${i}].folder_path`);
+            const detectedCaptionExt = normalizeDetectedCaptionExt(datasetOptions[0].detectedCaptionExt);
+            if (detectedCaptionExt) {
+              updated = setNestedValue(updated, detectedCaptionExt, `config.process[0].datasets[${i}].caption_ext`);
+            }
           }
         }
         return updated;

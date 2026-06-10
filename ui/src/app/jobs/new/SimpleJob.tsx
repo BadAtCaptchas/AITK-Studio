@@ -42,11 +42,13 @@ import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
 import TrainingPhasesEditor from './TrainingPhasesEditor';
 import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
+import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
+import { setNestedValue } from '@/utils/hooks';
 import { parseRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 
 type Props = {
   jobConfig: JobConfig;
-  setJobConfig: (value: any, key: string) => void;
+  setJobConfig: (value: any, key?: string) => void;
   status: 'idle' | 'saving' | 'success' | 'error';
   handleSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   runId: string | null;
@@ -54,7 +56,14 @@ type Props = {
   setGpuIDs: (value: string | null) => void;
   gpuList: any;
   datasetOptions: Array<
-    SelectOption & { encrypted?: boolean; name?: string; source?: 'local' | 'remote'; worker_id?: string; ref?: string }
+    SelectOption & {
+      encrypted?: boolean;
+      name?: string;
+      source?: 'local' | 'remote';
+      worker_id?: string;
+      ref?: string;
+      detectedCaptionExt?: string | null;
+    }
   >;
   isLoading?: boolean;
   comfyAutoInstall?: boolean;
@@ -321,6 +330,19 @@ export default function SimpleJob({
     } finally {
       setRandomPromptLoadingIndex(current => (current === sampleIndex ? null : current));
     }
+  };
+
+  const setDatasetPath = (datasetIndex: number, value: string) => {
+    const selectedOption = datasetOptions.find(option => option.value === value);
+    const detectedCaptionExt = normalizeDetectedCaptionExt(selectedOption?.detectedCaptionExt);
+
+    setJobConfig((previous: JobConfig) => {
+      let next = setNestedValue(previous, value, `config.process[0].datasets[${datasetIndex}].folder_path`);
+      if (detectedCaptionExt) {
+        next = setNestedValue(next, detectedCaptionExt, `config.process[0].datasets[${datasetIndex}].caption_ext`);
+      }
+      return next;
+    });
   };
 
   const handleBaseLoraUpload = async (file: File) => {
@@ -1389,7 +1411,7 @@ export default function SimpleJob({
                       <SelectInput
                         label="Target Dataset"
                         value={dataset.folder_path}
-                        onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].folder_path`)}
+                        onChange={value => setDatasetPath(i, value)}
                         options={datasetOptions}
                       />
                       {modelArch?.additionalSections?.includes('datasets.control_path') && (

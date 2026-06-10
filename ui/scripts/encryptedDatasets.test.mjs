@@ -108,10 +108,31 @@ test('listDatasetSummaries counts missing captions for plain datasets', async ()
   assert.equal(plainSummary.itemCount, 3);
   assert.equal(plainSummary.captionedItemCount, 2);
   assert.equal(plainSummary.missingCaptionCount, 1);
+  assert.equal(plainSummary.detectedCaptionExt, null);
   assert.equal(lockedSummary.encrypted, true);
   assert.equal(lockedSummary.itemCount, null);
   assert.equal(lockedSummary.captionedItemCount, null);
   assert.equal(lockedSummary.missingCaptionCount, null);
+  assert.equal(lockedSummary.detectedCaptionExt, null);
+});
+
+test('listDatasetSummaries detects clearly JSON-captioned plain datasets', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-json-caption-summary-'));
+  const jsonDataset = path.join(root, 'json_dataset');
+  await fs.mkdir(jsonDataset, { recursive: true });
+
+  await fs.writeFile(path.join(jsonDataset, 'one.png'), 'media');
+  await fs.writeFile(path.join(jsonDataset, 'one.json'), JSON.stringify({ caption: 'one json caption' }));
+  await fs.writeFile(path.join(jsonDataset, 'two.webp'), 'media');
+  await fs.writeFile(path.join(jsonDataset, 'two.json'), JSON.stringify({ caption: 'two json caption' }));
+
+  const summaries = await encryptedDatasets.listDatasetSummaries(root);
+  const jsonSummary = summaries.find(dataset => dataset.name === 'json_dataset');
+
+  assert.equal(jsonSummary.itemCount, 2);
+  assert.equal(jsonSummary.captionedItemCount, 2);
+  assert.equal(jsonSummary.missingCaptionCount, 0);
+  assert.equal(jsonSummary.detectedCaptionExt, 'json');
 });
 
 test('validateEncryptedCatalogKey accepts the matching dataset key', () => {

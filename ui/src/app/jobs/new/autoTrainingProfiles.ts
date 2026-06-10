@@ -100,7 +100,7 @@ function loraNetwork(rank: number, extra: Partial<NetworkConfig> = {}): Partial<
     lokr_bypass_mode: false,
     lokr_rs_lora: false,
     lokr_unbalanced_factorization: false,
-    lokr_legacy_factorization: false,
+    lokr_legacy_factorization: true,
     ...extra,
   };
 }

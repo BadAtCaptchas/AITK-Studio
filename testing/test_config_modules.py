@@ -71,6 +71,20 @@ class NetworkConfigTest(unittest.TestCase):
 
         self.assertIsNone(config.dropout)
 
+    def test_lokr_defaults_to_upstream_factorization(self):
+        config = NetworkConfig(type="lokr")
+
+        self.assertTrue(config.lokr_legacy_factorization)
+
+    def test_lokr_explicit_balanced_factorization_is_preserved(self):
+        config = NetworkConfig(type="lokr", lokr_legacy_factorization=False)
+
+        self.assertFalse(config.lokr_legacy_factorization)
+
+    def test_lokr_factor_alias_is_supported(self):
+        self.assertEqual(NetworkConfig(type="lokr", factor=8).lokr_factor, 8)
+        self.assertEqual(NetworkConfig(type="lokr", network_kwargs={"factor": 16}).lokr_factor, 16)
+
     def test_validate_rejects_network_without_trainable_target(self):
         with self.assertRaisesRegex(ValueError, "train.train_unet"):
             validate_configs(

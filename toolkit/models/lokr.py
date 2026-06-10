@@ -40,8 +40,20 @@ def _is_floating_dtype(dtype):
 
 def factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
     """
-    Return two factors of dimension, preferring a value close to factor.
-    The first value is lower than or equal to the second value.
+    Return upstream AI Toolkit LoKr factors.
+
+    Positive factors keep the requested factor on the left side, even when it
+    is larger than the paired factor. LoKr uses Kronecker products, so that
+    order is part of the adapter layout.
+    """
+    if factor > 0 and (dimension % factor) == 0:
+        return factor, dimension // factor
+    return balanced_factorization(dimension, factor)
+
+
+def balanced_factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
+    """
+    Return Revamped's balanced LoKr factors, keeping the smaller value first.
     """
     if factor > 0 and (dimension % factor) == 0:
         m = factor
@@ -67,8 +79,6 @@ def factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
 
 
 def legacy_factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
-    if factor > 0 and (dimension % factor) == 0:
-        return factor, dimension // factor
     return factorization(dimension, factor)
 
 
@@ -116,7 +126,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         bypass_mode=False,
         rs_lora=False,
         unbalanced_factorization=False,
-        legacy_factorization=False,
+        legacy_factorization=True,
         **kwargs,
     ):
         ToolkitModuleMixin.__init__(self, network=network)
@@ -152,7 +162,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         else:
             raise ValueError(f"{org_module.__class__.__name__} is not supported in LoKr.")
 
-        factorize = legacy_factorization if self.legacy_factorization else factorization
+        factorize = factorization if self.legacy_factorization else balanced_factorization
         in_m, in_n = factorize(in_dim, factor)
         out_l, out_k = factorize(out_dim, factor)
         if self.unbalanced_factorization:

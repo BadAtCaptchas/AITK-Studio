@@ -90,7 +90,7 @@ with mock.patch.dict("sys.modules", mocked_modules):
     from toolkit.base_lora import _infer_network_config
     from toolkit.config_modules import NetworkConfig
     from toolkit.lora_special import LoRASpecialNetwork
-    from toolkit.models.lokr import LokrModule, factorization, legacy_factorization
+    from toolkit.models.lokr import LokrModule, balanced_factorization, factorization, legacy_factorization
 
 
 class NetworkStub:
@@ -197,10 +197,28 @@ class Linear4bit(torch.nn.Module):
 
 class LokrModuleTest(unittest.TestCase):
     def test_factorization_matches_current_upstream(self):
-        self.assertEqual(factorization(128, 16), (8, 16))
+        self.assertEqual(factorization(128, 16), (16, 8))
         self.assertEqual(factorization(250, -1), (10, 25))
         self.assertEqual(factorization(360, 16), (15, 24))
+        self.assertEqual(balanced_factorization(128, 16), (8, 16))
         self.assertEqual(legacy_factorization(128, 16), (16, 8))
+
+    def test_default_lokr_module_uses_upstream_factor_shapes(self):
+        lokr = make_lokr(torch.nn.Linear(128, 128, bias=False), factor=16, lora_dim=16)
+
+        self.assertEqual(tuple(lokr.lokr_w1.shape), (16, 16))
+        self.assertEqual(tuple(lokr.lokr_w2.shape), (8, 8))
+
+    def test_opt_in_balanced_factorization_preserves_revamped_shapes(self):
+        lokr = make_lokr(
+            torch.nn.Linear(128, 128, bias=False),
+            factor=16,
+            lora_dim=16,
+            legacy_factorization=False,
+        )
+
+        self.assertEqual(tuple(lokr.lokr_w1.shape), (8, 8))
+        self.assertEqual(tuple(lokr.lokr_w2.shape), (16, 16))
 
     def test_linear_shape_uses_weight_shape_when_metadata_mismatches(self):
         module = torch.nn.Linear(1, 4, bias=False)

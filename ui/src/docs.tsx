@@ -270,8 +270,9 @@ const docs: { [key: string]: ConfigDoc } = {
     tooltip: 'Controls the Kronecker factorization shape; use -1 for automatic factorization.',
     description: (
       <>
-        Controls the Kronecker factorization shape used by LoKr. Use <code>-1</code> for automatic factorization, or set
-        a specific factor such as <code>8</code> or <code>16</code> when you want a known LoKr layout.
+        Controls the Kronecker factorization shape used by LoKr. With Upstream Factor enabled, positive factors keep the
+        same ordering as upstream AI Toolkit. Use <code>-1</code> for automatic factorization, or set a specific factor
+        such as <code>8</code> or <code>16</code> when you want a known LoKr layout.
       </>
     ),
   },
@@ -280,9 +281,9 @@ const docs: { [key: string]: ConfigDoc } = {
     tooltip: 'Advanced LoKr behavior controls for capacity, scaling, compatibility, and quantized layers.',
     description: (
       <>
-        Advanced LyCORIS LoKr settings. The defaults are conservative; only change these when you are matching an
-        existing LoKr recipe, importing older weights, or intentionally experimenting with LoKr capacity, scaling, or
-        quantized-layer behavior.
+        Advanced LyCORIS LoKr settings. The defaults match upstream AI Toolkit for plain imported LoKr configs; only
+        change these when you are matching a specific LoKr recipe or intentionally experimenting with capacity, scaling,
+        factorization, or quantized-layer behavior.
       </>
     ),
   },
@@ -387,12 +388,12 @@ const docs: { [key: string]: ConfigDoc } = {
     ),
   },
   'config.process[0].network.lokr_legacy_factorization': {
-    title: 'Legacy Factor',
-    tooltip: 'Uses the older AI Toolkit LoKr factor ordering for older configs or checkpoints.',
+    title: 'Upstream Factor',
+    tooltip: 'Uses upstream AI Toolkit LoKr factor ordering for imported configs or checkpoints.',
     description: (
       <>
-        Uses the older AI Toolkit LoKr factor ordering instead of the current LyCORIS-style factorization. Enable this
-        when you need compatibility with older LoKr checkpoints or older local configs.
+        Uses upstream AI Toolkit LoKr factor ordering instead of Revamped's balanced factorization. Keep this enabled
+        for plain imported LoKr configs, or disable it only when you intentionally want the newer balanced layout.
       </>
     ),
   },

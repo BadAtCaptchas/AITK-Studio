@@ -275,7 +275,7 @@ class NetworkConfig:
             self.conv = 9999999999
             self.conv_alpha = 9999999999
         # -1 automatically finds the largest factor
-        self.lokr_factor = kwargs.get('lokr_factor', -1)
+        self.lokr_factor = get_lokr_value('lokr_factor', -1, 'factor')
 
         disable_conv_cp = get_lokr_bool('disable_conv_cp', True)
         self.lokr_use_tucker = (
@@ -300,7 +300,7 @@ class NetworkConfig:
             'lokr_unbalanced_factorization', False, 'unbalanced_factorization'
         )
         self.lokr_legacy_factorization = get_lokr_bool(
-            'lokr_legacy_factorization', False, 'legacy_factorization'
+            'lokr_legacy_factorization', True, 'legacy_factorization'
         )
         if self.lokr_full_rank and self.type.lower() == 'lokr':
             self.lokr_full_matrix = True

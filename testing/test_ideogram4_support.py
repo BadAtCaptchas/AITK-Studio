@@ -186,11 +186,22 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
 
         self.assertIn("from toolkit.memory_management import attach_layer_offloading", model_source)
         self.assertIn("attach_layer_offloading(", model_source)
+        self.assertIn("def _apply_transformer_memory_policy", model_source)
+        self.assertIn("def _transformer_ignore_modules", model_source)
         self.assertIn('component="transformer"', model_source)
+        self.assertIn('component="unconditional_transformer"', model_source)
+        self.assertIn(
+            'conditional_transformer,\n            component="transformer"',
+            model_source,
+        )
+        self.assertIn(
+            'unconditional_transformer,\n            component="unconditional_transformer"',
+            model_source,
+        )
         self.assertIn("block_paths=self.get_transformer_block_names()", model_source)
-        self.assertIn("conditional_transformer.rotary_emb.inv_freq", model_source)
-        self.assertIn("conditional_transformer.input_proj", model_source)
-        self.assertIn("conditional_transformer.llm_cond_proj", model_source)
+        self.assertIn("transformer.rotary_emb.inv_freq", model_source)
+        self.assertIn("transformer.input_proj", model_source)
+        self.assertIn("transformer.llm_cond_proj", model_source)
         self.assertIn('component="text_encoder"', model_source)
         self.assertIn('"ideogram4"', offload_source)
 

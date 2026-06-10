@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 from types import SimpleNamespace
 
 import torch
@@ -169,6 +170,38 @@ class Linear4bit(torch.nn.Module):
         )
 
 
+class FakeCudaStream:
+    def __init__(self):
+        self.waited_streams = []
+        self.waited_events = []
+
+    def wait_stream(self, stream):
+        self.waited_streams.append(stream)
+
+    def wait_event(self, event):
+        self.waited_events.append(event)
+
+
+class FakeCudaStreamContext:
+    def __init__(self, stream, log):
+        self.stream = stream
+        self.log = log
+
+    def __enter__(self):
+        self.log.append(("enter", self.stream))
+
+    def __exit__(self, exc_type, exc, tb):
+        self.log.append(("exit", self.stream))
+
+
+class FakeCudaEvent:
+    def __init__(self):
+        self.recorded_stream = None
+
+    def record(self, stream):
+        self.recorded_stream = stream
+
+
 class LayerOffloadStrategyTest(unittest.TestCase):
     def test_selects_deterministic_whole_block_suffix(self):
         first = LayerOffloadStrategy((10, 10, 10, 10), 0.7)
@@ -257,6 +290,65 @@ class BlockOffloadManagerTest(unittest.TestCase):
         self.assertEqual([entry.name for entry in manager.layers], ["blocks.1"])
         self.assertEqual(model._aitk_block_offload_skipped_layers, ("blocks.0",))
         self.assertTrue(torch.allclose(model(x), expected))
+
+    def test_async_offload_waits_for_compute_stream_before_copy(self):
+        model = TinyBlockModel(block_count=1)
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+        entry = manager.layers[0]
+        entry.state = "device"
+        manager.active = True
+        manager.process_device = torch.device("cuda")
+        manager.transfer_stream = FakeCudaStream()
+        current_stream = FakeCudaStream()
+        stream_log = []
+
+        with (
+            mock.patch.object(torch.cuda, "current_stream", return_value=current_stream),
+            mock.patch.object(
+                torch.cuda,
+                "stream",
+                side_effect=lambda stream: FakeCudaStreamContext(stream, stream_log),
+            ),
+            mock.patch.object(torch.cuda, "Event", FakeCudaEvent),
+        ):
+            manager._offload_entry(entry, async_transfer=True)
+
+        self.assertEqual(manager.transfer_stream.waited_streams, [current_stream])
+        self.assertEqual(stream_log, [("enter", manager.transfer_stream), ("exit", manager.transfer_stream)])
+        self.assertEqual(entry.state, "offloading")
+        self.assertIs(entry.transfer_event.recorded_stream, manager.transfer_stream)
+
+    def test_ensure_device_waits_for_pending_offload_before_reload(self):
+        model = TinyBlockModel(block_count=1)
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+        entry = manager.layers[0]
+        entry.state = "offloading"
+        event = FakeCudaEvent()
+        entry.transfer_event = event
+        manager.active = True
+        manager.process_device = torch.device("cuda")
+        current_stream = FakeCudaStream()
+
+        with (
+            mock.patch.object(torch.cuda, "current_stream", return_value=current_stream),
+            mock.patch.object(manager, "_move_entry") as move_entry,
+        ):
+            manager._ensure_entry_on_device(entry)
+
+        self.assertEqual(current_stream.waited_events, [event])
+        self.assertIsNone(entry.transfer_event)
+        move_entry.assert_called_once_with(entry, torch.device("cuda"), async_transfer=False)
+        self.assertEqual(entry.state, "device")
 
     def test_all_tensor_subclass_blocks_fail_clearly(self):
         model = torch.nn.Module()

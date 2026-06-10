@@ -553,6 +553,37 @@ class Ideogram4Model(BaseModel):
             )
         return replaced
 
+    def _transformer_ignore_modules(self, transformer: Ideogram4Transformer) -> list:
+        return [
+            transformer.rotary_emb.inv_freq,
+            transformer.input_proj,
+            transformer.llm_cond_proj,
+        ]
+
+    def _apply_transformer_memory_policy(
+        self,
+        transformer: Ideogram4Transformer,
+        *,
+        component: str,
+    ) -> None:
+        if (
+            self.model_config.layer_offloading
+            and self.model_config.layer_offloading_transformer_percent > 0
+        ):
+            attach_layer_offloading(
+                self,
+                transformer,
+                self.device_torch,
+                offload_percent=self.model_config.layer_offloading_transformer_percent,
+                component=component,
+                block_paths=self.get_transformer_block_names(),
+                ignore_modules=self._transformer_ignore_modules(transformer),
+            )
+        elif self.model_config.low_vram:
+            transformer.to("cpu")
+        else:
+            transformer.to(self.device_torch)
+
     def load_model(self):
         _warn_if_torch_below_official_requirement()
 
@@ -642,27 +673,14 @@ class Ideogram4Model(BaseModel):
         autoencoder.requires_grad_(False)
         autoencoder.eval()
 
-        if (
-            self.model_config.layer_offloading
-            and self.model_config.layer_offloading_transformer_percent > 0
-        ):
-            attach_layer_offloading(
-                self,
-                conditional_transformer,
-                self.device_torch,
-                offload_percent=self.model_config.layer_offloading_transformer_percent,
-                component="transformer",
-                block_paths=self.get_transformer_block_names(),
-                ignore_modules=[
-                    conditional_transformer.rotary_emb.inv_freq,
-                    conditional_transformer.input_proj,
-                    conditional_transformer.llm_cond_proj,
-                ],
-            )
-        elif self.model_config.low_vram:
-            conditional_transformer.to("cpu")
-        else:
-            conditional_transformer.to(self.device_torch)
+        self._apply_transformer_memory_policy(
+            conditional_transformer,
+            component="transformer",
+        )
+        self._apply_transformer_memory_policy(
+            unconditional_transformer,
+            component="unconditional_transformer",
+        )
 
         if (
             self.model_config.layer_offloading

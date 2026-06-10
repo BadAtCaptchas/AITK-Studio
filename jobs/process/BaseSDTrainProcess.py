@@ -291,6 +291,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.current_boundary_index = 0
         self.steps_this_boundary = 0
         self.num_consecutive_oom = 0
+        self.additional_logs = OrderedDict()
 
     def post_process_generate_image_config_list(self, generate_image_config_list: List[GenerateImageConfig]):
         # override in subclass
@@ -2525,6 +2526,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 self.torch_profiler.start()
             did_oom = False
             loss_dict = None
+            self.additional_logs = OrderedDict()
             try:
                 with self.accelerator.accumulate(self.modules_being_trained):
                     loss_dict = self.hook_train_loop(batch_list)
@@ -2572,7 +2574,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # if optimizer has get_lrs method, then use it
                 learning_rate = 0.0
                 extra_step_metrics = OrderedDict()
+                additional_logs = OrderedDict()
                 if not did_oom and loss_dict is not None:
+                    if self.additional_logs:
+                        additional_logs = OrderedDict(self.additional_logs)
+                    self.additional_logs = OrderedDict()
                     if hasattr(self.optimizer, 'get_avg_learning_rate'):
                         learning_rate = self.optimizer.get_avg_learning_rate()
                     elif hasattr(self.optimizer, 'get_learning_rates'):
@@ -2616,6 +2622,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         phase_observed_metrics[f'loss/{key}'] = value
                         phase_observed_metrics[key] = value
                     phase_observed_metrics.update(extra_step_metrics)
+                    phase_observed_metrics.update(additional_logs)
                     self.phase_manager.observe_metrics(self.step_num, phase_observed_metrics)
 
                 # if the batch is a DataLoaderBatchDTO, then we need to clean it up
@@ -2700,6 +2707,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.logger.log({
                                         f'loss/{key}': value,
                                     })
+                            if additional_logs:
+                                self.logger.log(additional_logs)
                     elif self.logging_config.log_every is None:
                         if self.accelerator.is_main_process:
                             # log every step
@@ -2716,6 +2725,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.logger.log({
                                         f'loss/{key}': value,
                                     })
+                            if additional_logs:
+                                self.logger.log(additional_logs)
 
 
                     if self.performance_log_every > 0 and self.step_num % self.performance_log_every == 0:

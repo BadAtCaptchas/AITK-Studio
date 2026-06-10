@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
-export async function GET(request: NextRequest, { params }: { params: { queueID: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ queueID: string }> }) {
   const { queueID } = await params;
   const workerID = request.nextUrl.searchParams.get('worker_id') || 'local';
 

@@ -31,18 +31,16 @@ const contentTypeMap: { [key: string]: string } = {
 };
 
 type ImageRouteParams = {
-  imagePath: string | string[];
+  imagePath: string[];
 };
 
-function getRequestedValue(request: NextRequest, imagePath: string | string[]) {
+function getRequestedValue(request: NextRequest, imagePath: string[]) {
   const pathname = request.nextUrl?.pathname;
   const routePrefix = '/api/img/';
   const rawPath =
     pathname && pathname.startsWith(routePrefix)
       ? pathname.slice(routePrefix.length)
-      : Array.isArray(imagePath)
-        ? imagePath.join('/')
-        : imagePath;
+      : imagePath.join('/');
 
   return decodeURIComponent(rawPath);
 }
@@ -79,7 +77,7 @@ function isPathInsideRoot(root: string, filepath: string) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-export async function GET(request: NextRequest, { params }: { params: ImageRouteParams }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<ImageRouteParams> }) {
   const { imagePath } = await params;
   try {
     const requestedValue = getRequestedValue(request, imagePath);

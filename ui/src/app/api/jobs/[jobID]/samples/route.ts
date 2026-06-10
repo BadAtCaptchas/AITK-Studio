@@ -17,7 +17,7 @@ function isPathInsideRoot(root: string, filepath: string) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-export async function GET(_request: Request, { params }: { params: { jobID: string } }) {
+export async function GET(_request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);

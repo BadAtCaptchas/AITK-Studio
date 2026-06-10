@@ -19,7 +19,7 @@ const contentTypeMap: { [key: string]: string } = {
 
 type SampleRouteParams = {
   jobID: string;
-  samplePath: string | string[];
+  samplePath: string[];
 };
 
 function isPathInsideRoot(root: string, filepath: string) {
@@ -27,9 +27,9 @@ function isPathInsideRoot(root: string, filepath: string) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-export async function GET(request: NextRequest, { params }: { params: SampleRouteParams }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<SampleRouteParams> }) {
   const { jobID, samplePath } = await params;
-  const sampleSegments = Array.isArray(samplePath) ? samplePath : [samplePath];
+  const sampleSegments = samplePath;
 
   if (sampleSegments.length !== 1) {
     return new NextResponse('Invalid sample path', { status: 400 });

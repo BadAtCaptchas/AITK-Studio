@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { QueueReorderError, reorderQueueJobs } from '@/server/queueReorder';
 
-export async function POST(request: NextRequest, { params }: { params: { queueID: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ queueID: string }> }) {
   const { queueID } = await params;
 
   try {

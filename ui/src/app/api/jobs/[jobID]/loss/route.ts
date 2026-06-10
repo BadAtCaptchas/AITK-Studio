@@ -12,7 +12,7 @@ import {
 
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest, { params }: { params: { jobID: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   // this must be awaited to avoid TS error
   const { jobID } = await params;
 

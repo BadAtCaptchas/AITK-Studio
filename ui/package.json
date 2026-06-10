@@ -15,6 +15,7 @@
     "test:flux-guidance": "tsc -p tsconfig.worker.json && node --test scripts/fluxGuidancePolicy.test.mjs",
     "test:tensorboard": "tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
     "test:remote": "tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs",
+    "test:queue-reorder": "tsc -p tsconfig.worker.json && node --test scripts/queueReorder.test.mjs",
     "test:lifecycle": "node --test scripts/appLifecycle.test.mjs",
     "test:basic": "tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs",
     "test:random-prompt": "tsc -p tsconfig.worker.json && node --test scripts/randomPromptCaptions.test.mjs",

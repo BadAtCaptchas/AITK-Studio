@@ -1,11 +1,11 @@
 'use client';
 
-import JobsTable from '@/components/JobsTable';
+import QueueWorkbench from '@/components/QueueWorkbench';
 import { TopBar, MainContent } from '@/components/layout';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
-import { AlertTriangle, ArrowRight, CheckCircle2, CloudDownload, FileArchive, ListOrdered, Loader2, Plus, Upload, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, CloudDownload, FileArchive, ListOrdered, Loader2, Plus, Search, Upload, X } from 'lucide-react';
 import { SelectInput } from '@/components/formInputs';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { downloadJobModelReferences, importTrainingJob } from '@/utils/jobs';
@@ -107,6 +107,7 @@ export default function Dashboard() {
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
   const [jobsTableKey, setJobsTableKey] = useState(0);
+  const [filterText, setFilterText] = useState('');
   const isImporting = importStatus?.phase === 'uploading' || importStatus?.phase === 'processing';
   const isModelDownloading = modelDownloadStatus?.phase === 'downloading';
 
@@ -223,9 +224,21 @@ export default function Dashboard() {
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
           <ListOrdered className="h-4 w-4 text-cyan-300" />
-          <h1 className="text-base font-semibold">Queue</h1>
+          <h1 className="text-base font-semibold">
+            <span className="hidden text-gray-500 sm:inline">AI Toolkit / </span>
+            Queue
+          </h1>
         </div>
         <div className="flex-1"></div>
+        <label className="relative hidden min-w-52 max-w-md flex-1 lg:block">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+          <input
+            value={filterText}
+            onChange={event => setFilterText(event.target.value)}
+            placeholder="Filter by name, status, worker..."
+            className="h-9 w-full rounded-md border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-blue-600"
+          />
+        </label>
         {gpuList.length > 0 && (
           <div className="mr-2">
             <SelectInput
@@ -278,12 +291,12 @@ export default function Dashboard() {
         className="hidden"
         onChange={handleFileSelected}
       />
-      <MainContent>
+      <MainContent className="bg-[#02060a] px-0 pt-12 sm:px-0">
         {importStatus && (
           <section
             role="status"
             aria-live="polite"
-            className="mb-4 overflow-hidden border border-gray-700 bg-gray-900 text-gray-100"
+            className="mx-3 mt-3 overflow-hidden rounded-md border border-gray-700 bg-gray-900 text-gray-100"
           >
             <div className="flex items-start gap-3 px-4 py-4">
               <div
@@ -469,7 +482,18 @@ export default function Dashboard() {
             </div>
           </section>
         )}
-        <JobsTable key={jobsTableKey} />
+        <div className="lg:hidden px-3 pt-3">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <input
+              value={filterText}
+              onChange={event => setFilterText(event.target.value)}
+              placeholder="Filter by name, status, worker..."
+              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-blue-600"
+            />
+          </label>
+        </div>
+        <QueueWorkbench key={jobsTableKey} filterText={filterText} focusGpuIDs={gpuIDs} />
       </MainContent>
     </>
   );

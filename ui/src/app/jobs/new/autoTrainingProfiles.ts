@@ -56,6 +56,7 @@ const flowImageArchs = [
   'zimage',
   'zimage:*',
   'ernie_image',
+  'i1',
 ];
 
 const qwenImageArchs = ['qwen_image', 'qwen_image:2512'];

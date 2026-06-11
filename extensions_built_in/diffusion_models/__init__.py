@@ -26,7 +26,13 @@ def _optional_models(module_name: str, model_specs):
             for class_name, arch in model_specs
         )
 
-    return tuple(getattr(module, class_name) for class_name, _ in model_specs)
+    try:
+        return tuple(getattr(module, class_name) for class_name, _ in model_specs)
+    except ImportError as e:
+        return tuple(
+            _unavailable_model_class(class_name, arch, e)
+            for class_name, arch in model_specs
+        )
 
 
 ChromaModel, ChromaRadianceModel = _optional_models(
@@ -100,6 +106,7 @@ HidreamO1Model, = _optional_models(
     ".hidream.hidream_o1_model", (("HidreamO1Model", "hidream_o1"),)
 )
 GlmImageModel, = _optional_models(".glm_image", (("GlmImageModel", "glm_image"),))
+I1Model, = _optional_models(".i1", (("I1Model", "i1"),))
 
 
 AI_TOOLKIT_MODELS = [
@@ -131,4 +138,5 @@ AI_TOOLKIT_MODELS = [
     NucleusImageModel,
     HidreamO1Model,
     GlmImageModel,
+    I1Model,
 ]

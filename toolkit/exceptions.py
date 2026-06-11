@@ -4,3 +4,7 @@ class JobStopRequested(Exception):
     def __init__(self, message: str = "Job stopped", return_to_queue: bool = False):
         super().__init__(message)
         self.return_to_queue = return_to_queue
+
+
+class UserFacingError(Exception):
+    """Expected configuration/access issue that should be shown without a traceback."""

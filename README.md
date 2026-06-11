@@ -21,6 +21,7 @@ OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffus
 - [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) (Qwen-Image)
 - [Qwen/Qwen-Image-2512](https://huggingface.co/Qwen/Qwen-Image-2512) (Qwen-Image-2512)
 - [zai-org/GLM-Image](https://huggingface.co/zai-org/GLM-Image) (GLM-Image)
+- [zlab-princeton/i1-3B](https://huggingface.co/zlab-princeton/i1-3B) (i1-3B)
 - [HiDream-ai/HiDream-I1-Full](https://huggingface.co/HiDream-ai/HiDream-I1-Full) (HiDream)
 - [HiDream-ai/HiDream-O1-Image](https://huggingface.co/HiDream-ai/HiDream-O1-Image) (HiDream-O1)
 - [ideogram-ai/ideogram-4-nf4](https://huggingface.co/ideogram-ai/ideogram-4-nf4) (Ideogram 4 NF4)
@@ -38,6 +39,8 @@ OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffus
 HiDream-O1 training defaults to `train.t0_loss_target: true`, so the trainer compares the reconstructed timestep-0 prediction directly against the image latent target. That keeps O1 in its native x0 loss space instead of relying on velocity-space loss weighting to control small-timestep spikes.
 
 GLM-Image is supported for text-to-image sampling and transformer LoRA training through upstream Diffusers `GlmImagePipeline` and `GlmImageTransformer2DModel`. The built-in `glm_image` preset defaults to `zai-org/GLM-Image`, flowmatch scheduling, 1024px samples, 50 sample steps, guidance `1.5`, quantization, and exposed low-VRAM controls. V1 trains transformer LoRA only with `target_lora_modules: ["GlmImageTransformer2DModel"]`.
+
+i1-3B is supported through the built-in `i1` architecture for native text-to-image sampling and transformer LoRA training. It uses `zlab-princeton/i1-3B` for the transformer checkpoint, `google/t5gemma-2b-2b-ul2-it` for text embeddings, and the FLUX.2 VAE from `black-forest-labs/FLUX.2-dev`. The FLUX.2-dev repo is gated on Hugging Face, so request and accept access before running `hf auth login`, or set `model.model_kwargs.vae_name_or_path` to a local FLUX.2-dev root folder or local VAE folder. The 1024-resolution checkpoint uses a fixed square latent grid, so the built-in `i1` training defaults force 1024 square crops and recache i1 latents with square crop dimensions. The preset also defaults to 1024px samples, flowmatch scheduling, guidance `12`, guidance rescale `1.0`, 50 sample steps, quantization, cached text embeddings, and transformer-only LoRA rank `32`.
 
 Ideogram 4 is supported through the built-in `ideogram4` architecture for text-to-image sampling, transformer LoRA training, and full conditional-transformer fine-tuning. Use `ideogram-ai/ideogram-4-nf4` or `ideogram-ai/ideogram-4-fp8`; both are gated Hugging Face models and their weights remain under Ideogram's non-commercial license. The integration vendors the Apache-2.0 official pipeline components locally and does not call external moderation, magic-prompt, or other hosted APIs. Qwen3-VL, the VAE, and the unconditional transformer stay frozen; LoRA and full fine-tune jobs train only the conditional transformer.
 
@@ -536,7 +539,7 @@ train:
 
 Progress displays use the current step without a percentage bar while auto learn is active, because there is no planned final step. Resuming a checkpoint restores the current phase and continues plateau tracking from the saved training state.
 
-For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`. For Ideogram 4 LoRA and full fine-tune starting points, see `config/examples/train_lora_ideogram4_48gb.yaml`, `config/examples/train_lora_ideogram4_fp8_48gb.yaml`, and `config/examples/train_full_fine_tune_ideogram4.yaml`.
+For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`. For i1-3B LoRA, see `config/examples/train_lora_i1_24gb.yaml`. For Ideogram 4 LoRA and full fine-tune starting points, see `config/examples/train_lora_ideogram4_48gb.yaml`, `config/examples/train_lora_ideogram4_fp8_48gb.yaml`, and `config/examples/train_full_fine_tune_ideogram4.yaml`.
 
 ### Need help or found a bug?
 

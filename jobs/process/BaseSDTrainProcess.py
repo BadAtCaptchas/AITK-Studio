@@ -135,6 +135,21 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 optimizer_params.setdefault('weight_decay', 0.0001)
             if 't0_loss_target' not in raw_train_config:
                 raw_train_config['t0_loss_target'] = True
+        if model_config.get('arch') == 'i1':
+            raw_train_config.setdefault('noise_scheduler', 'flowmatch')
+            raw_train_config.setdefault('dtype', 'bf16')
+            raw_train_config.setdefault('batch_size', 1)
+            raw_train_config.setdefault('gradient_accumulation', 1)
+            raw_train_config.setdefault('steps', 3000)
+            raw_train_config.setdefault('optimizer', 'adamw8bit')
+            raw_train_config.setdefault('lr', 0.0001)
+            raw_train_config.setdefault('timestep_type', 'i1_lognorm')
+            raw_train_config.setdefault('content_or_style', 'balanced')
+            raw_train_config.setdefault('loss_type', 'mse')
+            raw_train_config.setdefault('cache_text_embeddings', True)
+            raw_train_config.setdefault('standardize_images', False)
+            raw_train_config.setdefault('standardize_latents', False)
+            raw_train_config.setdefault('latent_multiplier', 1.0)
         self.train_config = TrainConfig(**raw_train_config)
         self.modules_being_trained: List[torch.nn.Module] = []
 
@@ -167,6 +182,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # store is all are cached. Allows us to not load vae if we don't need to
         self.is_latents_cached = True
         raw_datasets = self.get_conf('datasets', None)
+        if model_config.get('arch') == 'i1' and raw_datasets is not None:
+            for raw_dataset in raw_datasets:
+                raw_dataset['resolution'] = [1024]
+                raw_dataset['square_crop'] = True
         if raw_datasets is not None and len(raw_datasets) > 0:
             raw_datasets = preprocess_dataset_raw_config(raw_datasets)
         self.datasets = None
@@ -1365,6 +1384,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.train_config.linear_timesteps,
                         self.train_config.linear_timesteps2,
                         self.train_config.timestep_type == 'linear',
+                        self.train_config.timestep_type == 'i1_lognorm',
                         self.train_config.timestep_type in ['one_step', 'two_step', 'four_step', 'eight_step'],
                     ])
                     
@@ -1438,6 +1458,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     timestep_indices = timestep_indices.long()
                 elif self.train_config.timestep_type == 'one_step':
                     timestep_indices = torch.zeros((batch_size,), device=self.device_torch, dtype=torch.long)
+                elif self.train_config.timestep_type == 'i1_lognorm':
+                    t = torch.sigmoid(torch.randn((batch_size,), device=self.device_torch))
+                    shift = 0.3
+                    t = (shift * t) / (1.0 + (shift - 1.0) * t)
+                    timestep_indices = ((1.0 - t) * (num_train_timesteps - 1)).long()
+                    timestep_indices = timestep_indices.clamp(min_noise_steps, max_noise_steps)
                 elif content_or_style in ['style', 'content']:
                     # this is from diffusers training code
                     # Cubic sampling for favoring later or earlier timesteps

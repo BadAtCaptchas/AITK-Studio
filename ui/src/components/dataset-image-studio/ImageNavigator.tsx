@@ -705,7 +705,7 @@ export function ImageNavigator({
   }, [entries]);
 
   return (
-    <div className="flex flex-shrink-0 flex-col border-t border-gray-900 bg-[#080d12]">
+    <div className="flex min-w-0 max-w-full flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-[#080d12]">
       {drawerOpen && (
         <div className="flex h-[42dvh] min-h-[230px] flex-col border-b border-gray-900 bg-[#080d12] xl:max-h-[440px]">
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-900 px-2 py-2 xl:px-3">
@@ -958,8 +958,8 @@ export function ImageNavigator({
         </div>
       )}
 
-      <div className="flex flex-col gap-2 px-2 py-2 xl:px-3">
-        <div className="flex items-center gap-2">
+      <div className="flex min-w-0 max-w-full flex-col gap-2 overflow-hidden px-2 py-2 xl:px-3">
+        <div className="operator-scrollbar-none flex min-w-0 max-w-full items-center gap-2 overflow-x-auto">
           <IconButton title="First image" disabled={!canGoPrevious} onClick={() => commitIndex(0)}>
             <ChevronsLeft className="h-4 w-4" />
           </IconButton>
@@ -1035,7 +1035,7 @@ export function ImageNavigator({
           </IconButton>
         </div>
 
-        <div className="flex h-[74px] items-center gap-2 sm:h-[86px] xl:h-[96px]">
+        <div className="flex h-[74px] min-w-0 max-w-full items-center gap-2 overflow-hidden sm:h-[86px] xl:h-[96px]">
           <button
             type="button"
             className="flex h-full w-10 flex-shrink-0 items-center justify-center rounded-md border border-gray-900 bg-gray-950 text-gray-300 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45 sm:w-12"

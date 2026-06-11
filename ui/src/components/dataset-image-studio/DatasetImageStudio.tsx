@@ -1178,7 +1178,7 @@ export default function DatasetImageStudio({
   if (!selectedItem) return null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#02060a] text-gray-100">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#02060a] text-gray-100">
       <StudioToolbar
         selectedIndex={selectedIndex}
         itemCount={items.length}
@@ -1195,7 +1195,7 @@ export default function DatasetImageStudio({
         onDeleteCurrent={handleDeleteCurrentImage}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row">
         <ToolRail
           activeTool={activeTool}
           canAnnotate={canAnnotate}
@@ -1212,9 +1212,9 @@ export default function DatasetImageStudio({
           }}
         />
 
-        <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-          <main className="relative flex min-h-0 flex-1 flex-col bg-[#03070b]">
-            <div className="relative flex min-h-[260px] flex-1 items-stretch justify-stretch overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden xl:flex-row">
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#03070b]">
+            <div className="relative flex min-h-[260px] min-w-0 flex-1 items-stretch justify-stretch overflow-hidden">
               <div className="absolute left-3 top-3 z-10 max-w-[calc(50%-1rem)] truncate rounded-md border border-gray-800 bg-gray-950/80 px-2 py-1 text-xs text-gray-300 backdrop-blur">
                 {selectedName}
               </div>
@@ -1265,7 +1265,7 @@ export default function DatasetImageStudio({
             />
           </main>
 
-          <aside className="flex max-h-[34dvh] min-h-[190px] flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-[#080d12] xl:max-h-none xl:min-h-0 xl:w-[410px] xl:border-l xl:border-t-0">
+          <aside className="flex w-full max-h-[34dvh] min-h-[190px] min-w-0 flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-[#080d12] xl:max-h-none xl:min-h-0 xl:w-[410px] xl:flex-none xl:border-l xl:border-t-0">
             <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto p-2 md:p-3">
               {canAnnotate && captionParse.kind === 'ideogram' && (
                 <LayersPanel

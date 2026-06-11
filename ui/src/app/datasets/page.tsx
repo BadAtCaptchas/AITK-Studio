@@ -10,12 +10,14 @@ import { FaRegTrashAlt } from 'react-icons/fa';
 import {
   AlertTriangle,
   CheckCircle2,
+  CloudDownload,
   Database,
   Download,
   FolderPlus,
   HelpCircle,
   KeyRound,
   Layers,
+  Loader2,
   LockKeyhole,
   MinusCircle,
   Pencil,
@@ -188,6 +190,23 @@ type FolderImportEntry = {
   rootName: string;
 };
 
+type HfDatasetPreview = {
+  datasetID: string;
+  configs: string[];
+  splits: string[];
+  selectedConfig: string;
+  selectedSplit: string;
+  rowCount?: number | null;
+  features: Array<{ name: string; kind: string }>;
+  imageColumns: string[];
+  textColumns: string[];
+  suggestedImageColumn: string | null;
+  suggestedCaptionColumn: string | null;
+  samples: Array<Record<string, unknown>>;
+};
+
+type HfCaptionMode = 'auto' | 'none' | 'column';
+
 type BulkUnlockStatus = 'loading' | 'locked' | 'unlocking' | 'unlocked' | 'error';
 
 function cleanClientDatasetName(name: string) {
@@ -212,6 +231,12 @@ function nextClientDatasetName(preferredName: string, usedNames: Set<string>) {
   }
   usedNames.add(candidate.toLowerCase());
   return candidate;
+}
+
+function hfOutputNameFromDataset(datasetID: string, split?: string) {
+  const base = cleanClientDatasetName(datasetID.replace(/^https?:\/\/(?:www\.)?huggingface\.co\/datasets\//i, ''));
+  const splitSuffix = split && split !== 'train' ? `_${cleanClientDatasetName(split)}` : '';
+  return `${base || 'hf_dataset'}${splitSuffix}`;
 }
 
 export default function Datasets() {
@@ -276,6 +301,21 @@ export default function Datasets() {
   const [folderImportDatasetName, setFolderImportDatasetName] = useState('');
   const [isImportingFolders, setIsImportingFolders] = useState(false);
   const [folderImportStatus, setFolderImportStatus] = useState('');
+  const [isHfImportModalOpen, setIsHfImportModalOpen] = useState(false);
+  const [hfDatasetInput, setHfDatasetInput] = useState('');
+  const [hfImportWorkerID, setHfImportWorkerID] = useState('local');
+  const [hfPreview, setHfPreview] = useState<HfDatasetPreview | null>(null);
+  const [hfConfig, setHfConfig] = useState('');
+  const [hfSplit, setHfSplit] = useState('');
+  const [hfImageColumn, setHfImageColumn] = useState('');
+  const [hfCaptionMode, setHfCaptionMode] = useState<HfCaptionMode>('auto');
+  const [hfCaptionColumn, setHfCaptionColumn] = useState('');
+  const [hfOutputName, setHfOutputName] = useState('');
+  const [hfMaxRows, setHfMaxRows] = useState('');
+  const [hfImportStatus, setHfImportStatus] = useState('');
+  const [hfImportError, setHfImportError] = useState('');
+  const [isLoadingHfPreview, setIsLoadingHfPreview] = useState(false);
+  const [isImportingHfDataset, setIsImportingHfDataset] = useState(false);
 
   const isDatasetUnlocked = useCallback(
     (dataset: DatasetSummary) =>
@@ -778,6 +818,99 @@ export default function Datasets() {
       alert(error?.response?.data?.error || 'Failed to import remote dataset.');
     } finally {
       setImportingRef(null);
+    }
+  };
+
+  const closeHfImportModal = () => {
+    if (isLoadingHfPreview || isImportingHfDataset) return;
+    setIsHfImportModalOpen(false);
+    setHfDatasetInput('');
+    setHfImportWorkerID('local');
+    setHfPreview(null);
+    setHfConfig('');
+    setHfSplit('');
+    setHfImageColumn('');
+    setHfCaptionMode('auto');
+    setHfCaptionColumn('');
+    setHfOutputName('');
+    setHfMaxRows('');
+    setHfImportStatus('');
+    setHfImportError('');
+  };
+
+  const hfRequestPayload = (action: 'preview' | 'import') => {
+    const maxRowsValue = hfMaxRows.trim() ? Number(hfMaxRows) : undefined;
+    return {
+      action,
+      worker_id: hfImportWorkerID,
+      dataset: hfDatasetInput,
+      config: hfConfig || undefined,
+      split: hfSplit || undefined,
+      imageColumn: hfImageColumn || undefined,
+      captionMode: hfCaptionMode,
+      captionColumn: hfCaptionMode === 'column' ? hfCaptionColumn || undefined : undefined,
+      outputName: action === 'import' ? hfOutputName || undefined : undefined,
+      maxRows: Number.isFinite(maxRowsValue) && Number(maxRowsValue) > 0 ? Math.floor(Number(maxRowsValue)) : undefined,
+    };
+  };
+
+  const handleLoadHfPreview = async () => {
+    if (!hfDatasetInput.trim() || isLoadingHfPreview) return;
+    try {
+      setIsLoadingHfPreview(true);
+      setHfImportError('');
+      setHfImportStatus('Loading preview...');
+      const res = await apiClient.post('/api/datasets/import-huggingface', hfRequestPayload('preview'), { timeout: 0 });
+      const preview = res.data as HfDatasetPreview;
+      setHfPreview(preview);
+      setHfConfig(preview.selectedConfig || '');
+      setHfSplit(preview.selectedSplit || '');
+      setHfImageColumn(preview.suggestedImageColumn || preview.imageColumns[0] || '');
+      setHfCaptionColumn(preview.suggestedCaptionColumn || preview.textColumns[0] || '');
+      if (!hfOutputName) {
+        setHfOutputName(hfOutputNameFromDataset(preview.datasetID, preview.selectedSplit));
+      }
+      const countText = preview.rowCount != null ? `${preview.rowCount} row${preview.rowCount === 1 ? '' : 's'}` : 'Preview ready';
+      setHfImportStatus(countText);
+    } catch (error: any) {
+      setHfPreview(null);
+      setHfImportError(error?.response?.data?.error || error?.message || 'Failed to load Hugging Face dataset preview.');
+      setHfImportStatus('');
+    } finally {
+      setIsLoadingHfPreview(false);
+    }
+  };
+
+  const handleImportHfDataset = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!hfDatasetInput.trim() || isImportingHfDataset) return;
+    try {
+      setIsImportingHfDataset(true);
+      setHfImportError('');
+      setHfImportStatus('Importing dataset...');
+      const res = await apiClient.post('/api/datasets/import-huggingface', hfRequestPayload('import'), { timeout: 0 });
+      const importedName = res.data?.dataset?.name;
+      const workerID = hfImportWorkerID;
+      const imported = res.data?.imported;
+      setHfImportStatus(
+        imported
+          ? `Imported ${imported.imagesWritten} image${imported.imagesWritten === 1 ? '' : 's'}.`
+          : 'Imported dataset.',
+      );
+      refreshDatasets();
+      setIsHfImportModalOpen(false);
+      if (importedName) {
+        router.push(
+          workerID === 'local'
+            ? `/datasets/${encodeURIComponent(importedName)}`
+            : `/datasets/${encodeURIComponent(importedName)}?worker_id=${encodeURIComponent(workerID)}`,
+        );
+      }
+    } catch (error: any) {
+      setHfImportError(error?.response?.data?.error || error?.message || 'Failed to import Hugging Face dataset.');
+      setHfImportStatus('');
+    } finally {
+      setIsImportingHfDataset(false);
     }
   };
 
@@ -1290,6 +1423,15 @@ export default function Datasets() {
           </Button>
           <Button
             className="operator-button shrink-0 py-1"
+            onClick={() => setIsHfImportModalOpen(true)}
+            title="Import Hugging Face dataset"
+            aria-label="Import Hugging Face dataset"
+          >
+            <CloudDownload className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Import HF</span>
+          </Button>
+          <Button
+            className="operator-button shrink-0 py-1"
             onClick={() => setIsFolderImportModalOpen(true)}
             title="Import folders"
             aria-label="Import folders"
@@ -1699,6 +1841,222 @@ export default function Datasets() {
               className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRenamingDataset ? 'Renaming...' : 'Rename'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isHfImportModalOpen}
+        onClose={closeHfImportModal}
+        title="Import Hugging Face Dataset"
+        size="lg"
+        closeOnOverlayClick={!isLoadingHfPreview && !isImportingHfDataset}
+      >
+        <form onSubmit={handleImportHfDataset} className="space-y-4 text-gray-200">
+          <TextInput
+            label="Dataset URL or ID"
+            value={hfDatasetInput}
+            onChange={value => {
+              setHfDatasetInput(value);
+              setHfPreview(null);
+              setHfImportStatus('');
+              setHfImportError('');
+            }}
+          />
+
+          {folderImportWorkerOptions.length > 1 && (
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Import To</label>
+              <select
+                value={hfImportWorkerID}
+                onChange={event => {
+                  setHfImportWorkerID(event.target.value);
+                  setHfPreview(null);
+                  setHfImportStatus('');
+                  setHfImportError('');
+                }}
+                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+              >
+                {folderImportWorkerOptions.map(worker => (
+                  <option key={worker.id} value={worker.id}>
+                    {worker.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Config</label>
+              {hfPreview?.configs?.length ? (
+                <select
+                  value={hfConfig}
+                  onChange={event => setHfConfig(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.configs.map(config => (
+                    <option key={config} value={config}>
+                      {config}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfConfig}
+                  onChange={event => setHfConfig(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Split</label>
+              {hfPreview?.splits?.length ? (
+                <select
+                  value={hfSplit}
+                  onChange={event => setHfSplit(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.splits.map(split => (
+                    <option key={split} value={split}>
+                      {split}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfSplit}
+                  onChange={event => setHfSplit(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Image Column</label>
+              {hfPreview?.imageColumns?.length ? (
+                <select
+                  value={hfImageColumn}
+                  onChange={event => setHfImageColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.imageColumns.map(column => (
+                    <option key={column} value={column}>
+                      {column}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfImageColumn}
+                  onChange={event => setHfImageColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Captions</label>
+              <select
+                value={hfCaptionMode}
+                onChange={event => setHfCaptionMode(event.target.value as HfCaptionMode)}
+                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+              >
+                <option value="auto">Auto</option>
+                <option value="none">None</option>
+                <option value="column">Column</option>
+              </select>
+            </div>
+          </div>
+
+          {hfCaptionMode === 'column' && (
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Caption Column</label>
+              {hfPreview?.textColumns?.length ? (
+                <select
+                  value={hfCaptionColumn}
+                  onChange={event => setHfCaptionColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.textColumns.map(column => (
+                    <option key={column} value={column}>
+                      {column}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfCaptionColumn}
+                  onChange={event => setHfCaptionColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <TextInput label="Output Dataset Name" value={hfOutputName} onChange={setHfOutputName} />
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Max Rows</label>
+              <input
+                type="number"
+                min="1"
+                value={hfMaxRows}
+                onChange={event => setHfMaxRows(event.target.value)}
+                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+              />
+            </div>
+          </div>
+
+          {hfPreview && (
+            <div className="rounded-md border border-gray-700 bg-gray-900 p-3 text-sm text-gray-300">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span>{hfPreview.datasetID}</span>
+                <span>{hfPreview.selectedConfig}</span>
+                <span>{hfPreview.selectedSplit}</span>
+                {hfPreview.rowCount != null && <span>{hfPreview.rowCount} rows</span>}
+              </div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <div className="min-w-0 truncate text-gray-400">
+                  Images: {hfPreview.imageColumns.length ? hfPreview.imageColumns.join(', ') : 'none'}
+                </div>
+                <div className="min-w-0 truncate text-gray-400">
+                  Text: {hfPreview.textColumns.length ? hfPreview.textColumns.join(', ') : 'none'}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {hfImportError && <div className="text-sm text-red-400">{hfImportError}</div>}
+          {hfImportStatus && !hfImportError && <div className="text-sm text-blue-300">{hfImportStatus}</div>}
+
+          <div className="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+              onClick={closeHfImportModal}
+              disabled={isLoadingHfPreview || isImportingHfDataset}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isLoadingHfPreview || isImportingHfDataset || !hfDatasetInput.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-slate-600 px-4 py-2 text-white hover:bg-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={handleLoadHfPreview}
+            >
+              {isLoadingHfPreview && <Loader2 className="h-4 w-4 animate-spin" />}
+              Preview
+            </button>
+            <button
+              type="submit"
+              disabled={isLoadingHfPreview || isImportingHfDataset || !hfDatasetInput.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isImportingHfDataset && <Loader2 className="h-4 w-4 animate-spin" />}
+              Import
             </button>
           </div>
         </form>

@@ -45,6 +45,7 @@
         "src/server/ollama.ts",
         "src/server/ollamaVision.ts",
         "src/server/remoteOllamaWorkers.ts",
+        "src/server/hfDatasetImport.ts",
         "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
         "src/server/randomPromptCaptions.ts",

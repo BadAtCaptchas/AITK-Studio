@@ -25,6 +25,7 @@
     "test:caption-bulk": "tsc -p tsconfig.worker.json && node --test scripts/captionKeywordSearch.test.mjs scripts/datasetCaptionBulk.test.mjs",
     "test:image-delete": "tsc -p tsconfig.worker.json && node --test scripts/imageDelete.test.mjs",
     "test:folder-import": "tsc -p tsconfig.worker.json && node --test scripts/folderImport.test.mjs",
+    "test:hf-dataset-import": "tsc -p tsconfig.worker.json && node --test scripts/hfDatasetImport.test.mjs",
     "test:annotation-geometry": "tsc -p tsconfig.worker.json && node --test scripts/annotationGeometry.test.mjs",
     "test:ideogram-caption": "tsc -p tsconfig.worker.json && node --test scripts/ideogramCaption.test.mjs",
     "test:job-datasets": "tsc -p tsconfig.worker.json && node --test scripts/jobDatasetDefaults.test.mjs scripts/remoteDatasetRefs.test.mjs scripts/remoteDatasetSync.test.mjs scripts/remoteStartProgress.test.mjs scripts/remoteClientUpload.test.mjs scripts/remoteJobMissing.test.mjs",

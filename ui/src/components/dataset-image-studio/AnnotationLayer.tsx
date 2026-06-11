@@ -15,8 +15,17 @@ import {
 } from '@/utils/annotationGeometry';
 import { rectToBox, type IdeogramBox, type IdeogramElementType, type NormalizedBox } from '@/utils/ideogramCaption';
 import { CLICK_DRAG_TOLERANCE, MIN_BOX_SPAN } from './constants';
-import type { ToolMode } from './types';
+import type { ImageSize, ToolMode } from './types';
 import { resolveBoxColor } from './utils';
+
+function previewSizeLabel(box: NormalizedBox, imageSize?: ImageSize | null) {
+  const w = Math.max(0, box.x2 - box.x1);
+  const h = Math.max(0, box.y2 - box.y1);
+  if (imageSize?.width && imageSize?.height) {
+    return `${Math.round((w / 1000) * imageSize.width)} × ${Math.round((h / 1000) * imageSize.height)} px`;
+  }
+  return `${(w / 10).toFixed(1)} × ${(h / 10).toFixed(1)} %`;
+}
 
 function handleCursor(handle: DragHandle | null) {
   if (!handle) return 'default';
@@ -46,6 +55,7 @@ export function AnnotationLayer({
   selectedElementIndex,
   hiddenElementIndexes,
   lockedElementIndexes,
+  imageSize,
   onSelect,
   onCreate,
   onChangeBox,
@@ -56,6 +66,7 @@ export function AnnotationLayer({
   selectedElementIndex: number | null;
   hiddenElementIndexes: Set<number>;
   lockedElementIndexes: Set<number>;
+  imageSize?: ImageSize | null;
   onSelect: (elementIndex: number | null) => void;
   onCreate: (type: IdeogramElementType, box: NormalizedBox) => void;
   onChangeBox: (elementIndex: number, box: NormalizedBox) => void;
@@ -187,17 +198,31 @@ export function AnnotationLayer({
         setNewBoxPreview(latest);
       };
 
-      const onUp = () => {
+      const cleanup = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('keydown', onCancelKey, true);
+      };
+
+      const onUp = () => {
+        cleanup();
         setNewBoxPreview(null);
         if (latest.x2 - latest.x1 >= MIN_BOX_SPAN && latest.y2 - latest.y1 >= MIN_BOX_SPAN) {
           onCreate(type, latest);
         }
       };
 
+      const onCancelKey = (keyEvent: KeyboardEvent) => {
+        if (keyEvent.key !== 'Escape') return;
+        keyEvent.preventDefault();
+        keyEvent.stopImmediatePropagation();
+        cleanup();
+        setNewBoxPreview(null);
+      };
+
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
+      window.addEventListener('keydown', onCancelKey, true);
     },
     [onCreate, pointToNorm],
   );
@@ -256,9 +281,14 @@ export function AnnotationLayer({
         setDragPreview({ elementIndex: dragBox.elementIndex, box: latest });
       };
 
-      const onUp = (upEvent: PointerEvent) => {
+      const cleanup = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('keydown', onCancelKey, true);
+      };
+
+      const onUp = (upEvent: PointerEvent) => {
+        cleanup();
         setDragPreview(null);
         if (moved) {
           onChangeBox(dragBox.elementIndex, latest);
@@ -271,8 +301,17 @@ export function AnnotationLayer({
         }
       };
 
+      const onCancelKey = (keyEvent: KeyboardEvent) => {
+        if (keyEvent.key !== 'Escape') return;
+        keyEvent.preventDefault();
+        keyEvent.stopImmediatePropagation();
+        cleanup();
+        setDragPreview(null);
+      };
+
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
+      window.addEventListener('keydown', onCancelKey, true);
     },
     [
       beginDraw,
@@ -347,6 +386,22 @@ export function AnnotationLayer({
           }}
         />
       )}
+      {(() => {
+        const activePreview = newBoxPreview ?? dragPreview?.box ?? null;
+        if (!activePreview) return null;
+        const badgeAbove = activePreview.y1 >= 30;
+        return (
+          <div
+            className="pointer-events-none absolute z-40 whitespace-nowrap rounded border border-gray-700 bg-gray-950/90 px-1.5 py-0.5 font-mono text-[10px] leading-none text-gray-200 shadow"
+            style={{
+              left: `${activePreview.x1 / 10}%`,
+              top: badgeAbove ? `calc(${activePreview.y1 / 10}% - 1.25rem)` : `calc(${activePreview.y1 / 10}% + 2px)`,
+            }}
+          >
+            {previewSizeLabel(activePreview, imageSize)}
+          </div>
+        );
+      })()}
       {cycleToast && (
         <div
           className="pointer-events-none absolute z-40 rounded-md border border-blue-400/40 bg-gray-950/90 px-2 py-1 text-[11px] font-semibold text-blue-100 shadow-xl"

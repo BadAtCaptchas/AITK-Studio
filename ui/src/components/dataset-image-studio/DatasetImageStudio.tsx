@@ -32,6 +32,7 @@ import {
   updateIdeogramElementType,
   updateIdeogramHighLevelDescription,
 } from '@/utils/ideogramCaption';
+import { resizeOrMoveBox } from '@/utils/annotationGeometry';
 import { AnnotationLayer } from './AnnotationLayer';
 import {
   AUTO_BOX_PROVIDERS,
@@ -39,6 +40,7 @@ import {
   DEFAULT_OLLAMA_VISION_MODEL,
   DEFAULT_OPENROUTER_BOX_MODEL,
   MAX_HISTORY,
+  MIN_BOX_SPAN,
 } from './constants';
 import { ImageNavigator } from './ImageNavigator';
 import { CaptionEditorPanel, ObjectDetailsPanel } from './InspectorPanels';
@@ -1080,9 +1082,27 @@ export default function DatasetImageStudio({
         void saveCaption();
         return;
       }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void saveCaption();
+        return;
+      }
       if (isTyping) return;
-      if (event.key === 'ArrowLeft') selectIndex(selectedIndex - 1);
-      if (event.key === 'ArrowRight') selectIndex(selectedIndex + 1);
+      const isArrowKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
+      if (isArrowKey) {
+        // Nudge the selected (unlocked) box with arrow keys; otherwise navigate images.
+        if (selectedBox && selectedElementIndex != null && !lockedLayerIndexes.has(selectedElementIndex)) {
+          event.preventDefault();
+          const step = event.shiftKey ? 20 : 5;
+          const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+          const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
+          handleChangeBox(selectedElementIndex, resizeOrMoveBox(selectedBox, dx, dy, 'move', MIN_BOX_SPAN));
+          return;
+        }
+        if (event.key === 'ArrowLeft') selectIndex(selectedIndex - 1);
+        if (event.key === 'ArrowRight') selectIndex(selectedIndex + 1);
+        return;
+      }
       if (event.key === 'Escape') {
         if (activePaletteSamplerIndex != null) {
           handleCancelPaletteSample();
@@ -1093,9 +1113,20 @@ export default function DatasetImageStudio({
       if (event.key === '[') cycleOverlapSelection(-1);
       if (event.key === ']') cycleOverlapSelection(1);
       if (event.key === 'Delete' || event.key === 'Backspace') handleDeleteSelectedElement();
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
+        if (selectedElementIndex != null) {
+          event.preventDefault();
+          handleDuplicateElement(selectedElementIndex);
+        }
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        undo();
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
         event.preventDefault();
@@ -1108,10 +1139,15 @@ export default function DatasetImageStudio({
     activePaletteSamplerIndex,
     cycleOverlapSelection,
     handleCancelPaletteSample,
+    handleChangeBox,
     handleDeleteSelectedElement,
+    handleDuplicateElement,
+    lockedLayerIndexes,
     redo,
     saveCaption,
     selectIndex,
+    selectedBox,
+    selectedElementIndex,
     selectedIndex,
     undo,
   ]);
@@ -1153,7 +1189,7 @@ export default function DatasetImageStudio({
         canDeleteCurrent={Boolean(onDeleteImages && selectedItem)}
         onPrevious={() => selectIndex(selectedIndex - 1)}
         onNext={() => selectIndex(selectedIndex + 1)}
-        onCycleZoom={() => setZoom(value => (value >= 1.5 ? 1 : Number((value + 0.25).toFixed(2))))}
+        onCycleZoom={() => setZoom(value => (value >= 2 ? 1 : Number((value + 0.25).toFixed(2))))}
         onPan={() => setActiveTool('pan')}
         onFit={() => setZoom(1)}
         onDeleteCurrent={handleDeleteCurrentImage}
@@ -1205,6 +1241,7 @@ export default function DatasetImageStudio({
                     selectedElementIndex={selectedElementIndex}
                     hiddenElementIndexes={hiddenLayerIndexes}
                     lockedElementIndexes={lockedLayerIndexes}
+                    imageSize={selectedImageSize}
                     onSelect={setSelectedElementIndex}
                     onCreate={handleCreateBox}
                     onChangeBox={handleChangeBox}

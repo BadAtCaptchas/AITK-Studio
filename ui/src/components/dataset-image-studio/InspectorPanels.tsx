@@ -433,8 +433,11 @@ export function CaptionEditorPanel({
               onChange={event => onCaptionDescriptionChange(event.target.value)}
               className="h-36 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 text-sm text-gray-100 outline-none focus:border-blue-500 disabled:opacity-50"
             />
-            <span className="mt-1 block text-right text-xs text-gray-500">
-              {highLevelDescription.length} / {isIdeogram ? 2000 : 4000}
+            <span className="mt-1 flex items-center justify-between text-xs text-gray-500">
+              <span>{highLevelDescription.trim() ? highLevelDescription.trim().split(/\s+/).length : 0} words</span>
+              <span>
+                {highLevelDescription.length} / {isIdeogram ? 2000 : 4000}
+              </span>
             </span>
           </label>
         ) : (
@@ -453,7 +456,7 @@ export function CaptionEditorPanel({
             {isDirty ? (
               <>
                 <span className="h-2 w-2 rounded-full bg-blue-400" />
-                Unsaved changes
+                Unsaved changes (Ctrl+S to save)
               </>
             ) : (
               <>

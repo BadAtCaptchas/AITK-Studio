@@ -13,6 +13,7 @@ import {
   remoteJson,
   syncRemoteJob,
   uploadDatasetArchiveToWorker,
+  withoutRemoteRedirects,
 } from './remoteClient';
 import {
   buildInitialRemoteCaptionState,
@@ -61,13 +62,19 @@ async function startRemoteWorkerCaptionJob(
   gpuIds: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
 ) {
-  await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobID)}/start`, {
+  const hasEncryptedDatasetKeys = Array.isArray(encryptedDatasetKeys) && encryptedDatasetKeys.length > 0;
+  const startInit: RequestInit = {
     method: 'POST',
     body: JSON.stringify({
       encryptedDatasetKeys,
-      durableEncryptedDatasetKeys: Array.isArray(encryptedDatasetKeys) && encryptedDatasetKeys.length > 0,
+      durableEncryptedDatasetKeys: hasEncryptedDatasetKeys,
     }),
-  });
+  };
+  await remoteJson(
+    worker,
+    `/api/jobs/${encodeURIComponent(remoteJobID)}/start`,
+    hasEncryptedDatasetKeys ? withoutRemoteRedirects(startInit) : startInit,
+  );
   await remoteJson(worker, `/api/queue/${encodeURIComponent(gpuIds)}/start`);
   const queue = await db.queues.findByGpuIds(gpuIds, worker.id);
   if (queue) {

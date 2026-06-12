@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatasetsRoot } from '@/server/settings';
-import { combineDatasets, isDatasetCombineError, type DatasetCombineRequest } from '@/server/datasetCombine';
-import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import {
+  combineDatasets,
+  datasetCombineRequestHasKeyMaterial,
+  isDatasetCombineError,
+  type DatasetCombineRequest,
+} from '@/server/datasetCombine';
+import { getRemoteWorker, isLocalWorker, remoteJson, withoutRemoteRedirects } from '@/server/remoteClient';
 import type { DatasetSummary } from '@/types';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 
@@ -26,11 +31,28 @@ export async function POST(request: NextRequest) {
 
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
+      const hasKeyMaterial = datasetCombineRequestHasKeyMaterial(body);
+      if (
+        hasKeyMaterial &&
+        !worker.base_url.toLowerCase().startsWith('https://') &&
+        process.env.AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS !== '1'
+      ) {
+        return NextResponse.json(
+          { error: 'Remote encrypted dataset combine requires an HTTPS worker URL.' },
+          { status: 400 },
+        );
+      }
+
       const remoteBody = { ...body, worker_id: 'local' };
-      const remoteResult = await remoteJson<any>(worker, '/api/datasets/combine', {
+      const remoteInit: RequestInit = {
         method: 'POST',
         body: JSON.stringify(remoteBody),
-      });
+      };
+      const remoteResult = await remoteJson<any>(
+        worker,
+        '/api/datasets/combine',
+        hasKeyMaterial ? withoutRemoteRedirects(remoteInit) : remoteInit,
+      );
       return NextResponse.json({
         ...remoteResult,
         dataset: remoteResult?.dataset ? decorateRemoteDataset(worker, remoteResult.dataset) : remoteResult?.dataset,

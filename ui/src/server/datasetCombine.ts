@@ -76,6 +76,14 @@ export type DatasetCombineResult = {
   renamed: boolean;
 };
 
+export function datasetCombineRequestHasKeyMaterial(request: Partial<DatasetCombineRequest> | null | undefined) {
+  return (
+    (Array.isArray(request?.encryptedDatasetKeys) &&
+      request.encryptedDatasetKeys.some(key => typeof key?.keyB64 === 'string' && key.keyB64.length > 0)) ||
+    (typeof request?.outputKeyB64 === 'string' && request.outputKeyB64.length > 0)
+  );
+}
+
 type SourceContext = {
   name: string;
   folder: string;

@@ -48,6 +48,7 @@
         "src/server/hfDatasetImport.ts",
         "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
+        "src/server/remoteClient.ts",
         "src/server/randomPromptCaptions.ts",
         "src/server/trainingAdvisor.ts",
         "src/server/remoteStartProgress.ts",

@@ -7,6 +7,7 @@ import {
   remoteJson,
   syncRemoteJob,
   uploadBundleToWorker,
+  withoutRemoteRedirects,
 } from './remoteClient';
 import {
   dispatchRemoteCaptionJob,
@@ -436,13 +437,19 @@ export async function startPreparedJob(
         warnings: remoteWarnings,
         remoteJobID: remoteJobId,
       });
-      await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobId)}/start`, {
+      const remoteStartHasKeys = requiredEncryptedDatasets.length > 0;
+      const remoteStartInit: RequestInit = {
         method: 'POST',
         body: JSON.stringify({
-          encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? remoteEncryptedKeysForLaunch : undefined,
+          encryptedDatasetKeys: remoteStartHasKeys ? remoteEncryptedKeysForLaunch : undefined,
           durableEncryptedDatasetKeys: useDurableEncryptedKeys,
         }),
-      });
+      };
+      await remoteJson(
+        worker,
+        `/api/jobs/${encodeURIComponent(remoteJobId)}/start`,
+        remoteStartHasKeys ? withoutRemoteRedirects(remoteStartInit) : remoteStartInit,
+      );
       onProgress?.({
         status: 'starting',
         message: 'Starting remote queue',

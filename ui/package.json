@@ -12,7 +12,7 @@
     "test:metrics": "tsc -p tsconfig.worker.json && node --test scripts/metricsDownsample.test.mjs",
     "test:advisor": "tsc -p tsconfig.worker.json && node --test scripts/trainingAdvisor.test.mjs",
     "test:tensorboard": "tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
-    "test:remote": "tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs",
+    "test:remote": "tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs scripts/remoteClient.test.mjs",
     "test:basic": "tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs",
     "test:dataset-combine": "tsc -p tsconfig.worker.json && node --test scripts/datasetCombine.test.mjs",
     "test:dataset-rename": "tsc -p tsconfig.worker.json && node --test scripts/datasetRename.test.mjs",

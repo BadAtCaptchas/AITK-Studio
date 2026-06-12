@@ -80,6 +80,11 @@ export async function remoteJson<T>(worker: WorkerNodeRecord, routePath: string,
   return response.json() as Promise<T>;
 }
 
+export function withoutRemoteRedirects(init: RequestInit): RequestInit {
+  // Prevent 307/308 responses from replaying secret-bearing POST bodies to another URL.
+  return { ...init, redirect: 'manual' };
+}
+
 export async function remoteProxyFetch(
   worker: WorkerNodeRecord,
   routePath: string,

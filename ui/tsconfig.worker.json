@@ -31,6 +31,7 @@
         "src/server/ollama.ts",
         "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
+        "src/server/remoteClient.ts",
         "src/server/trainingAdvisor.ts"
     ]
 }

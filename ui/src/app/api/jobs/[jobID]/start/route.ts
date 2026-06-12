@@ -8,6 +8,7 @@ import {
   remoteJson,
   syncRemoteJob,
   uploadBundleToWorker,
+  withoutRemoteRedirects,
 } from '@/server/remoteClient';
 import {
   dispatchRemoteCaptionJob,
@@ -201,13 +202,19 @@ async function handleStart(
         }
       }
 
-      await remoteJson(worker, `/api/jobs/${encodeURIComponent(remoteJobId)}/start`, {
+      const remoteStartHasKeys = requiredEncryptedDatasets.length > 0;
+      const remoteStartInit: RequestInit = {
         method: 'POST',
         body: JSON.stringify({
-          encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
+          encryptedDatasetKeys: remoteStartHasKeys ? encryptedKeysForLaunch : undefined,
           durableEncryptedDatasetKeys: useDurableEncryptedKeys,
         }),
-      });
+      };
+      await remoteJson(
+        worker,
+        `/api/jobs/${encodeURIComponent(remoteJobId)}/start`,
+        remoteStartHasKeys ? withoutRemoteRedirects(remoteStartInit) : remoteStartInit,
+      );
       await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`);
       await db.queues
         .findByGpuIds(job.gpu_ids, job.worker_id)

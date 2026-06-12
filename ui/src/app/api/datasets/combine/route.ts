@@ -6,7 +6,7 @@ import {
   isDatasetCombineError,
   type DatasetCombineRequest,
 } from '@/server/datasetCombine';
-import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { getRemoteWorker, isLocalWorker, remoteJson, withoutRemoteRedirects } from '@/server/remoteClient';
 import type { DatasetSummary } from '@/types';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 
@@ -31,8 +31,9 @@ export async function POST(request: NextRequest) {
 
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
+      const hasKeyMaterial = datasetCombineRequestHasKeyMaterial(body);
       if (
-        datasetCombineRequestHasKeyMaterial(body) &&
+        hasKeyMaterial &&
         !worker.base_url.toLowerCase().startsWith('https://') &&
         process.env.AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS !== '1'
       ) {
@@ -43,10 +44,15 @@ export async function POST(request: NextRequest) {
       }
 
       const remoteBody = { ...body, worker_id: 'local' };
-      const remoteResult = await remoteJson<any>(worker, '/api/datasets/combine', {
+      const remoteInit: RequestInit = {
         method: 'POST',
         body: JSON.stringify(remoteBody),
-      });
+      };
+      const remoteResult = await remoteJson<any>(
+        worker,
+        '/api/datasets/combine',
+        hasKeyMaterial ? withoutRemoteRedirects(remoteInit) : remoteInit,
+      );
       return NextResponse.json({
         ...remoteResult,
         dataset: remoteResult?.dataset ? decorateRemoteDataset(worker, remoteResult.dataset) : remoteResult?.dataset,

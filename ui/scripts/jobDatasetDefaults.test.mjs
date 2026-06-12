@@ -37,7 +37,7 @@ test('normalizes detected dataset caption extensions for job config use', () => 
 test('Ideogram model options declare JSON-safe dataset defaults', async () => {
   const source = await fs.readFile(path.join(uiRoot, 'src/app/jobs/new/options.ts'), 'utf8');
 
-  for (const modelName of ["name: 'ideogram4'", "name: 'ideogram4:fp8'"]) {
+  for (const modelName of ["name: 'ideogram4'", "name: 'ideogram4:fp8'", "name: 'ideogram4:nvfp4'"]) {
     const start = source.indexOf(modelName);
     assert.notEqual(start, -1);
     const end = source.indexOf('\n  },', start);

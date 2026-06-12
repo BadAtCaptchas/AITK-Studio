@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import warnings
 
 import bitsandbytes as bnb
@@ -23,6 +24,13 @@ FP8_SCALE_SUFFIX = ".weight_scale"
 # Marker written into the text encoder's config.json so the loader knows to take
 # the custom weight-only FP8 path instead of transformers' from_pretrained.
 FP8_TEXT_ENCODER_CONFIG_FLAG = "ideogram_fp8_weight_only"
+
+COMFY_QUANT_SUFFIX = ".comfy_quant"
+NVFP4_GLOBAL_SCALE_SUFFIX = ".weight_scale_2"
+NVFP4_GROUP_SIZE = 16
+NVFP4_WEIGHT_DTYPE = torch.uint8
+COMFY_FLOAT8_FORMAT = "float8_e4m3fn"
+COMFY_NVFP4_FORMAT = "nvfp4"
 
 
 def is_bnb4bit_state_dict(state_dict: dict[str, torch.Tensor]) -> bool:
@@ -161,6 +169,121 @@ def is_fp8_state_dict(state_dict: dict[str, torch.Tensor]) -> bool:
   )
 
 
+def decode_comfy_quant_marker(marker: torch.Tensor) -> dict[str, str]:
+  """Decode a Comfy ``.comfy_quant`` metadata tensor into its JSON object."""
+  if marker.dtype != torch.uint8:
+    raise ValueError(
+      f"Comfy quant marker tensors must be uint8 bytes, got {marker.dtype}"
+    )
+  raw = bytes(marker.detach().cpu().reshape(-1).tolist())
+  return json.loads(raw.decode("utf-8").rstrip("\x00"))
+
+
+def _comfy_quant_format(
+  state_dict: dict[str, torch.Tensor],
+  prefix: str,
+) -> str | None:
+  marker = state_dict.get(f"{prefix}{COMFY_QUANT_SUFFIX}")
+  if marker is None:
+    return None
+  return str(decode_comfy_quant_marker(marker).get("format", "")).lower()
+
+
+def is_comfy_quant_state_dict(state_dict: dict[str, torch.Tensor]) -> bool:
+  """True if the checkpoint has Comfy's per-module ``comfy_quant`` markers."""
+  return any(k.endswith(COMFY_QUANT_SUFFIX) for k in state_dict)
+
+
+def is_nvfp4_state_dict(state_dict: dict[str, torch.Tensor]) -> bool:
+  """True if the checkpoint carries Comfy NVFP4 packed weights."""
+  if any(k.endswith(NVFP4_GLOBAL_SCALE_SUFFIX) for k in state_dict):
+    return True
+  return any(
+    k.endswith(COMFY_QUANT_SUFFIX)
+    and _comfy_quant_format(state_dict, k.removesuffix(COMFY_QUANT_SUFFIX))
+    == COMFY_NVFP4_FORMAT
+    for k in state_dict
+  )
+
+
+def _fp8_scale_view(weight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+  while scale.dim() < weight.dim():
+    scale = scale.unsqueeze(-1)
+  return scale
+
+
+def dequantize_fp8_weight(
+  weight: torch.Tensor,
+  scale: torch.Tensor,
+  *,
+  device: torch.device,
+  dtype: torch.dtype,
+) -> torch.Tensor:
+  """Dequantize an FP8 weight tensor with scalar or per-row scale."""
+  w = weight.to(device=device, dtype=dtype)
+  s = scale.to(device=device, dtype=dtype)
+  return w * _fp8_scale_view(w, s)
+
+
+def _get_submodule_or_none(module: nn.Module, path: str) -> nn.Module | None:
+  try:
+    return module.get_submodule(path) if path else module
+  except AttributeError:
+    return None
+
+
+def _move_non_meta_tensors_to_device(module: nn.Module, device: torch.device) -> None:
+  """Move materialized tensors while leaving unresolved meta tensors untouched."""
+  for full_name, param in list(module.named_parameters(recurse=True)):
+    if param is None or param.is_meta or param.device == device:
+      continue
+    parent_path, _, leaf = full_name.rpartition(".")
+    parent = module.get_submodule(parent_path) if parent_path else module
+    parent._parameters[leaf] = nn.Parameter(
+      param.to(device=device),
+      requires_grad=param.requires_grad,
+    )
+
+  for full_name, buf in list(module.named_buffers(recurse=True)):
+    if buf is None or buf.is_meta or buf.device == device:
+      continue
+    parent_path, _, leaf = full_name.rpartition(".")
+    parent = module.get_submodule(parent_path) if parent_path else module
+    parent.register_buffer(
+      leaf,
+      buf.to(device=device),
+      persistent=leaf not in parent._non_persistent_buffers_set,
+    )
+
+
+def _finalize_quantized_load(
+  model: nn.Module,
+  device: torch.device,
+  *,
+  assign: bool,
+  strict: bool,
+) -> None:
+  meta_names = [
+    name
+    for name, tensor in (
+      list(model.named_parameters(recurse=True))
+      + list(model.named_buffers(recurse=True))
+    )
+    if tensor is not None and tensor.is_meta
+  ]
+  if not meta_names:
+    model.to(device)
+    return
+
+  if strict or not assign:
+    raise RuntimeError(
+      "quantized load left meta tensors unresolved: "
+      f"{meta_names[:10]}. This usually means checkpoint keys are missing."
+    )
+
+  _move_non_meta_tensors_to_device(model, device)
+
+
 class Fp8Linear(nn.Module):
   """Linear layer holding an e4m3 float8 weight + per-row float32 scale.
 
@@ -179,6 +302,7 @@ class Fp8Linear(nn.Module):
     out_features: int,
     bias: bool,
     compute_dtype: torch.dtype,
+    scale_shape: torch.Size | tuple[int, ...] | None = None,
   ) -> None:
     super().__init__()
     self.in_features = in_features
@@ -188,14 +312,139 @@ class Fp8Linear(nn.Module):
       "weight",
       torch.empty(out_features, in_features, dtype=FP8_WEIGHT_DTYPE),
     )
-    self.register_buffer("weight_scale", torch.empty(out_features, dtype=torch.float32))
+    scale_shape = tuple(scale_shape) if scale_shape is not None else (out_features,)
+    self.register_buffer("weight_scale", torch.empty(scale_shape, dtype=torch.float32))
     if bias:
       self.register_buffer("bias", torch.empty(out_features, dtype=compute_dtype))
     else:
       self.bias = None
 
   def forward(self, x: torch.Tensor) -> torch.Tensor:
-    w = self.weight.to(x.dtype) * self.weight_scale.to(x.dtype).unsqueeze(1)
+    w = dequantize_fp8_weight(
+      self.weight,
+      self.weight_scale,
+      device=x.device,
+      dtype=x.dtype,
+    )
+    bias = self.bias.to(x.dtype) if self.bias is not None else None
+    return F.linear(x, w, bias)
+
+
+class Nvfp4Linear(nn.Module):
+  """Linear layer holding Comfy packed NVFP4 weights.
+
+  The packed uint8 weight, e4m3 block scales, and scalar global scale are frozen
+  buffers. Forward expands nibbles through the E2M1 value table, applies the
+  scales, trims any padded input columns, and runs a normal dense matmul.
+  """
+
+  weight: torch.Tensor
+  weight_scale: torch.Tensor
+  weight_scale_2: torch.Tensor
+  bias: torch.Tensor | None
+
+  def __init__(
+    self,
+    in_features: int,
+    out_features: int,
+    bias: bool,
+    compute_dtype: torch.dtype,
+    *,
+    packed_weight_shape: torch.Size | tuple[int, ...] | None = None,
+    block_scale_shape: torch.Size | tuple[int, ...] | None = None,
+  ) -> None:
+    super().__init__()
+    self.in_features = in_features
+    self.out_features = out_features
+    self.compute_dtype = compute_dtype
+
+    group_count = (in_features + NVFP4_GROUP_SIZE - 1) // NVFP4_GROUP_SIZE
+    padded_in = group_count * NVFP4_GROUP_SIZE
+    default_weight_shape = (out_features, padded_in // 2)
+    default_scale_shape = (out_features, group_count)
+
+    weight_shape = (
+      tuple(packed_weight_shape)
+      if packed_weight_shape is not None
+      else default_weight_shape
+    )
+    scale_shape = (
+      tuple(block_scale_shape)
+      if block_scale_shape is not None
+      else default_scale_shape
+    )
+    self.register_buffer("weight", torch.empty(weight_shape, dtype=NVFP4_WEIGHT_DTYPE))
+    self.register_buffer(
+      "weight_scale", torch.empty(scale_shape, dtype=FP8_WEIGHT_DTYPE)
+    )
+    self.register_buffer("weight_scale_2", torch.empty((), dtype=torch.float32))
+    if bias:
+      self.register_buffer("bias", torch.empty(out_features, dtype=compute_dtype))
+    else:
+      self.bias = None
+
+  @staticmethod
+  def e2m1_table(device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    return torch.tensor(
+      [
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        6.0,
+        -0.0,
+        -0.5,
+        -1.0,
+        -1.5,
+        -2.0,
+        -3.0,
+        -4.0,
+        -6.0,
+      ],
+      device=device,
+      dtype=dtype,
+    )
+
+  def dequantize_weight(
+    self,
+    *,
+    device: torch.device | None = None,
+    dtype: torch.dtype | None = None,
+  ) -> torch.Tensor:
+    device = device or self.weight.device
+    dtype = dtype or self.compute_dtype
+
+    packed = self.weight.to(device=device)
+    low = torch.bitwise_and(packed, 0x0F).to(torch.long)
+    high = torch.bitwise_right_shift(packed, 4).to(torch.long)
+    codes = torch.stack((low, high), dim=-1).reshape(packed.shape[0], -1)
+
+    block_scales = self.weight_scale.to(device=device, dtype=torch.float32)
+    if block_scales.dim() != 2:
+      raise RuntimeError(
+        f"NVFP4 block scales must be rank 2, got {tuple(block_scales.shape)}"
+      )
+    group_count = block_scales.shape[1]
+    padded_in = group_count * NVFP4_GROUP_SIZE
+    if codes.shape[1] < padded_in:
+      raise RuntimeError(
+        "NVFP4 packed weight has too few columns for its block scales: "
+        f"packed expands to {codes.shape[1]}, scales imply {padded_in}"
+      )
+
+    table = self.e2m1_table(device=device, dtype=torch.float32)
+    values = table[codes[:, :padded_in]]
+    values = values.view(packed.shape[0], group_count, NVFP4_GROUP_SIZE)
+    values = values * block_scales.unsqueeze(-1)
+    values = values.flatten(1)[:, : self.in_features]
+    values = values * self.weight_scale_2.to(device=device, dtype=torch.float32)
+    return values.to(dtype=dtype)
+
+  def forward(self, x: torch.Tensor) -> torch.Tensor:
+    w = self.dequantize_weight(device=x.device, dtype=x.dtype)
     bias = self.bias.to(x.dtype) if self.bias is not None else None
     return F.linear(x, w, bias)
 
@@ -218,6 +467,7 @@ def swap_linears_to_fp8(
     if (
       isinstance(child, nn.Linear) and f"{child_prefix}{FP8_SCALE_SUFFIX}" in state_dict
     ):
+      scale = state_dict[f"{child_prefix}{FP8_SCALE_SUFFIX}"]
       setattr(
         module,
         name,
@@ -226,10 +476,87 @@ def swap_linears_to_fp8(
           child.out_features,
           bias=child.bias is not None,
           compute_dtype=compute_dtype,
+          scale_shape=scale.shape,
         ),
       )
     else:
       swap_linears_to_fp8(child, state_dict, compute_dtype, prefix=f"{child_prefix}.")
+
+
+def _is_nvfp4_linear_state(
+  state_dict: dict[str, torch.Tensor],
+  prefix: str,
+) -> bool:
+  fmt = _comfy_quant_format(state_dict, prefix)
+  if fmt == COMFY_NVFP4_FORMAT:
+    return True
+  return (
+    f"{prefix}{NVFP4_GLOBAL_SCALE_SUFFIX}" in state_dict
+    and state_dict.get(f"{prefix}.weight") is not None
+    and state_dict[f"{prefix}.weight"].dtype == NVFP4_WEIGHT_DTYPE
+  )
+
+
+def _is_fp8_linear_state(
+  state_dict: dict[str, torch.Tensor],
+  prefix: str,
+) -> bool:
+  fmt = _comfy_quant_format(state_dict, prefix)
+  if fmt == COMFY_FLOAT8_FORMAT:
+    return True
+  return (
+    f"{prefix}{FP8_SCALE_SUFFIX}" in state_dict
+    and state_dict.get(f"{prefix}.weight") is not None
+    and state_dict[f"{prefix}.weight"].dtype == FP8_WEIGHT_DTYPE
+  )
+
+
+def swap_linears_to_comfy_quant(
+  module: nn.Module,
+  state_dict: dict[str, torch.Tensor],
+  compute_dtype: torch.dtype,
+  *,
+  prefix: str = "",
+) -> None:
+  """Replace ``nn.Linear`` modules described by Comfy quant markers."""
+  for name, child in list(module.named_children()):
+    child_prefix = f"{prefix}{name}"
+    if isinstance(child, nn.Linear) and _is_nvfp4_linear_state(
+      state_dict, child_prefix
+    ):
+      weight = state_dict[f"{child_prefix}.weight"]
+      block_scale = state_dict[f"{child_prefix}{FP8_SCALE_SUFFIX}"]
+      setattr(
+        module,
+        name,
+        Nvfp4Linear(
+          child.in_features,
+          child.out_features,
+          bias=child.bias is not None,
+          compute_dtype=compute_dtype,
+          packed_weight_shape=weight.shape,
+          block_scale_shape=block_scale.shape,
+        ),
+      )
+    elif isinstance(child, nn.Linear) and _is_fp8_linear_state(
+      state_dict, child_prefix
+    ):
+      scale = state_dict[f"{child_prefix}{FP8_SCALE_SUFFIX}"]
+      setattr(
+        module,
+        name,
+        Fp8Linear(
+          child.in_features,
+          child.out_features,
+          bias=child.bias is not None,
+          compute_dtype=compute_dtype,
+          scale_shape=scale.shape,
+        ),
+      )
+    else:
+      swap_linears_to_comfy_quant(
+        child, state_dict, compute_dtype, prefix=f"{child_prefix}."
+      )
 
 
 def load_fp8_state_dict(
@@ -275,4 +602,99 @@ def load_fp8_state_dict(
       raise RuntimeError(f"missing keys after fp8 load: {missing[:10]}")
     warnings.warn(f"missing keys after fp8 load: {missing[:10]}", stacklevel=2)
 
-  model.to(device)
+  _finalize_quantized_load(model, device, assign=assign, strict=strict)
+
+
+def _prepare_comfy_tensor(
+  model: nn.Module,
+  state_dict: dict[str, torch.Tensor],
+  key: str,
+  tensor: torch.Tensor,
+  device: torch.device,
+  dtype: torch.dtype,
+) -> torch.Tensor | None:
+  parent_path, _, leaf = key.rpartition(".")
+  parent = _get_submodule_or_none(model, parent_path)
+  fmt = _comfy_quant_format(state_dict, parent_path)
+
+  if key.endswith(COMFY_QUANT_SUFFIX):
+    return None
+
+  if leaf == "weight_scale_2":
+    return tensor.to(device=device, dtype=torch.float32) if isinstance(
+      parent, Nvfp4Linear
+    ) else None
+
+  if leaf == "weight_scale":
+    if isinstance(parent, (Fp8Linear, Nvfp4Linear)):
+      scale_dtype = FP8_WEIGHT_DTYPE if isinstance(parent, Nvfp4Linear) else torch.float32
+      return tensor.to(device=device, dtype=scale_dtype)
+    return None
+
+  if leaf == "weight" and fmt == COMFY_FLOAT8_FORMAT and not isinstance(
+    parent, Fp8Linear
+  ):
+    scale = state_dict.get(f"{parent_path}{FP8_SCALE_SUFFIX}")
+    if scale is None:
+      raise RuntimeError(f"Comfy FP8 weight {key!r} is missing its weight_scale")
+    return dequantize_fp8_weight(tensor, scale, device=device, dtype=dtype)
+
+  if leaf == "weight" and fmt == COMFY_NVFP4_FORMAT and not isinstance(
+    parent, Nvfp4Linear
+  ):
+    raise RuntimeError(
+      f"Comfy NVFP4 weight {key!r} did not map to a Linear module. Packed "
+      "NVFP4 is only supported for Linear weights."
+    )
+
+  if isinstance(parent, Fp8Linear) and (leaf == "weight" or tensor.dtype == FP8_WEIGHT_DTYPE):
+    return tensor.to(device=device)
+
+  if isinstance(parent, Nvfp4Linear) and leaf == "weight":
+    return tensor.to(device=device)
+
+  if tensor.is_floating_point():
+    return tensor.to(device=device, dtype=dtype)
+  return tensor.to(device=device)
+
+
+def load_comfy_quant_state_dict(
+  model: nn.Module,
+  state_dict: dict[str, torch.Tensor],
+  device: torch.device,
+  dtype: torch.dtype,
+  *,
+  assign: bool = False,
+  strict: bool = True,
+) -> None:
+  """Load a Comfy quantized checkpoint into a model with swapped modules."""
+  expected_keys = set(model.state_dict().keys())
+  prepared: dict[str, torch.Tensor] = {}
+  for key, tensor in state_dict.items():
+    if not strict and key not in expected_keys and not key.endswith(
+      (COMFY_QUANT_SUFFIX, FP8_SCALE_SUFFIX, NVFP4_GLOBAL_SCALE_SUFFIX)
+    ):
+      continue
+    prepared_tensor = _prepare_comfy_tensor(
+      model,
+      state_dict,
+      key,
+      tensor,
+      device=device,
+      dtype=dtype,
+    )
+    if prepared_tensor is not None:
+      prepared[key] = prepared_tensor
+
+  missing, unexpected = model.load_state_dict(prepared, strict=False, assign=assign)
+  if unexpected:
+    raise RuntimeError(f"unexpected keys after comfy quant load: {unexpected[:10]}")
+  if missing:
+    if strict:
+      raise RuntimeError(f"missing keys after comfy quant load: {missing[:10]}")
+    warnings.warn(
+      f"missing keys after comfy quant load: {missing[:10]}",
+      stacklevel=2,
+    )
+
+  _finalize_quantized_load(model, device, assign=assign, strict=strict)

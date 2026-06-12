@@ -32,11 +32,15 @@ from .latent_norm import get_latent_norm
 from .modeling_ideogram4 import Ideogram4Config, Ideogram4Transformer
 from .quantized_loading import (
   FP8_TEXT_ENCODER_CONFIG_FLAG,
+  is_comfy_quant_state_dict,
   is_bnb4bit_state_dict,
   is_fp8_state_dict,
+  is_nvfp4_state_dict,
   load_bnb4bit_state_dict,
+  load_comfy_quant_state_dict,
   load_fp8_state_dict,
   swap_linears_to_bnb4bit,
+  swap_linears_to_comfy_quant,
   swap_linears_to_fp8,
 )
 from .scheduler import (
@@ -63,6 +67,11 @@ def _load_subfolder_state_dict(
       repo_id=repo_id, filename=f"{prefix}{basename}.safetensors"
     )
     return load_file(single_path)
+
+
+def _load_named_state_dict(repo_id: str, filename: str) -> dict[str, torch.Tensor]:
+  path = hf_hub_download(repo_id=repo_id, filename=filename)
+  return load_file(path)
 
 
 def _load_fp8_text_encoder(
@@ -102,6 +111,8 @@ def _load_qwen3_vl(
   *,
   tokenizer_subfolder: str | None = None,
   text_encoder_subfolder: str | None = None,
+  weights_repo_id: str | None = None,
+  weights_filename: str | None = None,
 ):
   """Load the Qwen3-VL tokenizer + model, optionally from named subfolders of ``repo_id``.
 
@@ -128,7 +139,32 @@ def _load_qwen3_vl(
   is_quantized = "quantization_config" in cfg_data
   is_fp8 = bool(cfg_data.get(FP8_TEXT_ENCODER_CONFIG_FLAG, False))
 
-  if is_fp8:
+  if weights_repo_id is not None and weights_filename is not None:
+    state_dict = _load_named_state_dict(weights_repo_id, weights_filename)
+    config_kwargs = {"subfolder": text_encoder_subfolder} if text_encoder_subfolder else {}
+    config = AutoConfig.from_pretrained(
+      repo_id, **config_kwargs, trust_remote_code=True
+    )
+    with init_empty_weights():
+      model = AutoModel.from_config(config, trust_remote_code=True)
+    if is_comfy_quant_state_dict(state_dict) or is_nvfp4_state_dict(state_dict):
+      swap_linears_to_comfy_quant(model, state_dict, compute_dtype=dtype)
+      load_comfy_quant_state_dict(
+        model, state_dict, device=device, dtype=dtype, assign=True, strict=False
+      )
+    elif is_fp8_state_dict(state_dict):
+      swap_linears_to_fp8(model, state_dict, compute_dtype=dtype)
+      load_fp8_state_dict(
+        model, state_dict, device=device, dtype=dtype, assign=True, strict=False
+      )
+    else:
+      prepared = {
+        k: v.to(device=device, dtype=dtype) if v.is_floating_point() else v.to(device)
+        for k, v in state_dict.items()
+      }
+      model.load_state_dict(prepared, strict=False, assign=True)
+      model.to(device)
+  elif is_fp8:
     model = _load_fp8_text_encoder(
       repo_id,
       device,
@@ -165,6 +201,12 @@ def _build_transformer(
       raise ValueError(f"bnb 4-bit weights require a CUDA device, got device={device}")
     swap_linears_to_bnb4bit(model, compute_dtype=dtype)
     load_bnb4bit_state_dict(model, state_dict, device=device, dtype=dtype)
+  elif is_comfy_quant_state_dict(state_dict) or is_nvfp4_state_dict(state_dict):
+    # Comfy quant markers disambiguate scalar FP8 scales from NVFP4 packed
+    # weights; handle them before the broad FP8 detector sees .weight_scale.
+    model.to(dtype)
+    swap_linears_to_comfy_quant(model, state_dict, compute_dtype=dtype)
+    load_comfy_quant_state_dict(model, state_dict, device=device, dtype=dtype)
   elif is_fp8_state_dict(state_dict):
     # Weight-only FP8: cast the unquantized params to the compute dtype first,
     # then swap in Fp8Linear layers (which keep their weights as float8).
@@ -222,6 +264,9 @@ def _load_indexed_or_single_state_dict(
   fall back to the single file (the index filename with ``.index.json``
   dropped) when it isn't present.
   """
+  if index_filename.endswith(".safetensors"):
+    single_path = hf_hub_download(repo_id=repo_id, filename=index_filename)
+    return load_file(single_path)
   try:
     return _load_sharded_state_dict(repo_id, index_filename)
   except EntryNotFoundError:
@@ -233,6 +278,8 @@ def _load_indexed_or_single_state_dict(
 @dataclass
 class Ideogram4PipelineConfig:
   weights_repo: str = "ideogram-ai/ideogram-4-nf4"
+  text_encoder_config_repo: str | None = None
+  text_encoder_weights_repo: str | None = None
   conditional_index_filename: str = (
     "transformer/diffusion_pytorch_model.safetensors.index.json"
   )
@@ -240,6 +287,7 @@ class Ideogram4PipelineConfig:
     "unconditional_transformer/diffusion_pytorch_model.safetensors.index.json"
   )
   autoencoder_filename: str = "vae/diffusion_pytorch_model.safetensors"
+  text_encoder_weights_filename: str | None = None
   text_encoder_subfolder: str = "text_encoder"
   tokenizer_subfolder: str = "tokenizer"
   patch_size: int = 2
@@ -308,11 +356,13 @@ class Ideogram4Pipeline:
     del unconditional_state_dict
 
     text_tokenizer, text_encoder = _load_qwen3_vl(
-      config.weights_repo,
+      config.text_encoder_config_repo or config.weights_repo,
       device,
       dtype,
       tokenizer_subfolder=config.tokenizer_subfolder,
       text_encoder_subfolder=config.text_encoder_subfolder,
+      weights_repo_id=config.text_encoder_weights_repo,
+      weights_filename=config.text_encoder_weights_filename,
     )
     autoencoder = _load_autoencoder(autoencoder_weights, device, dtype)
 

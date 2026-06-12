@@ -9,6 +9,7 @@ LINEAR_MODULES = [
     "Linear4bit",
     "Linear8bitLt",
     "Fp8Linear",
+    "Nvfp4Linear",
 ]
 CONV_MODULES = [
     "Conv2d",

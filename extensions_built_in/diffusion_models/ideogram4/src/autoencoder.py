@@ -340,22 +340,50 @@ class AutoEncoder(nn.Module):
 
 
 _NUM_RESOLUTIONS = 4
+_NATIVE_STATE_DICT_KEYS: set[str] | None = None
+
+
+def _native_state_dict_keys() -> set[str]:
+  global _NATIVE_STATE_DICT_KEYS
+  if _NATIVE_STATE_DICT_KEYS is None:
+    _NATIVE_STATE_DICT_KEYS = set(AutoEncoder(AutoEncoderParams()).state_dict().keys())
+  return _NATIVE_STATE_DICT_KEYS
+
+
+def _prepare_attention_weight(key: str, tensor: Tensor) -> Tensor:
+  if ".mid.attn_1." in key and key.endswith(".weight") and tensor.ndim == 2:
+    return tensor.unsqueeze(-1).unsqueeze(-1)
+  return tensor
+
+
+def is_native_state_dict(src: dict[str, Tensor]) -> bool:
+  keys = set(src.keys())
+  native_keys = _native_state_dict_keys()
+  return bool(keys) and keys.issubset(native_keys) and (
+    "encoder.quant_conv.weight" in keys or "decoder.post_quant_conv.weight" in keys
+  )
+
+
+def convert_native_state_dict(src: dict[str, Tensor]) -> dict[str, Tensor]:
+  native_keys = _native_state_dict_keys()
+  out: dict[str, Tensor] = {}
+  for src_key, tensor in src.items():
+    if src_key not in native_keys:
+      raise KeyError(f"Unrecognized native VAE state-dict key: {src_key}")
+    out[src_key] = _prepare_attention_weight(src_key, tensor)
+  return out
 
 
 def convert_diffusers_state_dict(src: dict[str, Tensor]) -> dict[str, Tensor]:
+  if is_native_state_dict(src):
+    return convert_native_state_dict(src)
+
   out: dict[str, Tensor] = {}
-  attn_substrings = (".mid.attn_1.",)
   for src_key, tensor in src.items():
     dst_key = _rewrite_diffusers_key(src_key)
     if dst_key is None:
       raise KeyError(f"Unrecognized diffusers VAE state-dict key: {src_key}")
-    if (
-      any(s in dst_key for s in attn_substrings)
-      and dst_key.endswith(".weight")
-      and tensor.ndim == 2
-    ):
-      tensor = tensor.unsqueeze(-1).unsqueeze(-1)
-    out[dst_key] = tensor
+    out[dst_key] = _prepare_attention_weight(dst_key, tensor)
   return out
 
 

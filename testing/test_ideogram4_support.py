@@ -36,6 +36,7 @@ try:
         Ideogram4Model,
         Ideogram4PipelineConfig,
         _load_subfolder_state_dict_local_or_hf,
+        _remap_comfy_qwen3_vl_state_dict,
         dequantize_fp8_linears,
         infer_ideogram4_quantization,
         patchify_latents,
@@ -46,9 +47,12 @@ try:
     )
     from extensions_built_in.diffusion_models.ideogram4.src.autoencoder import (
         AutoEncoder,
+        AutoEncoderParams,
+        convert_diffusers_state_dict,
     )
     from extensions_built_in.diffusion_models.ideogram4.src.quantized_loading import (
         Fp8Linear,
+        Nvfp4Linear,
     )
 
     IDEOGRAM_IMPORT_ERROR = None
@@ -57,7 +61,11 @@ except ImportError as exc:
     Ideogram4PipelineConfig = None
     CaptionVerifier = None
     AutoEncoder = None
+    AutoEncoderParams = None
+    convert_diffusers_state_dict = None
     Fp8Linear = None
+    Nvfp4Linear = None
+    _remap_comfy_qwen3_vl_state_dict = None
     _load_subfolder_state_dict_local_or_hf = None
     IDEOGRAM_IMPORT_ERROR = exc
 
@@ -176,9 +184,11 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertNotIn("MAGIC_PROMPT_API_KEY", combined_source)
         self.assertNotIn("import requests", combined_source)
 
-    def test_lora_allowlists_include_fp8_linear(self):
+    def test_lora_allowlists_include_quantized_linears(self):
         self.assertIn("Fp8Linear", LORA_SPECIAL_PATH.read_text(encoding="utf-8"))
         self.assertIn("Fp8Linear", NETWORK_MIXINS_PATH.read_text(encoding="utf-8"))
+        self.assertIn("Nvfp4Linear", LORA_SPECIAL_PATH.read_text(encoding="utf-8"))
+        self.assertIn("Nvfp4Linear", NETWORK_MIXINS_PATH.read_text(encoding="utf-8"))
 
     def test_ideogram_layer_offloading_contract_is_wired(self):
         model_source = (IDEOGRAM_ROOT / "ideogram4_model.py").read_text(encoding="utf-8")
@@ -257,13 +267,16 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("name: 'ideogram4:fp8'", options)
         self.assertIn("label: 'Ideogram 4 FP8'", options)
         self.assertIn("'config.process[0].model.name_or_path': ['ideogram-ai/ideogram-4-fp8', defaultNameOrPath]", options)
+        self.assertIn("name: 'ideogram4:nvfp4'", options)
+        self.assertIn("label: 'Ideogram 4 Comfy NVFP4'", options)
+        self.assertIn("'config.process[0].model.name_or_path': ['Comfy-Org/Ideogram-4', defaultNameOrPath]", options)
         self.assertIn("'config.process[0].train.bypass_guidance_embedding': [false, false]", options)
         self.assertIn("require_json_captions: false", options)
         self.assertIn("caption_strict: false", options)
         self.assertIn("dequantize_fp8_transformer: true", options)
         self.assertIn("'ideogram4'", memory)
         self.assertIn("id: 'ideogram4-balanced-lora'", profiles)
-        self.assertIn("const ideogram4Archs = ['ideogram4', 'ideogram4:fp8']", profiles)
+        self.assertIn("const ideogram4Archs = ['ideogram4', 'ideogram4:fp8', 'ideogram4:nvfp4']", profiles)
         self.assertIn("ideogram", advisor)
 
     def test_caption_json_prompts_document_canonical_key_order(self):
@@ -292,6 +305,7 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         examples = [
             ("train_lora_ideogram4_48gb.yaml", "ideogram-ai/ideogram-4-nf4", "nf4"),
             ("train_lora_ideogram4_fp8_48gb.yaml", "ideogram-ai/ideogram-4-fp8", "fp8"),
+            ("train_lora_ideogram4_nvfp4_48gb.yaml", "Comfy-Org/Ideogram-4", "nvfp4"),
             ("train_full_fine_tune_ideogram4.yaml", "ideogram-ai/ideogram-4-fp8", "fp8"),
         ]
 
@@ -756,13 +770,43 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
             "fp8",
         )
         self.assertEqual(
+            infer_ideogram4_quantization("Comfy-Org/Ideogram-4", {}),
+            "nvfp4",
+        )
+        self.assertEqual(
             infer_ideogram4_quantization(
                 "local/path", {"quantization": "fp8"}
             ),
             "fp8",
         )
+        self.assertEqual(
+            infer_ideogram4_quantization(
+                "local/path", {"quantization": "nvfp4"}
+            ),
+            "nvfp4",
+        )
         with self.assertRaisesRegex(ValueError, "quantization"):
             infer_ideogram4_quantization("local/path", {"quantization": "int8"})
+
+    def test_comfy_qwen3_vl_state_dict_remaps_to_transformers_model_keys(self):
+        source = {
+            "model.embed_tokens.weight": torch.ones(1),
+            "model.embed_tokens.weight_scale": torch.ones(1),
+            "model.embed_tokens.comfy_quant": torch.ones(1, dtype=torch.uint8),
+            "model.layers.0.self_attn.q_proj.weight": torch.ones(1),
+            "model.visual.patch_embed.proj.weight": torch.ones(1),
+            "lm_head.weight": torch.ones(1),
+        }
+
+        remapped = _remap_comfy_qwen3_vl_state_dict(source)
+
+        self.assertIn("language_model.embed_tokens.weight", remapped)
+        self.assertIn("language_model.embed_tokens.weight_scale", remapped)
+        self.assertIn("language_model.embed_tokens.comfy_quant", remapped)
+        self.assertIn("language_model.layers.0.self_attn.q_proj.weight", remapped)
+        self.assertIn("visual.patch_embed.proj.weight", remapped)
+        self.assertIn("lm_head.weight", remapped)
+        self.assertNotIn("model.embed_tokens.weight", remapped)
 
     def test_text_encoder_shard_loader_reports_progress(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1000,6 +1044,32 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         autoencoder.to(dtype=torch.bfloat16)
         self.assertEqual(autoencoder.dtype, torch.bfloat16)
 
+    def test_autoencoder_converter_accepts_comfy_native_vae_keys(self):
+        native = AutoEncoder(AutoEncoderParams()).state_dict()
+        sample = {
+            "bn.num_batches_tracked": native["bn.num_batches_tracked"],
+            "bn.running_mean": native["bn.running_mean"],
+            "bn.running_var": native["bn.running_var"],
+            "decoder.mid.attn_1.k.bias": native["decoder.mid.attn_1.k.bias"],
+            "decoder.mid.attn_1.k.weight": native["decoder.mid.attn_1.k.weight"].squeeze(-1).squeeze(-1),
+            "decoder.post_quant_conv.weight": native["decoder.post_quant_conv.weight"],
+            "decoder.post_quant_conv.bias": native["decoder.post_quant_conv.bias"],
+            "encoder.quant_conv.weight": native["encoder.quant_conv.weight"],
+            "encoder.quant_conv.bias": native["encoder.quant_conv.bias"],
+        }
+
+        converted = convert_diffusers_state_dict(sample)
+
+        self.assertEqual(
+            converted["decoder.mid.attn_1.k.bias"].shape,
+            native["decoder.mid.attn_1.k.bias"].shape,
+        )
+        self.assertEqual(
+            converted["decoder.mid.attn_1.k.weight"].shape,
+            native["decoder.mid.attn_1.k.weight"].shape,
+        )
+        self.assertIn("encoder.quant_conv.weight", converted)
+
     def test_caption_validation_allows_natural_language_by_default(self):
         model = object.__new__(Ideogram4Model)
         model.model_config = types.SimpleNamespace(model_kwargs={})
@@ -1149,7 +1219,9 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
         model.quantization = "fp8"
         model.model_config = types.SimpleNamespace(model_kwargs={"quantization": "fp8"})
 
-        with self.assertWarnsRegex(UserWarning, "first training step can appear stuck"):
+        with self.assertWarnsRegex(
+            UserWarning, "first training step and sample generation can appear stuck"
+        ):
             model.warn_if_fp8_training_without_dequantize()
 
         with warnings.catch_warnings(record=True) as caught:

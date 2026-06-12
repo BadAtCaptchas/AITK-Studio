@@ -61,7 +61,7 @@ const flowImageArchs = [
 
 const qwenImageArchs = ['qwen_image', 'qwen_image:2512'];
 const qwenEditArchs = ['qwen_image_edit', 'qwen_image_edit_plus', 'qwen_image_edit_plus:2511'];
-const ideogram4Archs = ['ideogram4', 'ideogram4:fp8'];
+const ideogram4Archs = ['ideogram4', 'ideogram4:fp8', 'ideogram4:nvfp4'];
 const sdArchs = ['sd15', 'sdxl'];
 const wanCommonArchs = ['wan21*', 'wan22_5b'];
 const wan22A14BArchs = ['wan22_14b:*', 'wan22_14b_i2v'];

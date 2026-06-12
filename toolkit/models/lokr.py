@@ -237,7 +237,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         if module_type == "linear":
             logical_shape = (int(org_module.out_features), int(org_module.in_features))
             storage_shape = tuple(org_module.weight.shape)
-            quantized_linear = org_module.__class__.__name__ in {"Fp8Linear", "Linear4bit", "Linear8bitLt", "QLinear"}
+            quantized_linear = org_module.__class__.__name__ in {"Fp8Linear", "Nvfp4Linear", "Linear4bit", "Linear8bitLt", "QLinear"}
             if quantized_linear or _prod(logical_shape) == _prod(storage_shape):
                 return logical_shape
             return storage_shape

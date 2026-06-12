@@ -44,6 +44,14 @@ from .src.pipeline_ideogram4 import (
 from .src.quantized_loading import (
     FP8_TEXT_ENCODER_CONFIG_FLAG,
     Fp8Linear,
+    _move_non_meta_tensors_to_device,
+    is_comfy_quant_state_dict,
+    is_fp8_state_dict,
+    is_nvfp4_state_dict,
+    load_comfy_quant_state_dict,
+    load_fp8_state_dict,
+    swap_linears_to_comfy_quant,
+    swap_linears_to_fp8,
 )
 from .src.sampler_configs import PRESETS
 from .src.scheduler import get_schedule_for_resolution, make_step_intervals
@@ -51,7 +59,22 @@ from .src.scheduler import get_schedule_for_resolution, make_step_intervals
 
 IDEOGRAM4_NF4_REPO = "ideogram-ai/ideogram-4-nf4"
 IDEOGRAM4_FP8_REPO = "ideogram-ai/ideogram-4-fp8"
+IDEOGRAM4_COMFY_REPO = "Comfy-Org/Ideogram-4"
 IDEOGRAM4_TORCH_MIN = (2, 11)
+IDEOGRAM4_COMFY_FILES = {
+    "nvfp4": {
+        "conditional": "diffusion_models/ideogram4_nvfp4_mixed.safetensors",
+        "unconditional": "diffusion_models/ideogram4_unconditional_nvfp4_mixed.safetensors",
+        "text_encoder": "text_encoders/qwen3vl_8b_nvfp4.safetensors",
+        "vae": "vae/flux2-vae.safetensors",
+    },
+    "fp8": {
+        "conditional": "diffusion_models/ideogram4_fp8_scaled.safetensors",
+        "unconditional": "diffusion_models/ideogram4_unconditional_fp8_scaled.safetensors",
+        "text_encoder": "text_encoders/qwen3vl_8b_fp8_scaled.safetensors",
+        "vae": "vae/flux2-vae.safetensors",
+    },
+}
 
 scheduler_config = {
     "base_image_seq_len": 256,
@@ -88,16 +111,24 @@ def infer_ideogram4_quantization(name_or_path: Optional[str], model_kwargs=None)
         quantization = str(explicit).lower()
     else:
         path = (name_or_path or "").lower()
-        quantization = "fp8" if "fp8" in path else "nf4"
-    if quantization not in {"nf4", "fp8"}:
+        if "nvfp4" in path or path.rstrip("/") == IDEOGRAM4_COMFY_REPO.lower():
+            quantization = "nvfp4"
+        else:
+            quantization = "fp8" if "fp8" in path else "nf4"
+    if quantization not in {"nf4", "fp8", "nvfp4"}:
         raise ValueError(
-            f"Ideogram 4 quantization must be 'nf4', 'fp8', or 'auto', got {quantization!r}"
+            "Ideogram 4 quantization must be 'nf4', 'fp8', 'nvfp4', or "
+            f"'auto', got {quantization!r}"
         )
     return quantization
 
 
 def default_repo_for_quantization(quantization: str) -> str:
-    return IDEOGRAM4_FP8_REPO if quantization == "fp8" else IDEOGRAM4_NF4_REPO
+    if quantization == "fp8":
+        return IDEOGRAM4_FP8_REPO
+    if quantization == "nvfp4":
+        return IDEOGRAM4_COMFY_REPO
+    return IDEOGRAM4_NF4_REPO
 
 
 def patchify_latents(latents: torch.Tensor, patch_size: int = 2) -> torch.Tensor:
@@ -158,10 +189,24 @@ def unpack_latent_tokens(
 
 
 def module_device(module: nn.Module) -> torch.device:
-    try:
-        return next(module.parameters()).device
-    except StopIteration:
-        return next(module.buffers()).device
+    fallback = None
+    for tensor in list(module.parameters()) + list(module.buffers()):
+        fallback = tensor.device
+        if not tensor.is_meta:
+            return tensor.device
+    if fallback is not None:
+        return fallback
+    return torch.device("cpu")
+
+
+def move_module_to_device(module: nn.Module, device: torch.device) -> None:
+    if any(
+        tensor.is_meta
+        for tensor in list(module.parameters()) + list(module.buffers())
+    ):
+        _move_non_meta_tensors_to_device(module, device)
+    else:
+        module.to(device)
 
 
 def dequantize_fp8_linears(
@@ -178,7 +223,9 @@ def dequantize_fp8_linears(
                 device=device,
             )
             weight = child.weight.to(device=device, dtype=dtype)
-            scale = child.weight_scale.to(device=device, dtype=dtype).unsqueeze(1)
+            scale = child.weight_scale.to(device=device, dtype=dtype)
+            while scale.dim() < weight.dim():
+                scale = scale.unsqueeze(-1)
             linear.weight.data.copy_(weight * scale)
             if child.bias is not None:
                 linear.bias.data.copy_(child.bias.to(device=device, dtype=dtype))
@@ -192,6 +239,12 @@ def dequantize_fp8_linears(
 def _load_local_state_dict(
     root: str, index_filename: str
 ) -> dict[str, torch.Tensor]:
+    if index_filename.endswith(".safetensors"):
+        single_path = os.path.join(root, index_filename.replace("/", os.sep))
+        if not os.path.exists(single_path):
+            raise FileNotFoundError(f"Could not find Ideogram state dict at {single_path}")
+        return load_file(single_path)
+
     index_path = os.path.join(root, index_filename.replace("/", os.sep))
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
@@ -284,6 +337,24 @@ def _load_subfolder_state_dict_local_or_hf(
             )
         state_dict.update(load_file(shard_path))
     return state_dict
+
+
+def _load_named_state_dict_local_or_hf(
+    repo_or_dir: str,
+    filename: str,
+    *,
+    status_callback=None,
+    label: str = "weights",
+) -> dict[str, torch.Tensor]:
+    if os.path.isdir(repo_or_dir):
+        path = os.path.join(repo_or_dir, filename.replace("/", os.sep))
+    else:
+        if status_callback is not None:
+            status_callback(f"Downloading/checking {label}: {os.path.basename(filename)}")
+        path = hf_hub_download(repo_id=repo_or_dir, filename=filename)
+    if status_callback is not None:
+        status_callback(f"Loading {label}: {os.path.basename(path)}")
+    return load_file(path)
 
 
 def _load_component_state_dict(
@@ -394,6 +465,101 @@ def _load_qwen3_vl_local_or_hf(
     return tokenizer, model
 
 
+def _remap_comfy_qwen3_vl_state_dict(
+    state_dict: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    remapped: dict[str, torch.Tensor] = {}
+    for key, value in state_dict.items():
+        if key.startswith("model.visual."):
+            key = "visual." + key[len("model.visual."):]
+        elif key.startswith("model."):
+            key = "language_model." + key[len("model."):]
+        remapped[key] = value
+    return remapped
+
+
+def _load_qwen3_vl_comfy_local_or_hf(
+    config_repo_or_dir: str,
+    weights_repo_or_dir: str,
+    weights_filename: str,
+    device: torch.device,
+    dtype: torch.dtype,
+    *,
+    tokenizer_subfolder: str,
+    text_encoder_subfolder: str,
+    status_callback=None,
+):
+    if status_callback is not None:
+        status_callback("Loading Qwen3-VL tokenizer/config source")
+    if os.path.isdir(config_repo_or_dir):
+        tokenizer_path = os.path.join(config_repo_or_dir, tokenizer_subfolder)
+        text_encoder_path = os.path.join(config_repo_or_dir, text_encoder_subfolder)
+        if not os.path.exists(tokenizer_path):
+            tokenizer_path = config_repo_or_dir
+        if not os.path.exists(os.path.join(text_encoder_path, "config.json")):
+            text_encoder_path = config_repo_or_dir
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        model_source_kwargs = {"pretrained_model_name_or_path": text_encoder_path}
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(
+            config_repo_or_dir, subfolder=tokenizer_subfolder
+        )
+        model_source_kwargs = {
+            "pretrained_model_name_or_path": config_repo_or_dir,
+            "subfolder": text_encoder_subfolder,
+        }
+
+    if status_callback is not None:
+        status_callback("Loading Comfy Qwen3-VL text encoder state dict")
+    state_dict = _load_named_state_dict_local_or_hf(
+        weights_repo_or_dir,
+        weights_filename,
+        status_callback=status_callback,
+        label="Comfy Qwen3-VL text encoder weights",
+    )
+
+    if status_callback is not None:
+        status_callback("Building Qwen3-VL text encoder structure")
+    config = AutoConfig.from_pretrained(**model_source_kwargs, trust_remote_code=True)
+    with init_empty_weights():
+        model = AutoModel.from_config(config, trust_remote_code=True)
+    state_dict = _remap_comfy_qwen3_vl_state_dict(state_dict)
+
+    if is_comfy_quant_state_dict(state_dict) or is_nvfp4_state_dict(state_dict):
+        if status_callback is not None:
+            status_callback("Swapping Qwen3-VL linear layers to Comfy quantized modules")
+        swap_linears_to_comfy_quant(model, state_dict, compute_dtype=dtype)
+        if status_callback is not None:
+            status_callback(f"Materializing Comfy Qwen3-VL weights on {device}")
+        load_comfy_quant_state_dict(
+            model,
+            state_dict,
+            device=device,
+            dtype=dtype,
+            assign=True,
+            strict=False,
+        )
+    elif is_fp8_state_dict(state_dict):
+        if status_callback is not None:
+            status_callback("Swapping Qwen3-VL linear layers to FP8")
+        swap_linears_to_fp8(model, state_dict, compute_dtype=dtype)
+        if status_callback is not None:
+            status_callback(f"Materializing Qwen3-VL FP8 weights on {device}")
+        load_fp8_state_dict(
+            model, state_dict, device=device, dtype=dtype, assign=True, strict=False
+        )
+    else:
+        prepared = {
+            k: v.to(device=device, dtype=dtype) if v.is_floating_point() else v.to(device)
+            for k, v in state_dict.items()
+        }
+        model.load_state_dict(prepared, strict=False, assign=True)
+        model.to(device)
+    del state_dict
+    model.eval()
+    return tokenizer, model
+
+
 def _warn_if_torch_below_official_requirement() -> None:
     if _version_tuple(torch.__version__) < IDEOGRAM4_TORCH_MIN:
         warnings.warn(
@@ -496,9 +662,74 @@ class Ideogram4Model(BaseModel):
         meta_quantization = str(
             self._read_local_meta(model_path).get("ideogram4_quantization", "")
         ).lower()
-        if meta_quantization in {"nf4", "fp8"}:
+        if meta_quantization in {"nf4", "fp8", "nvfp4"}:
             return meta_quantization
         return quantization
+
+    def _is_comfy_layout(self, model_path: str, quantization: str) -> bool:
+        kwargs = self._model_kwargs()
+        if kwargs.get("comfy_layout", False):
+            return True
+        if quantization == "nvfp4" and not model_path:
+            return True
+        if (model_path or "").lower().rstrip("/") == IDEOGRAM4_COMFY_REPO.lower():
+            return True
+        if quantization not in IDEOGRAM4_COMFY_FILES or not os.path.isdir(model_path):
+            return False
+        files = IDEOGRAM4_COMFY_FILES[quantization]
+        return os.path.exists(os.path.join(model_path, files["conditional"].replace("/", os.sep)))
+
+    def _resolve_comfy_config_source(self, model_path: str) -> str:
+        kwargs = self._model_kwargs()
+        for key in (
+            "text_encoder_config_name_or_path",
+            "config_name_or_path",
+            "tokenizer_name_or_path",
+        ):
+            value = kwargs.get(key)
+            if value:
+                return value
+
+        extras = self.model_config.extras_name_or_path
+        if extras and extras != model_path:
+            return extras
+
+        if os.path.isdir(model_path):
+            if (
+                os.path.exists(os.path.join(model_path, "tokenizer"))
+                and os.path.exists(os.path.join(model_path, "text_encoder", "config.json"))
+            ):
+                return model_path
+            meta = self._read_local_meta(model_path)
+            for key in (
+                "ideogram4_config_model",
+                "ideogram4_base_model",
+                "extras_name_or_path",
+                "base_model",
+                "base_model_name_or_path",
+            ):
+                if meta.get(key):
+                    return meta[key]
+
+        return IDEOGRAM4_FP8_REPO
+
+    def _comfy_pipeline_config(
+        self,
+        weights_path: str,
+        config_path: str,
+        quantization: str,
+    ) -> Ideogram4PipelineConfig:
+        files = IDEOGRAM4_COMFY_FILES[quantization]
+        return Ideogram4PipelineConfig(
+            weights_repo=weights_path,
+            text_encoder_config_repo=config_path,
+            text_encoder_weights_repo=weights_path,
+            conditional_index_filename=files["conditional"],
+            unconditional_index_filename=files["unconditional"],
+            autoencoder_filename=files["vae"],
+            text_encoder_weights_filename=files["text_encoder"],
+            max_text_tokens=self._resolve_max_text_tokens(),
+        )
 
     def _resolve_base_components_path(self, model_path: str, quantization: str) -> str:
         extras = self.model_config.extras_name_or_path
@@ -595,11 +826,24 @@ class Ideogram4Model(BaseModel):
         if quantization == "nf4":
             _check_nf4_runtime(self.device_torch)
 
-        base_model_path = self._resolve_base_components_path(model_path, quantization)
-        pipeline_config = Ideogram4PipelineConfig(
-            weights_repo=base_model_path,
-            max_text_tokens=self._resolve_max_text_tokens(),
-        )
+        comfy_layout = self._is_comfy_layout(model_path, quantization)
+        if comfy_layout:
+            weights_model_path = model_path or default_repo_for_quantization(quantization)
+            config_model_path = self._resolve_comfy_config_source(model_path)
+            pipeline_config = self._comfy_pipeline_config(
+                weights_model_path,
+                config_model_path,
+                quantization,
+            )
+            base_model_path = weights_model_path
+        else:
+            base_model_path = self._resolve_base_components_path(model_path, quantization)
+            weights_model_path = base_model_path
+            config_model_path = base_model_path
+            pipeline_config = Ideogram4PipelineConfig(
+                weights_repo=base_model_path,
+                max_text_tokens=self._resolve_max_text_tokens(),
+            )
         local_transformer = (
             os.path.isdir(model_path)
             and os.path.exists(os.path.join(model_path, "transformer"))
@@ -610,7 +854,7 @@ class Ideogram4Model(BaseModel):
         )
 
         conditional_root = (
-            model_path if local_transformer else base_model_path
+            model_path if local_transformer else weights_model_path
         )
         conditional_transformer = self._load_transformer_from_path(
             conditional_root,
@@ -625,7 +869,7 @@ class Ideogram4Model(BaseModel):
 
         self.print_and_status_update("Loading Ideogram 4 unconditional transformer")
         unconditional_transformer = self._load_transformer_from_path(
-            base_model_path,
+            weights_model_path,
             pipeline_config.unconditional_index_filename,
             dtype,
         )
@@ -635,18 +879,30 @@ class Ideogram4Model(BaseModel):
             )
 
         self.print_and_status_update("Loading Qwen3-VL text encoder")
-        tokenizer, text_encoder = _load_qwen3_vl_local_or_hf(
-            base_model_path,
-            self.device_torch,
-            dtype,
-            tokenizer_subfolder=pipeline_config.tokenizer_subfolder,
-            text_encoder_subfolder=pipeline_config.text_encoder_subfolder,
-            status_callback=self.print_and_status_update,
-        )
+        if comfy_layout:
+            tokenizer, text_encoder = _load_qwen3_vl_comfy_local_or_hf(
+                config_model_path,
+                weights_model_path,
+                pipeline_config.text_encoder_weights_filename,
+                self.device_torch,
+                dtype,
+                tokenizer_subfolder=pipeline_config.tokenizer_subfolder,
+                text_encoder_subfolder=pipeline_config.text_encoder_subfolder,
+                status_callback=self.print_and_status_update,
+            )
+        else:
+            tokenizer, text_encoder = _load_qwen3_vl_local_or_hf(
+                base_model_path,
+                self.device_torch,
+                dtype,
+                tokenizer_subfolder=pipeline_config.tokenizer_subfolder,
+                text_encoder_subfolder=pipeline_config.text_encoder_subfolder,
+                status_callback=self.print_and_status_update,
+            )
 
         self.print_and_status_update("Loading Ideogram 4 VAE")
         autoencoder = _load_autoencoder_local_or_hf(
-            base_model_path,
+            weights_model_path,
             pipeline_config.autoencoder_filename,
             self.device_torch,
             dtype,
@@ -702,6 +958,7 @@ class Ideogram4Model(BaseModel):
         self.unconditional_transformer = unconditional_transformer
         self.pipeline = pipe
         self.base_model_path = base_model_path
+        self.config_model_path = config_model_path
         self.quantization = quantization
         self.print_and_status_update("Ideogram 4 model loaded")
 
@@ -741,7 +998,7 @@ class Ideogram4Model(BaseModel):
             self.device_state["text_encoder"].append(
                 {
                     "training": encoder.training,
-                    "device": encoder.device,
+                    "device": module_device(encoder),
                     "requires_grad": False,
                 }
             )
@@ -769,7 +1026,7 @@ class Ideogram4Model(BaseModel):
                 encoder.train()
             else:
                 encoder.eval()
-            encoder.to(encoder_state["device"])
+            move_module_to_device(encoder, encoder_state["device"])
             encoder.requires_grad_(encoder_state.get("requires_grad", False))
 
         unconditional_state = state.get("unconditional_transformer", None)
@@ -899,8 +1156,8 @@ class Ideogram4Model(BaseModel):
         return super().generate_images(image_configs, sampler=sampler, pipeline=pipeline)
 
     def get_prompt_embeds(self, prompt: str) -> AdvancedPromptEmbeds:
-        if self.pipeline.text_encoder.device != self.device_torch:
-            self.pipeline.text_encoder.to(self.device_torch)
+        if module_device(self.pipeline.text_encoder) != self.device_torch:
+            move_module_to_device(self.pipeline.text_encoder, self.device_torch)
 
         prompts = [prompt] if isinstance(prompt, str) else prompt
         for p in prompts:
@@ -1247,6 +1504,13 @@ class Ideogram4Model(BaseModel):
         return self.transformer
 
     def save_model(self, output_path, meta, save_dtype):
+        if getattr(self, "quantization", None) == "nvfp4":
+            raise ValueError(
+                "Saving or full fine-tuning packed NVFP4 Ideogram 4 base weights is "
+                "not supported. Use LoRA/adapters with the NVFP4 base frozen, or "
+                "dequantize to a floating-point checkpoint before full fine-tuning."
+            )
+
         output_dir = output_path.removesuffix(".safetensors")
         transformer_dir = os.path.join(output_dir, "transformer")
         os.makedirs(transformer_dir, exist_ok=True)
@@ -1270,6 +1534,8 @@ class Ideogram4Model(BaseModel):
         meta["ideogram4_base_model"] = getattr(
             self, "base_model_path", self.model_config.extras_name_or_path
         )
+        if getattr(self, "config_model_path", None):
+            meta["ideogram4_config_model"] = self.config_model_path
         meta["ideogram4_quantization"] = getattr(self, "quantization", None)
         meta["ideogram4_local_only"] = True
         meta_path = os.path.join(output_dir, "aitk_meta.yaml")

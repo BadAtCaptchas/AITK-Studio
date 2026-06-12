@@ -202,6 +202,7 @@ class FluxGuidanceBypassConfigTest(unittest.TestCase):
         cases = [
             ("ideogram4", "ideogram-ai/ideogram-4-nf4"),
             ("ideogram4:fp8", "ideogram-ai/ideogram-4-fp8"),
+            ("ideogram4:nvfp4", "Comfy-Org/Ideogram-4"),
             ("flux2_klein_4b", "black-forest-labs/FLUX.2-klein-base-4B"),
             ("flux2_klein_9b", "black-forest-labs/FLUX.2-klein-base-9B"),
             ("asymflux2_klein_9b", "Lakonik/AsymFLUX.2-klein-9B"),
@@ -221,6 +222,7 @@ class FluxGuidanceBypassConfigTest(unittest.TestCase):
         cases = [
             ("ideogram4", "ideogram-ai/ideogram-4-nf4"),
             ("ideogram4:fp8", "ideogram-ai/ideogram-4-fp8"),
+            ("ideogram4:nvfp4", "Comfy-Org/Ideogram-4"),
             ("flux2_klein_4b", "black-forest-labs/FLUX.2-klein-base-4B"),
             ("flux2_klein_9b", "black-forest-labs/FLUX.2-klein-base-9B"),
             ("asymflux2_klein_9b", "Lakonik/AsymFLUX.2-klein-9B"),

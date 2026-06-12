@@ -37,6 +37,10 @@ test('Flux guidance policy distinguishes official FLUX, Ideogram, Klein, and Fle
     'forbidden',
   );
   assert.equal(
+    getFluxGuidanceBypassPolicy({ arch: 'ideogram4:nvfp4', name_or_path: 'Comfy-Org/Ideogram-4' }),
+    'forbidden',
+  );
+  assert.equal(
     getFluxGuidanceBypassPolicy({ arch: 'flux2_klein_4b', name_or_path: 'black-forest-labs/FLUX.2-klein-base-4B' }),
     'forbidden',
   );
@@ -95,6 +99,10 @@ test('Flux UI arch defaults set or clear guidance bypass explicitly', () => {
   );
   assert.match(
     archBlock(source, 'ideogram4:fp8'),
+    /'config\.process\[0\]\.train\.bypass_guidance_embedding': \[false, false\]/,
+  );
+  assert.match(
+    archBlock(source, 'ideogram4:nvfp4'),
     /'config\.process\[0\]\.train\.bypass_guidance_embedding': \[false, false\]/,
   );
   assert.match(

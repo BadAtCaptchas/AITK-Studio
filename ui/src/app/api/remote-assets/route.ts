@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteProxyFetch } from '@/server/remoteClient';
-import type { RemoteAssetType } from '@/server/remoteAssets';
+import { remoteAssetProxyPath, type RemoteAssetType } from '@/server/remoteAssets';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function remoteAssetPath(type: RemoteAssetType, remotePath: string) {
-  if (remotePath.startsWith('/api/jobs/')) return remotePath;
-  const encoded = encodeURIComponent(remotePath);
-  if (type === 'file') return `/api/files/${encoded}`;
-  if (type === 'audio-art') return `/api/audio/art/${encoded}`;
-  return `/api/img/${encoded}`;
-}
 
 function copyResponseHeaders(source: Response) {
   const headers = new Headers();
@@ -47,7 +39,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const worker = await getRemoteWorker(job.worker_id);
-    const remoteResponse = await remoteProxyFetch(worker, remoteAssetPath(type, remotePath), request.headers);
+    const remoteResponse = await remoteProxyFetch(
+      worker,
+      remoteAssetProxyPath(type, remotePath, job.remote_job_id),
+      request.headers,
+    );
     return new NextResponse(remoteResponse.body, {
       status: remoteResponse.status,
       headers: copyResponseHeaders(remoteResponse),

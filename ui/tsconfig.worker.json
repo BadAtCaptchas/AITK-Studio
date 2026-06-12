@@ -55,6 +55,7 @@
         "src/server/remoteDatasetSync.ts",
         "src/server/queueReorder.ts",
         "src/server/jobStart.ts",
-        "src/server/trainingJobRestart.ts"
+        "src/server/trainingJobRestart.ts",
+        "src/server/remoteAssets.ts"
     ]
 }

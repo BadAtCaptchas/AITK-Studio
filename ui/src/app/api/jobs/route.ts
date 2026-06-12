@@ -5,13 +5,12 @@ import { withComfyInstallProgress } from '@/server/comfyInstallProgress';
 import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
 import { reconcileLocalJobProcess } from '@/server/jobProcess';
 import {
-  discoverRemoteJobs,
   getRemoteWorker,
   isLocalWorker,
   remoteJson,
   syncRemoteJob,
-  syncRemoteJobs,
 } from '@/server/remoteClient';
+import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 import { isDirectRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
@@ -138,8 +137,7 @@ export async function GET(request: Request) {
       return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
 
-    const discoveredJobIds = localOnly ? new Set<string>() : await discoverRemoteJobs(job_type);
-    const jobs = await syncRemoteJobs(await db.jobs.list({ job_type }), discoveredJobIds);
+    const jobs = await listJobsForJobsApi({ jobType: job_type, localOnly });
     const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
       (job): job is Job => job !== null,
     );

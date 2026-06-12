@@ -114,6 +114,7 @@ export async function GET(request: Request) {
   const id = searchParams.get('id');
   const job_ref = searchParams.get('job_ref');
   const job_type = searchParams.get('job_type');
+  const localOnly = searchParams.get('local_only') === '1';
 
   try {
     if (id) {
@@ -137,7 +138,7 @@ export async function GET(request: Request) {
       return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
 
-    const discoveredJobIds = await discoverRemoteJobs(job_type);
+    const discoveredJobIds = localOnly ? new Set<string>() : await discoverRemoteJobs(job_type);
     const jobs = await syncRemoteJobs(await db.jobs.list({ job_type }), discoveredJobIds);
     const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
       (job): job is Job => job !== null,

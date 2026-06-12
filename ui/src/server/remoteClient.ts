@@ -14,6 +14,10 @@ import {
 } from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
 
+const REMOTE_DISCOVERY_TIMEOUT_MS = 15_000;
+
+type RemoteRequestInit = RequestInit & { timeoutMs?: number };
+
 export class RemoteClientError extends Error {
   status: number;
   body: string;
@@ -77,14 +81,30 @@ function remoteUrl(worker: WorkerNodeRecord, routePath: string) {
   return `${normalizeWorkerBaseUrl(worker.base_url)}${suffix}`;
 }
 
-async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
+async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: RemoteRequestInit = {}) {
+  const { timeoutMs, ...fetchInit } = init;
+  const headers = new Headers(fetchInit.headers);
   headers.set('Authorization', `Bearer ${worker.api_token}`);
 
+  let signal = fetchInit.signal;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let onAbort: (() => void) | null = null;
+  if (timeoutMs != null) {
+    const controller = new AbortController();
+    signal = controller.signal;
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+    onAbort = () => controller.abort(fetchInit.signal?.reason);
+    fetchInit.signal?.addEventListener('abort', onAbort, { once: true });
+  }
+
   const response = await fetch(remoteUrl(worker, routePath), {
-    ...init,
+    ...fetchInit,
     headers,
     cache: 'no-store',
+    signal,
+  }).finally(() => {
+    if (timeout) clearTimeout(timeout);
+    if (onAbort) fetchInit.signal?.removeEventListener('abort', onAbort);
   });
 
   if (!response.ok) {
@@ -99,11 +119,11 @@ async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: 
   return response;
 }
 
-export async function remoteFetch(worker: WorkerNodeRecord, routePath: string, init: RequestInit = {}) {
+export async function remoteFetch(worker: WorkerNodeRecord, routePath: string, init: RemoteRequestInit = {}) {
   return remoteRequest(worker, routePath, init);
 }
 
-export async function remoteJson<T>(worker: WorkerNodeRecord, routePath: string, init: RequestInit = {}): Promise<T> {
+export async function remoteJson<T>(worker: WorkerNodeRecord, routePath: string, init: RemoteRequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body != null && !headers.has('Content-Type') && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
@@ -164,8 +184,11 @@ export async function markRemoteJobMissing(localJob: Job) {
 }
 
 export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string | null) {
-  const query = jobType ? `?job_type=${encodeURIComponent(jobType)}` : '';
-  return remoteJson<{ jobs: Job[] }>(worker, `/api/jobs${query}`);
+  const query = new URLSearchParams({ local_only: '1' });
+  if (jobType) query.set('job_type', jobType);
+  return remoteJson<{ jobs: Job[] }>(worker, `/api/jobs?${query.toString()}`, {
+    timeoutMs: REMOTE_DISCOVERY_TIMEOUT_MS,
+  });
 }
 
 function remoteJobPatch(

@@ -52,6 +52,7 @@
         "src/server/remoteStartProgress.ts",
         "src/server/remoteDatasetSync.ts",
         "src/server/jobStart.ts",
-        "src/server/trainingJobRestart.ts"
+        "src/server/trainingJobRestart.ts",
+        "src/server/remoteAssets.ts"
     ]
 }

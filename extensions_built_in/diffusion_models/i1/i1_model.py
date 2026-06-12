@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import ntpath
 import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, List, Optional, Sequence
@@ -81,6 +82,24 @@ def _from_pretrained_with_dtype(cls, *args, dtype: torch.dtype, **kwargs):
         return cls.from_pretrained(*args, dtype=dtype, **kwargs)
     except TypeError:
         return cls.from_pretrained(*args, torch_dtype=dtype, **kwargs)
+
+
+def _safe_i1_checkpoint_save_filename(checkpoint_filename: str) -> str:
+    if not isinstance(checkpoint_filename, str) or not checkpoint_filename:
+        raise UserFacingError("i1 checkpoint_filename must be a non-empty filename")
+
+    save_filename = checkpoint_filename.replace(".pt", ".safetensors")
+    if (
+        os.path.isabs(save_filename)
+        or ntpath.splitdrive(save_filename)[0]
+        or os.path.basename(save_filename) != save_filename
+        or ntpath.basename(save_filename) != save_filename
+        or save_filename in {"", ".", ".."}
+    ):
+        raise UserFacingError(
+            "i1 checkpoint_filename must be a filename only, without path separators"
+        )
+    return save_filename
 
 
 class I1Model(BaseModel):
@@ -580,7 +599,9 @@ class I1Model(BaseModel):
         os.makedirs(output_path, exist_ok=True)
         save_file(
             save_dict,
-            os.path.join(output_path, self.checkpoint_filename.replace(".pt", ".safetensors")),
+            os.path.join(
+                output_path, _safe_i1_checkpoint_save_filename(self.checkpoint_filename)
+            ),
             metadata=metadata,
         )
         meta_path = os.path.join(output_path, "aitk_meta.yaml")

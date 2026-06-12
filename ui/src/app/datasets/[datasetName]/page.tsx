@@ -2,9 +2,7 @@
 
 import { useEffect, useState, use, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
-import { FaChevronLeft } from 'react-icons/fa';
-import { Pencil } from 'lucide-react';
+import { ArrowLeft, Ban, ImageOff, Loader2, Pencil } from 'lucide-react';
 import DatasetImageStudio, {
   type BulkCaptionActionRequest,
   type BulkCaptionActionResult,
@@ -13,12 +11,14 @@ import DatasetImageStudio, {
 } from '@/components/DatasetImageStudio';
 import { Button } from '@headlessui/react';
 import AddImagesModal, { openImagesModal, useOpenImagesModalOnDrag } from '@/components/AddImagesModal';
+import DatasetFolderIcon from '@/components/DatasetFolderIcon';
 import { Modal } from '@/components/Modal';
 import { TextInput } from '@/components/formInputs';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import useSettings from '@/hooks/useSettings';
-import { pathJoin } from '@/utils/basic';
+import { isImage, pathJoin } from '@/utils/basic';
+import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
@@ -37,6 +37,10 @@ import {
 } from '@/utils/encryptedDatasets';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
+
+function isPreviewableImagePath(value: string) {
+  return isImage(value) || isImage(getDisplayPath(value));
+}
 
 export default function DatasetPage({ params }: { params: Promise<{ datasetName: string }> }) {
   const [imgList, setImgList] = useState<{ img_path: string }[]>([]);
@@ -161,6 +165,10 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
     () => (settings?.DATASETS_FOLDER ? pathJoin(settings.DATASETS_FOLDER, datasetName) : datasetName),
     [datasetName, settings?.DATASETS_FOLDER],
   );
+  const datasetHeaderPreviewUrl = useMemo(() => {
+    const firstImagePath = imgList.map(image => image.img_path).find(path => isPreviewableImagePath(path));
+    return firstImagePath ? getMediaUrl(firstImagePath) : null;
+  }, [imgList]);
 
   const plainStudioItems = useMemo<DatasetStudioItem[]>(
     () => imgList.map(img => ({ kind: 'plain' as const, path: img.img_path })),
@@ -268,7 +276,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
     let iconColor = '';
 
     if (status == 'loading') {
-      icon = <LuLoader className="animate-spin w-8 h-8" />;
+      icon = <Loader2 className="h-8 w-8 animate-spin" />;
       text = 'Loading Images';
       subtitle = 'Please wait while we fetch your dataset images...';
       showIt = true;
@@ -277,7 +285,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
       iconColor = 'text-gray-400';
     }
     if (status == 'error') {
-      icon = <LuBan className="w-8 h-8" />;
+      icon = <Ban className="h-8 w-8" />;
       text = 'Error Loading Images';
       subtitle = 'There was a problem fetching the images. Please try refreshing the page.';
       showIt = true;
@@ -286,7 +294,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
       iconColor = 'text-red-400';
     }
     if (status == 'success' && !encryptedManifest && imgList.length === 0) {
-      icon = <LuImageOff className="w-8 h-8" />;
+      icon = <ImageOff className="h-8 w-8" />;
       text = 'No Images Found';
       subtitle = 'This dataset is empty. Click "Add Images" to get started.';
       showIt = true;
@@ -570,9 +578,17 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
       <TopBar className="h-14 bg-[#070b10]">
         <div className="flex-shrink-0">
           <Button className="operator-icon-button" onClick={() => history.back()} title="Back">
-            <FaChevronLeft />
+            <ArrowLeft className="h-4 w-4" />
           </Button>
         </div>
+        <DatasetFolderIcon
+          size="sm"
+          encrypted={!!encryptedManifest}
+          unlocked={!!encryptedCatalog}
+          remote={isRemoteDataset}
+          previewSrc={datasetHeaderPreviewUrl}
+          className="hidden sm:block"
+        />
         <div className="min-w-0 flex-shrink text-sm">
           <h1 className="truncate font-semibold text-gray-100">
             <span className="hidden text-gray-400 sm:inline">AI Toolkit / Datasets / </span>

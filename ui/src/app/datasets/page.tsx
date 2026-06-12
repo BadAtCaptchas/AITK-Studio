@@ -6,27 +6,30 @@ import Link from 'next/link';
 import { TextInput } from '@/components/formInputs';
 import useDatasetList from '@/hooks/useDatasetList';
 import { Button } from '@headlessui/react';
-import { FaRegTrashAlt } from 'react-icons/fa';
 import {
   AlertTriangle,
   CheckCircle2,
   CloudDownload,
   Database,
   Download,
+  Grid2X2,
   FolderPlus,
   HelpCircle,
   KeyRound,
   Layers,
+  List,
   Loader2,
   LockKeyhole,
   MinusCircle,
   Pencil,
   Plus,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { openConfirm } from '@/components/ConfirmModal';
+import DatasetFolderIcon from '@/components/DatasetFolderIcon';
 import { TopBar, MainContent } from '@/components/layout';
-import UniversalTable, { TableColumn } from '@/components/UniversalTable';
+import { PageNotice } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
 import { useRouter } from 'next/navigation';
 import {
@@ -49,8 +52,66 @@ import {
   isFolderImportCaptionSidecarPath,
   stripFolderImportRoot,
 } from '@/utils/folderImport';
+import { isImage } from '@/utils/basic';
+import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
+
+type DatasetExplorerView = 'details' | 'icons';
+
+type DatasetExplorerRow = {
+  dataset: DatasetSummary;
+  name: string;
+  encrypted: boolean;
+  unlocked: boolean;
+  source: 'local' | 'remote';
+  worker: string;
+  captions: string;
+  ref: string;
+  worker_id: string;
+};
+
+const DATASET_VIEW_STORAGE_KEY = 'aitk.datasets.view';
+
+function isPreviewableImagePath(value: string) {
+  return isImage(value) || isImage(getDisplayPath(value));
+}
+
+function parseDatasetExplorerView(value: string | null | undefined): DatasetExplorerView | null {
+  return value === 'details' || value === 'icons' ? value : null;
+}
+
+function readDatasetViewCookie() {
+  if (typeof document === 'undefined') return null;
+  const cookie = document.cookie
+    .split('; ')
+    .find(value => value.startsWith(`${DATASET_VIEW_STORAGE_KEY}=`));
+  if (!cookie) return null;
+  return parseDatasetExplorerView(decodeURIComponent(cookie.split('=').slice(1).join('=')));
+}
+
+function readStoredDatasetView() {
+  if (typeof window === 'undefined') return null;
+  try {
+    return parseDatasetExplorerView(window.localStorage.getItem(DATASET_VIEW_STORAGE_KEY)) || readDatasetViewCookie();
+  } catch {
+    return readDatasetViewCookie();
+  }
+}
+
+function writeStoredDatasetView(view: DatasetExplorerView) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(DATASET_VIEW_STORAGE_KEY, view);
+  } catch {
+    // Keep the cookie fallback below for private or restricted storage modes.
+  }
+  try {
+    document.cookie = `${DATASET_VIEW_STORAGE_KEY}=${encodeURIComponent(view)}; Max-Age=31536000; Path=/; SameSite=Lax`;
+  } catch {
+    // If both storage mechanisms are blocked, the current in-memory state still updates.
+  }
+}
 
 function datasetRowKey(dataset: DatasetSummary) {
   return dataset.ref || `${dataset.worker_id || 'local'}:${dataset.name}`;
@@ -252,6 +313,9 @@ export default function Datasets() {
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
   const [datasetFilter, setDatasetFilter] = useState('');
+  const [datasetView, setDatasetView] = useState<DatasetExplorerView>('details');
+  const [datasetPreviewUrls, setDatasetPreviewUrls] = useState<Record<string, string | null>>({});
+  const datasetPreviewRequestsRef = useRef<Set<string>>(new Set());
   const [newDatasetMode, setNewDatasetMode] = useState<'plain' | 'encrypted'>('plain');
   const [credentialMode, setCredentialMode] = useState<DatasetCredentialMode>('password');
   const [datasetPassword, setDatasetPassword] = useState('');
@@ -317,6 +381,24 @@ export default function Datasets() {
   const [isLoadingHfPreview, setIsLoadingHfPreview] = useState(false);
   const [isImportingHfDataset, setIsImportingHfDataset] = useState(false);
 
+  useEffect(() => {
+    const rememberedView = readStoredDatasetView();
+    if (rememberedView) setDatasetView(rememberedView);
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== DATASET_VIEW_STORAGE_KEY) return;
+      const nextView = parseDatasetExplorerView(event.newValue);
+      if (nextView) setDatasetView(nextView);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  const updateDatasetView = useCallback((view: DatasetExplorerView) => {
+    setDatasetView(view);
+    writeStoredDatasetView(view);
+  }, []);
+
   const isDatasetUnlocked = useCallback(
     (dataset: DatasetSummary) =>
       dataset.encrypted && (unlockedDatasetRefs.has(datasetRowKey(dataset)) || !!getRememberedDatasetKey(dataset)),
@@ -333,14 +415,14 @@ export default function Datasets() {
   }, []);
 
   // Transform datasets array into rows with objects
-  const tableRows = datasets.map(dataset => {
+  const tableRows: DatasetExplorerRow[] = datasets.map(dataset => {
     const unlocked = isDatasetUnlocked(dataset);
     return {
       dataset,
       name: dataset.name,
       encrypted: dataset.encrypted,
       unlocked,
-      source: dataset.source || 'local',
+      source: dataset.source === 'remote' ? 'remote' : 'local',
       worker: dataset.worker_name || 'Local',
       captions: captionStatusSearchText(dataset, unlocked),
       ref: datasetRowKey(dataset),
@@ -356,6 +438,30 @@ export default function Datasets() {
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
   }, [datasetFilter, tableRows]);
+
+  useEffect(() => {
+    filteredTableRows
+      .filter(row => !row.encrypted && !datasetPreviewRequestsRef.current.has(row.ref))
+      .slice(0, 80)
+      .forEach(row => {
+        datasetPreviewRequestsRef.current.add(row.ref);
+        apiClient
+          .post('/api/datasets/listImages', { datasetName: row.name, worker_id: row.worker_id })
+          .then(response => {
+            const images = Array.isArray(response.data?.images) ? response.data.images : [];
+            const firstImagePath = images
+              .map((image: { img_path?: unknown }) => (typeof image.img_path === 'string' ? image.img_path : ''))
+              .find(path => path && isPreviewableImagePath(path));
+            setDatasetPreviewUrls(previous => ({
+              ...previous,
+              [row.ref]: firstImagePath ? getMediaUrl(firstImagePath) : null,
+            }));
+          })
+          .catch(() => {
+            setDatasetPreviewUrls(previous => ({ ...previous, [row.ref]: null }));
+          });
+      });
+  }, [filteredTableRows]);
 
   const selectedDatasets = useMemo(
     () => tableRows.filter(row => selectedDatasetRefs.has(row.ref)).map(row => row.dataset),
@@ -417,105 +523,6 @@ export default function Datasets() {
     });
     return Array.from(options.entries()).map(([id, name]) => ({ id, name }));
   }, [datasets]);
-
-  const columns: TableColumn[] = [
-    {
-      title: '',
-      key: 'select',
-      className: 'w-10',
-      render: row => {
-        const selected = selectedDatasetRefs.has(row.ref);
-        const disabled = !selected && selectedWorkerID !== null && selectedWorkerID !== row.worker_id;
-        return (
-          <input
-            type="checkbox"
-            aria-label={`Select ${row.name}`}
-            checked={selected}
-            disabled={disabled}
-            onChange={() => toggleDatasetSelection(row.dataset)}
-            className="h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-600 disabled:opacity-40"
-          />
-        );
-      },
-    },
-    {
-      title: 'Dataset Name',
-      key: 'name',
-      render: row => (
-        <Link
-          href={
-            row.source === 'remote'
-              ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
-              : `/datasets/${encodeURIComponent(row.name)}`
-          }
-          className="block max-w-[26rem] truncate text-gray-200 hover:text-gray-100"
-        >
-          {row.name}
-        </Link>
-      ),
-    },
-    {
-      title: 'Source',
-      key: 'source',
-      className: 'w-40',
-      render: row => (
-        <span className={row.source === 'remote' ? 'text-blue-300' : 'text-gray-400'}>
-          {row.source === 'remote' ? row.worker : 'Local'}
-        </span>
-      ),
-    },
-    {
-      title: 'Type',
-      key: 'encrypted',
-      className: 'w-32',
-      render: row => (
-        <span className={row.encrypted ? 'text-blue-300' : 'text-gray-400'}>
-          {row.encrypted ? 'Encrypted' : 'Plain'}
-        </span>
-      ),
-    },
-    {
-      title: 'Captions',
-      key: 'captions',
-      className: 'w-48',
-      render: row => <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />,
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      className: 'w-36 text-right',
-      render: row => (
-        <div className="flex justify-end gap-1">
-          {row.source === 'remote' && (
-            <button
-              className="text-gray-200 hover:bg-blue-600 p-2 rounded-full transition-colors disabled:opacity-50"
-              disabled={importingRef === row.ref}
-              onClick={() => handleImportDataset(row.dataset)}
-              title="Import to Local"
-            >
-              <Download className="h-4 w-4" />
-            </button>
-          )}
-          <button
-            className="text-gray-200 hover:bg-cyan-700 p-2 rounded-full transition-colors"
-            onClick={() => openRenameDatasetModal(row.dataset)}
-            title="Rename dataset"
-            aria-label={`Rename ${row.name}`}
-          >
-            <Pencil className="h-4 w-4" />
-          </button>
-          <button
-            className="text-gray-200 hover:bg-red-600 p-2 rounded-full transition-colors"
-            onClick={() => handleDeleteDataset(row.name, row.worker_id)}
-            title="Delete dataset"
-            aria-label={`Delete ${row.name}`}
-          >
-            <FaRegTrashAlt />
-          </button>
-        </div>
-      ),
-    },
-  ];
 
   const toggleDatasetSelection = (dataset: DatasetSummary) => {
     const ref = datasetRowKey(dataset);
@@ -1396,6 +1403,267 @@ export default function Datasets() {
     setIsNewDatasetModalOpen(true);
   };
 
+  const datasetHref = (row: DatasetExplorerRow) =>
+    row.source === 'remote'
+      ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
+      : `/datasets/${encodeURIComponent(row.name)}`;
+
+  const datasetMediaLabel = (dataset: DatasetSummary, unlocked = false) => {
+    if (dataset.encrypted) return unlocked ? 'Unlocked' : 'Locked';
+    if (typeof dataset.itemCount !== 'number') return 'Not scanned';
+    if (dataset.itemCount === 0) return 'No media';
+    return `${dataset.itemCount} media item${dataset.itemCount === 1 ? '' : 's'}`;
+  };
+
+  const datasetCaptionLabel = (dataset: DatasetSummary, unlocked = false) => {
+    if (dataset.encrypted) return unlocked ? 'Captions unlocked' : 'Captions locked';
+    if (typeof dataset.itemCount !== 'number' || typeof dataset.missingCaptionCount !== 'number') return 'Not scanned';
+    if (dataset.itemCount === 0) return 'No captions';
+    if (dataset.missingCaptionCount > 0) {
+      return `${dataset.missingCaptionCount} missing caption${dataset.missingCaptionCount === 1 ? '' : 's'}`;
+    }
+    return 'Captions complete';
+  };
+
+  const isRowSelected = (row: DatasetExplorerRow) => selectedDatasetRefs.has(row.ref);
+  const isRowSelectionDisabled = (row: DatasetExplorerRow) =>
+    !isRowSelected(row) && selectedWorkerID !== null && selectedWorkerID !== row.worker_id;
+
+  const renderSelectionCheckbox = (row: DatasetExplorerRow) => (
+    <input
+      type="checkbox"
+      aria-label={`Select ${row.name}`}
+      checked={isRowSelected(row)}
+      disabled={isRowSelectionDisabled(row)}
+      onChange={() => toggleDatasetSelection(row.dataset)}
+      className="h-4 w-4 rounded border-gray-600 bg-gray-900 text-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+    />
+  );
+
+  const renderDatasetActions = (row: DatasetExplorerRow, compact = false) => (
+    <div className="flex justify-end gap-1">
+      {row.source === 'remote' && (
+        <button
+          type="button"
+          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+            compact ? 'h-7 w-7' : 'h-8 w-8'
+          }`}
+          disabled={importingRef === row.ref}
+          onClick={() => handleImportDataset(row.dataset)}
+          title="Import to Local"
+          aria-label={`Import ${row.name} to Local`}
+        >
+          {importingRef === row.ref ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+        </button>
+      )}
+      <button
+        type="button"
+        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-cyan-700 hover:text-white ${
+          compact ? 'h-7 w-7' : 'h-8 w-8'
+        }`}
+        onClick={() => openRenameDatasetModal(row.dataset)}
+        title="Rename dataset"
+        aria-label={`Rename ${row.name}`}
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-red-600 hover:text-white ${
+          compact ? 'h-7 w-7' : 'h-8 w-8'
+        }`}
+        onClick={() => handleDeleteDataset(row.name, row.worker_id)}
+        title="Delete dataset"
+        aria-label={`Delete ${row.name}`}
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
+  const renderSourceBadge = (row: DatasetExplorerRow) => (
+    <span
+      className={`inline-flex max-w-full items-center rounded-sm border px-2 py-0.5 text-xs font-medium ${
+        row.source === 'remote'
+          ? 'border-sky-700/70 bg-sky-950/35 text-sky-200'
+          : 'border-gray-700 bg-gray-900/80 text-gray-300'
+      }`}
+      title={row.source === 'remote' ? row.worker : 'Local'}
+    >
+      <span className="truncate">{row.source === 'remote' ? row.worker : 'Local'}</span>
+    </span>
+  );
+
+  const renderTypeBadge = (row: DatasetExplorerRow) => (
+    <span
+      className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium ${
+        row.encrypted
+          ? row.unlocked
+            ? 'border-emerald-700/70 bg-emerald-950/35 text-emerald-200'
+            : 'border-cyan-700/70 bg-cyan-950/35 text-cyan-200'
+          : 'border-gray-700 bg-gray-900/80 text-gray-300'
+      }`}
+    >
+      {row.encrypted ? (row.unlocked ? 'Unlocked' : 'Encrypted') : 'Plain'}
+    </span>
+  );
+
+  const renderBrowserState = () => {
+    if (status === 'loading') {
+      return (
+        <div className="flex min-h-64 items-center justify-center border border-gray-800 bg-gray-950/40">
+          <div className="flex items-center gap-2 text-sm text-gray-300">
+            <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
+            Loading datasets
+          </div>
+        </div>
+      );
+    }
+
+    if (status === 'error') {
+      return (
+        <PageNotice
+          tone="danger"
+          title="Datasets could not be loaded"
+          action={
+            <button type="button" onClick={() => refreshDatasets()} className="operator-button py-1 text-xs">
+              Retry
+            </button>
+          }
+        />
+      );
+    }
+
+    if (filteredTableRows.length === 0) {
+      return (
+        <PageNotice
+          tone="neutral"
+          title={datasetFilter ? 'No datasets match the filter' : 'No datasets found'}
+          action={
+            <button type="button" onClick={() => refreshDatasets()} className="operator-button py-1 text-xs">
+              Refresh
+            </button>
+          }
+        >
+          {datasetFilter ? 'Try a different dataset, worker, caption, or type filter.' : 'Create a dataset or import folders to prepare training data.'}
+        </PageNotice>
+      );
+    }
+
+    return null;
+  };
+
+  const renderDetailsView = () => {
+    const stateContent = renderBrowserState();
+    if (stateContent) return stateContent;
+
+    return (
+      <div className="overflow-hidden border border-gray-800 bg-gray-950/40">
+        <div className="overflow-x-auto">
+          <div className="min-w-[920px]">
+            <div className="grid grid-cols-[2.75rem_minmax(17rem,1.7fr)_8.5rem_minmax(12rem,0.85fr)_10rem_8rem_7.5rem] border-b border-gray-800 bg-gray-900/85 text-xs uppercase text-gray-500">
+              <div className="px-3 py-2" />
+              <div className="px-3 py-2 font-medium">Name</div>
+              <div className="px-3 py-2 font-medium">Items</div>
+              <div className="px-3 py-2 font-medium">Captions</div>
+              <div className="px-3 py-2 font-medium">Source</div>
+              <div className="px-3 py-2 font-medium">Type</div>
+              <div className="px-3 py-2 text-right font-medium">Actions</div>
+            </div>
+            {filteredTableRows.map((row, index) => {
+              const selected = isRowSelected(row);
+              const rowClass = selected
+                ? 'bg-cyan-950/35 ring-1 ring-inset ring-cyan-700/45'
+                : index % 2 === 0
+                  ? 'bg-gray-950/20'
+                  : 'bg-gray-900/35';
+              return (
+                <div
+                  key={row.ref}
+                  className={`grid grid-cols-[2.75rem_minmax(17rem,1.7fr)_8.5rem_minmax(12rem,0.85fr)_10rem_8rem_7.5rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
+                >
+                  <div className="flex items-center justify-center px-3 py-2">{renderSelectionCheckbox(row)}</div>
+                  <div className="min-w-0 px-3 py-2">
+                    <Link href={datasetHref(row)} className="flex min-w-0 items-center gap-3 text-gray-100 hover:text-cyan-100">
+                      <DatasetFolderIcon
+                        size="sm"
+                        encrypted={row.encrypted}
+                        unlocked={row.unlocked}
+                        remote={row.source === 'remote'}
+                        previewSrc={datasetPreviewUrls[row.ref]}
+                      />
+                      <span className="min-w-0 truncate font-medium">{row.name}</span>
+                    </Link>
+                    {row.dataset.path && <div className="mt-0.5 truncate text-xs text-gray-600">{row.dataset.path}</div>}
+                  </div>
+                  <div className="px-3 py-2 text-xs text-gray-400">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
+                  <div className="px-3 py-2">
+                    <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />
+                  </div>
+                  <div className="min-w-0 px-3 py-2">{renderSourceBadge(row)}</div>
+                  <div className="px-3 py-2">{renderTypeBadge(row)}</div>
+                  <div className="px-3 py-2">{renderDatasetActions(row)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderIconView = () => {
+    const stateContent = renderBrowserState();
+    if (stateContent) return stateContent;
+
+    return (
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))] gap-3">
+        {filteredTableRows.map(row => {
+          const selected = isRowSelected(row);
+          return (
+            <div
+              key={row.ref}
+              className={`relative min-h-56 rounded-sm border p-3 transition-colors ${
+                selected
+                  ? 'border-cyan-700 bg-cyan-950/30 shadow-sm shadow-cyan-950/50'
+                  : 'border-gray-800 bg-gray-950/45 hover:border-gray-700 hover:bg-gray-900/55'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                {renderSelectionCheckbox(row)}
+                {renderDatasetActions(row, true)}
+              </div>
+              <Link href={datasetHref(row)} className="mt-2 flex min-w-0 flex-col items-center gap-2 text-center">
+                <DatasetFolderIcon
+                  size="lg"
+                  encrypted={row.encrypted}
+                  unlocked={row.unlocked}
+                  remote={row.source === 'remote'}
+                  previewSrc={datasetPreviewUrls[row.ref]}
+                />
+                <span className="line-clamp-2 min-h-10 max-w-full break-words text-sm font-medium text-gray-100 hover:text-cyan-100">
+                  {row.name}
+                </span>
+              </Link>
+              <div className="mt-2 flex min-w-0 items-center justify-center gap-1.5">
+                {renderSourceBadge(row)}
+                {renderTypeBadge(row)}
+              </div>
+              <div className="mt-2 text-center text-xs text-gray-500">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
+              <div className="mt-1 truncate text-center text-xs text-gray-500">
+                {datasetCaptionLabel(row.dataset, row.unlocked)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <>
       <TopBar>
@@ -1467,15 +1735,43 @@ export default function Datasets() {
             {filteredTableRows.length} of {tableRows.length} datasets shown
             {selectedDatasets.length > 0 ? `, ${selectedDatasets.length} selected` : ''}
           </div>
-          <label className="relative block w-full sm:w-80">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-            <input
-              value={datasetFilter}
-              onChange={event => setDatasetFilter(event.target.value)}
-              placeholder="Filter datasets, workers, type"
-              className="h-8 w-full border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-cyan-700 focus:outline-none"
-            />
-          </label>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <div className="inline-flex h-8 w-full rounded-sm border border-gray-800 bg-gray-950 p-0.5 sm:w-auto">
+              <button
+                type="button"
+                onClick={() => updateDatasetView('details')}
+                className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors sm:flex-none ${
+                  datasetView === 'details' ? 'bg-gray-800 text-gray-100' : 'text-gray-400 hover:bg-gray-900 hover:text-gray-200'
+                }`}
+                title="Details view"
+                aria-pressed={datasetView === 'details'}
+              >
+                <List className="h-3.5 w-3.5" />
+                Details
+              </button>
+              <button
+                type="button"
+                onClick={() => updateDatasetView('icons')}
+                className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors sm:flex-none ${
+                  datasetView === 'icons' ? 'bg-gray-800 text-gray-100' : 'text-gray-400 hover:bg-gray-900 hover:text-gray-200'
+                }`}
+                title="Large icons view"
+                aria-pressed={datasetView === 'icons'}
+              >
+                <Grid2X2 className="h-3.5 w-3.5" />
+                Icons
+              </button>
+            </div>
+            <label className="relative block w-full sm:w-80">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+              <input
+                value={datasetFilter}
+                onChange={event => setDatasetFilter(event.target.value)}
+                placeholder="Filter datasets, workers, type"
+                className="h-8 w-full rounded-sm border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-cyan-700 focus:outline-none"
+              />
+            </label>
+          </div>
         </div>
         {errors.length > 0 && (
           <div className="mb-3 rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-sm text-yellow-200">
@@ -1483,15 +1779,7 @@ export default function Datasets() {
             {errors.map(error => `${error.worker_name}: ${error.error}`).join('; ')}
           </div>
         )}
-        <UniversalTable
-          columns={columns}
-          rows={filteredTableRows}
-          isLoading={status === 'loading'}
-          onRefresh={refreshDatasets}
-          emptyTitle={datasetFilter ? 'No datasets match the filter' : 'No datasets found'}
-          emptyDescription="Create a dataset or import folders to prepare training data."
-          errorMessage={status === 'error' ? 'Datasets could not be loaded.' : null}
-        />
+        {datasetView === 'details' ? renderDetailsView() : renderIconView()}
       </MainContent>
 
       <Modal

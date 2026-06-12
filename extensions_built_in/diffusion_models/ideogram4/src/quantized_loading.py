@@ -28,6 +28,8 @@ FP8_TEXT_ENCODER_CONFIG_FLAG = "ideogram_fp8_weight_only"
 COMFY_QUANT_SUFFIX = ".comfy_quant"
 NVFP4_GLOBAL_SCALE_SUFFIX = ".weight_scale_2"
 NVFP4_GROUP_SIZE = 16
+NVFP4_SCALE_ROW_BLOCK = 128
+NVFP4_SCALE_COL_BLOCK = 4
 NVFP4_WEIGHT_DTYPE = torch.uint8
 COMFY_FLOAT8_FORMAT = "float8_e4m3fn"
 COMFY_NVFP4_FORMAT = "nvfp4"
@@ -212,6 +214,14 @@ def _fp8_scale_view(weight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
   return scale
 
 
+def _round_up(value: int, multiple: int) -> int:
+  return ((value + multiple - 1) // multiple) * multiple
+
+
+def _ceil_div(value: int, divisor: int) -> int:
+  return (value + divisor - 1) // divisor
+
+
 def dequantize_fp8_weight(
   weight: torch.Tensor,
   scale: torch.Tensor,
@@ -223,6 +233,41 @@ def dequantize_fp8_weight(
   w = weight.to(device=device, dtype=dtype)
   s = scale.to(device=device, dtype=dtype)
   return w * _fp8_scale_view(w, s)
+
+
+def _unswizzle_comfy_block_scales(
+  blocked_scales: torch.Tensor,
+  *,
+  num_rows: int,
+  num_cols: int,
+) -> torch.Tensor:
+  """Undo Comfy Kitchen/cuBLAS SWIZZLE_32_4_4 scale layout."""
+  padded_rows = _round_up(num_rows, NVFP4_SCALE_ROW_BLOCK)
+  padded_cols = _round_up(num_cols, NVFP4_SCALE_COL_BLOCK)
+  if blocked_scales.dim() != 2:
+    raise RuntimeError(
+      f"NVFP4 block scales must be rank 2, got {tuple(blocked_scales.shape)}"
+    )
+  if blocked_scales.shape[0] < padded_rows or blocked_scales.shape[1] < padded_cols:
+    raise RuntimeError(
+      "NVFP4 block scales are too small for Comfy's swizzled layout: "
+      f"got {tuple(blocked_scales.shape)}, need at least "
+      f"({padded_rows}, {padded_cols})"
+    )
+
+  n_row_blocks = _ceil_div(num_rows, NVFP4_SCALE_ROW_BLOCK)
+  n_col_blocks = _ceil_div(num_cols, NVFP4_SCALE_COL_BLOCK)
+  blocked = blocked_scales[:padded_rows, :padded_cols].contiguous()
+  unblocked = (
+    blocked.reshape(-1, 32, 16)
+    .reshape(-1, 32, 4, 4)
+    .transpose(1, 2)
+    .reshape(n_row_blocks, n_col_blocks, 4, 32, 4)
+    .reshape(n_row_blocks, n_col_blocks, 128, 4)
+    .permute(0, 2, 1, 3)
+    .reshape(padded_rows, padded_cols)
+  )
+  return unblocked[:num_rows, :num_cols]
 
 
 def _get_submodule_or_none(module: nn.Module, path: str) -> nn.Module | None:
@@ -361,7 +406,10 @@ class Nvfp4Linear(nn.Module):
     group_count = (in_features + NVFP4_GROUP_SIZE - 1) // NVFP4_GROUP_SIZE
     padded_in = group_count * NVFP4_GROUP_SIZE
     default_weight_shape = (out_features, padded_in // 2)
-    default_scale_shape = (out_features, group_count)
+    default_scale_shape = (
+      _round_up(out_features, NVFP4_SCALE_ROW_BLOCK),
+      _round_up(group_count, NVFP4_SCALE_COL_BLOCK),
+    )
 
     weight_shape = (
       tuple(packed_weight_shape)
@@ -422,12 +470,7 @@ class Nvfp4Linear(nn.Module):
     low = torch.bitwise_and(packed, 0x0F).to(torch.long)
     codes = torch.stack((high, low), dim=-1).reshape(packed.shape[0], -1)
 
-    block_scales = self.weight_scale.to(device=device, dtype=torch.float32)
-    if block_scales.dim() != 2:
-      raise RuntimeError(
-        f"NVFP4 block scales must be rank 2, got {tuple(block_scales.shape)}"
-      )
-    group_count = block_scales.shape[1]
+    group_count = (packed.shape[1] * 2) // NVFP4_GROUP_SIZE
     padded_in = group_count * NVFP4_GROUP_SIZE
     if codes.shape[1] < padded_in:
       raise RuntimeError(
@@ -435,11 +478,16 @@ class Nvfp4Linear(nn.Module):
         f"packed expands to {codes.shape[1]}, scales imply {padded_in}"
       )
 
+    block_scales = _unswizzle_comfy_block_scales(
+      self.weight_scale.to(device=device, dtype=torch.float32),
+      num_rows=packed.shape[0],
+      num_cols=group_count,
+    )
     table = self.e2m1_table(device=device, dtype=torch.float32)
     values = table[codes[:, :padded_in]]
     values = values.view(packed.shape[0], group_count, NVFP4_GROUP_SIZE)
     values = values * block_scales.unsqueeze(-1)
-    values = values.flatten(1)[:, : self.in_features]
+    values = values[: self.out_features].flatten(1)[:, : self.in_features]
     values = values * self.weight_scale_2.to(device=device, dtype=torch.float32)
     return values.to(dtype=dtype)
 

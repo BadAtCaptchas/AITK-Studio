@@ -32,6 +32,22 @@ def pack_nvfp4(codes: torch.Tensor) -> torch.Tensor:
     return ((high << 4) | low).to(torch.uint8)
 
 
+def swizzle_block_scales(scales: torch.Tensor) -> torch.Tensor:
+    rows, cols = scales.shape
+    padded_rows = ((rows + 127) // 128) * 128
+    padded_cols = ((cols + 3) // 4) * 4
+    padded = torch.zeros(padded_rows, padded_cols, dtype=scales.dtype)
+    padded[:rows, :cols] = scales
+    n_row_blocks = padded_rows // 128
+    n_col_blocks = padded_cols // 4
+    blocks = padded.view(n_row_blocks, 128, n_col_blocks, 4).permute(0, 2, 1, 3)
+    return (
+        blocks.reshape(-1, 4, 32, 4)
+        .transpose(1, 2)
+        .reshape(padded_rows, padded_cols)
+    )
+
+
 class TinyTwoLinear(nn.Module):
     def __init__(self):
         super().__init__()
@@ -61,7 +77,7 @@ class Ideogram4Nvfp4LoadingTest(unittest.TestCase):
         self.assertTrue(is_comfy_quant_state_dict(state_dict))
         self.assertTrue(is_nvfp4_state_dict(state_dict))
 
-    def test_nvfp4_dequant_expands_scales_and_trims_padding(self):
+    def test_nvfp4_dequant_unswizzles_scales_and_trims_padding(self):
         layer = Nvfp4Linear(17, 2, bias=False, compute_dtype=torch.float32)
         codes = torch.tensor(
             [
@@ -76,7 +92,7 @@ class Ideogram4Nvfp4LoadingTest(unittest.TestCase):
         )
 
         layer.weight.copy_(pack_nvfp4(codes))
-        layer.weight_scale.copy_(block_scales.to(FP8_WEIGHT_DTYPE))
+        layer.weight_scale.copy_(swizzle_block_scales(block_scales).to(FP8_WEIGHT_DTYPE))
         layer.weight_scale_2.copy_(torch.tensor(2.0))
 
         actual = layer.dequantize_weight(dtype=torch.float32)
@@ -122,7 +138,9 @@ class Ideogram4Nvfp4LoadingTest(unittest.TestCase):
         state_dict = {
             "a.comfy_quant": comfy_marker(COMFY_NVFP4_FORMAT),
             "a.weight": pack_nvfp4(codes),
-            "a.weight_scale": torch.ones(2, 1, dtype=torch.float32).to(FP8_WEIGHT_DTYPE),
+            "a.weight_scale": swizzle_block_scales(
+                torch.ones(2, 1, dtype=torch.float32)
+            ).to(FP8_WEIGHT_DTYPE),
             "a.weight_scale_2": torch.tensor(1.0, dtype=torch.float32),
             "b.weight": b_weight,
         }

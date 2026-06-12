@@ -4,6 +4,7 @@ import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
+import { deleteCaptionSidecars } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: Request) {
@@ -64,12 +65,7 @@ export async function POST(request: Request) {
     // delete it and return success
     fs.unlinkSync(normalizedImgPath);
 
-    // check for caption
-    const captionPath = normalizedImgPath.replace(/\.[^/.]+$/, '') + '.txt';
-    if (fs.existsSync(captionPath)) {
-      // delete caption file
-      fs.unlinkSync(captionPath);
-    }
+    deleteCaptionSidecars(normalizedImgPath);
 
     return NextResponse.json({ success: true });
   } catch (error) {

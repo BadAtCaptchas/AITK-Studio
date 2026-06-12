@@ -7,6 +7,7 @@ export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, m
 export const imgExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'];
 export const videoExtensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv'];
 export const audioExtensions = ['.mp3', '.wav', '.flac', '.ogg'];
+export const textCaptionExtensions = ['.json', '.txt', '.caption', '.sdxl', '.md'];
 
 export const getFileExtension = (filePath: string) => {
   const cleanPath = filePath.split(/[?#]/, 1)[0];
@@ -18,6 +19,7 @@ export const getFileExtension = (filePath: string) => {
 export const isVideo = (filePath: string) => videoExtensions.includes(getFileExtension(filePath));
 export const isImage = (filePath: string) => imgExtensions.includes(getFileExtension(filePath));
 export const isAudio = (filePath: string) => audioExtensions.includes(getFileExtension(filePath));
+export const isTextCaption = (filePath: string) => textCaptionExtensions.includes(getFileExtension(filePath));
 
 export const tagsToObj = (tagStr: string): Record<string, any> => {
   const result: Record<string, any> = {};

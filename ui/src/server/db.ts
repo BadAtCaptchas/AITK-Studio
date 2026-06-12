@@ -1017,6 +1017,20 @@ export const db = {
       }
       return getPrisma().queue.update({ where: { id }, data });
     },
+
+    async deleteMany(options: { worker_id?: string } = {}): Promise<number> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const filter: Document = {};
+        if (options.worker_id) filter.worker_id = options.worker_id;
+        const result = await mongoCollection(mongo, 'queues').deleteMany(filter);
+        return result.deletedCount ?? 0;
+      }
+      const result = await getPrisma().queue.deleteMany({
+        where: options.worker_id ? { worker_id: options.worker_id } : undefined,
+      });
+      return result.count;
+    },
   },
 
   workerNodes: {
@@ -1100,7 +1114,12 @@ export const db = {
         const result = await mongoCollection(mongo, 'worker_nodes').findOneAndDelete({ id }, { projection: { _id: 0 } });
         return normalizeWorkerNode(result);
       }
-      return getPrisma().workerNode.delete({ where: { id } }) as Promise<WorkerNodeRecord | null>;
+      try {
+        return await getPrisma().workerNode.delete({ where: { id } }) as WorkerNodeRecord;
+      } catch (error: any) {
+        if (error?.code === 'P2025') return null;
+        throw error;
+      }
     },
   },
 
@@ -1130,6 +1149,18 @@ export const db = {
         return readMongoMetrics(jobID, options);
       }
       return readSqliteMetrics(logPath, options);
+    },
+
+    async deleteForJob(jobID: string): Promise<void> {
+      if (!isMongoProvider()) {
+        return;
+      }
+
+      const mongo = await getMongoDb();
+      await Promise.all([
+        mongoCollection(mongo, 'metrics').deleteMany({ job_id: jobID }),
+        mongoCollection(mongo, 'metric_keys').deleteMany({ job_id: jobID }),
+      ]);
     },
   },
 

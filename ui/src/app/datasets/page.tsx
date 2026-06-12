@@ -7,7 +7,23 @@ import { TextInput } from '@/components/formInputs';
 import useDatasetList from '@/hooks/useDatasetList';
 import { Button } from '@headlessui/react';
 import { FaRegTrashAlt } from 'react-icons/fa';
-import { Download, Search, Database, FolderPlus, Layers, Pencil, Plus } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CloudDownload,
+  Database,
+  Download,
+  FolderPlus,
+  HelpCircle,
+  KeyRound,
+  Layers,
+  Loader2,
+  LockKeyhole,
+  MinusCircle,
+  Pencil,
+  Plus,
+  Search,
+} from 'lucide-react';
 import { openConfirm } from '@/components/ConfirmModal';
 import { TopBar, MainContent } from '@/components/layout';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
@@ -16,6 +32,7 @@ import { useRouter } from 'next/navigation';
 import {
   buildEncryptedDatasetItem,
   createEmptyEncryptedManifest,
+  decryptCatalog,
   encryptCatalog,
   getMediaKind,
   getRememberedEncryptedDatasetKey,
@@ -28,6 +45,8 @@ import {
   folderImportCaptionKey,
   folderImportExtension,
   folderImportRootName,
+  FOLDER_IMPORT_SUPPORTED_EXTENSIONS,
+  isFolderImportCaptionSidecarPath,
   stripFolderImportRoot,
 } from '@/utils/folderImport';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
@@ -62,6 +81,108 @@ function rememberDatasetKey(dataset: DatasetSummary, rawKeyB64: string) {
   }
 }
 
+function captionStatusSearchText(dataset: DatasetSummary, unlocked = false) {
+  if (dataset.encrypted) return unlocked ? 'captions unlocked encrypted' : 'captions locked encrypted';
+  if (typeof dataset.itemCount !== 'number' || typeof dataset.missingCaptionCount !== 'number') {
+    return 'captions not scanned unknown';
+  }
+  if (dataset.itemCount === 0) return 'captions no media empty';
+  if (dataset.missingCaptionCount > 0) return `${dataset.missingCaptionCount} missing captions`;
+  return 'captions complete captioned';
+}
+
+function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSummary; unlocked?: boolean }) {
+  const itemCount = typeof dataset.itemCount === 'number' ? dataset.itemCount : null;
+  const missingCount = typeof dataset.missingCaptionCount === 'number' ? dataset.missingCaptionCount : null;
+  const captionedCount =
+    typeof dataset.captionedItemCount === 'number'
+      ? dataset.captionedItemCount
+      : itemCount !== null && missingCount !== null
+        ? Math.max(itemCount - missingCount, 0)
+        : null;
+
+  if (dataset.encrypted && unlocked) {
+    return (
+      <span
+        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-100"
+        title="This encrypted dataset is unlocked in the current browser session"
+      >
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />
+        Unlocked
+      </span>
+    );
+  }
+
+  if (dataset.encrypted) {
+    return (
+      <span
+        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-xs font-medium text-slate-300"
+        title="Caption counts are encrypted until the dataset is unlocked"
+      >
+        <LockKeyhole className="h-3.5 w-3.5 text-slate-400" />
+        Locked
+      </span>
+    );
+  }
+
+  if (itemCount === null || missingCount === null || captionedCount === null) {
+    return (
+      <span
+        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs font-medium text-gray-300"
+        title="Caption status is not available from this worker"
+      >
+        <HelpCircle className="h-3.5 w-3.5 text-gray-400" />
+        Not scanned
+      </span>
+    );
+  }
+
+  if (itemCount === 0) {
+    return (
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs font-medium text-gray-300">
+        <MinusCircle className="h-3.5 w-3.5 text-gray-400" />
+        No media
+      </span>
+    );
+  }
+
+  const hasMissingCaptions = missingCount > 0;
+  const coveragePercent = Math.max(0, Math.min(100, (captionedCount / itemCount) * 100));
+
+  return (
+    <div
+      className="flex min-w-[9.5rem] flex-col gap-1"
+      title={
+        hasMissingCaptions
+          ? `${missingCount} of ${itemCount} media item${itemCount === 1 ? '' : 's'} are missing caption sidecars`
+          : `All ${itemCount} media item${itemCount === 1 ? '' : 's'} have caption sidecars`
+      }
+    >
+      <span
+        className={
+          hasMissingCaptions
+            ? 'inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-100'
+            : 'inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-100'
+        }
+      >
+        {hasMissingCaptions ? (
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+        ) : (
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />
+        )}
+        <span>{hasMissingCaptions ? `${missingCount} missing` : 'Complete'}</span>
+        <span className={hasMissingCaptions ? 'text-amber-200/70' : 'text-emerald-200/70'}>of {itemCount}</span>
+      </span>
+      <span className="block h-1.5 w-28 overflow-hidden rounded-full bg-gray-800" aria-hidden="true">
+        <span
+          className={`block h-full rounded-full ${hasMissingCaptions ? 'bg-amber-400' : 'bg-emerald-400'}`}
+          style={{ width: `${hasMissingCaptions ? Math.max(coveragePercent, 6) : 100}%` }}
+        />
+      </span>
+    </div>
+  );
+}
+
 type FolderImportEntry = {
   id: string;
   file: File;
@@ -69,29 +190,24 @@ type FolderImportEntry = {
   rootName: string;
 };
 
-const FOLDER_IMPORT_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.webp',
-  '.gif',
-  '.bmp',
-  '.mp4',
-  '.avi',
-  '.mov',
-  '.mkv',
-  '.wmv',
-  '.m4v',
-  '.flv',
-  '.webm',
-  '.mp3',
-  '.wav',
-  '.flac',
-  '.ogg',
-  '.m4a',
-  '.aac',
-  '.txt',
-]);
+type HfDatasetPreview = {
+  datasetID: string;
+  configs: string[];
+  splits: string[];
+  selectedConfig: string;
+  selectedSplit: string;
+  rowCount?: number | null;
+  features: Array<{ name: string; kind: string }>;
+  imageColumns: string[];
+  textColumns: string[];
+  suggestedImageColumn: string | null;
+  suggestedCaptionColumn: string | null;
+  samples: Array<Record<string, unknown>>;
+};
+
+type HfCaptionMode = 'auto' | 'none' | 'column';
+
+type BulkUnlockStatus = 'loading' | 'locked' | 'unlocking' | 'unlocked' | 'error';
 
 function cleanClientDatasetName(name: string) {
   return name
@@ -115,6 +231,12 @@ function nextClientDatasetName(preferredName: string, usedNames: Set<string>) {
   }
   usedNames.add(candidate.toLowerCase());
   return candidate;
+}
+
+function hfOutputNameFromDataset(datasetID: string, split?: string) {
+  const base = cleanClientDatasetName(datasetID.replace(/^https?:\/\/(?:www\.)?huggingface\.co\/datasets\//i, ''));
+  const splitSuffix = split && split !== 'train' ? `_${cleanClientDatasetName(split)}` : '';
+  return `${base || 'hf_dataset'}${splitSuffix}`;
 }
 
 export default function Datasets() {
@@ -142,6 +264,16 @@ export default function Datasets() {
   const [renameDatasetError, setRenameDatasetError] = useState('');
   const [importingRef, setImportingRef] = useState<string | null>(null);
   const [selectedDatasetRefs, setSelectedDatasetRefs] = useState<Set<string>>(() => new Set());
+  const [unlockedDatasetRefs, setUnlockedDatasetRefs] = useState<Set<string>>(() => new Set());
+  const [isBulkUnlockModalOpen, setIsBulkUnlockModalOpen] = useState(false);
+  const [bulkUnlockTargets, setBulkUnlockTargets] = useState<DatasetSummary[]>([]);
+  const [bulkUnlockManifests, setBulkUnlockManifests] = useState<Record<string, EncryptedDatasetManifest>>({});
+  const [bulkUnlockStatus, setBulkUnlockStatus] = useState<Record<string, BulkUnlockStatus>>({});
+  const [bulkUnlockErrors, setBulkUnlockErrors] = useState<Record<string, string>>({});
+  const [bulkSharedPassword, setBulkSharedPassword] = useState('');
+  const [bulkRowPasswords, setBulkRowPasswords] = useState<Record<string, string>>({});
+  const [bulkRowKeyFiles, setBulkRowKeyFiles] = useState<Record<string, File | null>>({});
+  const [isBulkUnlocking, setIsBulkUnlocking] = useState(false);
   const [isCombineModalOpen, setIsCombineModalOpen] = useState(false);
   const [combineSources, setCombineSources] = useState<DatasetSummary[]>([]);
   const [combineOutputName, setCombineOutputName] = useState('');
@@ -169,22 +301,57 @@ export default function Datasets() {
   const [folderImportDatasetName, setFolderImportDatasetName] = useState('');
   const [isImportingFolders, setIsImportingFolders] = useState(false);
   const [folderImportStatus, setFolderImportStatus] = useState('');
+  const [isHfImportModalOpen, setIsHfImportModalOpen] = useState(false);
+  const [hfDatasetInput, setHfDatasetInput] = useState('');
+  const [hfImportWorkerID, setHfImportWorkerID] = useState('local');
+  const [hfPreview, setHfPreview] = useState<HfDatasetPreview | null>(null);
+  const [hfConfig, setHfConfig] = useState('');
+  const [hfSplit, setHfSplit] = useState('');
+  const [hfImageColumn, setHfImageColumn] = useState('');
+  const [hfCaptionMode, setHfCaptionMode] = useState<HfCaptionMode>('auto');
+  const [hfCaptionColumn, setHfCaptionColumn] = useState('');
+  const [hfOutputName, setHfOutputName] = useState('');
+  const [hfMaxRows, setHfMaxRows] = useState('');
+  const [hfImportStatus, setHfImportStatus] = useState('');
+  const [hfImportError, setHfImportError] = useState('');
+  const [isLoadingHfPreview, setIsLoadingHfPreview] = useState(false);
+  const [isImportingHfDataset, setIsImportingHfDataset] = useState(false);
+
+  const isDatasetUnlocked = useCallback(
+    (dataset: DatasetSummary) =>
+      dataset.encrypted && (unlockedDatasetRefs.has(datasetRowKey(dataset)) || !!getRememberedDatasetKey(dataset)),
+    [unlockedDatasetRefs],
+  );
+
+  const rememberUnlockedDataset = useCallback((dataset: DatasetSummary, rawKeyB64: string) => {
+    rememberDatasetKey(dataset, rawKeyB64);
+    setUnlockedDatasetRefs(previous => {
+      const next = new Set(previous);
+      next.add(datasetRowKey(dataset));
+      return next;
+    });
+  }, []);
 
   // Transform datasets array into rows with objects
-  const tableRows = datasets.map(dataset => ({
-    dataset,
-    name: dataset.name,
-    encrypted: dataset.encrypted,
-    source: dataset.source || 'local',
-    worker: dataset.worker_name || 'Local',
-    ref: datasetRowKey(dataset),
-    worker_id: datasetWorkerID(dataset),
-  }));
+  const tableRows = datasets.map(dataset => {
+    const unlocked = isDatasetUnlocked(dataset);
+    return {
+      dataset,
+      name: dataset.name,
+      encrypted: dataset.encrypted,
+      unlocked,
+      source: dataset.source || 'local',
+      worker: dataset.worker_name || 'Local',
+      captions: captionStatusSearchText(dataset, unlocked),
+      ref: datasetRowKey(dataset),
+      worker_id: datasetWorkerID(dataset),
+    };
+  });
   const filteredTableRows = useMemo(() => {
     const query = datasetFilter.trim().toLowerCase();
     if (!query) return tableRows;
     return tableRows.filter(row =>
-      [row.name, row.source, row.worker, row.encrypted ? 'encrypted' : 'plain']
+      [row.name, row.source, row.worker, row.encrypted ? 'encrypted' : 'plain', row.captions]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
@@ -194,12 +361,36 @@ export default function Datasets() {
     () => tableRows.filter(row => selectedDatasetRefs.has(row.ref)).map(row => row.dataset),
     [selectedDatasetRefs, tableRows],
   );
+  const selectedEncryptedDatasets = useMemo(
+    () => selectedDatasets.filter(dataset => dataset.encrypted),
+    [selectedDatasets],
+  );
   const selectedWorkerIDs = useMemo(
     () => Array.from(new Set(selectedDatasets.map(datasetWorkerID))),
     [selectedDatasets],
   );
   const selectedWorkerID = selectedWorkerIDs.length === 1 ? selectedWorkerIDs[0] : null;
   const canCombineSelection = selectedDatasets.length >= 2 && selectedWorkerID !== null;
+  const canBulkUnlockSelection = selectedEncryptedDatasets.length > 0;
+  const bulkPasswordTargetCount = useMemo(
+    () =>
+      bulkUnlockTargets.filter(target => {
+        const ref = datasetRowKey(target);
+        return (
+          bulkUnlockStatus[ref] !== 'unlocked' &&
+          bulkUnlockManifests[ref]?.crypto.kdf.type === 'PBKDF2-SHA256'
+        );
+      }).length,
+    [bulkUnlockManifests, bulkUnlockStatus, bulkUnlockTargets],
+  );
+  const bulkUnlockedCount = useMemo(
+    () => bulkUnlockTargets.filter(target => bulkUnlockStatus[datasetRowKey(target)] === 'unlocked').length,
+    [bulkUnlockStatus, bulkUnlockTargets],
+  );
+  const isBulkUnlockBusy = useMemo(
+    () => isBulkUnlocking || Object.values(bulkUnlockStatus).some(status => status === 'unlocking'),
+    [bulkUnlockStatus, isBulkUnlocking],
+  );
   const combineEncryptedSources = useMemo(
     () => combineSources.filter(source => source.encrypted),
     [combineSources],
@@ -257,7 +448,7 @@ export default function Datasets() {
               ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
               : `/datasets/${encodeURIComponent(row.name)}`
           }
-          className="text-gray-200 hover:text-gray-100"
+          className="block max-w-[26rem] truncate text-gray-200 hover:text-gray-100"
         >
           {row.name}
         </Link>
@@ -282,6 +473,12 @@ export default function Datasets() {
           {row.encrypted ? 'Encrypted' : 'Plain'}
         </span>
       ),
+    },
+    {
+      title: 'Captions',
+      key: 'captions',
+      className: 'w-48',
+      render: row => <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />,
     },
     {
       title: 'Actions',
@@ -338,6 +535,133 @@ export default function Datasets() {
       next.add(ref);
       return next;
     });
+  };
+
+  const loadBulkUnlockManifest = useCallback(async (dataset: DatasetSummary) => {
+    const ref = datasetRowKey(dataset);
+    setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'loading' }));
+    setBulkUnlockErrors(previous => ({ ...previous, [ref]: '' }));
+    try {
+      const res = await apiClient.post('/api/datasets/listImages', {
+        datasetName: dataset.name,
+        worker_id: datasetWorkerID(dataset),
+      });
+      if (res.data?.encrypted && res.data?.manifest) {
+        setBulkUnlockManifests(previous => ({ ...previous, [ref]: res.data.manifest }));
+        setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'locked' }));
+      } else {
+        setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
+        setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Encrypted manifest was not returned.' }));
+      }
+    } catch {
+      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
+      setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Could not load encrypted manifest.' }));
+    }
+  }, []);
+
+  const closeBulkUnlockModal = () => {
+    if (isBulkUnlockBusy) return;
+    setIsBulkUnlockModalOpen(false);
+    setBulkUnlockTargets([]);
+    setBulkUnlockManifests({});
+    setBulkUnlockStatus({});
+    setBulkUnlockErrors({});
+    setBulkSharedPassword('');
+    setBulkRowPasswords({});
+    setBulkRowKeyFiles({});
+  };
+
+  const openBulkUnlockModal = () => {
+    if (!canBulkUnlockSelection) {
+      alert('Select at least one encrypted dataset.');
+      return;
+    }
+
+    const targets = selectedEncryptedDatasets;
+    const initialStatus: Record<string, BulkUnlockStatus> = {};
+    const rememberedRefs = new Set<string>();
+    targets.forEach(target => {
+      const ref = datasetRowKey(target);
+      if (getRememberedDatasetKey(target)) {
+        initialStatus[ref] = 'unlocked';
+        rememberedRefs.add(ref);
+      } else {
+        initialStatus[ref] = 'loading';
+      }
+    });
+
+    if (rememberedRefs.size > 0) {
+      setUnlockedDatasetRefs(previous => {
+        const next = new Set(previous);
+        rememberedRefs.forEach(ref => next.add(ref));
+        return next;
+      });
+    }
+
+    setBulkUnlockTargets(targets);
+    setBulkUnlockManifests({});
+    setBulkUnlockStatus(initialStatus);
+    setBulkUnlockErrors({});
+    setBulkSharedPassword('');
+    setBulkRowPasswords({});
+    setBulkRowKeyFiles({});
+    setIsBulkUnlockModalOpen(true);
+    targets.forEach(target => {
+      if (!getRememberedDatasetKey(target)) void loadBulkUnlockManifest(target);
+    });
+  };
+
+  const unlockBulkDataset = async (
+    dataset: DatasetSummary,
+    request: Parameters<typeof unlockEncryptedDatasetKey>[1],
+    failureMessage = 'Could not unlock this dataset.',
+  ) => {
+    const ref = datasetRowKey(dataset);
+    const manifest = bulkUnlockManifests[ref];
+    if (!manifest) {
+      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
+      setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Encrypted manifest is still loading.' }));
+      return false;
+    }
+
+    setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'unlocking' }));
+    setBulkUnlockErrors(previous => ({ ...previous, [ref]: '' }));
+    try {
+      const unlocked = await unlockEncryptedDatasetKey(manifest, request);
+      await decryptCatalog(manifest, unlocked.key);
+      rememberUnlockedDataset(dataset, unlocked.rawKeyB64);
+      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'unlocked' }));
+      setBulkUnlockErrors(previous => ({ ...previous, [ref]: '' }));
+      return true;
+    } catch {
+      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
+      setBulkUnlockErrors(previous => ({ ...previous, [ref]: failureMessage }));
+      return false;
+    }
+  };
+
+  const handleBulkSharedPasswordUnlock = async () => {
+    if (!bulkSharedPassword || isBulkUnlocking) return;
+    setIsBulkUnlocking(true);
+    try {
+      for (const target of bulkUnlockTargets) {
+        const ref = datasetRowKey(target);
+        const manifest = bulkUnlockManifests[ref];
+        if (
+          bulkUnlockStatus[ref] === 'unlocked' ||
+          manifest?.crypto.kdf.type !== 'PBKDF2-SHA256'
+        ) {
+          continue;
+        }
+        await unlockBulkDataset(
+          target,
+          { provider: 'password', password: bulkSharedPassword },
+          'Needs a different password.',
+        );
+      }
+    } finally {
+      setIsBulkUnlocking(false);
+    }
   };
 
   const closeCombineModal = () => {
@@ -412,11 +736,18 @@ export default function Datasets() {
       const renamedName = res.data?.name || normalizedName;
       const rememberedKey = getRememberedDatasetKey(renameDataset);
       if (rememberedKey) {
-        rememberEncryptedDatasetKey(renamedName, rememberedKey);
-        if (workerID !== 'local') {
-          rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, renamedName), rememberedKey);
-          rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, renamedName), rememberedKey);
-        }
+        rememberUnlockedDataset(
+          {
+            ...renameDataset,
+            name: renamedName,
+            worker_id: workerID,
+            ref:
+              workerID === 'local'
+                ? `aitk-dataset://local/${encodeURIComponent(renamedName)}`
+                : makeRemoteDatasetRef(workerID, renamedName),
+          },
+          rememberedKey,
+        );
       }
       setSelectedDatasetRefs(previous => {
         const next = new Set(previous);
@@ -471,14 +802,115 @@ export default function Datasets() {
         getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(dataset.worker_id, dataset.name)) ||
         getRememberedEncryptedDatasetKey(dataset.name);
       if (remembered && importedName && importedPath) {
-        rememberEncryptedDatasetKey(importedName, remembered);
-        rememberEncryptedDatasetKey(importedPath, remembered);
+        rememberUnlockedDataset(
+          {
+            name: importedName,
+            encrypted: true,
+            worker_id: 'local',
+            ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
+            path: importedPath,
+          },
+          remembered,
+        );
       }
       if (importedName) router.push(`/datasets/${encodeURIComponent(importedName)}`);
     } catch (error: any) {
       alert(error?.response?.data?.error || 'Failed to import remote dataset.');
     } finally {
       setImportingRef(null);
+    }
+  };
+
+  const closeHfImportModal = () => {
+    if (isLoadingHfPreview || isImportingHfDataset) return;
+    setIsHfImportModalOpen(false);
+    setHfDatasetInput('');
+    setHfImportWorkerID('local');
+    setHfPreview(null);
+    setHfConfig('');
+    setHfSplit('');
+    setHfImageColumn('');
+    setHfCaptionMode('auto');
+    setHfCaptionColumn('');
+    setHfOutputName('');
+    setHfMaxRows('');
+    setHfImportStatus('');
+    setHfImportError('');
+  };
+
+  const hfRequestPayload = (action: 'preview' | 'import') => {
+    const maxRowsValue = hfMaxRows.trim() ? Number(hfMaxRows) : undefined;
+    return {
+      action,
+      worker_id: hfImportWorkerID,
+      dataset: hfDatasetInput,
+      config: hfConfig || undefined,
+      split: hfSplit || undefined,
+      imageColumn: hfImageColumn || undefined,
+      captionMode: hfCaptionMode,
+      captionColumn: hfCaptionMode === 'column' ? hfCaptionColumn || undefined : undefined,
+      outputName: action === 'import' ? hfOutputName || undefined : undefined,
+      maxRows: Number.isFinite(maxRowsValue) && Number(maxRowsValue) > 0 ? Math.floor(Number(maxRowsValue)) : undefined,
+    };
+  };
+
+  const handleLoadHfPreview = async () => {
+    if (!hfDatasetInput.trim() || isLoadingHfPreview) return;
+    try {
+      setIsLoadingHfPreview(true);
+      setHfImportError('');
+      setHfImportStatus('Loading preview...');
+      const res = await apiClient.post('/api/datasets/import-huggingface', hfRequestPayload('preview'), { timeout: 0 });
+      const preview = res.data as HfDatasetPreview;
+      setHfPreview(preview);
+      setHfConfig(preview.selectedConfig || '');
+      setHfSplit(preview.selectedSplit || '');
+      setHfImageColumn(preview.suggestedImageColumn || preview.imageColumns[0] || '');
+      setHfCaptionColumn(preview.suggestedCaptionColumn || preview.textColumns[0] || '');
+      if (!hfOutputName) {
+        setHfOutputName(hfOutputNameFromDataset(preview.datasetID, preview.selectedSplit));
+      }
+      const countText = preview.rowCount != null ? `${preview.rowCount} row${preview.rowCount === 1 ? '' : 's'}` : 'Preview ready';
+      setHfImportStatus(countText);
+    } catch (error: any) {
+      setHfPreview(null);
+      setHfImportError(error?.response?.data?.error || error?.message || 'Failed to load Hugging Face dataset preview.');
+      setHfImportStatus('');
+    } finally {
+      setIsLoadingHfPreview(false);
+    }
+  };
+
+  const handleImportHfDataset = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!hfDatasetInput.trim() || isImportingHfDataset) return;
+    try {
+      setIsImportingHfDataset(true);
+      setHfImportError('');
+      setHfImportStatus('Importing dataset...');
+      const res = await apiClient.post('/api/datasets/import-huggingface', hfRequestPayload('import'), { timeout: 0 });
+      const importedName = res.data?.dataset?.name;
+      const workerID = hfImportWorkerID;
+      const imported = res.data?.imported;
+      setHfImportStatus(
+        imported
+          ? `Imported ${imported.imagesWritten} image${imported.imagesWritten === 1 ? '' : 's'}.`
+          : 'Imported dataset.',
+      );
+      refreshDatasets();
+      setIsHfImportModalOpen(false);
+      if (importedName) {
+        router.push(
+          workerID === 'local'
+            ? `/datasets/${encodeURIComponent(importedName)}`
+            : `/datasets/${encodeURIComponent(importedName)}?worker_id=${encodeURIComponent(workerID)}`,
+        );
+      }
+    } catch (error: any) {
+      setHfImportError(error?.response?.data?.error || error?.message || 'Failed to import Hugging Face dataset.');
+      setHfImportStatus('');
+    } finally {
+      setIsImportingHfDataset(false);
     }
   };
 
@@ -541,7 +973,7 @@ export default function Datasets() {
       const rawKeyB64 = unlocked.rawKeyB64;
       setCombineSourceKeys(previous => ({ ...previous, [ref]: rawKeyB64 }));
       setCombineSourceErrors(previous => ({ ...previous, [ref]: '' }));
-      rememberDatasetKey(source, rawKeyB64);
+      rememberUnlockedDataset(source, rawKeyB64);
     } catch {
       setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Could not unlock this dataset.' }));
     }
@@ -603,7 +1035,7 @@ export default function Datasets() {
 
       const combined = res.data?.dataset as DatasetSummary | undefined;
       if (outputKeyB64 && combined?.name) {
-        rememberDatasetKey(
+        rememberUnlockedDataset(
           {
             ...combined,
             worker_id: combineWorkerID,
@@ -649,7 +1081,7 @@ export default function Datasets() {
       .filter(entry => {
         const parts = entry.relativePath.split('/').filter(Boolean);
         if (parts.some(part => part.startsWith('.'))) return false;
-        return FOLDER_IMPORT_EXTENSIONS.has(folderImportExtension(entry.relativePath));
+        return FOLDER_IMPORT_SUPPORTED_EXTENSIONS.has(folderImportExtension(entry.relativePath));
       });
 
     if (entries.length === 0) {
@@ -717,7 +1149,7 @@ export default function Datasets() {
   };
 
   const rememberFolderImportOutputKey = (workerID: string, datasetName: string, rawKeyB64: string) => {
-    rememberDatasetKey(
+    rememberUnlockedDataset(
       {
         name: datasetName,
         encrypted: true,
@@ -740,7 +1172,7 @@ export default function Datasets() {
     const captionFiles = new Map<string, File>();
     entries.forEach((entry, index) => {
       const relativePath = relativePaths[index] || entry.relativePath || entry.file.name;
-      if (/\.txt$/i.test(relativePath)) {
+      if (isFolderImportCaptionSidecarPath(relativePath)) {
         captionFiles.set(folderImportCaptionKey(relativePath), entry.file);
       }
     });
@@ -936,7 +1368,15 @@ export default function Datasets() {
         .then(res => res.data);
       console.log('New dataset created:', data);
       if (rawKeyB64 && data.name) {
-        rememberEncryptedDatasetKey(data.name, rawKeyB64);
+        rememberUnlockedDataset(
+          {
+            name: data.name,
+            encrypted: true,
+            worker_id: 'local',
+            ref: `aitk-dataset://local/${encodeURIComponent(data.name)}`,
+          },
+          rawKeyB64,
+        );
       }
       refreshDatasets();
       setNewDatasetName('');
@@ -971,6 +1411,25 @@ export default function Datasets() {
           </div>
         )}
         <div className="flex items-center gap-2">
+          <Button
+            className="operator-button shrink-0 py-1"
+            disabled={!canBulkUnlockSelection}
+            onClick={() => openBulkUnlockModal()}
+            title="Unlock selected encrypted datasets"
+            aria-label="Unlock selected encrypted datasets"
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Unlock</span>
+          </Button>
+          <Button
+            className="operator-button shrink-0 py-1"
+            onClick={() => setIsHfImportModalOpen(true)}
+            title="Import Hugging Face dataset"
+            aria-label="Import Hugging Face dataset"
+          >
+            <CloudDownload className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Import HF</span>
+          </Button>
           <Button
             className="operator-button shrink-0 py-1"
             onClick={() => setIsFolderImportModalOpen(true)}
@@ -1154,6 +1613,204 @@ export default function Datasets() {
       </Modal>
 
       <Modal
+        isOpen={isBulkUnlockModalOpen}
+        onClose={closeBulkUnlockModal}
+        title="Unlock Encrypted Datasets"
+        size="lg"
+        closeOnOverlayClick={!isBulkUnlockBusy}
+      >
+        <div className="space-y-4 text-gray-200">
+          <div className="rounded-md border border-gray-700 bg-gray-900 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-gray-100">
+                  {bulkUnlockedCount} of {bulkUnlockTargets.length} unlocked
+                </div>
+                <div className="mt-0.5 text-xs text-gray-400">
+                  {bulkUnlockTargets.length} encrypted dataset{bulkUnlockTargets.length === 1 ? '' : 's'} selected
+                </div>
+              </div>
+              <span className="text-xs text-gray-400">
+                {selectedWorkerID ? bulkUnlockTargets[0]?.worker_name || 'Local' : 'Mixed workers'}
+              </span>
+            </div>
+          </div>
+
+          {bulkPasswordTargetCount > 0 && (
+            <div className="rounded-md border border-gray-700 bg-gray-900 p-3">
+              <label className="mb-2 block text-sm font-medium text-gray-200">Shared Password</label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="password"
+                  value={bulkSharedPassword}
+                  onChange={event => setBulkSharedPassword(event.target.value)}
+                  placeholder="Dataset password"
+                  className="min-w-0 flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={handleBulkSharedPasswordUnlock}
+                  disabled={!bulkSharedPassword || isBulkUnlockBusy}
+                  className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isBulkUnlocking ? 'Unlocking...' : `Unlock ${bulkPasswordTargetCount}`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
+            {bulkUnlockTargets.map(target => {
+              const ref = datasetRowKey(target);
+              const manifest = bulkUnlockManifests[ref];
+              const status = bulkUnlockStatus[ref] || 'loading';
+              const error = bulkUnlockErrors[ref];
+              const isUnlocked = status === 'unlocked';
+              const isBusy = status === 'loading' || status === 'unlocking';
+              const rowPassword = bulkRowPasswords[ref] || '';
+              const rowKeyFile = bulkRowKeyFiles[ref] || null;
+
+              return (
+                <div key={ref} className="rounded-md border border-gray-800 bg-gray-950 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-gray-100">{target.name}</div>
+                      <div className="mt-0.5 text-xs text-gray-500">
+                        {target.worker_name || (datasetWorkerID(target) === 'local' ? 'Local' : datasetWorkerID(target))}
+                      </div>
+                    </div>
+                    <div
+                      className={
+                        isUnlocked
+                          ? 'text-sm text-green-300'
+                          : isBusy
+                            ? 'text-sm text-blue-300'
+                            : error
+                              ? 'text-sm text-red-300'
+                              : 'text-sm text-gray-400'
+                      }
+                    >
+                      {isUnlocked
+                        ? 'Unlocked'
+                        : status === 'loading'
+                          ? 'Loading...'
+                          : status === 'unlocking'
+                            ? 'Unlocking...'
+                            : error
+                              ? 'Needs attention'
+                              : 'Locked'}
+                    </div>
+                  </div>
+
+                  {!isUnlocked && !isBusy && manifest?.crypto.kdf.type === 'PBKDF2-SHA256' && (
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="password"
+                        value={rowPassword}
+                        onChange={event =>
+                          setBulkRowPasswords(previous => ({ ...previous, [ref]: event.target.value }))
+                        }
+                        placeholder="Different password"
+                        className="min-w-0 flex-1 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-gray-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          unlockBulkDataset(
+                            target,
+                            { provider: 'password', password: rowPassword },
+                            'Could not decrypt with this password.',
+                          )
+                        }
+                        disabled={!rowPassword || isBulkUnlockBusy}
+                        className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Unlock
+                      </button>
+                    </div>
+                  )}
+
+                  {!isUnlocked && !isBusy && manifest?.crypto.kdf.type === 'KEYFILE-SHA256' && (
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="file"
+                        onChange={event =>
+                          setBulkRowKeyFiles(previous => ({ ...previous, [ref]: event.target.files?.[0] || null }))
+                        }
+                        className="min-w-0 flex-1 text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          rowKeyFile &&
+                          unlockBulkDataset(
+                            target,
+                            { provider: 'keyFile', file: rowKeyFile },
+                            'Could not decrypt with this key file.',
+                          )
+                        }
+                        disabled={!rowKeyFile || isBulkUnlockBusy}
+                        className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Unlock
+                      </button>
+                    </div>
+                  )}
+
+                  {!isUnlocked && !isBusy && manifest?.crypto.kdf.type === 'WEBAUTHN-PRF' && (
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <div className="min-w-0 flex-1 rounded-md border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-gray-300">
+                        YubiKey / USB Security Key
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          unlockBulkDataset(
+                            target,
+                            { provider: 'webauthnPrf' },
+                            'Could not unlock with this YubiKey.',
+                          )
+                        }
+                        disabled={isBulkUnlockBusy}
+                        className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Unlock
+                      </button>
+                    </div>
+                  )}
+
+                  {!isUnlocked && !isBusy && !manifest && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => void loadBulkUnlockManifest(target)}
+                        className="rounded-md bg-gray-700 px-3 py-2 text-sm text-gray-100 hover:bg-gray-600"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+
+                  {error && <div className="mt-2 text-sm text-red-400">{error}</div>}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+              onClick={closeBulkUnlockModal}
+              disabled={isBulkUnlockBusy}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={!!renameDataset}
         onClose={closeRenameDatasetModal}
         title="Rename Dataset"
@@ -1184,6 +1841,222 @@ export default function Datasets() {
               className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRenamingDataset ? 'Renaming...' : 'Rename'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isHfImportModalOpen}
+        onClose={closeHfImportModal}
+        title="Import Hugging Face Dataset"
+        size="lg"
+        closeOnOverlayClick={!isLoadingHfPreview && !isImportingHfDataset}
+      >
+        <form onSubmit={handleImportHfDataset} className="space-y-4 text-gray-200">
+          <TextInput
+            label="Dataset URL or ID"
+            value={hfDatasetInput}
+            onChange={value => {
+              setHfDatasetInput(value);
+              setHfPreview(null);
+              setHfImportStatus('');
+              setHfImportError('');
+            }}
+          />
+
+          {folderImportWorkerOptions.length > 1 && (
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Import To</label>
+              <select
+                value={hfImportWorkerID}
+                onChange={event => {
+                  setHfImportWorkerID(event.target.value);
+                  setHfPreview(null);
+                  setHfImportStatus('');
+                  setHfImportError('');
+                }}
+                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+              >
+                {folderImportWorkerOptions.map(worker => (
+                  <option key={worker.id} value={worker.id}>
+                    {worker.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Config</label>
+              {hfPreview?.configs?.length ? (
+                <select
+                  value={hfConfig}
+                  onChange={event => setHfConfig(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.configs.map(config => (
+                    <option key={config} value={config}>
+                      {config}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfConfig}
+                  onChange={event => setHfConfig(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Split</label>
+              {hfPreview?.splits?.length ? (
+                <select
+                  value={hfSplit}
+                  onChange={event => setHfSplit(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.splits.map(split => (
+                    <option key={split} value={split}>
+                      {split}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfSplit}
+                  onChange={event => setHfSplit(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Image Column</label>
+              {hfPreview?.imageColumns?.length ? (
+                <select
+                  value={hfImageColumn}
+                  onChange={event => setHfImageColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.imageColumns.map(column => (
+                    <option key={column} value={column}>
+                      {column}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfImageColumn}
+                  onChange={event => setHfImageColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Captions</label>
+              <select
+                value={hfCaptionMode}
+                onChange={event => setHfCaptionMode(event.target.value as HfCaptionMode)}
+                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+              >
+                <option value="auto">Auto</option>
+                <option value="none">None</option>
+                <option value="column">Column</option>
+              </select>
+            </div>
+          </div>
+
+          {hfCaptionMode === 'column' && (
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Caption Column</label>
+              {hfPreview?.textColumns?.length ? (
+                <select
+                  value={hfCaptionColumn}
+                  onChange={event => setHfCaptionColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                >
+                  {hfPreview.textColumns.map(column => (
+                    <option key={column} value={column}>
+                      {column}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={hfCaptionColumn}
+                  onChange={event => setHfCaptionColumn(event.target.value)}
+                  className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+                />
+              )}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <TextInput label="Output Dataset Name" value={hfOutputName} onChange={setHfOutputName} />
+            <div>
+              <label className="mb-1 block text-sm text-gray-300">Max Rows</label>
+              <input
+                type="number"
+                min="1"
+                value={hfMaxRows}
+                onChange={event => setHfMaxRows(event.target.value)}
+                className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
+              />
+            </div>
+          </div>
+
+          {hfPreview && (
+            <div className="rounded-md border border-gray-700 bg-gray-900 p-3 text-sm text-gray-300">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span>{hfPreview.datasetID}</span>
+                <span>{hfPreview.selectedConfig}</span>
+                <span>{hfPreview.selectedSplit}</span>
+                {hfPreview.rowCount != null && <span>{hfPreview.rowCount} rows</span>}
+              </div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <div className="min-w-0 truncate text-gray-400">
+                  Images: {hfPreview.imageColumns.length ? hfPreview.imageColumns.join(', ') : 'none'}
+                </div>
+                <div className="min-w-0 truncate text-gray-400">
+                  Text: {hfPreview.textColumns.length ? hfPreview.textColumns.join(', ') : 'none'}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {hfImportError && <div className="text-sm text-red-400">{hfImportError}</div>}
+          {hfImportStatus && !hfImportError && <div className="text-sm text-blue-300">{hfImportStatus}</div>}
+
+          <div className="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+              onClick={closeHfImportModal}
+              disabled={isLoadingHfPreview || isImportingHfDataset}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isLoadingHfPreview || isImportingHfDataset || !hfDatasetInput.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-slate-600 px-4 py-2 text-white hover:bg-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={handleLoadHfPreview}
+            >
+              {isLoadingHfPreview && <Loader2 className="h-4 w-4 animate-spin" />}
+              Preview
+            </button>
+            <button
+              type="submit"
+              disabled={isLoadingHfPreview || isImportingHfDataset || !hfDatasetInput.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isImportingHfDataset && <Loader2 className="h-4 w-4 animate-spin" />}
+              Import
             </button>
           </div>
         </form>

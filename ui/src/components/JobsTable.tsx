@@ -10,6 +10,7 @@ import useQueueList from '@/hooks/useQueueList';
 import { startQueue, stopQueue } from '@/utils/queue';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { HFDownloadProgressInline } from '@/components/HFDownloadProgress';
+import { ComfyInstallProgressInline } from '@/components/ComfyInstallProgress';
 import useWorkers from '@/hooks/useWorkers';
 import { getTotalSteps } from '@/utils/jobs';
 import { PageNotice, ProgressBar, QueueStateBadge, StatusBadge } from '@/components/OperatorPrimitives';
@@ -117,7 +118,12 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
       title: 'Info',
       key: 'info',
       className: 'max-w-xs truncate',
-      render: row => <HFDownloadProgressInline progress={row.hf_download_progress} fallback={row.info} />,
+      render: row =>
+        row.comfy_install_progress ? (
+          <ComfyInstallProgressInline progress={row.comfy_install_progress} fallback={row.info} />
+        ) : (
+          <HFDownloadProgressInline progress={row.hf_download_progress} fallback={row.info} />
+        ),
     },
     {
       title: 'Actions',

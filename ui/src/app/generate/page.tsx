@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@headlessui/react';
 import { ArrowRight, FileJson, ImagePlus, Layers, Loader2, Upload, Wand2, X } from 'lucide-react';
@@ -22,7 +22,7 @@ import { apiClient } from '@/utils/api';
 import { startJob } from '@/utils/jobs';
 import { getMediaUrl } from '@/utils/media';
 import { startQueue } from '@/utils/queue';
-import type { ModelConfig, SelectOption } from '@/types';
+import type { ComfyConfig, ComfyMode, ComfyOnError, GenerationBackend, ModelConfig, SelectOption } from '@/types';
 import { groupedModelOptions, modelArchs, quantizationOptions } from '@/app/jobs/new/options';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { getLayerOffloadingMemoryProfile, type LayerOffloadingBackend } from '@/utils/memoryProfiles';
@@ -32,11 +32,15 @@ type GeneratedLora = {
   label: string;
   path: string;
   filename: string;
-  jobId: string;
-  jobName: string;
-  jobStatus: string;
+  source: 'job' | 'uploaded';
+  jobId?: string;
+  jobName?: string;
+  jobStatus?: string;
   updatedAt: string;
   sizeBytes: number;
+  triggerWords?: string[];
+  triggerWordSource?: 'metadata' | 'user' | 'none';
+  originalFilename?: string;
   model?: Partial<ModelConfig> & Record<string, unknown>;
 };
 
@@ -84,6 +88,22 @@ const dtypeOptions: SelectOption[] = [
 const samplerOptions: SelectOption[] = [
   { value: 'flowmatch', label: 'flowmatch' },
   { value: 'ddpm', label: 'ddpm' },
+];
+
+const generationBackendOptions: SelectOption[] = [
+  { value: 'native', label: 'Native' },
+  { value: 'comfy', label: 'ComfyUI' },
+];
+
+const comfyModeOptions: SelectOption[] = [
+  { value: 'external', label: 'External' },
+  { value: 'managed', label: 'Managed' },
+];
+
+const comfyOnErrorOptions: SelectOption[] = [
+  { value: 'fail', label: 'Fail' },
+  { value: 'native', label: 'Native fallback' },
+  { value: 'skip', label: 'Skip' },
 ];
 
 const imageFormatOptions: SelectOption[] = [
@@ -283,9 +303,23 @@ function cleanModelConfig(modelConfig: GeneratorModelConfig, useLora: boolean, l
   return model;
 }
 
+function formatLoraSource(lora: GeneratedLora) {
+  return lora.source === 'uploaded' ? 'Uploaded' : lora.jobName || 'Training job';
+}
+
+function formatMegabytes(bytes: number) {
+  return `${Math.max(1, Math.round(bytes / 1024 / 1024))} MB`;
+}
+
+function promptHasAnyTrigger(prompt: string, triggerWords: string[]) {
+  const lowerPrompt = prompt.toLowerCase();
+  return triggerWords.some(word => lowerPrompt.includes(word.toLowerCase()));
+}
+
 export default function GeneratePage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const loraFileInputRef = useRef<HTMLInputElement | null>(null);
   const inlineAbortControllerRef = useRef<AbortController | null>(null);
   const statusResetTimeoutRef = useRef<number | null>(null);
   const { settings, isSettingsLoaded } = useSettings();
@@ -297,6 +331,10 @@ export default function GeneratePage() {
   const [loraPath, setLoraPath] = useState('');
   const [loras, setLoras] = useState<GeneratedLora[]>([]);
   const [loraStatus, setLoraStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [loraUploadStatus, setLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const [loraUploadProgress, setLoraUploadProgress] = useState(0);
+  const [loraUploadTriggerWords, setLoraUploadTriggerWords] = useState('');
+  const [loraUploadMessage, setLoraUploadMessage] = useState('');
   const [prompts, setPrompts] = useState('photo of a cinematic portrait, detailed lighting');
   const [jsonPromptItems, setJsonPromptItems] = useState<PromptImageSettings[] | null>(null);
   const [importSummary, setImportSummary] = useState('');
@@ -311,6 +349,14 @@ export default function GeneratePage() {
   const [imageFormat, setImageFormat] = useState('png');
   const [writePromptFile, setWritePromptFile] = useState(true);
   const [startImmediately, setStartImmediately] = useState(true);
+  const [generationBackend, setGenerationBackend] = useState<GenerationBackend>('native');
+  const [comfyMode, setComfyMode] = useState<ComfyMode>('external');
+  const [comfyServerUrl, setComfyServerUrl] = useState('');
+  const [comfyManagedInstall, setComfyManagedInstall] = useState(false);
+  const [comfyRoot, setComfyRoot] = useState('');
+  const [comfyWorkflowName, setComfyWorkflowName] = useState('auto');
+  const [comfyWorkflowPath, setComfyWorkflowPath] = useState('');
+  const [comfyOnError, setComfyOnError] = useState<ComfyOnError>('fail');
   const [status, setStatus] = useState<'idle' | 'saving' | 'generating' | 'error'>('idle');
   const [inlineImagePath, setInlineImagePath] = useState('');
   const [inlineError, setInlineError] = useState('');
@@ -324,19 +370,21 @@ export default function GeneratePage() {
     }
   }, [gpuIDs, gpuList, isGPUInfoLoaded]);
 
-  useEffect(() => {
+  const refreshLoras = useCallback(async () => {
     setLoraStatus('loading');
-    apiClient
-      .get('/api/generate/loras')
-      .then(res => {
-        setLoras(res.data.loras || []);
-        setLoraStatus('success');
-      })
-      .catch(error => {
-        console.error('Error fetching LoRAs:', error);
-        setLoraStatus('error');
-      });
+    try {
+      const res = await apiClient.get('/api/generate/loras');
+      setLoras(res.data.loras || []);
+      setLoraStatus('success');
+    } catch (error) {
+      console.error('Error fetching LoRAs:', error);
+      setLoraStatus('error');
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshLoras();
+  }, [refreshLoras]);
 
   useEffect(() => {
     return () => {
@@ -371,9 +419,12 @@ export default function GeneratePage() {
   );
 
   const isBusy = status === 'saving' || status === 'generating';
+  const isManagedComfyGeneration = generationBackend === 'comfy' && comfyMode === 'managed';
   const primaryButtonLabel =
     status === 'generating'
-      ? 'Generating...'
+      ? isManagedComfyGeneration
+        ? 'Preparing ComfyUI...'
+        : 'Generating...'
       : status === 'saving'
         ? 'Creating...'
         : imageCount === 1
@@ -419,6 +470,7 @@ export default function GeneratePage() {
     const lora = loras.find(item => item.path === value);
     if (lora) {
       applyLoraModelDefaults(lora);
+      setLoraUploadTriggerWords(lora.triggerWords?.join(', ') || '');
     }
   };
 
@@ -427,7 +479,75 @@ export default function GeneratePage() {
     if (checked && !loraPath && loras[0]) {
       setLoraPath(loras[0].path);
       applyLoraModelDefaults(loras[0]);
+      setLoraUploadTriggerWords(loras[0].triggerWords?.join(', ') || '');
     }
+  };
+
+  const handleLoraUpload = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.safetensors')) {
+      setLoraUploadStatus('error');
+      setLoraUploadMessage('LoRA upload must be a .safetensors file.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (loraUploadTriggerWords.trim()) {
+      formData.append('trigger_words', loraUploadTriggerWords.trim());
+    }
+
+    setLoraUploadStatus('uploading');
+    setLoraUploadProgress(0);
+    setLoraUploadMessage('');
+    try {
+      const res = await apiClient.post('/api/generate/loras/upload', formData, {
+        onUploadProgress: progressEvent => {
+          if (!progressEvent.total) return;
+          setLoraUploadProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
+        },
+      });
+      const uploaded = res.data.lora as GeneratedLora;
+      setLoras(current => [uploaded, ...current.filter(item => item.path !== uploaded.path)]);
+      setUseLora(true);
+      setLoraPath(uploaded.path);
+      applyLoraModelDefaults(uploaded);
+      if (!loraUploadTriggerWords.trim() && uploaded.triggerWords?.length) {
+        setLoraUploadTriggerWords(uploaded.triggerWords.join(', '));
+      }
+      setLoraUploadStatus('success');
+      setLoraUploadMessage(
+        uploaded.triggerWords?.length
+          ? `Uploaded with trigger: ${uploaded.triggerWords.join(', ')}`
+          : 'Uploaded. No trigger metadata found.',
+      );
+      void refreshLoras();
+    } catch (error: any) {
+      console.error('Error uploading LoRA:', error);
+      setLoraUploadStatus('error');
+      setLoraUploadMessage(error.response?.data?.error || 'Failed to upload LoRA.');
+    } finally {
+      setLoraUploadProgress(0);
+      if (loraFileInputRef.current) {
+        loraFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const insertSelectedLoraTrigger = () => {
+    const triggerWords = selectedLora?.triggerWords?.filter(Boolean) ?? [];
+    if (triggerWords.length === 0) return;
+
+    const triggerText = triggerWords.join(', ');
+    setPrompts(current => {
+      const lines = current.split(/\r?\n/);
+      if (lines.length === 0 || lines.every(line => !line.trim())) return triggerText;
+      return lines.map(line => {
+        if (!line.trim() || promptHasAnyTrigger(line, triggerWords)) return line;
+        return `${triggerText}, ${line}`;
+      }).join('\n');
+    });
+    setJsonPromptItems(null);
+    setImportSummary('');
   };
 
   const handleArchChange = (archName: string) => {
@@ -536,6 +656,9 @@ export default function GeneratePage() {
     if (!numRepeats || numRepeats < 1 || numRepeats > 100) {
       errors.push('Images per prompt must be between 1 and 100.');
     }
+    if (generationBackend === 'comfy' && comfyMode === 'external' && !comfyServerUrl.trim()) {
+      errors.push('ComfyUI server URL is required for external mode.');
+    }
     return errors;
   };
 
@@ -543,6 +666,26 @@ export default function GeneratePage() {
     const errors = getGenerationValidationErrors(promptItems, model);
     setValidationErrors(errors);
     return errors.length === 0;
+  };
+
+  const buildComfyConfig = (): ComfyConfig => {
+    const comfyAutoInstall = settings.COMFY_AUTO_INSTALL === 'true';
+    const comfy: ComfyConfig = {
+      mode: comfyMode,
+      workflow_name: comfyWorkflowName.trim() || 'auto',
+      on_error: comfyOnError,
+    };
+    if (comfyMode === 'external') {
+      comfy.server_url = comfyServerUrl.trim();
+    }
+    if (comfyMode === 'managed') {
+      comfy.managed_install = comfyAutoInstall || comfyManagedInstall;
+      if (comfyRoot.trim()) comfy.root = comfyRoot.trim();
+    }
+    if (comfyWorkflowPath.trim()) {
+      comfy.workflow = comfyWorkflowPath.trim();
+    }
+    return comfy;
   };
 
   const buildGenerateJobConfig = (
@@ -563,6 +706,15 @@ export default function GeneratePage() {
     }));
 
     const outputFolder = joinPath(settings.TRAINING_FOLDER, normalizedJobName, 'samples');
+    const backendConfig =
+      generationBackend === 'comfy'
+        ? {
+            backend: 'comfy' as const,
+            comfy: buildComfyConfig(),
+          }
+        : {
+            backend: 'native' as const,
+          };
     return {
       job: 'generate',
       config: {
@@ -575,6 +727,7 @@ export default function GeneratePage() {
             device: 'cuda',
             dtype: model.dtype || 'bf16',
             generate: {
+              ...backendConfig,
               sampler,
               width: width || 1024,
               height: height || 1024,
@@ -589,6 +742,7 @@ export default function GeneratePage() {
               images: promptItems.map(cleanPromptImageSettings),
             },
             sample: {
+              ...backendConfig,
               sampler,
               sample_every: 1,
               width: width || 1024,
@@ -836,6 +990,70 @@ export default function GeneratePage() {
               <Checkbox label="Start job now" checked={startImmediately} onChange={setStartImmediately} />
               <Checkbox label="Write prompt files" checked={writePromptFile} onChange={setWritePromptFile} />
             </FormGroup>
+
+            <FormGroup label="Backend">
+              <SelectInput
+                label="Generation Backend"
+                value={generationBackend}
+                onChange={value => setGenerationBackend(value as GenerationBackend)}
+                options={generationBackendOptions}
+              />
+              {generationBackend === 'comfy' && (
+                <div className="grid grid-cols-1 gap-3 pt-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <SelectInput
+                      label="Comfy Mode"
+                      value={comfyMode}
+                      onChange={value => setComfyMode(value as ComfyMode)}
+                      options={comfyModeOptions}
+                    />
+                    <SelectInput
+                      label="On Error"
+                      value={comfyOnError}
+                      onChange={value => setComfyOnError(value as ComfyOnError)}
+                      options={comfyOnErrorOptions}
+                    />
+                  </div>
+                  {comfyMode === 'external' ? (
+                    <TextInput
+                      label="Comfy URL"
+                      value={comfyServerUrl}
+                      onChange={setComfyServerUrl}
+                      placeholder="http://127.0.0.1:8188"
+                    />
+                  ) : (
+                    <>
+                      <Checkbox
+                        label="Install Managed ComfyUI"
+                        checked={settings.COMFY_AUTO_INSTALL === 'true' || comfyManagedInstall}
+                        onChange={setComfyManagedInstall}
+                        disabled={settings.COMFY_AUTO_INSTALL === 'true'}
+                      />
+                      <TextInput
+                        label="Comfy Root"
+                        value={comfyRoot}
+                        onChange={setComfyRoot}
+                        placeholder=".aitk_comfy/ComfyUI"
+                      />
+                    </>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <TextInput
+                      label="Workflow"
+                      value={comfyWorkflowName}
+                      onChange={setComfyWorkflowName}
+                      placeholder="auto"
+                    />
+                    <TextInput
+                      label="Workflow JSON"
+                      value={comfyWorkflowPath}
+                      onChange={setComfyWorkflowPath}
+                      placeholder="optional path"
+                    />
+                  </div>
+                </div>
+              )}
+            </FormGroup>
           </form>
 
           <div className="space-y-6">
@@ -844,6 +1062,17 @@ export default function GeneratePage() {
                 <Layers className="h-5 w-5 text-amber-400" />
                 <h2 className="font-medium text-gray-100">Model</h2>
               </div>
+
+              <input
+                ref={loraFileInputRef}
+                type="file"
+                accept=".safetensors"
+                className="hidden"
+                onChange={event => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleLoraUpload(file);
+                }}
+              />
 
               <div className="mb-4 grid grid-cols-2 gap-2">
                 <button
@@ -868,27 +1097,85 @@ export default function GeneratePage() {
                       : 'border-gray-700 bg-gray-950 text-gray-300 hover:border-gray-500'
                   }`}
                 >
-                  Created LoRA
+                  LoRA
                 </button>
               </div>
 
               <div className="space-y-3">
                 {useLora && (
-                  <CreatableSelectInput
-                    label="LoRA"
-                    value={loraPath}
-                    onChange={handleLoraPathChange}
-                    options={loraOptions}
-                    placeholder="Path or Hugging Face repo"
-                  />
+                  <div className="space-y-2">
+                    <CreatableSelectInput
+                      label="LoRA"
+                      value={loraPath}
+                      onChange={handleLoraPathChange}
+                      options={loraOptions}
+                      placeholder="Path or Hugging Face repo"
+                    />
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                      <TextInput
+                        label="Trigger Words"
+                        value={loraUploadTriggerWords}
+                        onChange={setLoraUploadTriggerWords}
+                        placeholder="optional"
+                      />
+                      <Button
+                        type="button"
+                        className="operator-button mt-7 h-9 px-3"
+                        onClick={() => loraFileInputRef.current?.click()}
+                        disabled={isBusy || loraUploadStatus === 'uploading'}
+                        title="Upload LoRA"
+                        aria-label="Upload LoRA"
+                      >
+                        {loraUploadStatus === 'uploading' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        <span className="hidden sm:inline">
+                          {loraUploadStatus === 'uploading' ? `${loraUploadProgress}%` : 'Upload'}
+                        </span>
+                      </Button>
+                    </div>
+                    {loraUploadMessage && (
+                      <div
+                        className={`border px-3 py-2 text-xs ${
+                          loraUploadStatus === 'error'
+                            ? 'border-red-900 bg-red-950/30 text-red-300'
+                            : 'border-gray-800 bg-gray-950 text-gray-300'
+                        }`}
+                      >
+                        {loraUploadMessage}
+                      </div>
+                    )}
+                  </div>
                 )}
                 {useLora && selectedLora && (
                   <div className="border border-gray-800 bg-gray-950 px-3 py-2 text-xs text-gray-400">
                     <div className="truncate">{selectedLora.path}</div>
-                    <div className="mt-1 flex gap-3">
-                      <span>{selectedLora.jobName}</span>
-                      <span>{Math.max(1, Math.round(selectedLora.sizeBytes / 1024 / 1024))} MB</span>
+                    <div className="mt-1 flex flex-wrap gap-3">
+                      <span>{formatLoraSource(selectedLora)}</span>
+                      <span>{formatMegabytes(selectedLora.sizeBytes)}</span>
                     </div>
+                    {selectedLora.triggerWords && selectedLora.triggerWords.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-gray-500">Trigger</span>
+                        {selectedLora.triggerWords.map(word => (
+                          <button
+                            type="button"
+                            key={word}
+                            className="border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200 hover:border-gray-500"
+                            onClick={() => setLoraUploadTriggerWords(word)}
+                          >
+                            {word}
+                          </button>
+                        ))}
+                        <Button type="button" className="operator-button px-2 py-1 text-xs" onClick={insertSelectedLoraTrigger}>
+                          Insert
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-gray-500">No trigger metadata</div>
+                    )}
                   </div>
                 )}
                 {useLora && loraStatus === 'success' && loras.length === 0 && (
@@ -1028,8 +1315,17 @@ export default function GeneratePage() {
                 <div className="flex min-h-64 flex-col items-center justify-center gap-3 border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
                   <div className="flex items-center">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {cancelRequested ? 'Canceling generation' : 'Generating image'}
+                    {cancelRequested
+                      ? 'Canceling generation'
+                      : isManagedComfyGeneration
+                        ? 'Preparing managed ComfyUI, then generating image'
+                        : 'Generating image'}
                   </div>
+                  {isManagedComfyGeneration && !cancelRequested && (
+                    <p className="max-w-md text-center text-xs text-gray-500">
+                      If managed ComfyUI is missing, AI Toolkit will download and install it before this image is generated.
+                    </p>
+                  )}
                   <Button
                     type="button"
                     onClick={cancelInlineGeneration}

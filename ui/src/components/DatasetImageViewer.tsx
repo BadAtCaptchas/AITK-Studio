@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, DialogBackdrop, DialogPanel } from '@headlessui/react';
-import { Cog } from 'lucide-react';
+import { Cog, Pencil, Plus, Save, SquareDashed, Trash2 } from 'lucide-react';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import classNames from 'classnames';
 import { openConfirm } from './ConfirmModal';
@@ -11,6 +11,25 @@ import { isVideo, isAudio } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
+import BoundingBoxOverlay, {
+  BoundingBoxEditor,
+  extractEditableBoxes,
+  parseBoundingBoxes,
+} from './BoundingBoxOverlay';
+import type { BoxCoords } from './BoundingBoxOverlay';
+
+function parseJsonCaption(text: string): any | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function readCaptionElements(data: any): any[] | null {
+  const elements = data?.compositional_deconstruction?.elements;
+  return Array.isArray(elements) ? elements : null;
+}
 
 interface Props {
   imgPath: string | null; // current image path
@@ -26,12 +45,24 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
   const [caption, setCaption] = useState<string>('');
   const [savedCaption, setSavedCaption] = useState<string>('');
   const [isCaptionLoaded, setIsCaptionLoaded] = useState<boolean>(false);
+  const [showBoxes, setShowBoxes] = useState<boolean>(false);
+  const [isEditingBoxes, setIsEditingBoxes] = useState<boolean>(false);
+  const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | null>(null);
+  const [isDrawingBox, setIsDrawingBox] = useState<boolean>(false);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const captionRef = useRef<string>('');
   const savedCaptionRef = useRef<string>('');
   const currentImgPathRef = useRef<string | null>(null);
   const captionAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    setIsEditingBoxes(false);
+    setSelectedBoxIndex(null);
+    setIsDrawingBox(false);
+    setImageSize(null);
+  }, [imgPath]);
 
   // open/close based on external value
   useEffect(() => {
@@ -90,6 +121,10 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
     },
     [onCaptionSaved],
   );
+  const saveCaptionForPathRef = useRef(saveCaptionForPath);
+  useEffect(() => {
+    saveCaptionForPathRef.current = saveCaptionForPath;
+  }, [saveCaptionForPath]);
 
   const saveCaption = useCallback(() => {
     if (!imgPath) return;
@@ -100,7 +135,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
   useEffect(() => {
     const previousPath = currentImgPathRef.current;
     if (previousPath && previousPath !== imgPath) {
-      saveCaptionForPath(previousPath, captionRef.current, savedCaptionRef.current);
+      saveCaptionForPathRef.current(previousPath, captionRef.current, savedCaptionRef.current);
     }
     currentImgPathRef.current = imgPath;
 
@@ -137,17 +172,17 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
     return () => {
       controller.abort();
     };
-  }, [imgPath, saveCaptionForPath]);
+  }, [imgPath]);
 
   // Save any pending caption when the viewer fully unmounts
   useEffect(() => {
     return () => {
       const path = currentImgPathRef.current;
       if (path) {
-        saveCaptionForPath(path, captionRef.current, savedCaptionRef.current);
+        saveCaptionForPathRef.current(path, captionRef.current, savedCaptionRef.current);
       }
     };
-  }, [saveCaptionForPath]);
+  }, []);
 
   const onCancel = useCallback(() => {
     saveCaption();
@@ -194,6 +229,80 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
     });
   }, [imgPath, onChange, refreshImages]);
 
+  const updateCaptionJson = useCallback(
+    (mutate: (elements: any[], data: any) => unknown) => {
+      const data = parseJsonCaption(caption);
+      const elements = readCaptionElements(data);
+      if (!elements) return undefined;
+      const result = mutate(elements, data);
+      setCaption(JSON.stringify(data, null, 2));
+      return result;
+    },
+    [caption],
+  );
+
+  const handleBoxChange = useCallback(
+    (elementIndex: number, box: BoxCoords) => {
+      updateCaptionJson(elements => {
+        if (!elements[elementIndex]) return;
+        elements[elementIndex].bbox = [box.y1, box.x1, box.y2, box.x2];
+      });
+    },
+    [updateCaptionJson],
+  );
+
+  const handleCreateBox = useCallback(
+    (box: BoxCoords) => {
+      const newIndex = updateCaptionJson(elements => {
+        elements.push({ type: 'obj', bbox: [box.y1, box.x1, box.y2, box.x2], desc: '' });
+        return elements.length - 1;
+      });
+      setSelectedBoxIndex(typeof newIndex === 'number' ? newIndex : null);
+      setIsDrawingBox(false);
+      setShowBoxes(true);
+    },
+    [updateCaptionJson],
+  );
+
+  const handleDeleteBox = useCallback(
+    (elementIndex: number) => {
+      updateCaptionJson(elements => {
+        if (!elements[elementIndex]) return;
+        elements.splice(elementIndex, 1);
+      });
+      setSelectedBoxIndex(null);
+      setIsDrawingBox(false);
+    },
+    [updateCaptionJson],
+  );
+
+  const handleSelectedFieldChange = useCallback(
+    (field: 'desc' | 'text', value: string) => {
+      updateCaptionJson(elements => {
+        if (selectedBoxIndex == null || !elements[selectedBoxIndex]) return;
+        elements[selectedBoxIndex][field] = value;
+      });
+    },
+    [selectedBoxIndex, updateCaptionJson],
+  );
+
+  const handleSelectedTypeChange = useCallback(
+    (type: 'obj' | 'text') => {
+      updateCaptionJson(elements => {
+        if (selectedBoxIndex == null || !elements[selectedBoxIndex]) return;
+        const element = elements[selectedBoxIndex];
+        element.type = type;
+        if (type === 'text') {
+          if (element.text == null) element.text = '';
+        } else {
+          delete element.text;
+          if (element.desc == null) element.desc = '';
+        }
+      });
+    },
+    [selectedBoxIndex, updateCaptionJson],
+  );
+
   // keyboard events while open — skip nav while caption textarea is focused
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -219,7 +328,11 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
           break;
         case 'Delete':
         case 'Backspace':
-          handleDelete();
+          if (isEditingBoxes) {
+            if (selectedBoxIndex != null) handleDeleteBox(selectedBoxIndex);
+          } else {
+            handleDelete();
+          }
           break;
         default:
           break;
@@ -227,7 +340,16 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onCancel, handlePrev, handleNext, handleDelete]);
+  }, [
+    isOpen,
+    onCancel,
+    handlePrev,
+    handleNext,
+    handleDelete,
+    handleDeleteBox,
+    isEditingBoxes,
+    selectedBoxIndex,
+  ]);
 
   // Touch swipe navigation
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -235,20 +357,25 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
   const zoomedRef = useRef(false);
   const SWIPE_THRESHOLD = 40;
 
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    if (e.touches.length > 1) {
-      multiTouchRef.current = true;
-      touchStartRef.current = null;
-      return;
-    }
-    multiTouchRef.current = false;
-    const t = e.touches[0];
-    if (!t) return;
-    touchStartRef.current = { x: t.clientX, y: t.clientY };
-  }, []);
+  const onTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (isEditingBoxes) return;
+      if (e.touches.length > 1) {
+        multiTouchRef.current = true;
+        touchStartRef.current = null;
+        return;
+      }
+      multiTouchRef.current = false;
+      const t = e.touches[0];
+      if (!t) return;
+      touchStartRef.current = { x: t.clientX, y: t.clientY };
+    },
+    [isEditingBoxes],
+  );
 
   const onTouchEnd = useCallback(
     (e: React.TouchEvent) => {
+      if (isEditingBoxes) return;
       const start = touchStartRef.current;
       touchStartRef.current = null;
       if (multiTouchRef.current || zoomedRef.current) {
@@ -271,7 +398,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
         else handlePrev();
       }
     },
-    [handleNext, handlePrev],
+    [handleNext, handlePrev, isEditingBoxes],
   );
 
   const handleCaptionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -281,6 +408,21 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
     }
   };
 
+  const parsedCaptionData = useMemo(() => parseJsonCaption(caption), [caption]);
+  const boundingBoxes = useMemo(
+    () => parseBoundingBoxes(caption, imageSize ?? undefined),
+    [caption, imageSize],
+  );
+  const editBoxes = useMemo(
+    () => extractEditableBoxes(parsedCaptionData, imageSize ?? undefined),
+    [parsedCaptionData, imageSize],
+  );
+  const selectedElement = useMemo(() => {
+    if (selectedBoxIndex == null) return null;
+    return readCaptionElements(parsedCaptionData)?.[selectedBoxIndex] ?? null;
+  }, [parsedCaptionData, selectedBoxIndex]);
+  const canShowBoxes = Boolean(boundingBoxes && imgPath && !isAudio(imgPath) && !isVideo(imgPath));
+  const canUseBoxTools = Boolean((canShowBoxes || isEditingBoxes) && imgPath && !isAudio(imgPath) && !isVideo(imgPath));
   const isCaptionCurrent = caption.trim() === savedCaption.trim();
 
   if (!mounted) return null;
@@ -321,20 +463,40 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                     initialScale={1}
                     minScale={1}
                     maxScale={6}
-                    doubleClick={{ mode: 'toggle', step: 2 }}
-                    wheel={{ step: 0.2 }}
-                    panning={{ disabled: false, allowRightClickPan: false }}
+                    doubleClick={{ mode: 'toggle', step: 2, disabled: isEditingBoxes }}
+                    wheel={{ step: 0.2, disabled: isEditingBoxes }}
+                    panning={{ disabled: isEditingBoxes, allowRightClickPan: false }}
                     onTransform={(_ref, state) => {
                       zoomedRef.current = state.scale > 1.01;
                     }}
                   >
                     <TransformComponent>
-                      <img
-                        src={mediaUrl}
-                        alt="Dataset Image"
-                        draggable={false}
-                        className="w-auto h-auto max-w-full sm:max-w-[95vw] max-h-[70vh] object-contain select-none !pointer-events-auto"
-                      />
+                      <div className="relative inline-block leading-[0px]">
+                        <img
+                          src={mediaUrl}
+                          alt="Dataset Image"
+                          draggable={false}
+                          className="block w-auto h-auto max-w-full sm:max-w-[95vw] max-h-[70vh] object-contain select-none !pointer-events-auto"
+                          onLoad={event => {
+                            setImageSize({
+                              width: event.currentTarget.naturalWidth,
+                              height: event.currentTarget.naturalHeight,
+                            });
+                          }}
+                        />
+                        {isEditingBoxes ? (
+                          <BoundingBoxEditor
+                            boxes={editBoxes}
+                            selectedIndex={selectedBoxIndex}
+                            drawing={isDrawingBox}
+                            onSelect={setSelectedBoxIndex}
+                            onChangeBox={handleBoxChange}
+                            onCreateBox={handleCreateBox}
+                          />
+                        ) : (
+                          showBoxes && boundingBoxes && <BoundingBoxOverlay boxes={boundingBoxes} />
+                        )}
+                      </div>
                     </TransformComponent>
                   </TransformWrapper>
                 ))}
@@ -366,34 +528,172 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                   disabled={!isCaptionLoaded}
                 />
               </div>
-            </div>
-            <div className="absolute top-2 right-2 bg-gray-900 rounded-full p-1 leading-[0px] opacity-50 hover:opacity-100 z-20">
-              <Menu>
-                <MenuButton>
-                  <Cog />
-                </MenuButton>
-                <MenuItems
-                  anchor="bottom end"
-                  className="bg-gray-900 border border-gray-700 rounded shadow-lg w-48 px-2 py-2 mt-1 z-50"
-                >
-                  {imgPath && isAudio(imgPath) && (
-                    <MenuItem>
-                      <a
-                        className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
-                        href={getMediaUrl(imgPath, 'file')}
-                        download={filename}
-                      >
-                        Download
-                      </a>
-                    </MenuItem>
-                  )}
-                  <MenuItem>
-                    <div className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded" onClick={handleDelete}>
-                      Delete Image
+              {isEditingBoxes && (
+                <div className="rounded-sm border border-gray-700 bg-gray-900 p-2 text-xs text-gray-200">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsDrawingBox(value => !value)}
+                      title={isDrawingBox ? 'Cancel box drawing' : 'Add box'}
+                      className={classNames(
+                        'inline-flex h-8 items-center gap-2 rounded-sm border px-2 hover:bg-gray-800',
+                        {
+                          'border-blue-500 bg-blue-600 text-white hover:bg-blue-500': isDrawingBox,
+                          'border-gray-700 text-gray-200': !isDrawingBox,
+                        },
+                      )}
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Add</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveCaption}
+                      disabled={isCaptionCurrent}
+                      title={isCaptionCurrent ? 'Caption saved' : 'Save caption'}
+                      className={classNames(
+                        'ml-auto inline-flex h-8 items-center gap-2 rounded-sm border px-2 disabled:cursor-default disabled:opacity-50',
+                        {
+                          'border-green-500 bg-green-600 text-white hover:bg-green-500': !isCaptionCurrent,
+                          'border-gray-700 text-gray-400': isCaptionCurrent,
+                        },
+                      )}
+                    >
+                      <Save className="h-4 w-4" />
+                      <span>{isCaptionCurrent ? 'Saved' : 'Save'}</span>
+                    </button>
+                  </div>
+                  {selectedElement && (
+                    <div className="mt-2 flex flex-col gap-2 border-t border-gray-700 pt-2">
+                      <div className="flex items-center gap-2">
+                        <div className="inline-flex overflow-hidden rounded-sm border border-gray-700">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectedTypeChange('obj')}
+                            className={classNames('px-2 py-1', {
+                              'bg-cyan-600 text-white': selectedElement.type !== 'text',
+                              'text-gray-300 hover:bg-gray-800': selectedElement.type === 'text',
+                            })}
+                          >
+                            Object
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectedTypeChange('text')}
+                            className={classNames('border-l border-gray-700 px-2 py-1', {
+                              'bg-amber-600 text-white': selectedElement.type === 'text',
+                              'text-gray-300 hover:bg-gray-800': selectedElement.type !== 'text',
+                            })}
+                          >
+                            Text
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => selectedBoxIndex != null && handleDeleteBox(selectedBoxIndex)}
+                          title="Delete selected box"
+                          className="ml-auto inline-flex h-7 items-center gap-1 rounded-sm border border-red-700 px-2 text-red-400 hover:bg-red-950"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                      {selectedElement.type === 'text' && (
+                        <label className="flex flex-col gap-1">
+                          <span className="text-gray-400">Text</span>
+                          <textarea
+                            className="w-full rounded-sm border border-gray-700 bg-gray-950 p-1 text-gray-100 outline-none focus:border-blue-500"
+                            rows={2}
+                            value={selectedElement.text ?? ''}
+                            onChange={event => handleSelectedFieldChange('text', event.target.value)}
+                          />
+                        </label>
+                      )}
+                      <label className="flex flex-col gap-1">
+                        <span className="text-gray-400">Description</span>
+                        <textarea
+                          className="w-full rounded-sm border border-gray-700 bg-gray-950 p-1 text-gray-100 outline-none focus:border-blue-500"
+                          rows={2}
+                          value={selectedElement.desc ?? ''}
+                          onChange={event => handleSelectedFieldChange('desc', event.target.value)}
+                        />
+                      </label>
                     </div>
-                  </MenuItem>
-                </MenuItems>
-              </Menu>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="absolute top-2 right-2 z-20 flex items-center gap-2">
+              {canShowBoxes && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !showBoxes;
+                    setShowBoxes(next);
+                    if (!next) {
+                      setIsEditingBoxes(false);
+                      setSelectedBoxIndex(null);
+                      setIsDrawingBox(false);
+                    }
+                  }}
+                  title={showBoxes ? 'Hide bounding boxes' : 'Show bounding boxes'}
+                  className={classNames('rounded-full bg-gray-900 p-1 leading-[0px] hover:opacity-100', {
+                    'text-blue-400 opacity-100': showBoxes,
+                    'opacity-50': !showBoxes,
+                  })}
+                >
+                  <SquareDashed />
+                </button>
+              )}
+              {canUseBoxTools && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !isEditingBoxes;
+                    setIsEditingBoxes(next);
+                    setShowBoxes(true);
+                    if (!next) {
+                      setSelectedBoxIndex(null);
+                      setIsDrawingBox(false);
+                    }
+                  }}
+                  title={isEditingBoxes ? 'Done editing boxes' : 'Edit bounding boxes'}
+                  className={classNames('rounded-full bg-gray-900 p-1 leading-[0px] hover:opacity-100', {
+                    'text-blue-400 opacity-100': isEditingBoxes,
+                    'opacity-50': !isEditingBoxes,
+                  })}
+                >
+                  <Pencil />
+                </button>
+              )}
+              <div className="rounded-full bg-gray-900 p-1 leading-[0px] opacity-50 hover:opacity-100">
+                <Menu>
+                  <MenuButton>
+                    <Cog />
+                  </MenuButton>
+                  <MenuItems
+                    anchor="bottom end"
+                    className="bg-gray-900 border border-gray-700 rounded shadow-lg w-48 px-2 py-2 mt-1 z-50"
+                  >
+                    {imgPath && isAudio(imgPath) && (
+                      <MenuItem>
+                        <a
+                          className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
+                          href={getMediaUrl(imgPath, 'file')}
+                          download={filename}
+                        >
+                          Download
+                        </a>
+                      </MenuItem>
+                    )}
+                    <MenuItem>
+                      <div className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded" onClick={handleDelete}>
+                        Delete Image
+                      </div>
+                    </MenuItem>
+                  </MenuItems>
+                </Menu>
+              </div>
             </div>
           </DialogPanel>
         </div>

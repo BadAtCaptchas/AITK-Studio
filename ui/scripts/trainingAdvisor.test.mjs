@@ -32,8 +32,19 @@ function baseConfig(datasetPath) {
             linear_alpha: 32,
             conv: 16,
             conv_alpha: 16,
-            lokr_full_rank: true,
+            lokr_full_rank: false,
             lokr_factor: -1,
+            lokr_use_tucker: false,
+            lokr_use_scalar: false,
+            lokr_decompose_both: false,
+            lokr_rank_dropout_scale: false,
+            lokr_weight_decompose: false,
+            lokr_wd_on_output: true,
+            lokr_full_matrix: false,
+            lokr_bypass_mode: false,
+            lokr_rs_lora: false,
+            lokr_unbalanced_factorization: false,
+            lokr_legacy_factorization: true,
             network_kwargs: { ignore_if_contains: [] },
           },
           save: {
@@ -65,6 +76,7 @@ function baseConfig(datasetPath) {
           ],
           train: {
             batch_size: 1,
+            bypass_guidance_embedding: true,
             steps: 300,
             gradient_accumulation: 1,
             train_unet: true,
@@ -127,6 +139,106 @@ function baseConfig(datasetPath) {
 function findingIds(result) {
   return new Set(result.findings.map(finding => finding.id));
 }
+
+test('preflight reports official FLUX guidance bypass mismatch', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  const process = config.config.process[0];
+  process.model.arch = 'flux';
+  process.model.name_or_path = 'black-forest-labs/FLUX.1-dev';
+  process.train.bypass_guidance_embedding = true;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.bypass_guidance_embedding.flux'));
+});
+
+test('preflight reports Flex guidance bypass mismatch', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  config.config.process[0].train.bypass_guidance_embedding = false;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.bypass_guidance_embedding.flex'));
+});
+
+test('preflight reports Ideogram guidance bypass mismatch', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  const process = config.config.process[0];
+  process.model.arch = 'ideogram4';
+  process.model.name_or_path = 'ideogram-ai/ideogram-4-nf4';
+  process.train.bypass_guidance_embedding = true;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.bypass_guidance_embedding.ideogram'));
+});
+
+test('preflight reports Klein guidance bypass mismatch', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  const process = config.config.process[0];
+  process.model.arch = 'flux2_klein_9b';
+  process.model.name_or_path = 'black-forest-labs/FLUX.2-klein-base-9B';
+  process.train.bypass_guidance_embedding = true;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.bypass_guidance_embedding.klein'));
+});
+
+test('preflight accepts matching Flux and Flex guidance bypass settings', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const fluxConfig = baseConfig(dataset);
+  const fluxProcess = fluxConfig.config.process[0];
+  fluxProcess.model.arch = 'flux_kontext';
+  fluxProcess.model.name_or_path = 'black-forest-labs/FLUX.1-Kontext-dev';
+  fluxProcess.train.bypass_guidance_embedding = false;
+
+  const fluxIds = findingIds(analyzeTrainingAdvisor(fluxConfig, { scanFileLimit: 20 }));
+  assert.ok(!fluxIds.has('train.bypass_guidance_embedding.flux'));
+
+  const flexConfig = baseConfig(dataset);
+  const flexIds = findingIds(analyzeTrainingAdvisor(flexConfig, { scanFileLimit: 20 }));
+  assert.ok(!flexIds.has('train.bypass_guidance_embedding.flex'));
+
+  const ideogramConfig = baseConfig(dataset);
+  const ideogramProcess = ideogramConfig.config.process[0];
+  ideogramProcess.model.arch = 'ideogram4:fp8';
+  ideogramProcess.model.name_or_path = 'ideogram-ai/ideogram-4-fp8';
+  ideogramProcess.train.bypass_guidance_embedding = false;
+  const ideogramIds = findingIds(analyzeTrainingAdvisor(ideogramConfig, { scanFileLimit: 20 }));
+  assert.ok(!ideogramIds.has('train.bypass_guidance_embedding.ideogram'));
+
+  const kleinConfig = baseConfig(dataset);
+  const kleinProcess = kleinConfig.config.process[0];
+  kleinProcess.model.arch = 'asymflux2_klein_9b';
+  kleinProcess.model.name_or_path = 'Lakonik/AsymFLUX.2-klein-9B';
+  kleinProcess.train.bypass_guidance_embedding = false;
+  const kleinIds = findingIds(analyzeTrainingAdvisor(kleinConfig, { scanFileLimit: 20 }));
+  assert.ok(!kleinIds.has('train.bypass_guidance_embedding.klein'));
+});
 
 test('preflight reports missing and empty captions', () => {
   const dataset = makeDataset({

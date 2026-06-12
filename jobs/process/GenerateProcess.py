@@ -1,3 +1,4 @@
+import copy
 import gc
 import json
 import os
@@ -8,7 +9,7 @@ import torch
 from safetensors.torch import save_file, load_file
 
 from jobs.process.BaseProcess import BaseProcess
-from toolkit.config_modules import ModelConfig, GenerateImageConfig
+from toolkit.config_modules import ComfyConfig, ModelConfig, GenerateImageConfig
 from toolkit.metadata import get_meta_for_safetensors, load_metadata_from_safetensors, add_model_hash_to_meta, \
     add_base_model_info_to_meta
 from toolkit.sampler import get_sampler
@@ -24,6 +25,10 @@ class GenerateConfig:
     def __init__(self, **kwargs):
         self.prompts: List[str]
         self.images: List[Dict[str, Any]]
+        self.backend = kwargs.get('backend', 'native')
+        if self.backend not in ['native', 'comfy']:
+            raise ValueError(f"generate backend must be 'native' or 'comfy', got {self.backend}")
+        self.comfy = ComfyConfig(**kwargs.get('comfy', {}))
         self.sampler = kwargs.get('sampler', 'ddpm')
         self.width = kwargs.get('width', 512)
         self.height = kwargs.get('height', 512)
@@ -144,7 +149,14 @@ class GenerateProcess(BaseProcess):
         self.torch_dtype = get_torch_dtype(self.get_conf('dtype', 'float16'))
 
         self.progress_bar = None
-        
+        self.sd = None
+        self._native_model_initialized = False
+        if self.generate_config.backend != 'comfy':
+            self._init_native_model()
+
+    def _init_native_model(self):
+        if self._native_model_initialized:
+            return
         ModelClass = get_model_class(self.model_config)
         # if the model class has get_train_scheduler static method
         if hasattr(ModelClass, 'get_train_scheduler'):
@@ -171,6 +183,7 @@ class GenerateProcess(BaseProcess):
             dtype=self.model_config.dtype,
             noise_scheduler=sampler,
         )
+        self._native_model_initialized = True
 
         print(f"Using device {self.device}")
 
@@ -207,107 +220,145 @@ class GenerateProcess(BaseProcess):
             return value.strip().lower() not in ['0', 'false', 'no', 'off', '']
         return bool(value)
 
+    def _build_sampler_groups(self):
+        sampler_groups = OrderedDict()
+        for repeat_idx in range(self.generate_config.num_repeats):
+            for prompt_idx, image_config in enumerate(self.generate_config.images):
+                prompt = image_config['prompt'].strip()
+                width = self.get_image_int(image_config, 'width', self.generate_config.width)
+                height = self.get_image_int(image_config, 'height', self.generate_config.height)
+                # prompt = self.clean_prompt(prompt)
+
+                if self.generate_config.size_list is not None and 'width' not in image_config and 'height' not in image_config:
+                    # randomly select a size
+                    width, height = random.choice(self.generate_config.size_list)
+
+                output_ext = str(self.get_image_value(image_config, ['ext', 'format'], self.generate_config.ext)).lstrip('.')
+                output_index = repeat_idx * len(self.generate_config.images) + prompt_idx
+                output_path = os.path.join(
+                    self.output_folder,
+                    f"[time]_000000000_{output_index}.{output_ext}"
+                )
+
+                sampler_name = str(self.get_image_value(image_config, 'sampler', self.generate_config.sampler))
+                prompt_image_config = GenerateImageConfig(
+                    prompt=prompt,
+                    prompt_2=self.get_image_value(image_config, 'prompt_2', self.generate_config.prompt_2),
+                    width=width,
+                    height=height,
+                    num_inference_steps=self.get_image_int(
+                        image_config,
+                        ['sample_steps', 'steps', 'num_inference_steps'],
+                        self.generate_config.sample_steps
+                    ),
+                    guidance_scale=self.get_image_float(
+                        image_config,
+                        ['guidance_scale', 'guidance'],
+                        self.generate_config.guidance_scale
+                    ),
+                    negative_prompt=self.get_image_value(
+                        image_config,
+                        ['neg', 'negative_prompt'],
+                        self.generate_config.neg
+                    ),
+                    negative_prompt_2=self.get_image_value(
+                        image_config,
+                        ['neg_2', 'negative_prompt_2'],
+                        self.generate_config.neg_2
+                    ),
+                    seed=self.get_image_int(image_config, 'seed', self.generate_config.seed),
+                    network_multiplier=self.get_image_float(image_config, 'network_multiplier', 1.0),
+                    guidance_rescale=self.get_image_float(
+                        image_config,
+                        'guidance_rescale',
+                        self.generate_config.guidance_rescale
+                    ),
+                    output_path=output_path,
+                    output_ext=output_ext,
+                    output_folder=self.output_folder,
+                    add_prompt_file=self.get_image_bool(
+                        image_config,
+                        ['prompt_file', 'add_prompt_file'],
+                        self.generate_config.prompt_file
+                    ),
+                    adapter_image_path=self.get_image_value(image_config, 'adapter_image_path', None),
+                    adapter_conditioning_scale=self.get_image_float(
+                        image_config,
+                        'adapter_conditioning_scale',
+                        1.0
+                    ),
+                    refiner_start_at=self.get_image_float(image_config, 'refiner_start_at', 0.0),
+                    ctrl_img=self.get_image_value(image_config, 'ctrl_img', None),
+                    ctrl_img_1=self.get_image_value(image_config, 'ctrl_img_1', None),
+                    ctrl_img_2=self.get_image_value(image_config, 'ctrl_img_2', None),
+                    ctrl_img_3=self.get_image_value(image_config, 'ctrl_img_3', None),
+                    num_frames=self.get_image_int(image_config, 'num_frames', 1),
+                    fps=self.get_image_int(image_config, 'fps', 15),
+                    do_cfg_norm=self.get_image_bool(image_config, 'do_cfg_norm', False),
+                )
+                if sampler_name not in sampler_groups:
+                    sampler_groups[sampler_name] = []
+                sampler_groups[sampler_name].append(prompt_image_config)
+        return sampler_groups
+
+    def _load_native_model(self):
+        self._init_native_model()
+        print("Loading model...")
+        self.sd.load_model()
+        if self.model_config.low_vram or self.model_config.layer_offloading:
+            print("Using offload-aware generation; skipping full pipeline move")
+        else:
+            self.sd.pipeline.to(self.device, self.torch_dtype)
+
+        print("Compiling model...")
+        # self.sd.unet = torch.compile(self.sd.unet, mode="reduce-overhead", fullgraph=True)
+        if self.generate_config.compile:
+            self.sd.unet = torch.compile(self.sd.unet, mode="reduce-overhead")
+
+    def _run_native_generation(self, sampler_groups):
+        self._load_native_model()
+        for sampler_name, image_configs in sampler_groups.items():
+            self.sd.generate_images(image_configs, sampler=sampler_name)
+
+    def _run_comfy_generation(self, sampler_groups):
+        from toolkit.comfy import generate_images_with_comfy
+
+        model_config = copy.deepcopy(self.get_conf('model', required=True))
+        for sampler_name, image_configs in sampler_groups.items():
+            generate_images_with_comfy(
+                image_configs,
+                sampler=sampler_name,
+                comfy_config=self.generate_config.comfy,
+                model_config=model_config,
+                process_config=self.raw_process_config,
+                device=self.device,
+            )
+
     def run(self):
         with torch.no_grad():
             super().run()
-            print("Loading model...")
-            self.sd.load_model()
-            if self.model_config.low_vram or self.model_config.layer_offloading:
-                print("Using offload-aware generation; skipping full pipeline move")
-            else:
-                self.sd.pipeline.to(self.device, self.torch_dtype)
-
-            print("Compiling model...")
-            # self.sd.unet = torch.compile(self.sd.unet, mode="reduce-overhead", fullgraph=True)
-            if self.generate_config.compile:
-                self.sd.unet = torch.compile(self.sd.unet, mode="reduce-overhead")
-
             total_images = len(self.generate_config.images) * self.generate_config.num_repeats
             print(f"Generating {total_images} images")
-            # build prompt image configs
-            sampler_groups = OrderedDict()
-            for repeat_idx in range(self.generate_config.num_repeats):
-                for prompt_idx, image_config in enumerate(self.generate_config.images):
-                    prompt = image_config['prompt'].strip()
-                    width = self.get_image_int(image_config, 'width', self.generate_config.width)
-                    height = self.get_image_int(image_config, 'height', self.generate_config.height)
-                    # prompt = self.clean_prompt(prompt)
+            sampler_groups = self._build_sampler_groups()
 
-                    if self.generate_config.size_list is not None and 'width' not in image_config and 'height' not in image_config:
-                        # randomly select a size
-                        width, height = random.choice(self.generate_config.size_list)
-
-                    output_ext = str(self.get_image_value(image_config, ['ext', 'format'], self.generate_config.ext)).lstrip('.')
-                    output_index = repeat_idx * len(self.generate_config.images) + prompt_idx
-                    output_path = os.path.join(
-                        self.output_folder,
-                        f"[time]_000000000_{output_index}.{output_ext}"
-                    )
-
-                    sampler_name = str(self.get_image_value(image_config, 'sampler', self.generate_config.sampler))
-                    prompt_image_config = GenerateImageConfig(
-                        prompt=prompt,
-                        prompt_2=self.get_image_value(image_config, 'prompt_2', self.generate_config.prompt_2),
-                        width=width,
-                        height=height,
-                        num_inference_steps=self.get_image_int(
-                            image_config,
-                            ['sample_steps', 'steps', 'num_inference_steps'],
-                            self.generate_config.sample_steps
-                        ),
-                        guidance_scale=self.get_image_float(
-                            image_config,
-                            ['guidance_scale', 'guidance'],
-                            self.generate_config.guidance_scale
-                        ),
-                        negative_prompt=self.get_image_value(
-                            image_config,
-                            ['neg', 'negative_prompt'],
-                            self.generate_config.neg
-                        ),
-                        negative_prompt_2=self.get_image_value(
-                            image_config,
-                            ['neg_2', 'negative_prompt_2'],
-                            self.generate_config.neg_2
-                        ),
-                        seed=self.get_image_int(image_config, 'seed', self.generate_config.seed),
-                        network_multiplier=self.get_image_float(image_config, 'network_multiplier', 1.0),
-                        guidance_rescale=self.get_image_float(
-                            image_config,
-                            'guidance_rescale',
-                            self.generate_config.guidance_rescale
-                        ),
-                        output_path=output_path,
-                        output_ext=output_ext,
-                        output_folder=self.output_folder,
-                        add_prompt_file=self.get_image_bool(
-                            image_config,
-                            ['prompt_file', 'add_prompt_file'],
-                            self.generate_config.prompt_file
-                        ),
-                        adapter_image_path=self.get_image_value(image_config, 'adapter_image_path', None),
-                        adapter_conditioning_scale=self.get_image_float(
-                            image_config,
-                            'adapter_conditioning_scale',
-                            1.0
-                        ),
-                        ctrl_img=self.get_image_value(image_config, 'ctrl_img', None),
-                        ctrl_img_1=self.get_image_value(image_config, 'ctrl_img_1', None),
-                        ctrl_img_2=self.get_image_value(image_config, 'ctrl_img_2', None),
-                        ctrl_img_3=self.get_image_value(image_config, 'ctrl_img_3', None),
-                        num_frames=self.get_image_int(image_config, 'num_frames', 1),
-                        fps=self.get_image_int(image_config, 'fps', 15),
-                        do_cfg_norm=self.get_image_bool(image_config, 'do_cfg_norm', False),
-                    )
-                    if sampler_name not in sampler_groups:
-                        sampler_groups[sampler_name] = []
-                    sampler_groups[sampler_name].append(prompt_image_config)
-            # generate images
-            for sampler_name, image_configs in sampler_groups.items():
-                self.sd.generate_images(image_configs, sampler=sampler_name)
+            try:
+                if self.generate_config.backend == 'comfy':
+                    self._run_comfy_generation(sampler_groups)
+                else:
+                    self._run_native_generation(sampler_groups)
+            except Exception as e:
+                if self.generate_config.backend == 'comfy' and self.generate_config.comfy.on_error == 'skip':
+                    print(f"ComfyUI generation failed; skipping images: {e}")
+                elif self.generate_config.backend == 'comfy' and self.generate_config.comfy.on_error == 'native':
+                    print(f"ComfyUI generation failed; falling back to native generation: {e}")
+                    self._run_native_generation(sampler_groups)
+                else:
+                    raise
 
             print("Done generating images")
             # cleanup
-            del self.sd
+            if self.sd is not None:
+                del self.sd
             gc.collect()
             torch.cuda.empty_cache()
+            return

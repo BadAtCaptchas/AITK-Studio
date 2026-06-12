@@ -1,5 +1,5 @@
 import { CaptionJobConfig } from "@/types";
-import { captionerTypes } from "./captionOptions";
+import { captionerTypes, defaultImageCaptionPrompt } from "./captionOptions";
 
 
 export const defaultCaptionJobConfig: CaptionJobConfig = {
@@ -8,19 +8,21 @@ export const defaultCaptionJobConfig: CaptionJobConfig = {
     name: 'Caption Directory',
     process: [
       {
-        type: 'AceStepCaptioner',
+        type: 'Qwen3VLCaptioner',
         sqlite_db_path: './aitk_db.db',
         device: 'cuda',
         caption: {
-          model_name_or_path: "ACE-Step/acestep-transcriber",
-          model_name_or_path2: "ACE-Step/acestep-captioner",
+          model_name_or_path: "Qwen/Qwen3-VL-8B-Instruct",
           dtype: 'bf16',
           quantize: true,
           qtype: 'float8',
           low_vram: true,
-          extensions: ['mp3', 'wav', 'flac', 'ogg'],
+          extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'],
           path_to_caption: '',
           recaption: false,
+          caption_prompt: defaultImageCaptionPrompt,
+          max_res: 512,
+          max_new_tokens: 128,
         },
       },
     ],

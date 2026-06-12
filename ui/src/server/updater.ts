@@ -104,8 +104,15 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function normalizeRemoteWebUrl(remoteUrl?: string | null) {
+function redactRemoteCredentials(remoteUrl?: string | null) {
   const raw = (remoteUrl || '').trim();
+  if (!raw) return null;
+
+  return raw.replace(/^(https?:\/\/)(?:[^/?#]*@)/i, '$1');
+}
+
+function normalizeRemoteWebUrl(remoteUrl?: string | null) {
+  const raw = redactRemoteCredentials(remoteUrl);
   if (!raw) return null;
 
   const sshMatch = raw.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
@@ -149,7 +156,8 @@ async function readLiveSourceRemote() {
 }
 
 async function withLiveSourceRemote(status: RepoUpdateStatus) {
-  const sourceRemote = await readLiveSourceRemote();
+  const liveSourceRemote = await readLiveSourceRemote();
+  const sourceRemote = redactRemoteCredentials(liveSourceRemote);
   if (!sourceRemote) {
     return status;
   }
@@ -193,6 +201,9 @@ function normalizeStatus(raw: unknown): RepoUpdateStatus {
     message: status.message || 'Waiting for update checker',
     updatedAt: status.updatedAt || nowIso(),
   };
+
+  normalized.sourceRemote = redactRemoteCredentials(normalized.sourceRemote);
+  normalized.sourceRemoteWebUrl = normalizeRemoteWebUrl(normalized.sourceRemoteWebUrl);
 
   if (normalized.state === 'checking') {
     const updatedAt = new Date(normalized.updatedAt).getTime();

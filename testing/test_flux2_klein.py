@@ -171,6 +171,124 @@ class Flux2KleinCompatibilityTest(unittest.TestCase):
         self.assertIsNone(fallback_payload["values"]["text_encoder_subfolder"])
         self.assertIsNone(fallback_payload["values"]["tokenizer_subfolder"])
 
+    def test_quantized_text_encoder_cache_load_uses_cached_config(self):
+        model = make_klein_model()
+        source = model._get_qwen_source_candidates()[0]
+        text_encoder = mock.Mock()
+        cache = mock.Mock()
+        cache.has_entry.return_value = True
+        cache.load_metadata.return_value = {
+            "text_encoder_config": {"model_type": "qwen3"}
+        }
+        cache.load.return_value = cache.load_metadata.return_value
+        model._get_quantized_cache = mock.Mock(return_value=cache)
+
+        with (
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.flux2_klein_model.AutoConfig.from_pretrained",
+            ) as auto_config_from_pretrained,
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.flux2_klein_model._qwen3_from_config",
+                return_value=text_encoder,
+            ) as qwen3_from_config,
+        ):
+            loaded = model._load_qwen_quantized_cache(source)
+
+        self.assertIs(loaded, text_encoder)
+        auto_config_from_pretrained.assert_not_called()
+        qwen3_from_config.assert_called_once()
+        cache.load.assert_called_once()
+        cache.update_metadata.assert_not_called()
+        self.assertTrue(text_encoder._aitk_loaded_from_quantized_cache)
+
+    def test_quantized_text_encoder_cache_save_persists_config(self):
+        model = make_klein_model()
+        source = model._get_qwen_source_candidates()[0]
+        cache = mock.Mock()
+        model._get_quantized_cache = mock.Mock(return_value=cache)
+        config = mock.Mock()
+        config.to_dict.return_value = {
+            "model_type": "qwen3",
+            "hidden_size": 128,
+        }
+        text_encoder = mock.Mock(config=config)
+
+        model._save_qwen_quantized_cache(text_encoder, source)
+
+        extra_metadata = cache.save.call_args.kwargs["extra_metadata"]
+        self.assertEqual(
+            extra_metadata["text_encoder_config"],
+            {"model_type": "qwen3", "hidden_size": 128},
+        )
+        self.assertEqual(
+            extra_metadata["source_path"],
+            "black-forest-labs/FLUX.2-klein-base-4B",
+        )
+
+    def test_quantized_text_encoder_cache_failure_raises_in_offline_mode(self):
+        model = make_klein_model()
+        source = model._get_qwen_source_candidates()[0]
+        cache = mock.Mock()
+        cache.has_entry.return_value = True
+        cache.load_metadata.return_value = {}
+        model._get_quantized_cache = mock.Mock(return_value=cache)
+
+        with (
+            mock.patch.dict(os.environ, {"HF_HUB_OFFLINE": "1"}, clear=True),
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.flux2_klein_model.AutoConfig.from_pretrained",
+                side_effect=RuntimeError("missing config"),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "offline mode is enabled"):
+                model._load_qwen_quantized_cache(source)
+
+        cache.load.assert_not_called()
+
+    def test_qwen_text_encoder_load_honors_offline_env(self):
+        model = make_klein_model()
+        source = model._get_qwen_source_candidates()[0]
+        text_encoder = object()
+
+        with (
+            mock.patch.dict(os.environ, {"TRANSFORMERS_OFFLINE": "1"}, clear=True),
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.flux2_klein_model.Qwen3ForCausalLM.from_pretrained",
+                return_value=text_encoder,
+            ) as text_encoder_from_pretrained,
+        ):
+            loaded = model._load_qwen_text_encoder(source, torch.float32)
+
+        self.assertIs(loaded, text_encoder)
+        text_encoder_from_pretrained.assert_called_once_with(
+            "black-forest-labs/FLUX.2-klein-base-4B",
+            token=None,
+            torch_dtype=torch.float32,
+            subfolder="text_encoder",
+            local_files_only=True,
+        )
+
+    def test_qwen_tokenizer_does_not_retry_online_in_offline_mode(self):
+        model = make_klein_model()
+        source = model._get_qwen_source_candidates()[0]
+
+        with (
+            mock.patch.dict(os.environ, {"HF_DATASETS_OFFLINE": "1"}, clear=True),
+            mock.patch(
+                "extensions_built_in.diffusion_models.flux2.flux2_klein_model.Qwen2TokenizerFast.from_pretrained",
+                side_effect=RuntimeError("missing tokenizer"),
+            ) as tokenizer_from_pretrained,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "missing tokenizer"):
+                model._load_qwen_tokenizer(source)
+
+        tokenizer_from_pretrained.assert_called_once_with(
+            "black-forest-labs/FLUX.2-klein-base-4B",
+            local_files_only=True,
+            token=None,
+            subfolder="tokenizer",
+        )
+
     def test_plain_klein_lora_save_and_load_key_compatibility(self):
         model = object.__new__(Flux2Klein4BModel)
         peft_state_dict = {

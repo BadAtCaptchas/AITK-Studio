@@ -24,6 +24,8 @@ from huggingface_hub import HfApi, get_token, interpreter_login
 from toolkit.memory_management import MemoryManager
 
 from toolkit.basic import value_map
+from toolkit.base_lora import fuse_base_lora_into_model
+from toolkit.base_lora_metadata import add_base_lora_metadata
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.data_loader import get_dataloader_from_datasets, trigger_dataloader_setup_epoch
@@ -133,6 +135,21 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 optimizer_params.setdefault('weight_decay', 0.0001)
             if 't0_loss_target' not in raw_train_config:
                 raw_train_config['t0_loss_target'] = True
+        if model_config.get('arch') == 'i1':
+            raw_train_config.setdefault('noise_scheduler', 'flowmatch')
+            raw_train_config.setdefault('dtype', 'bf16')
+            raw_train_config.setdefault('batch_size', 1)
+            raw_train_config.setdefault('gradient_accumulation', 1)
+            raw_train_config.setdefault('steps', 3000)
+            raw_train_config.setdefault('optimizer', 'adamw8bit')
+            raw_train_config.setdefault('lr', 0.0001)
+            raw_train_config.setdefault('timestep_type', 'i1_lognorm')
+            raw_train_config.setdefault('content_or_style', 'balanced')
+            raw_train_config.setdefault('loss_type', 'mse')
+            raw_train_config.setdefault('cache_text_embeddings', True)
+            raw_train_config.setdefault('standardize_images', False)
+            raw_train_config.setdefault('standardize_latents', False)
+            raw_train_config.setdefault('latent_multiplier', 1.0)
         self.train_config = TrainConfig(**raw_train_config)
         self.modules_being_trained: List[torch.nn.Module] = []
 
@@ -165,6 +182,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # store is all are cached. Allows us to not load vae if we don't need to
         self.is_latents_cached = True
         raw_datasets = self.get_conf('datasets', None)
+        if model_config.get('arch') == 'i1' and raw_datasets is not None:
+            for raw_dataset in raw_datasets:
+                raw_dataset['resolution'] = [1024]
+                raw_dataset['square_crop'] = True
         if raw_datasets is not None and len(raw_datasets) > 0:
             raw_datasets = preprocess_dataset_raw_config(raw_datasets)
         self.datasets = None
@@ -289,6 +310,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.current_boundary_index = 0
         self.steps_this_boundary = 0
         self.num_consecutive_oom = 0
+        self.additional_logs = OrderedDict()
 
     def post_process_generate_image_config_list(self, generate_image_config_list: List[GenerateImageConfig]):
         # override in subclass
@@ -299,7 +321,34 @@ class BaseSDTrainProcess(BaseTrainProcess):
             gen_img_config_list: List[GenerateImageConfig],
             sampler=None,
             keep_low_vram_for_samples=False,
+            sample_config=None,
+            step=None,
     ):
+        if getattr(sample_config, 'backend', 'native') == 'comfy':
+            comfy_config = sample_config.comfy
+            try:
+                from toolkit.comfy import generate_images_with_comfy
+                generate_images_with_comfy(
+                    gen_img_config_list,
+                    sampler=sampler,
+                    comfy_config=comfy_config,
+                    model_config=None,
+                    process_config=self.raw_process_config,
+                    training_process=self,
+                    step=step,
+                    device=self.device,
+                    progress_hook=self.sample_step_hook,
+                )
+                return
+            except Exception as e:
+                if comfy_config.on_error == 'skip':
+                    print_acc(f"ComfyUI sample generation failed; skipping samples: {e}")
+                    return
+                if comfy_config.on_error == 'native':
+                    print_acc(f"ComfyUI sample generation failed; falling back to native samples: {e}")
+                else:
+                    raise
+
         if keep_low_vram_for_samples:
             self.sd.generate_images(gen_img_config_list, sampler=sampler)
             return
@@ -450,6 +499,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 gen_img_config_list,
                 sampler=sample_config.sampler,
                 keep_low_vram_for_samples=sample_config.keep_low_vram_for_samples,
+                sample_config=sample_config,
+                step=step,
             )
         finally:
             if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
@@ -463,6 +514,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             "training_info": self.get_training_info()
         })
         o_dict['ss_base_model_version'] = self.sd.get_base_model_version()
+        add_base_lora_metadata(o_dict, self.model_config)
 
         # o_dict = add_base_model_info_to_meta(
         #     o_dict,
@@ -980,7 +1032,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if latest_path is None and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
             # set pretrained lora path as load path if we do not have a checkpoint to resume from
             pretrained_path = self.network_config.pretrained_lora_path
-            if not str(pretrained_path).lower().endswith(".safetensors"):
+            if os.path.splitext(str(pretrained_path))[1] != ".safetensors":
                 print_acc(
                     f"Pretrained lora path from config must be a .safetensors file: {pretrained_path}"
                 )
@@ -1332,6 +1384,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.train_config.linear_timesteps,
                         self.train_config.linear_timesteps2,
                         self.train_config.timestep_type == 'linear',
+                        self.train_config.timestep_type == 'i1_lognorm',
                         self.train_config.timestep_type in ['one_step', 'two_step', 'four_step', 'eight_step'],
                     ])
                     
@@ -1405,6 +1458,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     timestep_indices = timestep_indices.long()
                 elif self.train_config.timestep_type == 'one_step':
                     timestep_indices = torch.zeros((batch_size,), device=self.device_torch, dtype=torch.long)
+                elif self.train_config.timestep_type == 'i1_lognorm':
+                    t = torch.sigmoid(torch.randn((batch_size,), device=self.device_torch))
+                    shift = 0.3
+                    t = (shift * t) / (1.0 + (shift - 1.0) * t)
+                    timestep_indices = ((1.0 - t) * (num_train_timesteps - 1)).long()
+                    timestep_indices = timestep_indices.clamp(min_noise_steps, max_noise_steps)
                 elif content_or_style in ['style', 'content']:
                     # this is from diffusers training code
                     # Cubic sampling for favoring later or earlier timesteps
@@ -1908,6 +1967,27 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.hook_after_sd_init_before_load()
         # run base sd process run
         self.sd.load_model()
+        if (
+            getattr(self.sd.model_config, "base_lora_path", None) is not None
+            and not getattr(self.sd, "_base_lora_fused", False)
+        ):
+            if getattr(self.sd.model_config, "quantize", False) or getattr(self.sd.model_config, "layer_offloading", False):
+                raise ValueError(
+                    "model.base_lora_path must be merged before quantization or layer offloading. "
+                    "This model loader did not pre-fuse the Base LoRA; disable quantize/layer_offloading "
+                    "or use a loader with pre-quantization Base LoRA support."
+                )
+            result = fuse_base_lora_into_model(self.sd)
+            if result is not None:
+                print_acc(
+                    f"Fused Base LoRA into training base: {result.path} "
+                    f"(strength={result.strength}, modules={result.num_modules})"
+                )
+        warn_fp8_training_without_dequantize = getattr(
+            self.sd, "warn_if_fp8_training_without_dequantize", None
+        )
+        if callable(warn_fp8_training_without_dequantize):
+            warn_fp8_training_without_dequantize()
         if hasattr(self.sd, 'set_moe_aux_loss_alpha'):
             self.sd.set_moe_aux_loss_alpha(self.train_config.moe_aux_loss_alpha)
         
@@ -2472,6 +2552,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 self.torch_profiler.start()
             did_oom = False
             loss_dict = None
+            self.additional_logs = OrderedDict()
             try:
                 with self.accelerator.accumulate(self.modules_being_trained):
                     loss_dict = self.hook_train_loop(batch_list)
@@ -2519,7 +2600,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # if optimizer has get_lrs method, then use it
                 learning_rate = 0.0
                 extra_step_metrics = OrderedDict()
+                additional_logs = OrderedDict()
                 if not did_oom and loss_dict is not None:
+                    if self.additional_logs:
+                        additional_logs = OrderedDict(self.additional_logs)
+                    self.additional_logs = OrderedDict()
                     if hasattr(self.optimizer, 'get_avg_learning_rate'):
                         learning_rate = self.optimizer.get_avg_learning_rate()
                     elif hasattr(self.optimizer, 'get_learning_rates'):
@@ -2563,6 +2648,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         phase_observed_metrics[f'loss/{key}'] = value
                         phase_observed_metrics[key] = value
                     phase_observed_metrics.update(extra_step_metrics)
+                    phase_observed_metrics.update(additional_logs)
                     self.phase_manager.observe_metrics(self.step_num, phase_observed_metrics)
 
                 # if the batch is a DataLoaderBatchDTO, then we need to clean it up
@@ -2647,6 +2733,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.logger.log({
                                         f'loss/{key}': value,
                                     })
+                            if additional_logs:
+                                self.logger.log(additional_logs)
                     elif self.logging_config.log_every is None:
                         if self.accelerator.is_main_process:
                             # log every step
@@ -2663,6 +2751,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.logger.log({
                                         f'loss/{key}': value,
                                     })
+                            if additional_logs:
+                                self.logger.log(additional_logs)
 
 
                     if self.performance_log_every > 0 and self.step_num % self.performance_log_every == 0:

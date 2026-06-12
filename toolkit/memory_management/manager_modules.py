@@ -6,6 +6,8 @@ https://github.com/lodestone-rock/RamTorch/blob/main/ramtorch/modules/linear.py
 I simply modified it to work with a memory management model and with AI Toolkit's models
 """
 
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,6 +19,10 @@ if TYPE_CHECKING:
 
 # --- Per-device global state registry ---
 _DEVICE_STATE = {}
+
+# How many layers deep to prefetch weights. The old ping-pong used 2 slots, which
+# only lets one transfer overlap one compute. Override with AI_TOOLKIT_OFFLOAD_DEPTH.
+PIPELINE_DEPTH = int(os.environ.get("AI_TOOLKIT_OFFLOAD_DEPTH", "4"))
 
 
 def _get_device_state(device: torch.device):
@@ -31,29 +37,89 @@ def _get_device_state(device: torch.device):
         return _DEVICE_STATE[device]
 
     if device not in _DEVICE_STATE:
+        d = max(2, PIPELINE_DEPTH)
         with torch.cuda.device(device):
             _DEVICE_STATE[device] = {
-                # streams & events
+                "depth": d,
+                # streams
                 "transfer_stream": torch.cuda.Stream(device=device),
                 "transfer_grad_stream": torch.cuda.Stream(device=device),
-                "transfer_forward_finished_event": torch.cuda.Event(),
-                "compute_forward_start_event": torch.cuda.Event(),
-                "transfer_backward_finished_event": torch.cuda.Event(),
-                "transfer_weight_backward_finished_event": torch.cuda.Event(),
-                "compute_backward_start_event": torch.cuda.Event(),
-                "compute_backward_finished_event": torch.cuda.Event(),
-                # ping-pong buffers
-                "w_buffers": [None, None],
-                "b_buffers": [None, None],
-                "w_bwd_buffers": [None, None],
-                # device-side staging for grads to be sent to CPU
-                "w_grad_buffers": [None, None],
-                "b_grad_buffers": [None, None],
-                # clocks
+                # forward weight ring: slot_ready = H2D done, slot_free = compute
+                # that consumed the slot done, so it can be overwritten.
+                "w_buffers": [None] * d,
+                "b_buffers": [None] * d,
+                "fwd_slot_ready": [torch.cuda.Event() for _ in range(d)],
+                "fwd_slot_free": [torch.cuda.Event() for _ in range(d)],
                 "forward_clk": 0,
+                # backward weight ring: re-fetch for grad-input.
+                "w_bwd_buffers": [None] * d,
+                "bwd_slot_ready": [torch.cuda.Event() for _ in range(d)],
+                "bwd_slot_free": [torch.cuda.Event() for _ in range(d)],
                 "backward_clk": 0,
+                # backward grad-staging ring: device-side grads -> CPU.
+                "w_grad_buffers": [None] * d,
+                "b_grad_buffers": [None] * d,
+                "grad_compute_done": [torch.cuda.Event() for _ in range(d)],
+                "grad_xfer_done": [torch.cuda.Event() for _ in range(d)],
             }
     return _DEVICE_STATE[device]
+
+
+def _stage_forward_weight(
+    state, device, materialize, weight_cpu, bias_cpu, materialize_bias=None
+):
+    d = state["depth"]
+    idx = state["forward_clk"]
+    state["forward_clk"] = (idx + 1) % d
+    ts = state["transfer_stream"]
+    with torch.cuda.stream(ts):
+        ts.wait_event(state["fwd_slot_free"][idx])
+        state["w_buffers"][idx] = materialize(weight_cpu, device)
+        if bias_cpu is not None:
+            if materialize_bias is None:
+                state["b_buffers"][idx] = bias_cpu.to(device, non_blocking=True)
+            else:
+                state["b_buffers"][idx] = materialize_bias(bias_cpu, device)
+        else:
+            state["b_buffers"][idx] = None
+        state["fwd_slot_ready"][idx].record()
+    torch.cuda.current_stream().wait_event(state["fwd_slot_ready"][idx])
+    return idx, state["w_buffers"][idx], state["b_buffers"][idx]
+
+
+def _release_forward_slot(state, idx):
+    state["fwd_slot_free"][idx].record()
+
+
+def _stage_backward_weight(state, device, materialize, weight_cpu):
+    d = state["depth"]
+    idx = state["backward_clk"]
+    state["backward_clk"] = (idx + 1) % d
+    ts = state["transfer_stream"]
+    with torch.cuda.stream(ts):
+        ts.wait_event(state["bwd_slot_free"][idx])
+        state["w_bwd_buffers"][idx] = materialize(weight_cpu)
+        state["bwd_slot_ready"][idx].record()
+    torch.cuda.current_stream().wait_event(state["bwd_slot_ready"][idx])
+    return idx, state["w_bwd_buffers"][idx]
+
+
+def _release_backward_weight_slot(state, idx):
+    state["bwd_slot_free"][idx].record()
+
+
+def _stage_grads_to_cpu(state, idx, grad_w_gpu, grad_b_gpu):
+    gs = state["transfer_grad_stream"]
+    state["grad_compute_done"][idx].record()
+    grad_w_cpu = grad_b_cpu = None
+    with torch.cuda.stream(gs):
+        gs.wait_event(state["grad_compute_done"][idx])
+        if grad_w_gpu is not None:
+            grad_w_cpu = grad_w_gpu.to("cpu", non_blocking=True)
+        if grad_b_gpu is not None:
+            grad_b_cpu = grad_b_gpu.to("cpu", non_blocking=True)
+        state["grad_xfer_done"][idx].record()
+    return grad_w_cpu, grad_b_cpu
 
 
 # (ADD) detect torchao wrapper tensors
@@ -91,8 +157,228 @@ def _is_quantized_tensor(t: Optional[torch.Tensor]) -> bool:
     # (ADD) torchao quantized wrappers
     if _is_ao_quantized_tensor(t):
         return True
+    # bitsandbytes quantized wrappers, including Params4bit used by Linear4bit.
+    try:
+        cls = t.__class__
+        if cls.__name__ in {"Params4bit", "Int8Params"}:
+            return True
+        if cls.__module__.startswith("bitsandbytes."):
+            return True
+    except Exception:
+        pass
+    try:
+        if getattr(t, "quant_state", None) is not None:
+            return True
+    except Exception:
+        pass
     # packed/int formats (weight-only)
-    return not t.dtype.is_floating_point
+    try:
+        return not t.dtype.is_floating_point
+    except Exception:
+        return False
+
+
+def _prod(shape: Tuple[int, ...]) -> int:
+    result = 1
+    for dim in shape:
+        result *= int(dim)
+    return result
+
+
+def _safe_to(t: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    try:
+        return t.to(*args, **kwargs)
+    except TypeError:
+        kwargs.pop("non_blocking", None)
+        return t.to(*args, **kwargs)
+
+
+def _safe_to_device(t: torch.Tensor, device: torch.device) -> torch.Tensor:
+    try:
+        if t.device == device:
+            return t
+    except Exception:
+        pass
+    return _safe_to(t, device, non_blocking=True)
+
+
+def _is_float8_dtype(dtype: Optional[torch.dtype]) -> bool:
+    return dtype is not None and str(dtype).startswith("torch.float8")
+
+
+def _is_bnb_4bit_tensor(t: Optional[torch.Tensor]) -> bool:
+    if t is None:
+        return False
+    try:
+        if t.__class__.__name__ == "Params4bit":
+            return True
+    except Exception:
+        pass
+    try:
+        quant_state = getattr(t, "quant_state", None)
+        if quant_state is not None and (
+            getattr(t, "bnb_quantized", False)
+            or getattr(t, "quant_type", None) in {"nf4", "fp4"}
+            or getattr(quant_state, "quant_type", None) in {"nf4", "fp4"}
+        ):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _dequantize_bnb_4bit(
+    weight: torch.Tensor, device: torch.device
+) -> Optional[torch.Tensor]:
+    quant_state = getattr(weight, "quant_state", None)
+    if quant_state is None:
+        return None
+
+    try:
+        quant_state.to(device)
+    except Exception:
+        pass
+
+    data = getattr(weight, "data", weight)
+    if not isinstance(data, torch.Tensor):
+        data = weight
+    data = _safe_to_device(data, device)
+
+    # Test doubles can provide the same contract without importing bitsandbytes.
+    dequantize_4bit = getattr(quant_state, "dequantize_4bit", None)
+    if callable(dequantize_4bit):
+        try:
+            return dequantize_4bit(data)
+        except Exception:
+            pass
+
+    try:
+        import bitsandbytes as bnb  # type: ignore
+
+        return bnb.functional.dequantize_4bit(data, quant_state)
+    except Exception:
+        return None
+
+
+def _linear_logical_shape(module: nn.Module) -> Optional[Tuple[int, int]]:
+    try:
+        return (int(module.out_features), int(module.in_features))
+    except Exception:
+        return None
+
+
+def _reshape_to_logical_linear_shape(
+    weight: torch.Tensor, logical_shape: Optional[Tuple[int, int]]
+) -> torch.Tensor:
+    if logical_shape is None:
+        return weight
+    try:
+        current_shape = tuple(weight.shape)
+        transposed_shape = (logical_shape[1], logical_shape[0])
+        if current_shape != logical_shape and current_shape == transposed_shape:
+            return weight.t()
+        if (
+            current_shape != logical_shape
+            and weight.numel() == _prod(logical_shape)
+        ):
+            return weight.reshape(logical_shape)
+    except Exception:
+        pass
+    return weight
+
+
+def _materialize_linear_weight(
+    weight_cpu: torch.Tensor,
+    device: torch.device,
+    target_dtype: torch.dtype,
+    logical_shape: Optional[Tuple[int, int]] = None,
+    weight_scale_cpu: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    is_quantized = _is_quantized_tensor(weight_cpu)
+    weight = _safe_to_device(weight_cpu, device)
+
+    if is_quantized or _is_quantized_tensor(weight):
+        bnb_4bit_weight = _is_bnb_4bit_tensor(weight)
+        bnb_dequantized = (
+            _dequantize_bnb_4bit(weight, device) if bnb_4bit_weight else None
+        )
+        if bnb_dequantized is not None:
+            weight = bnb_dequantized
+        else:
+            dequantize = getattr(weight, "dequantize", None)
+            if callable(dequantize):
+                try:
+                    weight = dequantize()
+                except Exception:
+                    pass
+        if _is_quantized_tensor(weight) or not getattr(
+            getattr(weight, "dtype", None), "is_floating_point", False
+        ):
+            weight = _safe_to(weight, dtype=torch.float32, non_blocking=True)
+
+    weight = _reshape_to_logical_linear_shape(weight, logical_shape)
+    if (
+        logical_shape is not None
+        and _is_quantized_tensor(weight_cpu)
+        and tuple(weight.shape) != logical_shape
+    ):
+        raise RuntimeError(
+            "Could not materialize quantized Linear weight for legacy layer "
+            f"offloading: got shape {tuple(weight.shape)}, expected {logical_shape}."
+        )
+
+    should_cast = (
+        is_quantized
+        or weight_scale_cpu is not None
+        or _is_float8_dtype(getattr(weight, "dtype", None))
+        or not getattr(getattr(weight, "dtype", None), "is_floating_point", False)
+    )
+    if should_cast and weight.dtype != target_dtype:
+        weight = _safe_to(weight, dtype=target_dtype, non_blocking=True)
+
+    if weight_scale_cpu is not None:
+        scale = _safe_to_device(weight_scale_cpu, device)
+        if getattr(scale, "dtype", None) != weight.dtype:
+            scale = _safe_to(scale, dtype=weight.dtype, non_blocking=True)
+        scale = scale.view(-1, *[1] * (weight.dim() - 1))
+        weight = weight * scale
+
+    return weight
+
+
+def _materialize_linear_bias(
+    bias_cpu: torch.Tensor,
+    device: torch.device,
+    target_dtype: torch.dtype,
+    cast_bias: bool,
+) -> torch.Tensor:
+    bias = _safe_to_device(bias_cpu, device)
+    if cast_bias and bias.dtype != target_dtype:
+        bias = _safe_to(bias, dtype=target_dtype, non_blocking=True)
+    return bias
+
+
+def _pin_inner_tensors(t: torch.Tensor) -> None:
+    """Pin tensor-subclass leaf storage, such as torchao float8 internals."""
+    try:
+        names, _ = t.__tensor_flatten__()
+    except Exception:
+        return
+    for name in names:
+        inner = getattr(t, name, None)
+        if inner is None:
+            continue
+        if hasattr(inner, "__tensor_flatten__"):
+            _pin_inner_tensors(inner)
+        elif (
+            isinstance(inner, torch.Tensor)
+            and inner.device.type == "cpu"
+            and not inner.is_pinned()
+        ):
+            try:
+                setattr(t, name, inner.pin_memory())
+            except Exception:
+                pass
 
 
 def _ensure_cpu_pinned(t: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
@@ -103,8 +389,11 @@ def _ensure_cpu_pinned(t: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
             t = t.to("cpu", copy=True)
         except Exception:
             t = t.to("cpu")
-    # Don't attempt to pin quantized tensors; many backends don't support it
+    # Quantized wrappers cannot always be pin_memory()'d directly, but pinning
+    # their inner storage still allows async H2D transfer for supported wrappers.
     if _is_quantized_tensor(t):
+        if torch.cuda.is_available():
+            _pin_inner_tensors(t)
         return t
     if torch.cuda.is_available():
         try:
@@ -115,13 +404,42 @@ def _ensure_cpu_pinned(t: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
 
 
 def _move_params_to_cpu_and_pin(module: nn.Module):
-    """Force parameters to CPU (+pinned) so we can 'bounce' them per forward/backward."""
+    """Force parameters/buffers to CPU (+pinned) so we can bounce them per call."""
     with torch.no_grad():
-        if hasattr(module, "weight") and isinstance(module.weight, nn.Parameter):
-            module.weight.data = _ensure_cpu_pinned(module.weight.data).detach()
-        if hasattr(module, "bias") and isinstance(module.bias, nn.Parameter):
-            if module.bias is not None:
-                module.bias.data = _ensure_cpu_pinned(module.bias.data).detach()
+        for name in ("weight", "bias"):
+            param = getattr(module, name, None)
+            if not isinstance(param, nn.Parameter):
+                continue
+            if _is_quantized_tensor(param):
+                try:
+                    cpu_param = _ensure_cpu_pinned(param)
+                    if isinstance(cpu_param, nn.Parameter):
+                        module._parameters[name] = cpu_param
+                        continue
+                except Exception:
+                    pass
+            cpu_data = _ensure_cpu_pinned(param.data).detach()
+            try:
+                param.data = cpu_data
+            except Exception:
+                if not _is_quantized_tensor(param):
+                    setattr(
+                        module,
+                        name,
+                        nn.Parameter(cpu_data, requires_grad=param.requires_grad),
+                    )
+
+        for name in ("weight", "bias", "weight_scale"):
+            if name not in module._buffers:
+                continue
+            buffer = module._buffers[name]
+            if not isinstance(buffer, torch.Tensor):
+                continue
+            cpu_buffer = _ensure_cpu_pinned(buffer)
+            if _is_quantized_tensor(cpu_buffer):
+                module._buffers[name] = cpu_buffer
+            else:
+                module._buffers[name] = cpu_buffer.detach()
 
 
 # ==========================
@@ -131,85 +449,97 @@ def _move_params_to_cpu_and_pin(module: nn.Module):
 
 class _BouncingLinearFn(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, weight_cpu, bias_cpu, device: torch.device):
+    def forward(
+        ctx,
+        x,
+        weight_cpu,
+        bias_cpu,
+        weight_scale_cpu,
+        device: torch.device,
+        logical_shape: Optional[Tuple[int, int]],
+    ):
         # choose compute dtype to match activations
         target_dtype = (
             x.dtype
             if x.dtype in (torch.bfloat16, torch.float16, torch.float32)
             else torch.bfloat16
         )
+        cast_linear_bias = (
+            _is_quantized_tensor(weight_cpu)
+            or weight_scale_cpu is not None
+            or _is_float8_dtype(getattr(weight_cpu, "dtype", None))
+        )
 
-        # GPU-side dequant/cast for quantized; float path unchanged
-        def _materialize_linear_weight(cpu_w, dev):
-            if _is_quantized_tensor(cpu_w):
-                # move quantized wrapper to GPU -> dequantize on GPU -> cast on GPU
-                w_q_gpu = cpu_w.to(dev, non_blocking=True)
-                try:
-                    w_fp_gpu = w_q_gpu.dequantize()
-                except Exception:
-                    w_fp_gpu = w_q_gpu.to(dtype=torch.float32, non_blocking=True)
-                if w_fp_gpu.dtype != target_dtype:
-                    w_fp_gpu = w_fp_gpu.to(target_dtype, non_blocking=True)
-                return w_fp_gpu
-            # float path (preserve original behavior: NO dtype cast)
-            w_gpu = cpu_w.to(dev, non_blocking=True)
-            return w_gpu
+        def _materialize_weight(cpu_w, dev):
+            return _materialize_linear_weight(
+                cpu_w,
+                dev,
+                target_dtype,
+                logical_shape=logical_shape,
+                weight_scale_cpu=weight_scale_cpu,
+            )
+
+        def _materialize_bias(cpu_b, dev):
+            return _materialize_linear_bias(
+                cpu_b, dev, target_dtype, cast_linear_bias
+            )
 
         if device.type != "cuda":
+            x_cpu = x.to("cpu")
+            if cast_linear_bias and x_cpu.dtype != target_dtype:
+                x_cpu = x_cpu.to(target_dtype)
             out = F.linear(
-                x.to("cpu"),
-                _materialize_linear_weight(weight_cpu, torch.device("cpu")),
-                bias_cpu,
+                x_cpu,
+                _materialize_weight(weight_cpu, torch.device("cpu")),
+                _materialize_bias(bias_cpu, torch.device("cpu"))
+                if bias_cpu is not None
+                else None,
             )
-            ctx.save_for_backward(x.to("cpu"), weight_cpu, bias_cpu)
+            ctx.save_for_backward(x_cpu, weight_cpu, bias_cpu, weight_scale_cpu)
             ctx.device = torch.device("cpu")
+            ctx.logical_shape = logical_shape
+            ctx.target_dtype = target_dtype
+            ctx.cast_linear_bias = cast_linear_bias
             return out.to(x.device)
 
         state = _get_device_state(device)
-        ts = state["transfer_stream"]
-        w_bufs, b_bufs = state["w_buffers"], state["b_buffers"]
-        ev_tx_f = state["transfer_forward_finished_event"]
-        ev_cu_s = state["compute_forward_start_event"]
-        idx = state["forward_clk"]
+        idx, w_gpu, b_gpu = _stage_forward_weight(
+            state,
+            device,
+            _materialize_weight,
+            weight_cpu,
+            bias_cpu,
+            _materialize_bias,
+        )
+        out = F.linear(x, w_gpu, b_gpu)
+        _release_forward_slot(state, idx)
 
-        with torch.cuda.stream(ts):
-            ts.wait_event(ev_cu_s)
-            w_bufs[idx] = _materialize_linear_weight(weight_cpu, device)
-            b_bufs[idx] = (
-                bias_cpu.to(device, non_blocking=True) if bias_cpu is not None else None
-            )
-            state["forward_clk"] ^= 1
-            ev_tx_f.record()
-
-        torch.cuda.current_stream().wait_event(ev_tx_f)
-        ev_cu_s.record()
-        out = F.linear(x, w_bufs[idx], b_bufs[idx])
-
-        ctx.save_for_backward(x, weight_cpu, bias_cpu)
+        ctx.save_for_backward(x, weight_cpu, bias_cpu, weight_scale_cpu)
         ctx.device = device
+        ctx.logical_shape = logical_shape
         ctx.target_dtype = target_dtype
+        ctx.cast_linear_bias = cast_linear_bias
         return out
 
     @staticmethod
     def backward(ctx, grad_out):
-        x, weight_cpu, bias_cpu = ctx.saved_tensors
+        x, weight_cpu, bias_cpu, weight_scale_cpu = ctx.saved_tensors
         device = ctx.device
         target_dtype = getattr(ctx, "target_dtype", grad_out.dtype)
+        logical_shape = getattr(ctx, "logical_shape", None)
 
         if device.type != "cuda":
             go_cpu = grad_out.to("cpu")
             x_cpu = x.to("cpu")
-            w_mat = (
-                weight_cpu.dequantize()
-                if _is_quantized_tensor(weight_cpu)
-                else weight_cpu
+            w_mat = _materialize_linear_weight(
+                weight_cpu,
+                torch.device("cpu"),
+                target_dtype,
+                logical_shape=logical_shape,
+                weight_scale_cpu=weight_scale_cpu,
             )
-            if w_mat.dtype != target_dtype and target_dtype in (
-                torch.bfloat16,
-                torch.float16,
-                torch.float32,
-            ):
-                w_mat = w_mat.to(target_dtype)
+            if go_cpu.dtype != w_mat.dtype:
+                go_cpu = go_cpu.to(w_mat.dtype)
             grad_input = go_cpu @ w_mat
             grad_weight = (
                 go_cpu.flatten(0, -2).T @ x_cpu.flatten(0, -2)
@@ -222,79 +552,63 @@ class _BouncingLinearFn(torch.autograd.Function):
                 if (bias_cpu is not None and getattr(bias_cpu, "requires_grad", False))
                 else None
             )
-            return grad_input.to(grad_out.device), grad_weight, grad_bias, None
+            return (
+                grad_input.to(grad_out.device),
+                grad_weight,
+                grad_bias,
+                None,
+                None,
+                None,
+            )
 
         state = _get_device_state(device)
-        transfer_stream = state["transfer_stream"]
-        transfer_grad_stream = state["transfer_grad_stream"]
 
-        w_bwd_buffers = state["w_bwd_buffers"]
-        w_grad_buffers = state["w_grad_buffers"]
-        b_grad_buffers = state["b_grad_buffers"]
-
-        ev_tx_b = state["transfer_backward_finished_event"]
-        ev_tx_w_bwd_done = state["transfer_weight_backward_finished_event"]
-        ev_cu_b_start = state["compute_backward_start_event"]
-        ev_cu_b_finish = state["compute_backward_finished_event"]
-
-        idx = state["backward_clk"]
-
-        # GPU-side dequant/cast for quantized; float path unchanged
         def _materialize_for_bwd(cpu_w):
-            if _is_quantized_tensor(cpu_w):
-                w_q_gpu = cpu_w.to(device, non_blocking=True)
-                try:
-                    w_fp_gpu = w_q_gpu.dequantize()
-                except Exception:
-                    w_fp_gpu = w_q_gpu.to(dtype=torch.float32, non_blocking=True)
-                if w_fp_gpu.dtype != target_dtype:
-                    w_fp_gpu = w_fp_gpu.to(target_dtype, non_blocking=True)
-                return w_fp_gpu
-            # float path (preserve original behavior: NO dtype cast)
-            w = cpu_w.to(device, non_blocking=True)
-            return w
+            return _materialize_linear_weight(
+                cpu_w,
+                device,
+                target_dtype,
+                logical_shape=logical_shape,
+                weight_scale_cpu=weight_scale_cpu,
+            )
 
-        with torch.cuda.stream(transfer_stream):
-            transfer_stream.wait_event(ev_cu_b_start)
-            w_bwd_buffers[idx] = _materialize_for_bwd(weight_cpu)
-            state["backward_clk"] ^= 1
-            ev_tx_b.record()
-
-        torch.cuda.current_stream().wait_event(ev_tx_b)
-        ev_cu_b_start.record()
+        idx, w_bwd = _stage_backward_weight(
+            state, device, _materialize_for_bwd, weight_cpu
+        )
 
         # grad wrt input (GPU)
-        grad_input = grad_out.to(dtype=target_dtype) @ w_bwd_buffers[idx]
+        grad_input = grad_out.to(dtype=target_dtype) @ w_bwd
+        _release_backward_weight_slot(state, idx)
 
-        # ensure previous grad-to-CPU transfer that used this slot finished
-        torch.cuda.current_stream().wait_event(ev_tx_w_bwd_done)
-
-        # compute grads if float masters exist
+        # compute grads if float masters exist (frozen/quantized bases skip this)
         grad_weight = None
         grad_bias = None
-        if (
+        need_w = (
             getattr(weight_cpu, "requires_grad", False)
             and weight_cpu.dtype.is_floating_point
-        ):
-            w_grad_buffers[idx] = grad_out.flatten(0, -2).T @ x.flatten(0, -2)
-        if bias_cpu is not None and getattr(bias_cpu, "requires_grad", False):
-            reduce_dims = tuple(range(grad_out.ndim - 1))
-            b_grad_buffers[idx] = grad_out.sum(dim=reduce_dims)
+        )
+        need_b = bias_cpu is not None and getattr(bias_cpu, "requires_grad", False)
+        if need_w or need_b:
+            torch.cuda.current_stream().wait_event(state["grad_xfer_done"][idx])
+            w_grad_gpu = b_grad_gpu = None
+            if need_w:
+                w_grad_gpu = grad_out.flatten(0, -2).T @ x.flatten(0, -2)
+                state["w_grad_buffers"][idx] = w_grad_gpu
+            if need_b:
+                b_grad_gpu = grad_out.sum(dim=tuple(range(grad_out.ndim - 1)))
+                state["b_grad_buffers"][idx] = b_grad_gpu
+            grad_weight, grad_bias = _stage_grads_to_cpu(
+                state, idx, w_grad_gpu, b_grad_gpu
+            )
 
-        ev_cu_b_finish.record()
-
-        with torch.cuda.stream(transfer_grad_stream):
-            transfer_grad_stream.wait_event(ev_cu_b_finish)
-            if (
-                getattr(weight_cpu, "requires_grad", False)
-                and weight_cpu.dtype.is_floating_point
-            ):
-                grad_weight = w_grad_buffers[idx].to("cpu", non_blocking=True)
-            if bias_cpu is not None and getattr(bias_cpu, "requires_grad", False):
-                grad_bias = b_grad_buffers[idx].to("cpu", non_blocking=True)
-            state["transfer_weight_backward_finished_event"].record()
-
-        return grad_input.to(dtype=grad_out.dtype), grad_weight, grad_bias, None
+        return (
+            grad_input.to(dtype=grad_out.dtype),
+            grad_weight,
+            grad_bias,
+            None,
+            None,
+            None,
+        )
 
 
 class _BouncingConv2dFn(torch.autograd.Function):
@@ -346,24 +660,11 @@ class _BouncingConv2dFn(torch.autograd.Function):
             return out.to(x.device)
 
         state = _get_device_state(device)
-        ts = state["transfer_stream"]
-        w_bufs, b_bufs = state["w_buffers"], state["b_buffers"]
-        ev_tx_f = state["transfer_forward_finished_event"]
-        ev_cu_s = state["compute_forward_start_event"]
-        idx = state["forward_clk"]
-
-        with torch.cuda.stream(ts):
-            ts.wait_event(ev_cu_s)
-            w_bufs[idx] = _materialize_conv_weight(weight_cpu, device)
-            b_bufs[idx] = (
-                bias_cpu.to(device, non_blocking=True) if bias_cpu is not None else None
-            )
-            state["forward_clk"] ^= 1
-            ev_tx_f.record()
-
-        torch.cuda.current_stream().wait_event(ev_tx_f)
-        ev_cu_s.record()
-        out = F.conv2d(x, w_bufs[idx], b_bufs[idx], stride, padding, dilation, groups)
+        idx, w_gpu, b_gpu = _stage_forward_weight(
+            state, device, _materialize_conv_weight, weight_cpu, bias_cpu
+        )
+        out = F.conv2d(x, w_gpu, b_gpu, stride, padding, dilation, groups)
+        _release_forward_slot(state, idx)
 
         ctx.save_for_backward(x, weight_cpu, bias_cpu)
         ctx.meta = (device, stride, padding, dilation, groups, target_dtype)
@@ -432,19 +733,6 @@ class _BouncingConv2dFn(torch.autograd.Function):
             )
 
         state = _get_device_state(device)
-        transfer_stream = state["transfer_stream"]
-        transfer_grad_stream = state["transfer_grad_stream"]
-
-        w_bwd_buffers = state["w_bwd_buffers"]
-        w_grad_buffers = state["w_grad_buffers"]
-        b_grad_buffers = state["b_grad_buffers"]
-
-        ev_tx_b = state["transfer_backward_finished_event"]
-        ev_tx_w_bwd_done = state["transfer_weight_backward_finished_event"]
-        ev_cu_b_start = state["compute_backward_start_event"]
-        ev_cu_b_finish = state["compute_backward_finished_event"]
-
-        idx = state["backward_clk"]
 
         # GPU-side dequant/cast for quantized; float path unchanged
         def _materialize_for_bwd(cpu_w):
@@ -461,63 +749,51 @@ class _BouncingConv2dFn(torch.autograd.Function):
             w = cpu_w.to(device, non_blocking=True)
             return w
 
-        # Stage weights for input-grad compute
-        with torch.cuda.stream(transfer_stream):
-            transfer_stream.wait_event(ev_cu_b_start)
-            w_bwd_buffers[idx] = _materialize_for_bwd(weight_cpu)
-            state["backward_clk"] ^= 1
-            ev_tx_b.record()
-
-        torch.cuda.current_stream().wait_event(ev_tx_b)
-        ev_cu_b_start.record()
+        idx, w_bwd = _stage_backward_weight(
+            state, device, _materialize_for_bwd, weight_cpu
+        )
 
         from torch.nn.grad import conv2d_input, conv2d_weight  # type: ignore
 
         grad_input = conv2d_input(
             x.shape,
-            w_bwd_buffers[idx],
+            w_bwd,
             grad_out.to(dtype=target_dtype),
             stride=stride,
             padding=padding,
             dilation=dilation,
             groups=groups,
         )
+        _release_backward_weight_slot(state, idx)
 
-        # Ensure previous grad transfer that used this slot is done
-        torch.cuda.current_stream().wait_event(ev_tx_w_bwd_done)
-
-        # Compute heavy grads on GPU into staging buffers
+        # Compute heavy grads on GPU into staging buffers (frozen bases skip this)
         grad_weight = None
         grad_bias = None
-        if (
+        need_w = (
             getattr(weight_cpu, "requires_grad", False)
             and weight_cpu.dtype.is_floating_point
-        ):
-            w_grad_buffers[idx] = conv2d_weight(
-                x,
-                weight_cpu.shape,
-                grad_out,
-                stride=stride,
-                padding=padding,
-                dilation=dilation,
-                groups=groups,
+        )
+        need_b = bias_cpu is not None and getattr(bias_cpu, "requires_grad", False)
+        if need_w or need_b:
+            torch.cuda.current_stream().wait_event(state["grad_xfer_done"][idx])
+            w_grad_gpu = b_grad_gpu = None
+            if need_w:
+                w_grad_gpu = conv2d_weight(
+                    x,
+                    weight_cpu.shape,
+                    grad_out,
+                    stride=stride,
+                    padding=padding,
+                    dilation=dilation,
+                    groups=groups,
+                )
+                state["w_grad_buffers"][idx] = w_grad_gpu
+            if need_b:
+                b_grad_gpu = grad_out.sum(dim=(0, 2, 3))
+                state["b_grad_buffers"][idx] = b_grad_gpu
+            grad_weight, grad_bias = _stage_grads_to_cpu(
+                state, idx, w_grad_gpu, b_grad_gpu
             )
-        if bias_cpu is not None and getattr(bias_cpu, "requires_grad", False):
-            b_grad_buffers[idx] = grad_out.sum(dim=(0, 2, 3))
-
-        ev_cu_b_finish.record()
-
-        # Launch CPU copies on the dedicated grad stream (overlaps with next H2D)
-        with torch.cuda.stream(transfer_grad_stream):
-            transfer_grad_stream.wait_event(ev_cu_b_finish)
-            if (
-                getattr(weight_cpu, "requires_grad", False)
-                and weight_cpu.dtype.is_floating_point
-            ):
-                grad_weight = w_grad_buffers[idx].to("cpu", non_blocking=True)
-            if bias_cpu is not None and getattr(bias_cpu, "requires_grad", False):
-                grad_bias = b_grad_buffers[idx].to("cpu", non_blocking=True)
-            state["transfer_weight_backward_finished_event"].record()
 
         return (
             grad_input.to(dtype=grad_out.dtype),
@@ -577,10 +853,14 @@ class LinearLayerMemoryManager(BaseLayerMemoryManager):
 
             weight_cpu = self.module.weight
             bias_cpu = getattr(self.module, "bias", None)
+            weight_scale_cpu = getattr(self.module, "weight_scale", None)
             device = self.manager.process_device
+            logical_shape = _linear_logical_shape(self.module)
 
             # NOTE: do NOT move params to device here; autograd fn streams & bounces them
-            return _BouncingLinearFn.apply(x, weight_cpu, bias_cpu, device)
+            return _BouncingLinearFn.apply(
+                x, weight_cpu, bias_cpu, weight_scale_cpu, device, logical_shape
+            )
 
         if hasattr(self.module, "ara_lora_ref"):
             self.module.ara_lora_ref().org_forward = _mm_forward

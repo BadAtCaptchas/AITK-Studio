@@ -1,33 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/server/db';
-import fsp from 'fs/promises';
-import { createRemoteTrainingJobBundle } from '@/server/trainingJobBundle';
 import {
-  getRemoteWorker,
-  isLocalWorker,
-  remoteJson,
-  syncRemoteJob,
-  uploadBundleToWorker,
-  withoutRemoteRedirects,
-} from '@/server/remoteClient';
+  JobStartError,
+  prepareJobStart,
+  startJobFromRequest,
+  startPreparedJob,
+} from '@/server/jobStart';
+import { isLocalWorker } from '@/server/remoteClient';
 import {
-  dispatchRemoteCaptionJob,
-  isRemoteCaptionDispatchError,
-} from '@/server/remoteCaptionDispatch';
-import {
-  getEncryptedDatasetsForJobConfig,
-  getKeyForRequiredDataset,
-  normalizeEncryptedKeyMap,
-  validateEncryptedDatasetStartKey,
-} from '@/server/encryptedDatasets';
-import {
-  getEncryptedKeyCoverage,
-  isDurableEncryptedDatasetKeySecretError,
-  storeDurableEncryptedDatasetKeys,
-} from '@/server/encryptedDatasetSecrets';
-import { isSecureRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
-import { startJobNow } from '../../../../../../cron/actions/startJob';
-import type { EncryptedDatasetStartKey, JobStartRequest } from '@/types';
+  createRemoteStartProgress,
+  hasActiveRemoteStartForJob,
+  updateRemoteStartProgress,
+} from '@/server/remoteStartProgress';
+import type { JobStartRequest } from '@/types';
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -43,44 +27,31 @@ function ensureApiAccess(request: NextRequest): NextResponse | null {
   return null;
 }
 
-function isValidJobId(jobID: string) {
-  return /^[a-zA-Z0-9_-]+$/.test(jobID);
+function handleJobStartError(error: unknown) {
+  if (error instanceof JobStartError) {
+    return NextResponse.json(error.payload, { status: error.status });
+  }
+  throw error;
 }
 
-function isSecureRemoteOllamaCaptionJobConfigJson(jobConfigJson: unknown) {
-  if (typeof jobConfigJson !== 'string' || !jobConfigJson.trim()) return false;
-  try {
-    return isSecureRemoteOllamaCaptionJob(JSON.parse(jobConfigJson));
-  } catch {
-    return false;
-  }
-}
-
-async function findInvalidEncryptedDatasetKeys(
-  requiredDatasets: { path: string; name: string }[],
-  encryptedKeys: EncryptedDatasetStartKey[],
-) {
-  const keyMap = normalizeEncryptedKeyMap(encryptedKeys);
-  const invalidDatasets: Array<{ path: string; name: string }> = [];
-
-  for (const dataset of requiredDatasets) {
-    const keyB64 = getKeyForRequiredDataset(keyMap, dataset);
-    if (!keyB64) continue;
-    try {
-      await validateEncryptedDatasetStartKey(dataset, keyB64);
-    } catch {
-      invalidDatasets.push(dataset);
-    }
-  }
-
-  return invalidDatasets;
+function runBackgroundRemoteStart(startID: string, prepared: Awaited<ReturnType<typeof prepareJobStart>>) {
+  void startPreparedJob(prepared, {
+    onRemoteStartProgress: progress => updateRemoteStartProgress(startID, progress),
+  }).catch(error => {
+    const message = error instanceof Error ? error.message : 'Failed to start remote job';
+    updateRemoteStartProgress(startID, {
+      status: 'failed',
+      message: 'Remote start failed',
+      percent: 100,
+      error: message,
+    });
+  });
 }
 
 async function handleStart(
   request: NextRequest,
-  { params }: { params: { jobID: string } },
-  encryptedDatasetKeys?: EncryptedDatasetStartKey[],
-  durableEncryptedDatasetKeys = false,
+  { params }: { params: Promise<{ jobID: string }> },
+  body: JobStartRequest = {},
 ) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) {
@@ -89,223 +60,47 @@ async function handleStart(
 
   const { jobID } = await params;
 
-  if (!isValidJobId(jobID)) {
-    return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
-  }
-
-  const job = await db.jobs.findById(jobID);
-
-  if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  }
-
-  let jobConfig: any;
   try {
-    jobConfig = JSON.parse(job.job_config);
-  } catch {
-    return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
-  }
-
-  const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
-  let encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedDatasetKeys);
-  if (encryptedKeyCoverage.missingDatasets.length > 0) {
-    return NextResponse.json(
-      {
-        error: 'decryption key required',
-        encryptedDatasets: encryptedKeyCoverage.missingDatasets,
-      },
-      { status: 409 },
-    );
-  }
-  let encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
-  let useDurableEncryptedKeys = requiredEncryptedDatasets.length > 0 && encryptedKeyCoverage.durableKeys.length > 0;
-  let invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(requiredEncryptedDatasets, encryptedKeysForLaunch);
-  if (invalidEncryptedDatasets.length > 0) {
-    return NextResponse.json(
-      {
-        error: 'invalid decryption key',
-        encryptedDatasets: invalidEncryptedDatasets,
-        invalidEncryptedDatasets,
-      },
-      { status: 409 },
-    );
-  }
-
-  if (durableEncryptedDatasetKeys && requiredEncryptedDatasets.length > 0) {
-    try {
-      await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
-    } catch (error) {
-      if (isDurableEncryptedDatasetKeySecretError(error)) {
-        return NextResponse.json({ error: error.message, code: 'durable_encrypted_key_secret_unavailable' }, { status: 400 });
-      }
-      throw error;
-    }
-    encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedKeysForLaunch);
-    encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
-    useDurableEncryptedKeys = true;
-    invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(requiredEncryptedDatasets, encryptedKeysForLaunch);
-    if (invalidEncryptedDatasets.length > 0) {
-      return NextResponse.json(
-        {
-          error: 'invalid decryption key',
-          encryptedDatasets: invalidEncryptedDatasets,
-          invalidEncryptedDatasets,
-        },
-        { status: 409 },
+    if (body.background === true) {
+      const prepared = await prepareJobStart(
+        jobID,
+        body.encryptedDatasetKeys,
+        body.durableEncryptedDatasetKeys === true,
       );
-    }
-  }
-
-  if (!isLocalWorker(job.worker_id)) {
-    try {
-      const worker = await getRemoteWorker(job.worker_id);
-      if (
-        requiredEncryptedDatasets.length > 0 &&
-        !worker.base_url.toLowerCase().startsWith('https://') &&
-        process.env.AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS !== '1'
-      ) {
-        return NextResponse.json(
-          { error: 'Remote encrypted training requires an HTTPS worker URL.' },
-          { status: 400 },
-        );
-      }
-
-      if (job.job_type === 'caption') {
-        const dispatched = await dispatchRemoteCaptionJob({
-          job,
-          jobConfig,
-          worker,
-          encrypted: requiredEncryptedDatasets.length > 0,
-          durableEncryptedDatasetKeys: useDurableEncryptedKeys,
-          encryptedKeysForLaunch,
-        });
-        return NextResponse.json(dispatched);
-      }
-
-      let remoteJobId = job.remote_job_id;
-
-      if (!remoteJobId) {
-        const bundle = await createRemoteTrainingJobBundle(jobID, { includeDatasets: true, checkpointMode: 'all' });
-        try {
-          const imported = await uploadBundleToWorker(worker, bundle.zipPath, job.gpu_ids);
-          remoteJobId = imported.job.id;
-          await db.jobs.update(jobID, {
-            name: imported.job.name,
-            gpu_ids: imported.job.gpu_ids,
-            job_config: imported.job.job_config,
-            remote_job_id: imported.job.id,
-            remote_error: [...bundle.warnings, ...(imported.warnings || [])].join('\n') || null,
-            remote_sync_at: new Date(),
-          });
-        } finally {
-          await fsp.rm(bundle.zipPath, { force: true }).catch(() => undefined);
+      if (!isLocalWorker(prepared.job.worker_id) && prepared.job.job_type === 'train') {
+        if (hasActiveRemoteStartForJob(jobID)) {
+          return NextResponse.json({ error: 'Remote start already in progress' }, { status: 409 });
         }
+        const progress = createRemoteStartProgress(jobID);
+        runBackgroundRemoteStart(progress.startID, prepared);
+        return NextResponse.json({
+          startID: progress.startID,
+          statusUrl: `/api/jobs/${jobID}/start-progress/${progress.startID}`,
+          progress,
+        });
       }
 
-      const remoteStartHasKeys = requiredEncryptedDatasets.length > 0;
-      const remoteStartInit: RequestInit = {
-        method: 'POST',
-        body: JSON.stringify({
-          encryptedDatasetKeys: remoteStartHasKeys ? encryptedKeysForLaunch : undefined,
-          durableEncryptedDatasetKeys: useDurableEncryptedKeys,
-        }),
-      };
-      await remoteJson(
-        worker,
-        `/api/jobs/${encodeURIComponent(remoteJobId)}/start`,
-        remoteStartHasKeys ? withoutRemoteRedirects(remoteStartInit) : remoteStartInit,
-      );
-      await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`);
-      await db.queues
-        .findByGpuIds(job.gpu_ids, job.worker_id)
-        .then(queue =>
-          queue
-            ? db.queues.update(queue.id, { is_running: true })
-            : db.queues.create({ worker_id: job.worker_id, gpu_ids: job.gpu_ids, is_running: true }),
-        );
-      const synced = await syncRemoteJob({
-        ...(await db.jobs.findById(jobID))!,
-        remote_job_id: remoteJobId,
-      });
-      return NextResponse.json(synced);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to start remote job';
-      await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
-      return NextResponse.json(
-        { error: message },
-        { status: isRemoteCaptionDispatchError(error) ? error.status : 502 },
-      );
-    }
-  }
-
-  const queueLocalJob = async () => {
-    const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
-
-    await db.jobs.update(jobID, { queue_position: newQueuePosition });
-
-    const queue = await db.queues.findByGpuIds(job.gpu_ids);
-
-    if (!queue) {
-      await db.queues.create({
-        gpu_ids: job.gpu_ids,
-        is_running: false,
-      });
+      return NextResponse.json(await startPreparedJob(prepared));
     }
 
-    await db.jobs.update(jobID, {
-      status: 'queued',
-      stop: false,
-      return_to_queue: false,
-      info: 'Job queued',
-    });
-
-    return (await db.jobs.findById(jobID)) || job;
-  };
-
-  if (isSecureRemoteOllamaCaptionJob(jobConfig)) {
-    await startJobNow(jobID, {
-      encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
-    });
-    return NextResponse.json((await db.jobs.findById(jobID)) || job);
-  }
-
-  if (requiredEncryptedDatasets.length > 0 && useDurableEncryptedKeys) {
-    return NextResponse.json(await queueLocalJob());
-  }
-
-  if (requiredEncryptedDatasets.length > 0) {
-    const runningJobs = await db.jobs.list({
-      status: ['running', 'stopping'],
-      gpu_ids: job.gpu_ids,
-      worker_id: 'local',
-    });
-    const runningJob = runningJobs.find(
-      candidate => candidate.id !== job.id && !isSecureRemoteOllamaCaptionJobConfigJson(candidate.job_config),
+    return NextResponse.json(
+      await startJobFromRequest(jobID, body.encryptedDatasetKeys, body.durableEncryptedDatasetKeys === true),
     );
-    if (runningJob && runningJob.id !== job.id) {
-      return NextResponse.json(
-        { error: 'Encrypted jobs must start immediately; the selected local GPU is busy.' },
-        { status: 409 },
-      );
-    }
-
-    await startJobNow(jobID, { encryptedDatasetKeys: encryptedKeysForLaunch });
-    return NextResponse.json((await db.jobs.findById(jobID)) || job);
+  } catch (error) {
+    return handleJobStartError(error);
   }
-
-  return NextResponse.json(await queueLocalJob());
 }
 
-export async function GET(request: NextRequest, context: { params: { jobID: string } }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ jobID: string }> }) {
   return handleStart(request, context);
 }
 
-export async function POST(request: NextRequest, context: { params: { jobID: string } }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ jobID: string }> }) {
   let body: JobStartRequest = {};
   try {
     body = await request.json();
   } catch {
     body = {};
   }
-  return handleStart(request, context, body.encryptedDatasetKeys, body.durableEncryptedDatasetKeys === true);
+  return handleStart(request, context, body);
 }

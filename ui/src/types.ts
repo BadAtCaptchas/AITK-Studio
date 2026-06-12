@@ -86,6 +86,9 @@ export interface DatasetSummary {
   name: string;
   encrypted: boolean;
   itemCount?: number | null;
+  captionedItemCount?: number | null;
+  missingCaptionCount?: number | null;
+  detectedCaptionExt?: string | null;
   source?: 'local' | 'remote';
   worker_id?: string;
   worker_name?: string;
@@ -101,6 +104,37 @@ export interface EncryptedDatasetStartKey {
 export interface JobStartRequest {
   encryptedDatasetKeys?: EncryptedDatasetStartKey[];
   durableEncryptedDatasetKeys?: boolean;
+  background?: boolean;
+}
+
+export type RemoteStartProgressStatus =
+  | 'queued'
+  | 'preparing'
+  | 'checking-datasets'
+  | 'zipping-dataset'
+  | 'uploading-dataset'
+  | 'importing-dataset'
+  | 'zipping-job'
+  | 'uploading-job'
+  | 'importing-job'
+  | 'starting'
+  | 'completed'
+  | 'failed';
+
+export interface RemoteStartProgress {
+  startID: string;
+  jobID: string;
+  status: RemoteStartProgressStatus;
+  message: string;
+  percent: number;
+  datasetName: string | null;
+  bytesProcessed: number;
+  bytesTotal: number;
+  warnings: string[];
+  error: string | null;
+  remoteJobID: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface WorkerNode {
@@ -113,6 +147,19 @@ export interface WorkerNode {
   last_checked_at: DbDate | null;
   capabilities: string;
   gpus: string;
+  created_at: DbDate;
+  updated_at: DbDate;
+}
+
+export interface RemoteOllamaWorker {
+  id: string;
+  name: string;
+  base_url: string;
+  enabled: boolean;
+  last_status: string;
+  last_error: string | null;
+  last_checked_at: DbDate | null;
+  model_count: number | null;
   created_at: DbDate;
   updated_at: DbDate;
 }
@@ -140,6 +187,7 @@ export interface Job {
   job_ref: string | null;
   save_now: boolean;
   hf_download_progress?: HFDownloadProgress | null;
+  comfy_install_progress?: ComfyInstallProgress | null;
 }
 
 export type HFDownloadStatus = 'idle' | 'downloading' | 'completed' | 'failed';
@@ -165,6 +213,20 @@ export interface HFDownloadProgress {
   percent: number | null;
   downloads: HFDownloadItem[];
   error: string | null;
+  updatedAt: string;
+}
+
+export type ComfyInstallStatus = 'idle' | 'checking' | 'installing' | 'launching' | 'ready' | 'completed' | 'failed';
+
+export interface ComfyInstallProgress {
+  version: number;
+  status: ComfyInstallStatus;
+  step: string;
+  message: string;
+  root: string | null;
+  percent: number | null;
+  error: string | null;
+  startedAt: string;
   updatedAt: string;
 }
 
@@ -291,6 +353,17 @@ export interface NetworkConfig {
   dropout?: number;
   lokr_full_rank: boolean;
   lokr_factor: number;
+  lokr_use_tucker?: boolean;
+  lokr_use_scalar?: boolean;
+  lokr_decompose_both?: boolean;
+  lokr_rank_dropout_scale?: boolean;
+  lokr_weight_decompose?: boolean;
+  lokr_wd_on_output?: boolean;
+  lokr_full_matrix?: boolean;
+  lokr_bypass_mode?: boolean;
+  lokr_rs_lora?: boolean;
+  lokr_unbalanced_factorization?: boolean;
+  lokr_legacy_factorization?: boolean;
   network_kwargs: {
     ignore_if_contains: string[];
     only_if_contains?: string[];
@@ -459,11 +532,14 @@ export interface ModelConfig {
   qtype_te: string;
   quantize_kwargs?: QuantizeKwargsConfig;
   arch: string;
+  use_flux_cfg?: boolean;
   extras_name_or_path?: string;
   vae_path?: string;
   refiner_name_or_path?: string;
   te_name_or_path?: string;
   lora_path?: string;
+  base_lora_path?: string;
+  base_lora_strength?: number;
   inference_lora_path?: string;
   low_vram: boolean;
   model_kwargs: { [key: string]: any };
@@ -492,7 +568,29 @@ export interface SampleItem {
   ctrl_img_3?: string | null;
 }
 
+export type GenerationBackend = 'native' | 'comfy';
+export type ComfyMode = 'external' | 'managed';
+export type ComfyOnError = 'fail' | 'native' | 'skip';
+
+export interface ComfyConfig {
+  mode?: ComfyMode;
+  server_url?: string;
+  managed_install?: boolean;
+  root?: string;
+  ref?: string;
+  workflow_name?: string;
+  workflow?: string | Record<string, unknown>;
+  bindings?: Record<string, string | string[]>;
+  on_error?: ComfyOnError;
+  timeout?: number;
+  poll_interval?: number;
+  free_memory_after_each?: boolean;
+  offload_training_model?: boolean;
+}
+
 export interface SampleConfig {
+  backend?: GenerationBackend;
+  comfy?: ComfyConfig;
   sampler: string;
   sample_every: number;
   width: number;
@@ -579,7 +677,14 @@ export interface CaptionProcessConfig {
     max_new_tokens?: number;
     fixed_caption?: string;
     remote_worker_id?: string;
+    remote_ollama_worker_id?: string;
     system_prompt?: string;
+    output_format?: 'text' | 'ideogram_json' | string;
+    source_caption_extension?: string;
+    delete_source_caption?: boolean;
+    convert_destination?: 'current' | 'copy' | string;
+    caption_extension?: string;
+    temperature?: number;
   }
 }
 
@@ -596,6 +701,7 @@ export interface CaptionJobConfig {
 export interface ConfigDoc {
   title: string | React.ReactNode;
   description: React.ReactNode;
+  tooltip?: string;
 }
 
 export interface SelectOption {

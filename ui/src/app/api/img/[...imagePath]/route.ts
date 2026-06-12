@@ -31,18 +31,16 @@ const contentTypeMap: { [key: string]: string } = {
 };
 
 type ImageRouteParams = {
-  imagePath: string | string[];
+  imagePath: string[];
 };
 
-function getRequestedValue(request: NextRequest, imagePath: string | string[]) {
+function getRequestedValue(request: NextRequest, imagePath: string[]) {
   const pathname = request.nextUrl?.pathname;
   const routePrefix = '/api/img/';
   const rawPath =
     pathname && pathname.startsWith(routePrefix)
       ? pathname.slice(routePrefix.length)
-      : Array.isArray(imagePath)
-        ? imagePath.join('/')
-        : imagePath;
+      : imagePath.join('/');
 
   return decodeURIComponent(rawPath);
 }
@@ -79,7 +77,7 @@ function isPathInsideRoot(root: string, filepath: string) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-export async function GET(request: NextRequest, { params }: { params: ImageRouteParams }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<ImageRouteParams> }) {
   const { imagePath } = await params;
   try {
     const requestedValue = getRequestedValue(request, imagePath);
@@ -113,12 +111,31 @@ export async function GET(request: NextRequest, { params }: { params: ImageRoute
     const [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot] = await Promise.all(
       [datasetRoot, trainingRoot, dataRoot].map(dir => resolveExistingDir(dir)),
     );
-    const allowedDirs = [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot].filter(
-      (dir): dir is string => dir !== null,
-    );
+    const generalAllowedDirs = [canonicalDatasetRoot, canonicalDataRoot].filter((dir): dir is string => dir !== null);
 
     const canonicalPath = await fs.promises.realpath(filepath).catch(() => null);
-    if (!canonicalPath || !allowedDirs.some(allowedDir => isPathInsideRoot(allowedDir, canonicalPath))) {
+    if (!canonicalPath) {
+      return new NextResponse('File not found', { status: 404 });
+    }
+
+    const ext = path.extname(canonicalPath).toLowerCase();
+    const contentType = contentTypeMap[ext];
+    if (!contentType) {
+      return new NextResponse('Unsupported media type', { status: 415 });
+    }
+
+    const trainingRelativePath =
+      canonicalTrainingRoot && isPathInsideRoot(canonicalTrainingRoot, canonicalPath)
+        ? path.relative(canonicalTrainingRoot, canonicalPath)
+        : null;
+    const isInGeneralAllowedDir =
+      trainingRelativePath === null &&
+      generalAllowedDirs.some(allowedDir => isPathInsideRoot(allowedDir, canonicalPath));
+    const isInTrainingSamplesDir =
+      trainingRelativePath !== null && trainingRelativePath.split(path.sep).includes('samples');
+
+    if (!isInGeneralAllowedDir && !isInTrainingSamplesDir) {
+      const allowedDirs = [...generalAllowedDirs, canonicalTrainingRoot].filter((dir): dir is string => dir !== null);
       console.warn(`Access denied: ${filepath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
     }
@@ -135,9 +152,6 @@ export async function GET(request: NextRequest, { params }: { params: ImageRoute
     if (!stat || !stat.isFile()) {
       return new NextResponse('File not found', { status: 404 });
     }
-
-    const ext = path.extname(canonicalPath).toLowerCase();
-    const contentType = contentTypeMap[ext] || 'application/octet-stream';
 
     const etag = `W/"${stat.ino.toString(36)}-${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
     const cacheControl = 'public, max-age=86400, immutable';

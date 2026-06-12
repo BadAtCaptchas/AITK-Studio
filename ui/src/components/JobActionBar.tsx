@@ -14,8 +14,10 @@ import {
 } from '@headlessui/react';
 import { openConfirm } from '@/components/ConfirmModal';
 import type { Job } from '@/types';
+import type { RemoteStartProgress } from '@/types';
 import {
   startJob,
+  restartJobFromScratch,
   stopJob,
   deleteJob,
   getAvaliableJobActions,
@@ -53,6 +55,11 @@ type ModelDownloadStatus = {
   phase: 'downloading' | 'completed' | 'failed';
   handledCount: number;
   warnings: string[];
+  error: string | null;
+};
+type RemoteStartStatus = {
+  phase: 'starting' | 'completed' | 'failed';
+  progress: RemoteStartProgress | null;
   error: string | null;
 };
 
@@ -122,6 +129,22 @@ function getModelDownloadStatusLabel(status: ModelDownloadStatus) {
   return status.warnings[0] || 'No downloadable model references were found.';
 }
 
+function getRemoteStartStatusLabel(status: RemoteStartStatus) {
+  if (status.phase === 'completed') return 'Remote job started';
+  if (status.phase === 'failed') return status.error || status.progress?.error || 'Remote start failed';
+  return status.progress?.message || 'Starting remote job...';
+}
+
+function getRemoteStartProgressDetail(progress: RemoteStartProgress | null) {
+  if (!progress) return null;
+  const dataset = progress.datasetName ? progress.datasetName : null;
+  const bytes =
+    progress.bytesTotal > 0
+      ? `${formatBytes(progress.bytesProcessed)} / ${formatBytes(progress.bytesTotal)}`
+      : null;
+  return [dataset, bytes].filter(Boolean).join(' / ');
+}
+
 function getRemoteCaptionState(job: Job) {
   try {
     const state = JSON.parse(job.job_config)?.config?.remote_caption;
@@ -143,22 +166,27 @@ export default function JobActionBar({
   hideView,
   autoStartQueue = false,
 }: JobActionBarProps) {
-  const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue } = getAvaliableJobActions(job);
+  const { canStart, canStop, canDelete, canEdit, canRemoveFromQueue, canRestartFromScratch } =
+    getAvaliableJobActions(job);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
+  const [remoteStartStatus, setRemoteStartStatus] = useState<RemoteStartStatus | null>(null);
   const [captionResultSyncing, setCaptionResultSyncing] = useState(false);
   const [exportDialog, setExportDialog] = useState<ExportDialogState>(null);
   const [checkpointMode, setCheckpointMode] = useState<TrainingJobCheckpointExportMode>('latest');
   const exportStatusTimeout = useRef<number | null>(null);
   const modelDownloadStatusTimeout = useRef<number | null>(null);
+  const remoteStartStatusTimeout = useRef<number | null>(null);
   const exportInFlight = useRef(false);
   const modelDownloadInFlight = useRef(false);
+  const remoteStartInFlight = useRef(false);
   const captionResultInFlight = useRef(false);
   const activeExportID = useRef<string | null>(null);
   const cancelExportInFlight = useRef(false);
   const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
   const isDownloadingModels = modelDownloadStatus?.phase === 'downloading';
+  const isRemoteStarting = remoteStartStatus?.phase === 'starting';
   const remoteCaptionState = getRemoteCaptionState(job);
   const remoteCaptionDownloadStatus = remoteCaptionState?.downloadStatus || null;
   const remoteCaptionLastError = typeof remoteCaptionState?.lastError === 'string' ? remoteCaptionState.lastError : null;
@@ -176,6 +204,9 @@ export default function JobActionBar({
       }
       if (modelDownloadStatusTimeout.current !== null) {
         window.clearTimeout(modelDownloadStatusTimeout.current);
+      }
+      if (remoteStartStatusTimeout.current !== null) {
+        window.clearTimeout(remoteStartStatusTimeout.current);
       }
       activeExportID.current = null;
     };
@@ -204,6 +235,18 @@ export default function JobActionBar({
         setModelDownloadStatus(null);
       }
       modelDownloadStatusTimeout.current = null;
+    }, 3500);
+  };
+
+  const clearRemoteStartStatusSoon = () => {
+    if (remoteStartStatusTimeout.current !== null) {
+      window.clearTimeout(remoteStartStatusTimeout.current);
+    }
+    remoteStartStatusTimeout.current = window.setTimeout(() => {
+      if (isMounted.current) {
+        setRemoteStartStatus(null);
+      }
+      remoteStartStatusTimeout.current = null;
     }, 3500);
   };
 
@@ -330,6 +373,60 @@ export default function JobActionBar({
     }
   };
 
+  const handleStartJob = async () => {
+    if (!canStart || remoteStartInFlight.current) return;
+
+    const useRemoteStartProgress = job.job_type === 'train' && job.worker_id !== 'local';
+    remoteStartInFlight.current = true;
+    if (remoteStartStatusTimeout.current !== null) {
+      window.clearTimeout(remoteStartStatusTimeout.current);
+      remoteStartStatusTimeout.current = null;
+    }
+    if (useRemoteStartProgress) {
+      setRemoteStartStatus({ phase: 'starting', progress: null, error: null });
+    }
+
+    try {
+      await startJob(job.id, undefined, {
+        background: useRemoteStartProgress,
+        onRemoteStartProgress: progress => {
+          if (!isMounted.current) return;
+          setRemoteStartStatus({
+            phase: progress.status === 'completed' ? 'completed' : progress.status === 'failed' ? 'failed' : 'starting',
+            progress,
+            error: progress.error,
+          });
+        },
+      });
+      if (autoStartQueue) {
+        await startQueue(job.gpu_ids, job.worker_id);
+      }
+      onRefresh?.();
+      if (useRemoteStartProgress) {
+        setRemoteStartStatus(current => ({
+          phase: 'completed',
+          progress: current?.progress || null,
+          error: null,
+        }));
+        clearRemoteStartStatusSoon();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start job.';
+      if (useRemoteStartProgress) {
+        setRemoteStartStatus(current => ({
+          phase: 'failed',
+          progress: current?.progress || null,
+          error: message,
+        }));
+        clearRemoteStartStatusSoon();
+      } else {
+        alert(message);
+      }
+    } finally {
+      remoteStartInFlight.current = false;
+    }
+  };
+
   const handleSaveNextStep = async () => {
     try {
       await saveJobNow(job.id);
@@ -338,6 +435,25 @@ export default function JobActionBar({
       console.error('Error requesting checkpoint save:', error);
       alert(getApiErrorMessage(error, 'Failed to request a checkpoint save.'));
     }
+  };
+
+  const handleRestartFromScratch = () => {
+    if (!canRestartFromScratch) return;
+
+    openConfirm({
+      title: 'Restart From Scratch',
+      message: `Restart "${job.name}" from scratch? This will permanently delete its checkpoints, samples, logs, and training metrics. The job config and datasets will remain.`,
+      type: 'danger',
+      confirmText: 'Restart From Scratch',
+      onConfirm: async () => {
+        try {
+          await restartJobFromScratch(job.id);
+          onRefresh?.();
+        } catch (error) {
+          alert(getApiErrorMessage(error, 'Failed to restart job from scratch.'));
+        }
+      },
+    });
   };
 
   const handleRetryRemoteCaptionResult = async () => {
@@ -359,8 +475,13 @@ export default function JobActionBar({
 
   const exportStatusLabel = getExportStatusLabel(exportStatus);
   const modelDownloadStatusLabel = modelDownloadStatus ? getModelDownloadStatusLabel(modelDownloadStatus) : '';
+  const remoteStartStatusLabel = remoteStartStatus ? getRemoteStartStatusLabel(remoteStartStatus) : '';
   const exportStatusDetail = getExportProgressDetail(exportStatus?.progress || null);
+  const remoteStartStatusDetail = getRemoteStartProgressDetail(remoteStartStatus?.progress || null);
   const exportPercent = Math.round(exportStatus?.progress?.percent || (exportStatus?.phase === 'ready' ? 100 : 0));
+  const remoteStartPercent = Math.round(
+    remoteStartStatus?.progress?.percent || (remoteStartStatus?.phase === 'completed' ? 100 : 0),
+  );
   const canCancelExport =
     isExporting &&
     !!(activeExportID.current || exportStatus?.progress?.exportID) &&
@@ -373,22 +494,11 @@ export default function JobActionBar({
         <Button
           title="Start job"
           aria-label="Start job"
-          onClick={async () => {
-            if (!canStart) return;
-            try {
-              await startJob(job.id);
-              // start the queue as well
-              if (autoStartQueue) {
-                await startQueue(job.gpu_ids, job.worker_id);
-              }
-              if (onRefresh) onRefresh();
-            } catch (error) {
-              alert(error instanceof Error ? error.message : 'Failed to start job.');
-            }
-          }}
-          className={actionButtonClass}
+          disabled={isRemoteStarting}
+          onClick={() => void handleStartJob()}
+          className={`${actionButtonClass} ${isRemoteStarting ? 'cursor-wait opacity-80' : ''}`}
         >
-          <Play className="h-4 w-4" />
+          {isRemoteStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
         </Button>
       )}
       {canRemoveFromQueue && (
@@ -597,6 +707,17 @@ export default function JobActionBar({
               </div>
             </MenuItem>
           )}
+          {canRestartFromScratch && (
+            <MenuItem>
+              <div
+                className="cursor-pointer rounded px-4 py-1 text-rose-200 hover:bg-rose-950/60 hover:text-rose-100 flex items-center gap-2"
+                onClick={handleRestartFromScratch}
+              >
+                <RefreshCcw className="w-4 h-4" />
+                Restart From Scratch
+              </div>
+            </MenuItem>
+          )}
           <MenuItem>
             <div
               className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded"
@@ -741,11 +862,47 @@ export default function JobActionBar({
           </div>
         </div>
       )}
+      {remoteStartStatus && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed ${
+            exportStatus ? 'bottom-24' : 'bottom-4'
+          } right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
+        >
+          {remoteStartStatus.phase === 'completed' ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-green-400" />
+          ) : remoteStartStatus.phase === 'failed' ? (
+            <X className="mt-0.5 h-4 w-4 flex-none text-red-400" />
+          ) : (
+            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-blue-400" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-3">
+              <span className="truncate">{remoteStartStatusLabel}</span>
+              <span className="flex-none text-xs text-gray-400">{remoteStartPercent}%</span>
+            </div>
+            {remoteStartStatusDetail && (
+              <div className="mt-0.5 truncate text-xs text-gray-400">{remoteStartStatusDetail}</div>
+            )}
+            {remoteStartStatus.phase === 'starting' && (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-700">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all"
+                  style={{ width: `${Math.max(2, remoteStartPercent)}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {modelDownloadStatus && (
         <div
           role="status"
           aria-live="polite"
-          className={`fixed ${exportStatus ? 'bottom-24' : 'bottom-4'} right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
+          className={`fixed ${
+            exportStatus || remoteStartStatus ? 'bottom-44' : 'bottom-4'
+          } right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
         >
           {modelDownloadStatus.phase === 'completed' ? (
             <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-green-400" />

@@ -50,8 +50,19 @@ export const defaultJobConfig: JobConfig = {
           linear_alpha: 32,
           conv: 16,
           conv_alpha: 16,
-          lokr_full_rank: true,
+          lokr_full_rank: false,
           lokr_factor: -1,
+          lokr_use_tucker: false,
+          lokr_use_scalar: false,
+          lokr_decompose_both: false,
+          lokr_rank_dropout_scale: false,
+          lokr_weight_decompose: false,
+          lokr_wd_on_output: true,
+          lokr_full_matrix: false,
+          lokr_bypass_mode: false,
+          lokr_rs_lora: false,
+          lokr_unbalanced_factorization: false,
+          lokr_legacy_factorization: true,
           network_kwargs: {
             ignore_if_contains: [],
           },
@@ -116,6 +127,7 @@ export const defaultJobConfig: JobConfig = {
           qtype_te: 'qfloat8',
           arch: 'flex1',
           low_vram: false,
+          base_lora_strength: 1.0,
           model_kwargs: {},
         },
         sample: defaultSampleConfig,
@@ -157,11 +169,19 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
     delete jobConfig.config.process[0].model.auto_memory;
   }
 
+  jobConfig.config.process[0].model.base_lora_strength ??= 1.0;
+
   if (jobConfig.config.process[0].model.layer_offloading) {
     const memoryProfile = getLayerOffloadingMemoryProfile(jobConfig.config.process[0].model.arch);
     jobConfig.config.process[0].model.layer_offloading_backend ??= memoryProfile.backend;
     jobConfig.config.process[0].model.layer_offloading_transformer_percent ??= memoryProfile.transformerPercent;
     jobConfig.config.process[0].model.layer_offloading_text_encoder_percent ??= memoryProfile.textEncoderPercent;
+  }
+
+  const sample = jobConfig.config.process[0].sample;
+  sample.backend ??= 'native';
+  if (jobConfig.config.process[0].model.low_vram && !('keep_low_vram_for_samples' in sample)) {
+    sample.keep_low_vram_for_samples = true;
   }
 
   if (!('logging' in jobConfig.config.process[0])) {

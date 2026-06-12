@@ -12,14 +12,8 @@ export interface LossPoint {
 
 type SeriesMap = Record<string, LossPoint[]>;
 
-function isLossKey(key: string) {
-  // treat anything containing "loss" as a loss-series
-  // (covers loss, train_loss, val_loss, loss/xyz, etc.)
-  return /loss/i.test(key);
-}
-
-function isPhaseKey(key: string) {
-  return key === 'phase/index';
+function isMarkerKey(key: string) {
+  return key === 'phase/index' || key.startsWith('event/');
 }
 
 export default function useJobLossLog(jobID: string, reloadInterval: null | number = null) {
@@ -34,10 +28,10 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
   const lastStepByKeyRef = useRef<Record<string, number | null>>({});
 
   const lossKeys = useMemo(() => {
-    const base = (keys ?? []).filter(isLossKey);
+    const base = (keys ?? []).filter(key => !isMarkerKey(key));
     // if keys table is empty early on, fall back to just "loss"
     if (base.length === 0) return ['loss'];
-    return base.sort();
+    return [...base].sort();
   }, [keys]);
 
   const refreshLoss = useCallback(async () => {
@@ -59,10 +53,7 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
       const newKeys = first.keys ?? [];
       setKeys(newKeys);
 
-      const wantedLossKeys = (newKeys.filter(isLossKey).length ? newKeys.filter(isLossKey) : ['loss']).sort();
-      const wantedKeys = Array.from(
-        new Set([...wantedLossKeys, ...newKeys.filter(isPhaseKey)]),
-      ).sort();
+      const wantedKeys = (newKeys.length ? [...newKeys] : ['loss']).sort();
 
       // Step 2: fetch each chart key incrementally (since_step per key if polling)
       const requests = wantedKeys.map(k => {
@@ -110,7 +101,7 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
 
         // remove stale chart keys that no longer exist (rare, but keeps UI clean)
         for (const existingKey of Object.keys(next)) {
-          if ((isLossKey(existingKey) || isPhaseKey(existingKey)) && !wantedKeys.includes(existingKey)) {
+          if (!wantedKeys.includes(existingKey)) {
             delete next[existingKey];
             delete lastStepByKeyRef.current[existingKey];
           }

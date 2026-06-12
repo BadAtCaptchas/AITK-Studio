@@ -1,0 +1,65 @@
+---
+job: extension
+config:
+  name: "my_ideogram4_nf4_lora_v1"
+  process:
+    - type: "sd_trainer"
+      training_folder: "output"
+      device: cuda:0
+      network:
+        type: "lora"
+        linear: 32
+        linear_alpha: 32
+        transformer_only: true
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 4
+      datasets:
+        - folder_path: "/path/to/images/folder"
+          # Captions should be JSON objects serialized as strings. No magic-prompt
+          # or moderation API is used by training.
+          caption_ext: "txt"
+          caption_dropout_rate: 0.0
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [512, 768, 1024]
+      train:
+        batch_size: 1
+        steps: 3000
+        gradient_accumulation: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        cache_text_embeddings: true
+        noise_scheduler: "flowmatch"
+        timestep_type: "weighted"
+        optimizer: "adamw8bit"
+        lr: 4e-5
+        dtype: bf16
+      model:
+        arch: "ideogram4"
+        name_or_path: "ideogram-ai/ideogram-4-nf4"
+        extras_name_or_path: "ideogram-ai/ideogram-4-nf4"
+        dtype: "bf16"
+        train_text_encoder: false
+        low_vram: true
+        model_kwargs:
+          quantization: "nf4"
+          require_json_captions: false
+          caption_strict: false
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 1024
+        height: 1024
+        prompts:
+          - '{"high_level_description":"A studio portrait of [trigger] in natural light.","style_description":{"aesthetics":"clean, detailed, realistic","lighting":"soft window light","photo":"85mm lens, shallow depth of field","medium":"photograph"},"compositional_deconstruction":{"background":"A quiet neutral studio backdrop.","elements":[{"type":"obj","bbox":[120,250,950,760],"desc":"[trigger] facing the camera with natural expression and detailed clothing."}]}}'
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 7
+        sample_steps: 20
+meta:
+  name: "[name]"
+  version: "1.0"

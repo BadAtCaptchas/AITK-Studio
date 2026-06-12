@@ -13,6 +13,7 @@
         "allowSyntheticDefaultImports": true,
         "paths": {
             "@/*": [
+                "./src/*",
                 "./cron/*"
             ]
         }
@@ -21,6 +22,13 @@
         "cron/**/*.ts",
         "src/paths.ts",
         "src/utils/basic.ts",
+        "src/utils/fluxGuidancePolicy.ts",
+        "src/utils/jobDatasetDefaults.ts",
+        "src/utils/remoteDatasetRefs.ts",
+        "src/utils/annotationGeometry.ts",
+        "src/utils/captionKeywordSearch.ts",
+        "src/utils/datasetImageNavigator.ts",
+        "src/utils/ideogramCaption.ts",
         "src/utils/folderImport.ts",
         "src/utils/webauthnPrfCrypto.ts",
         "src/utils/trainingPhaseSummary.ts",
@@ -28,10 +36,25 @@
         "src/server/scriptRunner.ts",
         "src/server/cloudflared.ts",
         "src/server/secureCaptionCrypto.ts",
+        "src/server/captionFiles.ts",
+        "src/server/imageDelete.ts",
+        "src/server/datasetCaptionBulk.ts",
+        "src/server/openRouterImageData.ts",
+        "src/server/openRouterBoxes.ts",
+        "src/server/openRouterLayerCaption.ts",
         "src/server/ollama.ts",
+        "src/server/ollamaVision.ts",
+        "src/server/remoteOllamaWorkers.ts",
+        "src/server/hfDatasetImport.ts",
         "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
         "src/server/remoteClient.ts",
-        "src/server/trainingAdvisor.ts"
+        "src/server/randomPromptCaptions.ts",
+        "src/server/trainingAdvisor.ts",
+        "src/server/remoteStartProgress.ts",
+        "src/server/remoteDatasetSync.ts",
+        "src/server/queueReorder.ts",
+        "src/server/jobStart.ts",
+        "src/server/trainingJobRestart.ts"
     ]
 }

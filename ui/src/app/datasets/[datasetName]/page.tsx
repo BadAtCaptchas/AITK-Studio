@@ -4,11 +4,13 @@ import { useEffect, useState, use, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
 import { FaChevronLeft } from 'react-icons/fa';
-import { VirtuosoGrid } from 'react-virtuoso';
 import { Pencil } from 'lucide-react';
-import DatasetImageCard from '@/components/DatasetImageCard';
-import DatasetImageViewer from '@/components/DatasetImageViewer';
-import EncryptedDatasetItemCard from '@/components/EncryptedDatasetItemCard';
+import DatasetImageStudio, {
+  type BulkCaptionActionRequest,
+  type BulkCaptionActionResult,
+  type DatasetStudioItem,
+  type DeleteImagesResult,
+} from '@/components/DatasetImageStudio';
 import { Button } from '@headlessui/react';
 import AddImagesModal, { openImagesModal, useOpenImagesModalOnDrag } from '@/components/AddImagesModal';
 import { Modal } from '@/components/Modal';
@@ -19,10 +21,13 @@ import useSettings from '@/hooks/useSettings';
 import { pathJoin } from '@/utils/basic';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
 import { PageNotice } from '@/components/OperatorPrimitives';
+import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import type { EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
 import {
   arrayBufferToBase64,
+  captionObjectPath,
   decryptCatalog,
+  encryptCaptionObject,
   encryptCatalog,
   exportRawAesKey,
   getRememberedEncryptedDatasetKey,
@@ -31,6 +36,7 @@ import {
   unlockEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
+import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
 
 export default function DatasetPage({ params }: { params: Promise<{ datasetName: string }> }) {
   const [imgList, setImgList] = useState<{ img_path: string }[]>([]);
@@ -54,14 +60,10 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
   const [unlockPassword, setUnlockPassword] = useState('');
   const [unlockKeyFile, setUnlockKeyFile] = useState<File | null>(null);
   const [unlockError, setUnlockError] = useState<string | null>(null);
-  const [selectedImgPath, setSelectedImgPath] = useState<string | null>(null);
-  const [captionRefreshKeys, setCaptionRefreshKeys] = useState<Record<string, number>>({});
-  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renameDatasetName, setRenameDatasetName] = useState(datasetName);
   const [isRenamingDataset, setIsRenamingDataset] = useState(false);
   const [renameDatasetError, setRenameDatasetError] = useState('');
-  const scrollParentCallback = useCallback((el: HTMLDivElement | null) => setScrollParent(el), []);
 
   const refreshImageList = (dbName: string) => {
     setStatus('loading');
@@ -72,7 +74,6 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
         if (data.encrypted) {
           setEncryptedManifest(data.manifest);
           setImgList([]);
-          setSelectedImgPath(null);
           setStatus('success');
           return;
         }
@@ -156,7 +157,28 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
     }
   };
 
-  const imgPaths = useMemo(() => imgList.map(img => img.img_path), [imgList]);
+  const datasetPath = useMemo(
+    () => (settings?.DATASETS_FOLDER ? pathJoin(settings.DATASETS_FOLDER, datasetName) : datasetName),
+    [datasetName, settings?.DATASETS_FOLDER],
+  );
+
+  const plainStudioItems = useMemo<DatasetStudioItem[]>(
+    () => imgList.map(img => ({ kind: 'plain' as const, path: img.img_path })),
+    [imgList],
+  );
+
+  const encryptedStudioItems = useMemo<DatasetStudioItem[]>(
+    () => (encryptedCatalog?.items || []).map(item => ({ kind: 'encrypted' as const, item })),
+    [encryptedCatalog?.items],
+  );
+
+  const openJsonConversion = useCallback(() => {
+    if (isRemoteDataset) return;
+    openCaptionDatasetModal(datasetPath, () => refreshImageList(datasetName), {
+      encryptedDatasetKeyB64: encryptedRawKeyB64 || undefined,
+      preset: 'ideogram_json',
+    });
+  }, [datasetName, datasetPath, encryptedRawKeyB64, isRemoteDataset]);
 
   useEffect(() => {
     if (datasetName) {
@@ -316,35 +338,246 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
     setEncryptedCatalog(nextCatalog);
   };
 
-  const deleteEncryptedItem = async (item: EncryptedDatasetItem) => {
-    if (!encryptedManifest || !encryptedCatalog || !encryptedKey) return;
+  const handleDeleteImages = async (targetItems: DatasetStudioItem[]): Promise<DeleteImagesResult> => {
+    const uniqueItems = Array.from(
+      new Map(
+        targetItems.map(item => [item.kind === 'plain' ? item.path : item.item.id, item] as const),
+      ).values(),
+    );
+    const plainPaths = uniqueItems.flatMap(item => (item.kind === 'plain' ? [item.path] : []));
+    const encryptedItems = uniqueItems.flatMap(item => (item.kind === 'encrypted' ? [item.item] : []));
+    const removedKeys: string[] = [];
+    let deleted = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    if (plainPaths.length > 0) {
+      const response = await apiClient.post('/api/img/delete-bulk', { imgPaths: plainPaths });
+      const data = response.data || {};
+      const removedPaths = Array.isArray(data.removedPaths)
+        ? data.removedPaths.filter((value: unknown): value is string => typeof value === 'string')
+        : [];
+      deleted += Number(data.deleted || 0);
+      skipped += Number(data.skipped || 0);
+      failed += Number(data.failed || 0);
+      removedKeys.push(...removedPaths);
+      if (removedPaths.length > 0) {
+        const removedPathSet = new Set(removedPaths);
+        setImgList(previous => previous.filter(image => !removedPathSet.has(image.img_path)));
+      }
+    }
+
+    if (encryptedItems.length > 0) {
+      if (!encryptedManifest || !encryptedCatalog || !encryptedKey) {
+        throw new Error('Unlock the encrypted dataset first.');
+      }
+      const encryptedIDs = new Set(encryptedItems.map(item => item.id));
+      const nextCatalog: EncryptedDatasetCatalog = {
+        ...encryptedCatalog,
+        items: encryptedCatalog.items.filter(item => !encryptedIDs.has(item.id)),
+      };
+      const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
+      await apiClient.post('/api/datasets/encrypted/update', {
+        datasetName,
+        worker_id: workerID,
+        manifest: nextManifest,
+        deleteObjects: encryptedItems.flatMap(item =>
+          [item.objectPath, item.captionObjectPath].filter((value): value is string => Boolean(value)),
+        ),
+      });
+      setEncryptedManifest(nextManifest);
+      setEncryptedCatalog(nextCatalog);
+      deleted += encryptedItems.length;
+      removedKeys.push(...encryptedItems.map(item => item.id));
+    }
+
+    return {
+      requested: uniqueItems.length,
+      deleted,
+      skipped,
+      failed,
+      removedKeys,
+    };
+  };
+
+  const encryptedObjectUpdate = async (objectPath: string) => {
+    const response = await apiClient.post(
+      '/api/datasets/encrypted/object',
+      { datasetName, worker_id: workerID, objectPath },
+      { responseType: 'blob' },
+    );
+    const bytes = await (response.data as Blob).arrayBuffer();
+    return { objectPath, dataBase64: arrayBufferToBase64(bytes) };
+  };
+
+  const handleBulkEncryptedCaptionAction = async (
+    request: BulkCaptionActionRequest,
+  ): Promise<BulkCaptionActionResult> => {
+    if (!encryptedManifest || !encryptedCatalog || !encryptedKey) {
+      throw new Error('Unlock the encrypted dataset first.');
+    }
+
+    const matches = request.matches.flatMap(match =>
+      match.item.kind === 'encrypted' ? [{ ...match, encryptedItem: match.item.item }] : [],
+    );
+    const matchedItems = Array.from(
+      new Map<string, EncryptedDatasetItem>(
+        matches.map(match => [match.encryptedItem.id, match.encryptedItem] as const),
+      ).values(),
+    );
+    const matchedIDs = new Set(matchedItems.map(item => item.id));
+    const now = new Date().toISOString();
+
+    if (request.action === 'delete') {
+      const nextCatalog: EncryptedDatasetCatalog = {
+        ...encryptedCatalog,
+        items: encryptedCatalog.items.filter(item => !matchedIDs.has(item.id)),
+      };
+      const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
+      await apiClient.post('/api/datasets/encrypted/update', {
+        datasetName,
+        worker_id: workerID,
+        manifest: nextManifest,
+        deleteObjects: matchedItems.flatMap(item => [item.objectPath, item.captionObjectPath].filter(Boolean)),
+      });
+      setEncryptedManifest(nextManifest);
+      setEncryptedCatalog(nextCatalog);
+      return {
+        action: request.action,
+        found: matches.length,
+        affected: matchedItems.length,
+        deleted: matchedItems.length,
+        removedKeys: matchedItems.map(item => item.id),
+      };
+    }
+
+    if (request.action === 'move') {
+      const destinationName = request.destinationName?.trim();
+      if (!destinationName) throw new Error('Destination dataset name is required.');
+
+      const { manifest: emptyManifest } = await encryptCatalog({ version: 1, items: [] }, encryptedKey, encryptedManifest);
+      const createResponse = await apiClient.post('/api/datasets/create', {
+        name: destinationName,
+        worker_id: workerID,
+        encrypted: true,
+        encryptedManifest: emptyManifest,
+      });
+      const createdName = createResponse.data?.name || destinationName;
+
+      const objects = [];
+      for (const item of matchedItems) {
+        objects.push(await encryptedObjectUpdate(item.objectPath));
+        if (item.captionObjectPath) objects.push(await encryptedObjectUpdate(item.captionObjectPath));
+      }
+
+      const targetCatalog: EncryptedDatasetCatalog = {
+        version: 1,
+        items: matchedItems.map(item => ({ ...item, updatedAt: now })),
+      };
+      const { manifest: targetManifest } = await encryptCatalog(targetCatalog, encryptedKey, emptyManifest);
+      await apiClient.post('/api/datasets/encrypted/update', {
+        datasetName: createdName,
+        worker_id: workerID,
+        manifest: targetManifest,
+        objects,
+      });
+
+      const nextCatalog: EncryptedDatasetCatalog = {
+        ...encryptedCatalog,
+        items: encryptedCatalog.items.filter(item => !matchedIDs.has(item.id)),
+      };
+      const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
+      await apiClient.post('/api/datasets/encrypted/update', {
+        datasetName,
+        worker_id: workerID,
+        manifest: nextManifest,
+        deleteObjects: matchedItems.flatMap(item => [item.objectPath, item.captionObjectPath].filter(Boolean)),
+      });
+      setEncryptedManifest(nextManifest);
+      setEncryptedCatalog(nextCatalog);
+      if (encryptedRawKeyB64) {
+        rememberEncryptedDatasetKey(createdName, encryptedRawKeyB64);
+        if (settings?.DATASETS_FOLDER) {
+          rememberEncryptedDatasetKey(pathJoin(settings.DATASETS_FOLDER, createdName), encryptedRawKeyB64);
+        }
+        if (isRemoteDataset) {
+          rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, createdName), encryptedRawKeyB64);
+          rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, createdName), encryptedRawKeyB64);
+        }
+      }
+
+      return {
+        action: request.action,
+        found: matches.length,
+        affected: matchedItems.length,
+        moved: matchedItems.length,
+        destinationName: createdName,
+        removedKeys: matchedItems.map(item => item.id),
+      };
+    }
+
+    const updatedCaptions: Record<string, string> = {};
+    const updatedItems = new Map<string, EncryptedDatasetItem>();
+    const objects: Array<{ objectPath: string; dataBase64: string }> = [];
+    let removedWords = 0;
+    const terms = parseCaptionKeywordQuery(request.query);
+
+    for (const match of matches) {
+      const result = removeCaptionKeywords(match.caption, terms, request.matchMode);
+      if (!result.changed) continue;
+      const item = match.encryptedItem;
+      const targetCaptionPath = item.captionObjectPath || captionObjectPath();
+      const encryptedCaption = await encryptCaptionObject(encryptedKey, targetCaptionPath, result.caption);
+      objects.push({
+        objectPath: targetCaptionPath,
+        dataBase64: arrayBufferToBase64(new TextEncoder().encode(JSON.stringify(encryptedCaption))),
+      });
+      updatedItems.set(item.id, { ...item, captionObjectPath: targetCaptionPath, updatedAt: now });
+      updatedCaptions[item.id] = result.caption;
+      removedWords += result.removedCount;
+    }
+
+    if (updatedItems.size === 0) {
+      return { action: request.action, found: matches.length, affected: 0, updated: 0, removedWords: 0 };
+    }
+
     const nextCatalog: EncryptedDatasetCatalog = {
       ...encryptedCatalog,
-      items: encryptedCatalog.items.filter(existing => existing.id !== item.id),
+      items: encryptedCatalog.items.map(item => updatedItems.get(item.id) || item),
     };
     const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
     await apiClient.post('/api/datasets/encrypted/update', {
       datasetName,
       worker_id: workerID,
       manifest: nextManifest,
-      deleteObjects: [item.objectPath, item.captionObjectPath].filter(Boolean),
+      objects,
     });
     setEncryptedManifest(nextManifest);
     setEncryptedCatalog(nextCatalog);
+
+    return {
+      action: request.action,
+      found: matches.length,
+      affected: updatedItems.size,
+      updated: updatedItems.size,
+      removedWords,
+      updatedCaptions,
+    };
   };
 
   return (
     <>
-      <TopBar>
+      <TopBar className="h-14 bg-[#070b10]">
         <div className="flex-shrink-0">
           <Button className="operator-icon-button" onClick={() => history.back()} title="Back">
             <FaChevronLeft />
           </Button>
         </div>
-        <div className="min-w-0 flex-shrink">
-          <h1 className="truncate text-base font-semibold">
-            <span className="hidden sm:inline">Dataset: </span>
-            {datasetName}
+        <div className="min-w-0 flex-shrink text-sm">
+          <h1 className="truncate font-semibold text-gray-100">
+            <span className="hidden text-gray-400 sm:inline">AI Toolkit / Datasets / </span>
+            <span>{datasetName}</span>
+            <span className="hidden text-gray-500 sm:inline"> / Edit Dataset</span>
             {isRemoteDataset ? <span className="ml-2 text-xs text-blue-300">Remote</span> : null}
           </h1>
         </div>
@@ -381,7 +614,7 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
           </Button>
         </div>
       </TopBar>
-      <MainContent ref={scrollParentCallback}>
+      <MainContent className="!top-14 !h-[calc(100%-3.5rem)] overflow-hidden !px-0 !pt-0 sm:!px-0">
         {encryptedManifest && !encryptedCatalog && (
           <div className="mx-auto mt-10 max-w-md border border-gray-700 bg-gray-900 p-5 text-gray-200">
             <h2 className="text-base font-semibold">Encrypted Dataset Locked</h2>
@@ -421,45 +654,45 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
             This encrypted dataset is empty. Add images to make it available for training.
           </PageNotice>
         )}
-        {status === 'success' && imgList.length > 0 && scrollParent && (
-          <VirtuosoGrid
-            totalCount={imgList.length}
-            customScrollParent={scrollParent}
-            overscan={400}
-            listClassName="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
-            itemContent={index => {
-              const img = imgList[index];
-              if (!img) return null;
-              return (
-                <DatasetImageCard
-                  alt="image"
-                  isAutoCaptioning={isAutoCaptioning}
-                  imageUrl={img.img_path}
-                  onDelete={() => refreshImageList(datasetName)}
-                  onImageClick={() => setSelectedImgPath(img.img_path)}
-                  captionRefreshKey={captionRefreshKeys[img.img_path] || 0}
-                  observerRoot={scrollParent}
-                />
-              );
-            }}
-            computeItemKey={index => imgList[index]?.img_path ?? index}
+        {status === 'success' && plainStudioItems.length > 0 && (
+          <DatasetImageStudio
+            datasetName={datasetName}
+            workerID={workerID}
+            datasetPath={!isRemoteDataset ? datasetPath : null}
+            items={plainStudioItems}
+            isAutoCaptioning={isAutoCaptioning}
+            onRefresh={() => refreshImageList(datasetName)}
+            onAddImages={() =>
+              openImagesModal(datasetName, () => refreshImageList(datasetName), {
+                ...encryptedUploadOptions,
+                workerID,
+              })
+            }
+            onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
+            onDeleteImages={handleDeleteImages}
           />
         )}
-        {status === 'success' && encryptedCatalog && encryptedKey && encryptedCatalog.items.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {encryptedCatalog.items.map(item => (
-              <EncryptedDatasetItemCard
-                key={item.id}
-                datasetName={datasetName}
-                workerID={workerID}
-                item={item}
-                cryptoKey={encryptedKey}
-                isAutoCaptioning={isAutoCaptioning}
-                onSaveCaption={saveEncryptedCaption}
-                onDelete={deleteEncryptedItem}
-              />
-            ))}
-          </div>
+        {status === 'success' && encryptedCatalog && encryptedKey && encryptedStudioItems.length > 0 && (
+          <DatasetImageStudio
+            datasetName={datasetName}
+            workerID={workerID}
+            datasetPath={!isRemoteDataset ? datasetPath : null}
+            items={encryptedStudioItems}
+            isAutoCaptioning={isAutoCaptioning}
+            encryptedKey={encryptedKey}
+            encryptedRawKeyB64={encryptedRawKeyB64}
+            onRefresh={() => refreshImageList(datasetName)}
+            onAddImages={() =>
+              openImagesModal(datasetName, () => refreshImageList(datasetName), {
+                ...encryptedUploadOptions,
+                workerID,
+              })
+            }
+            onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
+            onDeleteImages={handleDeleteImages}
+            onBulkEncryptedCaptionAction={handleBulkEncryptedCaptionAction}
+            onSaveEncryptedCaption={saveEncryptedCaption}
+          />
         )}
       </MainContent>
       <Modal
@@ -492,13 +725,6 @@ export default function DatasetPage({ params }: { params: Promise<{ datasetName:
         </form>
       </Modal>
       <AddImagesModal />
-      <DatasetImageViewer
-        imgPath={selectedImgPath}
-        imageList={imgPaths}
-        onChange={setSelectedImgPath}
-        refreshImages={() => refreshImageList(datasetName)}
-        onCaptionSaved={path => setCaptionRefreshKeys(prev => ({ ...prev, [path]: (prev[path] || 0) + 1 }))}
-      />
     </>
   );
 }

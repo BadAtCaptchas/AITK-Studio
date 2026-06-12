@@ -1,0 +1,295 @@
+import {
+  arrayToBox,
+  boxToArray,
+  parseIdeogramCaption,
+} from '../utils/ideogramCaption';
+import {
+  cleanString,
+  extractMessageText,
+  imageSizeLine,
+  isRecord,
+  normalizeOpenRouterBoxModel,
+  normalizedBboxToPixelArray,
+  pixelBboxToNormalizedArray,
+  parseJsonObject,
+  requireImageSize,
+  type OpenRouterUsage,
+} from './openRouterBoxes';
+
+type ImageSize = {
+  width?: number | null;
+  height?: number | null;
+};
+
+type GenerateOpenRouterLayerCaptionOptions = {
+  apiKey: string;
+  imageDataUrl: string;
+  caption: string;
+  elementIndex: number;
+  model?: string | null;
+  imageSize?: ImageSize | null;
+  fetchImpl?: typeof fetch;
+};
+
+type LayerType = 'obj' | 'text';
+
+export type SelectedLayerInfo = {
+  type: LayerType;
+  description: string;
+  visibleText: string;
+  bbox: [number, number, number, number] | null;
+  targetClue: string;
+};
+
+type OpenRouterLayerCaptionCallResult = {
+  content: string;
+  usage?: OpenRouterUsage;
+};
+
+const OPENROUTER_LAYER_CAPTION_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    desc: {
+      type: 'string',
+      description: 'Concise visual description of only the selected layer target.',
+    },
+    text: {
+      type: 'string',
+      description: 'Readable visible text for text layers, or an empty string for object layers.',
+    },
+    bbox: {
+      type: 'array',
+      description: 'Deprecated compatibility field. Use bbox_px.',
+      items: { type: 'integer', minimum: 0 },
+      minItems: 4,
+      maxItems: 4,
+    },
+    bbox_px: {
+      type: 'array',
+      description: 'Bounding box for the selected layer target as [ymin, xmin, ymax, xmax] in image pixels.',
+      items: { type: 'integer', minimum: 0 },
+      minItems: 4,
+      maxItems: 4,
+    },
+    color_palette: {
+      type: 'array',
+      description: 'Dominant visible colors for only the selected layer target as #RRGGBB hex strings.',
+      items: { type: 'string' },
+      maxItems: 5,
+    },
+  },
+  required: ['desc', 'text', 'bbox_px', 'color_palette'],
+};
+
+export function selectedLayerInfo(caption: string, elementIndex: number): SelectedLayerInfo {
+  const parsed = parseIdeogramCaption(caption);
+  if (parsed.kind !== 'ideogram') throw new Error('Layer captioning requires an Ideogram JSON caption.');
+  if (!Number.isInteger(elementIndex) || elementIndex < 0 || elementIndex >= parsed.elements.length) {
+    throw new Error('Selected layer was not found in the caption.');
+  }
+
+  const element = parsed.elements[elementIndex];
+  if (!isRecord(element)) throw new Error('Selected layer is not a valid caption element.');
+
+  const type: LayerType = element.type === 'text' ? 'text' : 'obj';
+  const description = cleanString(element.desc);
+  const visibleText = cleanString(element.text);
+  const bbox = arrayToBox(element.bbox);
+  const targetClue = type === 'text' ? visibleText || description : description || visibleText;
+  if (!bbox && !targetClue) {
+    throw new Error('Add a layer label or draw a box first.');
+  }
+
+  return {
+    type,
+    description,
+    visibleText,
+    bbox: bbox ? boxToArray(bbox) : null,
+    targetClue,
+  };
+}
+
+export function buildOpenRouterLayerCaptionPrompt(caption: string, elementIndex: number, imageSize?: ImageSize | null) {
+  const requiredImageSize = requireImageSize(imageSize);
+  const parsed = parseIdeogramCaption(caption);
+  if (parsed.kind !== 'ideogram') throw new Error('Layer captioning requires an Ideogram JSON caption.');
+  const selected = selectedLayerInfo(caption, elementIndex);
+  const targetBboxPx = selected.bbox ? normalizedBboxToPixelArray(selected.bbox, requiredImageSize) : null;
+  const sceneContext = {
+    highLevelDescription: cleanString(parsed.data.high_level_description),
+    background: cleanString(parsed.data.compositional_deconstruction?.background),
+  };
+  const selectedElement = {
+    elementIndex,
+    type: selected.type,
+    description: selected.description,
+    ...(selected.type === 'text' ? { visibleText: selected.visibleText } : {}),
+    ...(targetBboxPx ? { bbox_px: targetBboxPx } : { targetClue: selected.targetClue }),
+  };
+  const targetLine = targetBboxPx
+    ? `Target bbox_px: ${JSON.stringify(targetBboxPx)} as [ymin, xmin, ymax, xmax] pixels in the submitted ${requiredImageSize.width} x ${requiredImageSize.height} image. Describe only the content inside that region and return this target bbox_px.`
+    : `No bbox exists for the selected layer. Identify the visible subject that best matches this selected-layer clue, then return a tight bbox around only that target: ${JSON.stringify(selected.targetClue)}.`;
+
+  return [
+    'Caption only one selected Ideogram JSON caption layer in this image.',
+    imageSizeLine(requiredImageSize),
+    targetLine,
+    '',
+    'Rules:',
+    '- Do not caption the whole image.',
+    '- Return bbox_px as [ymin, xmin, ymax, xmax] integers in image pixels.',
+    `- Pixel coordinates must be relative to the submitted ${requiredImageSize.width} x ${requiredImageSize.height} image.`,
+    '- Fit bbox tightly around only the selected target; if it is cropped or occluded, box only the visible part.',
+    '- If a target bbox_px was provided, keep bbox_px focused on that same selected region.',
+    '- Return desc as a concise visual description of only the selected layer target.',
+    '- For text layers, return text as the readable glyph text if visible; use an empty string if uncertain.',
+    '- For object layers, return text as an empty string.',
+    '- Return color_palette as up to 5 dominant visible colors for only the selected target, ordered by prominence, using #RRGGBB hex strings.',
+    '- For text layers, include visible glyph, fill, stroke, shadow, or sign/background colors that belong to the selected text target.',
+    '- Use color_palette: [] only when no reliable color can be identified.',
+    '- Do not include markdown, quotes around the whole answer, or explanatory prose outside JSON.',
+    '',
+    'Scene context:',
+    JSON.stringify(sceneContext, null, 2),
+    '',
+    'Selected layer:',
+    JSON.stringify(selectedElement, null, 2),
+    '',
+    'Return only JSON that matches the schema.',
+  ].join('\n');
+}
+
+async function callOpenRouterLayerCaption({
+  apiKey,
+  imageDataUrl,
+  model,
+  prompt,
+  fetchImpl,
+}: {
+  apiKey: string;
+  imageDataUrl: string;
+  model: string;
+  prompt: string;
+  fetchImpl: typeof fetch;
+}): Promise<OpenRouterLayerCaptionCallResult> {
+  const response = await fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'X-Title': 'AI Toolkit Dataset Studio',
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0,
+      max_tokens: 600,
+      provider: { require_parameters: true },
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'dataset_layer_caption',
+          strict: true,
+          schema: OPENROUTER_LAYER_CAPTION_RESPONSE_SCHEMA,
+        },
+      },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      (isRecord(data?.error) && cleanString(data.error.message)) ||
+      cleanString(data?.error) ||
+      `OpenRouter request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  const content = extractMessageText(data);
+  if (!content) throw new Error('OpenRouter returned an empty layer caption response.');
+  return { content, usage: isRecord(data?.usage) ? data.usage : undefined };
+}
+
+function usableCaptionBox(value: unknown, imageSize: ReturnType<typeof requireImageSize>) {
+  const normalized = pixelBboxToNormalizedArray(value, imageSize);
+  const box = arrayToBox(normalized);
+  if (!box || box.x2 - box.x1 < 2 || box.y2 - box.y1 < 2) return null;
+  return boxToArray(box);
+}
+
+function rawPixelBbox(raw: Record<string, any>) {
+  return raw.bbox_px || raw.bboxPx || raw.bbox;
+}
+
+function rawColorPalette(raw: Record<string, any>) {
+  return raw.color_palette || raw.colorPalette || raw.palette || raw.colors;
+}
+
+function normalizeLayerColorPalette(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const colors: string[] = [];
+  value.forEach(item => {
+    const color = typeof item === 'string' ? item.trim().toUpperCase() : '';
+    if (!/^#[0-9A-F]{6}$/.test(color) || seen.has(color)) return;
+    seen.add(color);
+    colors.push(color);
+  });
+  return colors.slice(0, 5);
+}
+
+export function parseLayerCaptionResponse(
+  content: string,
+  type: LayerType,
+  requiresBbox: boolean,
+  imageSize: ReturnType<typeof requireImageSize>,
+  providerName = 'OpenRouter',
+) {
+  const parsed = parseJsonObject(content, providerName);
+  if (!isRecord(parsed)) throw new Error(`${providerName} did not return a JSON object.`);
+  const text = cleanString(parsed.text || parsed.visibleText).slice(0, 240);
+  const desc = (cleanString(parsed.desc || parsed.description || parsed.caption) || (type === 'text' && text ? `Visible text: ${text}` : '')).slice(0, 600);
+  if (!desc) throw new Error(`${providerName} did not return a usable layer caption.`);
+  const bbox = usableCaptionBox(rawPixelBbox(parsed), imageSize);
+  if (requiresBbox && !bbox) throw new Error(`${providerName} did not return a usable layer box.`);
+  const colorPalette = normalizeLayerColorPalette(rawColorPalette(parsed));
+  return {
+    desc,
+    ...(type === 'text' && text ? { text } : {}),
+    ...(bbox ? { bbox } : {}),
+    color_palette: colorPalette,
+  };
+}
+
+export async function generateOpenRouterLayerCaption(options: GenerateOpenRouterLayerCaptionOptions) {
+  const apiKey = options.apiKey.trim();
+  if (!apiKey) throw new Error('OpenRouter API key is missing. Add it in Settings.');
+
+  const selected = selectedLayerInfo(options.caption, options.elementIndex);
+  const imageSize = requireImageSize(options.imageSize);
+  const model = normalizeOpenRouterBoxModel(options.model);
+  const prompt = buildOpenRouterLayerCaptionPrompt(options.caption, options.elementIndex, imageSize);
+  const fetchImpl = options.fetchImpl || fetch;
+  const result = await callOpenRouterLayerCaption({
+    apiKey,
+    imageDataUrl: options.imageDataUrl,
+    model,
+    prompt,
+    fetchImpl,
+  });
+  return {
+    ...parseLayerCaptionResponse(result.content, selected.type, !selected.bbox, imageSize),
+    model,
+    usage: result.usage,
+  };
+}

@@ -3,6 +3,7 @@ import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import { getDisplayPath, getDownloadUrl } from '@/utils/media';
 import type { EncryptedDatasetStartKey } from '@/types';
+import type { RemoteStartProgress } from '@/types';
 import type { AxiosProgressEvent } from 'axios';
 import {
   forgetRememberedEncryptedDatasetKey,
@@ -61,6 +62,8 @@ export type JobModelPrefetchResult = {
 
 export type StartJobOptions = {
   durableEncryptedDatasetKeys?: boolean;
+  background?: boolean;
+  onRemoteStartProgress?: (progress: RemoteStartProgress) => void;
 };
 
 function basenameFromPath(value: string) {
@@ -117,20 +120,48 @@ async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: st
   return { datasetPath: dataset.path, keyB64 };
 }
 
-export const startJob = (
+const runStartLikeJobAction = (
   jobID: string,
+  actionPath: 'start' | 'restart-from-scratch',
+  successLabel: string,
+  failureLabel: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
   options: StartJobOptions = {},
 ) => {
   return new Promise<void>((resolve, reject) => {
-    apiClient
-      .post(`/api/jobs/${jobID}/start`, {
+    const waitForRemoteStart = async (startID: string) => {
+      while (true) {
+        await new Promise(waitResolve => window.setTimeout(waitResolve, 500));
+        const progress = await getRemoteStartProgress(jobID, startID);
+        options.onRemoteStartProgress?.(progress);
+        if (progress.status === 'completed') return;
+        if (progress.status === 'failed') {
+          throw new Error(progress.error || 'Remote start failed');
+        }
+      }
+    };
+
+    const postStart = async (payload: {
+      encryptedDatasetKeys?: EncryptedDatasetStartKey[];
+      durableEncryptedDatasetKeys?: boolean;
+    }) => {
+      const res = await apiClient.post(`/api/jobs/${jobID}/${actionPath}`, {
+        ...payload,
+        background: options.background === true && actionPath === 'start',
+      });
+      const data = res.data;
+      if (data?.startID && data?.progress) {
+        options.onRemoteStartProgress?.(data.progress);
+        await waitForRemoteStart(data.startID);
+      }
+    };
+
+    postStart({
         encryptedDatasetKeys,
         durableEncryptedDatasetKeys: options.durableEncryptedDatasetKeys === true,
       })
-      .then(res => res.data)
-      .then(data => {
-        console.log('Job started:', data);
+      .then(() => {
+        console.log(successLabel);
         resolve();
       })
       .catch(async error => {
@@ -160,32 +191,55 @@ export const startJob = (
               durableEncryptedDatasetKeys,
             };
             try {
-              await apiClient.post(`/api/jobs/${jobID}/start`, retryPayload);
+              await postStart(retryPayload);
             } catch (startError: any) {
               if (
                 durableEncryptedDatasetKeys &&
                 isDurableEncryptedKeySecretError(startError) &&
                 promptStartWithoutDurableEncryptedResume(apiErrorMessage(startError))
               ) {
-                await apiClient.post(`/api/jobs/${jobID}/start`, {
+                await postStart({
                   ...retryPayload,
                   durableEncryptedDatasetKeys: false,
                 });
               } else {
-                throw new Error(apiErrorMessage(startError, 'Failed to start job.'));
+                throw new Error(apiErrorMessage(startError, failureLabel));
               }
             }
             resolve();
             return;
           } catch (keyError) {
-            reject(keyError instanceof Error ? keyError : new Error(apiErrorMessage(keyError, 'Failed to start job.')));
+            reject(keyError instanceof Error ? keyError : new Error(apiErrorMessage(keyError, failureLabel)));
             return;
           }
         }
-        console.error('Error starting job:', error);
-        reject(new Error(apiErrorMessage(error, 'Failed to start job.')));
+        console.error(`${failureLabel}:`, error);
+        reject(new Error(apiErrorMessage(error, failureLabel)));
       });
   });
+};
+
+export const startJob = (
+  jobID: string,
+  encryptedDatasetKeys?: EncryptedDatasetStartKey[],
+  options: StartJobOptions = {},
+) => {
+  return runStartLikeJobAction(jobID, 'start', 'Job started', 'Failed to start job.', encryptedDatasetKeys, options);
+};
+
+export const restartJobFromScratch = (
+  jobID: string,
+  encryptedDatasetKeys?: EncryptedDatasetStartKey[],
+  options: StartJobOptions = {},
+) => {
+  return runStartLikeJobAction(
+    jobID,
+    'restart-from-scratch',
+    'Job restarted from scratch',
+    'Failed to restart job from scratch.',
+    encryptedDatasetKeys,
+    options,
+  );
 };
 
 export const stopJob = (jobID: string) => {
@@ -316,6 +370,12 @@ export const importTrainingJob = (
     .then(res => res.data as TrainingJobImportResult);
 };
 
+export const getRemoteStartProgress = (jobID: string, startID: string) => {
+  return apiClient
+    .get(`/api/jobs/${jobID}/start-progress/${startID}`)
+    .then(res => res.data as RemoteStartProgress);
+};
+
 export const downloadJobModelReferences = (jobID: string) => {
   return apiClient
     .post(`/api/jobs/${jobID}/prefetch-models`)
@@ -343,12 +403,14 @@ export const getAvaliableJobActions = (job: Job) => {
   const canRemoveFromQueue = job.status === 'queued';
   const canStop = job.status === 'running' && !isStopping;
   let canStart = ['stopped', 'error'].includes(job.status) && !isStopping;
+  const canRestartFromScratch =
+    job.job_type === 'train' && ['queued', 'completed', 'stopped', 'error'].includes(job.status) && !isStopping;
   // can resume if more steps were added
   const totalSteps = getTotalSteps(job);
   if (job.status === 'completed' && totalSteps !== null && totalSteps > job.step && !isStopping) {
     canStart = true;
   }
-  return { canDelete, canEdit, canStop, canStart, canRemoveFromQueue };
+  return { canDelete, canEdit, canStop, canStart, canRemoveFromQueue, canRestartFromScratch };
 };
 
 export const getNumberOfSamples = (job: Job) => {

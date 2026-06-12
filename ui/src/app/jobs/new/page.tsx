@@ -16,22 +16,23 @@ import YAML from 'yaml';
 import path from 'path';
 import { TopBar, MainContent } from '@/components/layout';
 import { Button } from '@headlessui/react';
-import { FaChevronLeft } from 'react-icons/fa';
+import { ChevronLeft, SlidersHorizontal, Sparkles, TerminalSquare, X } from 'lucide-react';
 import SimpleJob from './SimpleJob';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { apiClient } from '@/utils/api';
-import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import type { SelectOption } from '@/types';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import {
   getRememberedEncryptedDatasetKey,
   rememberEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
+import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
 import {
   makeRemoteDatasetRef,
   parseRemoteDatasetRef,
   remoteDatasetRememberKey,
+  shouldImportRemoteDatasetForWorker,
 } from '@/utils/remoteDatasetRefs';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -53,9 +54,19 @@ export default function TrainingForm() {
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus } = useDatasetList({ includeRemote: true });
   const [datasetOptions, setDatasetOptions] = useState<
-    Array<SelectOption & { encrypted: boolean; name: string; source: 'local' | 'remote'; worker_id: string; ref: string }>
+    Array<
+      SelectOption & {
+        encrypted: boolean;
+        name: string;
+        source: 'local' | 'remote';
+        worker_id: string;
+        ref: string;
+        detectedCaptionExt?: string | null;
+      }
+    >
   >([]);
   const [showAdvancedView, setShowAdvancedView] = useState(false);
+  const [rawConfigOpen, setRawConfigOpen] = useState(false);
 
   const [jobConfig, setJobConfig] = useNestedState<JobConfig>(objectCopy(migrateJobConfig(defaultJobConfig)));
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
@@ -125,6 +136,7 @@ export default function TrainingForm() {
         source,
         worker_id: workerID,
         ref,
+        detectedCaptionExt: dataset.detectedCaptionExt ?? null,
       };
     });
     setDatasetOptions(datasetOptions);
@@ -137,6 +149,10 @@ export default function TrainingForm() {
         for (let i = 0; i < prev.config.process[0].datasets.length; i++) {
           if (prev.config.process[0].datasets[i].folder_path === defaultDatasetPath) {
             updated = setNestedValue(updated, datasetOptions[0].value, `config.process[0].datasets[${i}].folder_path`);
+            const detectedCaptionExt = normalizeDetectedCaptionExt(datasetOptions[0].detectedCaptionExt);
+            if (detectedCaptionExt) {
+              updated = setNestedValue(updated, detectedCaptionExt, `config.process[0].datasets[${i}].caption_ext`);
+            }
           }
         }
         return updated;
@@ -191,6 +207,25 @@ export default function TrainingForm() {
     }
   }, [settings, isSettingsLoaded]);
 
+  useEffect(() => {
+    if (!rawConfigOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setRawConfigOpen(false);
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [rawConfigOpen]);
+
   const copyRememberedRemoteDatasetKey = (remoteRef: string, imported: { name: string; path: string }) => {
     const parsed = parseRemoteDatasetRef(remoteRef);
     if (!parsed) return;
@@ -231,7 +266,7 @@ export default function TrainingForm() {
     return promise;
   };
 
-  const importRemoteDatasetsForJobConfig = async (rawConfig: JobConfig) => {
+  const importRemoteDatasetsForJobConfig = async (rawConfig: JobConfig, targetWorkerID: string) => {
     const nextConfig = objectCopy(rawConfig) as JobConfig;
     const importCache = new Map<string, Promise<{ name: string; path: string }>>();
     const datasetPathFields = [
@@ -251,13 +286,27 @@ export default function TrainingForm() {
       for (const dataset of processConfig.datasets || []) {
         for (const field of datasetPathFields) {
           const current = (dataset as any)[field];
-          if (typeof current === 'string' && parseRemoteDatasetRef(current)) {
+          if (
+            typeof current === 'string' &&
+            shouldImportRemoteDatasetForWorker(
+              current,
+              targetWorkerID,
+              datasetOptions.find(option => option.value === current)?.encrypted === true,
+            )
+          ) {
             const imported = await importRemoteDatasetForJob(current, importCache);
             (dataset as any)[field] = imported.path;
           } else if (Array.isArray(current)) {
             const nextValues = [];
             for (const value of current) {
-              if (typeof value === 'string' && parseRemoteDatasetRef(value)) {
+              if (
+                typeof value === 'string' &&
+                shouldImportRemoteDatasetForWorker(
+                  value,
+                  targetWorkerID,
+                  datasetOptions.find(option => option.value === value)?.encrypted === true,
+                )
+              ) {
                 const imported = await importRemoteDatasetForJob(value, importCache);
                 nextValues.push(imported.path);
               } else {
@@ -270,6 +319,22 @@ export default function TrainingForm() {
       }
     }
 
+    return nextConfig;
+  };
+
+  const applyComfyAutoInstallSetting = (rawConfig: JobConfig): JobConfig => {
+    if (settings.COMFY_AUTO_INSTALL !== 'true') return rawConfig;
+
+    const nextConfig = objectCopy(rawConfig) as JobConfig;
+    for (const processConfig of nextConfig.config?.process ?? []) {
+      const processSections = processConfig as Record<string, any>;
+      for (const key of ['sample', 'first_sample', 'generate'] as const) {
+        const generationConfig = processSections[key];
+        if (generationConfig?.backend === 'comfy' && generationConfig?.comfy?.mode === 'managed') {
+          generationConfig.comfy.managed_install = true;
+        }
+      }
+    }
     return nextConfig;
   };
 
@@ -300,6 +365,23 @@ export default function TrainingForm() {
     }
     if (!modelConfig?.name_or_path?.trim()) {
       messages.push({ level: 'error', message: 'Select or enter a base model path.' });
+    }
+    const baseLoraPath = modelConfig?.base_lora_path?.trim();
+    if (baseLoraPath) {
+      if (modelConfig?.inference_lora_path?.trim()) {
+        messages.push({
+          level: 'error',
+          message: 'Base LoRA Path cannot be used with sample-time Inference LoRA Path.',
+        });
+      }
+      const baseLoraName = baseLoraPath.split(/[\\/]/).pop() || baseLoraPath;
+      if (/\.[^./\\]+$/.test(baseLoraName) && !baseLoraName.toLowerCase().endsWith('.safetensors')) {
+        messages.push({ level: 'error', message: 'Base LoRA Path must be a .safetensors adapter.' });
+      }
+      const baseLoraStrength = Number(modelConfig?.base_lora_strength ?? 1.0);
+      if (!Number.isFinite(baseLoraStrength)) {
+        messages.push({ level: 'error', message: 'Base LoRA Strength must be a finite number.' });
+      }
     }
     if (!datasetsConfig.length) {
       messages.push({ level: 'error', message: 'Add at least one dataset.' });
@@ -360,7 +442,8 @@ export default function TrainingForm() {
 
   const saveJob = async () => {
     if (status === 'saving') return;
-    const validation = validateJobBeforeSave(jobConfig);
+    const jobConfigWithSettings = applyComfyAutoInstallSetting(jobConfig);
+    const validation = validateJobBeforeSave(jobConfigWithSettings);
     setValidationMessages(validation);
     if (validation.some(message => message.level === 'error')) {
       setStatus('idle');
@@ -369,7 +452,7 @@ export default function TrainingForm() {
     setStatus('saving');
 
     try {
-      const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfig);
+      const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings, workerID);
       setJobConfig(preparedJobConfig);
       const res = await apiClient.post('/api/jobs', {
         id: runId,
@@ -409,6 +492,45 @@ export default function TrainingForm() {
 
   const validationErrors = validationMessages.filter(message => message.level === 'error');
   const validationWarnings = validationMessages.filter(message => message.level === 'warning');
+  const workerOptions = [
+    { value: 'local', label: 'Local worker' },
+    ...workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
+  ];
+  const trainerValue = `${jobConfig?.config.process[0].type}`;
+  const trainerLabel = jobTypeOptions.find(option => option.value === trainerValue)?.label || 'LoRA Trainer';
+  const workerLabel = workerOptions.find(option => option.value === workerID)?.label || 'Local worker';
+  const handleJobTypeChange = (value: string) => {
+    const currentOption = jobTypeOptions.find(option => option.value === jobConfig?.config.process[0].type);
+    if (currentOption && currentOption.onDeactivate) {
+      setJobConfig(currentOption.onDeactivate(objectCopy(jobConfig)));
+    }
+    const option = jobTypeOptions.find(option => option.value === value);
+    if (option) {
+      if (option.onActivate) {
+        setJobConfig(option.onActivate(objectCopy(jobConfig)));
+      }
+      jobTypeOptions.forEach(opt => {
+        if (opt.value !== option.value && opt.onDeactivate) {
+          setJobConfig(opt.onDeactivate(objectCopy(jobConfig)));
+        }
+      });
+    }
+    setJobConfig(value, 'config.process[0].type');
+  };
+  const transformAdvancedConfig = (parsed: any) => {
+    try {
+      parsed.config.process[0].sqlite_db_path = './aitk_db.db';
+      parsed.config.process[0].training_folder = settings.TRAINING_FOLDER;
+      parsed.config.process[0].device = 'cuda';
+      parsed.config.process[0].performance_log_every = 10;
+    } catch (e) {
+      console.warn(e);
+    }
+    return migrateJobConfig(parsed);
+  };
+  const renderAdvancedConfigEditor = () => (
+    <AdvancedConfigEditor config={jobConfig} setConfig={setJobConfig} transformOnParse={transformAdvancedConfig} />
+  );
   const validationSummary =
     validationMessages.length > 0 ? (
       <PageNotice
@@ -428,110 +550,62 @@ export default function TrainingForm() {
 
   return (
     <>
-      <TopBar>
-        <div>
-          <Button className="operator-icon-button" onClick={() => history.back()} title="Back">
-            <FaChevronLeft />
+      <TopBar className="h-16 !overflow-hidden border-gray-900 bg-gray-950 px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button className="operator-icon-button h-9 w-9 flex-none" onClick={() => history.back()} title="Back">
+            <ChevronLeft className="h-5 w-5" />
           </Button>
-        </div>
-        <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold">{runId ? 'Edit Training Job' : 'New Training Job'}</h1>
+          <h1 className="truncate text-lg font-semibold text-gray-100">{runId ? 'Edit Training Job' : 'New Training Job'}</h1>
         </div>
         <div className="flex-1"></div>
+        <div className="hidden min-w-40 md:block">
+          <SelectInput
+            value={workerID}
+            onChange={value => {
+              setWorkerID(value);
+              setGpuIDs(null);
+            }}
+            options={workerOptions}
+          />
+        </div>
+        <div className="hidden min-w-44 md:block">
+          <SelectInput value={trainerValue} onChange={handleJobTypeChange} options={jobTypeOptions} />
+        </div>
         {showAdvancedView && (
-          <>
-            <div className="min-w-40">
-              <SelectInput
-                value={workerID}
-                onChange={value => {
-                  setWorkerID(value);
-                  setGpuIDs(null);
-                }}
-                options={[
-                  { value: 'local', label: 'Local worker' },
-                  ...workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
-                ]}
-              />
-            </div>
-            <div className="mx-1 h-6 border-r border-gray-800"></div>
-            <div className="min-w-32">
-              <SelectInput
-                value={`${gpuIDs}`}
-                onChange={value => setGpuIDs(value)}
-                options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
-              />
-            </div>
-            <div className="mx-1 h-6 border-r border-gray-800"></div>
-            <div>
-              <Button className="operator-button py-1" onClick={handleImportConfig}>
-                Import Config
-              </Button>
-            </div>
-            <div className="mx-1 h-6 border-r border-gray-800"></div>
-          </>
+          <div className="hidden min-w-32 lg:block">
+            <SelectInput
+              value={`${gpuIDs}`}
+              onChange={value => setGpuIDs(value)}
+              options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
+            />
+          </div>
         )}
-        {!showAdvancedView && (
-          <>
-            <div className="min-w-40">
-              <SelectInput
-                value={workerID}
-                onChange={value => {
-                  setWorkerID(value);
-                  setGpuIDs(null);
-                }}
-                options={[
-                  { value: 'local', label: 'Local worker' },
-                  ...workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
-                ]}
-              />
-            </div>
-            <div className="mx-1 h-6 border-r border-gray-800"></div>
-            <div className="min-w-44">
-              <SelectInput
-                value={`${jobConfig?.config.process[0].type}`}
-                onChange={value => {
-                  // undo current job type changes
-                  const currentOption = jobTypeOptions.find(
-                    option => option.value === jobConfig?.config.process[0].type,
-                  );
-                  if (currentOption && currentOption.onDeactivate) {
-                    setJobConfig(currentOption.onDeactivate(objectCopy(jobConfig)));
-                  }
-                  const option = jobTypeOptions.find(option => option.value === value);
-                  if (option) {
-                    if (option.onActivate) {
-                      setJobConfig(option.onActivate(objectCopy(jobConfig)));
-                    }
-                    jobTypeOptions.forEach(opt => {
-                      if (opt.value !== option.value && opt.onDeactivate) {
-                        setJobConfig(opt.onDeactivate(objectCopy(jobConfig)));
-                      }
-                    });
-                  }
-                  setJobConfig(value, 'config.process[0].type');
-                }}
-                options={jobTypeOptions}
-              />
-            </div>
-            <div className="mx-1 h-6 border-r border-gray-800"></div>
-          </>
+        {showAdvancedView && (
+          <Button className="operator-button hidden py-1 lg:inline-flex" onClick={handleImportConfig}>
+            Import Config
+          </Button>
         )}
-
-        <div className="pr-2">
+        <div className="flex-none">
           <Button
-            className="operator-button py-1"
-            onClick={() => setShowAdvancedView(!showAdvancedView)}
+            className="operator-button h-9 border-gray-700 bg-gray-900 px-3 py-1 text-gray-100"
+            onClick={() => {
+              setRawConfigOpen(false);
+              setShowAdvancedView(!showAdvancedView);
+            }}
+            title={showAdvancedView ? 'Show Simple' : 'Show Advanced'}
           >
-            {showAdvancedView ? 'Show Simple' : 'Show Advanced'}
+            <SlidersHorizontal className="h-4 w-4" />
+            <span className="hidden sm:inline">{showAdvancedView ? 'Simple' : 'Advanced'}</span>
           </Button>
         </div>
-        <div>
+        <div className="flex-none">
           <Button
-            className="operator-button border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900"
+            className="operator-button h-9 border-emerald-800 bg-emerald-600/90 px-3 py-1 font-semibold text-gray-950 hover:bg-emerald-500 sm:px-5"
             onClick={() => saveJob()}
             disabled={status === 'saving'}
           >
-            {status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline">{status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}</span>
           </Button>
         </div>
       </TopBar>
@@ -545,30 +619,12 @@ export default function TrainingForm() {
       />
 
       {showAdvancedView ? (
-        <div className="pt-[48px] absolute top-0 left-0 w-full h-full overflow-auto">
+        <div className="absolute top-0 left-0 h-full w-full overflow-auto pt-16">
           {validationSummary && <div className="px-3 pt-3 sm:px-4">{validationSummary}</div>}
-          <AdvancedConfigEditor
-            config={jobConfig}
-            setConfig={setJobConfig}
-            transformOnParse={(parsed: any) => {
-              try {
-                parsed.config.process[0].sqlite_db_path = './aitk_db.db';
-                parsed.config.process[0].training_folder = settings.TRAINING_FOLDER;
-                parsed.config.process[0].device = 'cuda';
-                parsed.config.process[0].performance_log_every = 10;
-              } catch (e) {
-                console.warn(e);
-              }
-              return migrateJobConfig(parsed);
-            }}
-          />
+          {renderAdvancedConfigEditor()}
         </div>
       ) : (
-        <MainContent>
-          {validationSummary && <div className="mb-4">{validationSummary}</div>}
-          <div className="mb-6">
-            <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} />
-          </div>
+        <MainContent className="bg-gray-950 px-0 pt-16 sm:px-0">
           <ErrorBoundary
             fallback={
               <div className="flex h-64 items-center justify-center border border-red-300 bg-red-100 text-lg font-medium text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400">
@@ -586,14 +642,65 @@ export default function TrainingForm() {
               setGpuIDs={setGpuIDs}
               gpuList={gpuList}
               datasetOptions={datasetOptions}
+              validationMessages={validationMessages}
+              workerLabel={workerLabel}
+              trainerLabel={trainerLabel}
+              onOpenAdvanced={() => setShowAdvancedView(true)}
+              onOpenRawConfig={() => setRawConfigOpen(true)}
               isLoading={
                 !isSettingsLoaded || !isGPUInfoLoaded || workerStatus === 'loading' || datasetFetchStatus !== 'success'
               }
+              comfyAutoInstall={settings.COMFY_AUTO_INSTALL === 'true'}
             />
           </ErrorBoundary>
 
           <div className="pt-20"></div>
         </MainContent>
+      )}
+
+      {rawConfigOpen && !showAdvancedView && (
+        <div
+          className="fixed inset-0 z-50 flex bg-black/65 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="raw-config-title"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setRawConfigOpen(false)}
+            aria-label="Close raw config"
+          />
+          <section
+            id="raw-config-drawer"
+            className="relative ml-auto flex h-full w-full flex-col border-l border-gray-800 bg-gray-950 shadow-2xl sm:w-[min(920px,calc(100vw-72px))]"
+          >
+            <header className="flex h-16 flex-none items-center gap-3 border-b border-gray-900 px-4">
+              <div className="flex h-9 w-9 items-center justify-center border border-gray-800 bg-gray-900 text-cyan-200">
+                <TerminalSquare className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 id="raw-config-title" className="truncate text-base font-semibold text-gray-100">
+                  Raw config
+                </h2>
+                <p className="truncate text-xs text-gray-500">
+                  Editing this YAML updates the current job draft. Close returns to the same workspace position.
+                </p>
+              </div>
+              <Button className="operator-button hidden h-9 px-3 py-1 sm:inline-flex" onClick={() => setRawConfigOpen(false)}>
+                Close drawer
+              </Button>
+              <Button
+                className="operator-icon-button h-9 w-9 flex-none"
+                onClick={() => setRawConfigOpen(false)}
+                title="Close raw config"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </header>
+            <div className="min-h-0 flex-1">{renderAdvancedConfigEditor()}</div>
+          </section>
+        </div>
       )}
     </>
   );

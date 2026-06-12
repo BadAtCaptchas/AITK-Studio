@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
+import { withComfyInstallProgress } from '@/server/comfyInstallProgress';
 import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
 import { reconcileLocalJobProcess } from '@/server/jobProcess';
 import {
@@ -11,7 +12,9 @@ import {
   syncRemoteJob,
   syncRemoteJobs,
 } from '@/server/remoteClient';
+import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
+import { isDirectRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
 import type { Job } from '@/types';
 
 
@@ -29,6 +32,14 @@ function ensureApiAccess(request: Request): NextResponse | null {
   return null;
 }
 
+function hasForbiddenOpenRouterFields(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  return 'api_key_env' in value || 'base_url' in value;
+}
+
 function isSafeJobConfig(jobConfig: unknown) {
   if (!jobConfig || typeof jobConfig !== 'object') {
     return false;
@@ -40,7 +51,25 @@ function isSafeJobConfig(jobConfig: unknown) {
   }
 
   const processList = (config as Record<string, unknown>).process;
-  return Array.isArray(processList) && processList.length > 0;
+  if (!Array.isArray(processList) || processList.length === 0) {
+    return false;
+  }
+
+  return processList.every(processConfig => {
+    if (!processConfig || typeof processConfig !== 'object') {
+      return false;
+    }
+
+    const processRecord = processConfig as Record<string, unknown>;
+    if (processRecord.type !== 'OpenRouterCaptioner') {
+      return true;
+    }
+
+    return (
+      !hasForbiddenOpenRouterFields(processRecord) &&
+      !hasForbiddenOpenRouterFields(processRecord.caption)
+    );
+  });
 }
 
 function isValidGpuIds(gpuIds: unknown) {
@@ -71,6 +100,9 @@ function isValidJobName(name: unknown) {
   return name === name.split('/').pop() && name === name.split('\\').pop();
 }
 
+async function withJobProgress(job: Job) {
+  return withComfyInstallProgress(await withHFDownloadProgress(job));
+}
 
 export async function GET(request: Request) {
   const accessResponse = ensureApiAccess(request);
@@ -89,20 +121,20 @@ export async function GET(request: Request) {
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
         const captionSynced = await syncRemoteCaptionResultForJob(synced);
-        return NextResponse.json(await withHFDownloadProgress(captionSynced));
+        return NextResponse.json(await withJobProgress(captionSynced));
       }
       const reconciled = await reconcileLocalJobProcess(job);
-      return NextResponse.json(reconciled ? await withHFDownloadProgress(reconciled) : reconciled);
+      return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
     if (job_ref) {
       const job = await db.jobs.findLatestByRef(job_ref);
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
         const captionSynced = await syncRemoteCaptionResultForJob(synced);
-        return NextResponse.json(await withHFDownloadProgress(captionSynced));
+        return NextResponse.json(await withJobProgress(captionSynced));
       }
       const reconciled = await reconcileLocalJobProcess(job);
-      return NextResponse.json(reconciled ? await withHFDownloadProgress(reconciled) : reconciled);
+      return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
 
     const discoveredJobIds = await discoverRemoteJobs(job_type);
@@ -112,7 +144,7 @@ export async function GET(request: Request) {
     );
     const resultSyncedJobs = await Promise.all(reconciledJobs.map(job => syncRemoteCaptionResultForJob(job)));
     return NextResponse.json({
-      jobs: await Promise.all(resultSyncedJobs.map(job => withHFDownloadProgress(job))),
+      jobs: await Promise.all(resultSyncedJobs.map(job => withJobProgress(job))),
     });
   } catch (error) {
     console.error(error);
@@ -129,7 +161,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { id, name, job_config } = body;
-    const worker_id = normalizeWorkerId(body.worker_id);
+    let worker_id = normalizeWorkerId(body.worker_id);
+    if (isDirectRemoteOllamaCaptionJob(job_config)) {
+      worker_id = 'local';
+    }
 
     if (!isValidJobName(name)) {
       return NextResponse.json({ error: 'Invalid job name' }, { status: 400 });
@@ -182,20 +217,20 @@ export async function POST(request: Request) {
       let remotePatch: any = {};
       if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
         const worker = await getRemoteWorker(worker_id);
+        const remoteJobConfig = await rewriteSameWorkerRemoteDatasetRefsForWorker(job_config, worker);
         const remoteJob = await remoteJson<any>(worker, '/api/jobs', {
           method: 'POST',
           body: JSON.stringify({
             id: existing.remote_job_id,
             name,
             gpu_ids,
-            job_config,
+            job_config: remoteJobConfig,
             ...extra,
           }),
         });
         remotePatch = {
           name: remoteJob.name,
           gpu_ids: remoteJob.gpu_ids,
-          job_config: remoteJob.job_config,
           remote_sync_at: new Date(),
           remote_error: null,
         };

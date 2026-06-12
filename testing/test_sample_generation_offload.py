@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASE_SD_TRAIN_PROCESS_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
 CONFIG_MODULES_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
 GENERATE_PAGE_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "generate" / "page.tsx"
+SIMPLE_JOB_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "SimpleJob.tsx"
 JOB_UTILS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "utils.ts"
 JOB_CONFIG_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "jobConfig.ts"
 TYPES_PATH = PROJECT_ROOT / "ui" / "src" / "types.ts"
@@ -229,6 +230,21 @@ class TrainingUiMemoryProfileTest(unittest.TestCase):
         self.assertIn("memoryProfile.backend", source)
         self.assertIn("if (!('layer_offloading_backend' in jobConfig.config.process[0].model))", source)
         self.assertIn("delete newModel.layer_offloading_backend", source)
+
+    def test_training_low_vram_defaults_keep_low_vram_samples(self):
+        simple_job_source = SIMPLE_JOB_PATH.read_text(encoding="utf-8")
+        utils_source = JOB_UTILS_PATH.read_text(encoding="utf-8")
+        job_config_source = JOB_CONFIG_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("setJobConfig(true, 'config.process[0].sample.keep_low_vram_for_samples')", simple_job_source)
+        self.assertIn("const modelLowVramKey = 'config.process[0].model.low_vram'", utils_source)
+        self.assertIn(
+            "const keepLowVramForSamplesKey = 'config.process[0].sample.keep_low_vram_for_samples'",
+            utils_source,
+        )
+        self.assertIn("newDefaults[keepLowVramForSamplesKey] = [true, false]", utils_source)
+        self.assertIn("setJobConfig(false, keepLowVramForSamplesKey)", utils_source)
+        self.assertIn("sample.keep_low_vram_for_samples = true", job_config_source)
 
     def test_config_migration_and_types_include_backend(self):
         job_config_source = JOB_CONFIG_PATH.read_text(encoding="utf-8")

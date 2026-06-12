@@ -58,6 +58,17 @@ type HoverState = {
   items: HoverItem[];
 };
 
+interface PersistedGraphSettings {
+  chartTab: ChartTab;
+  useLogScale: boolean;
+  showRaw: boolean;
+  showSmoothed: boolean;
+  showTrend: boolean;
+  clipOutliers: boolean;
+  smoothing: number;
+  enabledLoss: Record<string, boolean>;
+}
+
 const FALLBACK_CANVAS_HEIGHT = 360;
 const MIN_CANVAS_HEIGHT = 220;
 const CHART_MAX_POINTS = 4000;
@@ -136,6 +147,11 @@ function cleanLabel(key: string) {
     .replace(/_/g, ' ');
 }
 
+function settingsStorageKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  return `jobLossGraph:${window.location.pathname}${window.location.search}`;
+}
+
 function hashToIndex(str: string, mod: number) {
   let h = 2166136261;
   for (let i = 0; i < str.length; i++) {
@@ -162,17 +178,42 @@ function computeCanvasSize(host: HTMLElement): { width: number; height: number }
   return { width, height: Math.max(MIN_CANVAS_HEIGHT, height) };
 }
 
-function emaWithNulls(ys: (number | null)[], alpha: number): (number | null)[] {
-  const out: (number | null)[] = new Array(ys.length);
-  let prev: number | null = null;
-  for (let i = 0; i < ys.length; i++) {
+function emaPass(ys: (number | null)[], alpha: number, reverse: boolean) {
+  const vals: (number | null)[] = new Array(ys.length).fill(null);
+  const weights: number[] = new Array(ys.length).fill(0);
+  const start = reverse ? ys.length - 1 : 0;
+  const step = reverse ? -1 : 1;
+  let s = 0;
+  let n = 0;
+  for (let i = start; i >= 0 && i < ys.length; i += step) {
     const v = ys[i];
     if (v === null || !Number.isFinite(v)) {
+      continue;
+    }
+    s = alpha * (v as number) + (1 - alpha) * s;
+    n += 1;
+    const w = 1 - Math.pow(1 - alpha, n);
+    vals[i] = s / w;
+    weights[i] = w;
+  }
+  return { vals, weights };
+}
+
+function emaWithNulls(ys: (number | null)[], alpha: number): (number | null)[] {
+  const fwd = emaPass(ys, alpha, false);
+  const bwd = emaPass(ys, alpha, true);
+  const out: (number | null)[] = new Array(ys.length);
+  for (let i = 0; i < ys.length; i++) {
+    const f = fwd.vals[i];
+    const b = bwd.vals[i];
+    if (f === null || b === null) {
       out[i] = null;
       continue;
     }
-    prev = prev === null ? v : alpha * v + (1 - alpha) * prev;
-    out[i] = prev;
+    const wf = fwd.weights[i];
+    const wb = bwd.weights[i];
+    const wsum = wf + wb;
+    out[i] = wsum > 0 ? (wf * f + wb * b) / wsum : (f + b) / 2;
   }
   return out;
 }
@@ -615,14 +656,65 @@ export default function JobLossGraph({ job }: Props) {
   const [smoothing, setSmoothing] = useState(82);
   const deferredSmoothing = useDeferredValue(smoothing);
   const [enabledLoss, setEnabledLoss] = useState<Record<string, boolean>>({});
+  const [hydrated, setHydrated] = useState(false);
+  const persistedEnabledRef = useRef<Record<string, boolean> | null>(null);
   const [isZoomed, setIsZoomed] = useState(false);
   const [hover, setHover] = useState<HoverState | null>(null);
 
   useEffect(() => {
+    setHydrated(false);
+    persistedEnabledRef.current = null;
+    setChartTab('loss');
+    setUseLogScale(false);
+    setShowRaw(false);
+    setShowSmoothed(true);
+    setShowTrend(true);
+    setClipOutliers(false);
+    setSmoothing(82);
+    setEnabledLoss({});
+
+    const key = settingsStorageKey();
+    if (!key) {
+      setHydrated(true);
+      return;
+    }
+
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const settings = JSON.parse(raw) as Partial<PersistedGraphSettings>;
+        if (settings.chartTab && ['loss', 'learning_rate', 'throughput', 'timesteps', 'gradients', 'memory'].includes(settings.chartTab)) {
+          setChartTab(settings.chartTab);
+        }
+        if (typeof settings.useLogScale === 'boolean') setUseLogScale(settings.useLogScale);
+        if (typeof settings.showRaw === 'boolean') setShowRaw(settings.showRaw);
+        if (typeof settings.showSmoothed === 'boolean') setShowSmoothed(settings.showSmoothed);
+        if (typeof settings.showTrend === 'boolean') setShowTrend(settings.showTrend);
+        if (typeof settings.clipOutliers === 'boolean') setClipOutliers(settings.clipOutliers);
+        if (typeof settings.smoothing === 'number') setSmoothing(clamp(settings.smoothing, 0, 100));
+        if (settings.enabledLoss && typeof settings.enabledLoss === 'object') {
+          persistedEnabledRef.current = settings.enabledLoss;
+          setEnabledLoss(settings.enabledLoss);
+        }
+      }
+    } catch {
+      // Ignore malformed or unavailable storage.
+    }
+
+    setHydrated(true);
+  }, [job.id]);
+
+  useEffect(() => {
     setEnabledLoss(prev => {
+      if (lossKeys.length === 0) return prev;
       const next = { ...prev };
+      const defaultKey =
+        (lossKeys.includes('loss/loss') && 'loss/loss') ||
+        (lossKeys.includes('loss') && 'loss') ||
+        lossKeys.find(key => /loss/i.test(key)) ||
+        lossKeys[0];
       for (const key of lossKeys) {
-        if (next[key] === undefined) next[key] = true;
+        if (next[key] === undefined) next[key] = persistedEnabledRef.current?.[key] ?? key === defaultKey;
       }
       for (const key of Object.keys(next)) {
         if (!lossKeys.includes(key)) delete next[key];
@@ -630,6 +722,27 @@ export default function JobLossGraph({ job }: Props) {
       return next;
     });
   }, [lossKeys]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const key = settingsStorageKey();
+    if (!key) return;
+    try {
+      const payload: PersistedGraphSettings = {
+        chartTab,
+        useLogScale,
+        showRaw,
+        showSmoothed,
+        showTrend,
+        clipOutliers,
+        smoothing,
+        enabledLoss,
+      };
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch {
+      // Ignore unavailable storage.
+    }
+  }, [chartTab, clipOutliers, enabledLoss, hydrated, showRaw, showSmoothed, showTrend, smoothing, useLogScale]);
 
   const activeLossKeys = useMemo(
     () => lossKeys.filter(key => enabledLoss[key] !== false && (series[key]?.length ?? 0) > 0),
@@ -889,10 +1002,15 @@ export default function JobLossGraph({ job }: Props) {
 
     uplotRef.current = new uPlot(opts, built.data, containerRef.current);
     setIsZoomed(false);
-    const fitted = computeCanvasSize(host);
-    if (fitted) uplotRef.current.setSize(fitted);
+    const raf = requestAnimationFrame(() => {
+      const u = uplotRef.current;
+      if (!u) return;
+      const fitted = computeCanvasSize(host);
+      if (fitted) u.setSize(fitted);
+    });
 
     return () => {
+      cancelAnimationFrame(raf);
       uplotRef.current?.destroy();
       uplotRef.current = null;
     };
@@ -1161,9 +1279,9 @@ export default function JobLossGraph({ job }: Props) {
             </div>
 
             <div className="border border-gray-800 bg-gray-950 p-3">
-              <div className="text-xs text-gray-400 mb-2">Loss Series</div>
+              <div className="text-xs text-gray-400 mb-2">Metric Series</div>
               {lossKeys.length === 0 ? (
-                <div className="text-sm text-gray-500">No loss keys found yet.</div>
+                <div className="text-sm text-gray-500">No metric keys found yet.</div>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {lossKeys.map(key => (

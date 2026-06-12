@@ -3,7 +3,7 @@ import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { TOOLKIT_ROOT, getHFToken, getTrainingFolder } from '../paths';
+import { TOOLKIT_ROOT, getHFToken, getOpenRouterApiKey, getTrainingFolder } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
@@ -16,7 +16,12 @@ import {
   clearDurableEncryptedDatasetKeys,
   getDurableEncryptedDatasetKeys,
 } from '../../src/server/encryptedDatasetSecrets';
-import { getSecureRemoteOllamaWorkerId } from '../../src/server/secureRemoteCaptionJobs';
+import {
+  getDirectRemoteOllamaWorkerId,
+  getSecureRemoteOllamaWorkerId,
+  rewriteDirectRemoteOllamaCaptionersForLocalOllama,
+} from '../../src/server/secureRemoteCaptionJobs';
+import { getRemoteOllamaWorker } from '../../src/server/remoteOllamaWorkers';
 import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
@@ -95,6 +100,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
     try {
       const trainingRoot = await getTrainingFolder();
       const hfToken = await getHFToken();
+      const openRouterApiKey = await getOpenRouterApiKey();
       const tensorBoardEnabled = isTensorBoardEnabled();
       const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
@@ -107,6 +113,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const logPath = path.join(trainingFolder, 'log.txt');
       launchLogPath = path.join(trainingFolder, LAUNCH_LOG_FILE);
       const hfDownloadProgressPath = path.join(trainingFolder, '.hf_download_progress.json');
+      const comfyInstallProgressPath = path.join(trainingFolder, '.comfy_install_progress.json');
 
       try {
         const logsFolder = path.join(trainingFolder, 'logs');
@@ -118,9 +125,17 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
 
       const dbConfig = getDatabaseConfig();
       const jobConfig = JSON.parse(job.job_config);
+      const directRemoteOllamaWorkerId = getDirectRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaWorkerId = getSecureRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaEnv: Record<string, string> = {};
-      if (secureRemoteOllamaWorkerId) {
+      if (directRemoteOllamaWorkerId) {
+        const worker = await getRemoteOllamaWorker(directRemoteOllamaWorkerId);
+        secureRemoteOllamaEnv.AITK_OLLAMA_BASE_URL = worker.base_url;
+        if (worker.auth_token) {
+          secureRemoteOllamaEnv.AITK_OLLAMA_AUTH_TOKEN = worker.auth_token;
+        }
+        rewriteDirectRemoteOllamaCaptionersForLocalOllama(jobConfig);
+      } else if (secureRemoteOllamaWorkerId) {
         const worker = await getSecureRemoteOllamaWorker(secureRemoteOllamaWorkerId);
         secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_BASE_URL = worker.base_url;
         secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_TOKEN = worker.api_token;
@@ -156,6 +171,11 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       } catch (error) {
         console.error('Error clearing Hugging Face download progress file:', error);
       }
+      try {
+        fs.rmSync(comfyInstallProgressPath, { force: true });
+      } catch (error) {
+        console.error('Error clearing ComfyUI install progress file:', error);
+      }
 
       const pythonPath = getToolkitPythonPath();
       const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
@@ -177,10 +197,15 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
         IS_AI_TOOLKIT_UI: '1',
         AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
+        AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
         ...secureRemoteOllamaEnv,
       };
+      if (openRouterApiKey) {
+        additionalEnv.OPENROUTER_API_KEY = openRouterApiKey;
+        additionalEnv.AITK_OPENROUTER_API_KEY = openRouterApiKey;
+      }
       if (encryptedDatasetKeys.length > 0) {
         additionalEnv.AITK_ENCRYPTED_DATASET_KEYS_B64 = Buffer.from(
           JSON.stringify(encryptedDatasetKeys),

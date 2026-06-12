@@ -95,3 +95,16 @@ test('TensorBoard launch keeps console Python outside Windows', () => {
 
   assert.equal(tensorBoard.getTensorBoardLaunchPythonPath('/venv/bin/python', 'linux'), '/venv/bin/python');
 });
+
+test('stopTensorBoard is safe when no managed process is running', async () => {
+  const { tensorBoard } = loadTensorBoardWithProbeStatus(0);
+
+  await assert.doesNotReject(() => tensorBoard.stopTensorBoard());
+});
+
+test('TensorBoard launch is managed by the worker process', () => {
+  const source = fs.readFileSync(tensorBoardModulePath, 'utf8');
+
+  assert.doesNotMatch(source, /detached:\s*true/);
+  assert.doesNotMatch(source, /\.unref\(/);
+});

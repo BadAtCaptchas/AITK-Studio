@@ -321,7 +321,7 @@ function isRepoUpdateStatus(value: unknown): value is RepoUpdateStatus {
   return Boolean(value && typeof value === 'object' && 'state' in value && 'message' in value);
 }
 
-export default function UpdaterStatus({ compact = false }: { compact?: boolean }) {
+export default function UpdaterStatus({ compact = false, minimal = false }: { compact?: boolean; minimal?: boolean }) {
   const [status, setStatus] = useState<RepoUpdateStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [requesting, setRequesting] = useState(false);
@@ -521,9 +521,25 @@ export default function UpdaterStatus({ compact = false }: { compact?: boolean }
       ),
   );
 
+  if (compact && minimal) {
+    return (
+      <Link
+        href="/updates"
+        title={title}
+        aria-label={meta.label}
+        className={classNames(
+          'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100',
+          meta.textClass,
+        )}
+      >
+        <Icon className={classNames('h-4 w-4', spinning ? 'animate-spin' : '')} />
+      </Link>
+    );
+  }
+
   if (compact) {
     return (
-      <span className="inline-flex items-center gap-1">
+      <span className="inline-flex flex-wrap items-center justify-center gap-1">
         <Link
           href="/updates"
           title={title}

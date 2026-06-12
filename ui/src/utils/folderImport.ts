@@ -12,6 +12,40 @@ export function folderImportExtension(relativePath: string) {
   return dotIndex > 0 ? fileName.slice(dotIndex).toLowerCase() : '';
 }
 
+export const FOLDER_IMPORT_MEDIA_EXTENSIONS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.bmp',
+  '.mp4',
+  '.avi',
+  '.mov',
+  '.mkv',
+  '.wmv',
+  '.m4v',
+  '.flv',
+  '.webm',
+  '.mp3',
+  '.wav',
+  '.flac',
+  '.ogg',
+  '.m4a',
+  '.aac',
+];
+
+export const FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS = ['.json', '.txt', '.caption', '.sdxl', '.md'];
+
+export const FOLDER_IMPORT_SUPPORTED_EXTENSIONS = new Set([
+  ...FOLDER_IMPORT_MEDIA_EXTENSIONS,
+  ...FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS,
+]);
+
+export function isFolderImportCaptionSidecarPath(relativePath: string) {
+  return FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS.includes(folderImportExtension(relativePath));
+}
+
 export function stripFolderImportRoot(relativePath: string, fallbackFileName: string) {
   const parts = normalizeFolderImportRelativePath(relativePath).split('/').filter(Boolean);
   if (parts.length > 1) return parts.slice(1).join('/');

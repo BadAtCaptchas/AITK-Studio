@@ -58,6 +58,15 @@ body {
   }
 }
 
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: rgb(3 7 18);
+  color: rgb(243 244 246);
+}
+
 @keyframes heartbeat {
   0%,
   40%,

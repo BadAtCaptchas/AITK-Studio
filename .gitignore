@@ -178,12 +178,15 @@ cython_debug/
 !/extensions/example
 /temp
 /wandb
-.vscode/settings.json
+.vscode/
+.github/
+.aitk_comfy/
 .DS_Store
 ._.DS_Store
 aitk_db.db
 /notes.md
 /data
 .claude
+.playwright-mcp/
 aitk_db.db-wal
 aitk_db.db-shm

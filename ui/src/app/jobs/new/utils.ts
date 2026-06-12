@@ -2,6 +2,10 @@ import { GroupedSelectOption, JobConfig, SelectOption } from '@/types';
 import { modelArchs, ModelArch } from './options';
 import { objectCopy } from '@/utils/basic';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
+import { expectedFluxGuidanceBypass } from '@/utils/fluxGuidancePolicy';
+
+const modelLowVramKey = 'config.process[0].model.low_vram';
+const keepLowVramForSamplesKey = 'config.process[0].sample.keep_low_vram_for_samples';
 
 const expandDatasetDefaults = (
   defaults: { [key: string]: any },
@@ -38,7 +42,8 @@ export const handleModelArchChange = (
 
   // update vram setting
   if (!newArch?.additionalSections?.includes('model.low_vram')) {
-    setJobConfig(false, 'config.process[0].model.low_vram');
+    setJobConfig(false, modelLowVramKey);
+    setJobConfig(false, keepLowVramForSamplesKey);
   }
 
   // handle layer offloading setting
@@ -76,6 +81,13 @@ export const handleModelArchChange = (
 
   let currentDefaults = expandDatasetDefaults(currentArch.defaults || {}, numDatasets);
   let newDefaults = expandDatasetDefaults(newArch?.defaults || {}, numDatasets);
+
+  if (currentDefaults[modelLowVramKey]?.[0] === true && !(keepLowVramForSamplesKey in currentDefaults)) {
+    currentDefaults[keepLowVramForSamplesKey] = [true, false];
+  }
+  if (newDefaults[modelLowVramKey]?.[0] === true && !(keepLowVramForSamplesKey in newDefaults)) {
+    newDefaults[keepLowVramForSamplesKey] = [true, false];
+  }
 
   // set new model
   setJobConfig(newArchName, 'config.process[0].model.arch');
@@ -156,5 +168,16 @@ export const handleModelArchChange = (
 
   for (const key in newDefaults) {
     setJobConfig(newDefaults[key][0], key);
+  }
+
+  const expectedGuidanceBypass = expectedFluxGuidanceBypass({
+    arch: newArchName,
+    name_or_path:
+      newDefaults['config.process[0].model.name_or_path']?.[0] ??
+      jobConfig.config.process[0].model.name_or_path,
+    use_flux_cfg: jobConfig.config.process[0].model.use_flux_cfg,
+  });
+  if (expectedGuidanceBypass !== null) {
+    setJobConfig(expectedGuidanceBypass, 'config.process[0].train.bypass_guidance_embedding');
   }
 };

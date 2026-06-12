@@ -1,0 +1,65 @@
+---
+job: extension
+config:
+  name: "my_ideogram4_full_finetune_v1"
+  process:
+    - type: "sd_trainer"
+      training_folder: "output"
+      device: cuda:0
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 2
+        save_format: "diffusers"
+      datasets:
+        - folder_path: "/path/to/images/folder"
+          # Captions should be JSON objects serialized as strings. No magic-prompt
+          # or moderation API is used by training.
+          caption_ext: "txt"
+          caption_dropout_rate: 0.0
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [512, 768, 1024]
+      train:
+        batch_size: 1
+        steps: 2000
+        gradient_accumulation: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        cache_text_embeddings: true
+        noise_scheduler: "flowmatch"
+        timestep_type: "weighted"
+        optimizer: "adafactor"
+        lr: 1e-5
+        dtype: bf16
+      model:
+        arch: "ideogram4"
+        name_or_path: "ideogram-ai/ideogram-4-fp8"
+        extras_name_or_path: "ideogram-ai/ideogram-4-fp8"
+        dtype: "bf16"
+        train_text_encoder: false
+        low_vram: true
+        model_kwargs:
+          quantization: "fp8"
+          dequantize_fp8_transformer: true
+          require_json_captions: false
+          caption_strict: false
+        # To resume a saved full fine-tune, set name_or_path to the saved folder
+        # containing transformer/ and aitk_meta.yaml. Frozen support components
+        # reload from extras_name_or_path unless aitk_meta.yaml specifies another base.
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 1024
+        height: 1024
+        prompts:
+          - '{"high_level_description":"A realistic editorial portrait of [trigger] in a gallery space.","style_description":{"aesthetics":"natural, refined, high detail","lighting":"soft overhead gallery lighting","photo":"70mm lens, shallow depth of field","medium":"photograph"},"compositional_deconstruction":{"background":"A modern gallery interior with neutral walls and soft reflections.","elements":[{"type":"obj","bbox":[110,260,960,790],"desc":"[trigger] standing calmly in the center with accurate anatomy, natural fabric folds, and crisp facial detail."}]}}'
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 7
+        sample_steps: 20
+meta:
+  name: "[name]"
+  version: "1.0"

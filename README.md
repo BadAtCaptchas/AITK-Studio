@@ -21,8 +21,11 @@ OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffus
 - [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) (Qwen-Image)
 - [Qwen/Qwen-Image-2512](https://huggingface.co/Qwen/Qwen-Image-2512) (Qwen-Image-2512)
 - [zai-org/GLM-Image](https://huggingface.co/zai-org/GLM-Image) (GLM-Image)
+- [zlab-princeton/i1-3B](https://huggingface.co/zlab-princeton/i1-3B) (i1-3B)
 - [HiDream-ai/HiDream-I1-Full](https://huggingface.co/HiDream-ai/HiDream-I1-Full) (HiDream)
 - [HiDream-ai/HiDream-O1-Image](https://huggingface.co/HiDream-ai/HiDream-O1-Image) (HiDream-O1)
+- [ideogram-ai/ideogram-4-nf4](https://huggingface.co/ideogram-ai/ideogram-4-nf4) (Ideogram 4 NF4)
+- [ideogram-ai/ideogram-4-fp8](https://huggingface.co/ideogram-ai/ideogram-4-fp8) (Ideogram 4 FP8)
 - [OmniGen2/OmniGen2](https://huggingface.co/OmniGen2/OmniGen2) (OmniGen2)
 - [Tongyi-MAI/Z-Image-Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) (Z-Image Turbo)
 - [Tongyi-MAI/Z-Image](https://huggingface.co/Tongyi-MAI/Z-Image) (Z-Image)
@@ -36,6 +39,12 @@ OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffus
 HiDream-O1 training defaults to `train.t0_loss_target: true`, so the trainer compares the reconstructed timestep-0 prediction directly against the image latent target. That keeps O1 in its native x0 loss space instead of relying on velocity-space loss weighting to control small-timestep spikes.
 
 GLM-Image is supported for text-to-image sampling and transformer LoRA training through upstream Diffusers `GlmImagePipeline` and `GlmImageTransformer2DModel`. The built-in `glm_image` preset defaults to `zai-org/GLM-Image`, flowmatch scheduling, 1024px samples, 50 sample steps, guidance `1.5`, quantization, and exposed low-VRAM controls. V1 trains transformer LoRA only with `target_lora_modules: ["GlmImageTransformer2DModel"]`.
+
+i1-3B is supported through the built-in `i1` architecture for native text-to-image sampling and transformer LoRA training. It uses `zlab-princeton/i1-3B` for the transformer checkpoint, `google/t5gemma-2b-2b-ul2-it` for text embeddings, and the FLUX.2 VAE from `black-forest-labs/FLUX.2-dev`. The FLUX.2-dev repo is gated on Hugging Face, so request and accept access before running `hf auth login`, or set `model.model_kwargs.vae_name_or_path` to a local FLUX.2-dev root folder or local VAE folder. The 1024-resolution checkpoint uses a fixed square latent grid, so the built-in `i1` training defaults force 1024 square crops and recache i1 latents with square crop dimensions. The preset also defaults to 1024px samples, flowmatch scheduling, guidance `12`, guidance rescale `1.0`, 50 sample steps, quantization, cached text embeddings, and transformer-only LoRA rank `32`.
+
+Ideogram 4 is supported through the built-in `ideogram4` architecture for text-to-image sampling, transformer LoRA training, and full conditional-transformer fine-tuning. Use `ideogram-ai/ideogram-4-nf4` or `ideogram-ai/ideogram-4-fp8`; both are gated Hugging Face models and their weights remain under Ideogram's non-commercial license. The integration vendors the Apache-2.0 official pipeline components locally and does not call external moderation, magic-prompt, or other hosted APIs. Qwen3-VL, the VAE, and the unconditional transformer stay frozen; LoRA and full fine-tune jobs train only the conditional transformer.
+
+Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommended for `arch: ideogram4`, but natural-language captions and sample prompts are allowed by default with a runtime warning that outputs may be worse than with structured Ideogram JSON captions. JSON caption schema and key-order issues warn by default, or fail when `model_kwargs.caption_strict: true` is set; users who want to enforce structured captions can also set `model_kwargs.require_json_captions: true`. Training and sampling do not call magic-prompt, moderation, or other hosted APIs. NF4 requires CUDA and `bitsandbytes>=0.49.2`. The FP8 model can be used directly on supported GPUs or dequantized for training with `model_kwargs.dequantize_fp8_transformer: true`. AI Toolkit also warns at runtime when the active Torch version is below Ideogram's official `torch>=2.11` requirement.
 
 ### Instruction / Edit
 - [black-forest-labs/FLUX.1-Kontext-dev](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev) (FLUX.1-Kontext-dev)
@@ -73,7 +82,7 @@ Requirements:
 
 Linux:
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 python3 -m venv venv
 source venv/bin/activate
@@ -90,7 +99,7 @@ Windows:
 If you are having issues with Windows. I recommend using the easy install script at [https://github.com/Tavris1/AI-Toolkit-Easy-Install](https://github.com/Tavris1/AI-Toolkit-Easy-Install)
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 python -m venv venv
 .\venv\Scripts\activate
@@ -138,6 +147,8 @@ model:
 
 The cache is used for `optimum.quanto` qtypes such as `qfloat8`. It is skipped for torchao qtypes and for FLUX.2 transformer loads that use an accuracy recovery adapter.
 
+For offline runs, set `HF_HUB_OFFLINE=1` or `TRANSFORMERS_OFFLINE=1`. FLUX.2 Klein Qwen3 quantized cache entries store the text encoder config with the cached weights, so later cache hits do not need to contact Hugging Face. Older cache entries may need one online rebuild if neither the source model config nor the tokenizer is already cached locally.
+
 ### Layer offloading
 
 Layer offloading can reduce peak VRAM by keeping part of a supported model in CPU RAM. The default backend is `block`, which offloads deterministic whole transformer/text-encoder blocks and prefetches them back to CUDA as needed. The older per-Linear/Conv offloader remains available as `legacy` for fallback cases.
@@ -162,7 +173,7 @@ locates at `./run_mac.zsh` that will install the dependencies locally and run th
 do the following:
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 chmod +x run_mac.zsh
 ./run_mac.zsh
@@ -191,6 +202,30 @@ npm run build_and_start
 ```
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
+
+## Development Utilities
+
+To test uncommitted local changes in another checkout without pushing a branch first, use the git-status sync helper:
+
+```bash
+python scripts/sync_local_changes.py /path/to/other/ai-toolkit
+```
+
+Or from the UI npm scripts:
+
+```bash
+npm --prefix ui run sync:local -- /path/to/other/ai-toolkit
+```
+
+On Windows, this also works with WSL UNC paths:
+
+```powershell
+$env:AITK_DEV_SYNC_TARGET='\\wsl.localhost\Ubuntu\home\<user>\ai-toolkit'
+npm --prefix ui run sync:local -- --dry-run
+npm --prefix ui run sync:local
+```
+
+The helper copies files reported by `git status`, including untracked files, and removes target files for local deletions or rename sources. Use `--tracked-only` to skip untracked files, `--no-delete` to leave target deletions alone, and `--no-verify-target` for non-git target directories.
 
 ## Image generation UI
 
@@ -318,9 +353,11 @@ AITK_CLOUDFLARED_AUTO_DOWNLOAD=0
 
 ### Secure remote Ollama captioning
 
-The Queue page includes a **Secure Remote Captioning** job view for image datasets. It starts a local UI caption job that streams one image at a time to a selected remote worker's UI, where the worker calls its local Ollama server. The dataset is not bundled or stored on the remote worker, and prompt/system-prompt/image/caption payloads are encrypted at the application layer in addition to the worker's HTTPS tunnel and bearer token. The optional system prompt is saved per dataset in the central UI and reused when that dataset is selected.
+The Queue page includes a **Secure Remote Captioning** job view for image datasets. It starts a local UI caption job that streams one image at a time to a selected **Remote Ollama** endpoint. The remote host can be a standalone Ollama server; it does not need to run the AI Toolkit UI. Add direct endpoints from **Settings > Remote Ollama** with the Ollama base URL, such as `http://ollama-host:11434`, and an optional bearer token for protected reverse proxies or tunnels.
 
-On the remote worker, run the UI with `AI_TOOLKIT_AUTH` and Cloudflared as above, and keep Ollama bound to localhost:
+Direct Remote Ollama sends prompt, optional system prompt, and image bytes to the configured Ollama HTTP API. Use HTTPS or a protected reverse proxy outside a trusted LAN. The dataset is not bundled or stored on the remote host. The optional system prompt is saved per dataset in the central UI and reused when that dataset is selected.
+
+If you prefer the older Toolkit-proxy mode for a full remote AI Toolkit worker, run the UI with `AI_TOOLKIT_AUTH` and Cloudflared as above, and keep Ollama bound to localhost:
 
 ```bash
 AITK_OLLAMA_ENABLED=1
@@ -328,9 +365,9 @@ AITK_OLLAMA_HOST=127.0.0.1:11434
 AITK_OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
-Docker and RunPod images include Ollama. When `AITK_OLLAMA_ENABLED=1`, the startup scripts launch `ollama serve` without exposing port `11434`; only the authenticated UI is exposed through Cloudflared. If the selected Ollama model is not installed, the remote worker pulls it automatically before captioning.
+Docker and RunPod images include Ollama. When `AITK_OLLAMA_ENABLED=1`, the startup scripts launch `ollama serve` without exposing port `11434`; only the authenticated UI is exposed through Cloudflared. If the selected Ollama model is not installed, the remote endpoint pulls it automatically before captioning.
 
-Threat model limit: the remote host and its Ollama process must decrypt each image and prompt in memory to run inference. This protects transport, logs, and remote disk persistence; it does not protect against a compromised remote machine.
+Threat model limit: direct Remote Ollama endpoints receive plaintext image and prompt payloads in their HTTP API. HTTPS or a protected tunnel protects transport; the older Toolkit-proxy mode also encrypts payloads at the application layer before the worker UI decrypts them for local Ollama. Neither mode protects against a compromised remote machine or Ollama process.
 
 ## Training job import/export
 
@@ -372,6 +409,8 @@ $env:AI_TOOLKIT_AUTH="super_secure_password"; npm run build_and_start
 1. Copy the example config file located at `config/examples/train_lora_flux_24gb.yaml` (`config/examples/train_lora_flux_schnell_24gb.yaml` for schnell) to the `config` folder and rename it to `whatever_you_want.yml`
 2. Edit the file following the comments in the file
 3. Run the file like so `python run.py config/whatever_you_want.yml`
+
+For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.yaml` for NF4 LoRA, `config/examples/train_lora_ideogram4_fp8_48gb.yaml` for FP8 LoRA, or `config/examples/train_full_fine_tune_ideogram4.yaml` for full conditional-transformer fine-tuning. Ideogram 4 dataset captions work as natural text or JSON objects serialized as text files; JSON is recommended for best prompt fidelity, and training does not call Ideogram magic-prompt, moderation, or any other hosted API.
 
 A folder with the name and the training folder from the config file will be created when you start. It will have all 
 checkpoints and images in it. You can stop the training at any time using ctrl+c and when you resume, it will pick back up
@@ -420,7 +459,7 @@ train:
       loss_type: mse
 ```
 
-Phase overrides inherit from the top-level `train` block. Supported phase-local overrides include learning rates, optimizer, optimizer params, LR scheduler params, timestep type/bias, loss type, denoising min/max, SNR settings, and prompt/noise multipliers. Model, network, dataset, save, sample, batch size, gradient accumulation, dtype, cache, LoRA rank, and LoKr factor settings stay top-level only for the whole run.
+Phase overrides inherit from the top-level `train` block. Supported phase-local overrides include learning rates, optimizer, optimizer params, LR scheduler params, timestep type/bias, loss type, denoising min/max, SNR settings, and prompt/noise multipliers. Model, network, dataset, save, sample, batch size, gradient accumulation, dtype, cache, LoRA rank, and LoKr rank/factor/advanced settings stay top-level only for the whole run.
 
 At each phase boundary the trainer saves by default, rebuilds the optimizer and LR scheduler, clears gradients, and continues. Phase changes only happen after a completed optimizer update, so boundaries defer cleanly during gradient accumulation. Checkpoints store the current phase index/name and phase-local step so resumes return to the correct phase.
 
@@ -455,6 +494,8 @@ For GLM-Image, the UI defaults Auto learn to `glm-image-balanced-lora` instead o
 
 - `glm-image-balanced-lora`: LoRA rank/alpha `32`, `adamw8bit`, weighted timesteps, MSE loss, and LR phases `0.00005 -> 0.00003 -> 0.000015` for content, balanced, and style stages.
 - `glm-image-low-vram-lora`: LoRA rank/alpha `16`, dropout `0.05`, `adamw8bit`, weighted timesteps, MSE loss, batch size `1`, gradient accumulation `2`, and LR phases `0.00003 -> 0.00002 -> 0.00001`.
+
+For Ideogram 4 NF4 and FP8, the UI defaults Auto learn to `ideogram4-balanced-lora`. It uses transformer-only LoRA rank/alpha `32`, cached text embeddings, weighted timesteps, caption-aware phases, and LR phases `0.00004 -> 0.000025 -> 0.00001`.
 
 You can also save the current auto-learn settings as a custom profile from the same editor. Custom profiles are stored in the browser's local storage.
 
@@ -498,11 +539,11 @@ train:
 
 Progress displays use the current step without a percentage bar while auto learn is active, because there is no planned final step. Resuming a checkpoint restores the current phase and continues plateau tracking from the saved training state.
 
-For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`.
+For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`. For i1-3B LoRA, see `config/examples/train_lora_i1_24gb.yaml`. For Ideogram 4 LoRA and full fine-tune starting points, see `config/examples/train_lora_ideogram4_48gb.yaml`, `config/examples/train_lora_ideogram4_fp8_48gb.yaml`, and `config/examples/train_full_fine_tune_ideogram4.yaml`.
 
 ### Need help or found a bug?
 
-This fork tracks reproducible code bugs in this repository only. If you find a bug in `rmcc3/ai-toolkit`, open a bug report at [github.com/rmcc3/ai-toolkit/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
+This fork tracks reproducible code bugs in this repository only. If you find a bug in `rmcc3/ai-toolkit-revamped`, open a bug report at [github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
 
 Please do not open bug reports here for upstream-only behavior, setup help, usage questions, or feature requests. If the behavior exists only in the original Ostris AI Toolkit, report it upstream.
 
@@ -529,7 +570,7 @@ This fork includes a maintained private RunPod Pod template for the revamped UI.
 ### 1. Setup
 #### ai-toolkit:
 ```
-git clone https://github.com/rmcc3/ai-toolkit.git
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
 cd ai-toolkit
 git submodule update --init --recursive
 python -m venv venv
@@ -661,13 +702,35 @@ if will be ignored.
 
 ## LoKr Training
 
-To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Guidelines.md). To train a LoKr model, you can adjust the network type in the config file like so:
+To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Guidelines.md) and the LyCORIS [network arguments](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Network-Args.md). To train a LoKr model, change the network type in the config file:
 
 ```yaml
       network:
         type: "lokr"
-        lokr_full_rank: true
+        linear: 16
+        linear_alpha: 16
         lokr_factor: 8
+        lokr_full_matrix: false
 ```
 
-Everything else should work the same including layer targeting.
+`linear` and `linear_alpha` are the LoKr dimension and alpha. `lokr_factor` maps to upstream AI Toolkit `factor`; use `-1` for automatic factorization. Plain LoKr configs default to upstream-compatible factor ordering. Set `lokr_legacy_factorization: false` only when you intentionally want Revamped's newer balanced factor layout. `lokr_full_matrix` forces the second Kronecker block to be stored as a full matrix and is normally left off unless you explicitly want that larger model. The older `lokr_full_rank` key is still accepted for compatibility and also enables full-matrix mode.
+
+Current LoKr options can be set either from the UI (`New Job` -> `Target Type: LoKr`) or in YAML:
+
+```yaml
+      network:
+        type: "lokr"
+        linear: 16
+        linear_alpha: 16
+        lokr_factor: 8
+        lokr_use_tucker: true
+        lokr_use_scalar: false
+        lokr_decompose_both: false
+        lokr_weight_decompose: false
+        lokr_bypass_mode: false
+        lokr_rs_lora: false
+```
+
+Supported advanced keys include `lokr_use_tucker`, `lokr_use_scalar`, `lokr_decompose_both`, `lokr_rank_dropout_scale`, `lokr_weight_decompose`, `lokr_wd_on_output`, `lokr_full_matrix`, `lokr_bypass_mode`, `lokr_rs_lora`, `lokr_unbalanced_factorization`, and `lokr_legacy_factorization`. The loader also accepts upstream-style aliases such as `factor`, `use_tucker`, `use_scalar`, `decompose_both`, `rank_dropout_scale`, `weight_decompose`, `dora_wd`, `wd_on_output`, `full_matrix`, `bypass_mode`, `rs_lora`, `unbalanced_factorization`, and `legacy_factorization`.
+
+Everything else should work the same, including layer targeting with `network_kwargs`.

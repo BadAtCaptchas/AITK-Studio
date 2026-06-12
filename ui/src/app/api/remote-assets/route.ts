@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function remoteAssetPath(type: RemoteAssetType, remotePath: string) {
+  if (remotePath.startsWith('/api/jobs/')) return remotePath;
   const encoded = encodeURIComponent(remotePath);
   if (type === 'file') return `/api/files/${encoded}`;
   if (type === 'audio-art') return `/api/audio/art/${encoded}`;

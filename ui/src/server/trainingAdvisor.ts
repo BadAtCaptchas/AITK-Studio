@@ -13,6 +13,7 @@ import type {
   ProcessConfig,
   TrainingPhaseConfig,
 } from '../types';
+import { getFluxGuidanceBypassPolicy } from '../utils/fluxGuidancePolicy';
 
 export type AdvisorMetricPoint = {
   step: number;
@@ -520,7 +521,92 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const arch = String(processConfig.model?.arch ?? '');
   const baseArch = arch.split(':')[0];
   const networkType = String(processConfig.network?.type ?? '');
-  const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx/i.test(arch);
+  const guidanceBypassPolicy = getFluxGuidanceBypassPolicy({
+    arch,
+    name_or_path: processConfig.model?.name_or_path,
+    use_flux_cfg: processConfig.model?.use_flux_cfg,
+  });
+  const bypassesGuidanceEmbedding = train?.bypass_guidance_embedding === true;
+  const isIdeogramGuidanceBypassPolicy =
+    baseArch === 'ideogram4' ||
+    /ideogram-ai[/\\]ideogram-4-(nf4|fp8)|ideogram-4-(nf4|fp8)/i.test(
+      String(processConfig.model?.name_or_path ?? ''),
+    );
+  const isKleinGuidanceBypassPolicy =
+    baseArch === 'flux2_klein_4b' ||
+    baseArch === 'flux2_klein_9b' ||
+    baseArch === 'asymflux2_klein_9b' ||
+    /flux\.2-klein-base-[49]b|asymflux\.2-klein-9b/i.test(
+      String(processConfig.model?.name_or_path ?? ''),
+    );
+  const isOfficialFluxGuidanceBypassPolicy =
+    baseArch === 'flux' ||
+    baseArch === 'flux_kontext' ||
+    /flux\.1-(dev|schnell|kontext(?:-dev)?)/i.test(String(processConfig.model?.name_or_path ?? ''));
+  if (guidanceBypassPolicy === 'forbidden' && bypassesGuidanceEmbedding) {
+    const forbiddenGuidanceBypassFinding = isIdeogramGuidanceBypassPolicy
+      ? {
+          id: 'train.bypass_guidance_embedding.ideogram',
+          title: 'Ideogram guidance bypass is enabled',
+          message: 'This job targets Ideogram 4, but train.bypass_guidance_embedding is a Flex-only setting.',
+          recommendation: 'Set train.bypass_guidance_embedding to false for Ideogram 4 training.',
+        }
+      : isKleinGuidanceBypassPolicy
+        ? {
+            id: 'train.bypass_guidance_embedding.klein',
+            title: 'Klein guidance bypass is enabled',
+            message: 'This job targets FLUX.2 Klein or AsymFLUX.2 Klein, but train.bypass_guidance_embedding is a Flex-only setting.',
+            recommendation: 'Set train.bypass_guidance_embedding to false for Klein training.',
+          }
+        : isOfficialFluxGuidanceBypassPolicy
+          ? {
+            id: 'train.bypass_guidance_embedding.flux',
+            title: 'Flux guidance bypass is enabled',
+            message: 'This job targets official FLUX.1-dev, FLUX.1-schnell, or FLUX.1-Kontext, but train.bypass_guidance_embedding is true.',
+            recommendation: 'Set train.bypass_guidance_embedding to false for official FLUX.1 and Kontext training.',
+          }
+          : {
+            id: 'train.bypass_guidance_embedding.non_flex',
+            title: 'Flex guidance bypass is enabled',
+            message: 'This job does not target Flex.1 or Flex.2, but train.bypass_guidance_embedding is enabled.',
+            recommendation: 'Set train.bypass_guidance_embedding to false for non-Flex training.',
+          };
+    addFinding(
+      findings,
+      'critical',
+      'preflight',
+      'config',
+      forbiddenGuidanceBypassFinding.id,
+      forbiddenGuidanceBypassFinding.title,
+      forbiddenGuidanceBypassFinding.message,
+      forbiddenGuidanceBypassFinding.recommendation,
+      undefined,
+      [
+        'config.process[0].model.arch',
+        'config.process[0].model.name_or_path',
+        'config.process[0].train.bypass_guidance_embedding',
+      ],
+    );
+  }
+  if (guidanceBypassPolicy === 'required' && !bypassesGuidanceEmbedding) {
+    addFinding(
+      findings,
+      'critical',
+      'preflight',
+      'config',
+      'train.bypass_guidance_embedding.flex',
+      'Flex guidance bypass is disabled',
+      'This job targets Flex.1 or Flex.2, but train.bypass_guidance_embedding is not enabled.',
+      'Set train.bypass_guidance_embedding to true for Flex.1 and Flex.2 training.',
+      undefined,
+      [
+        'config.process[0].model.arch',
+        'config.process[0].model.name_or_path',
+        'config.process[0].train.bypass_guidance_embedding',
+      ],
+    );
+  }
+  const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx|ideogram/i.test(arch);
   const warnLr = sensitiveArch ? 1e-4 : 3e-4;
   const criticalLr = sensitiveArch ? 3e-4 : 1e-3;
   if (!usesAdaptiveProdigyLr && lr > criticalLr) {

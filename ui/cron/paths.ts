@@ -27,3 +27,13 @@ export const getHFToken = async () => {
   }
   return token;
 };
+
+export const getOpenRouterApiKey = async () => {
+  const key = 'OPENROUTER_API_KEY';
+  let row = await db.settings.get(key);
+  let token = process.env.OPENROUTER_API_KEY?.trim() || process.env.AITK_OPENROUTER_API_KEY?.trim() || '';
+  if (row?.value && row.value !== '') {
+    token = row.value;
+  }
+  return token;
+};

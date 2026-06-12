@@ -3,6 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import { db } from '@/server/db';
 import { getTrainingFolder } from '@/server/settings';
+import {
+  extractTriggerWordsFromMetadata,
+  listUploadedLoras,
+  mergeTriggerWords,
+  readSafetensorsMetadata,
+  splitTriggerWords,
+} from '@/server/loraLibrary';
 
 const LORA_JOB_TYPES = new Set(['lora', 'locon', 'lokr', 'lorm']);
 
@@ -102,22 +109,31 @@ export async function GET() {
         const filePath = path.join(jobFolder, entry.name);
         const stat = await fs.promises.stat(filePath).catch(() => null);
         if (!stat) continue;
+        const metadata = await readSafetensorsMetadata(filePath);
+        const triggerWords = mergeTriggerWords(
+          extractTriggerWordsFromMetadata(metadata),
+          splitTriggerWords(jobConfig?.config?.process?.[0]?.trigger_word),
+        );
 
         loras.push({
           id: `${job.id}:${entry.name}`,
           label: `${job.name} / ${entry.name}`,
           path: filePath,
           filename: entry.name,
+          source: 'job',
           jobId: job.id,
           jobName: job.name,
           jobStatus: job.status,
           updatedAt: stat.mtime.toISOString(),
           sizeBytes: stat.size,
+          triggerWords,
+          triggerWordSource: triggerWords.length > 0 ? 'metadata' : 'none',
           model: getModelSummary(jobConfig),
         });
       }
     }
 
+    loras.push(...(await listUploadedLoras()));
     loras.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     return NextResponse.json({ loras });
   } catch (error) {

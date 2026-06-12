@@ -1,0 +1,88 @@
+---
+job: extension
+config:
+  name: "my_first_i1_lora_v1"
+  process:
+    - type: "sd_trainer"
+      training_folder: "output"
+      device: cuda:0
+      network:
+        type: "lora"
+        linear: 32
+        linear_alpha: 32
+        transformer_only: true
+        network_kwargs:
+          only_if_contains:
+            - "in_blocks"
+            - "mid_block"
+            - "out_blocks"
+            - "text_encoder_adapter"
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 4
+        push_to_hub: false
+      datasets:
+        - folder_path: "/path/to/images/folder"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [1024]
+          square_crop: true
+      train:
+        batch_size: 1
+        steps: 3000
+        gradient_accumulation: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        cache_text_embeddings: true
+        noise_scheduler: "flowmatch"
+        timestep_type: "i1_lognorm"
+        content_or_style: "balanced"
+        loss_type: "mse"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+        optimizer_params:
+          weight_decay: 0.0001
+        dtype: bf16
+      model:
+        arch: "i1"
+        name_or_path: "zlab-princeton/i1-3B"
+        dtype: bf16
+        quantize: true
+        qtype: "qfloat8"
+        quantize_te: true
+        qtype_te: "qfloat8"
+        low_vram: true
+        model_kwargs:
+          checkpoint_filename: "1024_resolution_checkpoint_torch.pt"
+          text_encoder_name_or_path: "google/t5gemma-2b-2b-ul2-it"
+          # FLUX.2-dev is gated on Hugging Face. Accept its terms and run `hf auth login`,
+          # or point this at a local FLUX.2-dev root folder or local FLUX.2 VAE folder.
+          vae_name_or_path: "black-forest-labs/FLUX.2-dev"
+          inference_timestep_shift: 0.3
+          cfg_rescale: 1.0
+          rewrite_prompt: false
+          rewriter_model: "Qwen/Qwen3-4B-Instruct-2507"
+          rewrite_batch_size: 1
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 1024
+        height: 1024
+        prompts:
+          - "a studio portrait of [trigger], natural window light, detailed fabric texture"
+          - "[trigger] in a clean editorial product photo, crisp shadows, neutral backdrop"
+          - "a ceramic mug on a desk with the word \"FOCUS\" printed in bold readable letters"
+          - "a modern apartment kitchen with polished steel fixtures and warm morning light"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 12
+        guidance_rescale: 1.0
+        sample_steps: 50
+meta:
+  name: "[name]"
+  version: "1.0"

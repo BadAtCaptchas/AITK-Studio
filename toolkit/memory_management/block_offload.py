@@ -505,6 +505,17 @@ class BlockOffloadManager:
         device = self._entry_device(entry.params, entry.buffers)
         return device or torch.device("cpu")
 
+    def _wait_for_entry_transfer(self, entry: _ManagedLayer):
+        if entry.transfer_event is None:
+            return
+        if self.active:
+            torch.cuda.current_stream(self.process_device).wait_event(entry.transfer_event)
+        entry.transfer_event = None
+        if entry.state == "prefetching":
+            entry.state = "device"
+        elif entry.state == "offloading":
+            entry.state = "cpu"
+
     def offload_inactive_layers(self):
         for entry in self.layers:
             if self.strategy.is_offloaded(entry.index):
@@ -549,11 +560,12 @@ class BlockOffloadManager:
     def _ensure_entry_on_device(self, entry: _ManagedLayer):
         if not self.active:
             return
-        if entry.state == "prefetching" and entry.transfer_event is not None:
-            torch.cuda.current_stream(self.process_device).wait_event(entry.transfer_event)
-            entry.transfer_event = None
-            entry.state = "device"
-            return
+        if entry.state == "prefetching":
+            self._wait_for_entry_transfer(entry)
+            if entry.state == "device":
+                return
+        if entry.state == "offloading":
+            self._wait_for_entry_transfer(entry)
         if entry.state != "device":
             self._move_entry(entry, self.process_device, async_transfer=False)
             entry.state = "device"
@@ -565,10 +577,10 @@ class BlockOffloadManager:
         entry.state = "prefetching"
 
     def _offload_entry(self, entry: _ManagedLayer, async_transfer: bool):
-        if not self.active or entry.state == "cpu":
+        if not self.active or entry.state in {"cpu", "offloading"}:
             return
         self._move_entry(entry, torch.device("cpu"), async_transfer=async_transfer)
-        entry.state = "cpu"
+        entry.state = "offloading" if async_transfer and entry.transfer_event is not None else "cpu"
 
     def _move_entry(
         self,
@@ -580,6 +592,9 @@ class BlockOffloadManager:
         if device.type == "cuda" and not self.active:
             return
 
+        if not async_transfer:
+            self._wait_for_entry_transfer(entry)
+
         stream_context = (
             torch.cuda.stream(self.transfer_stream)
             if async_transfer and self.transfer_stream is not None
@@ -588,6 +603,8 @@ class BlockOffloadManager:
         if stream_context is None:
             self._move_entry_tensors(entry, device, dtype)
         else:
+            if device.type == "cpu":
+                self.transfer_stream.wait_stream(torch.cuda.current_stream(self.process_device))
             with stream_context:
                 self._move_entry_tensors(entry, device, dtype)
                 entry.transfer_event = torch.cuda.Event()

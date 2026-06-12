@@ -79,10 +79,23 @@ function normalizePromptItems(generateConfig: any) {
   return [];
 }
 
+function getPositiveInteger(value: unknown, defaultValue: number) {
+  const parsed = Number(value ?? defaultValue);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : defaultValue;
+}
+
 function getRequestedImageCount(generateConfig: any) {
-  const repeatCount = Number(generateConfig?.num_repeats ?? 1);
-  const numRepeats = Number.isFinite(repeatCount) && repeatCount > 0 ? Math.floor(repeatCount) : 1;
-  return normalizePromptItems(generateConfig).length * numRepeats;
+  const numRepeats = getPositiveInteger(generateConfig?.num_repeats, 1);
+  const promptItems = normalizePromptItems(generateConfig);
+  if (promptItems.length === 0) {
+    return 0;
+  }
+
+  const imageCount = generateConfig?.random_prompts
+    ? getPositiveInteger(generateConfig?.max_images, 10000)
+    : promptItems.length;
+
+  return imageCount * numRepeats;
 }
 
 async function findNewestGeneratedImage(outputFolder: string) {
@@ -253,6 +266,7 @@ export async function POST(request: NextRequest) {
     const logPath = path.join(runFolder, 'log.txt');
     const launchLogPath = path.join(runFolder, 'launch.log');
     const hfDownloadProgressPath = path.join(runFolder, '.hf_download_progress.json');
+    const comfyInstallProgressPath = path.join(runFolder, '.comfy_install_progress.json');
 
     await fsp.mkdir(outputFolder, { recursive: true });
 
@@ -284,6 +298,7 @@ export async function POST(request: NextRequest) {
       CUDA_VISIBLE_DEVICES: gpuIds,
       IS_AI_TOOLKIT_UI: '1',
       AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
+      AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
       PYTHONUNBUFFERED: '1',
       HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
     };

@@ -1,11 +1,14 @@
 import torch
-from .manager_modules import LinearLayerMemoryManager, ConvLayerMemoryManager
+from .manager_modules import LinearLayerMemoryManager, ConvLayerMemoryManager, _DEVICE_STATE
 import random
 
 LINEAR_MODULES = [
     "Linear",
     "LoRACompatibleLinear",
     "QLinear",
+    "Linear4bit",
+    "Linear8bitLt",
+    "Fp8Linear",
 ]
 CONV_MODULES = [
     "Conv2d",
@@ -151,3 +154,85 @@ class MemoryManager:
                     module._memory_manager.unmanaged_modules.append(child_module)
                 else:
                     continue
+
+    @classmethod
+    def detach(cls, module: torch.nn.Module):
+        block_manager = getattr(module, "_block_offload_manager", None)
+        if block_manager is not None:
+            block_manager.detach()
+            if hasattr(module, "_block_offload_manager"):
+                del module._block_offload_manager
+
+        if not hasattr(module, "_memory_manager"):
+            if hasattr(module, "_aitk_layer_offloading_backend"):
+                del module._aitk_layer_offloading_backend
+            if hasattr(module, "_aitk_layer_offloading_component"):
+                del module._aitk_layer_offloading_component
+            return
+
+        for unmanaged in module._memory_manager.unmanaged_modules:
+            try:
+                if isinstance(unmanaged, torch.nn.Parameter):
+                    unmanaged.data = unmanaged.data.to("cpu")
+                else:
+                    unmanaged.to("cpu")
+            except Exception:
+                pass
+
+        if hasattr(module, "_mm_to"):
+            module.to = module._mm_to
+            del module._mm_to
+
+        del module._memory_manager
+
+        for child in module.modules():
+            lmm = getattr(child, "_layer_memory_manager", None)
+            if lmm is None:
+                continue
+
+            original_forward = getattr(lmm, "_original_forward", None)
+            if original_forward is not None:
+                if hasattr(child, "ara_lora_ref"):
+                    ara = child.ara_lora_ref()
+                    if ara is not None:
+                        ara.org_forward = original_forward
+                else:
+                    child.forward = original_forward
+
+            for param_name in ("weight", "bias"):
+                param = getattr(child, param_name, None)
+                if param is None or not isinstance(param, torch.nn.Parameter):
+                    continue
+                try:
+                    if param.data.is_pinned():
+                        object.__setattr__(
+                            child,
+                            param_name,
+                            torch.nn.Parameter(
+                                param.data.clone(),
+                                requires_grad=param.requires_grad,
+                            ),
+                        )
+                except Exception:
+                    pass
+
+            del child._layer_memory_manager
+            if hasattr(child, "_memory_management_device"):
+                del child._memory_management_device
+            if hasattr(child, "_is_memory_managed"):
+                del child._is_memory_managed
+
+        keys_to_delete = [
+            dev
+            for dev in _DEVICE_STATE
+            if isinstance(dev, torch.device) and dev.type == "cuda"
+        ]
+        for key in keys_to_delete:
+            del _DEVICE_STATE[key]
+
+        if hasattr(module, "_aitk_layer_offloading_backend"):
+            del module._aitk_layer_offloading_backend
+        if hasattr(module, "_aitk_layer_offloading_component"):
+            del module._aitk_layer_offloading_component
+
+        torch.cuda.empty_cache()

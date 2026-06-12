@@ -77,4 +77,9 @@ def decrypt_secure_caption_json(
     key = _derive_key(token, salt, direction)
     aesgcm = AESGCM(key)
     plaintext = aesgcm.decrypt(nonce, ciphertext, _aad(direction, job_id, item_id))
-    return json.loads(plaintext.decode("utf-8"))
+    decoded = plaintext.decode("utf-8", errors="replace")
+    try:
+        return json.loads(decoded)
+    except json.JSONDecodeError as exc:
+        preview = decoded[:2000]
+        raise ValueError(f"Secure caption payload is not valid JSON: {preview}") from exc

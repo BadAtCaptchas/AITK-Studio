@@ -8,7 +8,7 @@ import { apiClient } from '@/utils/api';
 import useSettings from '@/hooks/useSettings';
 
 type AdvisorStatus = 'idle' | 'loading' | 'success' | 'error' | 'refreshing';
-type Variant = 'card' | 'inline';
+type Variant = 'card' | 'inline' | 'rail';
 
 const severityLabel: Record<AdvisorSeverity, string> = {
   critical: 'Critical',
@@ -139,6 +139,103 @@ function AdvisorResultPanel({
   const initialLoading = status === 'loading' && !result;
   const hasFindings = !!result?.findings.length;
   const stats = result?.datasetStats;
+  const criticalCount = result?.summary.critical ?? 0;
+  const warningCount = result?.summary.warning ?? 0;
+  const infoCount = result?.summary.info ?? 0;
+
+  if (variant === 'rail') {
+    const clean = result && !criticalCount && !warningCount;
+    const title = initialLoading
+      ? 'Running advisor checks'
+      : error
+        ? 'Advisor unavailable'
+        : clean
+          ? 'No critical issues'
+          : result
+            ? `${criticalCount + warningCount + infoCount} advisor finding${criticalCount + warningCount + infoCount === 1 ? '' : 's'}`
+            : 'Advisor checks ready';
+
+    return (
+      <section className="border border-gray-800 bg-gray-950/50 p-3">
+        <div className="flex items-start gap-3">
+          <div
+            className={classNames(
+              'mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-full border',
+              error
+                ? 'border-rose-700 text-rose-300'
+                : initialLoading
+                  ? 'border-cyan-700 text-cyan-300'
+                  : clean
+                    ? 'border-emerald-600 text-emerald-300'
+                    : 'border-amber-700 text-amber-300',
+            )}
+          >
+            {initialLoading || loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : error ? (
+              <AlertTriangle className="h-4 w-4" />
+            ) : clean ? (
+              <CheckCircle2 className="h-4 w-4" />
+            ) : (
+              <Info className="h-4 w-4" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-gray-100">{title}</div>
+            <p className="mt-1 text-xs leading-5 text-gray-400">
+              {error ||
+                result?.summary.text ||
+                (initialLoading ? 'Checking this setup for common problems.' : 'Advisor checks your setup for issues.')}
+            </p>
+          </div>
+        </div>
+
+        {result && (
+          <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+            <span className={classNames('rounded-sm px-1.5 py-0.5', severityBadgeClasses.critical)}>
+              {criticalCount} critical
+            </span>
+            <span className={classNames('rounded-sm px-1.5 py-0.5', severityBadgeClasses.warning)}>
+              {warningCount} warning
+            </span>
+            <span className={classNames('rounded-sm px-1.5 py-0.5', severityBadgeClasses.info)}>
+              {infoCount} notes
+            </span>
+          </div>
+        )}
+
+        {stats && (
+          <div className="mt-3 border-t border-gray-900 pt-3 text-xs text-gray-500">
+            {stats.mediaFiles.toLocaleString()} media scanned
+            {stats.missingCaptions > 0 ? `, ${stats.missingCaptions.toLocaleString()} missing captions` : ''}
+          </div>
+        )}
+
+        {hasFindings && (
+          <div className="mt-3 space-y-2">
+            {result.findings.slice(0, 2).map(finding => (
+              <div key={finding.id} className={classNames('border px-2 py-1.5 text-xs', severityClasses[finding.severity])}>
+                <div className="font-medium">{finding.title}</div>
+                <div className="mt-0.5 opacity-85">{finding.recommendation}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {onRefresh && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="mt-3 inline-flex h-8 w-full items-center justify-center gap-2 border border-gray-800 text-xs text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw className={classNames('h-3.5 w-3.5', loading ? 'animate-spin' : '')} />
+            Re-run checks
+          </button>
+        )}
+      </section>
+    );
+  }
 
   return (
     <section
@@ -234,7 +331,15 @@ function AdvisorResultPanel({
   );
 }
 
-export function TrainingAdvisorPanel({ jobConfig, gpuIDs }: { jobConfig: JobConfig; gpuIDs: string | null }) {
+export function TrainingAdvisorPanel({
+  jobConfig,
+  gpuIDs,
+  variant = 'card',
+}: {
+  jobConfig: JobConfig;
+  gpuIDs: string | null;
+  variant?: Variant;
+}) {
   const [result, setResult] = useState<AdvisorResult | null>(null);
   const [status, setStatus] = useState<AdvisorStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -310,13 +415,23 @@ export function TrainingAdvisorPanel({ jobConfig, gpuIDs }: { jobConfig: JobConf
     };
   }, [advisorVisibility.enabled, advisorVisibility.loaded, payload, runPreflight]);
 
-  if (!advisorVisibility.loaded || !advisorVisibility.enabled) return null;
+  if (!advisorVisibility.loaded) return null;
+  if (!advisorVisibility.enabled) {
+    if (variant !== 'rail') return null;
+    return (
+      <section className="border border-gray-800 bg-gray-950/50 p-3">
+        <div className="text-sm font-semibold text-gray-100">Advisor checks off</div>
+        <p className="mt-1 text-xs leading-5 text-gray-400">Enable Training Advisor in Settings to check this setup for common issues.</p>
+      </section>
+    );
+  }
 
   return (
     <AdvisorResultPanel
       result={result}
       status={status}
       error={error}
+      variant={variant}
       onRefresh={() => runPreflight(payload, { force: true })}
       onHide={() => advisorVisibility.setEnabled(false)}
       hideDisabled={advisorVisibility.saving}

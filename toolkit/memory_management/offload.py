@@ -35,6 +35,7 @@ SUPPORTED_BLOCK_ARCHES = {
     "nucleus_image",
     "ernie_image",
     "zimage_l2p",
+    "ideogram4",
 }
 
 

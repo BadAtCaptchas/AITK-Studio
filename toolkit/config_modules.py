@@ -1,7 +1,7 @@
 import os
 import time
 import math
-from typing import List, Optional, Literal, Tuple, Union, TYPE_CHECKING, Dict
+from typing import Any, List, Optional, Literal, Union, TYPE_CHECKING, Dict
 import random
 
 import torch
@@ -14,6 +14,10 @@ from torchao.quantization.quant_primitives import _DTYPE_TO_BIT_WIDTH
 ImgExt = Literal['jpg', 'png', 'webp']
 
 SaveFormat = Literal['safetensors', 'diffusers']
+
+GenerationBackend = Literal['native', 'comfy']
+ComfyMode = Literal['external', 'managed']
+ComfyOnError = Literal['fail', 'native', 'skip']
 
 if TYPE_CHECKING:
     from toolkit.guidance import GuidanceType
@@ -52,6 +56,29 @@ class LoggingConfig:
         self.monitor_gpu_stats: bool = kwargs.get('monitor_gpu_stats', True)
         self.monitor_grad_stats: bool = kwargs.get('monitor_grad_stats', True)
 
+
+class ComfyConfig:
+    def __init__(self, **kwargs):
+        self.mode: ComfyMode = kwargs.get('mode', 'external')
+        if self.mode not in ['external', 'managed']:
+            raise ValueError(f"comfy.mode must be 'external' or 'managed', got {self.mode}")
+
+        self.server_url: Optional[str] = kwargs.get('server_url', None)
+        self.managed_install: bool = kwargs.get('managed_install', False)
+        self.root: Optional[str] = kwargs.get('root', None)
+        self.ref: Optional[str] = kwargs.get('ref', None)
+        self.workflow_name: str = kwargs.get('workflow_name', 'auto')
+        self.workflow: Optional[Union[str, Dict[str, Any]]] = kwargs.get('workflow', None)
+        self.bindings: Dict[str, Any] = kwargs.get('bindings', {}) or {}
+        self.on_error: ComfyOnError = kwargs.get('on_error', 'fail')
+        if self.on_error not in ['fail', 'native', 'skip']:
+            raise ValueError(f"comfy.on_error must be 'fail', 'native', or 'skip', got {self.on_error}")
+
+        self.timeout: float = float(kwargs.get('timeout', 900))
+        self.poll_interval: float = float(kwargs.get('poll_interval', 0.5))
+        self.free_memory_after_each: bool = kwargs.get('free_memory_after_each', True)
+        self.offload_training_model: bool = kwargs.get('offload_training_model', False)
+
 class SampleItem:
     def __init__(
         self,
@@ -89,6 +116,10 @@ class SampleItem:
 
 class SampleConfig:
     def __init__(self, **kwargs):
+        self.backend: GenerationBackend = kwargs.get('backend', 'native')
+        if self.backend not in ['native', 'comfy']:
+            raise ValueError(f"sample backend must be 'native' or 'comfy', got {self.backend}")
+        self.comfy = ComfyConfig(**kwargs.get('comfy', {}))
         self.sampler: str = kwargs.get('sampler', 'ddpm')
         self.sample_every: int = kwargs.get('sample_every', 100)
         self.width: int = kwargs.get('width', 512)
@@ -180,6 +211,12 @@ class LoRMConfig:
 NetworkType = Literal['lora', 'locon', 'lorm', 'lokr']
 
 
+def _config_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 class NetworkConfig:
     def __init__(self, **kwargs):
         self.type: NetworkType = kwargs.get('type', 'lora')
@@ -202,7 +239,20 @@ class NetworkConfig:
         if self.type.lower() == 'lokr' and self.dropout:
             # LoKr currently ignores normal dropout; normalize early to avoid per-module warnings.
             self.dropout = None
-        self.network_kwargs: dict = kwargs.get('network_kwargs', {})
+        self.network_kwargs: dict = kwargs.get('network_kwargs', {}) or {}
+
+        def get_lokr_value(name, default=None, *aliases):
+            keys = (name, *aliases)
+            for key in keys:
+                if key in kwargs:
+                    return kwargs[key]
+            for key in keys:
+                if key in self.network_kwargs:
+                    return self.network_kwargs[key]
+            return default
+
+        def get_lokr_bool(name, default=False, *aliases):
+            return _config_bool(get_lokr_value(name, default, *aliases))
 
         self.lorm_config: Union[LoRMConfig, None] = None
         lorm = kwargs.get('lorm', None)
@@ -225,7 +275,35 @@ class NetworkConfig:
             self.conv = 9999999999
             self.conv_alpha = 9999999999
         # -1 automatically finds the largest factor
-        self.lokr_factor = kwargs.get('lokr_factor', -1)
+        self.lokr_factor = get_lokr_value('lokr_factor', -1, 'factor')
+
+        disable_conv_cp = get_lokr_bool('disable_conv_cp', True)
+        self.lokr_use_tucker = (
+            get_lokr_bool('lokr_use_tucker', False, 'use_tucker')
+            or get_lokr_bool('use_cp', False)
+            or get_lokr_bool('use_conv_cp', False)
+            or not disable_conv_cp
+        )
+        self.lokr_use_scalar = get_lokr_bool('lokr_use_scalar', False, 'use_scalar')
+        self.lokr_decompose_both = get_lokr_bool('lokr_decompose_both', False, 'decompose_both')
+        self.lokr_rank_dropout_scale = get_lokr_bool(
+            'lokr_rank_dropout_scale', False, 'rank_dropout_scale'
+        )
+        self.lokr_weight_decompose = get_lokr_bool(
+            'lokr_weight_decompose', False, 'weight_decompose', 'dora_wd'
+        )
+        self.lokr_wd_on_output = get_lokr_bool('lokr_wd_on_output', True, 'wd_on_output')
+        self.lokr_full_matrix = get_lokr_bool('lokr_full_matrix', False, 'full_matrix')
+        self.lokr_bypass_mode = get_lokr_bool('lokr_bypass_mode', False, 'bypass_mode')
+        self.lokr_rs_lora = get_lokr_bool('lokr_rs_lora', False, 'rs_lora')
+        self.lokr_unbalanced_factorization = get_lokr_bool(
+            'lokr_unbalanced_factorization', False, 'unbalanced_factorization'
+        )
+        self.lokr_legacy_factorization = get_lokr_bool(
+            'lokr_legacy_factorization', True, 'legacy_factorization'
+        )
+        if self.lokr_full_rank and self.type.lower() == 'lokr':
+            self.lokr_full_matrix = True
         
         # Use the old lokr format
         self.old_lokr_format = kwargs.get('old_lokr_format', False)
@@ -624,8 +702,47 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ideogram4', 'i1']
 LayerOffloadingBackend = Literal['block', 'legacy']
+
+def _normalize_model_ref(value: Optional[str]) -> str:
+    return str(value or '').strip().replace('\\', '/').lower()
+
+
+def _normalize_arch(value: Optional[str]) -> str:
+    return str(value or '').strip().lower().split(':', 1)[0]
+
+
+def _looks_like_flex_ref(model_ref: str) -> bool:
+    return (
+        '/flex.1' in model_ref
+        or model_ref.startswith('flex.1')
+        or '/flex.2' in model_ref
+        or model_ref.startswith('flex.2')
+    )
+
+
+def get_flux_guidance_bypass_policy(model_config: "ModelConfig") -> str:
+    arch_candidates = {
+        _normalize_arch(getattr(model_config, 'arch_original', None)),
+        _normalize_arch(getattr(model_config, 'arch', None)),
+    }
+    arch_candidates.discard('')
+    model_ref = _normalize_model_ref(getattr(model_config, 'name_or_path', None))
+
+    # Keep model.use_flux_cfg's existing Flux behavior: it trains by bypassing the Flux guidance embedding.
+    if getattr(model_config, 'use_flux_cfg', False) and (
+        getattr(model_config, 'is_flux', False) or bool(arch_candidates & {'flux', 'flux_kontext'})
+    ):
+        return 'required'
+
+    if arch_candidates & {'flex1', 'flex2'} or _looks_like_flex_ref(model_ref):
+        return 'required'
+
+    if arch_candidates:
+        return 'forbidden'
+
+    return 'unspecified'
 
 
 class ModelConfig:
@@ -653,6 +770,13 @@ class ModelConfig:
         self._original_refiner_name_or_path = self.refiner_name_or_path
         self.refiner_start_at = kwargs.get('refiner_start_at', 0.5)
         self.lora_path = kwargs.get('lora_path', None)
+        self.base_lora_path = kwargs.get('base_lora_path', None)
+        if self.base_lora_path == '':
+            self.base_lora_path = None
+        base_lora_strength = kwargs.get('base_lora_strength', 1.0)
+        if base_lora_strength is None:
+            base_lora_strength = 1.0
+        self.base_lora_strength = float(base_lora_strength)
         # mainly for decompression loras for distilled models
         self.assistant_lora_path = kwargs.get('assistant_lora_path', None)
         self.inference_lora_path = kwargs.get('inference_lora_path', None)
@@ -708,6 +832,7 @@ class ModelConfig:
         self.te_name_or_path = kwargs.get("te_name_or_path", None)
         
         self.arch: ModelArch = kwargs.get("arch", None)
+        self.arch_original: Optional[str] = self.arch
         
         # auto memory management, only for some models
         self.auto_memory = kwargs.get("auto_memory", False)
@@ -1428,6 +1553,14 @@ def validate_configs(
         if model_config.use_flux_cfg:
             # bypass the embedding
             train_config.bypass_guidance_embedding = True
+    flux_guidance_bypass_policy = get_flux_guidance_bypass_policy(model_config)
+    if flux_guidance_bypass_policy == 'forbidden' and train_config.bypass_guidance_embedding:
+        raise ValueError(
+            "train.bypass_guidance_embedding must be false for official FLUX.1-dev, "
+            "FLUX.1-schnell, FLUX.1-Kontext, Ideogram 4, and FLUX.2 Klein models. "
+            "This setting is only for Flex-style models or model.use_flux_cfg Flux jobs; "
+            "remove it or set it to false."
+        )
     if train_config.bypass_guidance_embedding and train_config.do_guidance_loss:
         raise ValueError("Cannot bypass guidance embedding and do guidance loss at the same time. "
                          "Please set bypass_guidance_embedding to False or do_guidance_loss to False.")
@@ -1436,6 +1569,16 @@ def validate_configs(
         if model_config.assistant_lora_path is not None:
             raise ValueError("Cannot use accuracy recovery adapter and assistant lora at the same time. "
                              "Please set one of them to None.")
+
+    if model_config.base_lora_path is not None:
+        if model_config.inference_lora_path is not None:
+            raise ValueError(
+                "Cannot use model.base_lora_path and model.inference_lora_path together. "
+                "model.base_lora_path is fused into the frozen training base; "
+                "model.inference_lora_path is sample-time only."
+            )
+        if not math.isfinite(model_config.base_lora_strength):
+            raise ValueError("model.base_lora_strength must be a finite number.")
 
     if (
         network_config is None

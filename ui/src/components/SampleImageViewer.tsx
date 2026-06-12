@@ -3,13 +3,15 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, DialogBackdrop, DialogPanel } from '@headlessui/react';
 import { SampleConfig, SampleItem } from '@/types';
-import { Cog } from 'lucide-react';
+import { Cog, SquareDashed } from 'lucide-react';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
+import classNames from 'classnames';
 import { openConfirm } from './ConfirmModal';
 import { apiClient } from '@/utils/api';
 import { isVideo, isAudio } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
 import { getDisplayPath, getMediaUrl, parseRemoteAssetRef } from '@/utils/media';
+import BoundingBoxOverlay, { parseBoundingBoxes } from './BoundingBoxOverlay';
 
 interface Props {
   imgPath: string | null; // current image path
@@ -31,6 +33,8 @@ export default function SampleImageViewer({
   const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(Boolean(imgPath));
   const [showingControlIdx, setShowingControlIdx] = useState<number | null>(null);
+  const [showBoxes, setShowBoxes] = useState(false);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -46,6 +50,10 @@ export default function SampleImageViewer({
       return () => clearTimeout(t);
     }
   }, [isOpen, imgPath, onChange]);
+
+  useEffect(() => {
+    setImageSize(null);
+  }, [imgPath]);
 
   const onCancel = useCallback(() => {
     setShowingControlIdx(null);
@@ -205,6 +213,18 @@ export default function SampleImageViewer({
     return imgPath;
   }, [showingControlIdx, controlImages, imgPath]);
 
+  const boundingBoxes = useMemo(
+    () => (sampleItem?.prompt ? parseBoundingBoxes(sampleItem.prompt, imageSize ?? undefined) : null),
+    [sampleItem?.prompt, imageSize],
+  );
+  const canShowBoxes = Boolean(
+    boundingBoxes &&
+      showingControlIdx === null &&
+      displayedImgPath &&
+      !isAudio(displayedImgPath) &&
+      !isVideo(displayedImgPath),
+  );
+
   // keyboard events while open
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -272,11 +292,20 @@ export default function SampleImageViewer({
                     controls={true}
                   />
                 ) : (
-                  <img
-                    src={getMediaUrl(displayedImgPath)}
-                    alt="Sample Image"
-                    className="w-auto h-auto max-w-[95vw] max-h-[82vh] object-contain"
-                  />
+                  <div className="relative inline-block leading-[0px]">
+                    <img
+                      src={getMediaUrl(displayedImgPath)}
+                      alt="Sample Image"
+                      className="block w-auto h-auto max-w-[95vw] max-h-[82vh] object-contain"
+                      onLoad={event => {
+                        setImageSize({
+                          width: event.currentTarget.naturalWidth,
+                          height: event.currentTarget.naturalHeight,
+                        });
+                      }}
+                    />
+                    {showBoxes && canShowBoxes && boundingBoxes && <BoundingBoxOverlay boxes={boundingBoxes} />}
+                  </div>
                 ))}
             </div>
             {/* # make full width */}
@@ -329,35 +358,50 @@ export default function SampleImageViewer({
                 </div>
               </div>
             </div>
-            <div className="absolute top-2 right-2 bg-gray-900 rounded-full p-1 leading-[0px] opacity-50 hover:opacity-100 z-20">
-              <Menu>
-                <MenuButton>
-                  <Cog />
-                </MenuButton>
-                <MenuItems
-                  anchor="bottom end"
-                  className="bg-gray-900 border border-gray-700 rounded shadow-lg w-48 px-2 py-2 mt-1 z-50"
+            <div className="absolute top-2 right-2 z-20 flex items-center gap-2">
+              {canShowBoxes && (
+                <button
+                  type="button"
+                  onClick={() => setShowBoxes(value => !value)}
+                  title={showBoxes ? 'Hide bounding boxes' : 'Show bounding boxes'}
+                  className={classNames('rounded-full bg-gray-900 p-1 leading-[0px] hover:opacity-100', {
+                    'text-blue-400 opacity-100': showBoxes,
+                    'opacity-50': !showBoxes,
+                  })}
                 >
-                  {imgPath && isAudio(imgPath) && (
-                    <MenuItem>
-                      <a
-                        className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
-                        href={getMediaUrl(imgPath)}
-                        download={getDisplayPath(imgPath).replace(/^.*[\\/]/, '')}
-                      >
-                        Download
-                      </a>
-                    </MenuItem>
-                  )}
-                  {canDeleteSample && (
-                    <MenuItem>
-                      <div className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded" onClick={handleDelete}>
-                        Delete Sample
-                      </div>
-                    </MenuItem>
-                  )}
-                </MenuItems>
-              </Menu>
+                  <SquareDashed />
+                </button>
+              )}
+              <div className="rounded-full bg-gray-900 p-1 leading-[0px] opacity-50 hover:opacity-100">
+                <Menu>
+                  <MenuButton>
+                    <Cog />
+                  </MenuButton>
+                  <MenuItems
+                    anchor="bottom end"
+                    className="bg-gray-900 border border-gray-700 rounded shadow-lg w-48 px-2 py-2 mt-1 z-50"
+                  >
+                    {imgPath && isAudio(imgPath) && (
+                      <MenuItem>
+                        <a
+                          className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
+                          href={getMediaUrl(imgPath)}
+                          download={getDisplayPath(imgPath).replace(/^.*[\\/]/, '')}
+                        >
+                          Download
+                        </a>
+                      </MenuItem>
+                    )}
+                    {canDeleteSample && (
+                      <MenuItem>
+                        <div className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded" onClick={handleDelete}>
+                          Delete Sample
+                        </div>
+                      </MenuItem>
+                    )}
+                  </MenuItems>
+                </Menu>
+              </div>
             </div>
           </DialogPanel>
         </div>

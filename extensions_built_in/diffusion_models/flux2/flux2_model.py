@@ -9,6 +9,7 @@ from toolkit.memory_management import attach_layer_offloading
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.models.base_model import BaseModel
 from toolkit.basic import flush
+from toolkit.hf_offline import is_hf_offline_mode
 from toolkit.prompt_utils import PromptEmbeds
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
@@ -57,6 +58,7 @@ scheduler_config = {
 }
 
 MISTRAL_PATH = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+FLUX2_TEXT_ENCODER_SUBFOLDER = "text_encoder"
 FLUX2_VAE_FILENAME = "ae.safetensors"
 FLUX2_TRANSFORMER_FILENAME = "flux2-dev.safetensors"
 
@@ -180,40 +182,142 @@ class Flux2Model(BaseModel):
                 f"Failed to save transformer quantized cache: {e}"
             )
 
+    def _looks_like_official_flux2_model_path(self, model_path: str) -> bool:
+        normalized_path = model_path.replace("\\", "/").lower()
+        return "flux.2" in normalized_path and "klein" not in normalized_path
+
+    def _get_mistral_source_candidates(self):
+        candidates = []
+        explicit_te_path = self.model_config.te_name_or_path
+        if explicit_te_path:
+            candidates.append(
+                {
+                    "text_encoder_path": explicit_te_path,
+                    "text_encoder_subfolder": None,
+                    "label": explicit_te_path,
+                    "allow_fallback": False,
+                    "is_fallback": False,
+                }
+            )
+
+        model_path = self.model_config.name_or_path
+        if model_path is not None:
+            local_text_encoder_path = os.path.join(
+                model_path, FLUX2_TEXT_ENCODER_SUBFOLDER
+            )
+            has_local_text_encoder = os.path.isdir(local_text_encoder_path)
+            has_local_model_path = os.path.exists(model_path)
+            should_try_remote_subfolder = (
+                not has_local_model_path
+                and self._looks_like_official_flux2_model_path(model_path)
+            )
+
+            if has_local_text_encoder or should_try_remote_subfolder:
+                candidates.append(
+                    {
+                        "text_encoder_path": model_path,
+                        "text_encoder_subfolder": FLUX2_TEXT_ENCODER_SUBFOLDER,
+                        "label": f"{model_path}/{FLUX2_TEXT_ENCODER_SUBFOLDER}",
+                        "allow_fallback": not has_local_text_encoder,
+                        "is_fallback": False,
+                    }
+                )
+
+        candidates.append(
+            {
+                "text_encoder_path": MISTRAL_PATH,
+                "text_encoder_subfolder": None,
+                "label": MISTRAL_PATH,
+                "allow_fallback": False,
+                "is_fallback": True,
+            }
+        )
+
+        deduped = []
+        seen = set()
+        for candidate in candidates:
+            key = (
+                candidate["text_encoder_path"],
+                candidate["text_encoder_subfolder"],
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(candidate)
+        return deduped
+
+    def _load_mistral_text_encoder(self, source, dtype):
+        text_encoder_kwargs = {
+            "torch_dtype": dtype,
+            "token": HF_TOKEN,
+            "use_safetensors": True,
+        }
+        if source["text_encoder_subfolder"] is not None:
+            text_encoder_kwargs["subfolder"] = source["text_encoder_subfolder"]
+        return Mistral3ForConditionalGeneration.from_pretrained(
+            source["text_encoder_path"],
+            **text_encoder_kwargs,
+        )
+
+    def _load_mistral_processor(self, source):
+        processor_kwargs = {"token": HF_TOKEN}
+        if source["text_encoder_subfolder"] is not None:
+            processor_kwargs["subfolder"] = source["text_encoder_subfolder"]
+        return AutoProcessor.from_pretrained(
+            source["text_encoder_path"],
+            **processor_kwargs,
+        )
+
     def load_te(self):
         dtype = self.torch_dtype
-        self.print_and_status_update("Loading Mistral")
+        source_candidates = self._get_mistral_source_candidates()
+        last_error = None
 
-        text_encoder: Mistral3ForConditionalGeneration = (
-            Mistral3ForConditionalGeneration.from_pretrained(
-                MISTRAL_PATH,
-                torch_dtype=dtype,
-            )
-        )
-        text_encoder.to(self.device_torch, dtype=dtype)
+        for source in source_candidates:
+            text_encoder = None
+            try:
+                self.print_and_status_update(f"Loading Mistral from {source['label']}")
+                text_encoder: Mistral3ForConditionalGeneration = (
+                    self._load_mistral_text_encoder(source, dtype)
+                )
+                text_encoder.to(self.device_torch, dtype=dtype)
 
-        flush()
+                flush()
 
-        if self.model_config.quantize_te:
-            self.print_and_status_update("Quantizing Mistral")
-            quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
-            freeze(text_encoder)
-            flush()
+                if self.model_config.quantize_te:
+                    self.print_and_status_update("Quantizing Mistral")
+                    quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
+                    freeze(text_encoder)
+                    flush()
 
-        if (
-            self.model_config.layer_offloading
-            and self.model_config.layer_offloading_text_encoder_percent > 0
-        ):
-            attach_layer_offloading(
-                self,
-                text_encoder,
-                self.device_torch,
-                offload_percent=self.model_config.layer_offloading_text_encoder_percent,
-                component="text_encoder",
-            )
+                if (
+                    self.model_config.layer_offloading
+                    and self.model_config.layer_offloading_text_encoder_percent > 0
+                ):
+                    attach_layer_offloading(
+                        self,
+                        text_encoder,
+                        self.device_torch,
+                        offload_percent=self.model_config.layer_offloading_text_encoder_percent,
+                        component="text_encoder",
+                    )
 
-        tokenizer = AutoProcessor.from_pretrained(MISTRAL_PATH)
-        return text_encoder, tokenizer
+                tokenizer = self._load_mistral_processor(source)
+                return text_encoder, tokenizer
+            except Exception as e:
+                last_error = e
+                if not source["allow_fallback"]:
+                    raise RuntimeError(
+                        f"Failed to load FLUX.2 text encoder from {source['label']}: {e}"
+                    ) from e
+                self.print_and_status_update(
+                    "Failed to load FLUX.2 text encoder from "
+                    f"{source['label']}; falling back to {MISTRAL_PATH}: {e}"
+                )
+                del text_encoder
+                flush()
+
+        raise RuntimeError("Failed to load FLUX.2 text encoder") from last_error
 
     def load_model(self):
         dtype = self.torch_dtype
@@ -232,11 +336,14 @@ class Flux2Model(BaseModel):
 
         if not os.path.exists(transformer_path):
             # assume it is from the hub
-            transformer_path = huggingface_hub.hf_hub_download(
-                repo_id=model_path,
-                filename=self.flux2_te_filename,
-                token=HF_TOKEN,
-            )
+            download_kwargs = {
+                "repo_id": model_path,
+                "filename": self.flux2_te_filename,
+                "token": HF_TOKEN,
+            }
+            if is_hf_offline_mode():
+                download_kwargs["local_files_only"] = True
+            transformer_path = huggingface_hub.hf_hub_download(**download_kwargs)
 
         loaded_transformer_from_cache = False
         if self.model_config.quantize:
@@ -301,11 +408,14 @@ class Flux2Model(BaseModel):
                     vae_path = "/".join(vae_path.split("/")[:-1])
             p = vae_path if vae_path is not None else model_path
             # assume it is from the hub
-            vae_path = huggingface_hub.hf_hub_download(
-                repo_id=p,
-                filename=vae_filename,
-                token=HF_TOKEN,
-            )
+            download_kwargs = {
+                "repo_id": p,
+                "filename": vae_filename,
+                "token": HF_TOKEN,
+            }
+            if is_hf_offline_mode():
+                download_kwargs["local_files_only"] = True
+            vae_path = huggingface_hub.hf_hub_download(**download_kwargs)
         
         vae_state_dict = load_file(vae_path, device="cpu")
         

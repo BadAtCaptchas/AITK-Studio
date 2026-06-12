@@ -4,6 +4,12 @@ import path from 'path';
 import { webcrypto } from 'crypto';
 import { getDatasetsRoot } from '@/server/settings';
 import {
+  getRandomPromptCaptionExtCandidates,
+  normalizeRandomPromptCaptionExt,
+  parseRandomPromptCaptionText,
+  parseRandomPromptCaptionTextAuto,
+} from '@/server/randomPromptCaptions';
+import {
   getKeyForRequiredDataset,
   isEncryptedDatasetFolder,
   normalizeEncryptedKeyMap,
@@ -61,12 +67,6 @@ function isPathInside(parent: string, child: string) {
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function normalizeCaptionExt(captionExt: unknown) {
-  const raw = typeof captionExt === 'string' && captionExt.trim() ? captionExt.trim() : 'txt';
-  const withDot = raw.startsWith('.') ? raw : `.${raw}`;
-  return /^\.[a-zA-Z0-9_-]+$/.test(withDot) ? withDot : '.txt';
-}
-
 function resolveDatasetPath(folderPath: unknown, datasetsRoot: string) {
   if (typeof folderPath !== 'string' || !folderPath.trim()) return null;
   const resolved = path.isAbsolute(folderPath) ? path.resolve(folderPath) : path.resolve(datasetsRoot, folderPath);
@@ -76,6 +76,16 @@ function resolveDatasetPath(folderPath: unknown, datasetsRoot: string) {
 function captionPathForMedia(mediaPath: string, captionExt: string) {
   const parsed = path.parse(mediaPath);
   return path.join(parsed.dir, `${parsed.name}${captionExt}`);
+}
+
+function findCaptionForMedia(mediaPath: string, captionExt: string) {
+  for (const candidateExt of getRandomPromptCaptionExtCandidates(captionExt)) {
+    const candidatePath = captionPathForMedia(mediaPath, candidateExt);
+    if (fs.existsSync(candidatePath)) {
+      return { path: candidatePath, ext: candidateExt };
+    }
+  }
+  return null;
 }
 
 function considerCandidate(state: RandomPromptState, candidate: RandomPromptCandidate) {
@@ -138,7 +148,7 @@ async function scanEncryptedDatasetFolder(
     let source: RandomPromptCandidate['source'] = 'caption';
 
     if (item.captionObjectPath) {
-      prompt = (await decryptEncryptedCaption(datasetPath, item, keyB64)).trim();
+      prompt = parseRandomPromptCaptionTextAuto(await decryptEncryptedCaption(datasetPath, item, keyB64));
     }
 
     if (!prompt && defaultCaption) {
@@ -182,13 +192,13 @@ function scanDatasetFolder(
     if (!mediaExtensions.includes(path.extname(name).toLowerCase())) continue;
 
     state.scannedMediaCount += 1;
-    const captionPath = captionPathForMedia(itemPath, captionExt);
+    const caption = findCaptionForMedia(itemPath, captionExt);
     let prompt = '';
     let source: RandomPromptCandidate['source'] = 'caption';
-    let selectedCaptionPath: string | undefined = captionPath;
+    let selectedCaptionPath: string | undefined = caption?.path;
 
-    if (fs.existsSync(captionPath)) {
-      prompt = fs.readFileSync(captionPath, 'utf-8').trim();
+    if (caption) {
+      prompt = parseRandomPromptCaptionText(fs.readFileSync(caption.path, 'utf-8'), caption.ext);
     }
 
     if (!prompt && defaultCaption) {
@@ -258,7 +268,7 @@ export async function POST(request: Request) {
       scanDatasetFolder(
         datasetPath,
         datasetPath,
-        normalizeCaptionExt(dataset.captionExt),
+        normalizeRandomPromptCaptionExt(dataset.captionExt),
         typeof dataset.defaultCaption === 'string' ? dataset.defaultCaption.trim() : '',
         state,
       );

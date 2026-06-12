@@ -2,8 +2,11 @@ import base64
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
+from types import ModuleType, SimpleNamespace
+from unittest import mock
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from PIL import Image
@@ -144,6 +147,105 @@ class EncryptedDatasetReaderTest(unittest.TestCase):
 
         self.assertEqual(len(reader.items), 1)
         self.assertEqual(reader.open_image(reader.items[0]).size, (4, 3))
+
+    def make_captioner(self, reader, output_format="ideogram_json", recaption=False):
+        try:
+            from extensions_built_in.captioner.BaseCaptioner import BaseCaptioner
+        except ModuleNotFoundError as exc:
+            if exc.name not in {"torchaudio", "diffusers"}:
+                raise
+            sys.modules.pop("extensions_built_in.captioner.BaseCaptioner", None)
+
+            torchaudio_module = ModuleType("torchaudio")
+            jobs_module = ModuleType("jobs")
+            process_module = ModuleType("jobs.process")
+            process_module.BaseExtensionProcess = type("BaseExtensionProcess", (), {})
+            jobs_module.process = process_module
+            train_tools_module = ModuleType("toolkit.train_tools")
+            train_tools_module.get_torch_dtype = lambda *_args, **_kwargs: None
+            ui_database_module = ModuleType("toolkit.ui_database")
+            ui_database_module.UIJobStore = type(
+                "UIJobStore",
+                (),
+                {
+                    "__init__": lambda self, *_args, **_kwargs: None,
+                    "available": False,
+                },
+            )
+
+            with mock.patch.dict(
+                "sys.modules",
+                {
+                    "torchaudio": torchaudio_module,
+                    "jobs": jobs_module,
+                    "jobs.process": process_module,
+                    "toolkit.train_tools": train_tools_module,
+                    "toolkit.ui_database": ui_database_module,
+                },
+            ):
+                from extensions_built_in.captioner.BaseCaptioner import BaseCaptioner
+
+        captioner = object.__new__(BaseCaptioner)
+        captioner.encrypted_reader = reader
+        captioner.encrypted_items_by_path = {}
+        captioner.file_paths = []
+        captioner.caption_config = SimpleNamespace(
+            extensions=["png"],
+            output_format=output_format,
+            recaption=recaption,
+        )
+        return captioner
+
+    def test_encrypted_json_conversion_includes_existing_text_caption(self):
+        root, key = self.make_dataset()
+        reader = EncryptedDatasetReader(root, key=key)
+        reader.save_caption(reader.items[0], "existing text caption")
+        reader = EncryptedDatasetReader(root, key=key)
+
+        captioner = self.make_captioner(reader, output_format="ideogram_json")
+        captioner.find_files()
+
+        self.assertEqual(len(captioner.file_paths), 1)
+
+    def test_encrypted_text_captioning_skips_existing_caption(self):
+        root, key = self.make_dataset()
+        reader = EncryptedDatasetReader(root, key=key)
+        reader.save_caption(reader.items[0], "existing text caption")
+        reader = EncryptedDatasetReader(root, key=key)
+
+        captioner = self.make_captioner(reader, output_format="text")
+        captioner.find_files()
+
+        self.assertEqual(len(captioner.file_paths), 0)
+
+    def test_encrypted_json_conversion_skips_existing_valid_json_caption(self):
+        root, key = self.make_dataset()
+        reader = EncryptedDatasetReader(root, key=key)
+        reader.save_caption(
+            reader.items[0],
+            json.dumps(
+                {
+                    "high_level_description": "A small generated test image.",
+                    "style_description": {
+                        "aesthetics": "simple",
+                        "lighting": "even studio lighting",
+                        "photo": "minimal product photo",
+                        "medium": "photograph",
+                        "color_palette": ["#0C2238"],
+                    },
+                    "compositional_deconstruction": {
+                        "background": "A plain background.",
+                        "elements": [],
+                    },
+                }
+            ),
+        )
+        reader = EncryptedDatasetReader(root, key=key)
+
+        captioner = self.make_captioner(reader, output_format="ideogram_json")
+        captioner.find_files()
+
+        self.assertEqual(len(captioner.file_paths), 0)
 
 
 if __name__ == "__main__":

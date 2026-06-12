@@ -36,6 +36,17 @@ class SecureRemoteOllamaCaptionerExtension(Extension):
         return SecureRemoteOllamaCaptioner
 
 
+class OpenRouterCaptionerExtension(Extension):
+    uid = "OpenRouterCaptioner"
+    name = "OpenRouter Captioner"
+
+    @classmethod
+    def get_process(cls):
+        from .OpenRouterCaptioner import OpenRouterCaptioner
+
+        return OpenRouterCaptioner
+
+
 class OllamaCaptionerExtension(Extension):
     uid = "OllamaCaptioner"
     name = "Ollama Captioner"
@@ -50,6 +61,7 @@ class OllamaCaptionerExtension(Extension):
 AI_TOOLKIT_EXTENSIONS = [
     AceStepCaptionerExtension,
     OllamaCaptionerExtension,
+    OpenRouterCaptionerExtension,
     Qwen3VLCaptionerExtension,
     SecureRemoteOllamaCaptionerExtension,
 ]

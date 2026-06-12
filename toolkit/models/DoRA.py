@@ -16,7 +16,10 @@ if TYPE_CHECKING:
 # diffusers specific stuff
 LINEAR_MODULES = [
     'Linear',
-    'LoRACompatibleLinear'
+    'LoRACompatibleLinear',
+    'Linear4bit',
+    'Linear8bitLt',
+    'Fp8Linear',
     # 'GroupNorm',
 ]
 CONV_MODULES = [

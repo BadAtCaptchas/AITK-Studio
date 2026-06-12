@@ -46,7 +46,7 @@ import argparse
 from toolkit.job import get_job
 from toolkit.accelerator import get_accelerator
 from toolkit.print import print_acc, setup_log_to_file
-from toolkit.exceptions import JobStopRequested
+from toolkit.exceptions import JobStopRequested, UserFacingError
 
 accelerator = get_accelerator()
 
@@ -162,6 +162,13 @@ def main():
             run_process_error_handler(process, e)
             print_end_message(jobs_completed, jobs_failed, jobs_stopped)
             return
+        except UserFacingError as e:
+            print_acc(f"Error running job: {e}")
+            jobs_failed += 1
+            run_process_error_handler(get_first_process(job), e)
+            if not args.recover:
+                print_end_message(jobs_completed, jobs_failed, jobs_stopped)
+                raise SystemExit(1)
         except Exception as e:
             print_acc(f"Error running job: {e}")
             jobs_failed += 1

@@ -37,7 +37,7 @@ type UseJobMetricsOptions =
       enabled?: boolean;
     };
 
-const DEFAULT_METRIC_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
+const DEFAULT_METRIC_KEYS = ['*'];
 const DEFAULT_MAX_POINTS = 4000;
 const COMPACT_THRESHOLD = 5000;
 
@@ -71,6 +71,10 @@ function normalizeOptions(options: UseJobMetricsOptions | undefined) {
     keys: keys?.length ? keys : DEFAULT_METRIC_KEYS,
     enabled: options?.enabled ?? true,
   };
+}
+
+function isChartMetricKey(key: string) {
+  return !key.startsWith('event/') && !key.startsWith('phase/');
 }
 
 export default function useJobMetrics(
@@ -205,7 +209,7 @@ export default function useJobMetrics(
     return () => clearInterval(interval);
   }, [pollInterval, refreshMetrics]);
 
-  const lossKeys = useMemo(() => keys.filter(key => /loss/i.test(key)).sort(), [keys]);
+  const lossKeys = useMemo(() => keys.filter(isChartMetricKey).sort(), [keys]);
   const eventKeys = useMemo(() => keys.filter(key => key.startsWith('event/')).sort(), [keys]);
 
   return {

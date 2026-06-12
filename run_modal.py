@@ -86,6 +86,7 @@ if os.environ.get("DEBUG_TOOLKIT", "0") == "1":
 
 import argparse
 from toolkit.job import get_job
+from toolkit.exceptions import UserFacingError
 
 def print_end_message(jobs_completed, jobs_failed):
     failure_string = f"{jobs_failed} failure{'' if jobs_failed == 1 else 's'}" if jobs_failed > 0 else ""
@@ -133,6 +134,12 @@ def main(config_file_list_str: str, recover: bool = False, name: str = None):
             
             job.cleanup()
             jobs_completed += 1
+        except UserFacingError as e:
+            print(f"Error running job: {e}")
+            jobs_failed += 1
+            if not recover:
+                print_end_message(jobs_completed, jobs_failed)
+                raise SystemExit(1)
         except Exception as e:
             print(f"Error running job: {e}")
             jobs_failed += 1

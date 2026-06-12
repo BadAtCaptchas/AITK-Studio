@@ -3,6 +3,8 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import yauzl from 'yauzl';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { isMac } from '@/helpers/basic';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import { TOOLKIT_ROOT } from '@/paths';
@@ -20,6 +22,14 @@ import {
   validateArchiveEntryName,
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
+import {
+  archiveUploadMode,
+  assembleArchiveUploadChunks,
+  cleanupOldArchiveUploadChunks,
+  readArchiveUploadChunksTotal,
+  readArchiveUploadID,
+  saveArchiveUploadChunk,
+} from '@/server/archiveUploadChunks';
 import { db } from '@/server/db';
 
 export const runtime = 'nodejs';
@@ -146,26 +156,76 @@ async function copyArchivePath(sourcePath: string, targetPath: string) {
   await fsp.cp(sourcePath, targetPath, { recursive: true, force: false, errorOnExist: true });
 }
 
+function isMultipartRequest(request: NextRequest) {
+  return (request.headers.get('content-type') || '').toLowerCase().includes('multipart/form-data');
+}
+
+async function saveJobArchiveUpload(request: NextRequest, uploadPath: string) {
+  const url = new URL(request.url);
+  let gpuIdsRaw: FormDataEntryValue | string | null =
+    url.searchParams.get('gpu_ids') || request.headers.get('x-aitk-gpu-ids');
+
+  await fsp.mkdir(path.dirname(uploadPath), { recursive: true });
+
+  if (isMultipartRequest(request)) {
+    const formData = await request.formData();
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
+      throw new Error('file is required');
+    }
+    gpuIdsRaw = formData.get('gpu_ids') || gpuIdsRaw;
+    await fsp.writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
+    return gpuIdsRaw;
+  }
+
+  if (!request.body) {
+    throw new Error('file is required');
+  }
+
+  await pipeline(
+    Readable.fromWeb(request.body as any),
+    fs.createWriteStream(uploadPath),
+  );
+  return gpuIdsRaw;
+}
+
 export async function POST(request: NextRequest) {
   const trainingRoot = await getTrainingFolder();
   const datasetsRoot = await getDatasetsRoot();
   await fsp.mkdir(trainingRoot, { recursive: true });
   await fsp.mkdir(datasetsRoot, { recursive: true });
 
-  const importId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const workRoot = path.join(trainingRoot, `.aitk-import-${importId}`);
-  const uploadPath = path.join(workRoot, 'upload.zip');
-  const extractRoot = path.join(workRoot, 'extract');
+  const chunkUploadRoot = path.join(trainingRoot, '.aitk-job-import-chunks');
+  const uploadMode = archiveUploadMode(request);
+  if (uploadMode === 'chunk') {
+    try {
+      await cleanupOldArchiveUploadChunks(chunkUploadRoot);
+      return NextResponse.json(await saveArchiveUploadChunk(request, chunkUploadRoot));
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Failed to upload job archive chunk' },
+        { status: 400 },
+      );
+    }
+  }
+
+  let workRoot: string | null = null;
 
   try {
-    const formData = await request.formData();
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'file is required' }, { status: 400 });
+    const importId = uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    workRoot =
+      uploadMode === 'complete'
+        ? path.join(chunkUploadRoot, importId)
+        : path.join(trainingRoot, `.aitk-import-${importId}`);
+    const uploadPath = path.join(workRoot, 'upload.zip');
+    const extractRoot = path.join(workRoot, 'extract');
+    const requestedGpuIds =
+      uploadMode === 'complete'
+        ? request.nextUrl.searchParams.get('gpu_ids') || request.headers.get('x-aitk-gpu-ids')
+        : await saveJobArchiveUpload(request, uploadPath);
+    if (uploadMode === 'complete') {
+      await assembleArchiveUploadChunks(chunkUploadRoot, importId, readArchiveUploadChunksTotal(request), uploadPath);
     }
-
-    await fsp.mkdir(workRoot, { recursive: true });
-    await fsp.writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
     await extractZipSafely(uploadPath, extractRoot);
 
     const manifest = await readJsonFile<TrainingJobExportManifest>(path.join(extractRoot, 'manifest.json'));
@@ -221,7 +281,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const requestedGpuIds = formData.get('gpu_ids');
     let gpuIds = typeof requestedGpuIds === 'string' && requestedGpuIds.trim() ? requestedGpuIds : sourceJob?.gpu_ids || '0';
     if (isMac()) {
       gpuIds = 'mps';
@@ -269,9 +328,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ job, warnings });
   } catch (error) {
     console.error('Training job import failed:', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to import training job' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to import training job';
+    const status = message === 'file is required' || message.startsWith('Invalid archive upload') ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   } finally {
-    if (fs.existsSync(workRoot)) {
+    if (workRoot && fs.existsSync(workRoot)) {
       await fsp.rm(workRoot, { recursive: true, force: true });
     }
   }

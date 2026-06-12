@@ -1,8 +1,17 @@
 import path from 'path';
 import fs from 'fs/promises';
+import { createReadStream, existsSync } from 'fs';
+import { randomUUID } from 'crypto';
+import { Readable } from 'stream';
 import { db, type WorkerNodeRecord } from './db';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
 import { getJobRemoteCaptionState } from './remoteCaptionJobs';
+import {
+  collectDatasetReferences,
+  collectSameWorkerRemoteDatasetReferences,
+  isRemoteReference,
+  resolveConfigPath,
+} from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
 
 export class RemoteClientError extends Error {
@@ -15,6 +24,29 @@ export class RemoteClientError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+export const REMOTE_JOB_MISSING_MESSAGE =
+  'Remote job was not found on the worker. It may have been deleted there while the central UI was offline.';
+
+type RemoteDiscoveryErrorLogState = {
+  signature: string;
+  lastLoggedAt: number;
+  suppressedCount: number;
+};
+
+const REMOTE_DISCOVERY_ERROR_LOG_INTERVAL_MS = 5 * 60 * 1000;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __remoteDiscoveryErrorLogState: Map<string, RemoteDiscoveryErrorLogState> | undefined;
+}
+
+const remoteDiscoveryErrorLogState =
+  globalThis.__remoteDiscoveryErrorLogState ?? new Map<string, RemoteDiscoveryErrorLogState>();
+
+if (!globalThis.__remoteDiscoveryErrorLogState) {
+  globalThis.__remoteDiscoveryErrorLogState = remoteDiscoveryErrorLogState;
 }
 
 export function isLocalWorker(workerId: string | null | undefined) {
@@ -105,6 +137,32 @@ async function fetchWorkerJob(worker: WorkerNodeRecord, remoteJobId: string) {
   return remoteJson<Job | null>(worker, `/api/jobs?id=${encodeURIComponent(remoteJobId)}`);
 }
 
+export function isRemoteJobMissingError(error: unknown) {
+  return (
+    error instanceof RemoteClientError &&
+    error.status === 404 &&
+    (/job not found/i.test(error.body) || /job not found/i.test(error.message))
+  );
+}
+
+export function remoteJobMissingUpdate() {
+  return {
+    remote_job_id: null,
+    status: 'error',
+    stop: false,
+    return_to_queue: false,
+    pid: null,
+    speed_string: '',
+    info: 'Remote job was deleted on the worker.',
+    remote_error: REMOTE_JOB_MISSING_MESSAGE,
+    remote_sync_at: new Date(),
+  };
+}
+
+export async function markRemoteJobMissing(localJob: Job) {
+  return db.jobs.update(localJob.id, remoteJobMissingUpdate());
+}
+
 export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string | null) {
   const query = jobType ? `?job_type=${encodeURIComponent(jobType)}` : '';
   return remoteJson<{ jobs: Job[] }>(worker, `/api/jobs${query}`);
@@ -138,6 +196,10 @@ function remoteJobPatch(
     remote_error: null,
   };
 
+  if (existingLocalJob && shouldPreserveLocalJobConfig(existingLocalJob, workerId)) {
+    patch.job_config = existingLocalJob.job_config;
+  }
+
   if (existingLocalJob && getJobRemoteCaptionState(existingLocalJob)) {
     patch.name = existingLocalJob.name;
     patch.job_config = existingLocalJob.job_config;
@@ -145,6 +207,19 @@ function remoteJobPatch(
   }
 
   return patch;
+}
+
+function shouldPreserveLocalJobConfig(existingLocalJob: Job, workerId: string) {
+  try {
+    const jobConfig = JSON.parse(existingLocalJob.job_config);
+    if (collectSameWorkerRemoteDatasetReferences(jobConfig, workerId).length > 0) return true;
+    return collectDatasetReferences(jobConfig).some(ref => {
+      if (isRemoteReference(ref.value)) return false;
+      return existsSync(resolveConfigPath(ref.value));
+    });
+  } catch {
+    return false;
+  }
 }
 
 async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job, localJobId?: string) {
@@ -205,10 +280,7 @@ export async function syncRemoteJob(localJob: Job) {
     const worker = await getRemoteWorker(localJob.worker_id);
     const remoteJob = await fetchWorkerJob(worker, localJob.remote_job_id);
     if (!remoteJob) {
-      return db.jobs.update(localJob.id, {
-        remote_error: 'Remote job was not found on the worker.',
-        remote_sync_at: new Date(),
-      });
+      return markRemoteJobMissing(localJob);
     }
 
     const latestLocalJob = await db.jobs.findById(localJob.id);
@@ -225,6 +297,9 @@ export async function syncRemoteJob(localJob: Job) {
     }
     return synced;
   } catch (error) {
+    if (isRemoteJobMissingError(error)) {
+      return markRemoteJobMissing(localJob);
+    }
     return db.jobs.update(localJob.id, {
       remote_sync_at: new Date(),
       remote_error: error instanceof Error ? error.message : 'Remote sync failed',
@@ -234,6 +309,57 @@ export async function syncRemoteJob(localJob: Job) {
 
 export async function syncRemoteJobs(jobs: Job[], alreadySyncedJobIds = new Set<string>()) {
   return Promise.all(jobs.map(job => (alreadySyncedJobIds.has(job.id) ? job : syncRemoteJob(job))));
+}
+
+function remoteDiscoveryErrorMessage(workerName: string, error: unknown) {
+  if (error instanceof RemoteClientError) {
+    const cloudflareTunnelUnavailable =
+      error.status === 530 &&
+      (/Cloudflare Tunnel error/i.test(error.body) || /Error<\/span>\s*<span>1033<\/span>/i.test(error.body));
+    const detail = cloudflareTunnelUnavailable ? 'Cloudflare tunnel is unavailable' : error.message;
+    return `Failed to discover jobs for worker ${workerName}: ${detail}`;
+  }
+  return `Failed to discover jobs for worker ${workerName}: ${
+    error instanceof Error ? error.message : 'Remote worker discovery failed'
+  }`;
+}
+
+function logRemoteDiscoveryError(workerId: string, workerName: string, error: unknown) {
+  const message = remoteDiscoveryErrorMessage(workerName, error);
+  const signature = error instanceof RemoteClientError ? `${error.status}:${message}` : message;
+  const now = Date.now();
+  const state = remoteDiscoveryErrorLogState.get(workerId);
+
+  if (
+    !state ||
+    state.signature !== signature ||
+    now - state.lastLoggedAt >= REMOTE_DISCOVERY_ERROR_LOG_INTERVAL_MS
+  ) {
+    const suffix = state?.suppressedCount
+      ? ` (${state.suppressedCount} repeated discovery error${state.suppressedCount === 1 ? '' : 's'} suppressed)`
+      : '';
+    console.warn(`${message}${suffix}`);
+    remoteDiscoveryErrorLogState.set(workerId, {
+      signature,
+      lastLoggedAt: now,
+      suppressedCount: 0,
+    });
+    return;
+  }
+
+  state.suppressedCount += 1;
+}
+
+function clearRemoteDiscoveryErrorLog(workerId: string) {
+  const state = remoteDiscoveryErrorLogState.get(workerId);
+  if (state?.suppressedCount) {
+    console.info(
+      `Remote worker discovery recovered for ${workerId} (${state.suppressedCount} repeated discovery error${
+        state.suppressedCount === 1 ? '' : 's'
+      } suppressed)`,
+    );
+  }
+  remoteDiscoveryErrorLogState.delete(workerId);
 }
 
 export async function discoverRemoteJobs(jobType?: string | null) {
@@ -248,24 +374,190 @@ export async function discoverRemoteJobs(jobType?: string | null) {
           (data.jobs || []).map(remoteJob => upsertRemoteJobMirror(worker, remoteJob)),
         );
         syncedJobs.forEach(job => syncedJobIds.add(job.id));
+        clearRemoteDiscoveryErrorLog(workerRecord.id);
       } catch (error) {
-        console.error(`Failed to discover jobs for worker ${workerRecord.name}:`, error);
+        logRemoteDiscoveryError(workerRecord.id, workerRecord.name, error);
       }
     }),
   );
   return syncedJobIds;
 }
 
-export async function uploadBundleToWorker(worker: WorkerNodeRecord, zipPath: string, gpuIds: string) {
-  const form = new FormData();
-  const buffer = await fs.readFile(zipPath);
-  const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
-  form.append('file', blob, path.basename(zipPath));
-  form.append('gpu_ids', gpuIds);
-  return remoteJson<{ job: Job; warnings: string[] }>(worker, '/api/jobs/import', {
+type FileUploadProgress = {
+  loaded: number;
+  total: number;
+};
+
+type RemoteArchiveImportStatus<T> = {
+  uploadID: string;
+  status: 'importing' | 'completed' | 'failed';
+  result: T | null;
+  error: string | null;
+};
+
+const DEFAULT_REMOTE_ARCHIVE_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+
+function appendQueryParam(routePath: string, name: string, value?: string | null) {
+  if (value == null || value === '') return routePath;
+  const separator = routePath.includes('?') ? '&' : '?';
+  return `${routePath}${separator}${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
+}
+
+function appendQueryParams(routePath: string, params: Record<string, string | number | undefined | null>) {
+  return Object.entries(params).reduce(
+    (nextPath, [name, value]) => appendQueryParam(nextPath, name, value == null ? null : String(value)),
+    routePath,
+  );
+}
+
+function remoteArchiveUploadChunkBytes() {
+  const configured = Number(process.env.AITK_REMOTE_UPLOAD_CHUNK_MB || '');
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(256 * 1024, Math.floor(configured * 1024 * 1024));
+  }
+  return DEFAULT_REMOTE_ARCHIVE_UPLOAD_CHUNK_BYTES;
+}
+
+function isRemoteArchiveImportStatus<T>(value: unknown): value is RemoteArchiveImportStatus<T> {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    'uploadID' in value &&
+    'status' in value &&
+    ((value as { status?: unknown }).status === 'importing' ||
+      (value as { status?: unknown }).status === 'completed' ||
+      (value as { status?: unknown }).status === 'failed')
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForRemoteArchiveImport<T>(worker: WorkerNodeRecord, routePath: string, uploadID: string) {
+  let firstPoll = true;
+  while (true) {
+    if (firstPoll) {
+      firstPoll = false;
+    } else {
+      await sleep(1000);
+    }
+    const status = await remoteJson<RemoteArchiveImportStatus<T>>(
+      worker,
+      appendQueryParams(routePath, {
+        aitk_upload: 'status',
+        uploadID,
+      }),
+    );
+    if (status.status === 'completed') {
+      if (status.result == null) {
+        throw new Error('Remote archive import completed without a result.');
+      }
+      return status.result;
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error || 'Remote archive import failed.');
+    }
+  }
+}
+
+async function remoteZipFileJson<T>(
+  worker: WorkerNodeRecord,
+  routePath: string,
+  options: {
+    filePath: string;
+    fileName?: string;
+    onProgress?: (progress: FileUploadProgress) => void;
+    backgroundComplete?: boolean;
+  },
+) {
+  const fileStat = await fs.stat(options.filePath);
+  const fileName = options.fileName || path.basename(options.filePath);
+  let uploadedFileBytes = 0;
+  const reportProgress = () => {
+    options.onProgress?.({
+      loaded: Math.min(uploadedFileBytes, fileStat.size),
+      total: fileStat.size,
+    });
+  };
+
+  const uploadID = randomUUID();
+  const chunkBytes = remoteArchiveUploadChunkBytes();
+  const chunksTotal = Math.max(1, Math.ceil(fileStat.size / chunkBytes));
+  reportProgress();
+
+  for (let chunkIndex = 0; chunkIndex < chunksTotal; chunkIndex += 1) {
+    const start = chunkIndex * chunkBytes;
+    const end = Math.min(fileStat.size, start + chunkBytes) - 1;
+    const chunkSize = Math.max(0, end - start + 1);
+    const body =
+      chunkSize > 0
+        ? Readable.toWeb(createReadStream(options.filePath, { start, end })) as unknown as BodyInit
+        : Readable.toWeb(Readable.from([Buffer.alloc(0)])) as unknown as BodyInit;
+
+    await remoteJson(worker, appendQueryParams(routePath, {
+      aitk_upload: 'chunk',
+      uploadID,
+      chunkIndex,
+      chunksTotal,
+    }), {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(chunkSize),
+        'X-AITK-File-Name': fileName,
+      },
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+
+    uploadedFileBytes = Math.min(fileStat.size, uploadedFileBytes + chunkSize);
+    reportProgress();
+  }
+
+  const completeResult = await remoteJson<T | RemoteArchiveImportStatus<T>>(worker, appendQueryParams(routePath, {
+    aitk_upload: 'complete',
+    uploadID,
+    chunksTotal,
+    background: options.backgroundComplete ? '1' : null,
+  }), {
     method: 'POST',
-    body: form,
+    headers: {
+      'X-AITK-File-Name': fileName,
+    },
   });
+
+  if (options.backgroundComplete && isRemoteArchiveImportStatus<T>(completeResult)) {
+    if (completeResult.status === 'completed') {
+      if (completeResult.result == null) {
+        throw new Error('Remote archive import completed without a result.');
+      }
+      return completeResult.result;
+    }
+    if (completeResult.status === 'failed') {
+      throw new Error(completeResult.error || 'Remote archive import failed.');
+    }
+    return waitForRemoteArchiveImport<T>(worker, routePath, uploadID);
+  }
+
+  return completeResult as T;
+}
+
+export async function uploadBundleToWorker(
+  worker: WorkerNodeRecord,
+  zipPath: string,
+  gpuIds: string,
+  onProgress?: (progress: FileUploadProgress) => void,
+) {
+  return remoteZipFileJson<{ job: Job; warnings: string[] }>(
+    worker,
+    appendQueryParam('/api/jobs/import', 'gpu_ids', gpuIds),
+    {
+    filePath: zipPath,
+    fileName: path.basename(zipPath),
+    onProgress,
+    },
+  );
 }
 
 export async function fetchWorkerHealth(worker: WorkerNodeRecord) {
@@ -282,20 +574,22 @@ export async function uploadDatasetArchiveToWorker(
   worker: WorkerNodeRecord,
   zipPath: string,
   preferredName?: string,
+  onProgress?: (progress: FileUploadProgress) => void,
 ) {
-  const form = new FormData();
-  const buffer = await fs.readFile(zipPath);
-  const blob = new Blob([new Uint8Array(buffer)], { type: 'application/zip' });
-  form.append('file', blob, path.basename(zipPath));
-  if (preferredName) form.append('preferredName', preferredName);
-  return remoteJson<{
+  return remoteZipFileJson<{
     dataset: { name: string; encrypted: boolean; path?: string };
     path: string;
     renamed: boolean;
-  }>(worker, '/api/datasets/import-archive', {
-    method: 'POST',
-    body: form,
-  });
+  }>(
+    worker,
+    appendQueryParam('/api/datasets/import-archive', 'preferredName', preferredName),
+    {
+      filePath: zipPath,
+      fileName: path.basename(zipPath),
+      onProgress,
+      backgroundComplete: true,
+    },
+  );
 }
 
 export async function fetchWorkerGpu(worker: WorkerNodeRecord) {

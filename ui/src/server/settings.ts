@@ -53,6 +53,21 @@ export const getHFToken = async () => {
   return token;
 };
 
+export const getOpenRouterApiKey = async () => {
+  const key = 'OPENROUTER_API_KEY';
+  let token = myCache.get(key) as string;
+  if (token) {
+    return token;
+  }
+  let row = await db.settings.get(key);
+  token = process.env.OPENROUTER_API_KEY?.trim() || process.env.AITK_OPENROUTER_API_KEY?.trim() || '';
+  if (row?.value && row.value !== '') {
+    token = row.value;
+  }
+  myCache.set(key, token);
+  return token;
+};
+
 export const getDataRoot = async () => {
   const key = 'DATA_ROOT';
   let dataRoot = myCache.get(key) as string;

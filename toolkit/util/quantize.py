@@ -181,9 +181,7 @@ def quantize_model(
         first_key = list(lora_state_dict.keys())[0]
         first_weight = lora_state_dict[first_key]
         # if it starts with lycoris and includes lokr
-        if first_key.startswith("lycoris") and any(
-            "lokr" in key for key in lora_state_dict.keys()
-        ):
+        if any("lokr" in key.lower() for key in lora_state_dict.keys()):
             network_config["type"] = "lokr"
         
         network_kwargs = {}
@@ -210,13 +208,32 @@ def quantize_model(
         elif network_config["type"] == "lokr":
             # find the factor
             largest_factor = 0
+            inferred_rank = None
+            lowered_keys = [key.lower() for key in lora_state_dict.keys()]
+            has_w1_a = any("lokr_w1_a" in key for key in lowered_keys)
+            has_w2_a = any("lokr_w2_a" in key for key in lowered_keys)
+            has_tucker = any("lokr_t2" in key for key in lowered_keys)
+            has_dora_scale = any("dora_scale" in key for key in lowered_keys)
             for key, value in lora_state_dict.items():
                 if "lokr_w1" in key:
                     factor = int(value.shape[0])
                     if factor > largest_factor:
                         largest_factor = factor
-            network_config["lokr_full_rank"] = True
+                if inferred_rank is None and "lokr_w1_a" in key:
+                    inferred_rank = int(value.shape[1])
+                if inferred_rank is None and "lokr_w2_a" in key:
+                    inferred_rank = int(value.shape[0] if has_tucker else value.shape[1])
+            if inferred_rank is None:
+                network_config["lokr_full_rank"] = True
+            else:
+                network_config["linear"] = inferred_rank
+                network_config["linear_alpha"] = inferred_rank
+                network_config["lokr_full_matrix"] = not has_w1_a and not has_w2_a
             network_config["lokr_factor"] = largest_factor
+            network_config["lokr_use_tucker"] = has_tucker
+            network_config["lokr_decompose_both"] = has_w1_a
+            network_config["lokr_weight_decompose"] = has_dora_scale
+            network_config["lokr_legacy_factorization"] = True
 
             only_if_contains = []
             for key in lora_state_dict.keys():
@@ -299,7 +316,10 @@ def quantize_model(
         for name in transformer_block_names:
             block_list = getattr(model_to_quantize, name, None)
             if block_list is not None:
-                all_blocks += list(block_list)
+                if isinstance(block_list, (list, tuple, torch.nn.ModuleList, torch.nn.Sequential)):
+                    all_blocks += list(block_list)
+                elif isinstance(block_list, torch.nn.Module):
+                    all_blocks.append(block_list)
         base_model.print_and_status_update(
             f" - quantizing {len(all_blocks)} transformer blocks"
         )

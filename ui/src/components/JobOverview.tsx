@@ -17,7 +17,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import useJobLog from '@/hooks/useJobLog';
 import useJobMetrics from '@/hooks/useJobMetrics';
 import useJobDownloadProgress from '@/hooks/useJobDownloadProgress';
+import useJobComfyInstallProgress from '@/hooks/useJobComfyInstallProgress';
 import { HFDownloadProgressBand } from '@/components/HFDownloadProgress';
+import { ComfyInstallProgressBand } from '@/components/ComfyInstallProgress';
 import { PageNotice, ProgressBar, StatusBadge } from '@/components/OperatorPrimitives';
 
 interface JobOverviewProps {
@@ -106,6 +108,11 @@ export default function JobOverview({ job }: JobOverviewProps) {
   const { progress: hfDownloadProgress } = useJobDownloadProgress(
     job.id,
     job.hf_download_progress || null,
+    downloadPollInterval,
+  );
+  const { progress: comfyInstallProgress } = useJobComfyInstallProgress(
+    job.id,
+    job.comfy_install_progress || null,
     downloadPollInterval,
   );
   const logRef = useRef<HTMLDivElement>(null);
@@ -199,6 +206,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
         </div>
 
         <div className="flex flex-grow flex-col space-y-4 p-3">
+          <ComfyInstallProgressBand progress={comfyInstallProgress} />
           <HFDownloadProgressBand progress={hfDownloadProgress} />
           {job.remote_error && (
             <PageNotice tone="warning" title="Remote worker reported a problem">

@@ -17,12 +17,14 @@ import CaptionSimpleJob from '@/components/CaptionSimpleJob';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import { SelectInput } from '@/components/formInputs';
 import { Loader2 } from 'lucide-react';
+import { defaultIdeogramJsonCaptionPrompt } from '@/helpers/captionOptions';
 
 export interface CaptionDatasetModalState {
   datasetPath: string;
   jobId?: string | null;
   cloneId?: string | null;
   encryptedDatasetKeyB64?: string | null;
+  preset?: 'ideogram_json' | null;
   onClose?: () => void;
 }
 
@@ -31,7 +33,12 @@ export const captionDatasetModalState = createGlobalState<CaptionDatasetModalSta
 export const openCaptionDatasetModal = (
   datasetPath: string,
   onClose?: () => void,
-  options?: { jobId?: string | null; cloneId?: string | null; encryptedDatasetKeyB64?: string | null },
+  options?: {
+    jobId?: string | null;
+    cloneId?: string | null;
+    encryptedDatasetKeyB64?: string | null;
+    preset?: 'ideogram_json' | null;
+  },
 ) => {
   captionDatasetModalState.set({
     datasetPath,
@@ -39,6 +46,7 @@ export const openCaptionDatasetModal = (
     jobId: options?.jobId ?? null,
     cloneId: options?.cloneId ?? null,
     encryptedDatasetKeyB64: options?.encryptedDatasetKeyB64 ?? null,
+    preset: options?.preset ?? null,
   });
 };
 
@@ -67,6 +75,15 @@ export const CaptionDatasetModal: React.FC = () => {
     // set the path_to_caption
     if (modalInfo?.datasetPath) {
       setJobConfig(modalInfo.datasetPath, 'config.process[0].caption.path_to_caption');
+    }
+    if (modalInfo?.preset === 'ideogram_json') {
+      setJobConfig('ideogram_json', 'config.process[0].caption.output_format');
+      setJobConfig(defaultIdeogramJsonCaptionPrompt, 'config.process[0].caption.caption_prompt');
+      setJobConfig('json', 'config.process[0].caption.caption_extension');
+      setJobConfig('txt', 'config.process[0].caption.source_caption_extension');
+      setJobConfig('copy', 'config.process[0].caption.convert_destination');
+      setJobConfig(1024, 'config.process[0].caption.max_res');
+      setJobConfig(2048, 'config.process[0].caption.max_new_tokens');
     }
   }, [modalInfo]);
 
@@ -125,26 +142,59 @@ export const CaptionDatasetModal: React.FC = () => {
       alert('Dataset path is missing. Please try again.');
       return;
     }
+    if (jobConfig.config.process[0].type === 'OpenRouterCaptioner' && modalInfo.encryptedDatasetKeyB64) {
+      alert('OpenRouter captioning is not supported for encrypted datasets. Caption an unencrypted copy, then encrypt it afterward if needed.');
+      return;
+    }
     isSavingRef.current = true;
     setIsSaving(true);
 
     const isEdit = !!modalInfo.jobId;
+    const jobConfigToSave = objectCopy(jobConfig);
+    let jobRef = modalInfo.datasetPath;
+
+    try {
+      const captionConfig = jobConfigToSave.config.process[0].caption;
+      const outputFormat = captionConfig.output_format || 'text';
+      const shouldCopyDataset =
+        (outputFormat === 'ideogram_json' || outputFormat === 'json') &&
+        captionConfig.convert_destination === 'copy' &&
+        !isEdit;
+      if (shouldCopyDataset) {
+        const copied = await apiClient
+          .post('/api/datasets/copy', {
+            datasetPath: modalInfo.datasetPath,
+            suffix: 'json_captions',
+          })
+          .then(res => res.data);
+        if (!copied?.path) {
+          throw new Error('Dataset copy failed');
+        }
+        captionConfig.path_to_caption = copied.path;
+        jobRef = copied.path;
+      }
+    } catch (error: any) {
+      alert(error?.response?.data?.error || error?.message || 'Failed to prepare caption dataset.');
+      isSavingRef.current = false;
+      setIsSaving(false);
+      return;
+    }
 
     apiClient
       .post('/api/jobs', {
         id: isEdit ? modalInfo.jobId : null,
         name: isEdit && existingJobName ? existingJobName : uuidv4(),
         gpu_ids: gpuIDs,
-        job_config: jobConfig,
+        job_config: jobConfigToSave,
         job_type: 'caption',
-        job_ref: modalInfo.datasetPath,
+        job_ref: jobRef,
       })
       .then(async res => {
         const jobId = res.data.id;
         await startJob(
           jobId,
           modalInfo.encryptedDatasetKeyB64
-            ? [{ datasetPath: modalInfo.datasetPath, keyB64: modalInfo.encryptedDatasetKeyB64 }]
+            ? [{ datasetPath: jobRef, keyB64: modalInfo.encryptedDatasetKeyB64 }]
             : undefined,
           { durableEncryptedDatasetKeys: allowDurableEncryptedResume },
         );
@@ -209,6 +259,8 @@ export const CaptionDatasetModal: React.FC = () => {
             <CaptionSimpleJob
               jobConfig={jobConfig}
               setJobConfig={setJobConfig}
+              datasetPath={modalInfo?.datasetPath || ''}
+              encryptedDatasetKeyB64={modalInfo?.encryptedDatasetKeyB64}
               gpuIDs={gpuIDs}
               setGpuIDs={setGpuIDs}
               gpuList={gpuList}

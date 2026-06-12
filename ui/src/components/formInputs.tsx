@@ -13,6 +13,7 @@ const Select = dynamic(() => import('react-select'), { ssr: false });
 const labelClasses = 'block text-xs mb-1 mt-2 text-gray-300';
 const inputClasses =
   'w-full text-sm px-3 py-1 bg-gray-950 dark:bg-gray-800 border border-gray-700 rounded-sm text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-gray-600 focus:border-transparent';
+const getDocTooltip = (doc: ConfigDoc) => doc.tooltip || (typeof doc.title === 'string' ? doc.title : 'Open help');
 
 export interface InputProps {
   label?: string;
@@ -42,7 +43,11 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>((props: Te
         <label className={labelClasses}>
           {label}{' '}
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}
@@ -86,7 +91,11 @@ export const TextAreaInput = forwardRef<HTMLTextAreaElement, TextAreaInputProps>
         <label className={labelClasses}>
           {label}{' '}
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}
@@ -138,7 +147,11 @@ export const NumberInput = (props: NumberInputProps) => {
         <label className={labelClasses}>
           {label}{' '}
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}
@@ -221,7 +234,11 @@ export const SelectInput = (props: SelectInputProps) => {
         <label className={labelClasses}>
           {label}{' '}
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}
@@ -233,6 +250,8 @@ export const SelectInput = (props: SelectInputProps) => {
         isDisabled={props.disabled}
         className="aitk-react-select-container"
         classNamePrefix="aitk-react-select"
+        menuPosition="fixed"
+        menuPlacement="auto"
         onChange={selected => {
           if (selected) {
             onChange((selected as { value: string }).value);
@@ -300,7 +319,11 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
         <label className={labelClasses}>
           {label}{' '}
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}
@@ -407,7 +430,11 @@ export const Checkbox = (props: CheckboxProps) => {
             {label}
           </label>
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}
@@ -437,7 +464,11 @@ export const FormGroup: React.FC<FormGroupProps> = props => {
         <label className={classNames(labelClasses, 'mb-2')}>
           {label}{' '}
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}
@@ -537,7 +568,11 @@ export const SliderInput: React.FC<SliderInputProps> = props => {
         <label className={labelClasses}>
           {label}{' '}
           {doc && (
-            <div className="inline-block ml-1 text-xs text-gray-500 cursor-pointer" onClick={() => openDoc(doc)}>
+            <div
+              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+              title={getDocTooltip(doc)}
+              onClick={() => openDoc(doc)}
+            >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
             </div>
           )}

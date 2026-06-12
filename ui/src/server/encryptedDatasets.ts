@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { TOOLKIT_ROOT } from '../paths';
 import type { DatasetSummary, EncryptedDatasetManifest, EncryptedDatasetStartKey } from '../types';
+import { DATASET_CAPTION_SIDECAR_EXTENSIONS } from './captionFiles';
 
 export const ENCRYPTED_DATASET_MANIFEST = '.aitk_encrypted_dataset.json';
 const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
@@ -23,9 +24,120 @@ const DATASET_CONFIG_FIELDS = [
   'clip_image_path',
 ];
 
+const DATASET_MEDIA_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.mp4',
+  '.avi',
+  '.mov',
+  '.mkv',
+  '.wmv',
+  '.m4v',
+  '.flv',
+  '.mp3',
+  '.wav',
+  '.flac',
+  '.ogg',
+]);
+
+const DATASET_CAPTION_EXTENSIONS = DATASET_CAPTION_SIDECAR_EXTENSIONS;
+const DETECTED_CAPTION_MIN_MEDIA_COVERAGE = 0.5;
+const DETECTED_CAPTION_MIN_CAPTION_SHARE = 0.8;
+
+export type DatasetCaptionSummary = {
+  itemCount: number;
+  captionedItemCount: number;
+  missingCaptionCount: number;
+  detectedCaptionExt: string | null;
+  captionExtensionCounts: Record<string, number>;
+};
+
 function isPathInside(parent: string, child: string) {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function safeIsFile(filePath: string) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function normalizeCaptionExtension(extension: string) {
+  return extension.replace(/^\.+/, '').toLowerCase();
+}
+
+function captionSidecars(mediaPath: string) {
+  const parsed = path.parse(mediaPath);
+  return DATASET_CAPTION_EXTENSIONS.filter(captionExt => safeIsFile(path.join(parsed.dir, `${parsed.name}${captionExt}`)));
+}
+
+function detectDominantCaptionExt(summary: Pick<DatasetCaptionSummary, 'itemCount' | 'captionedItemCount' | 'captionExtensionCounts'>) {
+  let bestExtension = '';
+  let bestCount = 0;
+
+  for (const extension of DATASET_CAPTION_EXTENSIONS) {
+    const count = summary.captionExtensionCounts[extension] || 0;
+    if (count > bestCount) {
+      bestExtension = extension;
+      bestCount = count;
+    }
+  }
+
+  if (summary.itemCount === 0 || summary.captionedItemCount === 0 || bestCount === 0) return null;
+  if (bestCount / summary.itemCount < DETECTED_CAPTION_MIN_MEDIA_COVERAGE) return null;
+  if (bestCount / summary.captionedItemCount < DETECTED_CAPTION_MIN_CAPTION_SHARE) return null;
+
+  return normalizeCaptionExtension(bestExtension);
+}
+
+export function summarizePlainDatasetCaptions(datasetFolder: string): DatasetCaptionSummary {
+  const summary: DatasetCaptionSummary = {
+    itemCount: 0,
+    captionedItemCount: 0,
+    missingCaptionCount: 0,
+    detectedCaptionExt: null,
+    captionExtensionCounts: {},
+  };
+  const stack = [datasetFolder];
+
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== '_controls') stack.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile() || !DATASET_MEDIA_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+
+      summary.itemCount += 1;
+      const sidecars = captionSidecars(entryPath);
+      if (sidecars.length > 0) {
+        summary.captionedItemCount += 1;
+        sidecars.forEach(extension => {
+          summary.captionExtensionCounts[extension] = (summary.captionExtensionCounts[extension] || 0) + 1;
+        });
+      } else {
+        summary.missingCaptionCount += 1;
+      }
+    }
+  }
+
+  summary.detectedCaptionExt = detectDominantCaptionExt(summary);
+  return summary;
 }
 
 export function cleanDatasetName(name: string) {
@@ -203,10 +315,30 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
     .map(entry => {
       const datasetFolder = path.join(datasetsRoot, entry.name);
       const encrypted = isEncryptedDatasetFolder(datasetFolder);
+      if (encrypted) {
+        return {
+          name: entry.name,
+          encrypted,
+          itemCount: null,
+          captionedItemCount: null,
+          missingCaptionCount: null,
+          detectedCaptionExt: null,
+          source: 'local' as const,
+          worker_id: 'local',
+          worker_name: 'Local',
+          ref: `aitk-dataset://local/${encodeURIComponent(entry.name)}`,
+          path: datasetFolder,
+        };
+      }
+
+      const captionSummary = summarizePlainDatasetCaptions(datasetFolder);
       return {
         name: entry.name,
         encrypted,
-        itemCount: encrypted ? null : undefined,
+        itemCount: captionSummary.itemCount,
+        captionedItemCount: captionSummary.captionedItemCount,
+        missingCaptionCount: captionSummary.missingCaptionCount,
+        detectedCaptionExt: captionSummary.detectedCaptionExt,
         source: 'local' as const,
         worker_id: 'local',
         worker_name: 'Local',

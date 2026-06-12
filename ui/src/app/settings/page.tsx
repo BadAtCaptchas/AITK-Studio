@@ -507,8 +507,7 @@ export default function Settings() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveSettings = async () => {
     setStatus('saving');
 
     apiClient
@@ -698,8 +697,8 @@ export default function Settings() {
             {saveStatusLabel}
           </span>
           <button
-            type="submit"
-            form="settings-form"
+            type="button"
+            onClick={saveSettings}
             disabled={status === 'saving'}
             aria-label="Save settings"
             title="Save settings"
@@ -712,7 +711,7 @@ export default function Settings() {
       </TopBar>
 
       <MainContent className="bg-gray-950 px-0 pt-24">
-        <form id="settings-form" onSubmit={handleSubmit} className="min-h-full">
+        <div className="min-h-full">
           <div className="grid min-h-[calc(100dvh-4rem)] grid-cols-1 xl:grid-cols-[210px_minmax(0,1fr)_360px]">
             <aside className="hidden border-r border-gray-900 px-5 py-6 xl:block">
               <nav className="sticky top-6 space-y-1">
@@ -1313,7 +1312,7 @@ export default function Settings() {
               </div>
             </aside>
           </div>
-        </form>
+        </div>
       </MainContent>
     </>
   );

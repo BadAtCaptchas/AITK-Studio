@@ -418,9 +418,9 @@ class Nvfp4Linear(nn.Module):
     dtype = dtype or self.compute_dtype
 
     packed = self.weight.to(device=device)
-    low = torch.bitwise_and(packed, 0x0F).to(torch.long)
     high = torch.bitwise_right_shift(packed, 4).to(torch.long)
-    codes = torch.stack((low, high), dim=-1).reshape(packed.shape[0], -1)
+    low = torch.bitwise_and(packed, 0x0F).to(torch.long)
+    codes = torch.stack((high, low), dim=-1).reshape(packed.shape[0], -1)
 
     block_scales = self.weight_scale.to(device=device, dtype=torch.float32)
     if block_scales.dim() != 2:

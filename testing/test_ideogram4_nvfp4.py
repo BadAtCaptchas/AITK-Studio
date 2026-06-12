@@ -27,9 +27,9 @@ def comfy_marker(fmt: str) -> torch.Tensor:
 def pack_nvfp4(codes: torch.Tensor) -> torch.Tensor:
     if codes.shape[-1] % 2 != 0:
         raise ValueError("NVFP4 test codes must have an even number of columns")
-    low = codes[..., 0::2]
-    high = codes[..., 1::2]
-    return (low | (high << 4)).to(torch.uint8)
+    high = codes[..., 0::2]
+    low = codes[..., 1::2]
+    return ((high << 4) | low).to(torch.uint8)
 
 
 class TinyTwoLinear(nn.Module):

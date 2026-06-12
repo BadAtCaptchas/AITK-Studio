@@ -128,6 +128,23 @@ class I1StaticSupportTest(unittest.TestCase):
             "google/t5gemma-2b-2b-ul2-it",
         )
 
+    def test_i1_save_checkpoint_filename_is_restricted_to_basename(self):
+        source = I1_MODEL_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("def _safe_i1_checkpoint_save_filename", source)
+        self.assertIn("os.path.basename(save_filename) != save_filename", source)
+        self.assertIn("ntpath.basename(save_filename) != save_filename", source)
+        self.assertIn(
+            "os.path.join(\n"
+            "                output_path, _safe_i1_checkpoint_save_filename(self.checkpoint_filename)\n"
+            "            )",
+            source,
+        )
+        self.assertNotIn(
+            'os.path.join(output_path, self.checkpoint_filename.replace(".pt", ".safetensors"))',
+            source,
+        )
+
     def test_training_loop_has_i1_lognorm_defaults_and_branch(self):
         source = TRAIN_PROCESS_PATH.read_text(encoding="utf-8")
 

@@ -123,8 +123,8 @@ Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommende
 ### Linux
 
 ```bash
-git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
-cd ai-toolkit-revamped
+git clone https://github.com/BadAtCaptchas/AITK-Studio.git
+cd AITK-Studio
 python3 -m venv venv
 source venv/bin/activate
 # install the older-GPU Torch stack first
@@ -138,8 +138,8 @@ For devices running **DGX OS** (including DGX Spark), follow [these](dgx_instruc
 
 
 ```bash
-git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
-cd ai-toolkit-revamped
+git clone https://github.com/BadAtCaptchas/AITK-Studio.git
+cd AITK-Studio
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements_torch_legacy_cu128.txt
@@ -151,8 +151,8 @@ pip install -r requirements.txt
 Experimental support for Apple silicon Macs is available. It has not been fully tested on high-RAM Mac systems, so please report issues if you hit them. The convenience script at `./run_mac.zsh` installs dependencies locally and starts the UI:
 
 ```bash
-git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
-cd ai-toolkit-revamped
+git clone https://github.com/BadAtCaptchas/AITK-Studio.git
+cd AITK-Studio
 chmod +x run_mac.zsh
 ./run_mac.zsh
 ```
@@ -584,7 +584,7 @@ For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_i
 To train locally with the legacy Gradio UI after installing AITK Studio:
 
 ```bash
-cd ai-toolkit-revamped # in case you are not yet in the ai-toolkit folder
+cd AITK-Studio # in case you are not yet in the AITK-Studio folder
 huggingface-cli login # provide a `write` token to publish your LoRA at the end
 python flux_train_ui.py
 ```
@@ -607,8 +607,8 @@ This fork includes a maintained private RunPod Pod template for the AITK Studio 
 ##### AITK Studio
 
 ```bash
-git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
-cd ai-toolkit-revamped
+git clone https://github.com/BadAtCaptchas/AITK-Studio.git
+cd AITK-Studio
 git submodule update --init --recursive
 python -m venv venv
 source venv/bin/activate
@@ -777,7 +777,7 @@ Everything else should work the same, including layer targeting with `network_kw
 
 ## Help and Attribution
 
-This fork tracks reproducible code bugs in this repository only. If you find a bug in `BadAtCaptchas/ai-toolkit-revamped`, open a bug report at [github.com/BadAtCaptchas/ai-toolkit-revamped/issues/new?template=bug_report.md](https://github.com/BadAtCaptchas/ai-toolkit-revamped/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
+This fork tracks reproducible code bugs in this repository only. If you find a bug in `BadAtCaptchas/AITK-Studio`, open a bug report at [github.com/BadAtCaptchas/AITK-Studio/issues/new?template=bug_report.md](https://github.com/BadAtCaptchas/AITK-Studio/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
 
 Please do not open bug reports here for upstream-only behavior, setup help, usage questions, or feature requests. If the behavior exists only in the original Ostris AI Toolkit, report it upstream.
 

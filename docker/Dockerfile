@@ -67,7 +67,7 @@ RUN pip install --no-cache-dir torch==2.10.0 torchvision==0.25.0 torchaudio==2.1
 ARG CACHEBUST=1234
 ARG GIT_COMMIT=main
 RUN echo "Cache bust: ${CACHEBUST}" && \
-    git clone https://github.com/BadAtCaptchas/ai-toolkit.git && \
+    git clone https://github.com/BadAtCaptchas/AITK-Studio.git && \
     cd ai-toolkit && \
     git checkout ${GIT_COMMIT}
 

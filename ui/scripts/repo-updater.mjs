@@ -14,7 +14,7 @@ const VERSION_PATH = path.join(TOOLKIT_ROOT, 'version.py');
 const RESTART_SCRIPT = path.join(UI_ROOT, 'scripts', 'restart-ui.mjs');
 
 const DEFAULT_REPO_OWNER = 'BadAtCaptchas';
-const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
+const DEFAULT_REPO_NAME = 'AITK-Studio';
 const REPO_OWNER = (process.env.AITK_UPDATE_REPO_OWNER || DEFAULT_REPO_OWNER).trim();
 const REPO_NAME = (process.env.AITK_UPDATE_REPO_NAME || DEFAULT_REPO_NAME).trim();
 const REPO_BRANCH = (process.env.AITK_UPDATE_REPO_BRANCH || '').trim();
@@ -299,7 +299,7 @@ async function githubGet(pathname, options = {}) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const headers = {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'ai-toolkit-revamped-updater',
+    'User-Agent': 'AITK-Studio-updater',
     'X-GitHub-Api-Version': '2022-11-28',
   };
   const token = process.env.AITK_UPDATE_GITHUB_TOKEN || process.env.GITHUB_TOKEN;

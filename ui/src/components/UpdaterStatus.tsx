@@ -277,7 +277,7 @@ function getTitle(status: RepoUpdateStatus | null, detail: string) {
   if (status.needsRestart) parts.push('Restart the app to use the update.');
   if (status.sourceRemoteMatchesCanonical === false && status.sourceRemoteWebUrl) {
     parts.push(`Local git remote: ${status.sourceRemoteWebUrl}`);
-    const recommendedRemote = status.remote || `${(status.repoWebUrl || status.remoteWebUrl || 'https://github.com/BadAtCaptchas/ai-toolkit-revamped').replace(/\.git$/, '')}.git`;
+    const recommendedRemote = status.remote || `${(status.repoWebUrl || status.remoteWebUrl || 'https://github.com/BadAtCaptchas/AITK-Studio').replace(/\.git$/, '')}.git`;
     parts.push(`Suggested origin: ${recommendedRemote}`);
     parts.push(`git remote set-url origin ${recommendedRemote}`);
   }
@@ -511,7 +511,7 @@ export default function UpdaterStatus({ compact = false, minimal = false }: { co
   const canApplyUpdate = Boolean(status?.canApplyUpdate && status.state === 'update_available');
   const isRestarting = restarting || status?.state === 'restarting';
   const canRestart = Boolean(status?.needsRestart || status?.state === 'updated' || isRestarting);
-  const repoUrl = status?.repoWebUrl || status?.remoteWebUrl || 'https://github.com/BadAtCaptchas/ai-toolkit-revamped';
+  const repoUrl = status?.repoWebUrl || status?.remoteWebUrl || 'https://github.com/BadAtCaptchas/AITK-Studio';
   const shouldLinkRepo = Boolean(
     status &&
       repoUrl &&

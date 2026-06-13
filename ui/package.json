@@ -28,6 +28,7 @@
     "test:hf-dataset-import": "tsc -p tsconfig.worker.json && node --test scripts/hfDatasetImport.test.mjs",
     "test:annotation-geometry": "tsc -p tsconfig.worker.json && node --test scripts/annotationGeometry.test.mjs",
     "test:ideogram-caption": "tsc -p tsconfig.worker.json && node --test scripts/ideogramCaption.test.mjs",
+    "test:ideogram-workflow": "tsc -p tsconfig.worker.json && node --test scripts/ideogramWorkflow.test.mjs",
     "test:job-datasets": "tsc -p tsconfig.worker.json && node --test scripts/jobDatasetDefaults.test.mjs scripts/remoteDatasetRefs.test.mjs scripts/remoteDatasetSync.test.mjs scripts/remoteStartProgress.test.mjs scripts/remoteClientUpload.test.mjs scripts/remoteJobMissing.test.mjs",
     "test:openrouter-boxes": "tsc -p tsconfig.worker.json && node --test scripts/openRouterBoxes.test.mjs",
     "test:openrouter-layer-caption": "tsc -p tsconfig.worker.json && node --test scripts/openRouterLayerCaption.test.mjs",

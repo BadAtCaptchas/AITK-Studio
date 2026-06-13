@@ -185,7 +185,7 @@ const sectionNav: Array<{ id: SettingsSectionKey; label: string }> = [
   { id: 'access', label: 'Access' },
   { id: 'storage', label: 'Storage' },
   { id: 'workers', label: 'Workers' },
-  { id: 'comfy', label: 'Managed ComfyUI' },
+  { id: 'comfy', label: 'ComfyUI' },
   { id: 'advanced', label: 'Advanced' },
 ];
 
@@ -921,6 +921,23 @@ export default function Settings() {
                   {advancedOpen && (
                     <div className="mt-5 space-y-5">
                       <section id="comfy" className="scroll-mt-20 border-y border-gray-900 py-5">
+                        <div className="mb-6 border-b border-gray-900 pb-5">
+                          <FieldShell
+                            id="COMFY_EXTERNAL_URL"
+                            label="External ComfyUI URL"
+                            detail="Used by the Ideogram workflow builder for live export, import, preflight, and generation."
+                          >
+                            <input
+                              type="url"
+                              id="COMFY_EXTERNAL_URL"
+                              name="COMFY_EXTERNAL_URL"
+                              value={settings.COMFY_EXTERNAL_URL}
+                              onChange={handleChange}
+                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                              placeholder="http://127.0.0.1:8188"
+                            />
+                          </FieldShell>
+                        </div>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <h2 className="text-base font-semibold text-gray-100">Managed ComfyUI</h2>

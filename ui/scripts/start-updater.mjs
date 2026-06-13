@@ -11,7 +11,7 @@ const PID_PATH = path.join(TMP_ROOT, 'repo-updater.pid');
 const STATUS_PATH = path.join(TMP_ROOT, 'repo-update-status.json');
 const RUNTIME_PATH = path.join(TMP_ROOT, 'ui-runtime.json');
 const UPDATER_SCRIPT = path.join(UI_ROOT, 'scripts', 'repo-updater.mjs');
-const DEFAULT_REPO_OWNER = 'rmcc3';
+const DEFAULT_REPO_OWNER = 'BadAtCaptchas';
 const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
 const DESIRED_REPO_FULL_NAME = `${process.env.AITK_UPDATE_REPO_OWNER || DEFAULT_REPO_OWNER}/${
   process.env.AITK_UPDATE_REPO_NAME || DEFAULT_REPO_NAME

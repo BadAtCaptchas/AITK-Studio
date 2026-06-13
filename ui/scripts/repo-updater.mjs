@@ -13,7 +13,7 @@ const PID_PATH = path.join(TMP_ROOT, 'repo-updater.pid');
 const VERSION_PATH = path.join(TOOLKIT_ROOT, 'version.py');
 const RESTART_SCRIPT = path.join(UI_ROOT, 'scripts', 'restart-ui.mjs');
 
-const DEFAULT_REPO_OWNER = 'rmcc3';
+const DEFAULT_REPO_OWNER = 'BadAtCaptchas';
 const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
 const REPO_OWNER = (process.env.AITK_UPDATE_REPO_OWNER || DEFAULT_REPO_OWNER).trim();
 const REPO_NAME = (process.env.AITK_UPDATE_REPO_NAME || DEFAULT_REPO_NAME).trim();

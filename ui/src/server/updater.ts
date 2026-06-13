@@ -96,7 +96,7 @@ const STATUS_PATH = path.join(TMP_ROOT, 'repo-update-status.json');
 const REQUEST_PATH = path.join(TMP_ROOT, 'repo-update-request.json');
 const STALE_CHECKING_MS = 10 * 60 * 1000;
 const GIT_REMOTE_TIMEOUT_MS = 5000;
-const DEFAULT_REPO_OWNER = 'rmcc3';
+const DEFAULT_REPO_OWNER = 'BadAtCaptchas';
 const DEFAULT_REPO_NAME = 'ai-toolkit-revamped';
 const execFileAsync = promisify(execFile);
 

@@ -1,6 +1,6 @@
 # OstrisAI-Toolkit Revamped UI
 
-This is the Next.js UI for `rmcc3/ai-toolkit`. It provides the web interface, local job worker, database preparation scripts, and supporting UI tooling for this fork.
+This is the Next.js UI for `BadAtCaptchas/ai-toolkit`. It provides the web interface, local job worker, database preparation scripts, and supporting UI tooling for this fork.
 
 ## Getting Started
 
@@ -23,7 +23,7 @@ npm run start
 
 ## Bug Reports
 
-Report reproducible UI bugs in the main repository: [github.com/rmcc3/ai-toolkit/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit/issues/new?template=bug_report.md).
+Report reproducible UI bugs in the main repository: [github.com/BadAtCaptchas/ai-toolkit/issues/new?template=bug_report.md](https://github.com/BadAtCaptchas/ai-toolkit/issues/new?template=bug_report.md).
 
 ## Useful Scripts
 

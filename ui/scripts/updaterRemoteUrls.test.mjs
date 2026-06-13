@@ -22,16 +22,16 @@ test('redactRemoteCredentials removes HTTPS remote userinfo', async () => {
   const { redactRemoteCredentials } = await loadRemoteUrlHelpers();
 
   assert.equal(
-    redactRemoteCredentials('https://user:ghp_secret@github.com/rmcc3/ai-toolkit-revamped.git'),
-    'https://github.com/rmcc3/ai-toolkit-revamped.git',
+    redactRemoteCredentials('https://user:ghp_secret@github.com/BadAtCaptchas/ai-toolkit-revamped.git'),
+    'https://github.com/BadAtCaptchas/ai-toolkit-revamped.git',
   );
   assert.equal(
-    redactRemoteCredentials('https://ghp_secret@github.com/rmcc3/ai-toolkit-revamped.git'),
-    'https://github.com/rmcc3/ai-toolkit-revamped.git',
+    redactRemoteCredentials('https://ghp_secret@github.com/BadAtCaptchas/ai-toolkit-revamped.git'),
+    'https://github.com/BadAtCaptchas/ai-toolkit-revamped.git',
   );
   assert.equal(
-    redactRemoteCredentials('https://user:p@ss@github.com/rmcc3/ai-toolkit-revamped.git'),
-    'https://github.com/rmcc3/ai-toolkit-revamped.git',
+    redactRemoteCredentials('https://user:p@ss@github.com/BadAtCaptchas/ai-toolkit-revamped.git'),
+    'https://github.com/BadAtCaptchas/ai-toolkit-revamped.git',
   );
 });
 
@@ -39,11 +39,11 @@ test('normalizeRemoteWebUrl strips credentials before returning a display URL', 
   const { normalizeRemoteWebUrl } = await loadRemoteUrlHelpers();
 
   assert.equal(
-    normalizeRemoteWebUrl('https://user:ghp_secret@github.com/rmcc3/ai-toolkit-revamped.git'),
-    'https://github.com/rmcc3/ai-toolkit-revamped',
+    normalizeRemoteWebUrl('https://user:ghp_secret@github.com/BadAtCaptchas/ai-toolkit-revamped.git'),
+    'https://github.com/BadAtCaptchas/ai-toolkit-revamped',
   );
   assert.equal(
-    normalizeRemoteWebUrl('git@github.com:rmcc3/ai-toolkit-revamped.git'),
-    'https://github.com/rmcc3/ai-toolkit-revamped',
+    normalizeRemoteWebUrl('git@github.com:BadAtCaptchas/ai-toolkit-revamped.git'),
+    'https://github.com/BadAtCaptchas/ai-toolkit-revamped',
   );
 });

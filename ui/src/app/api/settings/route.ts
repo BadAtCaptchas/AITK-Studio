@@ -5,6 +5,7 @@ import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
 import { isRemoteOllamaWorkersSettingKey } from '@/server/remoteOllamaWorkers';
+import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyUrl } from '@/server/externalComfy';
 import path from 'path';
 
 type SettingsAccess = {
@@ -68,6 +69,9 @@ export async function GET(request: NextRequest) {
       false,
     );
     settingsObject.COMFY_AUTO_INSTALL = normalizeBooleanSetting(settingsObject.COMFY_AUTO_INSTALL, false);
+    settingsObject.COMFY_EXTERNAL_URL = normalizeExternalComfyUrl(
+      settingsObject.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,
+    );
     if (!access.authenticated) {
       settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
       settingsObject.HF_TOKEN = '';
@@ -95,6 +99,7 @@ export async function POST(request: NextRequest) {
       DATASETS_FOLDER,
       TRAINING_ADVISOR_ENABLED,
       COMFY_AUTO_INSTALL,
+      COMFY_EXTERNAL_URL,
     } = body;
 
     let normalizedDatasetsFolder = DATASETS_FOLDER;
@@ -106,11 +111,22 @@ export async function POST(request: NextRequest) {
       normalizedDatasetsFolder = resolvedDatasetsFolder;
     }
 
+    let normalizedExternalComfyUrl = '';
+    try {
+      normalizedExternalComfyUrl = normalizeExternalComfyUrl(COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Invalid external ComfyUI URL' },
+        { status: 400 },
+      );
+    }
+
     const settingsToUpdate: Record<string, string> = {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
+      COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,
     };
 
     if (typeof HF_TOKEN === 'string' && (access.authenticated || HF_TOKEN !== '')) {

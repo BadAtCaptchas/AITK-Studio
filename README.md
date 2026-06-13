@@ -123,7 +123,7 @@ Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommende
 ### Linux
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit-revamped.git
+git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
 cd ai-toolkit-revamped
 python3 -m venv venv
 source venv/bin/activate
@@ -138,7 +138,7 @@ For devices running **DGX OS** (including DGX Spark), follow [these](dgx_instruc
 
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit-revamped.git
+git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
 cd ai-toolkit-revamped
 python -m venv venv
 .\venv\Scripts\activate
@@ -151,7 +151,7 @@ pip install -r requirements.txt
 Experimental support for Apple silicon Macs is available. It has not been fully tested on high-RAM Mac systems, so please report issues if you hit them. The convenience script at `./run_mac.zsh` installs dependencies locally and starts the UI:
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit-revamped.git
+git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
 cd ai-toolkit-revamped
 chmod +x run_mac.zsh
 ./run_mac.zsh
@@ -220,6 +220,10 @@ Block offloading is currently CUDA-first and is intended for LoRA/network traini
 | Generate | New Training Job |
 | --- | --- |
 | <img src="assets/readme-ui-generate.png" alt="AITK Studio Generate UI"> | <img src="assets/readme-ui-new-job.png" alt="AITK Studio New Training Job UI"> |
+
+| Ideogram Workflow Builder | ComfyUI History Import |
+| --- | --- |
+| <img src="assets/readme-ui-workflow-builder.png" alt="AITK Studio Ideogram workflow builder canvas"> | <img src="assets/readme-ui-workflow-builder-comfy.png" alt="AITK Studio Ideogram workflow builder ComfyUI history import"> |
 
 The AITK Studio UI is the main control surface for creating datasets, starting and stopping jobs, monitoring training, running generation, and exporting work. It can also require a bearer token so the UI is safer to run on a remote machine.
 
@@ -603,7 +607,7 @@ This fork includes a maintained private RunPod Pod template for the AITK Studio 
 ##### AITK Studio
 
 ```bash
-git clone https://github.com/rmcc3/ai-toolkit-revamped.git
+git clone https://github.com/BadAtCaptchas/ai-toolkit-revamped.git
 cd ai-toolkit-revamped
 git submodule update --init --recursive
 python -m venv venv
@@ -773,7 +777,7 @@ Everything else should work the same, including layer targeting with `network_kw
 
 ## Help and Attribution
 
-This fork tracks reproducible code bugs in this repository only. If you find a bug in `rmcc3/ai-toolkit-revamped`, open a bug report at [github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
+This fork tracks reproducible code bugs in this repository only. If you find a bug in `BadAtCaptchas/ai-toolkit-revamped`, open a bug report at [github.com/BadAtCaptchas/ai-toolkit-revamped/issues/new?template=bug_report.md](https://github.com/BadAtCaptchas/ai-toolkit-revamped/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
 
 Please do not open bug reports here for upstream-only behavior, setup help, usage questions, or feature requests. If the behavior exists only in the original Ostris AI Toolkit, report it upstream.
 

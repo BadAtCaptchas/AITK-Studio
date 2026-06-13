@@ -359,10 +359,10 @@ export default function UpdatesPage() {
   };
 
   const commits = status?.recentCommits || [];
-  const repoUrl = status?.repoWebUrl || 'https://github.com/rmcc3/ai-toolkit-revamped';
+  const repoUrl = status?.repoWebUrl || 'https://github.com/BadAtCaptchas/ai-toolkit-revamped';
   const statusTone = toneByState[status?.state || ''] || 'border-gray-800 bg-gray-900/60 text-gray-100';
   const StatusIcon = status?.state === 'updating' || status?.state === 'checking' || status?.state === 'restarting' ? Loader2 : status?.state?.includes('fail') || status?.state === 'error' ? AlertCircle : CheckCircle2;
-  const repoName = status?.repoFullName || 'rmcc3/ai-toolkit-revamped';
+  const repoName = status?.repoFullName || 'BadAtCaptchas/ai-toolkit-revamped';
   const isBusy = status?.state === 'checking' || status?.state === 'updating' || status?.state === 'restarting';
   const isRestarting = restarting || status?.state === 'restarting';
   const canRestart = Boolean(status?.needsRestart || status?.state === 'updated' || isRestarting);

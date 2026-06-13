@@ -35,5 +35,5 @@
     "PYTHONIOENCODING": "utf-8",
     "TZ": "UTC"
   },
-  "readme": "AI Toolkit RunPod Blackwell template. See runpod/README.md in https://github.com/rmcc3/ai-toolkit for build, deployment, and operating instructions."
+  "readme": "AI Toolkit RunPod Blackwell template. See runpod/README.md in https://github.com/BadAtCaptchas/ai-toolkit for build, deployment, and operating instructions."
 }

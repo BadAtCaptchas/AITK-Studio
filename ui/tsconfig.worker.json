@@ -29,6 +29,7 @@
         "src/utils/captionKeywordSearch.ts",
         "src/utils/datasetImageNavigator.ts",
         "src/utils/ideogramCaption.ts",
+        "src/utils/ideogramWorkflow.ts",
         "src/utils/folderImport.ts",
         "src/utils/webauthnPrfCrypto.ts",
         "src/utils/trainingPhaseSummary.ts",
@@ -57,6 +58,7 @@
         "src/server/jobStart.ts",
         "src/server/jobsApiList.ts",
         "src/server/trainingJobRestart.ts",
-        "src/server/remoteAssets.ts"
+        "src/server/remoteAssets.ts",
+        "src/server/externalComfy.ts"
     ]
 }

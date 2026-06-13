@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/utils/api';
 
+const DEFAULT_EXTERNAL_COMFY_URL = 'http://127.0.0.1:8188';
+
 export interface Settings {
   HF_TOKEN: string;
   OPENROUTER_API_KEY: string;
@@ -10,6 +12,7 @@ export interface Settings {
   DATASETS_FOLDER: string;
   TRAINING_ADVISOR_ENABLED: string;
   COMFY_AUTO_INSTALL: string;
+  COMFY_EXTERNAL_URL: string;
 }
 
 export default function useSettings() {
@@ -20,6 +23,7 @@ export default function useSettings() {
     DATASETS_FOLDER: '',
     TRAINING_ADVISOR_ENABLED: 'false',
     COMFY_AUTO_INSTALL: 'false',
+    COMFY_EXTERNAL_URL: DEFAULT_EXTERNAL_COMFY_URL,
   });
   const [isSettingsLoaded, setIsLoaded] = useState(false);
   useEffect(() => {
@@ -35,6 +39,7 @@ export default function useSettings() {
           DATASETS_FOLDER: data.DATASETS_FOLDER || '',
           TRAINING_ADVISOR_ENABLED: data.TRAINING_ADVISOR_ENABLED === 'true' ? 'true' : 'false',
           COMFY_AUTO_INSTALL: data.COMFY_AUTO_INSTALL === 'true' ? 'true' : 'false',
+          COMFY_EXTERNAL_URL: data.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,
         });
         setIsLoaded(true);
       })

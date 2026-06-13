@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Home, Images, ListOrdered, Plus, Settings, Wand2 } from 'lucide-react';
+import { GitBranch, Home, Images, ListOrdered, Plus, Settings, Wand2 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { FaDiscord } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
@@ -14,6 +14,7 @@ const Sidebar = () => {
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'New Job', href: '/jobs/new', icon: Plus },
     { name: 'Generate', href: '/generate', icon: Wand2 },
+    { name: 'Workflows', href: '/workflows', icon: GitBranch },
     { name: 'Queue', href: '/jobs', icon: ListOrdered },
     { name: 'Datasets', href: '/datasets', icon: Images },
     { name: 'Settings', href: '/settings', icon: Settings },

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">AITK Studio social preview</title>
+  <desc id="desc">Black and white social preview for AITK Studio.</desc>
+  <rect width="1200" height="630" fill="#050505"/>
+  <g stroke="#ffffff" stroke-width="1.25" opacity="0.13">
+    <path d="M0 105h1200M0 210h1200M0 315h1200M0 420h1200M0 525h1200"/>
+    <path d="M120 0v630M240 0v630M360 0v630M480 0v630M600 0v630M720 0v630M840 0v630M960 0v630M1080 0v630"/>
+  </g>
+  <g transform="translate(96 118)">
+    <rect width="194" height="194" rx="42" fill="#ffffff"/>
+    <g stroke="#050505" stroke-width="8" stroke-linecap="round" opacity="0.92">
+      <path d="M49 56h97"/>
+      <path d="M49 97h97"/>
+      <path d="M49 138h97"/>
+      <path d="M56 49v97"/>
+      <path d="M97 49v97"/>
+      <path d="M138 49v97"/>
+    </g>
+    <g fill="#050505">
+      <circle cx="56" cy="56" r="10"/>
+      <circle cx="97" cy="56" r="7"/>
+      <circle cx="138" cy="56" r="10"/>
+      <circle cx="56" cy="97" r="7"/>
+      <circle cx="97" cy="97" r="12"/>
+      <circle cx="138" cy="97" r="7"/>
+      <circle cx="56" cy="138" r="10"/>
+      <circle cx="97" cy="138" r="7"/>
+      <circle cx="138" cy="138" r="10"/>
+    </g>
+    <rect x="40" y="72" width="114" height="50" rx="13" fill="#050505"/>
+    <text x="97" y="108" fill="#ffffff" font-family="Arial" font-size="36" font-weight="800" text-anchor="middle">AITK</text>
+  </g>
+  <text x="96" y="410" fill="#ffffff" font-family="Arial" font-size="112" font-weight="830" letter-spacing="0">AITK Studio</text>
+  <text x="102" y="478" fill="#d2d2d2" font-family="Arial" font-size="35" font-weight="500" letter-spacing="0">Training, datasets, generation</text>
+  <g stroke="#ffffff" stroke-width="13" stroke-linecap="round" opacity="0.36">
+    <path d="M785 160h245"/>
+    <path d="M725 315h355"/>
+    <path d="M785 470h245"/>
+    <path d="M850 110v410"/>
+    <path d="M970 110v410"/>
+  </g>
+  <g fill="#ffffff" opacity="0.72">
+    <circle cx="850" cy="160" r="20"/>
+    <circle cx="970" cy="160" r="13"/>
+    <circle cx="1090" cy="160" r="20"/>
+    <circle cx="730" cy="315" r="13"/>
+    <circle cx="850" cy="315" r="20"/>
+    <circle cx="970" cy="315" r="26"/>
+    <circle cx="1090" cy="315" r="13"/>
+    <circle cx="850" cy="470" r="20"/>
+    <circle cx="970" cy="470" r="13"/>
+    <circle cx="1090" cy="470" r="20"/>
+  </g>
+</svg>

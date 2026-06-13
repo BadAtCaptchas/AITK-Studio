@@ -89,15 +89,12 @@ export default function AuthWrapper({ authRequired, children }: AuthWrapperProps
       {/* Left side - decorative or brand area */}
       <div className="hidden lg:flex lg:w-1/2 bg-gray-800 flex-col justify-center items-center p-12">
         <div className="mb-4">
-          {/* Replace with your own logo */}
           <div className="flex items-center justify-center">
-            <img src="/ostris_logo.png" alt="OstrisAI-Toolkit Revamped" className="w-auto h-24 inline" />
+            <img src="/aitk-studio-logo-light.png" alt="AITK Studio" className="w-auto h-24 inline" />
           </div>
         </div>
         <h1 className="text-4xl mb-6 text-center leading-tight">
-          OstrisAI-Toolkit
-          <br />
-          <span className="text-gray-300">Revamped</span>
+          AITK Studio
         </h1>
       </div>
 
@@ -105,16 +102,13 @@ export default function AuthWrapper({ authRequired, children }: AuthWrapperProps
       <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-8 sm:p-12">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex justify-center mb-4">
-            {/* Mobile logo */}
             <div className="flex items-center justify-center">
-              <img src="/ostris_logo.png" alt="OstrisAI-Toolkit Revamped" className="w-auto h-24 inline" />
+              <img src="/aitk-studio-logo-light.png" alt="AITK Studio" className="w-auto h-24 inline" />
             </div>
           </div>
 
           <h2 className="text-3xl text-center mb-2 lg:hidden leading-tight">
-            OstrisAI-Toolkit
-            <br />
-            <span className="text-gray-300">Revamped</span>
+            AITK Studio
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-6">

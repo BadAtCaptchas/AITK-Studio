@@ -34,7 +34,7 @@ const Sidebar = () => {
       <div className="flex h-14 items-center justify-between gap-3 border-b border-gray-900/80 px-3 md:h-16 md:justify-center md:px-0">
         <Link href="/dashboard" className="flex min-w-0 items-center gap-2 md:flex-col md:gap-1" aria-label="Dashboard">
           <ThemeLogo className="mr-0 h-8" />
-          <span className="truncate text-xs font-semibold text-gray-200 md:hidden">AI Toolkit</span>
+          <span className="truncate text-xs font-semibold text-gray-200 md:hidden">AITK Studio</span>
         </Link>
         <div className="flex items-center gap-1 md:hidden">
           <UpdaterStatus compact minimal />

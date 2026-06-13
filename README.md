@@ -1,12 +1,47 @@
-# OstrisAI-Toolkit Revamped
+# AITK Studio
 
-**Experimental fork notice:** OstrisAI-Toolkit Revamped is an experimental fork of the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit), not the upstream project. It contains fast-moving model integrations, UI changes, remote-worker support, and other changes that may be unstable or diverge from upstream behavior.
+<p align="center">
+<img src="assets/brand/aitk-studio-readme-banner.png" alt="AITK Studio" width="100%">
+</p>
 
-> This fork is not guaranteed to stay in sync with upstream. New upstream model support may arrive here after a delay, may be changed substantially, or may not be ported at all. Use the upstream repo if you need the canonical AI Toolkit release.
+<p align="center">
+  <strong>A training studio for diffusion models, datasets, generation, and queue workflows.</strong>
+</p>
 
-OstrisAI-Toolkit Revamped is an easy to use all in one training suite for diffusion models. It aims to support current models on consumer grade hardware, including image, video, and audio models. It can be run as a GUI or CLI. It is designed to be easy to use but still have every feature imaginable. Free and open source.
+AITK Studio is an all-in-one training suite for diffusion models. It supports current image, video, and audio models on consumer-grade hardware, and can be used from either the web UI or the CLI. The goal is a practical workbench: easy enough to get a run started, deep enough for serious LoRA, LoKr, phase-based, encrypted-dataset, and remote-worker workflows.
+
+> **Fork notice:** AITK Studio is a maintained fork of the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit). It preserves compatibility with AI Toolkit while adding fast-moving model integrations, UI changes, remote-worker support, and other project-specific changes that may diverge from upstream behavior.
+
+## Highlights
+
+- Web UI for training jobs, datasets, generation, TensorBoard, queue management, and exports.
+- CLI-first training still works for config-driven workflows and automation.
+- Supports LoRA, LoKr, full fine-tuning paths for selected models, training phases, and auto-learn profiles.
+- Includes encrypted dataset workflows with password, key-file, and YubiKey-backed unlock modes.
+- Supports local, RunPod, Modal, and remote-worker workflows.
+- Free and open source, with original AI Toolkit attribution preserved.
+
+## Contents
+
+- [Supported Models](#supported-models)
+- [Quick Start](#quick-start)
+- [Web UI](#web-ui)
+- [Developer Utilities](#developer-utilities)
+- [Generation](#generation)
+- [Monitoring and Storage](#monitoring-and-storage)
+- [Remote Workflows](#remote-workflows)
+- [Job Import and Export](#job-import-and-export)
+- [Security](#security)
+- [Training](#training)
+- [Cloud Training](#cloud-training)
+- [Datasets](#datasets)
+- [Advanced Training](#advanced-training)
+- [Help and Attribution](#help-and-attribution)
 
 ## Supported Models
+
+<details>
+<summary><strong>Model list and model-specific notes</strong></summary>
 
 ### Image
 - [black-forest-labs/FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) (FLUX.1)
@@ -46,7 +81,7 @@ i1-3B is supported through the built-in `i1` architecture for native text-to-ima
 
 Ideogram 4 is supported through the built-in `ideogram4` architecture for text-to-image sampling, transformer LoRA training, and full conditional-transformer fine-tuning. Use `ideogram-ai/ideogram-4-nf4`, `ideogram-ai/ideogram-4-fp8`, or `Comfy-Org/Ideogram-4` with `model_kwargs.quantization: "nvfp4"` for packed Comfy NVFP4 LoRA training. The official Ideogram repos are gated Hugging Face models and the weights remain under Ideogram's non-commercial license. The integration vendors the Apache-2.0 official pipeline components locally and does not call external moderation, magic-prompt, or other hosted APIs. Qwen3-VL, the VAE, and the unconditional transformer stay frozen; LoRA and full fine-tune jobs train only the conditional transformer.
 
-Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommended for `arch: ideogram4`, but natural-language captions and sample prompts are allowed by default with a runtime warning that outputs may be worse than with structured Ideogram JSON captions. JSON caption schema and key-order issues warn by default, or fail when `model_kwargs.caption_strict: true` is set; users who want to enforce structured captions can also set `model_kwargs.require_json_captions: true`. Training and sampling do not call magic-prompt, moderation, or other hosted APIs. NF4 requires CUDA and `bitsandbytes>=0.49.2`. The FP8 model can be used directly on supported GPUs or dequantized for training with `model_kwargs.dequantize_fp8_transformer: true`. Comfy NVFP4 trains LoRA adapters directly on frozen packed weights; full packed-NVFP4 base-model fine-tuning is rejected unless the base is dequantized first. Comfy's repo contains weights only, so use `extras_name_or_path` or `model_kwargs.text_encoder_config_name_or_path` to point at `ideogram-ai/ideogram-4-fp8` or a local equivalent for tokenizer and Qwen3-VL config files. AI Toolkit also warns at runtime when the active Torch version is below Ideogram's official `torch>=2.11` requirement.
+Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommended for `arch: ideogram4`, but natural-language captions and sample prompts are allowed by default with a runtime warning that outputs may be worse than with structured Ideogram JSON captions. JSON caption schema and key-order issues warn by default, or fail when `model_kwargs.caption_strict: true` is set; users who want to enforce structured captions can also set `model_kwargs.require_json_captions: true`. Training and sampling do not call magic-prompt, moderation, or other hosted APIs. NF4 requires CUDA and `bitsandbytes>=0.49.2`. The FP8 model can be used directly on supported GPUs or dequantized for training with `model_kwargs.dequantize_fp8_transformer: true`. Comfy NVFP4 trains LoRA adapters directly on frozen packed weights; full packed-NVFP4 base-model fine-tuning is rejected unless the base is dequantized first. Comfy's repo contains weights only, so use `extras_name_or_path` or `model_kwargs.text_encoder_config_name_or_path` to point at `ideogram-ai/ideogram-4-fp8` or a local equivalent for tokenizer and Qwen3-VL config files. AITK Studio also warns at runtime when the active Torch version is below Ideogram's official `torch>=2.11` requirement.
 
 ### Instruction / Edit
 - [black-forest-labs/FLUX.1-Kontext-dev](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev) (FLUX.1-Kontext-dev)
@@ -73,19 +108,23 @@ Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommende
 ### Experimental
 - [lodestones/Zeta-Chroma](https://huggingface.co/lodestones/Zeta-Chroma) (Zeta Chroma)
 
-## Installation
+</details>
 
-Requirements:
-- python >=3.10 (3.12 recommended)
-- Nvidia GPU with enough ram to do what you need
-- python venv
-- git
+## Quick Start
 
+### Requirements
 
-Linux:
+- Python 3.10 or newer. Python 3.12 is recommended.
+- NVIDIA GPU with enough VRAM for the model and workflow you want to run.
+- Python virtual environment support.
+- Git.
+- Node.js 20.19.0 or newer if you plan to use the web UI.
+
+### Linux
+
 ```bash
 git clone https://github.com/rmcc3/ai-toolkit-revamped.git
-cd ai-toolkit
+cd ai-toolkit-revamped
 python3 -m venv venv
 source venv/bin/activate
 # install the older-GPU Torch stack first
@@ -95,18 +134,27 @@ pip3 install -r requirements.txt
 
 For devices running **DGX OS** (including DGX Spark), follow [these](dgx_instructions.md) instructions.
 
+### Windows
 
-Windows:
-
-If you are having issues with Windows. I recommend using the easy install script at [https://github.com/Tavris1/AI-Toolkit-Easy-Install](https://github.com/Tavris1/AI-Toolkit-Easy-Install)
 
 ```bash
 git clone https://github.com/rmcc3/ai-toolkit-revamped.git
-cd ai-toolkit
+cd ai-toolkit-revamped
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements_torch_legacy_cu128.txt
 pip install -r requirements.txt
+```
+
+### macOS
+
+Experimental support for Apple silicon Macs is available. It has not been fully tested on high-RAM Mac systems, so please report issues if you hit them. The convenience script at `./run_mac.zsh` installs dependencies locally and starts the UI:
+
+```bash
+git clone https://github.com/rmcc3/ai-toolkit-revamped.git
+cd ai-toolkit-revamped
+chmod +x run_mac.zsh
+./run_mac.zsh
 ```
 
 ### NVIDIA Blackwell / RTX 50-series GPUs
@@ -127,11 +175,11 @@ You can verify the active environment with:
 python scripts/check_blackwell_cuda.py
 ```
 
-OstrisAI-Toolkit Revamped also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Non-Blackwell GPUs continue with a warning if the active Torch version is outside the older-GPU known-good stack. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
+AITK Studio also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Non-Blackwell GPUs continue with a warning if the active Torch version is outside the older-GPU known-good stack. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
 
 ### HiDream-O1 PyTorch note
 
-The HiDream-O1 model card currently warns against PyTorch 2.9.x. For older GPUs such as L40, use `requirements_torch_legacy_cu128.txt` (`torch==2.8.0`, `torchcodec==0.7.0`). For Blackwell, use `requirements_torch_blackwell_cu128.txt` or the DGX CUDA 13.0 stack (`torch==2.10.0`, `torchcodec==0.10.0`). AI Toolkit warns at runtime when HiDream-O1 is started on PyTorch 2.9.x.
+The HiDream-O1 model card currently warns against PyTorch 2.9.x. For older GPUs such as L40, use `requirements_torch_legacy_cu128.txt` (`torch==2.8.0`, `torchcodec==0.7.0`). For Blackwell, use `requirements_torch_blackwell_cu128.txt` or the DGX CUDA 13.0 stack (`torch==2.10.0`, `torchcodec==0.10.0`). AITK Studio warns at runtime when HiDream-O1 is started on PyTorch 2.9.x.
 
 ### Quantized model cache
 
@@ -167,36 +215,17 @@ The percentage values are fractions of whole blocks for the block backend. Lower
 
 Block offloading is currently CUDA-first and is intended for LoRA/network training plus standalone generation. For supported architectures, full base-model fine-tuning with `layer_offloading_backend: block` is rejected unless the base transformer/text encoder is frozen; use LoRA training or set `layer_offloading_backend: legacy` instead. `low_vram` is still separate: it unloads broader model components and can be combined with memory-saving workflows, but it is generally slower than block offloading alone.
 
-MacOS:
+## Web UI
 
-Experimental support for Silicon Macs is available. I do not have a Mac with enough RAM to fully test this
-so please let me know if there are issues. There is a convience script to install and run on MacOS 
-locates at `./run_mac.zsh` that will install the dependencies locally and run the UI. To run this, 
-do the following:
+| Generate | New Training Job |
+| --- | --- |
+| <img src="assets/readme-ui-generate.png" alt="AITK Studio Generate UI"> | <img src="assets/readme-ui-new-job.png" alt="AITK Studio New Training Job UI"> |
 
-```bash
-git clone https://github.com/rmcc3/ai-toolkit-revamped.git
-cd ai-toolkit
-chmod +x run_mac.zsh
-./run_mac.zsh
-```
+The AITK Studio UI is the main control surface for creating datasets, starting and stopping jobs, monitoring training, running generation, and exporting work. It can also require a bearer token so the UI is safer to run on a remote machine.
 
+### Run the UI
 
-# OstrisAI-Toolkit Revamped UI
-
-<img src="assets/readme-ui-generate.png" alt="OstrisAI-Toolkit Revamped Generate UI" width="100%">
-
-<img src="assets/readme-ui-new-job.png" alt="OstrisAI-Toolkit Revamped New Training Job UI" width="100%">
-
-The OstrisAI-Toolkit Revamped UI is a web interface for OstrisAI-Toolkit Revamped. It allows you to easily start, stop, and monitor jobs. It also allows you to easily train models with a few clicks. It also allows you to set a token for the UI to prevent unauthorized access so it is mostly safe to run on an exposed server.
-
-## Running the UI
-
-Requirements:
-- Node.js >=20.19.0
-
-The UI does not need to be kept running for the jobs to run. It is only needed to start/stop/monitor jobs. The commands below
-will install / update the UI and it's dependencies and start the UI. 
+The UI does not need to stay open for jobs to keep running. It is only needed to start, stop, and monitor jobs. The command below installs or updates the UI dependencies, builds the app, and starts it.
 
 ```bash
 cd ui
@@ -205,7 +234,7 @@ npm run build_and_start
 
 You can now access the UI at `http://localhost:8675` or `http://<your-ip>:8675` if you are running it on a server.
 
-## Development Utilities
+## Developer Utilities
 
 To test uncommitted local changes in another checkout without pushing a branch first, use the git-status sync helper:
 
@@ -229,7 +258,7 @@ npm --prefix ui run sync:local
 
 The helper copies files reported by `git status`, including untracked files, and removes target files for local deletions or rename sources. Use `--tracked-only` to skip untracked files, `--no-delete` to leave target deletions alone, and `--no-verify-target` for non-git target directories.
 
-## Image generation UI
+## Generation
 
 The **Generate** page can run image generation from a base model or a locally trained LoRA without creating a training job. A single requested image is generated inline and displayed on the same page by default. If the request would create more than one image, for example multiple prompts or `Images per Prompt` greater than `1`, the UI creates a normal `generate` job instead so it can run through the queue and be tracked from the jobs page.
 
@@ -267,7 +296,9 @@ Prompt JSON files are also supported for per-image settings. The JSON can be an 
 
 Common per-image keys include `prompt`, `negative_prompt` or `neg`, `width`, `height`, `seed`, `guidance_scale`, `sample_steps`, `sampler`, `format` or `ext`, and `network_multiplier`.
 
-## TensorBoard
+## Monitoring and Storage
+
+### TensorBoard
 
 TensorBoard is installed with the Python requirements. If `AITK_ENABLE_TENSORBOARD` is not set, the UI tries to auto-enable TensorBoard when the package is available in the active Python environment and silently skips it if the probe or startup fails.
 
@@ -278,7 +309,7 @@ You can force it on or off when starting the UI:
 AITK_ENABLE_TENSORBOARD=1 npm run build_and_start
 AITK_ENABLE_TENSORBOARD=0 npm run build_and_start
 
-# Windows Powershell
+# Windows PowerShell
 $env:AITK_ENABLE_TENSORBOARD="1"; npm run build_and_start
 $env:AITK_ENABLE_TENSORBOARD="0"; npm run build_and_start
 ```
@@ -302,7 +333,7 @@ AITK_ENABLE_TENSORBOARD=1 docker compose up
 AITK_ENABLE_TENSORBOARD=0 docker compose up
 ```
 
-## UI database
+### UI database
 
 The UI uses SQLite by default and stores its state in `aitk_db.db`. You can switch all UI-backed state to MongoDB at startup:
 
@@ -331,9 +362,11 @@ AITK_MONGODB_URI="mongodb://localhost:27017" npm run migrate_sqlite_to_mongo
 
 The migration imports jobs, queues, settings, and existing per-job `loss_log.db` metrics. SQLite files are left untouched so you can switch back to SQLite.
 
-## Remote workers and Cloudflare Tunnel
+## Remote Workflows
 
-The UI can control remote AI Toolkit worker instances. Each worker runs the same UI/cron app with `AI_TOOLKIT_AUTH` set. Add the worker from **Settings > Remote Workers** using its public URL and bearer token. When you start a job assigned to a remote worker, the central UI creates a `.aitk.zip` job bundle with datasets, uploads it to the worker, starts the worker queue, and then proxies logs, metrics, samples, checkpoints, and exports back through the central UI.
+### Remote workers and Cloudflare Tunnel
+
+The UI can control remote AITK Studio worker instances. Each worker runs the same UI/cron app with `AI_TOOLKIT_AUTH` set. Add the worker from **Settings > Remote Workers** using its public URL and bearer token. When you start a job assigned to a remote worker, the central UI creates a `.aitk.zip` job bundle with datasets, uploads it to the worker, starts the worker queue, and then proxies logs, metrics, samples, checkpoints, and exports back through the central UI.
 
 Remote workers are authoritative after upload. The central UI mirrors status, step, speed, config, and error text from the worker. Base model files are not bundled; they must exist on the worker or the import will report warnings.
 
@@ -355,11 +388,11 @@ AITK_CLOUDFLARED_AUTO_DOWNLOAD=0
 
 ### Secure remote Ollama captioning
 
-The Queue page includes a **Secure Remote Captioning** job view for image datasets. It starts a local UI caption job that streams one image at a time to a selected **Remote Ollama** endpoint. The remote host can be a standalone Ollama server; it does not need to run the AI Toolkit UI. Add direct endpoints from **Settings > Remote Ollama** with the Ollama base URL, such as `http://ollama-host:11434`, and an optional bearer token for protected reverse proxies or tunnels.
+The Queue page includes a **Secure Remote Captioning** job view for image datasets. It starts a local UI caption job that streams one image at a time to a selected **Remote Ollama** endpoint. The remote host can be a standalone Ollama server; it does not need to run the AITK Studio UI. Add direct endpoints from **Settings > Remote Ollama** with the Ollama base URL, such as `http://ollama-host:11434`, and an optional bearer token for protected reverse proxies or tunnels.
 
 Direct Remote Ollama sends prompt, optional system prompt, and image bytes to the configured Ollama HTTP API. Use HTTPS or a protected reverse proxy outside a trusted LAN. The dataset is not bundled or stored on the remote host. The optional system prompt is saved per dataset in the central UI and reused when that dataset is selected.
 
-If you prefer the older Toolkit-proxy mode for a full remote AI Toolkit worker, run the UI with `AI_TOOLKIT_AUTH` and Cloudflared as above, and keep Ollama bound to localhost:
+If you prefer the older Toolkit-proxy mode for a full remote AITK Studio worker, run the UI with `AI_TOOLKIT_AUTH` and Cloudflared as above, and keep Ollama bound to localhost:
 
 ```bash
 AITK_OLLAMA_ENABLED=1
@@ -371,7 +404,7 @@ Docker and RunPod images include Ollama. When `AITK_OLLAMA_ENABLED=1`, the start
 
 Threat model limit: direct Remote Ollama endpoints receive plaintext image and prompt payloads in their HTTP API. HTTPS or a protected tunnel protects transport; the older Toolkit-proxy mode also encrypts payloads at the application layer before the worker UI decrypts them for local Ollama. Neither mode protects against a compromised remote machine or Ollama process.
 
-## Training job import/export
+## Job Import and Export
 
 The UI can export and import training jobs from the queue page. Use the action menu on a training job to export either:
 
@@ -388,7 +421,7 @@ Encrypted dataset exports do not decrypt files. Import/export copies encrypted m
 
 Jobs launched from the UI are detached from the cron worker process, and the worker now waits for in-flight queue work and disconnects cleanly on shutdown signals.
 
-## Securing the UI
+## Security
 
 If you are hosting the UI on a cloud provider or any network that is not secure, set `AI_TOOLKIT_AUTH` before starting the UI.
 When this variable is set, API routes require a matching bearer token and unauthenticated calls are rejected with `401 Unauthorized`.
@@ -403,22 +436,21 @@ AI_TOOLKIT_AUTH=super_secure_password npm run build_and_start
 # Windows
 set AI_TOOLKIT_AUTH=super_secure_password && npm run build_and_start
 
-# Windows Powershell
+# Windows PowerShell
 $env:AI_TOOLKIT_AUTH="super_secure_password"; npm run build_and_start
 ```
 
-### Training
+## Training
+
 1. Copy the example config file located at `config/examples/train_lora_flux_24gb.yaml` (`config/examples/train_lora_flux_schnell_24gb.yaml` for schnell) to the `config` folder and rename it to `whatever_you_want.yml`
 2. Edit the file following the comments in the file
 3. Run the file like so `python run.py config/whatever_you_want.yml`
 
 For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.yaml` for NF4 LoRA, `config/examples/train_lora_ideogram4_fp8_48gb.yaml` for FP8 LoRA, `config/examples/train_lora_ideogram4_nvfp4_48gb.yaml` for Comfy NVFP4 LoRA, or `config/examples/train_full_fine_tune_ideogram4.yaml` for full conditional-transformer fine-tuning. For Comfy NVFP4 Ideogram 4 LoRA, an H200 GPU is suggested; keep the example's `train.batch_size: 1` so the job fits in memory. Ideogram 4 dataset captions work as natural text or JSON objects serialized as text files; JSON is recommended for best prompt fidelity, and training does not call Ideogram magic-prompt, moderation, or any other hosted API.
 
-A folder with the name and the training folder from the config file will be created when you start. It will have all 
-checkpoints and images in it. You can stop the training at any time using ctrl+c and when you resume, it will pick back up
-from the last checkpoint.
+When training starts, AITK Studio creates the configured training folder and writes checkpoints and samples there. You can stop training with `Ctrl+C`; when you resume, it picks up from the latest checkpoint.
 
-IMPORTANT. If you press crtl+c while it is saving, it will likely corrupt that checkpoint. So wait until it is done saving
+IMPORTANT: If you press `Ctrl+C` while a checkpoint is saving, it will likely corrupt that checkpoint. Wait until saving finishes before stopping the run.
 
 ### Multi-step training phases
 
@@ -543,80 +575,80 @@ Progress displays use the current step without a percentage bar while auto learn
 
 For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`. For i1-3B LoRA, see `config/examples/train_lora_i1_24gb.yaml`. For Ideogram 4 LoRA and full fine-tune starting points, see `config/examples/train_lora_ideogram4_48gb.yaml`, `config/examples/train_lora_ideogram4_fp8_48gb.yaml`, `config/examples/train_lora_ideogram4_nvfp4_48gb.yaml`, and `config/examples/train_full_fine_tune_ideogram4.yaml`.
 
-### Need help or found a bug?
+### Gradio UI
 
-This fork tracks reproducible code bugs in this repository only. If you find a bug in `rmcc3/ai-toolkit-revamped`, open a bug report at [github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
-
-Please do not open bug reports here for upstream-only behavior, setup help, usage questions, or feature requests. If the behavior exists only in the original Ostris AI Toolkit, report it upstream.
-
-## Gradio UI
-
-To get started training locally with a with a custom UI, once you followed the steps above and `ai-toolkit` is installed:
+To train locally with the legacy Gradio UI after installing AITK Studio:
 
 ```bash
-cd ai-toolkit #in case you are not yet in the ai-toolkit folder
-huggingface-cli login #provide a `write` token to publish your LoRA at the end
+cd ai-toolkit-revamped # in case you are not yet in the ai-toolkit folder
+huggingface-cli login # provide a `write` token to publish your LoRA at the end
 python flux_train_ui.py
 ```
 
-You will instantiate a UI that will let you upload your images, caption them, train and publish your LoRA
-![image](assets/lora_ease_ui.png)
+This starts a UI for uploading images, captioning them, training a LoRA, and publishing the result.
+
+![Legacy Gradio training UI](assets/lora_ease_ui.png)
 
 
-## Training in RunPod
+## Cloud Training
 
-This fork includes a maintained private RunPod Pod template for the revamped UI. See [`runpod/README.md`](runpod/README.md) for the Blackwell-first template, persistent volume layout, required `AI_TOOLKIT_AUTH` secret, and access URL format: `https://<POD_ID>-8675.proxy.runpod.net`.
+### RunPod
 
-## Training in Modal
+This fork includes a maintained private RunPod Pod template for the AITK Studio UI. See [`runpod/README.md`](runpod/README.md) for the Blackwell-first template, persistent volume layout, required `AI_TOOLKIT_AUTH` secret, and access URL format: `https://<POD_ID>-8675.proxy.runpod.net`.
 
-### 1. Setup
-#### ai-toolkit:
-```
+### Modal
+
+#### 1. Setup
+
+##### AITK Studio
+
+```bash
 git clone https://github.com/rmcc3/ai-toolkit-revamped.git
-cd ai-toolkit
+cd ai-toolkit-revamped
 git submodule update --init --recursive
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements_torch_legacy_cu128.txt
 pip install -r requirements.txt
-pip install --upgrade accelerate transformers diffusers huggingface_hub #Optional, run it if you run into issues
+pip install --upgrade accelerate transformers diffusers huggingface_hub # Optional, run it if you run into issues
 ```
-#### Modal:
-- Run `pip install modal` to install the modal Python package.
-- Run `modal setup` to authenticate (if this doesn’t work, try `python -m modal setup`).
 
-#### Hugging Face:
+##### Modal
+- Run `pip install modal` to install the modal Python package.
+- Run `modal setup` to authenticate. If that does not work, try `python -m modal setup`.
+
+##### Hugging Face
 - Get a READ token from [here](https://huggingface.co/settings/tokens) and request access to Flux.1-dev model from [here](https://huggingface.co/black-forest-labs/FLUX.1-dev).
 - Run `huggingface-cli login` and paste your token.
 
-### 2. Upload your dataset
+#### 2. Upload your dataset
 - Drag and drop your dataset folder containing the .jpg, .jpeg, or .png images and .txt files in `ai-toolkit`.
 
-### 3. Configs
-- Copy an example config file located at ```config/examples/modal``` to the `config` folder and rename it to ```whatever_you_want.yml```.
+#### 3. Configs
+- Copy an example config from `config/examples/modal` to the `config` folder and rename it to `whatever_you_want.yml`.
 - Edit the config following the comments in the file, **<ins>be careful and follow the example `/root/ai-toolkit` paths</ins>**.
 
-### 4. Edit run_modal.py
+#### 4. Edit run_modal.py
 - Set your entire local `ai-toolkit` path at `code_mount = modal.Mount.from_local_dir` like:
-  
+
    ```
    code_mount = modal.Mount.from_local_dir("/Users/username/ai-toolkit", remote_path="/root/ai-toolkit")
    ```
-- Choose a `GPU` and `Timeout` in `@app.function` _(default is A100 40GB and 2 hour timeout)_.
+- Choose a `GPU` and `Timeout` in `@app.function`. The default is A100 40GB with a 2-hour timeout.
 
-### 5. Training
+#### 5. Training
 - Run the config file in your terminal: `modal run run_modal.py --config-file-list-str=/root/ai-toolkit/config/whatever_you_want.yml`.
 - You can monitor your training in your local terminal, or on [modal.com](https://modal.com/).
 - Models, samples and optimizer will be stored in `Storage > flux-lora-models`.
 
-### 6. Saving the model
-- Check contents of the volume by running `modal volume ls flux-lora-models`. 
+#### 6. Saving the model
+- Check contents of the volume by running `modal volume ls flux-lora-models`.
 - Download the content by running `modal volume get flux-lora-models your-model-name`.
 - Example: `modal volume get flux-lora-models my_first_flux_lora_v1`.
 
 ---
 
-## Dataset Preparation
+## Datasets
 
 Datasets generally need to be a folder containing images and associated text files. Supported static image formats
 are jpg, jpeg, png, and webp. Animated WebP files are not supported as image dataset inputs; use a video dataset
@@ -655,7 +687,9 @@ Threat model limit: encrypted datasets protect against plaintext at rest on disk
 Disk caches and plaintext sidecars are disabled for encrypted datasets. Generated controls and external control/mask/inpaint paths are not supported for encrypted datasets yet.
 
 
-## Training Specific Layers
+## Advanced Training
+
+### Layer Targeting
 
 To train specific layers with LoRA, you can use the `only_if_contains` network kwargs. For instance, if you want to train only the 2 layers
 used by The Last Ben, [mentioned in this post](https://x.com/__TheBen/status/1829554120270987740), you can adjust your
@@ -702,7 +736,7 @@ You can also exclude layers by their names by using `ignore_if_contains` network
 `ignore_if_contains` takes priority over `only_if_contains`. So if a weight is covered by both,
 if will be ignored.
 
-## LoKr Training
+### LoKr Training
 
 To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Guidelines.md) and the LyCORIS [network arguments](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Network-Args.md). To train a LoKr model, change the network type in the config file:
 
@@ -715,7 +749,7 @@ To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https:/
         lokr_full_matrix: false
 ```
 
-`linear` and `linear_alpha` are the LoKr dimension and alpha. `lokr_factor` maps to upstream AI Toolkit `factor`; use `-1` for automatic factorization. Plain LoKr configs default to upstream-compatible factor ordering. Set `lokr_legacy_factorization: false` only when you intentionally want Revamped's newer balanced factor layout. `lokr_full_matrix` forces the second Kronecker block to be stored as a full matrix and is normally left off unless you explicitly want that larger model. The older `lokr_full_rank` key is still accepted for compatibility and also enables full-matrix mode.
+`linear` and `linear_alpha` are the LoKr dimension and alpha. `lokr_factor` maps to upstream AI Toolkit `factor`; use `-1` for automatic factorization. Plain LoKr configs default to upstream-compatible factor ordering. Set `lokr_legacy_factorization: false` only when you intentionally want this fork's newer balanced factor layout. `lokr_full_matrix` forces the second Kronecker block to be stored as a full matrix and is normally left off unless you explicitly want that larger model. The older `lokr_full_rank` key is still accepted for compatibility and also enables full-matrix mode.
 
 Current LoKr options can be set either from the UI (`New Job` -> `Target Type: LoKr`) or in YAML:
 
@@ -736,3 +770,11 @@ Current LoKr options can be set either from the UI (`New Job` -> `Target Type: L
 Supported advanced keys include `lokr_use_tucker`, `lokr_use_scalar`, `lokr_decompose_both`, `lokr_rank_dropout_scale`, `lokr_weight_decompose`, `lokr_wd_on_output`, `lokr_full_matrix`, `lokr_bypass_mode`, `lokr_rs_lora`, `lokr_unbalanced_factorization`, and `lokr_legacy_factorization`. The loader also accepts upstream-style aliases such as `factor`, `use_tucker`, `use_scalar`, `decompose_both`, `rank_dropout_scale`, `weight_decompose`, `dora_wd`, `wd_on_output`, `full_matrix`, `bypass_mode`, `rs_lora`, `unbalanced_factorization`, and `legacy_factorization`.
 
 Everything else should work the same, including layer targeting with `network_kwargs`.
+
+## Help and Attribution
+
+This fork tracks reproducible code bugs in this repository only. If you find a bug in `rmcc3/ai-toolkit-revamped`, open a bug report at [github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md](https://github.com/rmcc3/ai-toolkit-revamped/issues/new?template=bug_report.md) and include your reproduction steps, environment details, logs, and the commit or version you are running.
+
+Please do not open bug reports here for upstream-only behavior, setup help, usage questions, or feature requests. If the behavior exists only in the original Ostris AI Toolkit, report it upstream.
+
+AITK Studio is based on the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit). Keep the original license and attribution intact when redistributing this project.

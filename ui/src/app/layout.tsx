@@ -15,8 +15,8 @@ export const dynamic = 'force-dynamic';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'OstrisAI-Toolkit Revamped',
-  description: 'A revamped fork of Ostris AI Toolkit for training diffusion models.',
+  title: 'AITK Studio',
+  description: 'A training studio for diffusion models, datasets, and generation workflows.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta name="apple-mobile-web-app-title" content="AITK Revamped" />
+        <meta name="apple-mobile-web-app-title" content="AITK Studio" />
         <script
           dangerouslySetInnerHTML={{
             __html: `

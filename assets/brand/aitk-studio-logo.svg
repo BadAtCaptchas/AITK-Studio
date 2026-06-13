@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 256" role="img" aria-labelledby="title desc">
+  <title id="title">AITK Studio logo</title>
+  <desc id="desc">Black AITK Studio wordmark with a latent grid mark.</desc>
+  <rect width="980" height="256" fill="none"/>
+  <g transform="translate(24 24)">
+    <rect width="208" height="208" rx="44" fill="#050505"/>
+    <g stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.92">
+      <path d="M52 60h104"/>
+      <path d="M52 104h104"/>
+      <path d="M52 148h104"/>
+      <path d="M60 52v104"/>
+      <path d="M104 52v104"/>
+      <path d="M148 52v104"/>
+    </g>
+    <g fill="#ffffff">
+      <circle cx="60" cy="60" r="10"/>
+      <circle cx="104" cy="60" r="7"/>
+      <circle cx="148" cy="60" r="10"/>
+      <circle cx="60" cy="104" r="7"/>
+      <circle cx="104" cy="104" r="12"/>
+      <circle cx="148" cy="104" r="7"/>
+      <circle cx="60" cy="148" r="10"/>
+      <circle cx="104" cy="148" r="7"/>
+      <circle cx="148" cy="148" r="10"/>
+    </g>
+    <rect x="43" y="77" width="122" height="54" rx="14" fill="#ffffff"/>
+    <text x="104" y="116" fill="#050505" font-family="Arial" font-size="38" font-weight="800" text-anchor="middle">AITK</text>
+  </g>
+  <g fill="#050505" font-family="Arial" letter-spacing="0">
+    <text x="280" y="117" font-size="78" font-weight="800">AITK</text>
+    <text x="280" y="182" font-size="58" font-weight="560">Studio</text>
+  </g>
+  <path d="M758 64h126M758 104h86M758 144h126M758 184h68" stroke="#050505" stroke-width="10" stroke-linecap="round" opacity="0.34"/>
+</svg>

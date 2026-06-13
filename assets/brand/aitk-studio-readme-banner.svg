@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 520" role="img" aria-labelledby="title desc">
+  <title id="title">AITK Studio README banner</title>
+  <desc id="desc">Black and white AITK Studio banner with latent grid geometry.</desc>
+  <rect width="1600" height="520" fill="#050505"/>
+  <g stroke="#ffffff" stroke-width="1.4" opacity="0.16">
+    <path d="M0 80h1600M0 160h1600M0 240h1600M0 320h1600M0 400h1600"/>
+    <path d="M120 0v520M240 0v520M360 0v520M480 0v520M600 0v520M720 0v520M840 0v520M960 0v520M1080 0v520M1200 0v520M1320 0v520M1440 0v520"/>
+  </g>
+  <g opacity="0.22" stroke="#ffffff" stroke-width="10" stroke-linecap="round">
+    <path d="M1090 138h270"/>
+    <path d="M1034 260h382"/>
+    <path d="M1090 382h270"/>
+    <path d="M1160 88v344"/>
+    <path d="M1280 88v344"/>
+  </g>
+  <g fill="#ffffff" opacity="0.55">
+    <circle cx="1160" cy="138" r="17"/>
+    <circle cx="1280" cy="138" r="12"/>
+    <circle cx="1400" cy="138" r="17"/>
+    <circle cx="1040" cy="260" r="12"/>
+    <circle cx="1160" cy="260" r="17"/>
+    <circle cx="1280" cy="260" r="22"/>
+    <circle cx="1400" cy="260" r="12"/>
+    <circle cx="1160" cy="382" r="17"/>
+    <circle cx="1280" cy="382" r="12"/>
+    <circle cx="1400" cy="382" r="17"/>
+  </g>
+  <g transform="translate(112 112)">
+    <rect width="168" height="168" rx="36" fill="#ffffff"/>
+    <g stroke="#050505" stroke-width="7" stroke-linecap="round" opacity="0.92">
+      <path d="M42 48h84"/>
+      <path d="M42 84h84"/>
+      <path d="M42 120h84"/>
+      <path d="M48 42v84"/>
+      <path d="M84 42v84"/>
+      <path d="M120 42v84"/>
+    </g>
+    <g fill="#050505">
+      <circle cx="48" cy="48" r="8"/>
+      <circle cx="84" cy="48" r="6"/>
+      <circle cx="120" cy="48" r="8"/>
+      <circle cx="48" cy="84" r="6"/>
+      <circle cx="84" cy="84" r="10"/>
+      <circle cx="120" cy="84" r="6"/>
+      <circle cx="48" cy="120" r="8"/>
+      <circle cx="84" cy="120" r="6"/>
+      <circle cx="120" cy="120" r="8"/>
+    </g>
+    <rect x="35" y="62" width="98" height="44" rx="12" fill="#050505"/>
+    <text x="84" y="94" fill="#ffffff" font-family="Arial" font-size="31" font-weight="800" text-anchor="middle">AITK</text>
+  </g>
+  <text x="112" y="355" fill="#ffffff" font-family="Arial" font-size="108" font-weight="820" letter-spacing="0">AITK Studio</text>
+  <text x="118" y="415" fill="#cfcfcf" font-family="Arial" font-size="34" font-weight="500" letter-spacing="0">Training workspace for diffusion models</text>
+</svg>

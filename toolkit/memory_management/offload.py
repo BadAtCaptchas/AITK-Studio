@@ -36,6 +36,7 @@ SUPPORTED_BLOCK_ARCHES = {
     "ernie_image",
     "zimage_l2p",
     "ideogram4",
+    "prx_pixel",
 }
 
 

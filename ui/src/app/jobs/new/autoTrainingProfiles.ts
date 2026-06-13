@@ -55,6 +55,7 @@ const flowImageArchs = [
   'omnigen2',
   'zimage',
   'zimage:*',
+  'prx_pixel',
   'ernie_image',
   'i1',
 ];

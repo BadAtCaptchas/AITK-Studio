@@ -107,6 +107,9 @@ HidreamO1Model, = _optional_models(
 )
 GlmImageModel, = _optional_models(".glm_image", (("GlmImageModel", "glm_image"),))
 I1Model, = _optional_models(".i1", (("I1Model", "i1"),))
+PRXPixelT2IModel, = _optional_models(
+    ".prx_pixel_t2i", (("PRXPixelT2IModel", "prx_pixel"),)
+)
 
 
 AI_TOOLKIT_MODELS = [
@@ -139,4 +142,5 @@ AI_TOOLKIT_MODELS = [
     HidreamO1Model,
     GlmImageModel,
     I1Model,
+    PRXPixelT2IModel,
 ]

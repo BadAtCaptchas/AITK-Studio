@@ -33,6 +33,7 @@ const BLOCK_SUPPORTED_ARCHES = new Set([
   'nucleus_image',
   'ernie_image',
   'ideogram4',
+  'prx_pixel',
 ]);
 
 const LARGE_TEXT_ENCODER_ARCHES = new Set([
@@ -56,6 +57,7 @@ const LARGE_TEXT_ENCODER_ARCHES = new Set([
   'nucleus_image',
   'ernie_image',
   'ideogram4',
+  'prx_pixel',
 ]);
 
 export function normalizeMemoryProfileArch(archName?: string | null) {

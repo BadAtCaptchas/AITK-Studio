@@ -1296,15 +1296,7 @@ export default function IdeogramWorkflowBuilderPage() {
                           />
                         </button>
                       </>
-                    ) : (
-                      <>
-                        <div className="absolute bottom-5 left-5 right-5 top-[45%] bg-gradient-to-b from-slate-900/15 to-slate-800/30" />
-                        <div className="pointer-events-none absolute inset-x-8 top-[17%] text-center text-[54px] font-black tracking-[0.08em] text-gray-300/20">
-                          COMFY
-                        </div>
-                        <div className="pointer-events-none absolute bottom-[18%] left-1/2 h-24 w-40 -translate-x-1/2 rounded-sm border border-gray-600/20 bg-gray-300/5" />
-                      </>
-                    )}
+                    ) : null}
                     {state.elements.map((element, index) => {
                       const selected = index === selectedElementIndex;
                       const color = element.color_palette?.[0] || (element.type === 'text' ? '#22D3EE' : '#F59E0B');

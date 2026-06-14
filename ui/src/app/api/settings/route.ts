@@ -6,6 +6,7 @@ import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSec
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
 import { isRemoteOllamaWorkersSettingKey } from '@/server/remoteOllamaWorkers';
 import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyLoraDir, normalizeExternalComfyUrl } from '@/server/externalComfy';
+import { IDEOGRAM_WORKFLOW_HISTORY_KEY } from '@/server/ideogramWorkflowHistory';
 import path from 'path';
 
 type SettingsAccess = {
@@ -53,6 +54,7 @@ export async function GET(request: NextRequest) {
       if (isEncryptedDatasetSecretSettingKey(setting.key)) return acc;
       if (isSecureCaptionSystemPromptSettingKey(setting.key)) return acc;
       if (isRemoteOllamaWorkersSettingKey(setting.key)) return acc;
+      if (setting.key === IDEOGRAM_WORKFLOW_HISTORY_KEY) return acc;
       acc[setting.key] = setting.value;
       return acc;
     }, {});

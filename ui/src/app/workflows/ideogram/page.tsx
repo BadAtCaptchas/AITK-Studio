@@ -20,6 +20,7 @@ import {
   Send,
   Sparkles,
   Square,
+  Star,
   Trash2,
   X,
   ZoomIn,
@@ -102,6 +103,24 @@ type ImportedCanvasImage = PreviewImage & {
   width: number;
   height: number;
   aspectRatio: string;
+};
+
+type WorkflowHistoryEntry = {
+  id: string;
+  title: string;
+  promptId: string;
+  serverUrl: string;
+  state: IdeogramWorkflowState;
+  workflow: Record<string, unknown>;
+  images: ComfyImageRef[];
+  favorite: boolean;
+  status: 'queued' | 'completed' | 'error' | 'imported';
+  createdAt: string;
+  updatedAt: string;
+  aspectRatio: string;
+  seed: number;
+  steps: number;
+  cfg: number;
 };
 
 type GenerationState = {
@@ -366,6 +385,36 @@ function filenameBase(filename: string) {
   return filename.split(/[\\/]/).pop() || filename;
 }
 
+function formatHistoryDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown time';
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function historyStatusLabel(status: WorkflowHistoryEntry['status']) {
+  if (status === 'queued') return 'Queued';
+  if (status === 'error') return 'Error';
+  if (status === 'imported') return 'Imported';
+  return 'Completed';
+}
+
+function historyImageUrl(entry: WorkflowHistoryEntry) {
+  const image = entry.images?.[0];
+  if (!image || !entry.serverUrl) return '';
+  const params = new URLSearchParams({
+    server_url: entry.serverUrl,
+    filename: image.filename,
+    subfolder: image.subfolder || '',
+    type: image.type || 'output',
+  });
+  return `/api/comfy/external/view?${params.toString()}`;
+}
+
 function clampZoom(value: number) {
   return Math.max(0.45, Math.min(1.2, Number(value.toFixed(2))));
 }
@@ -499,6 +548,7 @@ export default function IdeogramWorkflowBuilderPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const historyInputRef = useRef<HTMLInputElement | null>(null);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const generationAbortRef = useRef(false);
   const objectUrlsRef = useRef<string[]>([]);
@@ -530,6 +580,11 @@ export default function IdeogramWorkflowBuilderPage() {
   const [importedImage, setImportedImage] = useState<ImportedCanvasImage | null>(null);
   const [canvasImage, setCanvasImage] = useState<PreviewImage | null>(null);
   const [lightboxImage, setLightboxImage] = useState<PreviewImage | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<WorkflowHistoryEntry[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'saving' | 'error'>('idle');
+  const [historyMessage, setHistoryMessage] = useState('');
+  const [activeHistoryId, setActiveHistoryId] = useState('');
   const [nowTick, setNowTick] = useState(Date.now());
 
   const workflow = useMemo(() => buildIdeogramComfyWorkflow(state), [state]);
@@ -548,6 +603,12 @@ export default function IdeogramWorkflowBuilderPage() {
         return name && externalLoras.length > 0 && !externalLoraSet.has(name);
       }),
     [externalLoraSet, externalLoras.length, state.loras],
+  );
+  const favoriteHistoryEntries = useMemo(() => historyEntries.filter(entry => entry.favorite), [historyEntries]);
+  const recentHistoryEntries = useMemo(() => historyEntries.filter(entry => !entry.favorite), [historyEntries]);
+  const activeHistoryEntry = useMemo(
+    () => historyEntries.find(entry => entry.id === activeHistoryId || (!!generation.promptId && entry.promptId === generation.promptId)) || null,
+    [activeHistoryId, generation.promptId, historyEntries],
   );
 
   const clearResultObjectUrls = useCallback(() => {
@@ -592,6 +653,59 @@ export default function IdeogramWorkflowBuilderPage() {
     [serverUrl],
   );
 
+  const refreshWorkflowHistory = useCallback(async () => {
+    setHistoryStatus('loading');
+    setHistoryMessage('');
+    try {
+      const response = await apiClient.get('/api/workflows/ideogram/history');
+      setHistoryEntries(Array.isArray(response.data?.entries) ? response.data.entries : []);
+      setHistoryStatus('idle');
+    } catch (error: any) {
+      setHistoryStatus('error');
+      setHistoryMessage(error.response?.data?.error || 'Could not load workflow history.');
+    }
+  }, []);
+
+  const saveWorkflowHistoryEntry = useCallback(
+    async ({
+      stateSnapshot,
+      workflowSnapshot,
+      serverUrlSnapshot,
+      promptId,
+      images = [],
+      status = 'completed',
+    }: {
+      stateSnapshot: IdeogramWorkflowState;
+      workflowSnapshot: Record<string, unknown>;
+      serverUrlSnapshot: string;
+      promptId?: string;
+      images?: ComfyImageRef[];
+      status?: WorkflowHistoryEntry['status'];
+    }) => {
+      setHistoryStatus('saving');
+      try {
+        const response = await apiClient.post('/api/workflows/ideogram/history', {
+          promptId,
+          serverUrl: serverUrlSnapshot,
+          state: stateSnapshot,
+          workflow: workflowSnapshot,
+          images,
+          status,
+        });
+        const entries = Array.isArray(response.data?.entries) ? response.data.entries : [];
+        setHistoryEntries(entries);
+        if (response.data?.entry?.id) setActiveHistoryId(response.data.entry.id);
+        setHistoryStatus('idle');
+        return response.data?.entry as WorkflowHistoryEntry | undefined;
+      } catch (error: any) {
+        setHistoryStatus('error');
+        setHistoryMessage(error.response?.data?.error || 'Could not save workflow history.');
+        return undefined;
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     apiClient
       .get('/api/comfy/external/settings')
@@ -607,6 +721,10 @@ export default function IdeogramWorkflowBuilderPage() {
         setSettingsMessage(error.response?.data?.error || 'Could not load external ComfyUI settings.');
       });
   }, []);
+
+  useEffect(() => {
+    void refreshWorkflowHistory();
+  }, [refreshWorkflowHistory]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNowTick(Date.now()), 1000);
@@ -891,7 +1009,8 @@ export default function IdeogramWorkflowBuilderPage() {
   };
 
   const fetchResultImages = useCallback(
-    async (images: ComfyImageRef[]) => {
+    async (images: ComfyImageRef[], serverUrlOverride?: string) => {
+      const imageServerUrl = serverUrlOverride || serverUrl;
       setCanvasImage(current => (current?.source === 'result' ? null : current));
       setLightboxImage(current => (current?.source === 'result' ? null : current));
       clearResultObjectUrls();
@@ -900,7 +1019,7 @@ export default function IdeogramWorkflowBuilderPage() {
         const response = await apiClient.get('/api/comfy/external/view', {
           responseType: 'blob',
           params: {
-            server_url: serverUrl,
+            server_url: imageServerUrl,
             filename: image.filename,
             subfolder: image.subfolder,
             type: image.type,
@@ -933,6 +1052,16 @@ export default function IdeogramWorkflowBuilderPage() {
         if (Array.isArray(response.data?.images) && response.data.images.length > 0) {
           await fetchResultImages(response.data.images);
         }
+        if (options.applyWorkflow && isRecord(response.data?.state)) {
+          await saveWorkflowHistoryEntry({
+            stateSnapshot: response.data.state as IdeogramWorkflowState,
+            workflowSnapshot: isRecord(response.data?.workflow) ? response.data.workflow : buildIdeogramComfyWorkflow(response.data.state),
+            serverUrlSnapshot: serverUrl,
+            promptId,
+            images: Array.isArray(response.data?.images) ? response.data.images : [],
+            status: 'imported',
+          });
+        }
         return response.data;
       } catch (error: any) {
         if (!options.quietNotFound || error.response?.status !== 404) {
@@ -941,11 +1070,18 @@ export default function IdeogramWorkflowBuilderPage() {
         throw error;
       }
     },
-    [fetchResultImages, serverUrl],
+    [fetchResultImages, saveWorkflowHistoryEntry, serverUrl],
   );
 
   const pollHistoryUntilComplete = useCallback(
-    async (promptId: string) => {
+    async (
+      promptId: string,
+      snapshot: {
+        stateSnapshot: IdeogramWorkflowState;
+        workflowSnapshot: Record<string, unknown>;
+        serverUrlSnapshot: string;
+      },
+    ) => {
       for (let attempt = 0; attempt < 240; attempt += 1) {
         if (generationAbortRef.current) return;
         try {
@@ -953,6 +1089,12 @@ export default function IdeogramWorkflowBuilderPage() {
           const images = Array.isArray(result?.images) ? result.images : [];
           const status = isRecord(result?.status) ? result.status : {};
           if (status.status_str === 'error') {
+            await saveWorkflowHistoryEntry({
+              ...snapshot,
+              promptId,
+              images,
+              status: 'error',
+            });
             setGeneration(current => ({
               ...current,
               status: 'error',
@@ -962,6 +1104,12 @@ export default function IdeogramWorkflowBuilderPage() {
             return;
           }
           if (images.length > 0) {
+            await saveWorkflowHistoryEntry({
+              ...snapshot,
+              promptId,
+              images,
+              status: 'completed',
+            });
             setGeneration(current => ({
               ...current,
               status: 'completed',
@@ -983,6 +1131,12 @@ export default function IdeogramWorkflowBuilderPage() {
         }
         await new Promise(resolve => window.setTimeout(resolve, 1500));
       }
+      await saveWorkflowHistoryEntry({
+        ...snapshot,
+        promptId,
+        images: [],
+        status: 'error',
+      });
       setGeneration(current => ({
         ...current,
         status: 'error',
@@ -990,7 +1144,7 @@ export default function IdeogramWorkflowBuilderPage() {
         message: 'Timed out waiting for ComfyUI history outputs.',
       }));
     },
-    [importHistory],
+    [importHistory, saveWorkflowHistoryEntry],
   );
 
   const connectProgressSocket = useCallback(
@@ -1068,6 +1222,9 @@ export default function IdeogramWorkflowBuilderPage() {
     }
     generationAbortRef.current = false;
     const clientId = crypto.randomUUID();
+    const stateSnapshot = cloneIdeogramWorkflowState(state);
+    const workflowSnapshot = buildIdeogramComfyWorkflow(stateSnapshot);
+    const serverUrlSnapshot = serverUrl;
     setCanvasImage(current => (current?.source === 'result' ? null : current));
     setLightboxImage(current => (current?.source === 'result' ? null : current));
     clearResultObjectUrls();
@@ -1083,12 +1240,20 @@ export default function IdeogramWorkflowBuilderPage() {
     if (generationAbortRef.current) return;
     try {
       const response = await apiClient.post('/api/comfy/external/prompt', {
-        server_url: serverUrl,
-        state,
-        workflow,
+        server_url: serverUrlSnapshot,
+        state: stateSnapshot,
+        workflow: workflowSnapshot,
         clientId,
       });
       const promptId = response.data?.promptId || '';
+      await saveWorkflowHistoryEntry({
+        stateSnapshot,
+        workflowSnapshot,
+        serverUrlSnapshot,
+        promptId,
+        images: [],
+        status: 'queued',
+      });
       setGeneration(current => ({
         ...current,
         status: 'queued',
@@ -1096,7 +1261,7 @@ export default function IdeogramWorkflowBuilderPage() {
         queuePosition: response.data?.queueNumber == null ? current.queuePosition : String(response.data.queueNumber),
         message: 'Queued in ComfyUI',
       }));
-      void pollHistoryUntilComplete(promptId);
+      void pollHistoryUntilComplete(promptId, { stateSnapshot, workflowSnapshot, serverUrlSnapshot });
     } catch (error: any) {
       const preflightResult = error.response?.data?.preflight;
       if (preflightResult) setPreflight(preflightResult);
@@ -1107,7 +1272,7 @@ export default function IdeogramWorkflowBuilderPage() {
         message: 'Failed to queue prompt.',
       }));
     }
-  }, [clearResultObjectUrls, connectProgressSocket, pollHistoryUntilComplete, serverUrl, state, workflow]);
+  }, [clearResultObjectUrls, connectProgressSocket, pollHistoryUntilComplete, saveWorkflowHistoryEntry, serverUrl, state]);
 
   const cancelGeneration = async () => {
     generationAbortRef.current = true;
@@ -1123,6 +1288,80 @@ export default function IdeogramWorkflowBuilderPage() {
       message: 'Generation canceled.',
     }));
   };
+
+  const loadWorkflowHistoryEntry = useCallback(
+    async (entry: WorkflowHistoryEntry) => {
+      const restoredState = cloneIdeogramWorkflowState(entry.state);
+      setState(restoredState);
+      setPreflight(null);
+      setSelectedElementIndex(0);
+      setActiveHistoryId(entry.id);
+      setActiveTab('preview');
+      setHistoryOpen(false);
+      if (entry.serverUrl) {
+        setServerUrl(entry.serverUrl);
+        setServerUrlDraft(entry.serverUrl);
+      }
+      setGeneration({
+        ...EMPTY_GENERATION,
+        status: entry.status === 'error' ? 'error' : entry.status === 'queued' ? 'queued' : 'completed',
+        promptId: entry.promptId,
+        clientId: '',
+        queuePosition: '-',
+        executingNode: '-',
+        step: entry.steps,
+        maxStep: entry.steps,
+        message: entry.status === 'queued' ? 'Loaded queued workflow.' : 'Loaded workflow history.',
+        error: entry.status === 'error' ? 'This saved generation ended with an error.' : '',
+      });
+      if (entry.images.length > 0) {
+        try {
+          await fetchResultImages(entry.images, entry.serverUrl || serverUrl);
+        } catch (error: any) {
+          setHistoryMessage(error.response?.data?.error || 'Workflow loaded, but its saved result image could not be restored.');
+        }
+      } else {
+        setCanvasImage(current => (current?.source === 'result' ? null : current));
+        setLightboxImage(current => (current?.source === 'result' ? null : current));
+        clearResultObjectUrls();
+        setResults([]);
+      }
+    },
+    [clearResultObjectUrls, fetchResultImages, serverUrl],
+  );
+
+  const toggleHistoryFavorite = useCallback(async (entry: WorkflowHistoryEntry) => {
+    setHistoryStatus('saving');
+    setHistoryMessage('');
+    try {
+      const response = await apiClient.patch('/api/workflows/ideogram/history', {
+        id: entry.id,
+        favorite: !entry.favorite,
+      });
+      setHistoryEntries(Array.isArray(response.data?.entries) ? response.data.entries : []);
+      setHistoryStatus('idle');
+    } catch (error: any) {
+      setHistoryStatus('error');
+      setHistoryMessage(error.response?.data?.error || 'Could not update favorite.');
+    }
+  }, []);
+
+  const deleteWorkflowHistoryEntry = useCallback(
+    async (entry: WorkflowHistoryEntry) => {
+      setHistoryStatus('saving');
+      setHistoryMessage('');
+      try {
+        const response = await apiClient.delete('/api/workflows/ideogram/history', { params: { id: entry.id } });
+        setHistoryEntries(Array.isArray(response.data?.entries) ? response.data.entries : []);
+        if (activeHistoryId === entry.id) setActiveHistoryId('');
+        setHistoryStatus('idle');
+      } catch (error: any) {
+        setHistoryStatus('error');
+        setHistoryMessage(error.response?.data?.error || 'Could not delete history entry.');
+      }
+    },
+    [activeHistoryId],
+  );
 
   const onCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (activeTool !== 'object' && activeTool !== 'text') return;
@@ -1174,13 +1413,21 @@ export default function IdeogramWorkflowBuilderPage() {
     [selectedElementIndex, state.elements],
   );
 
-  const handleCanvasWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+  const handleCanvasWheel = useCallback((event: WheelEvent) => {
     if (event.deltaY === 0) return;
     event.preventDefault();
+    event.stopPropagation();
     const direction = event.deltaY < 0 ? 1 : -1;
     const increment = event.shiftKey ? 0.04 : 0.08;
     setZoom(value => clampZoom(value + direction * increment));
   }, []);
+
+  useEffect(() => {
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+    viewport.addEventListener('wheel', handleCanvasWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', handleCanvasWheel);
+  }, [handleCanvasWheel]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1215,6 +1462,15 @@ export default function IdeogramWorkflowBuilderPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [lightboxImage]);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setHistoryOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [historyOpen]);
 
   const startBoxDrag = (event: React.PointerEvent<HTMLElement>, elementIndex: number, mode: 'move' | 'resize') => {
     event.preventDefault();
@@ -1259,6 +1515,78 @@ export default function IdeogramWorkflowBuilderPage() {
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp, { once: true });
+  };
+
+  const renderHistoryEntry = (entry: WorkflowHistoryEntry) => {
+    const thumbnailUrl = historyImageUrl(entry);
+    const active = activeHistoryId === entry.id || (!!generation.promptId && generation.promptId === entry.promptId);
+    return (
+      <article
+        key={entry.id}
+        className={classNames(
+          'overflow-hidden rounded-sm border bg-gray-950 transition-colors',
+          active ? 'border-cyan-800 shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : 'border-gray-800 hover:border-gray-700',
+        )}
+      >
+        <div className="grid grid-cols-[5.25rem_1fr] gap-3 p-2.5">
+          <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-sm border border-gray-800 bg-[#050a0f]">
+            {thumbnailUrl ? (
+              <img src={thumbnailUrl} alt={entry.title} className="h-full w-full object-contain" />
+            ) : (
+              <Sparkles className="h-5 w-5 text-gray-600" />
+            )}
+            <span
+              className={classNames(
+                'absolute bottom-1 left-1 rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold',
+                entry.status === 'completed'
+                  ? 'border-emerald-900 bg-emerald-950/80 text-emerald-200'
+                  : entry.status === 'error'
+                    ? 'border-rose-900 bg-rose-950/80 text-rose-200'
+                    : 'border-gray-700 bg-gray-950/85 text-gray-300',
+              )}
+            >
+              {historyStatusLabel(entry.status)}
+            </span>
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-start gap-2">
+              <button
+                type="button"
+                onClick={() => void toggleHistoryFavorite(entry)}
+                title={entry.favorite ? 'Remove favorite' : 'Favorite workflow'}
+                className={classNames(
+                  'mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-sm border transition-colors',
+                  entry.favorite
+                    ? 'border-amber-700 bg-amber-950/35 text-amber-200'
+                    : 'border-gray-800 bg-gray-950 text-gray-500 hover:border-gray-700 hover:text-gray-200',
+                )}
+              >
+                <Star className={classNames('h-4 w-4', entry.favorite ? 'fill-current' : '')} />
+              </button>
+              <div className="min-w-0 flex-1">
+                <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-gray-100">{entry.title}</h3>
+                <div className="mt-1 text-xs text-gray-500">{formatHistoryDate(entry.updatedAt)}</div>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-[11px] text-gray-500">
+              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">{entry.aspectRatio.split(' ')[0]}</span>
+              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">{entry.steps} steps</span>
+              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">CFG {entry.cfg}</span>
+            </div>
+            {entry.promptId ? <div className="mt-2 truncate font-mono text-[11px] text-gray-600">{entry.promptId}</div> : null}
+            <div className="mt-3 flex gap-2">
+              <ActionButton onClick={() => void loadWorkflowHistoryEntry(entry)} tone={active ? 'cyan' : 'neutral'}>
+                <History className="h-4 w-4" />
+                Load
+              </ActionButton>
+              <IconButton title="Delete history entry" danger onClick={() => void deleteWorkflowHistoryEntry(entry)}>
+                <Trash2 className="h-4 w-4" />
+              </IconButton>
+            </div>
+          </div>
+        </div>
+      </article>
+    );
   };
 
   const renderGenerationProgressPanel = () => (
@@ -1356,6 +1684,10 @@ export default function IdeogramWorkflowBuilderPage() {
           <ActionButton onClick={() => historyInputRef.current?.focus()}>
             <History className="h-4 w-4" />
             <span className="hidden sm:inline">Import History</span>
+          </ActionButton>
+          <ActionButton onClick={() => setHistoryOpen(true)}>
+            <History className="h-4 w-4" />
+            <span className="hidden sm:inline">Generation History</span>
           </ActionButton>
           <ActionButton onClick={exportJson}>
             <Code2 className="h-4 w-4" />
@@ -1606,7 +1938,7 @@ export default function IdeogramWorkflowBuilderPage() {
               </div>
 
               <div
-                onWheel={handleCanvasWheel}
+                ref={canvasViewportRef}
                 className="operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-auto bg-[#03070b] p-4"
               >
                 <div className="absolute right-3 top-3 z-10 flex flex-col gap-2 rounded-sm border border-gray-800 bg-gray-950/90 p-2">
@@ -1746,7 +2078,20 @@ export default function IdeogramWorkflowBuilderPage() {
                     {results.length} completed
                   </span>
                 </div>
-                <div className="text-xs text-gray-500">{generation.promptId ? `Prompt ${generation.promptId}` : 'No active prompt'}</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHistoryOpen(true)}
+                    className="inline-flex h-8 items-center gap-2 rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs font-medium text-gray-300 transition-colors hover:border-cyan-800 hover:text-cyan-100"
+                  >
+                    <History className="h-3.5 w-3.5" />
+                    Generation History
+                    <span className="rounded-sm border border-gray-800 bg-[#050a0f] px-1.5 py-0.5 text-[10px] text-gray-500">
+                      {historyEntries.length}
+                    </span>
+                  </button>
+                  <div className="hidden text-xs text-gray-500 lg:block">{generation.promptId ? `Prompt ${generation.promptId}` : 'No active prompt'}</div>
+                </div>
               </div>
               <div className="grid min-h-0 flex-1 gap-2 p-3 lg:grid-cols-[minmax(0,1fr)_260px]">
                 <div className="grid grid-cols-4 gap-2">
@@ -1789,6 +2134,16 @@ export default function IdeogramWorkflowBuilderPage() {
                     <span className="text-gray-300">{state.guiderCfg}</span>
                   </div>
                   <div className="mt-4 flex gap-2">
+                    <IconButton
+                      title={activeHistoryEntry?.favorite ? 'Remove favorite' : 'Favorite workflow'}
+                      disabled={!activeHistoryEntry}
+                      active={Boolean(activeHistoryEntry?.favorite)}
+                      onClick={() => {
+                        if (activeHistoryEntry) void toggleHistoryFavorite(activeHistoryEntry);
+                      }}
+                    >
+                      <Star className={classNames('h-4 w-4', activeHistoryEntry?.favorite ? 'fill-current' : '')} />
+                    </IconButton>
                     <IconButton title="Copy prompt ID" disabled={!generation.promptId} onClick={() => void copyText(generation.promptId, 'Prompt ID copied.')}>
                       <Copy className="h-4 w-4" />
                     </IconButton>
@@ -1978,6 +2333,86 @@ export default function IdeogramWorkflowBuilderPage() {
           </aside>
         </div>
       </MainContent>
+      {historyOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Generation history"
+          className="fixed inset-0 z-[90] flex justify-end bg-black/70 backdrop-blur-sm"
+          onMouseDown={() => setHistoryOpen(false)}
+        >
+          <aside
+            className="flex h-full w-full max-w-xl flex-col border-l border-gray-800 bg-[#05080c] shadow-2xl"
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <div className="flex h-14 flex-none items-center justify-between gap-3 border-b border-gray-800 px-4">
+              <div className="min-w-0">
+                <h2 className="truncate text-base font-semibold text-gray-100">Generation History</h2>
+                <p className="mt-0.5 text-xs text-gray-500">Load prior Ideogram generations or pin favorites.</p>
+              </div>
+              <div className="flex flex-none items-center gap-2">
+                <IconButton title="Refresh generation history" disabled={historyStatus === 'loading'} onClick={() => void refreshWorkflowHistory()}>
+                  {historyStatus === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </IconButton>
+                <IconButton title="Close generation history" onClick={() => setHistoryOpen(false)}>
+                  <X className="h-4 w-4" />
+                </IconButton>
+              </div>
+            </div>
+
+            <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto p-4">
+              <section className="mb-4 rounded-sm border border-gray-800 bg-gray-950 p-3">
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="rounded-sm border border-gray-800 bg-[#050a0f] px-2 py-2">
+                    <div className="text-lg font-semibold text-gray-100">{historyEntries.length}</div>
+                    <div className="text-gray-500">Generations</div>
+                  </div>
+                  <div className="rounded-sm border border-gray-800 bg-[#050a0f] px-2 py-2">
+                    <div className="text-lg font-semibold text-amber-200">{favoriteHistoryEntries.length}</div>
+                    <div className="text-gray-500">Favorites</div>
+                  </div>
+                  <div className="rounded-sm border border-gray-800 bg-[#050a0f] px-2 py-2">
+                    <div className="text-lg font-semibold text-cyan-100">{recentHistoryEntries.length}</div>
+                    <div className="text-gray-500">Recent</div>
+                  </div>
+                </div>
+                {historyMessage ? (
+                  <div className={classNames('mt-3 rounded-sm border px-3 py-2 text-xs', historyStatus === 'error' ? 'border-rose-900 bg-rose-950/20 text-rose-200' : 'border-gray-800 bg-gray-900 text-gray-300')}>
+                    {historyMessage}
+                  </div>
+                ) : null}
+              </section>
+
+              {historyEntries.length === 0 ? (
+                <section className="flex min-h-64 flex-col items-center justify-center rounded-sm border border-dashed border-gray-800 bg-gray-950 p-6 text-center">
+                  <History className="mb-3 h-7 w-7 text-gray-600" />
+                  <h2 className="text-sm font-semibold text-gray-200">No generation history yet</h2>
+                  <p className="mt-1 max-w-sm text-xs leading-5 text-gray-500">
+                    Generated workflows will appear here with their settings, prompt ID, result refs, and favorite state.
+                  </p>
+                </section>
+              ) : null}
+
+              {favoriteHistoryEntries.length > 0 ? (
+                <section className="mb-5">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-200">
+                    <Star className="h-3.5 w-3.5 fill-current" />
+                    Favorites
+                  </div>
+                  <div className="space-y-2">{favoriteHistoryEntries.map(renderHistoryEntry)}</div>
+                </section>
+              ) : null}
+
+              {recentHistoryEntries.length > 0 ? (
+                <section>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Recent Generations</div>
+                  <div className="space-y-2">{recentHistoryEntries.map(renderHistoryEntry)}</div>
+                </section>
+              ) : null}
+            </div>
+          </aside>
+        </div>
+      ) : null}
       {lightboxImage ? (
         <div
           role="dialog"

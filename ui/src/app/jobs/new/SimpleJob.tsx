@@ -410,13 +410,14 @@ export default function SimpleJob({
       if (!uploaded?.path) {
         throw new Error('Upload did not return a LoRA path.');
       }
+      const reused = response.data?.reused === true;
       setJobConfig(uploaded.path, 'config.process[0].model.base_lora_path');
       const triggerWords = Array.isArray(uploaded.triggerWords) ? uploaded.triggerWords.filter(Boolean) : [];
       setBaseLoraUploadStatus('success');
       setBaseLoraUploadMessage(
         triggerWords.length > 0
-          ? `Uploaded. Trigger metadata: ${triggerWords.join(', ')}`
-          : 'Uploaded. No trigger metadata found.',
+          ? `${reused ? 'Loaded existing upload' : 'Uploaded'}. Trigger metadata: ${triggerWords.join(', ')}`
+          : `${reused ? 'Loaded existing upload' : 'Uploaded'}. No trigger metadata found.`,
       );
     } catch (error: any) {
       setBaseLoraUploadStatus('error');
@@ -883,8 +884,8 @@ export default function SimpleJob({
                         className="operator-icon-button mt-7 h-8 w-8 border-gray-800"
                         onClick={() => baseLoraFileInputRef.current?.click()}
                         disabled={baseLoraUploadStatus === 'uploading'}
-                        title="Upload Base LoRA"
-                        aria-label="Upload Base LoRA"
+                        title="Upload or reuse Base LoRA"
+                        aria-label="Upload or reuse Base LoRA"
                       >
                         {baseLoraUploadStatus === 'uploading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
                       </button>

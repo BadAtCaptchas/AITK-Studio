@@ -3,6 +3,7 @@ import fs from 'fs';
 import {
   buildUploadedLoraEntry,
   extractTriggerWordsFromMetadata,
+  findDuplicateUploadedLoraPath,
   getUploadedLoraRoot,
   mergeTriggerWords,
   nextAvailableLoraPath,
@@ -18,6 +19,7 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   let savedPath: string | null = null;
+  let createdPath: string | null = null;
 
   try {
     const contentLength = Number(request.headers.get('content-length') || 0);
@@ -41,26 +43,34 @@ export async function POST(request: NextRequest) {
 
     const root = await getUploadedLoraRoot();
     await fs.promises.mkdir(root, { recursive: true });
-    savedPath = await nextAvailableLoraPath(root, file.name);
-    await fs.promises.writeFile(savedPath, Buffer.from(await file.arrayBuffer()));
+    const content = Buffer.from(await file.arrayBuffer());
+    const duplicatePath = await findDuplicateUploadedLoraPath(root, file.name, content);
+    savedPath = duplicatePath || (await nextAvailableLoraPath(root, file.name));
+    const reused = duplicatePath !== null;
+    if (!reused) {
+      createdPath = savedPath;
+      await fs.promises.writeFile(savedPath, content);
+    }
 
     const metadata = await readSafetensorsMetadataStrict(savedPath);
     const userTriggerWords = splitTriggerWords(formData.get('trigger_words'));
     const metadataTriggerWords = extractTriggerWordsFromMetadata(metadata);
     const triggerWords = userTriggerWords.length > 0 ? userTriggerWords : metadataTriggerWords;
 
-    await writeUploadedLoraSidecar(savedPath, {
-      originalFilename: file.name,
-      uploadedAt: new Date().toISOString(),
-      triggerWords: mergeTriggerWords(triggerWords),
-      triggerWordSource: userTriggerWords.length > 0 ? 'user' : metadataTriggerWords.length > 0 ? 'metadata' : 'none',
-    });
+    if (!reused || userTriggerWords.length > 0) {
+      await writeUploadedLoraSidecar(savedPath, {
+        originalFilename: file.name,
+        uploadedAt: new Date().toISOString(),
+        triggerWords: mergeTriggerWords(triggerWords),
+        triggerWordSource: userTriggerWords.length > 0 ? 'user' : metadataTriggerWords.length > 0 ? 'metadata' : 'none',
+      });
+    }
 
     const lora = await buildUploadedLoraEntry(savedPath);
-    return NextResponse.json({ lora });
+    return NextResponse.json({ lora, reused });
   } catch (error) {
-    if (savedPath) {
-      await fs.promises.unlink(savedPath).catch(() => {});
+    if (createdPath) {
+      await fs.promises.unlink(createdPath).catch(() => {});
     }
 
     console.error('LoRA upload error:', error);

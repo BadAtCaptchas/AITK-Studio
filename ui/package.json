@@ -35,6 +35,7 @@
     "test:encrypted-dataset-secrets": "tsc -p tsconfig.worker.json && node --test scripts/encryptedDatasetSecrets.test.mjs scripts/encryptedDatasets.test.mjs",
     "test:secure-caption": "tsc -p tsconfig.worker.json && node --test scripts/secureCaptionCrypto.test.mjs scripts/ollamaClient.test.mjs scripts/ollamaVision.test.mjs scripts/secureRemoteCaptionJobs.test.mjs scripts/remoteOllamaWorkers.test.mjs scripts/remoteCaptionJobs.test.mjs scripts/remoteCaptionResults.test.mjs",
     "test:phase-summary": "tsc -p tsconfig.worker.json && node --test scripts/trainingPhaseSummary.test.mjs",
+    "test:lora-library": "tsc -p tsconfig.worker.json && node --test scripts/loraLibrary.test.mjs",
     "test:scripts": "tsc -p tsconfig.worker.json && node --test scripts/scriptRunner.test.mjs",
     "migrate_sqlite_to_mongo": "node scripts/migrate-sqlite-to-mongo.mjs",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,css,scss}\""

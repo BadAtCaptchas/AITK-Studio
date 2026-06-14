@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { createHash } from 'crypto';
 import path from 'path';
 import { getDataRoot } from './settings';
 
@@ -264,6 +265,55 @@ export async function nextAvailableLoraPath(root: string, filename: string) {
     index += 1;
   }
   return candidate;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function contentHash(content: Buffer) {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+async function fileHash(filePath: string) {
+  return new Promise<string>((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+export async function findDuplicateUploadedLoraPath(root: string, filename: string, content: Buffer) {
+  const safeFilename = sanitizeLoraFilename(filename);
+  const ext = path.extname(safeFilename);
+  const stem = path.basename(safeFilename, ext);
+  const candidatePattern = new RegExp(`^${escapeRegExp(stem)}(?:_\\d+)?${escapeRegExp(ext)}$`, 'i');
+  const entries = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
+  const candidates = entries
+    .filter(entry => entry.isFile() && candidatePattern.test(entry.name))
+    .map(entry => path.join(root, entry.name))
+    .sort((left, right) => {
+      const leftName = path.basename(left).toLowerCase();
+      const rightName = path.basename(right).toLowerCase();
+      const safeName = safeFilename.toLowerCase();
+      if (leftName === safeName && rightName !== safeName) return -1;
+      if (rightName === safeName && leftName !== safeName) return 1;
+      return leftName.localeCompare(rightName);
+    });
+  if (candidates.length === 0) return null;
+
+  const expectedHash = contentHash(content);
+  for (const candidate of candidates) {
+    const stat = await fs.promises.stat(candidate).catch(() => null);
+    if (!stat?.isFile() || stat.size !== content.length) continue;
+    if ((await fileHash(candidate)) === expectedHash) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function sidecarPathFor(filePath: string) {

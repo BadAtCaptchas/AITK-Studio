@@ -26,6 +26,7 @@ from toolkit.prompt_utils import inject_trigger_into_prompt, PromptEmbeds, conca
 from toolkit.reference_adapter import ReferenceAdapter
 from toolkit.sd_device_states_presets import empty_preset
 from toolkit.train_tools import get_torch_dtype, apply_noise_offset
+from toolkit.memory_management import SampleMemoryCoordinator
 import torch
 from toolkit.pipelines import CustomStableDiffusionXLPipeline
 from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, T2IAdapter, DDPMScheduler, \
@@ -374,6 +375,22 @@ class BaseModel:
     def add_status_update_hook(self, func):
         self._status_update_hooks.append(func)
 
+    def should_use_sample_memory_coordinator(self) -> bool:
+        return bool(getattr(self.model_config, "low_vram", False))
+
+    def get_sample_memory_coordinator(self) -> SampleMemoryCoordinator:
+        return SampleMemoryCoordinator(
+            self,
+            device=self.device_torch,
+            status_callback=self.print_and_status_update,
+        )
+
+    def sample_memory_text_encode_components(self) -> tuple[str, ...]:
+        return ("text_encoder", "adapter")
+
+    def sample_memory_generate_components(self) -> tuple[str, ...]:
+        return ("unet", "vae", "adapter", "refiner_unet")
+
     @torch.no_grad()
     def generate_images(
             self,
@@ -416,8 +433,19 @@ class BaseModel:
         else:
             network = BlankNetwork()
 
+        sample_memory = (
+            self.get_sample_memory_coordinator()
+            if self.should_use_sample_memory_coordinator()
+            else None
+        )
+        self._sample_memory_coordinator = sample_memory
         self.save_device_state()
-        self.set_device_state_preset('generate')
+        if sample_memory is not None:
+            self.print_and_status_update("Using managed low-VRAM native sample generation")
+            sample_memory.capture()
+            sample_memory.offload_all("setup")
+        else:
+            self.set_device_state_preset('generate')
 
         # save current seed state for training
         rng_state = torch.get_rng_state()
@@ -429,6 +457,8 @@ class BaseModel:
                 pipeline.set_progress_bar_config(disable=os.environ.get("IS_AI_TOOLKIT_UI") != "1")
             except:
                 pass
+        if sample_memory is not None:
+            sample_memory.offload_all("pipeline ready")
 
         start_multiplier = 1.0
         if network is not None:
@@ -494,6 +524,13 @@ class BaseModel:
                     torch.cuda.manual_seed(gen_config.seed)
 
                     generator = torch.manual_seed(gen_config.seed)
+
+                    if sample_memory is not None:
+                        sample_memory.activate(
+                            self.sample_memory_text_encode_components(),
+                            phase_name="text_encode",
+                            message=f"Low-VRAM sample {i + 1}/{len(image_configs)}: encoding prompts",
+                        )
 
                     if self.adapter is not None and isinstance(self.adapter, ClipVisionAdapter) \
                             and gen_config.adapter_image_path is not None:
@@ -659,6 +696,13 @@ class BaseModel:
                             raise ValueError(
                                 "Refiner is only supported for XL models")
 
+                    if sample_memory is not None:
+                        sample_memory.activate(
+                            self.sample_memory_generate_components(),
+                            phase_name="generate",
+                            message=f"Low-VRAM sample {i + 1}/{len(image_configs)}: generating image",
+                        )
+
                     conditional_embeds = conditional_embeds.to(
                         self.device_torch, dtype=self.unet.dtype)
                     unconditional_embeds = unconditional_embeds.to(
@@ -682,6 +726,10 @@ class BaseModel:
                     self.adapter.clear_memory()
 
         # clear pipeline and cache to reduce vram usage
+        if sample_memory is not None:
+            sample_memory.offload_all("sample cleanup")
+            sample_memory.restore()
+            self._sample_memory_coordinator = None
         del pipeline
         torch.cuda.empty_cache()
 

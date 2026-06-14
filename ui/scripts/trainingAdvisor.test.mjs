@@ -188,6 +188,42 @@ test('preflight reports Ideogram guidance bypass mismatch', () => {
   assert.ok(ids.has('train.bypass_guidance_embedding.ideogram'));
 });
 
+test('preflight warns for Ideogram no-unconditional experimental mode', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  const process = config.config.process[0];
+  process.model.arch = 'ideogram4';
+  process.model.name_or_path = 'ideogram-ai/ideogram-4-nf4';
+  process.model.model_kwargs.skip_unconditional_transformer_for_training = true;
+  process.train.bypass_guidance_embedding = false;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('model.ideogram.skip_unconditional_transformer'));
+});
+
+test('preflight keeps no-unconditional warning scoped to Ideogram', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  const process = config.config.process[0];
+  process.model.arch = 'flux';
+  process.model.name_or_path = 'black-forest-labs/FLUX.1-dev';
+  process.model.model_kwargs.skip_unconditional_transformer_for_training = true;
+  process.train.bypass_guidance_embedding = false;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(!ids.has('model.ideogram.skip_unconditional_transformer'));
+});
+
 test('preflight reports Klein guidance bypass mismatch', () => {
   const dataset = makeDataset({
     'one.jpg': 'image',

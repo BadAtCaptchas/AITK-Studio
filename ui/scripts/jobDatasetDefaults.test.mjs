@@ -45,5 +45,17 @@ test('Ideogram model options declare JSON-safe dataset defaults', async () => {
 
     assert.match(block, /'config\.process\[0\]\.datasets\[x\]\.caption_dropout_rate': \[0, 0\.05\]/);
     assert.match(block, /'config\.process\[0\]\.datasets\[x\]\.shuffle_tokens': \[false, undefined\]/);
+    assert.match(block, /model\.ideogram_skip_unconditional_transformer/);
+    assert.equal(block.includes('skip_unconditional_transformer_for_training'), false);
   }
+});
+
+test('Ideogram no-unconditional opt-in is wired through the guided job page', async () => {
+  const simpleJob = await fs.readFile(path.join(uiRoot, 'src/app/jobs/new/SimpleJob.tsx'), 'utf8');
+  const utils = await fs.readFile(path.join(uiRoot, 'src/app/jobs/new/utils.ts'), 'utf8');
+
+  assert.match(simpleJob, /Skip unconditional transformer/);
+  assert.match(simpleJob, /model_kwargs\.skip_unconditional_transformer_for_training/);
+  assert.match(utils, /skip_unconditional_transformer_for_training/);
+  assert.match(utils, /setJobConfig\(undefined, ideogramSkipUnconditionalKey\)/);
 });

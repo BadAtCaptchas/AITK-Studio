@@ -21,6 +21,7 @@ CONFIG_MODULES_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
 LORA_SPECIAL_PATH = PROJECT_ROOT / "toolkit" / "lora_special.py"
 NETWORK_MIXINS_PATH = PROJECT_ROOT / "toolkit" / "network_mixins.py"
 UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
+UI_SIMPLE_JOB_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "SimpleJob.tsx"
 MEMORY_PROFILE_PATH = PROJECT_ROOT / "ui" / "src" / "utils" / "memoryProfiles.ts"
 AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
 ADVISOR_PATH = PROJECT_ROOT / "ui" / "src" / "server" / "trainingAdvisor.ts"
@@ -220,8 +221,9 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
             'conditional_transformer,\n            component="transformer"',
             model_source,
         )
+        self.assertIn("if unconditional_transformer is not None:", model_source)
         self.assertIn(
-            'unconditional_transformer,\n            component="unconditional_transformer"',
+            'unconditional_transformer,\n                component="unconditional_transformer"',
             model_source,
         )
         self.assertIn("block_paths=self.get_transformer_block_names()", model_source)
@@ -348,8 +350,276 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn('label="unconditional"', model_source)
         self.assertIn("sample generation can", model_source)
 
+    def test_skip_unconditional_transformer_flag_defaults_off(self):
+        require_ideogram_imports()
+        model = Ideogram4Model.__new__(Ideogram4Model)
+
+        model.model_config = types.SimpleNamespace(model_kwargs={})
+        self.assertFalse(model._skip_unconditional_transformer_for_training())
+
+        model.model_config = types.SimpleNamespace(
+            model_kwargs={"skip_unconditional_transformer_for_training": True}
+        )
+        self.assertTrue(model._skip_unconditional_transformer_for_training())
+
+    def test_load_model_skips_unconditional_transformer_when_opted_in(self):
+        require_ideogram_imports()
+
+        class TinyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1))
+                self.config = types.SimpleNamespace(in_channels=4)
+                self.dtype = torch.float32
+
+            @property
+            def device(self):
+                return self.weight.device
+
+        model = Ideogram4Model.__new__(Ideogram4Model)
+        model.device_torch = torch.device("cpu")
+        model.torch_dtype = torch.float32
+        model.print_and_status_update = mock.Mock()
+        model.model_config = types.SimpleNamespace(
+            name_or_path="ideogram-ai/ideogram-4-fp8",
+            extras_name_or_path=None,
+            model_kwargs={
+                "quantization": "fp8",
+                "skip_unconditional_transformer_for_training": True,
+            },
+            quantize=False,
+            layer_offloading=False,
+            layer_offloading_transformer_percent=0,
+            layer_offloading_text_encoder_percent=0,
+            low_vram=False,
+        )
+
+        conditional = TinyModule()
+        text_encoder = TinyModule()
+        autoencoder = TinyModule()
+        tokenizer = object()
+        model._load_transformer_from_path = mock.Mock(return_value=conditional)
+        module = sys.modules[Ideogram4Model.__module__]
+
+        with mock.patch.object(
+            module, "_load_qwen3_vl_local_or_hf", return_value=(tokenizer, text_encoder)
+        ), mock.patch.object(
+            module, "_load_autoencoder_local_or_hf", return_value=autoencoder
+        ):
+            model.load_model()
+
+        self.assertEqual(model._load_transformer_from_path.call_count, 1)
+        self.assertIsNone(model.unconditional_transformer)
+        self.assertIs(model.model, conditional)
+        self.assertIn(
+            mock.call("Skipping Ideogram 4 unconditional transformer (experimental)"),
+            model.print_and_status_update.mock_calls,
+        )
+
+    def test_device_state_is_null_safe_without_unconditional_transformer(self):
+        require_ideogram_imports()
+
+        class TinyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1))
+
+            @property
+            def device(self):
+                return self.weight.device
+
+        model = Ideogram4Model.__new__(Ideogram4Model)
+        model.vae = TinyModule()
+        model.model = TinyModule()
+        model.text_encoder = [TinyModule()]
+        model.unconditional_transformer = None
+
+        model.save_device_state()
+        self.assertIsNone(model.device_state["unconditional_transformer"])
+
+        model.set_device_state(model.device_state)
+        self.assertIsNone(model.unconditional_transformer)
+
+    def test_conditional_only_native_sample_warns_and_uses_conditional_branch(self):
+        require_ideogram_imports()
+
+        class DummyEmbeds:
+            def __init__(self):
+                self.text_embeds = torch.ones(1, 1, 2)
+                self.attention_mask = torch.ones(1, 1, dtype=torch.bool)
+
+            def to(self, *args, **kwargs):
+                return self
+
+        class TinyConditional(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.config = types.SimpleNamespace(in_channels=4)
+                self.calls = 0
+
+            @property
+            def device(self):
+                return torch.device("cpu")
+
+            def to(self, *args, **kwargs):
+                return self
+
+            def forward(
+                self,
+                *,
+                llm_features,
+                x,
+                t,
+                position_ids,
+                segment_ids,
+                indicator,
+            ):
+                self.calls += 1
+                return torch.ones_like(x) * 0.25
+
+        class RecordingCoordinator:
+            def __init__(self):
+                self.phases = []
+
+            def activate(self, active_components, *, phase_name, message=None):
+                self.phases.append(tuple(active_components))
+
+        conditional = TinyConditional()
+        coordinator = RecordingCoordinator()
+        model = Ideogram4Model.__new__(Ideogram4Model)
+        model.device_torch = torch.device("cpu")
+        model.torch_dtype = torch.float32
+        model.model = conditional
+        model.vae = None
+        model._sample_memory_coordinator = coordinator
+        pipeline = types.SimpleNamespace(
+            conditional_transformer=conditional,
+            unconditional_transformer=None,
+            _decode=lambda z, grid_h, grid_w: [z.detach().clone()],
+        )
+        gen_config = types.SimpleNamespace(
+            width=16,
+            height=16,
+            num_inference_steps=1,
+            guidance_scale=7,
+            seed=0,
+        )
+
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(0)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            image = model.generate_single_image(
+                pipeline,
+                gen_config,
+                DummyEmbeds(),
+                DummyEmbeds(),
+                generator,
+                {},
+            )
+
+        self.assertEqual(conditional.calls, 1)
+        self.assertEqual(tuple(image.shape), (1, 1, 4))
+        self.assertIn(("transformer",), coordinator.phases)
+        self.assertNotIn(("unconditional_transformer",), coordinator.phases)
+        self.assertEqual(coordinator.phases[-1], ("vae",))
+        self.assertTrue(
+            any("conditional-only previews" in str(warning.message) for warning in caught)
+        )
+
+    def test_low_vram_native_sample_phases_heavy_ideogram_components(self):
+        require_ideogram_imports()
+
+        class DummyEmbeds:
+            def __init__(self):
+                self.text_embeds = torch.ones(1, 1, 2)
+                self.attention_mask = torch.ones(1, 1, dtype=torch.bool)
+
+            def to(self, *args, **kwargs):
+                return self
+
+        class TinyTransformer(torch.nn.Module):
+            def __init__(self, value):
+                super().__init__()
+                self.config = types.SimpleNamespace(in_channels=4)
+                self.value = value
+                self.calls = 0
+
+            @property
+            def device(self):
+                return torch.device("cpu")
+
+            def to(self, *args, **kwargs):
+                return self
+
+            def forward(
+                self,
+                *,
+                llm_features,
+                x,
+                t,
+                position_ids,
+                segment_ids,
+                indicator,
+            ):
+                self.calls += 1
+                return torch.ones_like(x) * self.value
+
+        class RecordingCoordinator:
+            def __init__(self):
+                self.phases = []
+
+            def activate(self, active_components, *, phase_name, message=None):
+                self.phases.append(tuple(active_components))
+
+        conditional = TinyTransformer(0.25)
+        unconditional = TinyTransformer(0.0)
+        coordinator = RecordingCoordinator()
+        model = Ideogram4Model.__new__(Ideogram4Model)
+        model.device_torch = torch.device("cpu")
+        model.torch_dtype = torch.float32
+        model.model = conditional
+        model.vae = None
+        model._sample_memory_coordinator = coordinator
+        pipeline = types.SimpleNamespace(
+            conditional_transformer=conditional,
+            unconditional_transformer=unconditional,
+            _decode=lambda z, grid_h, grid_w: [z.detach().clone()],
+        )
+        gen_config = types.SimpleNamespace(
+            width=16,
+            height=16,
+            num_inference_steps=1,
+            guidance_scale=7,
+            seed=0,
+        )
+
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(0)
+        image = model.generate_single_image(
+            pipeline,
+            gen_config,
+            DummyEmbeds(),
+            DummyEmbeds(),
+            generator,
+            {},
+        )
+
+        heavy = {"text_encoder", "transformer", "unconditional_transformer", "vae"}
+        self.assertEqual(conditional.calls, 1)
+        self.assertEqual(unconditional.calls, 1)
+        self.assertEqual(tuple(image.shape), (1, 1, 4))
+        self.assertIn(("transformer",), coordinator.phases)
+        self.assertIn(("unconditional_transformer",), coordinator.phases)
+        self.assertEqual(coordinator.phases[-1], ("vae",))
+        self.assertTrue(
+            all(len(set(phase) & heavy) <= 1 for phase in coordinator.phases)
+        )
+        self.assertEqual(model.sample_memory_generate_components(), ())
+
     def test_ui_defaults_memory_profile_and_auto_profile(self):
         options = UI_OPTIONS_PATH.read_text(encoding="utf-8")
+        simple_job = UI_SIMPLE_JOB_PATH.read_text(encoding="utf-8")
         memory = MEMORY_PROFILE_PATH.read_text(encoding="utf-8")
         profiles = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
         advisor = ADVISOR_PATH.read_text(encoding="utf-8")
@@ -367,6 +637,8 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("require_json_captions: false", options)
         self.assertIn("caption_strict: false", options)
         self.assertIn("dequantize_fp8_transformer: true", options)
+        self.assertIn("model.ideogram_skip_unconditional_transformer", options)
+        self.assertIn("skip_unconditional_transformer_for_training", simple_job)
         self.assertIn("'ideogram4'", memory)
         self.assertIn("id: 'ideogram4-balanced-lora'", profiles)
         self.assertIn("const ideogram4Archs = ['ideogram4', 'ideogram4:fp8', 'ideogram4:nvfp4']", profiles)
@@ -417,6 +689,10 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
                 self.assertEqual(model["model_kwargs"]["quantization"], quantization)
                 self.assertFalse(model["model_kwargs"]["require_json_captions"])
                 self.assertFalse(model["model_kwargs"]["caption_strict"])
+                self.assertNotIn(
+                    "skip_unconditional_transformer_for_training",
+                    model["model_kwargs"],
+                )
                 self.assertFalse(process["train"]["train_text_encoder"])
                 self.assertEqual(process["sample"]["sample_steps"], 20)
                 self.assertIn('"compositional_deconstruction"', process["sample"]["prompts"][0])

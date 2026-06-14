@@ -349,7 +349,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 else:
                     raise
 
-        if keep_low_vram_for_samples:
+        sd_model_config = getattr(self.sd, "model_config", None)
+        sample_uses_low_vram = any([
+            bool(getattr(self.sd, "low_vram", False)),
+            bool(getattr(self.model_config, "low_vram", False)),
+            bool(getattr(sd_model_config, "low_vram", False)),
+        ])
+        if sample_uses_low_vram or keep_low_vram_for_samples:
             self.sd.generate_images(gen_img_config_list, sampler=sampler)
             return
 
@@ -366,7 +372,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
             restore_attrs.append((obj, attr, getattr(obj, attr)))
             setattr(obj, attr, value)
 
-        sd_model_config = getattr(self.sd, "model_config", None)
         def uses_legacy_layer_offloading(config):
             return (
                 bool(getattr(config, "layer_offloading", False))

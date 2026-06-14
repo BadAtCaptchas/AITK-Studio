@@ -621,6 +621,13 @@ class Ideogram4Model(BaseModel):
     def _model_kwargs(self) -> dict:
         return self.model_config.model_kwargs or {}
 
+    def _skip_unconditional_transformer_for_training(self) -> bool:
+        return bool(
+            self._model_kwargs().get(
+                "skip_unconditional_transformer_for_training", False
+            )
+        )
+
     def warn_if_fp8_training_without_dequantize(self) -> None:
         if getattr(self, "quantization", None) != "fp8":
             return
@@ -867,16 +874,22 @@ class Ideogram4Model(BaseModel):
                 conditional_transformer, dtype=dtype, label="conditional"
             )
 
-        self.print_and_status_update("Loading Ideogram 4 unconditional transformer")
-        unconditional_transformer = self._load_transformer_from_path(
-            weights_model_path,
-            pipeline_config.unconditional_index_filename,
-            dtype,
-        )
-        if quantization == "fp8":
-            self._dequantize_fp8_transformer_if_requested(
-                unconditional_transformer, dtype=dtype, label="unconditional"
+        if self._skip_unconditional_transformer_for_training():
+            self.print_and_status_update(
+                "Skipping Ideogram 4 unconditional transformer (experimental)"
             )
+            unconditional_transformer = None
+        else:
+            self.print_and_status_update("Loading Ideogram 4 unconditional transformer")
+            unconditional_transformer = self._load_transformer_from_path(
+                weights_model_path,
+                pipeline_config.unconditional_index_filename,
+                dtype,
+            )
+            if quantization == "fp8":
+                self._dequantize_fp8_transformer_if_requested(
+                    unconditional_transformer, dtype=dtype, label="unconditional"
+                )
 
         self.print_and_status_update("Loading Qwen3-VL text encoder")
         if comfy_layout:
@@ -921,9 +934,10 @@ class Ideogram4Model(BaseModel):
 
         conditional_transformer.eval()
         conditional_transformer.dtype = dtype
-        unconditional_transformer.requires_grad_(False)
-        unconditional_transformer.eval()
-        unconditional_transformer.dtype = dtype
+        if unconditional_transformer is not None:
+            unconditional_transformer.requires_grad_(False)
+            unconditional_transformer.eval()
+            unconditional_transformer.dtype = dtype
         text_encoder.requires_grad_(False)
         text_encoder.eval()
         autoencoder.requires_grad_(False)
@@ -933,10 +947,11 @@ class Ideogram4Model(BaseModel):
             conditional_transformer,
             component="transformer",
         )
-        self._apply_transformer_memory_policy(
-            unconditional_transformer,
-            component="unconditional_transformer",
-        )
+        if unconditional_transformer is not None:
+            self._apply_transformer_memory_policy(
+                unconditional_transformer,
+                component="unconditional_transformer",
+            )
 
         if (
             self.model_config.layer_offloading
@@ -965,7 +980,11 @@ class Ideogram4Model(BaseModel):
     def get_generation_pipeline(self):
         return Ideogram4Pipeline(
             conditional_transformer=unwrap_model(self.transformer),
-            unconditional_transformer=unwrap_model(self.unconditional_transformer),
+            unconditional_transformer=(
+                unwrap_model(self.unconditional_transformer)
+                if self.unconditional_transformer is not None
+                else None
+            ),
             text_encoder=unwrap_model(self.text_encoder[0]),
             text_tokenizer=self.tokenizer[0],
             autoencoder=unwrap_model(self.vae),
@@ -988,12 +1007,14 @@ class Ideogram4Model(BaseModel):
                 "requires_grad": unet_has_grad,
             },
             "text_encoder": [],
-            "unconditional_transformer": {
+            "unconditional_transformer": None,
+        }
+        if self.unconditional_transformer is not None:
+            self.device_state["unconditional_transformer"] = {
                 "training": self.unconditional_transformer.training,
                 "device": self.unconditional_transformer.device,
                 "requires_grad": False,
-            },
-        }
+            }
         for encoder in self.text_encoder:
             self.device_state["text_encoder"].append(
                 {
@@ -1060,6 +1081,17 @@ class Ideogram4Model(BaseModel):
             stacklevel=2,
         )
         self._warned_natural_caption_quality = True
+
+    def _warn_conditional_only_preview_once(self) -> None:
+        if getattr(self, "_warned_conditional_only_preview", False):
+            return
+        warnings.warn(
+            "Ideogram 4 unconditional transformer is not loaded; native samples "
+            "are using experimental conditional-only previews without asymmetric "
+            "CFG guidance.",
+            stacklevel=2,
+        )
+        self._warned_conditional_only_preview = True
 
     def _validate_caption(self, prompt: str) -> None:
         if prompt.strip() == "":
@@ -1154,6 +1186,9 @@ class Ideogram4Model(BaseModel):
         for image_config in image_configs:
             self.prepare_sample_image_config_for_encoding(image_config)
         return super().generate_images(image_configs, sampler=sampler, pipeline=pipeline)
+
+    def sample_memory_generate_components(self) -> tuple[str, ...]:
+        return ()
 
     def get_prompt_embeds(self, prompt: str) -> AdvancedPromptEmbeds:
         if module_device(self.pipeline.text_encoder) != self.device_torch:
@@ -1399,7 +1434,8 @@ class Ideogram4Model(BaseModel):
         generator: torch.Generator,
         extra: dict,
     ):
-        if self.model.device == torch.device("cpu"):
+        sample_memory = getattr(self, "_sample_memory_coordinator", None)
+        if sample_memory is None and self.model.device == torch.device("cpu"):
             self.model.to(self.device_torch)
 
         sc = self.get_bucket_divisibility()
@@ -1437,11 +1473,18 @@ class Ideogram4Model(BaseModel):
             )
         )
         batch_size = llm_features.shape[0]
-        neg_llm, neg_position_ids, neg_segment_ids, neg_indicator, _ = (
-            self._build_transformer_inputs_from_embeds(
-                cond, latent_h, latent_w, include_text=False
+        if pipeline.unconditional_transformer is None:
+            self._warn_conditional_only_preview_once()
+            neg_llm = None
+            neg_position_ids = None
+            neg_segment_ids = None
+            neg_indicator = None
+        else:
+            neg_llm, neg_position_ids, neg_segment_ids, neg_indicator, _ = (
+                self._build_transformer_inputs_from_embeds(
+                    cond, latent_h, latent_w, include_text=False
+                )
             )
-        )
 
         latent_dim = pipeline.conditional_transformer.config.in_channels
         sample_generator = generator
@@ -1465,12 +1508,22 @@ class Ideogram4Model(BaseModel):
         )
 
         for step_idx in range(num_steps - 1, -1, -1):
+            step_num = num_steps - step_idx
             t_val = float(schedule(step_intervals[step_idx + 1].unsqueeze(0)).item())
             s_val = float(schedule(step_intervals[step_idx].unsqueeze(0)).item())
             t = torch.full(
                 (batch_size,), t_val, dtype=torch.float32, device=self.device_torch
             )
             pos_z = torch.cat([text_z_padding, z], dim=1)
+            if sample_memory is not None:
+                sample_memory.activate(
+                    ("transformer",),
+                    phase_name="ideogram conditional denoise",
+                    message=(
+                        f"Low-VRAM sample: Ideogram denoise step "
+                        f"{step_num}/{num_steps} conditional"
+                    ),
+                )
             pos_out = pipeline.conditional_transformer(
                 llm_features=llm_features,
                 x=pos_z,
@@ -1480,17 +1533,35 @@ class Ideogram4Model(BaseModel):
                 indicator=indicator,
             )
             pos_v = pos_out[:, max_text_tokens:]
-            neg_v = pipeline.unconditional_transformer(
-                llm_features=neg_llm,
-                x=z,
-                t=t,
-                position_ids=neg_position_ids,
-                segment_ids=neg_segment_ids,
-                indicator=neg_indicator,
-            )
-            v = gw_per_step[step_idx] * pos_v + (1.0 - gw_per_step[step_idx]) * neg_v
+            if pipeline.unconditional_transformer is None:
+                v = pos_v
+            else:
+                if sample_memory is not None:
+                    sample_memory.activate(
+                        ("unconditional_transformer",),
+                        phase_name="ideogram unconditional denoise",
+                        message=(
+                            f"Low-VRAM sample: Ideogram denoise step "
+                            f"{step_num}/{num_steps} unconditional"
+                        ),
+                    )
+                neg_v = pipeline.unconditional_transformer(
+                    llm_features=neg_llm,
+                    x=z,
+                    t=t,
+                    position_ids=neg_position_ids,
+                    segment_ids=neg_segment_ids,
+                    indicator=neg_indicator,
+                )
+                v = gw_per_step[step_idx] * pos_v + (1.0 - gw_per_step[step_idx]) * neg_v
             z = z + v * (s_val - t_val)
 
+        if sample_memory is not None:
+            sample_memory.activate(
+                ("vae",),
+                phase_name="ideogram decode",
+                message="Low-VRAM sample: decoding Ideogram image",
+            )
         images = pipeline._decode(z, grid_h=latent_h, grid_w=latent_w)
         return images[0]
 

@@ -31,7 +31,8 @@ type AdditionalSections =
   | 'model.layer_offloading'
   | 'model.low_vram'
   | 'model.qie.match_target_res'
-  | 'model.assistant_lora_path';
+  | 'model.assistant_lora_path'
+  | 'model.ideogram_skip_unconditional_transformer';
 
 type ModelGroup = 'image' | 'instruction' | 'video' | 'experimental' | 'audio';
 
@@ -950,7 +951,7 @@ export const modelArchs: ModelArch[] = [
       ],
     },
     disableSections: ['network.conv', 'model.quantize', 'model.quantize_te', 'train.unload_text_encoder'],
-    additionalSections: ['model.low_vram', 'model.layer_offloading'],
+    additionalSections: ['model.low_vram', 'model.layer_offloading', 'model.ideogram_skip_unconditional_transformer'],
   },
   {
     name: 'ideogram4:fp8',
@@ -987,7 +988,7 @@ export const modelArchs: ModelArch[] = [
       ],
     },
     disableSections: ['network.conv', 'model.quantize', 'model.quantize_te', 'train.unload_text_encoder'],
-    additionalSections: ['model.low_vram', 'model.layer_offloading'],
+    additionalSections: ['model.low_vram', 'model.layer_offloading', 'model.ideogram_skip_unconditional_transformer'],
   },
   {
     name: 'ideogram4:nvfp4',
@@ -1023,7 +1024,7 @@ export const modelArchs: ModelArch[] = [
       ],
     },
     disableSections: ['network.conv', 'model.quantize', 'model.quantize_te', 'train.unload_text_encoder'],
-    additionalSections: ['model.low_vram', 'model.layer_offloading'],
+    additionalSections: ['model.low_vram', 'model.layer_offloading', 'model.ideogram_skip_unconditional_transformer'],
   },
   {
     name: 'flux2_klein_9b',

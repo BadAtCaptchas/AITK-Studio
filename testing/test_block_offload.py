@@ -291,6 +291,37 @@ class BlockOffloadManagerTest(unittest.TestCase):
         self.assertEqual(model._aitk_block_offload_skipped_layers, ("blocks.0",))
         self.assertTrue(torch.allclose(model(x), expected))
 
+    def test_activate_for_forward_avoids_full_cuda_to(self):
+        model = TinyBlockModel(block_count=3)
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=0.5,
+            block_paths=["blocks"],
+        )
+        manager._original_to = mock.Mock(side_effect=AssertionError("full cuda move"))
+        for entry in manager.layers:
+            entry.state = "cpu"
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.cuda, "Stream", return_value=FakeCudaStream),
+            mock.patch.object(
+                manager,
+                "_move_tensor",
+                side_effect=lambda tensor, device, dtype: tensor,
+            ) as move_tensor,
+        ):
+            manager.activate_for_forward(torch.device("cuda"))
+
+        manager._original_to.assert_not_called()
+        self.assertTrue(manager.active)
+        self.assertEqual(manager.process_device, torch.device("cuda"))
+        self.assertGreater(move_tensor.call_count, 0)
+        for entry in manager.layers:
+            expected = "cpu" if manager.strategy.is_offloaded(entry.index) else "resident"
+            self.assertEqual(entry.state, expected)
+
     def test_async_offload_waits_for_compute_stream_before_copy(self):
         model = TinyBlockModel(block_count=1)
         manager = BlockOffloadManager.attach(

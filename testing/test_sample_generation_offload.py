@@ -48,7 +48,7 @@ def load_base_process_methods(method_names: set[str]):
 
 
 class SampleGenerationOffloadTest(unittest.TestCase):
-    def test_sample_generation_temporarily_disables_cpu_offload_flags(self):
+    def test_sample_generation_keeps_low_vram_flags_enabled(self):
         process_cls = load_base_process_methods({"_generate_sample_images"})
         process = process_cls()
         process.model_config = SimpleNamespace(
@@ -68,11 +68,11 @@ class SampleGenerationOffloadTest(unittest.TestCase):
         def generate_images(image_configs, sampler=None):
             self.assertEqual(image_configs, ["sample"])
             self.assertEqual(sampler, "flowmatch")
-            self.assertFalse(process.sd.low_vram)
-            self.assertFalse(process.model_config.low_vram)
-            self.assertFalse(process.model_config.layer_offloading)
-            self.assertFalse(process.sd.model_config.low_vram)
-            self.assertFalse(process.sd.model_config.layer_offloading)
+            self.assertTrue(process.sd.low_vram)
+            self.assertTrue(process.model_config.low_vram)
+            self.assertTrue(process.model_config.layer_offloading)
+            self.assertTrue(process.sd.model_config.low_vram)
+            self.assertTrue(process.sd.model_config.layer_offloading)
 
         process.sd.generate_images = generate_images
 
@@ -179,6 +179,7 @@ class SampleGenerationOffloadTest(unittest.TestCase):
     def test_trainer_sample_uses_offload_guard(self):
         source = BASE_SD_TRAIN_PROCESS_PATH.read_text(encoding="utf-8")
         self.assertIn("keep_low_vram_for_samples=sample_config.keep_low_vram_for_samples", source)
+        self.assertIn("sample_uses_low_vram", source)
         self.assertNotIn("self.sd.generate_images(gen_img_config_list, sampler=sample_config.sampler)", source)
 
     def test_sample_config_option_defaults_disabled(self):

@@ -1053,6 +1053,16 @@ export default function SimpleJob({
                       />
                     </div>
                   )}
+                  {modelArch?.additionalSections?.includes('model.ideogram_skip_unconditional_transformer') && (
+                    <div className="space-y-2">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Experimental</h3>
+                      <Checkbox
+                        label="Skip unconditional transformer"
+                        checked={!!processConfig.model.model_kwargs?.skip_unconditional_transformer_for_training}
+                        onChange={value => setJobConfig(value ? true : undefined, 'config.process[0].model.model_kwargs.skip_unconditional_transformer_for_training')}
+                      />
+                    </div>
+                  )}
                 </div>,
               )}
 

@@ -301,7 +301,7 @@ class Ideogram4Pipeline:
   def __init__(
     self,
     conditional_transformer: Ideogram4Transformer,
-    unconditional_transformer: Ideogram4Transformer,
+    unconditional_transformer: Ideogram4Transformer | None,
     text_encoder,
     text_tokenizer,
     autoencoder,
@@ -322,6 +322,17 @@ class Ideogram4Pipeline:
     shift, scale = get_latent_norm()
     self.latent_shift = shift.to(device)
     self.latent_scale = scale.to(device)
+
+  def _warn_conditional_only_preview_once(self) -> None:
+    if getattr(self, "_warned_conditional_only_preview", False):
+      return
+    warnings.warn(
+      "Ideogram 4 unconditional transformer is not loaded; native generation "
+      "is using experimental conditional-only previews without asymmetric CFG "
+      "guidance.",
+      stacklevel=2,
+    )
+    self._warned_conditional_only_preview = True
 
   @classmethod
   def from_pretrained(
@@ -603,17 +614,24 @@ class Ideogram4Pipeline:
       inputs["token_ids"], inputs["text_position_ids"], inputs["indicator"]
     )
 
-    # Negative branch is image-only (asymmetric CFG) with zeroed conditioning.
-    neg_position_ids = inputs["position_ids"][:, max_text_tokens:]
-    neg_segment_ids = inputs["segment_ids"][:, max_text_tokens:]
-    neg_indicator = inputs["indicator"][:, max_text_tokens:]
-    neg_llm_features = torch.zeros(  # type: ignore[call-overload]
-      batch_size,
-      num_image_tokens,
-      llm_features.shape[-1],
-      dtype=llm_features.dtype,
-      device=self.device,
-    )
+    if self.unconditional_transformer is None:
+      self._warn_conditional_only_preview_once()
+      neg_position_ids = None
+      neg_segment_ids = None
+      neg_indicator = None
+      neg_llm_features = None
+    else:
+      # Negative branch is image-only (asymmetric CFG) with zeroed conditioning.
+      neg_position_ids = inputs["position_ids"][:, max_text_tokens:]
+      neg_segment_ids = inputs["segment_ids"][:, max_text_tokens:]
+      neg_indicator = inputs["indicator"][:, max_text_tokens:]
+      neg_llm_features = torch.zeros(  # type: ignore[call-overload]
+        batch_size,
+        num_image_tokens,
+        llm_features.shape[-1],
+        dtype=llm_features.dtype,
+        device=self.device,
+      )
 
     generator = torch.Generator(device=self.device)
     if seed is not None:
@@ -651,17 +669,19 @@ class Ideogram4Pipeline:
       )
       pos_v = pos_out[:, max_text_tokens:]
 
-      neg_v = self.unconditional_transformer(
-        llm_features=neg_llm_features,
-        x=z,
-        t=t,
-        position_ids=neg_position_ids,
-        segment_ids=neg_segment_ids,
-        indicator=neg_indicator,
-      )
-
-      gw_i = gw_per_step[i]
-      v = gw_i * pos_v + (1.0 - gw_i) * neg_v
+      if self.unconditional_transformer is None:
+        v = pos_v
+      else:
+        neg_v = self.unconditional_transformer(
+          llm_features=neg_llm_features,
+          x=z,
+          t=t,
+          position_ids=neg_position_ids,
+          segment_ids=neg_segment_ids,
+          indicator=neg_indicator,
+        )
+        gw_i = gw_per_step[i]
+        v = gw_i * pos_v + (1.0 - gw_i) * neg_v
       delta = s_val - t_val
       z = z + v * delta
 

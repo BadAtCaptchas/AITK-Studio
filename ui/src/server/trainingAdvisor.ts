@@ -606,6 +606,26 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
       ],
     );
   }
+  if (
+    isIdeogramGuidanceBypassPolicy &&
+    processConfig.model?.model_kwargs?.skip_unconditional_transformer_for_training === true
+  ) {
+    addFinding(
+      findings,
+      'warning',
+      'preflight',
+      'config',
+      'model.ideogram.skip_unconditional_transformer',
+      'Ideogram unconditional transformer is skipped',
+      'This experimental Ideogram 4 job will not load the unconditional transformer.',
+      'Expect lower VRAM use during training, and treat native samples as conditional-only previews rather than normal Ideogram guided samples.',
+      undefined,
+      [
+        'config.process[0].model.arch',
+        'config.process[0].model.model_kwargs.skip_unconditional_transformer_for_training',
+      ],
+    );
+  }
   const sensitiveArch = /hidream|qwen|zimage|flux2|wan|ltx|ideogram/i.test(arch);
   const warnLr = sensitiveArch ? 1e-4 : 3e-4;
   const criticalLr = sensitiveArch ? 3e-4 : 1e-3;

@@ -6,6 +6,7 @@ import { expectedFluxGuidanceBypass } from '@/utils/fluxGuidancePolicy';
 
 const modelLowVramKey = 'config.process[0].model.low_vram';
 const keepLowVramForSamplesKey = 'config.process[0].sample.keep_low_vram_for_samples';
+const ideogramSkipUnconditionalKey = 'config.process[0].model.model_kwargs.skip_unconditional_transformer_for_training';
 
 const expandDatasetDefaults = (
   defaults: { [key: string]: any },
@@ -44,6 +45,10 @@ export const handleModelArchChange = (
   if (!newArch?.additionalSections?.includes('model.low_vram')) {
     setJobConfig(false, modelLowVramKey);
     setJobConfig(false, keepLowVramForSamplesKey);
+  }
+
+  if (!newArch?.additionalSections?.includes('model.ideogram_skip_unconditional_transformer')) {
+    setJobConfig(undefined, ideogramSkipUnconditionalKey);
   }
 
   // handle layer offloading setting

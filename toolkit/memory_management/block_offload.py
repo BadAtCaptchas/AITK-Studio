@@ -501,6 +501,64 @@ class BlockOffloadManager:
                 entry.state = "cpu"
         return result
 
+    def activate_for_forward(self, device: torch.device):
+        device = _normalize_device(device)
+        self.process_device = device
+        self.active = self.process_device.type == "cuda" and torch.cuda.is_available()
+        if self.active and self.transfer_stream is None:
+            self.transfer_stream = torch.cuda.Stream(device=self.process_device)
+        elif not self.active:
+            self.transfer_stream = None
+
+        if not self.active:
+            self._original_to(device)
+            for entry in self.layers:
+                entry.state = "cpu"
+            return self.module
+
+        self._move_non_offloaded_tensors(self.process_device)
+        for entry in self.layers:
+            if self.strategy.is_offloaded(entry.index):
+                self._offload_entry(entry, async_transfer=False)
+            else:
+                entry.state = "resident"
+        return self.module
+
+    def deactivate_to_cpu(self):
+        for entry in self.layers:
+            self._wait_for_entry_transfer(entry)
+        self._original_to(torch.device("cpu"))
+        self.active = False
+        self.transfer_stream = None
+        for entry in self.layers:
+            entry.transfer_event = None
+            entry.state = "cpu"
+        return self.module
+
+    def _move_non_offloaded_tensors(
+        self,
+        device: torch.device,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        offloaded_tensor_ids: set[int] = set()
+        for entry in self.layers:
+            if not self.strategy.is_offloaded(entry.index):
+                continue
+            offloaded_tensor_ids.update(id(param) for param in entry.params)
+            offloaded_tensor_ids.update(id(buffer) for buffer in entry.buffers)
+
+        for child in self.module.modules():
+            for param in child._parameters.values():
+                if param is None or id(param) in offloaded_tensor_ids:
+                    continue
+                param.data = self._move_tensor(param.data, device, dtype)
+                if param.grad is not None:
+                    param.grad.data = self._move_tensor(param.grad.data, device, dtype)
+            for buffer in child._buffers.values():
+                if buffer is None or id(buffer) in offloaded_tensor_ids:
+                    continue
+                buffer.data = self._move_tensor(buffer.data, device, dtype)
+
     def _entry_target_device(self, entry: _ManagedLayer) -> torch.device:
         device = self._entry_device(entry.params, entry.buffers)
         return device or torch.device("cpu")

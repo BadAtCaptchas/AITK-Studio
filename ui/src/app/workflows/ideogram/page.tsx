@@ -530,14 +530,14 @@ export default function IdeogramWorkflowBuilderPage() {
     setActiveTool('select');
   };
 
-  const deleteSelectedElement = () => {
+  const deleteSelectedElement = useCallback(() => {
     updateState(current => {
-      if (current.elements.length <= 1) return current;
+      if (!current.elements[selectedElementIndex]) return current;
       current.elements.splice(selectedElementIndex, 1);
       setSelectedElementIndex(index => Math.max(0, Math.min(index, current.elements.length - 1)));
       return current;
     });
-  };
+  }, [selectedElementIndex, updateState]);
 
   const randomSeed = () => {
     updateState(current => {
@@ -901,7 +901,14 @@ export default function IdeogramWorkflowBuilderPage() {
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName;
       const isTyping = tagName === 'INPUT' || tagName === 'TEXTAREA' || target?.isContentEditable;
+      if (lightboxImage) return;
       if (isTyping) return;
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (!state.elements[selectedElementIndex]) return;
+        event.preventDefault();
+        deleteSelectedElement();
+        return;
+      }
       const isArrowKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
       if (!isArrowKey) return;
       event.preventDefault();
@@ -912,7 +919,7 @@ export default function IdeogramWorkflowBuilderPage() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [nudgeSelectedElement]);
+  }, [deleteSelectedElement, lightboxImage, nudgeSelectedElement, selectedElementIndex, state.elements]);
 
   useEffect(() => {
     if (!lightboxImage) return;
@@ -1247,7 +1254,7 @@ export default function IdeogramWorkflowBuilderPage() {
                   <IconButton title="Add text" active={activeTool === 'text'} onClick={() => setActiveTool('text')}>
                     <span className="text-sm font-semibold">T</span>
                   </IconButton>
-                  <IconButton title="Delete selected" danger disabled={state.elements.length <= 1} onClick={deleteSelectedElement}>
+                  <IconButton title="Delete selected" danger disabled={!selectedElement} onClick={deleteSelectedElement}>
                     <Trash2 className="h-4 w-4" />
                   </IconButton>
                 </div>

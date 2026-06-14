@@ -8,6 +8,12 @@
   <strong>A training studio for diffusion models, datasets, generation, and queue workflows.</strong>
 </p>
 
+<p align="center">
+  <a href="https://discord.gg/umF6SfKRtm">
+    <img src="assets/brand/aitk-discord-readme-card.png" alt="Join our Discord: https://discord.gg/umF6SfKRtm" width="100%">
+  </a>
+</p>
+
 AITK Studio is an all-in-one training suite for diffusion models. It supports current image, video, and audio models on consumer-grade hardware, and can be used from either the web UI or the CLI. The goal is a practical workbench: easy enough to get a run started, deep enough for serious LoRA, LoKr, phase-based, encrypted-dataset, and remote-worker workflows.
 
 > **Fork notice:** AITK Studio is a maintained fork of the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit). It preserves compatibility with AI Toolkit while adding fast-moving model integrations, UI changes, remote-worker support, and other project-specific changes that may diverge from upstream behavior.

@@ -221,7 +221,7 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
             'conditional_transformer,\n            component="transformer"',
             model_source,
         )
-        self.assertIn("if unconditional_transformer is not None:", model_source)
+        self.assertIn("unconditional_transformer.requires_grad_(False)", model_source)
         self.assertIn(
             'unconditional_transformer,\n                component="unconditional_transformer"',
             model_source,
@@ -361,6 +361,88 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
             model_kwargs={"skip_unconditional_transformer_for_training": True}
         )
         self.assertTrue(model._skip_unconditional_transformer_for_training())
+
+    def test_low_vram_applies_transformer_memory_policy_during_load(self):
+        require_ideogram_imports()
+
+        events = []
+
+        class TinyModule(torch.nn.Module):
+            def __init__(self, label):
+                super().__init__()
+                self.label = label
+                self.weight = torch.nn.Parameter(torch.ones(1))
+                self.config = types.SimpleNamespace(in_channels=4)
+                self.dtype = torch.float32
+
+            @property
+            def device(self):
+                return self.weight.device
+
+            def to(self, *args, **kwargs):
+                if self.label in {"conditional", "unconditional"}:
+                    target = args[0] if args else kwargs.get("device")
+                    events.append(f"to:{self.label}:{target}")
+                return super().to(*args, **kwargs)
+
+        conditional = TinyModule("conditional")
+        unconditional = TinyModule("unconditional")
+        text_encoder = TinyModule("text_encoder")
+        autoencoder = TinyModule("autoencoder")
+        tokenizer = object()
+
+        model = Ideogram4Model.__new__(Ideogram4Model)
+        model.device_torch = torch.device("cpu")
+        model.torch_dtype = torch.float32
+        model.print_and_status_update = mock.Mock()
+        model.model_config = types.SimpleNamespace(
+            name_or_path="ideogram-ai/ideogram-4-fp8",
+            extras_name_or_path=None,
+            model_kwargs={"quantization": "fp8"},
+            quantize=False,
+            layer_offloading=False,
+            layer_offloading_transformer_percent=0,
+            layer_offloading_text_encoder_percent=0,
+            low_vram=True,
+        )
+
+        def load_transformer(_component_root, index_filename, _dtype):
+            if "unconditional" in index_filename:
+                events.append("load:unconditional")
+                return unconditional
+            events.append("load:conditional")
+            return conditional
+
+        def load_text_encoder(*_args, **_kwargs):
+            events.append("load:text_encoder")
+            return tokenizer, text_encoder
+
+        def load_autoencoder(*_args, **_kwargs):
+            events.append("load:vae")
+            return autoencoder
+
+        model._load_transformer_from_path = mock.Mock(side_effect=load_transformer)
+        module = sys.modules[Ideogram4Model.__module__]
+
+        with mock.patch.object(
+            module, "_load_qwen3_vl_local_or_hf", side_effect=load_text_encoder
+        ), mock.patch.object(
+            module, "_load_autoencoder_local_or_hf", side_effect=load_autoencoder
+        ):
+            model.load_model()
+
+        self.assertEqual(events.count("to:conditional:cpu"), 1)
+        self.assertEqual(events.count("to:unconditional:cpu"), 1)
+        self.assertLess(
+            events.index("to:conditional:cpu"),
+            events.index("load:unconditional"),
+        )
+        self.assertLess(
+            events.index("to:unconditional:cpu"),
+            events.index("load:text_encoder"),
+        )
+        self.assertIs(model.model, conditional)
+        self.assertIs(model.unconditional_transformer, unconditional)
 
     def test_load_model_skips_unconditional_transformer_when_opted_in(self):
         require_ideogram_imports()

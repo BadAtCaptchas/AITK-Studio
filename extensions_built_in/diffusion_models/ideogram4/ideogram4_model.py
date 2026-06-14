@@ -873,6 +873,12 @@ class Ideogram4Model(BaseModel):
             self._dequantize_fp8_transformer_if_requested(
                 conditional_transformer, dtype=dtype, label="conditional"
             )
+        conditional_transformer.eval()
+        conditional_transformer.dtype = dtype
+        self._apply_transformer_memory_policy(
+            conditional_transformer,
+            component="transformer",
+        )
 
         if self._skip_unconditional_transformer_for_training():
             self.print_and_status_update(
@@ -890,6 +896,13 @@ class Ideogram4Model(BaseModel):
                 self._dequantize_fp8_transformer_if_requested(
                     unconditional_transformer, dtype=dtype, label="unconditional"
                 )
+            unconditional_transformer.requires_grad_(False)
+            unconditional_transformer.eval()
+            unconditional_transformer.dtype = dtype
+            self._apply_transformer_memory_policy(
+                unconditional_transformer,
+                component="unconditional_transformer",
+            )
 
         self.print_and_status_update("Loading Qwen3-VL text encoder")
         if comfy_layout:
@@ -932,26 +945,10 @@ class Ideogram4Model(BaseModel):
             dtype=dtype,
         )
 
-        conditional_transformer.eval()
-        conditional_transformer.dtype = dtype
-        if unconditional_transformer is not None:
-            unconditional_transformer.requires_grad_(False)
-            unconditional_transformer.eval()
-            unconditional_transformer.dtype = dtype
         text_encoder.requires_grad_(False)
         text_encoder.eval()
         autoencoder.requires_grad_(False)
         autoencoder.eval()
-
-        self._apply_transformer_memory_policy(
-            conditional_transformer,
-            component="transformer",
-        )
-        if unconditional_transformer is not None:
-            self._apply_transformer_memory_policy(
-                unconditional_transformer,
-                component="unconditional_transformer",
-            )
 
         if (
             self.model_config.layer_offloading

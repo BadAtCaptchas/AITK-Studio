@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AITK Studio</title>
+  <meta name="description" content="Train LoRA and LoKr adapters locally for image, video, and audio models." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['DM Sans', 'Arial', 'sans-serif'],
+            mono: ['IBM Plex Mono', 'monospace'],
+          },
+          colors: {
+            graphite: {
+              990: '#020303',
+              960: '#050706',
+              920: '#0a0d0c',
+              880: '#111614',
+              760: '#26312e',
+            },
+            signal: {
+              cyan: '#65ffe7',
+              amber: '#f5b43d',
+              green: '#49e69e',
+              red: '#ff687b',
+              paper: '#f3eee0',
+              ink: '#15120d',
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    :root {
+      --bg: #020303;
+      --paper: #f3eee0;
+      --ink: #15120d;
+      --muted: rgba(243, 238, 224, 0.64);
+      --soft: rgba(243, 238, 224, 0.42);
+      --line: rgba(243, 238, 224, 0.13);
+      --line-strong: rgba(243, 238, 224, 0.24);
+      --cyan: #65ffe7;
+      --amber: #f5b43d;
+      --green: #49e69e;
+      --red: #ff687b;
+      --mx: 0px;
+      --my: 0px;
+    }
+
+    html,
+    body {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--paper);
+      font-family: 'DM Sans', Arial, sans-serif;
+    }
+
+    ::selection {
+      background: rgba(101, 255, 231, 0.28);
+      color: #fff;
+    }
+
+    .font-mono {
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    .texture {
+      position: fixed;
+      inset: 0;
+      z-index: 65;
+      pointer-events: none;
+      opacity: 0.055;
+      mix-blend-mode: screen;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 320 320' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    .scroll-progress {
+      position: fixed;
+      inset: 0 auto auto 0;
+      z-index: 80;
+      height: 2px;
+      width: 100%;
+      transform: scaleX(0);
+      transform-origin: left;
+      background: linear-gradient(90deg, var(--cyan), var(--amber), var(--green));
+    }
+
+    .cursor-signal {
+      position: fixed;
+      left: 0;
+      top: 0;
+      z-index: 64;
+      display: none;
+      width: 9rem;
+      height: 9rem;
+      pointer-events: none;
+      transform: translate3d(-50%, -50%, 0);
+      border-left: 1px solid rgba(101, 255, 231, 0.22);
+      border-top: 1px solid rgba(245, 180, 61, 0.16);
+      mix-blend-mode: screen;
+    }
+
+    @media (min-width: 960px) {
+      .cursor-signal {
+        display: block;
+      }
+    }
+
+    .rail-nav {
+      display: none;
+    }
+
+    .mobile-nav {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+      z-index: 72;
+      border-bottom: 1px solid var(--line);
+      background: rgba(2, 3, 3, 0.84);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    @media (min-width: 960px) {
+      .mobile-nav {
+        display: none;
+      }
+
+      .rail-nav {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 72;
+        display: grid;
+        width: 5rem;
+        grid-template-rows: auto 1fr auto;
+        border-right: 1px solid var(--line);
+        background: rgba(2, 3, 3, 0.78);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+
+      .page-shell {
+        padding-left: 5rem;
+      }
+    }
+
+    .rail-mark,
+    .rail-github {
+      display: flex;
+      height: 5rem;
+      align-items: center;
+      justify-content: center;
+      color: var(--paper);
+    }
+
+    .brand-mark {
+      display: block;
+      height: 2.35rem;
+      width: 2.35rem;
+      object-fit: contain;
+    }
+
+    .mobile-brand-mark {
+      display: block;
+      height: 2.25rem;
+      width: 2.25rem;
+      object-fit: contain;
+    }
+
+    .rail-links {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2rem;
+    }
+
+    .rail-link {
+      position: relative;
+      display: inline-flex;
+      color: rgba(243, 238, 224, 0.48);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      writing-mode: vertical-rl;
+      transition: color 0.18s ease;
+    }
+
+    .rail-link::before {
+      content: '';
+      position: absolute;
+      left: -0.72rem;
+      top: 50%;
+      width: 1px;
+      height: 0;
+      transform: translateY(-50%);
+      background: var(--cyan);
+      transition: height 0.18s ease;
+    }
+
+    .rail-link:hover,
+    .rail-link.active {
+      color: #fff;
+    }
+
+    .rail-link.active::before {
+      height: 2rem;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 92svh;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .hero-image {
+      position: absolute;
+      inset: 0;
+      z-index: -3;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 58% center;
+      transform: translate3d(calc(var(--mx) * -0.55), calc(var(--my) * -0.28), 0) scale(1.045);
+      transition: transform 0.16s ease-out;
+      will-change: transform;
+    }
+
+    .hero::before,
+    .hero::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+    }
+
+    .hero::before {
+      background:
+        linear-gradient(90deg, rgba(2, 3, 3, 0.98) 0%, rgba(2, 3, 3, 0.86) 32%, rgba(2, 3, 3, 0.42) 70%, rgba(2, 3, 3, 0.18) 100%),
+        linear-gradient(180deg, rgba(2, 3, 3, 0.16) 0%, rgba(2, 3, 3, 0.22) 52%, rgba(2, 3, 3, 0.94) 100%);
+    }
+
+    .hero::after {
+      background-image:
+        linear-gradient(to right, rgba(243, 238, 224, 0.065) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(243, 238, 224, 0.055) 1px, transparent 1px);
+      background-size: 4rem 4rem;
+      mask-image: linear-gradient(90deg, #000 0%, transparent 74%);
+      opacity: 0.42;
+    }
+
+    .hero-inner {
+      display: grid;
+      min-height: 92svh;
+      align-content: center;
+      padding: 6.25rem 1.25rem 3rem;
+    }
+
+    @media (min-width: 768px) {
+      .hero-inner {
+        padding: 6rem 3rem 3rem;
+      }
+    }
+
+    @media (min-width: 1280px) {
+      .hero-inner {
+        padding-left: 5rem;
+        padding-right: 5rem;
+      }
+    }
+
+    .hero-kicker,
+    .eyebrow {
+      color: var(--cyan);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .hero-title {
+      margin-top: 1.25rem;
+      max-width: 11ch;
+      color: #fff;
+      font-size: 3.55rem;
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 0.88;
+    }
+
+    .hero-title span {
+      display: block;
+      color: transparent;
+      -webkit-text-stroke: 1px rgba(243, 238, 224, 0.72);
+      text-stroke: 1px rgba(243, 238, 224, 0.72);
+    }
+
+    @media (min-width: 768px) {
+      .hero-title {
+        font-size: 6rem;
+      }
+    }
+
+    @media (min-width: 1280px) {
+      .hero-title {
+        font-size: 9rem;
+      }
+    }
+
+    .hero-copy {
+      margin-top: 1.5rem;
+      max-width: 38rem;
+      color: rgba(243, 238, 224, 0.72);
+      font-size: 1.05rem;
+      line-height: 1.75;
+    }
+
+    .actions {
+      margin-top: 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .action-primary,
+    .action-secondary {
+      display: inline-flex;
+      min-height: 3rem;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
+      border: 1px solid transparent;
+      padding: 0.85rem 1.1rem;
+      font-size: 0.88rem;
+      font-weight: 800;
+      transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    }
+
+    .action-primary {
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    .action-primary:hover,
+    .action-secondary:hover {
+      transform: translateY(-2px);
+    }
+
+    .action-secondary {
+      border-color: rgba(243, 238, 224, 0.22);
+      background: rgba(2, 3, 3, 0.34);
+      color: #fff;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .hero-proof {
+      margin-top: 2.75rem;
+      display: grid;
+      max-width: 47rem;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    @media (min-width: 640px) {
+      .hero-proof {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    .proof-item {
+      min-width: 0;
+      border-top: 1px solid var(--line);
+      padding: 1rem 0;
+    }
+
+    .proof-item:first-child {
+      border-top: 0;
+    }
+
+    @media (min-width: 640px) {
+      .proof-item {
+        border-top: 0;
+        border-left: 1px solid var(--line);
+        padding: 1rem 1.1rem;
+      }
+
+      .proof-item:first-child {
+        border-left: 0;
+        padding-left: 0;
+      }
+    }
+
+    .proof-label {
+      color: rgba(243, 238, 224, 0.42);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .proof-value {
+      margin-top: 0.35rem;
+      color: #fff;
+      font-size: 1.8rem;
+      font-weight: 900;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .atelier-strip {
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #030404;
+      overflow: hidden;
+    }
+
+    .strip-track {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    @media (min-width: 900px) {
+      .strip-track {
+        grid-template-columns: 0.36fr 0.64fr;
+      }
+    }
+
+    .strip-copy {
+      display: grid;
+      align-content: center;
+      gap: 1rem;
+      padding: 2rem 1.25rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    @media (min-width: 900px) {
+      .strip-copy {
+        border-right: 1px solid var(--line);
+        border-bottom: 0;
+        padding: 2.25rem 3rem;
+      }
+    }
+
+    .atlas-window {
+      position: relative;
+      min-height: 16rem;
+      overflow: hidden;
+    }
+
+    .atlas-window img {
+      position: absolute;
+      inset: 0;
+      width: 118%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      transform: translateX(calc(var(--atlas-shift, 0) * -1px));
+    }
+
+    .section {
+      position: relative;
+      padding: 5rem 1.25rem;
+    }
+
+    @media (min-width: 768px) {
+      .section {
+        padding: 7rem 3rem;
+      }
+    }
+
+    @media (min-width: 1280px) {
+      .section {
+        padding-left: 5rem;
+        padding-right: 5rem;
+      }
+    }
+
+    .section-head {
+      display: grid;
+      gap: 1.2rem;
+      max-width: 75rem;
+    }
+
+    @media (min-width: 960px) {
+      .section-head {
+        grid-template-columns: 0.94fr 0.72fr;
+        align-items: end;
+      }
+    }
+
+    .section-title {
+      max-width: 13ch;
+      color: #fff;
+      font-size: 3rem;
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 0.95;
+    }
+
+    @media (min-width: 768px) {
+      .section-title {
+        font-size: 5.5rem;
+      }
+    }
+
+    .section-copy {
+      max-width: 36rem;
+      color: rgba(243, 238, 224, 0.62);
+      font-size: 1rem;
+      line-height: 1.75;
+    }
+
+    .feature-run {
+      margin-top: 4rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .feature-line {
+      position: relative;
+      display: grid;
+      gap: 1rem;
+      border-bottom: 1px solid var(--line);
+      padding: 1.35rem 0;
+    }
+
+    @media (min-width: 900px) {
+      .feature-line {
+        grid-template-columns: 0.24fr 0.52fr 1fr;
+        align-items: center;
+      }
+    }
+
+    .feature-line::before {
+      content: '';
+      position: absolute;
+      inset: 0 auto 0 -1.25rem;
+      width: 0;
+      background: var(--cyan);
+      transition: width 0.18s ease;
+    }
+
+    .feature-line:hover::before {
+      width: 0.18rem;
+    }
+
+    .feature-number {
+      color: var(--amber);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+    }
+
+    .feature-word {
+      color: #fff;
+      font-size: 2.6rem;
+      font-weight: 900;
+      line-height: 0.92;
+    }
+
+    @media (min-width: 768px) {
+      .feature-word {
+        font-size: 4rem;
+      }
+    }
+
+    .feature-text {
+      color: rgba(243, 238, 224, 0.62);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .models {
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #050706;
+    }
+
+    .model-stage {
+      margin-top: 4rem;
+      display: grid;
+      gap: 2rem;
+    }
+
+    @media (min-width: 960px) {
+      .model-stage {
+        grid-template-columns: 17rem 1fr;
+      }
+    }
+
+    .model-tabs {
+      display: grid;
+      align-content: start;
+      border-top: 1px solid var(--line);
+    }
+
+    .model-tab {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      border-bottom: 1px solid var(--line);
+      padding: 1rem 0;
+      color: rgba(243, 238, 224, 0.5);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-align: left;
+      text-transform: uppercase;
+      transition: color 0.18s ease, padding-left 0.18s ease;
+    }
+
+    .model-tab.active,
+    .model-tab:hover {
+      color: #fff;
+      padding-left: 0.65rem;
+    }
+
+    .model-tab span:last-child {
+      color: var(--cyan);
+    }
+
+    .model-grid {
+      display: grid;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+
+    @media (min-width: 640px) {
+      .model-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (min-width: 1200px) {
+      .model-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+    }
+
+    .model-grid li {
+      min-height: 4rem;
+      display: flex;
+      align-items: center;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 0.85rem 1rem;
+      color: rgba(243, 238, 224, 0.74);
+      font-size: 0.9rem;
+      line-height: 1.35;
+      transition: background 0.18s ease, color 0.18s ease;
+    }
+
+    .model-grid li:hover {
+      background: rgba(101, 255, 231, 0.055);
+      color: #fff;
+    }
+
+    .interface-stage {
+      margin-top: 4.5rem;
+      display: grid;
+      gap: 2rem;
+      align-items: start;
+    }
+
+    @media (min-width: 1060px) {
+      .interface-stage {
+        grid-template-columns: 0.56fr 0.44fr;
+      }
+    }
+
+    .screen {
+      position: relative;
+      border: 1px solid rgba(243, 238, 224, 0.18);
+      background: #050706;
+      box-shadow: 0 3rem 7rem rgba(0, 0, 0, 0.44);
+    }
+
+    .screen::before {
+      content: '';
+      position: absolute;
+      inset: -0.7rem;
+      z-index: -1;
+      border: 1px solid rgba(101, 255, 231, 0.14);
+      transform: translate3d(var(--screen-offset, 0.5rem), var(--screen-offset-y, 0.5rem), 0);
+    }
+
+    .screen img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    @media (min-width: 1060px) {
+      .screen.primary {
+        transform: rotate(-1.4deg);
+      }
+
+      .screen.secondary {
+        margin-top: 6rem;
+        transform: rotate(2deg);
+      }
+    }
+
+    .interface-notes {
+      margin-top: 2rem;
+      border-left: 1px solid var(--line);
+      padding-left: 1.25rem;
+      color: rgba(243, 238, 224, 0.58);
+      font-size: 0.94rem;
+      line-height: 1.75;
+    }
+
+    .runway {
+      border-top: 1px solid var(--line);
+      background: #0a0d0c;
+    }
+
+    .workflow {
+      margin-top: 4rem;
+      border-top: 1px solid var(--line);
+      counter-reset: step;
+    }
+
+    .step {
+      counter-increment: step;
+      display: grid;
+      gap: 1rem;
+      border-bottom: 1px solid var(--line);
+      padding: 1.3rem 0;
+    }
+
+    .step::before {
+      content: counter(step, decimal-leading-zero);
+      color: var(--amber);
+      font-family: 'IBM Plex Mono', monospace;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+    }
+
+    @media (min-width: 900px) {
+      .step {
+        grid-template-columns: 5rem 0.78fr 1.1fr;
+        align-items: baseline;
+      }
+    }
+
+    .step h3 {
+      color: #fff;
+      font-size: 1.45rem;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+
+    .step p {
+      color: rgba(243, 238, 224, 0.58);
+      line-height: 1.7;
+    }
+
+    .install-shell {
+      display: grid;
+      gap: 2.5rem;
+    }
+
+    @media (min-width: 1040px) {
+      .install-shell {
+        grid-template-columns: 0.42fr 0.58fr;
+        align-items: start;
+      }
+    }
+
+    .requirement-list {
+      margin-top: 2rem;
+      border-top: 1px solid var(--line);
+      color: rgba(243, 238, 224, 0.64);
+      font-size: 0.94rem;
+    }
+
+    .requirement-list div {
+      display: flex;
+      gap: 0.75rem;
+      border-bottom: 1px solid var(--line);
+      padding: 0.85rem 0;
+    }
+
+    .console {
+      border: 1px solid rgba(101, 255, 231, 0.24);
+      background:
+        linear-gradient(180deg, rgba(8, 13, 12, 0.96), rgba(2, 3, 3, 0.98)),
+        #020303;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2.5rem 6rem rgba(0, 0, 0, 0.42);
+    }
+
+    .console-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      border-bottom: 1px solid var(--line);
+      padding: 0.8rem 1rem;
+    }
+
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      border: 1px solid rgba(243, 238, 224, 0.15);
+      padding: 0.45rem 0.7rem;
+      color: rgba(243, 238, 224, 0.78);
+      font-size: 0.75rem;
+      font-weight: 800;
+      transition: border-color 0.18s ease, color 0.18s ease;
+    }
+
+    .copy-btn:hover {
+      border-color: rgba(101, 255, 231, 0.52);
+      color: #fff;
+    }
+
+    .console-code {
+      overflow-x: auto;
+      padding: 1.25rem;
+      color: rgba(243, 238, 224, 0.78);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.82rem;
+      line-height: 1.9;
+      counter-reset: line;
+    }
+
+    .console-line {
+      counter-increment: line;
+      display: flex;
+      min-width: max-content;
+      gap: 1rem;
+      white-space: nowrap;
+    }
+
+    .console-line::before {
+      content: counter(line, decimal-leading-zero);
+      width: 2rem;
+      flex: none;
+      color: rgba(101, 255, 231, 0.44);
+      text-align: right;
+      font-size: 0.72rem;
+    }
+
+    .cta {
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    .cta .section-title {
+      color: var(--ink);
+    }
+
+    .cta .section-copy {
+      color: rgba(21, 18, 13, 0.7);
+    }
+
+    .cta-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
+      min-height: 3rem;
+      border: 1px solid rgba(21, 18, 13, 0.22);
+      padding: 0.85rem 1.05rem;
+      color: var(--ink);
+      font-size: 0.88rem;
+      font-weight: 900;
+      transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
+    }
+
+    .cta-link.primary {
+      background: var(--ink);
+      color: var(--paper);
+    }
+
+    .cta-link:hover {
+      transform: translateY(-2px);
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.72s ease, transform 0.72s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .site-footer {
+      border-top: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(5, 7, 6, 0.96), rgba(2, 3, 3, 1)),
+        var(--bg);
+      padding: 2.5rem 1.25rem;
+    }
+
+    @media (min-width: 768px) {
+      .site-footer {
+        padding: 3rem;
+      }
+    }
+
+    @media (min-width: 960px) {
+      .site-footer {
+        margin-left: 5rem;
+      }
+    }
+
+    @media (min-width: 1280px) {
+      .site-footer {
+        padding-inline: 5rem;
+      }
+    }
+
+    .footer-inner {
+      margin: 0 auto;
+      max-width: 88rem;
+    }
+
+    .footer-top {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1.5rem;
+    }
+
+    @media (min-width: 680px) {
+      .footer-top {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+      }
+    }
+
+    .footer-logo {
+      display: block;
+      width: min(13.5rem, 78vw);
+      height: auto;
+    }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      color: rgba(243, 238, 224, 0.54);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .footer-links a {
+      transition: color 0.18s ease;
+    }
+
+    .footer-links a:hover {
+      color: #fff;
+    }
+
+    .footer-attribution {
+      margin-top: 2rem;
+      max-width: 42rem;
+      color: rgba(243, 238, 224, 0.42);
+      font-size: 0.82rem;
+      line-height: 1.75;
+    }
+
+    .footer-attribution a {
+      color: rgba(243, 238, 224, 0.72);
+      text-decoration: underline;
+      text-underline-offset: 0.25rem;
+    }
+
+    .footer-attribution a:hover {
+      color: #fff;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html,
+      body {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+
+      .hero-image,
+      .atlas-window img {
+        transform: none !important;
+      }
+
+      .cursor-signal {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="scroll-progress" id="scroll-progress"></div>
+  <div class="texture"></div>
+  <div class="cursor-signal" id="cursor-signal" aria-hidden="true"></div>
+
+  <nav class="rail-nav" aria-label="Primary">
+    <a href="#" class="rail-mark" aria-label="AITK Studio home">
+      <img src="assets/brand/aitk-studio-mark.svg" alt="" class="brand-mark" />
+    </a>
+    <div class="rail-links">
+      <a href="#features" class="rail-link" data-nav="features">Why</a>
+      <a href="#models" class="rail-link" data-nav="models">Models</a>
+      <a href="#interface" class="rail-link" data-nav="interface">Proof</a>
+      <a href="#install" class="rail-link" data-nav="install">Install</a>
+    </div>
+    <a href="https://github.com/BadAtCaptchas/AITK-Studio" target="_blank" rel="noopener" class="rail-github" aria-label="Open GitHub">
+      <i data-lucide="github" class="h-5 w-5" aria-hidden="true"></i>
+    </a>
+  </nav>
+
+  <nav class="mobile-nav" aria-label="Mobile primary">
+    <div class="flex h-16 items-center justify-between px-5">
+      <a href="#" class="flex items-center gap-3 text-sm font-black text-white" aria-label="AITK Studio home">
+        <img src="assets/brand/aitk-studio-mark.svg" alt="" class="mobile-brand-mark" />
+        AITK Studio
+      </a>
+      <button id="menu-btn" class="border border-white/14 p-2 text-white/74" type="button" aria-label="Menu" aria-expanded="false">
+        <i data-lucide="menu" class="h-5 w-5" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div id="mobile-menu" class="hidden border-t border-white/10 px-5 py-4">
+      <div class="grid gap-1 text-sm font-bold text-white/74">
+        <a href="#features" class="py-2">Features</a>
+        <a href="#models" class="py-2">Models</a>
+        <a href="#interface" class="py-2">Interface</a>
+        <a href="#install" class="py-2">Install</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page-shell">
+    <section class="hero" aria-label="AITK Studio">
+      <img src="assets/index-alt-atelier-hero.png" alt="" class="hero-image" />
+      <div class="hero-inner">
+        <div class="max-w-5xl">
+          <div class="hero-kicker reveal">Train it yourself</div>
+          <h1 class="hero-title reveal">
+            AITK Studio
+          </h1>
+          <p class="hero-copy reveal">
+            Turn your own images, clips, or audio into LoRA and LoKr adapters you can reuse. Run the job on your machine, check the samples, and keep the result.
+          </p>
+          <div class="actions reveal">
+            <a href="#install" class="action-primary">
+              Install locally
+              <i data-lucide="terminal" class="h-4 w-4" aria-hidden="true"></i>
+            </a>
+            <a href="#interface" class="action-secondary">
+              See the workspace
+              <i data-lucide="monitor-play" class="h-4 w-4" aria-hidden="true"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="atelier-strip" aria-label="Creative model atlas">
+      <div class="strip-track">
+        <div class="strip-copy reveal">
+          <div class="eyebrow">The basic idea</div>
+          <p class="text-3xl font-black leading-none text-white md:text-5xl">
+            A folder of references can become a model you come back to.
+          </p>
+        </div>
+        <div class="atlas-window">
+          <img src="assets/index-alt-model-atlas.png" alt="" id="atlas-image" />
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section bg-graphite-960">
+      <div class="section-head reveal">
+        <div>
+          <div class="eyebrow">Why use it</div>
+          <h2 class="section-title">Teach it what you mean.</h2>
+        </div>
+        <p class="section-copy">
+          Use the UI for the parts you do often. Open YAML when a run needs exact settings. Your dataset does not have to leave your machine.
+        </p>
+      </div>
+
+      <div class="feature-run">
+        <article class="feature-line reveal">
+          <div class="feature-number">01</div>
+          <h3 class="feature-word">Style</h3>
+          <p class="feature-text">Train a character, product, edit style, or visual habit without setting everything up from scratch each time.</p>
+        </article>
+        <article class="feature-line reveal">
+          <div class="feature-number">02</div>
+          <h3 class="feature-word">Motion</h3>
+          <p class="feature-text">Use Wan and LTX when the thing you want has timing, not just a good still frame.</p>
+        </article>
+        <article class="feature-line reveal">
+          <div class="feature-number">03</div>
+          <h3 class="feature-word">Sound</h3>
+          <p class="feature-text">Ace Step support gives audio experiments a place in the same toolkit.</p>
+        </article>
+        <article class="feature-line reveal">
+          <div class="feature-number">04</div>
+          <h3 class="feature-word">Control</h3>
+          <p class="feature-text">Start with presets. Then change phases, optimizers, checkpoints, and encryption when the job gets serious.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="models" class="section models">
+      <div class="section-head reveal">
+        <div>
+          <div class="eyebrow">Model range</div>
+          <h2 class="section-title">Models you can actually train.</h2>
+        </div>
+        <p class="section-copy">
+          Image, edit, video, and audio support live in one place. Choose a tab, pick a family, and get to work.
+        </p>
+      </div>
+
+      <div class="model-stage reveal">
+        <div class="model-tabs" role="tablist" aria-label="Model categories">
+          <button class="model-tab active" type="button" data-tab="image" role="tab" aria-controls="tab-image" aria-selected="true">
+            <span>Image</span><span>17</span>
+          </button>
+          <button class="model-tab" type="button" data-tab="edit" role="tab" aria-controls="tab-edit" aria-selected="false">
+            <span>Edit</span><span>03</span>
+          </button>
+          <button class="model-tab" type="button" data-tab="video" role="tab" aria-controls="tab-video" aria-selected="false">
+            <span>Video</span><span>03</span>
+          </button>
+          <button class="model-tab" type="button" data-tab="audio" role="tab" aria-controls="tab-audio" aria-selected="false">
+            <span>Audio</span><span>02</span>
+          </button>
+        </div>
+
+        <div>
+          <ul id="tab-image" class="model-panel model-grid" role="tabpanel">
+            <li>FLUX.1 / FLUX.2-dev</li>
+            <li>FLUX.2 Klein</li>
+            <li>AsymFLUX.2</li>
+            <li>Flex.1 / Flex.2</li>
+            <li>Chroma / Zeta Chroma</li>
+            <li>Lumina Image 2.0</li>
+            <li>Qwen-Image</li>
+            <li>GLM-Image</li>
+            <li>i1-3B</li>
+            <li>HiDream / HiDream-O1</li>
+            <li>PRX Pixel</li>
+            <li>Ideogram 4</li>
+            <li>OmniGen2 / Z-Image</li>
+            <li>SDXL / SD 1.5</li>
+            <li>ERNIE-Image</li>
+            <li>Nucleus-Image</li>
+            <li>Juggernaut Z</li>
+          </ul>
+          <ul id="tab-edit" class="model-panel model-grid hidden" role="tabpanel">
+            <li>FLUX.1-Kontext-dev</li>
+            <li>Qwen-Image-Edit</li>
+            <li>HiDream-E1-1</li>
+          </ul>
+          <ul id="tab-video" class="model-panel model-grid hidden" role="tabpanel">
+            <li>Wan 2.1 T2V / I2V</li>
+            <li>Wan 2.2 T2V / I2V / TI2V</li>
+            <li>LTX-2 / LTX-2.3</li>
+          </ul>
+          <ul id="tab-audio" class="model-panel model-grid hidden" role="tabpanel">
+            <li>Ace Step 1.5</li>
+            <li>Ace Step 1.5 XL</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="interface" class="section bg-graphite-960">
+      <div class="section-head reveal">
+        <div>
+          <div class="eyebrow">Actual workspace</div>
+          <h2 class="section-title">Here's the real UI.</h2>
+        </div>
+        <p class="section-copy">
+          No fake product mockups here. These are the screens you use to set up jobs, inspect samples, and keep configuration close.
+        </p>
+      </div>
+
+      <div class="interface-stage">
+        <div class="reveal">
+          <figure class="screen primary">
+            <img src="assets/readme-ui-caption-studio.png" alt="AITK Studio caption studio annotation interface" loading="lazy" />
+          </figure>
+          <p class="interface-notes">Edit captions, tune object boxes, and move through dataset images without leaving the studio.</p>
+        </div>
+        <div class="reveal">
+          <figure class="screen secondary">
+            <img src="assets/readme-ui-workflow-builder.png" alt="AITK Studio Ideogram workflow builder canvas" loading="lazy" />
+          </figure>
+          <p class="interface-notes">Build Ideogram prompts with structured controls, canvas elements, palette choices, and live JSON preview.</p>
+        </div>
+        <div class="reveal">
+          <figure class="screen primary">
+            <img src="assets/readme-ui-generate.png" alt="AITK Studio generate interface" loading="lazy" />
+          </figure>
+          <p class="interface-notes">Generate samples while you work, then compare what changed before you move on.</p>
+        </div>
+        <div class="reveal">
+          <figure class="screen secondary">
+            <img src="assets/readme-ui-new-job.png" alt="AITK Studio new training job interface" loading="lazy" />
+          </figure>
+          <p class="interface-notes">Set the model, adapter, dataset, optimizer, and run profile from one place.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section runway">
+      <div class="section-head reveal">
+        <div>
+          <div class="eyebrow">How it goes</div>
+          <h2 class="section-title">Bring data. Train. Reuse.</h2>
+        </div>
+        <p class="section-copy">
+          The first run can be simple. The next one can be tuned. Either way, you end with an adapter you can use again.
+        </p>
+      </div>
+
+      <div class="workflow reveal">
+        <div class="step">
+          <h3>Bring the dataset</h3>
+          <p>Add images, video, or audio with the captions and notes that explain what matters.</p>
+        </div>
+        <div class="step">
+          <h3>Choose the target</h3>
+          <p>Pick a model family, adapter type, preset, and phase plan that fit the result you want.</p>
+        </div>
+        <div class="step">
+          <h3>Check the run</h3>
+          <p>Watch checkpoints, samples, and loss while the worker does the slow part.</p>
+        </div>
+        <div class="step">
+          <h3>Keep the result</h3>
+          <p>Export the adapter, generate with it, and use it in the rest of your setup.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="section bg-graphite-990">
+      <div class="install-shell">
+        <div class="reveal">
+          <div class="eyebrow">Install</div>
+          <h2 class="section-title">Install it locally.</h2>
+          <p class="section-copy mt-5">
+            You will need Python 3.10+, git, and an NVIDIA GPU. Blackwell / RTX 50-series users should use the Blackwell torch requirements file.
+          </p>
+          <div class="requirement-list">
+            <div><i data-lucide="cpu" class="mt-1 h-4 w-4 text-signal-cyan" aria-hidden="true"></i><span>Runs on your GPU</span></div>
+            <div><i data-lucide="panel-top" class="mt-1 h-4 w-4 text-signal-amber" aria-hidden="true"></i><span>Opens at localhost:8675</span></div>
+            <div><i data-lucide="file-code-2" class="mt-1 h-4 w-4 text-signal-green" aria-hidden="true"></i><span>Use the UI or edit YAML</span></div>
+          </div>
+        </div>
+
+        <div class="console reveal">
+          <div class="console-top">
+            <div class="flex min-w-0 items-center gap-3">
+              <span class="h-2 w-2 bg-signal-red/80"></span>
+              <span class="h-2 w-2 bg-signal-amber/80"></span>
+              <span class="h-2 w-2 bg-signal-green/80"></span>
+              <span class="truncate font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-white/44">Linux setup</span>
+            </div>
+            <button id="copy-btn" class="copy-btn" type="button">
+              <i data-lucide="copy" class="h-3.5 w-3.5" aria-hidden="true"></i>
+              <span>Copy</span>
+            </button>
+          </div>
+          <div class="console-code">
+            <div class="console-line">git clone https://github.com/BadAtCaptchas/AITK-Studio.git</div>
+            <div class="console-line">cd AITK-Studio</div>
+            <div class="console-line">python3 -m venv venv &amp;&amp; source venv/bin/activate</div>
+            <div class="console-line">pip3 install -r requirements_torch_legacy_cu128.txt</div>
+            <div class="console-line">pip3 install -r requirements.txt</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section cta">
+      <div class="section-head reveal">
+        <div>
+          <div class="font-mono text-xs font-bold uppercase tracking-[0.16em] text-graphite-760">Open source fork</div>
+          <h2 class="section-title mt-3">Train something that belongs to you.</h2>
+        </div>
+        <div>
+          <p class="section-copy">
+            Start with one dataset. Keep the settings that work. Change the ones that do not.
+          </p>
+          <div class="actions">
+            <a href="https://github.com/BadAtCaptchas/AITK-Studio" target="_blank" rel="noopener" class="cta-link primary">
+              GitHub
+              <i data-lucide="arrow-up-right" class="h-4 w-4" aria-hidden="true"></i>
+            </a>
+            <a href="README.md" class="cta-link">
+              Read docs
+              <i data-lucide="book-open" class="h-4 w-4" aria-hidden="true"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-top">
+        <a href="#" aria-label="AITK Studio home">
+          <img src="assets/brand/aitk-studio-logo-inverse.svg" alt="AITK Studio" class="footer-logo" />
+        </a>
+        <nav class="footer-links" aria-label="Footer">
+          <a href="https://github.com/BadAtCaptchas/AITK-Studio" target="_blank" rel="noopener">GitHub</a>
+          <a href="README.md">Docs</a>
+          <a href="FAQ.md">FAQ</a>
+          <a href="LICENSE">License</a>
+        </nav>
+      </div>
+      <p class="footer-attribution">
+        AITK Studio is a maintained fork of the original
+        <a href="https://github.com/ostris/ai-toolkit" target="_blank" rel="noopener">Ostris AI Toolkit</a>.
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+
+    const menuBtn = document.getElementById('menu-btn');
+    const mobileMenu = document.getElementById('mobile-menu');
+    menuBtn.addEventListener('click', () => {
+      const isOpen = !mobileMenu.classList.contains('hidden');
+      mobileMenu.classList.toggle('hidden');
+      menuBtn.setAttribute('aria-expanded', String(!isOpen));
+    });
+    mobileMenu.querySelectorAll('a').forEach(link => {
+      link.addEventListener('click', () => {
+        mobileMenu.classList.add('hidden');
+        menuBtn.setAttribute('aria-expanded', 'false');
+      });
+    });
+
+    const tabs = document.querySelectorAll('.model-tab');
+    const panels = document.querySelectorAll('.model-panel');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        tabs.forEach(item => {
+          item.classList.remove('active');
+          item.setAttribute('aria-selected', 'false');
+        });
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        panels.forEach(panel => panel.classList.add('hidden'));
+        document.getElementById('tab-' + target).classList.remove('hidden');
+      });
+    });
+
+    const copyBtn = document.getElementById('copy-btn');
+    const copyLabel = copyBtn.querySelector('span');
+    const codeText = [
+      'git clone https://github.com/BadAtCaptchas/AITK-Studio.git',
+      'cd AITK-Studio',
+      'python3 -m venv venv && source venv/bin/activate',
+      'pip3 install -r requirements_torch_legacy_cu128.txt',
+      'pip3 install -r requirements.txt',
+    ].join('\n');
+
+    const fallbackCopy = text => {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.setAttribute('readonly', '');
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return ok;
+    };
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(codeText);
+        } else if (!fallbackCopy(codeText)) {
+          throw new Error('Copy failed');
+        }
+        copyLabel.textContent = 'Copied';
+        setTimeout(() => { copyLabel.textContent = 'Copy'; }, 1600);
+      } catch (err) {
+        copyLabel.textContent = 'Failed';
+        setTimeout(() => { copyLabel.textContent = 'Copy'; }, 1600);
+      }
+    });
+
+    const progress = document.getElementById('scroll-progress');
+    const atlasImage = document.getElementById('atlas-image');
+    const cursorSignal = document.getElementById('cursor-signal');
+
+    const updateScroll = () => {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const ratio = max > 0 ? Math.min(scrollTop / max, 1) : 0;
+      progress.style.transform = `scaleX(${ratio})`;
+
+      if (!prefersReducedMotion && atlasImage) {
+        const atlasRect = atlasImage.parentElement.getBoundingClientRect();
+        const atlasProgress = Math.min(Math.max((window.innerHeight - atlasRect.top) / (window.innerHeight + atlasRect.height), 0), 1);
+        atlasImage.style.setProperty('--atlas-shift', String(Math.round(atlasProgress * 90)));
+      }
+    };
+    window.addEventListener('scroll', updateScroll, { passive: true });
+    updateScroll();
+
+    if (!prefersReducedMotion) {
+      document.addEventListener('mousemove', event => {
+        const x = (event.clientX - window.innerWidth / 2) / window.innerWidth;
+        const y = (event.clientY - window.innerHeight / 2) / window.innerHeight;
+        document.documentElement.style.setProperty('--mx', `${x * 24}px`);
+        document.documentElement.style.setProperty('--my', `${y * 24}px`);
+        if (cursorSignal) {
+          cursorSignal.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0) translate3d(-50%, -50%, 0)`;
+        }
+      }, { passive: true });
+    }
+
+    const formatCounter = element => {
+      const prefix = element.dataset.prefix || '';
+      const suffix = element.dataset.suffix || '';
+      const value = element.dataset.current || element.dataset.count || '0';
+      element.textContent = `${prefix}${value}${suffix}`;
+    };
+
+    const animateCounter = element => {
+      const target = Number(element.dataset.count || 0);
+      const prefix = element.dataset.prefix || '';
+      const suffix = element.dataset.suffix || '';
+      if (prefersReducedMotion || !Number.isFinite(target)) {
+        element.textContent = `${prefix}${target}${suffix}`;
+        return;
+      }
+      const start = performance.now();
+      const duration = 1100;
+      const step = now => {
+        const progressValue = Math.min((now - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - progressValue, 3);
+        element.dataset.current = String(Math.round(target * eased));
+        formatCounter(element);
+        if (progressValue < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    };
+
+    const navLinks = document.querySelectorAll('[data-nav]');
+
+    if ('IntersectionObserver' in window) {
+      const revealObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            revealObserver.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
+      document.querySelectorAll('.reveal').forEach(element => revealObserver.observe(element));
+
+      const counterObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            animateCounter(entry.target);
+            counterObserver.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.6 });
+      document.querySelectorAll('[data-count]').forEach(element => counterObserver.observe(element));
+
+      const sectionObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          navLinks.forEach(link => link.classList.toggle('active', link.dataset.nav === entry.target.id));
+        });
+      }, { threshold: 0.28, rootMargin: '-20% 0px -55% 0px' });
+      document.querySelectorAll('section[id]').forEach(section => sectionObserver.observe(section));
+    } else {
+      document.querySelectorAll('.reveal').forEach(element => element.classList.add('visible'));
+      document.querySelectorAll('[data-count]').forEach(formatCounter);
+    }
+  </script>
+</body>
+</html>

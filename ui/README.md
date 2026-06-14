@@ -1,4 +1,4 @@
-# OstrisAI-Toolkit Revamped UI
+# AITK Studio UI
 
 This is the Next.js UI for `BadAtCaptchas/AITK-Studio`. It provides the web interface, local job worker, database preparation scripts, and supporting UI tooling for this fork.
 

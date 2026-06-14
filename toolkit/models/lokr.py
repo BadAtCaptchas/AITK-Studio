@@ -53,7 +53,7 @@ def factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
 
 def balanced_factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
     """
-    Return Revamped's balanced LoKr factors, keeping the smaller value first.
+    Return balanced LoKr factors, keeping the smaller value first.
     """
     if factor > 0 and (dimension % factor) == 0:
         m = factor

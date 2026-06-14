@@ -209,7 +209,7 @@ class LokrModuleTest(unittest.TestCase):
         self.assertEqual(tuple(lokr.lokr_w1.shape), (16, 16))
         self.assertEqual(tuple(lokr.lokr_w2.shape), (8, 8))
 
-    def test_opt_in_balanced_factorization_preserves_revamped_shapes(self):
+    def test_opt_in_balanced_factorization_preserves_balanced_shapes(self):
         lokr = make_lokr(
             torch.nn.Linear(128, 128, bias=False),
             factor=16,

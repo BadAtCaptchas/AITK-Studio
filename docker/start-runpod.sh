@@ -190,7 +190,7 @@ start_ollama
 echo "Persistent root: ${PERSIST_ROOT}"
 echo "SQLite path: ${AITK_SQLITE_PATH}"
 echo "Hugging Face cache: ${HUGGINGFACE_HUB_CACHE}"
-echo "Starting OstrisAI-Toolkit Revamped UI on port 8675..."
+echo "Starting AITK Studio UI on port 8675..."
 
 cd "${APP_ROOT}/ui"
 npm run update_db

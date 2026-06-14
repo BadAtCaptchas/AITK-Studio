@@ -392,7 +392,7 @@ const docs: { [key: string]: ConfigDoc } = {
     tooltip: 'Uses upstream AI Toolkit LoKr factor ordering for imported configs or checkpoints.',
     description: (
       <>
-        Uses upstream AI Toolkit LoKr factor ordering instead of Revamped's balanced factorization. Keep this enabled
+        Uses upstream AI Toolkit LoKr factor ordering instead of AITK Studio's balanced factorization. Keep this enabled
         for plain imported LoKr configs, or disable it only when you intentionally want the newer balanced layout.
       </>
     ),

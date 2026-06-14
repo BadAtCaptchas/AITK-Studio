@@ -1,6 +1,6 @@
 # RunPod Blackwell Template
 
-This folder contains the private RunPod Pod template for OstrisAI-Toolkit Revamped. It is intended for NVIDIA Blackwell-first deployments with a reproducible Docker image and persistent data on the RunPod volume at `/workspace`.
+This folder contains the private RunPod Pod template for AITK Studio. It is intended for NVIDIA Blackwell-first deployments with a reproducible Docker image and persistent data on the RunPod volume at `/workspace`.
 
 ## Build And Push
 

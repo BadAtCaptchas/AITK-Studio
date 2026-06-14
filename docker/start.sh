@@ -100,5 +100,5 @@ export_env_vars
 require_auth_secret
 validate_cloudflared_config
 start_ollama
-echo "Starting OstrisAI-Toolkit Revamped UI..."
+echo "Starting AITK Studio UI..."
 cd /app/ai-toolkit/ui && npm run update_db && npm run start

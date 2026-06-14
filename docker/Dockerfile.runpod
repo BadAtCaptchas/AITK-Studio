@@ -6,7 +6,7 @@ ARG GIT_COMMIT=unknown
 
 LABEL authors="jaret" \
     org.opencontainers.image.title="AI Toolkit RunPod Blackwell" \
-    org.opencontainers.image.description="RunPod Pod image for OstrisAI-Toolkit Revamped UI with CUDA 13 and cu130 PyTorch." \
+    org.opencontainers.image.description="RunPod Pod image for AITK Studio UI with CUDA 13 and cu130 PyTorch." \
     org.opencontainers.image.source="https://github.com/BadAtCaptchas/AITK-Studio" \
     org.opencontainers.image.version="${AITK_VERSION}" \
     org.opencontainers.image.revision="${GIT_COMMIT}"

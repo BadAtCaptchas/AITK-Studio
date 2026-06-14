@@ -10,7 +10,7 @@ import type { ComfyImageRef } from './externalComfy';
 export const IDEOGRAM_WORKFLOW_HISTORY_KEY = 'IDEOGRAM_WORKFLOW_HISTORY';
 const RECENT_HISTORY_LIMIT = 80;
 
-export type IdeogramWorkflowHistoryStatus = 'queued' | 'completed' | 'error' | 'imported';
+export type IdeogramWorkflowHistoryStatus = 'queued' | 'completed' | 'error' | 'imported' | 'canceled';
 
 export type IdeogramWorkflowHistoryEntry = {
   id: string;
@@ -56,7 +56,7 @@ function cleanDate(value: unknown, fallback = new Date().toISOString()) {
 }
 
 function cleanStatus(value: unknown): IdeogramWorkflowHistoryStatus {
-  return value === 'queued' || value === 'completed' || value === 'error' || value === 'imported' ? value : 'completed';
+  return value === 'queued' || value === 'completed' || value === 'error' || value === 'imported' || value === 'canceled' ? value : 'completed';
 }
 
 function cleanImages(value: unknown): ComfyImageRef[] {

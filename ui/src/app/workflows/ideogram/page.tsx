@@ -114,7 +114,7 @@ type WorkflowHistoryEntry = {
   workflow: Record<string, unknown>;
   images: ComfyImageRef[];
   favorite: boolean;
-  status: 'queued' | 'completed' | 'error' | 'imported';
+  status: 'queued' | 'completed' | 'error' | 'imported' | 'canceled';
   createdAt: string;
   updatedAt: string;
   aspectRatio: string;
@@ -400,6 +400,7 @@ function historyStatusLabel(status: WorkflowHistoryEntry['status']) {
   if (status === 'queued') return 'Queued';
   if (status === 'error') return 'Error';
   if (status === 'imported') return 'Imported';
+  if (status === 'canceled') return 'Canceled';
   return 'Completed';
 }
 
@@ -571,6 +572,8 @@ export default function IdeogramWorkflowBuilderPage() {
   const [activeTool, setActiveTool] = useState<ToolMode>('select');
   const [selectedElementIndex, setSelectedElementIndex] = useState(0);
   const [zoom, setZoom] = useState(0.72);
+  const [canvasPan, setCanvasPan] = useState({ x: 0, y: 0 });
+  const [isCanvasPanning, setIsCanvasPanning] = useState(false);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [isPreflighting, setIsPreflighting] = useState(false);
   const [importPromptId, setImportPromptId] = useState('');
@@ -593,7 +596,8 @@ export default function IdeogramWorkflowBuilderPage() {
   const selectedElement = state.elements[selectedElementIndex] || null;
   const selectedPreset = IDEOGRAM4_QUALITY_PRESETS[state.qualityPreset];
   const canvasAspect = parseIdeogramAspectRatio(state.aspectRatio);
-  const canGenerate = Boolean(serverUrl && preflight?.ok && generation.status !== 'connecting' && generation.status !== 'queued' && generation.status !== 'executing');
+  const isGenerationRunning = generation.status === 'connecting' || generation.status === 'queued' || generation.status === 'executing';
+  const canGenerate = Boolean(serverUrl && preflight?.ok && !isGenerationRunning);
   const stepPercent = generation.maxStep > 0 ? Math.round((generation.step / generation.maxStep) * 100) : 0;
   const externalLoraSet = useMemo(() => new Set(externalLoras), [externalLoras]);
   const missingLoras = useMemo(
@@ -610,6 +614,7 @@ export default function IdeogramWorkflowBuilderPage() {
     () => historyEntries.find(entry => entry.id === activeHistoryId || (!!generation.promptId && entry.promptId === generation.promptId)) || null,
     [activeHistoryId, generation.promptId, historyEntries],
   );
+  const suppressCanvasImageClickRef = useRef(false);
 
   const clearResultObjectUrls = useCallback(() => {
     objectUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
@@ -1274,20 +1279,35 @@ export default function IdeogramWorkflowBuilderPage() {
     }
   }, [clearResultObjectUrls, connectProgressSocket, pollHistoryUntilComplete, saveWorkflowHistoryEntry, serverUrl, state]);
 
-  const cancelGeneration = async () => {
+  const cancelGeneration = useCallback(async () => {
     generationAbortRef.current = true;
     wsRef.current?.close();
+    const promptId = generation.promptId;
+    const stateSnapshot = activeHistoryEntry?.state ? cloneIdeogramWorkflowState(activeHistoryEntry.state) : cloneIdeogramWorkflowState(state);
+    const workflowSnapshot = isRecord(activeHistoryEntry?.workflow) ? activeHistoryEntry.workflow : buildIdeogramComfyWorkflow(stateSnapshot);
+    const serverUrlSnapshot = activeHistoryEntry?.serverUrl || serverUrl;
+    const images = activeHistoryEntry?.images || [];
     try {
       await apiClient.post('/api/comfy/external/interrupt', { server_url: serverUrl });
     } catch {
       // Ignore interrupt failures; the UI still exits the local wait state.
+    }
+    if (promptId) {
+      await saveWorkflowHistoryEntry({
+        stateSnapshot,
+        workflowSnapshot,
+        serverUrlSnapshot,
+        promptId,
+        images,
+        status: 'canceled',
+      });
     }
     setGeneration(current => ({
       ...current,
       status: 'canceled',
       message: 'Generation canceled.',
     }));
-  };
+  }, [activeHistoryEntry, generation.promptId, saveWorkflowHistoryEntry, serverUrl, state]);
 
   const loadWorkflowHistoryEntry = useCallback(
     async (entry: WorkflowHistoryEntry) => {
@@ -1304,14 +1324,14 @@ export default function IdeogramWorkflowBuilderPage() {
       }
       setGeneration({
         ...EMPTY_GENERATION,
-        status: entry.status === 'error' ? 'error' : entry.status === 'queued' ? 'queued' : 'completed',
+        status: entry.status === 'error' ? 'error' : entry.status === 'queued' ? 'queued' : entry.status === 'canceled' ? 'canceled' : 'completed',
         promptId: entry.promptId,
         clientId: '',
         queuePosition: '-',
         executingNode: '-',
         step: entry.steps,
         maxStep: entry.steps,
-        message: entry.status === 'queued' ? 'Loaded queued workflow.' : 'Loaded workflow history.',
+        message: entry.status === 'queued' ? 'Loaded queued workflow.' : entry.status === 'canceled' ? 'Loaded canceled generation.' : 'Loaded workflow history.',
         error: entry.status === 'error' ? 'This saved generation ended with an error.' : '',
       });
       if (entry.images.length > 0) {
@@ -1421,6 +1441,59 @@ export default function IdeogramWorkflowBuilderPage() {
     const increment = event.shiftKey ? 0.04 : 0.08;
     setZoom(value => clampZoom(value + direction * increment));
   }, []);
+
+  const startCanvasPan = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 && event.button !== 1) return;
+      if (activeTool === 'object' || activeTool === 'text') return;
+
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-canvas-ui="true"], [data-canvas-footer="true"], [data-box-node="true"]')) return;
+
+      const viewport = event.currentTarget;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startPan = canvasPan;
+      const pointerId = event.pointerId;
+      let didMove = false;
+
+      viewport.setPointerCapture(pointerId);
+      setIsCanvasPanning(true);
+
+      const onMove = (moveEvent: PointerEvent) => {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        if (!didMove && Math.hypot(dx, dy) > 3) {
+          didMove = true;
+          suppressCanvasImageClickRef.current = true;
+        }
+        if (didMove) {
+          moveEvent.preventDefault();
+          setCanvasPan({ x: startPan.x + dx, y: startPan.y + dy });
+        }
+      };
+
+      const finishPan = () => {
+        setIsCanvasPanning(false);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', finishPan);
+        window.removeEventListener('pointercancel', finishPan);
+        if (viewport.hasPointerCapture(pointerId)) {
+          viewport.releasePointerCapture(pointerId);
+        }
+        if (didMove) {
+          window.setTimeout(() => {
+            suppressCanvasImageClickRef.current = false;
+          }, 0);
+        }
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', finishPan, { once: true });
+      window.addEventListener('pointercancel', finishPan, { once: true });
+    },
+    [activeTool, canvasPan],
+  );
 
   useEffect(() => {
     const viewport = canvasViewportRef.current;
@@ -1542,7 +1615,9 @@ export default function IdeogramWorkflowBuilderPage() {
                   ? 'border-emerald-900 bg-emerald-950/80 text-emerald-200'
                   : entry.status === 'error'
                     ? 'border-rose-900 bg-rose-950/80 text-rose-200'
-                    : 'border-gray-700 bg-gray-950/85 text-gray-300',
+                    : entry.status === 'canceled'
+                      ? 'border-amber-900 bg-amber-950/75 text-amber-200'
+                      : 'border-gray-700 bg-gray-950/85 text-gray-300',
               )}
             >
               {historyStatusLabel(entry.status)}
@@ -1609,7 +1684,7 @@ export default function IdeogramWorkflowBuilderPage() {
       </div>
       <ProgressBar value={stepPercent} className="mt-4" tone={generation.status === 'error' ? 'danger' : generation.status === 'completed' ? 'success' : 'info'} />
       <div className="mt-3 text-xs text-gray-400">{generation.error || generation.message}</div>
-      {(generation.status === 'connecting' || generation.status === 'queued' || generation.status === 'executing') && (
+      {isGenerationRunning && (
         <div className="mt-4 flex justify-end">
           <ActionButton tone="rose" onClick={cancelGeneration}>
             <X className="h-4 w-4" />
@@ -1697,13 +1772,17 @@ export default function IdeogramWorkflowBuilderPage() {
             <Send className="h-4 w-4" />
             <span className="hidden md:inline">Send to Comfy</span>
           </ActionButton>
-          <ActionButton onClick={generate} disabled={!canGenerate} tone="cyan">
-            {generation.status === 'connecting' || generation.status === 'queued' || generation.status === 'executing' ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+          <ActionButton
+            onClick={isGenerationRunning ? cancelGeneration : generate}
+            disabled={!isGenerationRunning && !canGenerate}
+            tone={isGenerationRunning ? 'rose' : 'cyan'}
+          >
+            {isGenerationRunning ? (
+              <X className="h-4 w-4" />
             ) : (
               <Sparkles className="h-4 w-4" />
             )}
-            Generate
+            {isGenerationRunning ? 'Cancel' : 'Generate'}
           </ActionButton>
         </div>
       </TopBar>
@@ -1939,13 +2018,17 @@ export default function IdeogramWorkflowBuilderPage() {
 
               <div
                 ref={canvasViewportRef}
-                className="operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-auto bg-[#03070b] p-4"
+                onPointerDown={startCanvasPan}
+                className={classNames(
+                  'operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-hidden bg-[#03070b] p-4',
+                  activeTool === 'object' || activeTool === 'text' ? 'cursor-crosshair' : isCanvasPanning ? 'cursor-grabbing' : 'cursor-grab',
+                )}
               >
-                <div className="absolute right-3 top-3 z-10 flex flex-col gap-2 rounded-sm border border-gray-800 bg-gray-950/90 p-2">
+                <div data-canvas-ui="true" className="absolute right-3 top-3 z-10 flex flex-col gap-2 rounded-sm border border-gray-800 bg-gray-950/90 p-2">
                   <IconButton title="Select" active={activeTool === 'select'} onClick={() => setActiveTool('select')}>
                     <MousePointer2 className="h-4 w-4" />
                   </IconButton>
-                  <IconButton title="Move" active={activeTool === 'move'} onClick={() => setActiveTool('move')}>
+                  <IconButton title="Pan canvas" active={activeTool === 'move'} onClick={() => setActiveTool('move')}>
                     <Move className="h-4 w-4" />
                   </IconButton>
                   <IconButton title="Add object" active={activeTool === 'object'} onClick={() => setActiveTool('object')}>
@@ -1959,7 +2042,13 @@ export default function IdeogramWorkflowBuilderPage() {
                   </IconButton>
                 </div>
 
-                <div className="flex flex-col items-center gap-3" style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }}>
+                <div
+                  className="flex flex-col items-center gap-3"
+                  style={{
+                    transform: `translate3d(${canvasPan.x}px, ${canvasPan.y}px, 0) scale(${zoom})`,
+                    transformOrigin: 'center',
+                  }}
+                >
                   <div className="flex w-full items-center justify-between text-xs text-gray-500">
                     <span>{canvasAspect.width}:{canvasAspect.height}</span>
                     <span>{state.aspectRatio}</span>
@@ -1969,7 +2058,7 @@ export default function IdeogramWorkflowBuilderPage() {
                     onPointerDown={onCanvasPointerDown}
                     className={classNames(
                       'relative overflow-hidden border border-gray-700 bg-[#071017] shadow-[0_0_0_1px_rgba(34,211,238,0.06)]',
-                      activeTool === 'object' || activeTool === 'text' ? 'cursor-crosshair' : 'cursor-default',
+                      activeTool === 'object' || activeTool === 'text' ? 'cursor-crosshair' : isCanvasPanning ? 'cursor-grabbing' : 'cursor-grab',
                     )}
                     style={{
                       aspectRatio: canvasAspect.css,
@@ -1986,10 +2075,12 @@ export default function IdeogramWorkflowBuilderPage() {
                         <button
                           type="button"
                           aria-label={`Open ${canvasImage.filename}`}
-                          onPointerDown={event => {
-                            if (activeTool === 'select') event.stopPropagation();
-                          }}
                           onClick={event => {
+                            if (suppressCanvasImageClickRef.current) {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              return;
+                            }
                             if (activeTool !== 'select') return;
                             event.stopPropagation();
                             setLightboxImage(canvasImage);
@@ -1999,6 +2090,7 @@ export default function IdeogramWorkflowBuilderPage() {
                           <img
                             src={canvasImage.objectUrl}
                             alt={canvasImage.filename}
+                            draggable={false}
                             className="h-full w-full object-contain"
                           />
                         </button>
@@ -2010,7 +2102,8 @@ export default function IdeogramWorkflowBuilderPage() {
                       return (
                         <div
                           key={`${element.type}-${index}`}
-                          className={classNames('absolute select-none border-2', selected ? 'z-20' : 'z-10')}
+                          data-box-node="true"
+                          className={classNames('absolute cursor-move select-none border-2', selected ? 'z-20' : 'z-10')}
                           style={{ ...boxStyle(element), borderColor: selected ? color : `${color}B8` }}
                           onPointerDown={event => startBoxDrag(event, index, activeTool === 'move' ? 'move' : 'move')}
                         >
@@ -2048,7 +2141,7 @@ export default function IdeogramWorkflowBuilderPage() {
                       );
                     })}
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <div data-canvas-footer="true" className="flex items-center gap-2 text-xs text-gray-500">
                     <span>Normalized bbox grid</span>
                     {canvasImage ? (
                       <IconButton title="Open canvas image" onClick={() => setLightboxImage(canvasImage)}>

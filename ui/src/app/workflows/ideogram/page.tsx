@@ -1599,10 +1599,11 @@ export default function IdeogramWorkflowBuilderPage() {
         return;
       }
 
-      const resizingNorth = mode.includes('n');
-      const resizingEast = mode.includes('e');
-      const resizingSouth = mode.includes('s');
-      const resizingWest = mode.includes('w');
+      const resizeDirection = mode.replace('resize-', '');
+      const resizingNorth = resizeDirection.includes('n');
+      const resizingEast = resizeDirection.includes('e');
+      const resizingSouth = resizeDirection.includes('s');
+      const resizingWest = resizeDirection.includes('w');
       const nextBox = {
         y1: resizingNorth ? clampNormRange(y1 + dy, 0, y2 - MIN_BOX_SPAN) : y1,
         x1: resizingWest ? clampNormRange(x1 + dx, 0, x2 - MIN_BOX_SPAN) : x1,

@@ -13,11 +13,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+try:
+  from flash_attn import flash_attn_varlen_func
+
+  _FLASH_ATTN_AVAILABLE = True
+except ImportError:
+  flash_attn_varlen_func = None
+  _FLASH_ATTN_AVAILABLE = False
+
 from .constants import (
   LLM_TOKEN_INDICATOR,
   OUTPUT_IMAGE_INDICATOR,
   QWEN3_VL_ACTIVATION_LAYERS,
 )
+
+ATTENTION_BACKENDS = ("native", "flash")
 
 
 @dataclass
@@ -117,6 +127,33 @@ class Ideogram4RMSNorm(nn.Module):
     return F.rms_norm(x, self.weight.shape, self.weight, self.eps)
 
 
+def _build_flash_meta(
+  segment_ids: torch.Tensor,
+) -> tuple[torch.Tensor, int, torch.Tensor, torch.Tensor]:
+  """Derive Flash Attention 2 packing metadata from segment ids."""
+  batch_size, _ = segment_ids.shape
+  device = segment_ids.device
+
+  seg = segment_ids.to(torch.long)
+  seg_shifted = seg - int(seg.min())
+  num_seg = int(seg_shifted.max()) + 1
+  row = torch.arange(batch_size, device=device).unsqueeze(1)
+  group = (row * num_seg + seg_shifted).reshape(-1)
+
+  order = torch.argsort(group, stable=True)
+  inv_order = torch.argsort(order, stable=True)
+  sorted_group = group[order]
+
+  change = torch.ones_like(sorted_group, dtype=torch.bool)
+  change[1:] = sorted_group[1:] != sorted_group[:-1]
+  boundaries = torch.nonzero(change, as_tuple=False).flatten()
+
+  total = torch.tensor([sorted_group.numel()], device=device, dtype=boundaries.dtype)
+  cu_seqlens = torch.cat([boundaries, total]).to(torch.int32)
+  max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
+  return cu_seqlens, max_seqlen, order, inv_order
+
+
 class Ideogram4Attention(nn.Module):
   def __init__(self, hidden_size: int, num_heads: int, eps: float = 1e-5) -> None:
     super().__init__()
@@ -124,6 +161,7 @@ class Ideogram4Attention(nn.Module):
     self.hidden_size = hidden_size
     self.num_heads = num_heads
     self.head_dim = hidden_size // num_heads
+    self.attention_backend = "native"
 
     self.qkv = nn.Linear(hidden_size, hidden_size * 3, bias=False)
     self.norm_q = Ideogram4RMSNorm(self.head_dim, eps=eps)
@@ -136,6 +174,7 @@ class Ideogram4Attention(nn.Module):
     segment_ids: torch.Tensor,
     cos: torch.Tensor,
     sin: torch.Tensor,
+    flash_meta: tuple[torch.Tensor, int, torch.Tensor, torch.Tensor] | None = None,
   ) -> torch.Tensor:
     batch_size, seq_len, _ = x.shape
 
@@ -146,18 +185,40 @@ class Ideogram4Attention(nn.Module):
     q = self.norm_q(q)
     k = self.norm_k(k)
 
-    # SDPA expects (B, num_heads, L, head_dim).
+    # SDPA and RoPE expect (B, num_heads, L, head_dim).
     q = q.transpose(1, 2)
     k = k.transpose(1, 2)
     v = v.transpose(1, 2)
 
     q, k = _apply_rotary_pos_emb(q, k, cos, sin)
 
-    # Block-diagonal mask from segment ids: (B, 1, L, L), True = attend.
-    attn_mask = (segment_ids.unsqueeze(2) == segment_ids.unsqueeze(1)).unsqueeze(1)
-
-    out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-    out = out.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_size)
+    if self.attention_backend == "flash":
+      if flash_meta is None:
+        flash_meta = _build_flash_meta(segment_ids)
+      cu_seqlens, max_seqlen, order, inv_order = flash_meta
+      qf = q.transpose(1, 2).reshape(-1, self.num_heads, self.head_dim)
+      kf = k.transpose(1, 2).reshape(-1, self.num_heads, self.head_dim)
+      vf = v.transpose(1, 2).reshape(-1, self.num_heads, self.head_dim)
+      qf = qf.index_select(0, order)
+      kf = kf.index_select(0, order)
+      vf = vf.index_select(0, order)
+      out = flash_attn_varlen_func(
+        qf,
+        kf,
+        vf,
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_k=cu_seqlens,
+        max_seqlen_q=max_seqlen,
+        max_seqlen_k=max_seqlen,
+        causal=False,
+      )
+      out = out.index_select(0, inv_order)
+      out = out.reshape(batch_size, seq_len, self.hidden_size)
+    else:
+      # Block-diagonal mask from segment ids: (B, 1, L, L), True = attend.
+      attn_mask = (segment_ids.unsqueeze(2) == segment_ids.unsqueeze(1)).unsqueeze(1)
+      out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+      out = out.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_size)
     return self.o(out)
 
 
@@ -199,6 +260,7 @@ class Ideogram4TransformerBlock(nn.Module):
     cos: torch.Tensor,
     sin: torch.Tensor,
     adaln_input: torch.Tensor,
+    flash_meta: tuple[torch.Tensor, int, torch.Tensor, torch.Tensor] | None = None,
   ) -> torch.Tensor:
     mod = self.adaln_modulation(adaln_input)
     scale_msa, gate_msa, scale_mlp, gate_mlp = mod.chunk(4, dim=-1)
@@ -212,6 +274,7 @@ class Ideogram4TransformerBlock(nn.Module):
       segment_ids=segment_ids,
       cos=cos,
       sin=sin,
+      flash_meta=flash_meta,
     )
     x = x + gate_msa * self.attention_norm2(attn_out)
     x = x + gate_mlp * self.ffn_norm2(self.feed_forward(self.ffn_norm1(x) * scale_mlp))
@@ -271,6 +334,7 @@ class Ideogram4Transformer(nn.Module):
   def __init__(self, config: Ideogram4Config) -> None:
     super().__init__()
     self.config = config
+    self.attention_backend = "native"
 
     head_dim = config.emb_dim // config.num_heads
 
@@ -310,6 +374,21 @@ class Ideogram4Transformer(nn.Module):
   @property
   def device(self) -> torch.device:
     return next(self.parameters()).device
+
+  def set_attention_backend(self, backend: str) -> None:
+    backend = backend.lower()
+    if backend not in ATTENTION_BACKENDS:
+      raise ValueError(
+        f"Unknown attention backend {backend!r}. Expected one of {ATTENTION_BACKENDS}."
+      )
+    if backend == "flash" and not _FLASH_ATTN_AVAILABLE:
+      raise RuntimeError(
+        "Flash attention 2 backend requested but the `flash_attn` package is not "
+        "installed. Install it with `pip install flash-attn` or use the 'native' backend."
+      )
+    self.attention_backend = backend
+    for layer in self.layers:
+      layer.attention.attention_backend = backend
 
   def forward(
     self,
@@ -375,8 +454,18 @@ class Ideogram4Transformer(nn.Module):
     cos = cos.to(h.dtype)
     sin = sin.to(h.dtype)
 
+    flash_meta = (
+      _build_flash_meta(segment_ids) if self.attention_backend == "flash" else None
+    )
     for layer in self.layers:
-      h = layer(h, segment_ids=segment_ids, cos=cos, sin=sin, adaln_input=adaln_input)
+      h = layer(
+        h,
+        segment_ids=segment_ids,
+        cos=cos,
+        sin=sin,
+        adaln_input=adaln_input,
+        flash_meta=flash_meta,
+      )
 
     out = self.final_layer(h, c=adaln_input)
     return out.to(torch.float32)

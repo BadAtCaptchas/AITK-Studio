@@ -400,7 +400,9 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                         
                         if self.transformer_only and is_unet:
                             if self.transformer_block_names is not None:
-                                if not any([name in lora_name for name in self.transformer_block_names]):
+                                # Match against clean_name (dotted) so nested block
+                                # paths can be targeted before LoRA naming rewrites.
+                                if not any([name in clean_name for name in self.transformer_block_names]):
                                     skip = True
                             else:
                                 if self.is_pixart:

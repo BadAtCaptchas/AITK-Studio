@@ -50,6 +50,16 @@ try:
         AutoEncoderParams,
         convert_diffusers_state_dict,
     )
+    from extensions_built_in.diffusion_models.ideogram4.src.modeling_ideogram4 import (
+        Ideogram4Config,
+        Ideogram4Transformer,
+        _FLASH_ATTN_AVAILABLE,
+        _build_flash_meta,
+    )
+    from extensions_built_in.diffusion_models.ideogram4.src.constants import (
+        LLM_TOKEN_INDICATOR,
+        OUTPUT_IMAGE_INDICATOR,
+    )
     from extensions_built_in.diffusion_models.ideogram4.src.quantized_loading import (
         Fp8Linear,
         Nvfp4Linear,
@@ -63,6 +73,12 @@ except ImportError as exc:
     AutoEncoder = None
     AutoEncoderParams = None
     convert_diffusers_state_dict = None
+    Ideogram4Config = None
+    Ideogram4Transformer = None
+    _FLASH_ATTN_AVAILABLE = False
+    _build_flash_meta = None
+    LLM_TOKEN_INDICATOR = 3
+    OUTPUT_IMAGE_INDICATOR = 2
     Fp8Linear = None
     Nvfp4Linear = None
     _remap_comfy_qwen3_vl_state_dict = None
@@ -222,6 +238,83 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
 
         self.assertIn("self.inv_freq.device != position_ids.device", transformer_source)
         self.assertIn("self.inv_freq.to(position_ids.device)", transformer_source)
+
+    def test_ideogram_transformer_attention_backend_contract(self):
+        require_ideogram_imports()
+        config = Ideogram4Config(
+            emb_dim=12,
+            num_layers=1,
+            num_heads=1,
+            intermediate_size=24,
+            adanln_dim=6,
+            in_channels=4,
+            llm_features_dim=8,
+            mrope_section=(1, 1, 1),
+        )
+        transformer = Ideogram4Transformer(config)
+        transformer.set_attention_backend("native")
+
+        self.assertEqual(transformer.attention_backend, "native")
+        self.assertEqual(transformer.layers[0].attention.attention_backend, "native")
+        with self.assertRaises(ValueError):
+            transformer.set_attention_backend("bogus")
+
+        if _FLASH_ATTN_AVAILABLE:
+            transformer.set_attention_backend("flash")
+            self.assertEqual(transformer.layers[0].attention.attention_backend, "flash")
+            transformer.set_attention_backend("native")
+        else:
+            with self.assertRaises(RuntimeError):
+                transformer.set_attention_backend("flash")
+
+        batch_size = 2
+        seq_len = 5
+        out = transformer(
+            llm_features=torch.randn(batch_size, seq_len, config.llm_features_dim),
+            x=torch.randn(batch_size, seq_len, config.in_channels),
+            t=torch.rand(batch_size),
+            position_ids=torch.zeros(batch_size, seq_len, 3, dtype=torch.long),
+            segment_ids=torch.tensor(
+                [[0, -1, 0, 1, 1], [0, 0, -1, 1, 1]],
+                dtype=torch.long,
+            ),
+            indicator=torch.tensor(
+                [
+                    [
+                        LLM_TOKEN_INDICATOR,
+                        LLM_TOKEN_INDICATOR,
+                        OUTPUT_IMAGE_INDICATOR,
+                        OUTPUT_IMAGE_INDICATOR,
+                        OUTPUT_IMAGE_INDICATOR,
+                    ],
+                    [
+                        LLM_TOKEN_INDICATOR,
+                        OUTPUT_IMAGE_INDICATOR,
+                        LLM_TOKEN_INDICATOR,
+                        OUTPUT_IMAGE_INDICATOR,
+                        OUTPUT_IMAGE_INDICATOR,
+                    ],
+                ],
+                dtype=torch.long,
+            ),
+        )
+
+        self.assertEqual(tuple(out.shape), (batch_size, seq_len, config.in_channels))
+
+    def test_flash_meta_groups_nested_segment_ids(self):
+        require_ideogram_imports()
+        segment_ids = torch.tensor(
+            [[0, -1, 0, 1, 1], [0, 0, -1, 1, 1]],
+            dtype=torch.long,
+        )
+        cu_seqlens, max_seqlen, order, inv_order = _build_flash_meta(segment_ids)
+
+        self.assertEqual(cu_seqlens[0].item(), 0)
+        self.assertEqual(cu_seqlens[-1].item(), segment_ids.numel())
+        self.assertEqual(max_seqlen, 2)
+        self.assertTrue(
+            torch.equal(order.index_select(0, inv_order), torch.arange(segment_ids.numel()))
+        )
 
     def test_latent_cache_version_bumped_for_reference_patch_order(self):
         model_source = (IDEOGRAM_ROOT / "ideogram4_model.py").read_text(encoding="utf-8")

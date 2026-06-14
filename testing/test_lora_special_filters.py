@@ -125,6 +125,22 @@ class Ideogram4Transformer(torch.nn.Module):
         )
 
 
+class NestedLanguageTransformer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = torch.nn.Module()
+        self.model.language_model = torch.nn.Module()
+        self.model.language_model.layers = torch.nn.ModuleList(
+            [
+                torch.nn.ModuleDict(
+                    {
+                        "q_proj": torch.nn.Linear(4, 4),
+                    }
+                )
+            ]
+        )
+
+
 class _BaseModel:
     arch = "zimage"
     use_old_lokr_format = False
@@ -135,6 +151,13 @@ class _BaseModel:
 
 class _IdeogramBaseModel(_BaseModel):
     arch = "ideogram4"
+
+
+class _NestedLanguageBaseModel(_BaseModel):
+    arch = "hidream_o1"
+
+    def get_transformer_block_names(self):
+        return ["model.language_model.layers"]
 
 
 class LoRASpecialFilterTest(unittest.TestCase):
@@ -229,6 +252,19 @@ class LoRASpecialFilterTest(unittest.TestCase):
 
         network.merge_in()
         self.assertFalse(network.is_merged_in)
+
+    def test_nested_transformer_block_names_match_clean_lora_paths(self):
+        network = self._build_network(
+            unet=NestedLanguageTransformer(),
+            target_lin_modules=["NestedLanguageTransformer"],
+            base_model=_NestedLanguageBaseModel(),
+        )
+
+        self.assertEqual(len(network.get_all_modules()), 1)
+        self.assertIn(
+            "model$$language_model$$layers",
+            network.get_all_modules()[0].lora_name,
+        )
 
     def test_empty_network_error_includes_targeting_details(self):
         network = self._build_network(["does_not_exist"])

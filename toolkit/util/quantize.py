@@ -314,7 +314,11 @@ def quantize_model(
         all_blocks: List[torch.nn.Module] = []
         transformer_block_names = base_model.get_transformer_block_names()
         for name in transformer_block_names:
-            block_list = getattr(model_to_quantize, name, None)
+            block_list = model_to_quantize
+            for part in name.split('.'):
+                block_list = getattr(block_list, part, None)
+                if block_list is None:
+                    break
             if block_list is not None:
                 if isinstance(block_list, (list, tuple, torch.nn.ModuleList, torch.nn.Sequential)):
                     all_blocks += list(block_list)

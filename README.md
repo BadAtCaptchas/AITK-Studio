@@ -231,6 +231,8 @@ Block offloading is currently CUDA-first and is intended for LoRA/network traini
 | --- | --- |
 | <img src="assets/readme-ui-workflow-builder.png" alt="AITK Studio Ideogram workflow builder canvas"> | <img src="assets/readme-ui-workflow-builder-comfy.png" alt="AITK Studio Ideogram workflow builder ComfyUI history import"> |
 
+> **Ideogram external ComfyUI tip:** When using the Ideogram Workflow Builder with external ComfyUI, start ComfyUI with `--fast fp16_accumulation` and `--disable-smart-memory`. Ideogram tends to behave better with those options, and some systems can otherwise hit unexpectedly long generation times.
+
 The AITK Studio UI is the main control surface for creating datasets, starting and stopping jobs, monitoring training, running generation, and exporting work. It can also require a bearer token so the UI is safer to run on a remote machine.
 
 ### Run the UI

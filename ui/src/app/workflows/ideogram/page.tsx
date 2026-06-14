@@ -46,10 +46,10 @@ import {
   type IdeogramWorkflowLora,
   type IdeogramWorkflowState,
 } from '@/utils/ideogramWorkflow';
-import { normalizeBox } from '@/utils/ideogramCaption';
 
 type PanelTab = 'preview' | 'json' | 'comfy';
 type ToolMode = 'select' | 'move' | 'object' | 'text';
+type BoxDragMode = 'move' | 'resize-n' | 'resize-e' | 'resize-s' | 'resize-w' | 'resize-ne' | 'resize-se' | 'resize-sw' | 'resize-nw';
 type PreflightStatus = 'found' | 'missing' | 'unknown';
 
 type PreflightItem = {
@@ -420,6 +420,24 @@ function clampZoom(value: number) {
   return Math.max(0.45, Math.min(1.2, Number(value.toFixed(2))));
 }
 
+function clampNormRange(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+const MIN_BOX_SPAN = 20;
+
+const BOX_RESIZE_HANDLES: Array<{ mode: Exclude<BoxDragMode, 'move'>; title: string; className: string }> = [
+  { mode: 'resize-n', title: 'Resize from top', className: 'left-1/2 -top-1.5 h-3 w-9 -translate-x-1/2 cursor-ns-resize rounded-sm' },
+  { mode: 'resize-e', title: 'Resize from right', className: '-right-1.5 top-1/2 h-9 w-3 -translate-y-1/2 cursor-ew-resize rounded-sm' },
+  { mode: 'resize-s', title: 'Resize from bottom', className: '-bottom-1.5 left-1/2 h-3 w-9 -translate-x-1/2 cursor-ns-resize rounded-sm' },
+  { mode: 'resize-w', title: 'Resize from left', className: '-left-1.5 top-1/2 h-9 w-3 -translate-y-1/2 cursor-ew-resize rounded-sm' },
+  { mode: 'resize-nw', title: 'Resize from top left', className: '-left-1.5 -top-1.5 h-3 w-3 cursor-nwse-resize' },
+  { mode: 'resize-ne', title: 'Resize from top right', className: '-right-1.5 -top-1.5 h-3 w-3 cursor-nesw-resize' },
+  { mode: 'resize-sw', title: 'Resize from bottom left', className: '-bottom-1.5 -left-1.5 h-3 w-3 cursor-nesw-resize' },
+  { mode: 'resize-se', title: 'Resize from bottom right', className: '-bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize' },
+];
+
 function normalizeHexColorInput(value: string) {
   const compact = value.trim().replace(/\s+/g, '').replace(/^#/, '');
   if (/^[0-9a-fA-F]{3}$/.test(compact)) {
@@ -492,9 +510,11 @@ function PaletteColorRow({
 function PaletteEditor({
   colors,
   onChange,
+  label = 'Palette',
 }: {
   colors: string[];
   onChange: (colors: string[]) => void;
+  label?: string;
 }) {
   const normalizedColors = colors.map(color => normalizeHexColorInput(color)).filter((color): color is string => Boolean(color));
   const addColor = () => {
@@ -505,7 +525,7 @@ function PaletteEditor({
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-300">Palette</span>
+        <span className="text-xs font-medium text-gray-300">{label}</span>
         <button
           type="button"
           onClick={addColor}
@@ -1545,7 +1565,7 @@ export default function IdeogramWorkflowBuilderPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [historyOpen]);
 
-  const startBoxDrag = (event: React.PointerEvent<HTMLElement>, elementIndex: number, mode: 'move' | 'resize') => {
+  const startBoxDrag = (event: React.PointerEvent<HTMLElement>, elementIndex: number, mode: BoxDragMode) => {
     event.preventDefault();
     event.stopPropagation();
     const canvas = event.currentTarget.closest('[data-composition-canvas="true"]') as HTMLDivElement | null;
@@ -1557,37 +1577,53 @@ export default function IdeogramWorkflowBuilderPage() {
     const startY = event.clientY;
     const [y1, x1, y2, x2] = startElement.bbox;
     const pointerId = event.pointerId;
-    event.currentTarget.setPointerCapture(pointerId);
+    const captureTarget = event.currentTarget;
+    const startWidth = x2 - x1;
+    const startHeight = y2 - y1;
+    captureTarget.setPointerCapture(pointerId);
 
     const onMove = (moveEvent: PointerEvent) => {
       const dx = ((moveEvent.clientX - startX) / canvasRect.width) * 1000;
       const dy = ((moveEvent.clientY - startY) / canvasRect.height) * 1000;
-      const nextBox =
-        mode === 'resize'
-          ? normalizeBox({ y1, x1, y2: y2 + dy, x2: x2 + dx })
-          : normalizeBox({ y1: y1 + dy, x1: x1 + dx, y2: y2 + dy, x2: x2 + dx });
-      const spanX = nextBox.x2 - nextBox.x1;
-      const spanY = nextBox.y2 - nextBox.y1;
       if (mode === 'move') {
-        const adjusted = {
-          y1: Math.max(0, Math.min(1000 - spanY, nextBox.y1)),
-          x1: Math.max(0, Math.min(1000 - spanX, nextBox.x1)),
-          y2: Math.max(spanY, Math.min(1000, nextBox.y2)),
-          x2: Math.max(spanX, Math.min(1000, nextBox.x2)),
-        };
-        setState(current => updateIdeogramWorkflowElementBox(current, elementIndex, adjusted));
-      } else {
-        setState(current => updateIdeogramWorkflowElementBox(current, elementIndex, nextBox));
+        const nextX1 = clampNormRange(x1 + dx, 0, 1000 - startWidth);
+        const nextY1 = clampNormRange(y1 + dy, 0, 1000 - startHeight);
+        setState(current =>
+          updateIdeogramWorkflowElementBox(current, elementIndex, {
+            y1: nextY1,
+            x1: nextX1,
+            y2: nextY1 + startHeight,
+            x2: nextX1 + startWidth,
+          }),
+        );
+        return;
+      }
+
+      const resizingNorth = mode.includes('n');
+      const resizingEast = mode.includes('e');
+      const resizingSouth = mode.includes('s');
+      const resizingWest = mode.includes('w');
+      const nextBox = {
+        y1: resizingNorth ? clampNormRange(y1 + dy, 0, y2 - MIN_BOX_SPAN) : y1,
+        x1: resizingWest ? clampNormRange(x1 + dx, 0, x2 - MIN_BOX_SPAN) : x1,
+        y2: resizingSouth ? clampNormRange(y2 + dy, y1 + MIN_BOX_SPAN, 1000) : y2,
+        x2: resizingEast ? clampNormRange(x2 + dx, x1 + MIN_BOX_SPAN, 1000) : x2,
+      };
+      setState(current => updateIdeogramWorkflowElementBox(current, elementIndex, nextBox));
+    };
+
+    const finishDrag = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+      if (captureTarget.hasPointerCapture(pointerId)) {
+        captureTarget.releasePointerCapture(pointerId);
       }
     };
 
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-
     window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp, { once: true });
+    window.addEventListener('pointerup', finishDrag, { once: true });
+    window.addEventListener('pointercancel', finishDrag, { once: true });
   };
 
   const renderHistoryEntry = (entry: WorkflowHistoryEntry) => {
@@ -2124,17 +2160,20 @@ export default function IdeogramWorkflowBuilderPage() {
                           </button>
                           {selected ? (
                             <>
-                              <span className="absolute -left-1.5 -top-1.5 h-3 w-3 border border-gray-950" style={{ backgroundColor: color }} />
-                              <span className="absolute -right-1.5 -top-1.5 h-3 w-3 border border-gray-950" style={{ backgroundColor: color }} />
-                              <span className="absolute -bottom-1.5 -left-1.5 h-3 w-3 border border-gray-950" style={{ backgroundColor: color }} />
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                title="Resize"
-                                onPointerDown={event => startBoxDrag(event, index, 'resize')}
-                                className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize border border-gray-950"
-                                style={{ backgroundColor: color }}
-                              />
+                              {BOX_RESIZE_HANDLES.map(handle => (
+                                <button
+                                  key={handle.mode}
+                                  type="button"
+                                  aria-label={handle.title}
+                                  title={handle.title}
+                                  onPointerDown={event => startBoxDrag(event, index, handle.mode)}
+                                  className={classNames(
+                                    'absolute z-30 border border-gray-950 p-0 shadow-[0_0_0_1px_rgba(255,255,255,0.18)] transition-transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-cyan-200',
+                                    handle.className,
+                                  )}
+                                  style={{ backgroundColor: color }}
+                                />
+                              ))}
                             </>
                           ) : null}
                         </div>
@@ -2307,6 +2346,16 @@ export default function IdeogramWorkflowBuilderPage() {
                             className="w-full resize-none rounded-sm border border-gray-800 bg-[#050a0f] px-3 py-2 text-sm leading-5 text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
                           />
                         </Field>
+                        <PaletteEditor
+                          label="Element Palette"
+                          colors={selectedElement.color_palette || []}
+                          onChange={colors =>
+                            updateSelectedElement(element => ({
+                              ...element,
+                              color_palette: colors,
+                            }))
+                          }
+                        />
                       </div>
                     </section>
                   ) : null}

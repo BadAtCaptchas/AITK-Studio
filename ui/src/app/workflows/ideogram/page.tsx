@@ -370,6 +370,131 @@ function clampZoom(value: number) {
   return Math.max(0.45, Math.min(1.2, Number(value.toFixed(2))));
 }
 
+function normalizeHexColorInput(value: string) {
+  const compact = value.trim().replace(/\s+/g, '').replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(compact)) {
+    return `#${compact.split('').map(char => `${char}${char}`).join('').toUpperCase()}`;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(compact)) {
+    return `#${compact.toUpperCase()}`;
+  }
+  return null;
+}
+
+const PALETTE_FALLBACKS = ['#22D3EE', '#F59E0B', '#EF4444', '#E5E7EB', '#64748B'];
+
+function PaletteColorRow({
+  color,
+  index,
+  onChange,
+  onDelete,
+}: {
+  color: string;
+  index: number;
+  onChange: (value: string) => void;
+  onDelete: () => void;
+}) {
+  const normalizedColor = normalizeHexColorInput(color) || '#64748B';
+  const [draft, setDraft] = useState(normalizedColor);
+
+  useEffect(() => {
+    setDraft(normalizedColor);
+  }, [normalizedColor]);
+
+  const updateDraft = (value: string) => {
+    setDraft(value);
+    const normalized = normalizeHexColorInput(value);
+    if (normalized) onChange(normalized);
+  };
+
+  return (
+    <div className="grid grid-cols-[2.25rem_1fr_auto] items-center gap-2 rounded-sm border border-gray-800 bg-gray-950 p-1.5">
+      <input
+        type="color"
+        aria-label={`Palette color ${index + 1}`}
+        value={normalizedColor}
+        onChange={event => updateDraft(event.target.value)}
+        className="h-8 w-8 rounded-sm border border-gray-700 bg-gray-900 p-0.5"
+      />
+      <input
+        type="text"
+        value={draft}
+        spellCheck={false}
+        onChange={event => updateDraft(event.target.value)}
+        onBlur={() => setDraft(normalizeHexColorInput(draft) || normalizedColor)}
+        onPaste={event => {
+          const pasted = event.clipboardData.getData('text');
+          const normalized = normalizeHexColorInput(pasted);
+          if (!normalized) return;
+          event.preventDefault();
+          updateDraft(normalized);
+        }}
+        className="h-8 min-w-0 rounded-sm border border-gray-800 bg-[#050a0f] px-2 font-mono text-xs uppercase text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+        placeholder="#22D3EE"
+      />
+      <IconButton title="Delete color" danger onClick={onDelete}>
+        <Trash2 className="h-4 w-4" />
+      </IconButton>
+    </div>
+  );
+}
+
+function PaletteEditor({
+  colors,
+  onChange,
+}: {
+  colors: string[];
+  onChange: (colors: string[]) => void;
+}) {
+  const normalizedColors = colors.map(color => normalizeHexColorInput(color)).filter((color): color is string => Boolean(color));
+  const addColor = () => {
+    const nextColor = PALETTE_FALLBACKS.find(color => !normalizedColors.includes(color)) || '#64748B';
+    onChange([...normalizedColors, nextColor]);
+  };
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-300">Palette</span>
+        <button
+          type="button"
+          onClick={addColor}
+          className="inline-flex items-center gap-1 text-xs font-medium text-cyan-300 hover:text-cyan-100"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add color
+        </button>
+      </div>
+      <div className="space-y-2">
+        {normalizedColors.length === 0 ? (
+          <button
+            type="button"
+            onClick={addColor}
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-sm border border-dashed border-gray-800 bg-gray-950 text-xs text-gray-500 hover:border-cyan-900 hover:text-cyan-200"
+          >
+            <Plus className="h-4 w-4" />
+            Add a palette color
+          </button>
+        ) : (
+          normalizedColors.map((color, index) => (
+            <PaletteColorRow
+              key={`${color}-${index}`}
+              color={color}
+              index={index}
+              onChange={value => {
+                const next = [...normalizedColors];
+                next[index] = value;
+                onChange(next);
+              }}
+              onDelete={() => onChange(normalizedColors.filter((_, colorIndex) => colorIndex !== index))}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function IdeogramWorkflowBuilderPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1298,34 +1423,7 @@ export default function IdeogramWorkflowBuilderPage() {
                 />
               </Field>
 
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-300">Palette</span>
-                  <button
-                    type="button"
-                    className="text-xs text-cyan-300 hover:text-cyan-100"
-                    onClick={() => setStyleField('colorPalette', [...state.style.colorPalette, '#64748B'])}
-                  >
-                    Add
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {state.style.colorPalette.map((color, index) => (
-                    <input
-                      key={`${color}-${index}`}
-                      type="color"
-                      value={color}
-                      title={color}
-                      onChange={event => {
-                        const colors = [...state.style.colorPalette];
-                        colors[index] = event.target.value.toUpperCase();
-                        setStyleField('colorPalette', colors);
-                      }}
-                      className="h-8 w-8 rounded-sm border border-gray-700 bg-gray-900 p-0.5"
-                    />
-                  ))}
-                </div>
-              </div>
+              <PaletteEditor colors={state.style.colorPalette} onChange={colors => setStyleField('colorPalette', colors)} />
 
               <Field label="Quality Preset" detail={`default ${selectedPreset.steps} steps`}>
                 <div className="grid grid-cols-3 overflow-hidden rounded-sm border border-gray-800">

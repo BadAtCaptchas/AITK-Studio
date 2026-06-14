@@ -42,6 +42,7 @@ import {
   type IdeogramImportResult,
   type IdeogramQualityPreset,
   type IdeogramWorkflowElement,
+  type IdeogramWorkflowLora,
   type IdeogramWorkflowState,
 } from '@/utils/ideogramWorkflow';
 import { normalizeBox } from '@/utils/ideogramCaption';
@@ -83,6 +84,17 @@ type PreviewImage = {
 
 type ResultImage = ComfyImageRef & PreviewImage & {
   source: 'result';
+};
+
+type ToolkitLoraSummary = {
+  id: string;
+  label: string;
+  path: string;
+  filename: string;
+  source: 'job' | 'uploaded';
+  sizeBytes: number;
+  updatedAt: string;
+  triggerWords: string[];
 };
 
 type ImportedCanvasImage = PreviewImage & {
@@ -191,17 +203,20 @@ function TextInput({
   placeholder,
   type = 'text',
   inputRef,
+  list,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   type?: string;
   inputRef?: Ref<HTMLInputElement>;
+  list?: string;
 }) {
   return (
     <input
       ref={inputRef}
       type={type}
+      list={list}
       value={value}
       onChange={event => onChange(event.target.value)}
       placeholder={placeholder}
@@ -363,6 +378,14 @@ export default function IdeogramWorkflowBuilderPage() {
   const [state, setState] = useState<IdeogramWorkflowState>(() => cloneIdeogramWorkflowState());
   const [serverUrl, setServerUrl] = useState(DEFAULT_EXTERNAL_COMFY_URL);
   const [serverUrlDraft, setServerUrlDraft] = useState(DEFAULT_EXTERNAL_COMFY_URL);
+  const [loraDir, setLoraDir] = useState('');
+  const [loraDirDraft, setLoraDirDraft] = useState('');
+  const [externalLoras, setExternalLoras] = useState<string[]>([]);
+  const [externalLoraSource, setExternalLoraSource] = useState('');
+  const [toolkitLoras, setToolkitLoras] = useState<ToolkitLoraSummary[]>([]);
+  const [copyToolkitPath, setCopyToolkitPath] = useState('');
+  const [loraStatus, setLoraStatus] = useState<'idle' | 'loading' | 'copying' | 'error'>('idle');
+  const [loraMessage, setLoraMessage] = useState('');
   const [settingsStatus, setSettingsStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const [settingsMessage, setSettingsMessage] = useState('');
   const [activeTab, setActiveTab] = useState<PanelTab>('preview');
@@ -388,6 +411,15 @@ export default function IdeogramWorkflowBuilderPage() {
   const canvasAspect = parseIdeogramAspectRatio(state.aspectRatio);
   const canGenerate = Boolean(serverUrl && preflight?.ok && generation.status !== 'connecting' && generation.status !== 'queued' && generation.status !== 'executing');
   const stepPercent = generation.maxStep > 0 ? Math.round((generation.step / generation.maxStep) * 100) : 0;
+  const externalLoraSet = useMemo(() => new Set(externalLoras), [externalLoras]);
+  const missingLoras = useMemo(
+    () =>
+      state.loras.filter(lora => {
+        const name = lora.loraName.trim();
+        return name && externalLoras.length > 0 && !externalLoraSet.has(name);
+      }),
+    [externalLoraSet, externalLoras.length, state.loras],
+  );
 
   const clearResultObjectUrls = useCallback(() => {
     objectUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
@@ -403,6 +435,34 @@ export default function IdeogramWorkflowBuilderPage() {
     setLightboxImage(current => (current?.source === 'imported' && current.objectUrl === objectUrl ? null : current));
   }, []);
 
+  const refreshLoras = useCallback(
+    async (urlOverride?: string) => {
+      const url = urlOverride || serverUrl;
+      if (!url) return;
+      setLoraStatus('loading');
+      setLoraMessage('');
+      try {
+        const response = await apiClient.get('/api/comfy/external/loras', { params: { server_url: url } });
+        const nextExternalLoras = Array.isArray(response.data?.externalLoras) ? response.data.externalLoras.map(String) : [];
+        const nextToolkitLoras = Array.isArray(response.data?.toolkitLoras) ? response.data.toolkitLoras : [];
+        setExternalLoras(nextExternalLoras);
+        setExternalLoraSource(response.data?.externalSource || '');
+        setToolkitLoras(nextToolkitLoras);
+        if (typeof response.data?.loraDir === 'string') {
+          setLoraDir(response.data.loraDir);
+          setLoraDirDraft(response.data.loraDir);
+        }
+        setCopyToolkitPath(current => current || nextToolkitLoras[0]?.path || '');
+        setLoraStatus('idle');
+        setLoraMessage(nextExternalLoras.length > 0 ? `${nextExternalLoras.length} external LoRAs found.` : 'No external LoRAs reported by ComfyUI.');
+      } catch (error: any) {
+        setLoraStatus('error');
+        setLoraMessage(error.response?.data?.error || 'Could not refresh external LoRAs.');
+      }
+    },
+    [serverUrl],
+  );
+
   useEffect(() => {
     apiClient
       .get('/api/comfy/external/settings')
@@ -410,6 +470,8 @@ export default function IdeogramWorkflowBuilderPage() {
         const nextUrl = response.data?.serverUrl || '';
         setServerUrl(nextUrl || DEFAULT_EXTERNAL_COMFY_URL);
         setServerUrlDraft(nextUrl || DEFAULT_EXTERNAL_COMFY_URL);
+        setLoraDir(response.data?.loraDir || '');
+        setLoraDirDraft(response.data?.loraDir || '');
       })
       .catch(error => {
         setSettingsStatus('error');
@@ -441,18 +503,22 @@ export default function IdeogramWorkflowBuilderPage() {
     setSettingsStatus('saving');
     setSettingsMessage('');
     try {
-      const response = await apiClient.post('/api/comfy/external/settings', { server_url: serverUrlDraft });
+      const response = await apiClient.post('/api/comfy/external/settings', { server_url: serverUrlDraft, lora_dir: loraDirDraft });
       const nextUrl = response.data?.serverUrl || '';
+      const nextLoraDir = response.data?.loraDir || '';
       setServerUrl(nextUrl || DEFAULT_EXTERNAL_COMFY_URL);
       setServerUrlDraft(nextUrl || DEFAULT_EXTERNAL_COMFY_URL);
+      setLoraDir(nextLoraDir);
+      setLoraDirDraft(nextLoraDir);
       setSettingsStatus('idle');
-      setSettingsMessage('External ComfyUI URL saved.');
+      setSettingsMessage('External ComfyUI settings saved.');
       setPreflight(null);
+      void refreshLoras(nextUrl || DEFAULT_EXTERNAL_COMFY_URL);
     } catch (error: any) {
       setSettingsStatus('error');
-      setSettingsMessage(error.response?.data?.error || 'Failed to save external ComfyUI URL.');
+      setSettingsMessage(error.response?.data?.error || 'Failed to save external ComfyUI settings.');
     }
-  }, [serverUrlDraft]);
+  }, [loraDirDraft, refreshLoras, serverUrlDraft]);
 
   const runPreflight = useCallback(async () => {
     if (!serverUrl) {
@@ -468,7 +534,10 @@ export default function IdeogramWorkflowBuilderPage() {
     }
     setIsPreflighting(true);
     try {
-      const response = await apiClient.post('/api/comfy/external/preflight', { server_url: serverUrl, state, workflow });
+      const [response] = await Promise.all([
+        apiClient.post('/api/comfy/external/preflight', { server_url: serverUrl, state, workflow }),
+        refreshLoras(serverUrl),
+      ]);
       setPreflight(response.data);
     } catch (error: any) {
       setPreflight({
@@ -482,7 +551,7 @@ export default function IdeogramWorkflowBuilderPage() {
     } finally {
       setIsPreflighting(false);
     }
-  }, [serverUrl, state, workflow]);
+  }, [refreshLoras, serverUrl, state, workflow]);
 
   useEffect(() => {
     if (!serverUrl || preflight) return;
@@ -544,6 +613,86 @@ export default function IdeogramWorkflowBuilderPage() {
       current.seed = Math.floor(Math.random() * 999999999999);
       return current;
     });
+  };
+
+  const addLora = () => {
+    updateState(current => {
+      current.loras = [
+        ...(current.loras || []),
+        {
+          loraName: externalLoras[0] || '',
+          strengthModel: 1,
+          strengthClip: 1,
+        },
+      ];
+      return current;
+    });
+    setPreflight(null);
+  };
+
+  const updateLora = (index: number, patch: Partial<IdeogramWorkflowLora>) => {
+    updateState(current => {
+      const loras = [...(current.loras || [])];
+      while (loras.length <= index) {
+        loras.push({ loraName: '', strengthModel: 1, strengthClip: 1 });
+      }
+      loras[index] = {
+        loraName: loras[index]?.loraName || '',
+        strengthModel: loras[index]?.strengthModel ?? 1,
+        strengthClip: loras[index]?.strengthClip ?? 1,
+        ...patch,
+      };
+      current.loras = loras;
+      return current;
+    });
+    setPreflight(null);
+  };
+
+  const removeLora = (index: number) => {
+    updateState(current => {
+      current.loras = (current.loras || []).filter((_, loraIndex) => loraIndex !== index);
+      return current;
+    });
+    setPreflight(null);
+  };
+
+  const copyToolkitLora = async () => {
+    if (!copyToolkitPath) {
+      setLoraStatus('error');
+      setLoraMessage('Select a Toolkit LoRA to copy.');
+      return;
+    }
+    setLoraStatus('copying');
+    setLoraMessage('');
+    try {
+      const response = await apiClient.post('/api/comfy/external/loras/copy', {
+        toolkitPath: copyToolkitPath,
+        loraDir: loraDirDraft || loraDir,
+      });
+      const filename = response.data?.filename || filenameBase(copyToolkitPath);
+      updateState(current => {
+        const existing = (current.loras || []).some(lora => lora.loraName === filename);
+        if (!existing) {
+          current.loras = [
+            ...(current.loras || []),
+            {
+              loraName: filename,
+              strengthModel: 1,
+              strengthClip: 1,
+              toolkitPath: copyToolkitPath,
+            },
+          ];
+        }
+        return current;
+      });
+      setPreflight(null);
+      setLoraStatus('idle');
+      setLoraMessage(`${filename} copied to external ComfyUI.`);
+      void refreshLoras(serverUrl);
+    } catch (error: any) {
+      setLoraStatus('error');
+      setLoraMessage(error.response?.data?.error || 'Failed to copy Toolkit LoRA.');
+    }
   };
 
   const exportJson = () => {
@@ -1222,6 +1371,112 @@ export default function IdeogramWorkflowBuilderPage() {
                   </ActionButton>
                 </div>
               </div>
+
+              <section className="border-t border-gray-900 pt-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-300">LoRAs</h2>
+                    <div className="mt-1 text-[11px] text-gray-500">
+                      {externalLoras.length > 0
+                        ? `${externalLoras.length} external${externalLoraSource ? ` via ${externalLoraSource}` : ''}`
+                        : 'External choices load on Check Comfy'}
+                    </div>
+                  </div>
+                  <button type="button" onClick={addLora} className="text-xs font-medium text-cyan-300 hover:text-cyan-100">
+                    Add
+                  </button>
+                </div>
+
+                <datalist id="external-comfy-lora-options">
+                  {externalLoras.map(name => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+
+                <div className="space-y-2">
+                  {(state.loras || []).length === 0 ? (
+                    <div className="rounded-sm border border-dashed border-gray-800 bg-gray-950 px-3 py-3 text-xs text-gray-500">
+                      No LoRAs selected.
+                    </div>
+                  ) : (
+                    state.loras.map((lora, index) => {
+                      const name = lora.loraName.trim();
+                      const missing = Boolean(name && externalLoras.length > 0 && !externalLoraSet.has(name));
+                      return (
+                        <div key={`lora-${index}`} className="rounded-sm border border-gray-800 bg-gray-950 p-2">
+                          <div className="grid grid-cols-[1fr_auto] gap-2">
+                            <TextInput
+                              value={lora.loraName}
+                              onChange={value => updateLora(index, { loraName: value })}
+                              placeholder="filename.safetensors"
+                              list="external-comfy-lora-options"
+                            />
+                            <IconButton title="Remove LoRA" danger onClick={() => removeLora(index)}>
+                              <Trash2 className="h-4 w-4" />
+                            </IconButton>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <Field label="Model">
+                              <NumberInput value={lora.strengthModel} min={-10} max={10} step={0.05} onChange={value => updateLora(index, { strengthModel: value })} />
+                            </Field>
+                            <Field label="CLIP">
+                              <NumberInput value={lora.strengthClip} min={-10} max={10} step={0.05} onChange={value => updateLora(index, { strengthClip: value })} />
+                            </Field>
+                          </div>
+                          {missing ? <div className="mt-2 text-xs text-amber-300">Missing in external ComfyUI.</div> : null}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {missingLoras.length > 0 ? (
+                  <div className="mt-2 rounded-sm border border-amber-900/70 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+                    {missingLoras.length} selected LoRA{missingLoras.length === 1 ? '' : 's'} need to be installed in external ComfyUI.
+                  </div>
+                ) : null}
+
+                <div className="mt-3 rounded-sm border border-gray-800 bg-gray-950 p-2">
+                  <div className="mb-2 flex items-center justify-between text-xs">
+                    <span className="font-medium text-gray-300">Copy Toolkit LoRA</span>
+                    <button
+                      type="button"
+                      disabled={!serverUrl || loraStatus === 'loading'}
+                      onClick={() => void refreshLoras(serverUrl)}
+                      className="text-cyan-300 hover:text-cyan-100 disabled:text-gray-600"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <select
+                      value={copyToolkitPath}
+                      onChange={event => setCopyToolkitPath(event.target.value)}
+                      className="h-9 min-w-0 rounded-sm border border-gray-800 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-cyan-700"
+                    >
+                      {toolkitLoras.length === 0 ? <option value="">No Toolkit LoRAs found</option> : null}
+                      {toolkitLoras.map(lora => (
+                        <option key={lora.id} value={lora.path}>
+                          {lora.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ActionButton
+                      onClick={() => void copyToolkitLora()}
+                      disabled={!copyToolkitPath || loraStatus === 'copying'}
+                      tone={loraStatus === 'copying' ? 'neutral' : 'emerald'}
+                    >
+                      {loraStatus === 'copying' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+                      Copy
+                    </ActionButton>
+                  </div>
+                  {loraMessage ? (
+                    <div className={classNames('mt-2 text-xs', loraStatus === 'error' ? 'text-rose-300' : 'text-gray-400')}>
+                      {loraMessage}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
             </div>
           </aside>
 
@@ -1532,6 +1787,11 @@ export default function IdeogramWorkflowBuilderPage() {
                         </ActionButton>
                       </div>
                     </Field>
+                    <div className="mt-3">
+                      <Field label="LoRA Folder" detail="external models/loras">
+                        <TextInput value={loraDirDraft} onChange={setLoraDirDraft} placeholder="E:\\ComfyUI\\models\\loras" />
+                      </Field>
+                    </div>
                     {settingsMessage ? (
                       <div className={classNames('mt-2 rounded-sm border px-3 py-2 text-xs', settingsStatus === 'error' ? 'border-rose-900 bg-rose-950/20 text-rose-200' : 'border-gray-800 bg-gray-900 text-gray-300')}>
                         {settingsMessage}

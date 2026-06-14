@@ -1,5 +1,15 @@
 import { db } from './db';
 import { flushCache } from './settings';
+import fs from 'fs';
+import path from 'path';
+import { getTrainingFolder } from './settings';
+import {
+  extractTriggerWordsFromMetadata,
+  listUploadedLoras,
+  mergeTriggerWords,
+  readSafetensorsMetadata,
+  splitTriggerWords,
+} from './loraLibrary';
 import {
   classTypesFromWorkflow,
   requiredIdeogramModels,
@@ -7,7 +17,10 @@ import {
 } from '../utils/ideogramWorkflow';
 
 export const COMFY_EXTERNAL_URL_KEY = 'COMFY_EXTERNAL_URL';
+export const COMFY_EXTERNAL_LORA_DIR_KEY = 'COMFY_EXTERNAL_LORA_DIR';
 export const DEFAULT_EXTERNAL_COMFY_URL = 'http://127.0.0.1:8188';
+
+const LORA_JOB_TYPES = new Set(['lora', 'locon', 'lokr', 'lorm']);
 
 export type FetchLike = typeof fetch;
 
@@ -32,6 +45,17 @@ export type ComfyPreflightResult = {
   nodes: ComfyPreflightItem[];
   models: ComfyPreflightItem[];
   error: string | null;
+};
+
+export type ToolkitLoraSummary = {
+  id: string;
+  label: string;
+  path: string;
+  filename: string;
+  source: 'job' | 'uploaded';
+  sizeBytes: number;
+  updatedAt: string;
+  triggerWords: string[];
 };
 
 export class ExternalComfyError extends Error {
@@ -74,9 +98,24 @@ export function normalizeExternalComfyUrl(value: unknown) {
   return url.toString().replace(/\/+$/, '');
 }
 
+export function normalizeExternalComfyLoraDir(value: unknown) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return '';
+  const resolved = path.resolve(raw);
+  if (resolved === path.parse(resolved).root) {
+    throw new ExternalComfyError('External ComfyUI LoRA folder cannot be the filesystem root.', 400);
+  }
+  return resolved;
+}
+
 export async function getSavedExternalComfyUrl() {
   const row = await db.settings.get(COMFY_EXTERNAL_URL_KEY);
   return normalizeExternalComfyUrl(row?.value || DEFAULT_EXTERNAL_COMFY_URL);
+}
+
+export async function getSavedExternalComfyLoraDir() {
+  const row = await db.settings.get(COMFY_EXTERNAL_LORA_DIR_KEY);
+  return normalizeExternalComfyLoraDir(row?.value || '');
 }
 
 export async function saveExternalComfyUrl(value: unknown) {
@@ -86,11 +125,93 @@ export async function saveExternalComfyUrl(value: unknown) {
   return serverUrl;
 }
 
+export async function saveExternalComfyLoraDir(value: unknown) {
+  const loraDir = normalizeExternalComfyLoraDir(value || '');
+  await db.settings.upsert(COMFY_EXTERNAL_LORA_DIR_KEY, loraDir);
+  flushCache();
+  return loraDir;
+}
+
 export async function resolveExternalComfyUrl(value?: unknown) {
   const normalized = normalizeExternalComfyUrl(value || '');
   if (normalized) return normalized;
   const saved = await getSavedExternalComfyUrl();
   return saved;
+}
+
+function parseJobConfig(jobConfig: string) {
+  try {
+    return JSON.parse(jobConfig);
+  } catch {
+    return null;
+  }
+}
+
+function isLoraTrainingJob(jobConfig: any) {
+  const networkType = String(jobConfig?.config?.process?.[0]?.network?.type || '').toLowerCase();
+  return LORA_JOB_TYPES.has(networkType);
+}
+
+async function getSafeJobFolder(trainingRoot: string, jobName: string) {
+  const root = await fs.promises.realpath(trainingRoot).catch(() => null);
+  if (!root) return null;
+  const folder = path.resolve(root, jobName);
+  const relativePath = path.relative(root, folder);
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) return null;
+  const stat = await fs.promises.stat(folder).catch(() => null);
+  return stat?.isDirectory() ? folder : null;
+}
+
+export async function listToolkitLoras(): Promise<ToolkitLoraSummary[]> {
+  const trainingRoot = await getTrainingFolder();
+  const jobs = await db.jobs.list({ job_type: 'train' });
+  const loras: ToolkitLoraSummary[] = [];
+
+  for (const job of jobs) {
+    if (job.worker_id && job.worker_id !== 'local') continue;
+    const jobConfig = parseJobConfig(job.job_config);
+    if (!jobConfig || !isLoraTrainingJob(jobConfig)) continue;
+    const jobFolder = await getSafeJobFolder(trainingRoot, job.name);
+    if (!jobFolder) continue;
+
+    const entries = await fs.promises.readdir(jobFolder, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.safetensors')) continue;
+      const filePath = path.join(jobFolder, entry.name);
+      const stat = await fs.promises.stat(filePath).catch(() => null);
+      if (!stat) continue;
+      const metadata = await readSafetensorsMetadata(filePath);
+      const triggerWords = mergeTriggerWords(
+        extractTriggerWordsFromMetadata(metadata),
+        splitTriggerWords(jobConfig?.config?.process?.[0]?.trigger_word),
+      );
+      loras.push({
+        id: `${job.id}:${entry.name}`,
+        label: `${job.name} / ${entry.name}`,
+        path: filePath,
+        filename: entry.name,
+        source: 'job',
+        updatedAt: stat.mtime.toISOString(),
+        sizeBytes: stat.size,
+        triggerWords,
+      });
+    }
+  }
+
+  const uploaded = await listUploadedLoras();
+  loras.push(
+    ...uploaded.map(lora => ({
+      id: lora.id,
+      label: lora.label,
+      path: lora.path,
+      filename: lora.filename,
+      source: lora.source,
+      updatedAt: lora.updatedAt,
+      sizeBytes: lora.sizeBytes,
+      triggerWords: lora.triggerWords,
+    })),
+  );
+  return loras.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
 function comfyUrl(serverUrl: string, pathname: string, query?: Record<string, string | number | null | undefined>) {
@@ -172,6 +293,34 @@ function inputAllowedValues(objectInfo: Record<string, unknown>, classType: stri
     return spec[0].map(item => String(item));
   }
   return null;
+}
+
+export function loraNamesFromObjectInfo(objectInfo: Record<string, unknown>) {
+  return inputAllowedValues(objectInfo, 'LoraLoader', 'lora_name') || [];
+}
+
+export async function listExternalComfyLoras(serverUrl: string, fetchImpl?: FetchLike) {
+  try {
+    const objectInfo = await getComfyObjectInfo(serverUrl, fetchImpl);
+    const objectInfoNames = loraNamesFromObjectInfo(objectInfo);
+    if (objectInfoNames.length > 0) {
+      return {
+        source: 'object_info' as const,
+        loras: Array.from(new Set(objectInfoNames)).sort((a, b) => a.localeCompare(b)),
+      };
+    }
+  } catch {
+    // Fall back to ComfyUI's model listing route below when object_info is unavailable.
+  }
+  try {
+    const modelNames = await comfyRequest<string[]>({ serverUrl, path: '/models/loras', fetchImpl });
+    return {
+      source: 'models' as const,
+      loras: Array.from(new Set((Array.isArray(modelNames) ? modelNames : []).map(String))).sort((a, b) => a.localeCompare(b)),
+    };
+  } catch {
+    return { source: 'none' as const, loras: [] };
+  }
 }
 
 function nodePreflightItems(workflow: Record<string, unknown>, objectInfo: Record<string, unknown>): ComfyPreflightItem[] {
@@ -333,4 +482,57 @@ export async function getComfyViewImage({
 
 export async function interruptComfy(serverUrl: string, fetchImpl?: FetchLike) {
   return comfyRequest({ serverUrl, path: '/interrupt', method: 'POST', body: {}, fetchImpl });
+}
+
+function staysWithin(parent: string, child: string) {
+  const relativePath = path.relative(parent, child);
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+export async function copyToolkitLoraToExternalComfy({
+  toolkitPath,
+  loraDir,
+  knownLoras,
+}: {
+  toolkitPath: string;
+  loraDir?: string;
+  knownLoras?: ToolkitLoraSummary[];
+}) {
+  const destinationRoot = normalizeExternalComfyLoraDir(loraDir || (await getSavedExternalComfyLoraDir()));
+  if (!destinationRoot) throw new ExternalComfyError('External ComfyUI LoRA folder is not configured.', 400);
+
+  const destinationRootReal = await fs.promises.realpath(destinationRoot).catch(() => null);
+  if (!destinationRootReal) throw new ExternalComfyError('External ComfyUI LoRA folder does not exist.', 400);
+  const destinationStat = await fs.promises.stat(destinationRootReal).catch(() => null);
+  if (!destinationStat?.isDirectory()) throw new ExternalComfyError('External ComfyUI LoRA folder is not a directory.', 400);
+
+  const requestedReal = await fs.promises.realpath(path.resolve(toolkitPath || '')).catch(() => null);
+  if (!requestedReal) throw new ExternalComfyError('Toolkit LoRA file was not found.', 404);
+  const known = knownLoras || (await listToolkitLoras());
+  const knownLora = await Promise.all(
+    known.map(async lora => ({
+      lora,
+      realPath: await fs.promises.realpath(lora.path).catch(() => ''),
+    })),
+  ).then(entries => entries.find(entry => entry.realPath === requestedReal)?.lora);
+  if (!knownLora) throw new ExternalComfyError('Only known Toolkit LoRAs can be copied to external ComfyUI.', 403);
+  if (!requestedReal.toLowerCase().endsWith('.safetensors')) {
+    throw new ExternalComfyError('Only .safetensors LoRA files can be copied.', 400);
+  }
+
+  const filename = path.basename(requestedReal);
+  const destination = path.join(destinationRootReal, filename);
+  if (!staysWithin(destinationRootReal, destination)) {
+    throw new ExternalComfyError('Resolved LoRA destination escaped the configured folder.', 400);
+  }
+  if (await fs.promises.stat(destination).catch(() => null)) {
+    throw new ExternalComfyError(`External ComfyUI already has ${filename}.`, 409);
+  }
+  await fs.promises.copyFile(requestedReal, destination);
+  return {
+    filename,
+    destination,
+    copied: true,
+    lora: knownLora,
+  };
 }

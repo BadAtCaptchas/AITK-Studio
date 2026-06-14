@@ -5,7 +5,7 @@ import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
 import { isRemoteOllamaWorkersSettingKey } from '@/server/remoteOllamaWorkers';
-import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyUrl } from '@/server/externalComfy';
+import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyLoraDir, normalizeExternalComfyUrl } from '@/server/externalComfy';
 import path from 'path';
 
 type SettingsAccess = {
@@ -72,6 +72,7 @@ export async function GET(request: NextRequest) {
     settingsObject.COMFY_EXTERNAL_URL = normalizeExternalComfyUrl(
       settingsObject.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,
     );
+    settingsObject.COMFY_EXTERNAL_LORA_DIR = normalizeExternalComfyLoraDir(settingsObject.COMFY_EXTERNAL_LORA_DIR || '');
     if (!access.authenticated) {
       settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
       settingsObject.HF_TOKEN = '';
@@ -100,6 +101,7 @@ export async function POST(request: NextRequest) {
       TRAINING_ADVISOR_ENABLED,
       COMFY_AUTO_INSTALL,
       COMFY_EXTERNAL_URL,
+      COMFY_EXTERNAL_LORA_DIR,
     } = body;
 
     let normalizedDatasetsFolder = DATASETS_FOLDER;
@@ -112,11 +114,13 @@ export async function POST(request: NextRequest) {
     }
 
     let normalizedExternalComfyUrl = '';
+    let normalizedExternalComfyLoraDir = '';
     try {
       normalizedExternalComfyUrl = normalizeExternalComfyUrl(COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL);
+      normalizedExternalComfyLoraDir = normalizeExternalComfyLoraDir(COMFY_EXTERNAL_LORA_DIR || '');
     } catch (error) {
       return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Invalid external ComfyUI URL' },
+        { error: error instanceof Error ? error.message : 'Invalid external ComfyUI setting' },
         { status: 400 },
       );
     }
@@ -127,6 +131,7 @@ export async function POST(request: NextRequest) {
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
       COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,
+      COMFY_EXTERNAL_LORA_DIR: normalizedExternalComfyLoraDir,
     };
 
     if (typeof HF_TOKEN === 'string' && (access.authenticated || HF_TOKEN !== '')) {

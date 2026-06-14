@@ -13,6 +13,7 @@ export interface Settings {
   TRAINING_ADVISOR_ENABLED: string;
   COMFY_AUTO_INSTALL: string;
   COMFY_EXTERNAL_URL: string;
+  COMFY_EXTERNAL_LORA_DIR: string;
 }
 
 export default function useSettings() {
@@ -24,6 +25,7 @@ export default function useSettings() {
     TRAINING_ADVISOR_ENABLED: 'false',
     COMFY_AUTO_INSTALL: 'false',
     COMFY_EXTERNAL_URL: DEFAULT_EXTERNAL_COMFY_URL,
+    COMFY_EXTERNAL_LORA_DIR: '',
   });
   const [isSettingsLoaded, setIsLoaded] = useState(false);
   useEffect(() => {
@@ -40,6 +42,7 @@ export default function useSettings() {
           TRAINING_ADVISOR_ENABLED: data.TRAINING_ADVISOR_ENABLED === 'true' ? 'true' : 'false',
           COMFY_AUTO_INSTALL: data.COMFY_AUTO_INSTALL === 'true' ? 'true' : 'false',
           COMFY_EXTERNAL_URL: data.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,
+          COMFY_EXTERNAL_LORA_DIR: data.COMFY_EXTERNAL_LORA_DIR || '',
         });
         setIsLoaded(true);
       })

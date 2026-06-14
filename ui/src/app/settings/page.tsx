@@ -921,7 +921,7 @@ export default function Settings() {
                   {advancedOpen && (
                     <div className="mt-5 space-y-5">
                       <section id="comfy" className="scroll-mt-20 border-y border-gray-900 py-5">
-                        <div className="mb-6 border-b border-gray-900 pb-5">
+                        <div className="mb-6 space-y-4 border-b border-gray-900 pb-5">
                           <FieldShell
                             id="COMFY_EXTERNAL_URL"
                             label="External ComfyUI URL"
@@ -935,6 +935,21 @@ export default function Settings() {
                               onChange={handleChange}
                               className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
                               placeholder="http://127.0.0.1:8188"
+                            />
+                          </FieldShell>
+                          <FieldShell
+                            id="COMFY_EXTERNAL_LORA_DIR"
+                            label="External ComfyUI LoRA folder"
+                            detail="Absolute path to the external ComfyUI models/loras folder for copying Toolkit LoRAs."
+                          >
+                            <input
+                              type="text"
+                              id="COMFY_EXTERNAL_LORA_DIR"
+                              name="COMFY_EXTERNAL_LORA_DIR"
+                              value={settings.COMFY_EXTERNAL_LORA_DIR}
+                              onChange={handleChange}
+                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                              placeholder="E:\\ComfyUI\\models\\loras"
                             />
                           </FieldShell>
                         </div>

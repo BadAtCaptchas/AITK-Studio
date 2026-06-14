@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { ExternalComfyError, getSavedExternalComfyUrl, saveExternalComfyUrl } from '@/server/externalComfy';
+import {
+  ExternalComfyError,
+  getSavedExternalComfyLoraDir,
+  getSavedExternalComfyUrl,
+  saveExternalComfyLoraDir,
+  saveExternalComfyUrl,
+} from '@/server/externalComfy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,7 +19,8 @@ function errorResponse(error: unknown) {
 
 export async function GET() {
   try {
-    return NextResponse.json({ serverUrl: await getSavedExternalComfyUrl() });
+    const [serverUrl, loraDir] = await Promise.all([getSavedExternalComfyUrl(), getSavedExternalComfyLoraDir()]);
+    return NextResponse.json({ serverUrl, loraDir });
   } catch (error) {
     return errorResponse(error);
   }
@@ -23,7 +30,11 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const serverUrl = await saveExternalComfyUrl(body?.server_url ?? body?.serverUrl ?? '');
-    return NextResponse.json({ serverUrl });
+    const hasLoraDir = Object.prototype.hasOwnProperty.call(body || {}, 'lora_dir') || Object.prototype.hasOwnProperty.call(body || {}, 'loraDir');
+    const loraDir = hasLoraDir
+      ? await saveExternalComfyLoraDir(body?.lora_dir ?? body?.loraDir ?? '')
+      : await getSavedExternalComfyLoraDir();
+    return NextResponse.json({ serverUrl, loraDir });
   } catch (error) {
     return errorResponse(error);
   }

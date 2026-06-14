@@ -25,6 +25,13 @@ export type IdeogramWorkflowModels = {
   vae: string;
 };
 
+export type IdeogramWorkflowLora = {
+  loraName: string;
+  strengthModel: number;
+  strengthClip: number;
+  toolkitPath?: string;
+};
+
 export type IdeogramWorkflowState = {
   highLevelDescription: string;
   style: {
@@ -48,6 +55,7 @@ export type IdeogramWorkflowState = {
   overrideEndPercent: number;
   filenamePrefix: string;
   models: IdeogramWorkflowModels;
+  loras: IdeogramWorkflowLora[];
 };
 
 export type IdeogramImportResult = {
@@ -152,6 +160,7 @@ export const DEFAULT_IDEOGRAM_WORKFLOW_STATE: IdeogramWorkflowState = {
   overrideEndPercent: 1,
   filenamePrefix: 'Ideogram_4.0',
   models: { ...IDEOGRAM4_DEFAULT_MODELS },
+  loras: [],
 };
 
 function isRecord(value: unknown): value is Record<string, any> {
@@ -179,6 +188,23 @@ function cleanText(value: unknown, fallback = '') {
   return typeof value === 'string' ? value : fallback;
 }
 
+function cleanLora(raw: unknown): IdeogramWorkflowLora | null {
+  if (!isRecord(raw)) return null;
+  const loraName = cleanText(raw.loraName || raw.lora_name || raw.name).trim();
+  const toolkitPath = cleanText(raw.toolkitPath || raw.toolkit_path).trim();
+  return {
+    loraName,
+    strengthModel: finiteNumber(raw.strengthModel ?? raw.strength_model, 1),
+    strengthClip: finiteNumber(raw.strengthClip ?? raw.strength_clip, 1),
+    ...(toolkitPath ? { toolkitPath } : {}),
+  };
+}
+
+function cleanLoras(value: unknown): IdeogramWorkflowLora[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(cleanLora).filter((item): item is IdeogramWorkflowLora => item !== null);
+}
+
 function cleanElement(raw: unknown): IdeogramWorkflowElement | null {
   if (!isRecord(raw)) return null;
   const box = arrayToBox(raw.bbox);
@@ -197,7 +223,9 @@ function cleanElement(raw: unknown): IdeogramWorkflowElement | null {
 }
 
 export function cloneIdeogramWorkflowState(state: IdeogramWorkflowState = DEFAULT_IDEOGRAM_WORKFLOW_STATE): IdeogramWorkflowState {
-  return deepClone(state);
+  const next = deepClone(state);
+  next.loras = cleanLoras(next.loras);
+  return next;
 }
 
 export function updateIdeogramWorkflowElementBox(
@@ -309,6 +337,7 @@ export function closestIdeogramAspectRatio(width: number, height: number) {
 }
 
 export function requiredIdeogramModels(state: IdeogramWorkflowState = DEFAULT_IDEOGRAM_WORKFLOW_STATE): IdeogramRequiredModel[] {
+  const loras = cleanLoras(state.loras).filter(lora => lora.loraName.trim());
   return [
     {
       id: 'unet-main',
@@ -338,6 +367,13 @@ export function requiredIdeogramModels(state: IdeogramWorkflowState = DEFAULT_ID
       inputName: 'vae_name',
       value: state.models.vae,
     },
+    ...loras.map((lora, index) => ({
+      id: `lora-${index}`,
+      label: `LoRA ${index + 1}`,
+      classType: 'LoraLoader',
+      inputName: 'lora_name',
+      value: lora.loraName,
+    })),
   ];
 }
 
@@ -346,8 +382,9 @@ export function buildIdeogramComfyWorkflow(state: IdeogramWorkflowState = DEFAUL
   const selectedPreset = IDEOGRAM4_QUALITY_PRESETS[qualityPreset] || IDEOGRAM4_QUALITY_PRESETS.Default;
   const steps = positiveFiniteInt(state.steps, selectedPreset.steps);
   const promptText = serializeIdeogramWorkflowPrompt(state);
+  const loras = cleanLoras(state.loras).filter(lora => lora.loraName.trim());
 
-  return {
+  const workflow: Record<string, any> = {
     '37': {
       inputs: {
         aspect_ratio: state.aspectRatio,
@@ -572,6 +609,50 @@ export function buildIdeogramComfyWorkflow(state: IdeogramWorkflowState = DEFAUL
       _meta: { title: 'Dual Model CFG Guider' },
     },
   };
+
+  let positiveModelLink: [string, number] = ['98:23', 0];
+  let negativeModelLink: [string, number] = ['98:154', 0];
+  let clipLink: [string, number] = ['98:14', 0];
+
+  loras.forEach((lora, index) => {
+    const positiveId = `98:${177 + index * 2}`;
+    const negativeId = `98:${178 + index * 2}`;
+    const strengthModel = finiteNumber(lora.strengthModel, 1);
+    const strengthClip = finiteNumber(lora.strengthClip, 1);
+
+    workflow[positiveId] = {
+      inputs: {
+        lora_name: lora.loraName,
+        strength_model: strengthModel,
+        strength_clip: strengthClip,
+        model: positiveModelLink,
+        clip: clipLink,
+      },
+      class_type: 'LoraLoader',
+      _meta: { title: `Load LoRA ${index + 1} (Positive)` },
+    };
+    workflow[negativeId] = {
+      inputs: {
+        lora_name: lora.loraName,
+        strength_model: strengthModel,
+        strength_clip: strengthClip,
+        model: negativeModelLink,
+        clip: clipLink,
+      },
+      class_type: 'LoraLoader',
+      _meta: { title: `Load LoRA ${index + 1} (Negative)` },
+    };
+
+    positiveModelLink = [positiveId, 0];
+    negativeModelLink = [negativeId, 0];
+    clipLink = [negativeId, 1];
+  });
+
+  workflow['98:157'].inputs.model = positiveModelLink;
+  workflow['98:155'].inputs.model_negative = negativeModelLink;
+  workflow['98:24'].inputs.clip = clipLink;
+
+  return workflow;
 }
 
 function getNode(workflow: Record<string, any>, id: string) {
@@ -588,6 +669,71 @@ function findNodesByClass(workflow: Record<string, any>, classType: string) {
   return Object.entries(workflow)
     .filter(([, node]) => isRecord(node) && node.class_type === classType)
     .map(([id, node]) => ({ id, node }));
+}
+
+function linkNodeId(value: unknown) {
+  return Array.isArray(value) && typeof value[0] === 'string' ? value[0] : null;
+}
+
+function traceLoraModelChain(workflow: Record<string, any>, terminalLink: unknown, baseNodeId: string) {
+  const chain: Array<{ id: string; node: Record<string, any> }> = [];
+  const seen = new Set<string>();
+  let nodeId = linkNodeId(terminalLink);
+  while (nodeId && nodeId !== baseNodeId && !seen.has(nodeId)) {
+    seen.add(nodeId);
+    const node = getNode(workflow, nodeId);
+    if (!node || node.class_type !== 'LoraLoader' || !isRecord(node.inputs)) break;
+    chain.push({ id: nodeId, node });
+    nodeId = linkNodeId(node.inputs.model);
+  }
+  return chain.reverse();
+}
+
+function parseLoraChains(workflow: Record<string, any>, warnings: string[]): IdeogramWorkflowLora[] {
+  const positiveChain = traceLoraModelChain(workflow, input(workflow, '98:157', 'model'), '98:23');
+  const negativeChain = traceLoraModelChain(workflow, input(workflow, '98:155', 'model_negative'), '98:154');
+  if (positiveChain.length === 0 && negativeChain.length === 0) return [];
+  if (positiveChain.length !== negativeChain.length) {
+    warnings.push('Imported LoRA chain has mismatched positive and negative LoRA counts; using matched entries where possible.');
+  }
+
+  const count = Math.max(positiveChain.length, negativeChain.length);
+  const loras: IdeogramWorkflowLora[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const positiveInputs = positiveChain[index]?.node.inputs || {};
+    const negativeInputs = negativeChain[index]?.node.inputs || {};
+    const positiveName = cleanText(positiveInputs.lora_name).trim();
+    const negativeName = cleanText(negativeInputs.lora_name).trim();
+    const loraName = positiveName || negativeName;
+    if (!loraName) continue;
+    if (positiveName && negativeName && positiveName !== negativeName) {
+      warnings.push(`Imported LoRA pair ${index + 1} has mismatched names: ${positiveName} / ${negativeName}.`);
+    }
+    const positiveStrengthModel = finiteNumber(positiveInputs.strength_model, NaN);
+    const negativeStrengthModel = finiteNumber(negativeInputs.strength_model, NaN);
+    const positiveStrengthClip = finiteNumber(positiveInputs.strength_clip, NaN);
+    const negativeStrengthClip = finiteNumber(negativeInputs.strength_clip, NaN);
+    if (
+      Number.isFinite(positiveStrengthModel) &&
+      Number.isFinite(negativeStrengthModel) &&
+      positiveStrengthModel !== negativeStrengthModel
+    ) {
+      warnings.push(`Imported LoRA pair ${index + 1} has mismatched model strengths; using the positive value.`);
+    }
+    if (
+      Number.isFinite(positiveStrengthClip) &&
+      Number.isFinite(negativeStrengthClip) &&
+      positiveStrengthClip !== negativeStrengthClip
+    ) {
+      warnings.push(`Imported LoRA pair ${index + 1} has mismatched CLIP strengths; using the positive value.`);
+    }
+    loras.push({
+      loraName,
+      strengthModel: finiteNumber(positiveInputs.strength_model, finiteNumber(negativeInputs.strength_model, 1)),
+      strengthClip: finiteNumber(positiveInputs.strength_clip, finiteNumber(negativeInputs.strength_clip, 1)),
+    });
+  }
+  return loras;
 }
 
 export function classTypesFromWorkflow(workflow: Record<string, unknown>) {
@@ -651,6 +797,7 @@ export function parseIdeogramComfyWorkflow(rawWorkflow: unknown): IdeogramImport
     clip: cleanText(input(workflow, '98:14', 'clip_name'), next.models.clip),
     vae: cleanText(input(workflow, '98:9', 'vae_name'), next.models.vae),
   };
+  next.loras = parseLoraChains(workflow, warnings);
 
   const missingClasses = IDEOGRAM4_REQUIRED_NODE_CLASSES.filter(classType => !classTypesFromWorkflow(workflow).includes(classType));
   if (missingClasses.length > 0) {

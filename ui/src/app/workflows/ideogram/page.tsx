@@ -366,6 +366,10 @@ function filenameBase(filename: string) {
   return filename.split(/[\\/]/).pop() || filename;
 }
 
+function clampZoom(value: number) {
+  return Math.max(0.45, Math.min(1.2, Number(value.toFixed(2))));
+}
+
 export default function IdeogramWorkflowBuilderPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -1045,6 +1049,14 @@ export default function IdeogramWorkflowBuilderPage() {
     [selectedElementIndex, state.elements],
   );
 
+  const handleCanvasWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY === 0) return;
+    event.preventDefault();
+    const direction = event.deltaY < 0 ? 1 : -1;
+    const increment = event.shiftKey ? 0.04 : 0.08;
+    setZoom(value => clampZoom(value + direction * increment));
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -1485,17 +1497,20 @@ export default function IdeogramWorkflowBuilderPage() {
               <div className="operator-panel-header">
                 <span>Composition Canvas</span>
                 <div className="flex items-center gap-1">
-                  <IconButton title="Zoom out" onClick={() => setZoom(value => Math.max(0.45, Number((value - 0.08).toFixed(2))))}>
+                  <IconButton title="Zoom out" onClick={() => setZoom(value => clampZoom(value - 0.08))}>
                     <ZoomOut className="h-4 w-4" />
                   </IconButton>
                   <span className="w-12 text-center text-xs text-gray-400">{Math.round(zoom * 100)}%</span>
-                  <IconButton title="Zoom in" onClick={() => setZoom(value => Math.min(1.2, Number((value + 0.08).toFixed(2))))}>
+                  <IconButton title="Zoom in" onClick={() => setZoom(value => clampZoom(value + 0.08))}>
                     <ZoomIn className="h-4 w-4" />
                   </IconButton>
                 </div>
               </div>
 
-              <div className="operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-auto bg-[#03070b] p-4">
+              <div
+                onWheel={handleCanvasWheel}
+                className="operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-auto bg-[#03070b] p-4"
+              >
                 <div className="absolute right-3 top-3 z-10 flex flex-col gap-2 rounded-sm border border-gray-800 bg-gray-950/90 p-2">
                   <IconButton title="Select" active={activeTool === 'select'} onClick={() => setActiveTool('select')}>
                     <MousePointer2 className="h-4 w-4" />
@@ -1710,6 +1725,45 @@ export default function IdeogramWorkflowBuilderPage() {
             <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto p-3">
               {activeTab === 'preview' && (
                 <div className="space-y-3">
+                  {selectedElement ? (
+                    <section className="rounded-sm border border-gray-800 bg-gray-950 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <h2 className="text-sm font-semibold text-gray-100">Selected Element</h2>
+                        <span className="rounded-sm border border-gray-800 bg-gray-900 px-2 py-0.5 text-[11px] uppercase tracking-wide text-gray-400">
+                          {selectedElement.type === 'text' ? 'Text' : 'Object'}
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {selectedElement.type === 'text' ? (
+                          <Field label="Text">
+                            <TextInput
+                              value={selectedElement.text || ''}
+                              onChange={value =>
+                                updateSelectedElement(element => ({
+                                  ...element,
+                                  text: value,
+                                  desc: element.desc || value,
+                                }))
+                              }
+                            />
+                          </Field>
+                        ) : null}
+                        <Field label="Description" detail={`${selectedElement.desc.length} chars`}>
+                          <textarea
+                            value={selectedElement.desc}
+                            onChange={event =>
+                              updateSelectedElement(element => ({
+                                ...element,
+                                desc: event.target.value,
+                              }))
+                            }
+                            rows={4}
+                            className="w-full resize-none rounded-sm border border-gray-800 bg-[#050a0f] px-3 py-2 text-sm leading-5 text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                          />
+                        </Field>
+                      </div>
+                    </section>
+                  ) : null}
                   <section className="rounded-sm border border-gray-800 bg-gray-950 p-3">
                     <h2 className="mb-2 text-sm font-semibold text-gray-100">Ideogram Prompt JSON</h2>
                     <pre className="operator-scrollbar-none max-h-[360px] overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-gray-300">

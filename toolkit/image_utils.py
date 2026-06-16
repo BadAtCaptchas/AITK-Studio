@@ -14,10 +14,14 @@ import torch
 from diffusers import AutoencoderTiny
 from PIL import Image as PILImage
 from toolkit.image_io import (
+    JpegXLSupportError,
     UnsupportedAnimatedImageError,
+    ensure_jpegxl_plugin_for_source,
     image_has_alpha,
+    is_jpegxl_header,
     open_static_image,
     open_static_image_from_bytes,
+    save_static_image,
 )
 
 FILE_UNKNOWN = "Sorry, don't know how to get size for this file."
@@ -35,6 +39,7 @@ JPEG = types['JPEG'] = 'JPEG'
 PNG = types['PNG'] = 'PNG'
 TIFF = types['TIFF'] = 'TIFF'
 WEBP = types['WEBP'] = 'WEBP'
+JPEGXL = types['JPEGXL'] = 'JPEGXL'
 
 image_fields = ['path', 'type', 'file_size', 'width', 'height']
 
@@ -85,6 +90,23 @@ def _read_webp_dimensions(input, size):
         offset = payload_offset + chunk_size + (chunk_size % 2)
 
     raise UnknownImageFormat("Unsupported WebP bitstream")
+
+
+def _read_pillow_dimensions(input, size, file_path=None, format_name="image"):
+    try:
+        if file_path is not None:
+            ensure_jpegxl_plugin_for_source(file_path)
+            with PILImage.open(file_path) as image:
+                return image.size
+        input.seek(0)
+        data = input.read(size)
+        ensure_jpegxl_plugin_for_source(file_path, data)
+        with PILImage.open(io.BytesIO(data)) as image:
+            return image.size
+    except JpegXLSupportError:
+        raise
+    except Exception as e:
+        raise UnknownImageFormat(f"{e.__class__.__name__} raised while trying to decode as {format_name}.")
 
 
 class Image(collections.namedtuple('Image', image_fields)):
@@ -295,6 +317,9 @@ def get_image_metadata_from_bytesio(input, size, file_path=None):
     elif size >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         imgtype = WEBP
         width, height = _read_webp_dimensions(input, size)
+    elif is_jpegxl_header(data):
+        imgtype = JPEGXL
+        width, height = _read_pillow_dimensions(input, size, file_path, "JPEG XL")
     elif size >= 2:
         # see http://en.wikipedia.org/wiki/ICO_(file_format)
         imgtype = 'ICO'
@@ -569,7 +594,7 @@ def save_tensors(imgs: torch.Tensor, path='output.png', fps=None):
         img_numpy = np.concatenate(img_numpy, axis=1)
         # conver to pil
         img_pil = PILImage.fromarray(img_numpy)
-        img_pil.save(path)
+        save_static_image(img_pil, path)
 
 def show_latents(latents: torch.Tensor, vae: 'AutoencoderTiny', name='AI Toolkit'):
     if vae.device == 'cpu':

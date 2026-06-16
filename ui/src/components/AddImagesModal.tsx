@@ -328,7 +328,7 @@ export default function AddImagesModal() {
 
   const dropAccept = useMemo<AcceptMap>(
     () => ({
-      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'],
+      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.jxl'],
       'video/*': ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv'],
       'audio/*': ['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac'],
       'application/json': ['.json'],

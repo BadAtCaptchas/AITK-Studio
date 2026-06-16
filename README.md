@@ -634,7 +634,7 @@ pip install --upgrade accelerate transformers diffusers huggingface_hub # Option
 - Run `huggingface-cli login` and paste your token.
 
 #### 2. Upload your dataset
-- Drag and drop your dataset folder containing the .jpg, .jpeg, or .png images and .txt files in `ai-toolkit`.
+- Drag and drop your dataset folder containing the .jpg, .jpeg, .png, .webp, or experimental .jxl images and .txt files in `ai-toolkit`.
 
 #### 3. Configs
 - Copy an example config from `config/examples/modal` to the `config` folder and rename it to `whatever_you_want.yml`.
@@ -663,10 +663,10 @@ pip install --upgrade accelerate transformers diffusers huggingface_hub # Option
 ## Datasets
 
 Datasets generally need to be a folder containing images and associated text files. Supported static image formats
-are jpg, jpeg, png, and webp. Animated WebP files are not supported as image dataset inputs; use a video dataset
+are jpg, jpeg, png, webp, and experimental jxl. Animated WebP and animated JPEG XL files are not supported as image dataset inputs; use a video dataset
 format or convert them to static WebP, PNG, or JPEG first. WebP transparency is supported for alpha mask and inpaint
 workflows, while normal training images are loaded as RGB. The text files should be named the same as the images
-but with a `.txt` extension. For example `image2.webp` and `image2.txt`. The text file should contain only the caption.
+but with a `.txt` extension. For example `image2.webp` and `image2.txt`, or `image3.jxl` and `image3.txt`. The text file should contain only the caption.
 You can add the word `[trigger]` in the caption file and if you have `trigger_word` in your config, it will be automatically
 replaced. 
 

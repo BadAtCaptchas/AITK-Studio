@@ -68,6 +68,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
     '.jpg',
     '.jpeg',
     '.webp',
+    '.jxl',
     '.mp4',
     '.mp3',
     '.wav',

@@ -3,10 +3,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from io import BytesIO
 from typing import Any, Dict, Iterable, List, Optional
 
-from PIL import Image
+from toolkit.image_io import open_static_image_from_bytes
 
 from toolkit.comfy.errors import ComfyError, ComfyWorkflowError
 
@@ -113,11 +112,10 @@ class ComfyClient:
                 subfolder=image_ref.get('subfolder', ''),
                 image_type=image_ref.get('type', 'output'),
             )
-            with Image.open(BytesIO(image_bytes)) as image:
-                image = image.convert('RGB')
-                gen_config.save_image(image, count=count, max_count=max_count)
-                gen_config.log_image(image, count=count, max_count=max_count)
-                saved_paths.append(gen_config.get_image_path(count=count, max_count=max_count))
+            image = open_static_image_from_bytes(image_bytes, source=image_ref['filename'], mode='RGB')
+            gen_config.save_image(image, count=count, max_count=max_count)
+            gen_config.log_image(image, count=count, max_count=max_count)
+            saved_paths.append(gen_config.get_image_path(count=count, max_count=max_count))
         return saved_paths
 
     @staticmethod

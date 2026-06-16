@@ -34,7 +34,7 @@ function readNullTerminated(buf: Buffer, start: number, wide: boolean): { text: 
   return { text: buf.slice(start, i).toString('latin1'), next: i + 1 };
 }
 
-const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp']);
+const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/jxl', 'image/bmp']);
 
 type ArtResult = { mime: string; data: Buffer } | null;
 

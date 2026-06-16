@@ -29,6 +29,7 @@ const DATASET_MEDIA_EXTENSIONS = new Set([
   '.jpg',
   '.jpeg',
   '.webp',
+  '.jxl',
   '.mp4',
   '.avi',
   '.mov',

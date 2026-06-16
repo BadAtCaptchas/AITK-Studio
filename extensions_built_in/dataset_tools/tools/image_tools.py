@@ -3,12 +3,13 @@ from typing import Literal, Type, TYPE_CHECKING, Union
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
+from toolkit.image_io import open_static_image
 
 Step: Type = Literal['caption', 'caption_short', 'create_mask', 'contrast_stretch']
 
 img_manipulation_steps = ['contrast_stretch']
 
-img_ext = ['.jpg', '.jpeg', '.png', '.webp']
+img_ext = ['.jpg', '.jpeg', '.png', '.webp', '.jxl']
 
 if TYPE_CHECKING:
     from .llava_utils import LLaVAImageProcessor
@@ -28,7 +29,7 @@ def cv2_to_pil(image):
 
 
 def load_image(img_path: str):
-    image = Image.open(img_path).convert('RGB')
+    image = open_static_image(img_path, mode='RGB')
     try:
         # transpose with exif data
         image = ImageOps.exif_transpose(image)

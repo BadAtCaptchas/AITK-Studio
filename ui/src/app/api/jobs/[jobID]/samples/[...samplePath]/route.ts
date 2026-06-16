@@ -10,6 +10,7 @@ const contentTypeMap: { [key: string]: string } = {
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
+  '.jxl': 'image/jxl',
   '.mp4': 'video/mp4',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',

@@ -49,6 +49,7 @@ const mediaExtensions = [
   '.jpg',
   '.jpeg',
   '.webp',
+  '.jxl',
   '.mp4',
   '.avi',
   '.mov',

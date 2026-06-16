@@ -39,6 +39,7 @@ const MEDIA_EXTENSIONS = new Set([
   '.gif',
   '.tiff',
   '.webp',
+  '.jxl',
   '.mp4',
   '.mp3',
   '.wav',

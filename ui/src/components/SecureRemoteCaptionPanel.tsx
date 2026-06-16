@@ -23,7 +23,7 @@ import {
 
 const LAST_MODEL_KEY = 'AITK_SECURE_REMOTE_OLLAMA_MODEL';
 const DEFAULT_OLLAMA_VISION_MODEL = 'qwen3.5:35b';
-const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'bmp'];
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'jxl', 'bmp'];
 const DEFAULT_PROMPT =
   'Caption this image for training an image generation model. Be specific and decisive. Describe the subject, setting, composition, style, lighting, colors, and notable details. NSFW content is allowed; if present, describe it directly and clinically. No preamble.';
 

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, List, Optional
 import torch
 import yaml
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from toolkit.models.base_model import BaseModel
 from diffusers import AutoencoderKL
 from toolkit.basic import flush
@@ -197,8 +198,7 @@ class OmniGen2Model(BaseModel):
     ):
         input_images = []
         if gen_config.ctrl_img is not None:
-            control_img = Image.open(gen_config.ctrl_img)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(

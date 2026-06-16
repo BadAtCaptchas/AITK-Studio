@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List, Optional
 import huggingface_hub
 import torch
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from toolkit.memory_management import attach_layer_offloading
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.models.base_model import BaseModel
@@ -511,20 +512,16 @@ class Flux2Model(BaseModel):
 
         control_img_list = []
         if gen_config.ctrl_img is not None:
-            control_img = Image.open(gen_config.ctrl_img)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             control_img_list.append(control_img)
         elif gen_config.ctrl_img_1 is not None:
-            control_img = Image.open(gen_config.ctrl_img_1)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img_1, mode="RGB")
             control_img_list.append(control_img)
         if gen_config.ctrl_img_2 is not None:
-            control_img = Image.open(gen_config.ctrl_img_2)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img_2, mode="RGB")
             control_img_list.append(control_img)
         if gen_config.ctrl_img_3 is not None:
-            control_img = Image.open(gen_config.ctrl_img_3)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img_3, mode="RGB")
             control_img_list.append(control_img)
 
         if not self.flux2_is_guidance_distilled:

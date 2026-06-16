@@ -56,6 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       '.png': 'image/png',
       '.gif': 'image/gif',
       '.webp': 'image/webp',
+      '.jxl': 'image/jxl',
       '.svg': 'image/svg+xml',
       '.bmp': 'image/bmp',
       '.safetensors': 'application/octet-stream',

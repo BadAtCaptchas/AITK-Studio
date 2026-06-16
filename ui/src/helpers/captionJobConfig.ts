@@ -17,7 +17,7 @@ export const defaultCaptionJobConfig: CaptionJobConfig = {
           quantize: true,
           qtype: 'float8',
           low_vram: true,
-          extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'],
+          extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'jxl'],
           path_to_caption: '',
           recaption: false,
           caption_prompt: defaultImageCaptionPrompt,

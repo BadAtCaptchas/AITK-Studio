@@ -7,6 +7,7 @@ import torchaudio
 from transformers import Gemma3Config
 import yaml
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
 from toolkit.models.base_model import BaseModel
 from toolkit.basic import flush
@@ -673,7 +674,7 @@ class LTX2Model(BaseModel):
 
         # handle control image
         if gen_config.ctrl_img is not None:
-            control_img = Image.open(gen_config.ctrl_img).convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             # resize the control image
             control_img = control_img.resize(
                 (gen_config.width, gen_config.height), Image.LANCZOS

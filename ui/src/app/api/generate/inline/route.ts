@@ -13,7 +13,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const isWindows = process.platform === 'win32';
-const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl']);
 
 class InlineGenerationCanceledError extends Error {
   constructor() {

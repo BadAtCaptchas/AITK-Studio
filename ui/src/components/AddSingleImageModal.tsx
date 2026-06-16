@@ -75,7 +75,7 @@ export default function AddSingleImageModal() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'],
+      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.jxl'],
     },
     multiple: false,
   });

@@ -8,10 +8,11 @@ import torch
 import torchaudio
 
 from toolkit.audio.album_artwork import add_album_artwork
+from toolkit.image_io import save_static_image
 from toolkit.prompt_utils import PromptEmbeds
 from torchao.quantization.quant_primitives import _DTYPE_TO_BIT_WIDTH
 
-ImgExt = Literal['jpg', 'png', 'webp']
+ImgExt = Literal['jpg', 'png', 'webp', 'jxl']
 
 SaveFormat = Literal['safetensors', 'diffusers']
 
@@ -133,8 +134,8 @@ class SampleConfig:
         self.network_multiplier = kwargs.get('network_multiplier', 1)
         self.guidance_rescale = kwargs.get('guidance_rescale', 0.0)
         raw_ext = str(kwargs.get('format', 'jpg')).lower().lstrip('.')
-        if raw_ext not in ['jpg', 'png', 'webp']:
-            raise ValueError(f"sample format must be one of ['jpg', 'png', 'webp'], got {raw_ext}")
+        if raw_ext not in ['jpg', 'png', 'webp', 'jxl']:
+            raise ValueError(f"sample format must be one of ['jpg', 'png', 'webp', 'jxl'], got {raw_ext}")
         self.ext: ImgExt = raw_ext
         self.adapter_conditioning_scale = kwargs.get('adapter_conditioning_scale', 1.0)
         self.refiner_start_at = kwargs.get('refiner_start_at',
@@ -1102,7 +1103,7 @@ class DatasetConfig:
         
         # color for transparent reigon of control images with transparency
         self.control_transparent_color: List[int] = kwargs.get('control_transparent_color', [0, 0, 0])
-        # inpaint images should be webp/png images with alpha channel. The alpha 0 (invisible) section will
+        # inpaint images should be png/webp/jxl images with alpha channel. The alpha 0 (invisible) section will
         # be the part conditioned to be inpainted. The alpha 1 (visible) section will be the part that is ignored
         self.inpaint_path: Union[str,List[str]] = kwargs.get('inpaint_path', None)
         # instead of cropping ot match image, it will serve the full size control image (clip images ie for ip adapters)
@@ -1410,7 +1411,7 @@ class GenerateImageConfig:
                 add_album_artwork(audio_path)
         else:
             # TODO save image gen header info for A1111 and us, our seeds probably wont match
-            image.save(self.get_image_path(count, max_count))
+            save_static_image(image, self.get_image_path(count, max_count))
             # do prompt file
             if self.add_prompt_file:
                 self.save_prompt_file(count, max_count)

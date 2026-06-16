@@ -5,6 +5,7 @@ import yaml
 from toolkit.accelerator import unwrap_model
 from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from toolkit.prompt_utils import PromptEmbeds
 from transformers import AutoTokenizer, UMT5EncoderModel
 from diffusers import AutoencoderKLWan, WanImageToVideoPipeline, WanTransformer3DModel
@@ -415,7 +416,7 @@ class Wan21I2V(Wan21):
         if gen_config.ctrl_img is None:
             raise ValueError("I2V samples must have a control image")
         
-        control_img = Image.open(gen_config.ctrl_img).convert("RGB")
+        control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
         
         height = gen_config.height
         width = gen_config.width

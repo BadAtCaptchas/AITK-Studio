@@ -17,6 +17,7 @@ export const FOLDER_IMPORT_MEDIA_EXTENSIONS = [
   '.jpg',
   '.jpeg',
   '.webp',
+  '.jxl',
   '.gif',
   '.bmp',
   '.mp4',

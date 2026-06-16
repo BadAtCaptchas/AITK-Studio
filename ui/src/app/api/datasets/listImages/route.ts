@@ -81,6 +81,7 @@ function findImagesRecursively(dir: string): string[] {
     '.jpg',
     '.jpeg',
     '.webp',
+    '.jxl',
     '.gif',
     '.bmp',
     '.mp4',

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from toolkit.stable_diffusion_model import StableDiffusion
     
 
-image_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.jxl']
 video_extensions = ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.wmv', '.m4v', '.flv']
 audio_extensions = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a']
 
@@ -98,7 +98,7 @@ class ImageDataset(Dataset, CaptionMixin):
 
         self.resolution = self.get_config('resolution', 256)
         self.file_list = [os.path.join(self.path, file) for file in os.listdir(self.path) if
-                          file.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))]
+                          file.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.jxl'))]
 
         # this might take a while
         print_acc(f"  -  Preprocessing image dimensions")
@@ -237,7 +237,7 @@ class PairedImageDataset(Dataset):
         self.pos_weight = self.get_config('pos_weight', self.network_weight)
         self.neg_weight = self.get_config('neg_weight', self.network_weight)
 
-        supported_exts = ('.jpg', '.jpeg', '.png', '.webp', '.JPEG', '.JPG', '.PNG', '.WEBP')
+        supported_exts = ('.jpg', '.jpeg', '.png', '.webp', '.jxl', '.JPEG', '.JPG', '.PNG', '.WEBP', '.JXL')
 
         if self.pos_folder is not None and self.neg_folder is not None:
             # find matching files
@@ -586,7 +586,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 )
                 self.file_list.append(file_item)
             except Exception as e:
-                if isinstance(e, image_utils.UnsupportedAnimatedImageError):
+                if isinstance(e, (image_utils.UnsupportedAnimatedImageError, image_utils.JpegXLSupportError)):
                     raise
                 print_acc(traceback.format_exc())
                 if self.is_video:

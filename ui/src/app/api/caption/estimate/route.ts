@@ -31,7 +31,7 @@ function normalizeMediaExtensions(value: unknown) {
   const normalized = requested
     .map(item => (typeof item === 'string' ? item.trim().replace(/^\.+/, '').toLowerCase() : ''))
     .filter(Boolean);
-  return normalized.length > 0 ? normalized : ['jpg', 'jpeg', 'png', 'bmp', 'webp'];
+  return normalized.length > 0 ? normalized : ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'jxl'];
 }
 
 function countCaptionTargets(

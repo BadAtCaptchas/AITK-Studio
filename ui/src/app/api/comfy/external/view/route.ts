@@ -15,6 +15,7 @@ function imageContentType(filename: string) {
   const lower = filename.toLowerCase();
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
   if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.jxl')) return 'image/jxl';
   return 'image/png';
 }
 

@@ -5,6 +5,7 @@ from PIL import Image
 from diffusers import UniPCMultistepScheduler
 import torch
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
 )
@@ -165,7 +166,7 @@ class Wan225bModel(Wan21):
         width = gen_config.width
         noise_mask = None
         if gen_config.ctrl_img is not None:
-            control_img = Image.open(gen_config.ctrl_img).convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
 
             d = self.get_bucket_divisibility()
 

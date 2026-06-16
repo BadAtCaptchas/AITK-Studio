@@ -110,6 +110,7 @@ const imageFormatOptions: SelectOption[] = [
   { value: 'png', label: 'PNG' },
   { value: 'jpg', label: 'JPG' },
   { value: 'webp', label: 'WEBP' },
+  { value: 'jxl', label: 'JXL' },
 ];
 
 const layerOffloadingBackendOptions: SelectOption[] = [

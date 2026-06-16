@@ -28,7 +28,7 @@ const defaultNameOrPath = '';
 const defaultOllamaVisionModel = 'qwen3.5:35b';
 
 const extensionsAudio = ['mp3', 'wav', 'flac', 'ogg'];
-const extensionsImage = ['jpg', 'jpeg', 'png', 'bmp', 'webp'];
+const extensionsImage = ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'jxl'];
 
 const defaultExtensions = [...extensionsImage];
 

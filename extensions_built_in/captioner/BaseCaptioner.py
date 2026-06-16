@@ -21,6 +21,7 @@ import tqdm
 
 from toolkit.exceptions import JobStopRequested
 from toolkit.encrypted_dataset import EncryptedDatasetReader, is_encrypted_dataset_path
+from toolkit.image_io import open_static_image
 from toolkit.train_tools import get_torch_dtype
 from toolkit.ui_database import UIJobStore
 
@@ -335,7 +336,7 @@ class BaseCaptioner(BaseExtensionProcess):
         if self.encrypted_reader is not None:
             image = self.encrypted_reader.open_image(self.encrypted_items_by_path[file_path]).convert("RGB")
         else:
-            image = Image.open(file_path).convert("RGB")
+            image = open_static_image(file_path, mode="RGB")
         if max_res is not None:
             max_pixels = max_res * max_res
             image_pixels = image.width * image.height

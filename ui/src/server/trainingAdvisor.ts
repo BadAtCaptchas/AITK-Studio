@@ -65,6 +65,7 @@ const MEDIA_EXTENSIONS = new Set([
   '.jpg',
   '.jpeg',
   '.webp',
+  '.jxl',
   '.bmp',
   '.gif',
   '.mp4',

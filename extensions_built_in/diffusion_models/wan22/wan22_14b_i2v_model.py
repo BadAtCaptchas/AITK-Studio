@@ -4,6 +4,7 @@ from toolkit.prompt_utils import PromptEmbeds
 from PIL import Image
 import torch
 from toolkit.config_modules import GenerateImageConfig
+from toolkit.image_io import open_static_image
 from .wan22_pipeline import Wan22Pipeline
 
 from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
@@ -39,7 +40,7 @@ class Wan2214bI2VModel(Wan2214bModel):
         width = gen_config.width
         first_frame_n1p1 = None
         if gen_config.ctrl_img is not None:
-            control_img = Image.open(gen_config.ctrl_img).convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
 
             d = self.get_bucket_divisibility()
 

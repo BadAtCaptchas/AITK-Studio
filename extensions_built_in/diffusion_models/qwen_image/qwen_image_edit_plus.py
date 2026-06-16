@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List, Optional
 import yaml
 from toolkit import train_tools
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from PIL import Image
 from toolkit.models.base_model import BaseModel
 from toolkit.basic import flush
@@ -104,21 +105,17 @@ class QwenImageEditPlusModel(QwenImageModel):
 
         control_img_list = []
         if gen_config.ctrl_img is not None:
-            control_img = Image.open(gen_config.ctrl_img)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             control_img_list.append(control_img)
         elif gen_config.ctrl_img_1 is not None:
-            control_img = Image.open(gen_config.ctrl_img_1)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img_1, mode="RGB")
             control_img_list.append(control_img)
 
         if gen_config.ctrl_img_2 is not None:
-            control_img = Image.open(gen_config.ctrl_img_2)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img_2, mode="RGB")
             control_img_list.append(control_img)
         if gen_config.ctrl_img_3 is not None:
-            control_img = Image.open(gen_config.ctrl_img_3)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img_3, mode="RGB")
             control_img_list.append(control_img)
 
         # flush for low vram if we are doing that

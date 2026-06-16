@@ -6,6 +6,7 @@ import torchvision
 import yaml
 from toolkit import train_tools
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from PIL import Image
 from toolkit.models.base_model import BaseModel
 from diffusers import FluxTransformer2DModel, AutoencoderKL, FluxKontextPipeline
@@ -215,8 +216,7 @@ class FluxKontextModel(BaseModel):
                 "Control image is required for Flux Kontext model generation."
             )
         else:
-            control_img = Image.open(gen_config.ctrl_img)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(

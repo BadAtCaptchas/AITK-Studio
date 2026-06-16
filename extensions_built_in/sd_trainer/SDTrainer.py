@@ -18,6 +18,7 @@ from toolkit.data_loader import get_dataloader_datasets
 from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO, FileItemDTO
 from toolkit.guidance import get_targeted_guidance_loss, get_guidance_loss, GuidanceType
 from toolkit.image_utils import show_tensors, show_latents
+from toolkit.image_io import open_static_image
 from toolkit.ip_adapter import IPAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.print import print_acc
@@ -244,7 +245,7 @@ class SDTrainer(BaseSDTrainProcess):
                     ctrl_img_list = []
                     
                     if gen_img_config.ctrl_img is not None:
-                        ctrl_img = Image.open(gen_img_config.ctrl_img).convert("RGB")
+                        ctrl_img = open_static_image(gen_img_config.ctrl_img, mode="RGB")
                         # convert to 0 to 1 tensor
                         ctrl_img = (
                             TF.to_tensor(ctrl_img)
@@ -254,7 +255,7 @@ class SDTrainer(BaseSDTrainProcess):
                         ctrl_img_list.append(ctrl_img)
                     
                     if gen_img_config.ctrl_img_1 is not None:
-                        ctrl_img_1 = Image.open(gen_img_config.ctrl_img_1).convert("RGB")
+                        ctrl_img_1 = open_static_image(gen_img_config.ctrl_img_1, mode="RGB")
                         # convert to 0 to 1 tensor
                         ctrl_img_1 = (
                             TF.to_tensor(ctrl_img_1)
@@ -263,7 +264,7 @@ class SDTrainer(BaseSDTrainProcess):
                         )
                         ctrl_img_list.append(ctrl_img_1)
                     if gen_img_config.ctrl_img_2 is not None:
-                        ctrl_img_2 = Image.open(gen_img_config.ctrl_img_2).convert("RGB")
+                        ctrl_img_2 = open_static_image(gen_img_config.ctrl_img_2, mode="RGB")
                         # convert to 0 to 1 tensor
                         ctrl_img_2 = (
                             TF.to_tensor(ctrl_img_2)
@@ -272,7 +273,7 @@ class SDTrainer(BaseSDTrainProcess):
                         )
                         ctrl_img_list.append(ctrl_img_2)
                     if gen_img_config.ctrl_img_3 is not None:
-                        ctrl_img_3 = Image.open(gen_img_config.ctrl_img_3).convert("RGB")
+                        ctrl_img_3 = open_static_image(gen_img_config.ctrl_img_3, mode="RGB")
                         # convert to 0 to 1 tensor
                         ctrl_img_3 = (
                             TF.to_tensor(ctrl_img_3)

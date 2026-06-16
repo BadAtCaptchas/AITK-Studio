@@ -20,6 +20,7 @@ from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.ip_adapter import IPAdapter
 from toolkit.config_modules import ModelConfig, GenerateImageConfig, ModelArch
+from toolkit.image_io import open_static_image
 from toolkit.models.decorator import Decorator
 from toolkit.paths import KEYMAPS_ROOT
 from toolkit.prompt_utils import inject_trigger_into_prompt, PromptEmbeds, concat_prompt_embeds
@@ -477,10 +478,10 @@ class BaseModel:
                     extra = {}
                     validation_image = None
                     if self.adapter is not None and gen_config.adapter_image_path is not None:
-                        validation_image = Image.open(gen_config.adapter_image_path)
                         if ".inpaint." not in gen_config.adapter_image_path:
-                            validation_image = validation_image.convert("RGB")
+                            validation_image = open_static_image(gen_config.adapter_image_path, mode="RGB")
                         else:
+                            validation_image = open_static_image(gen_config.adapter_image_path, mode="RGBA", require_alpha=True)
                             # make sure it has an alpha
                             if validation_image.mode != "RGBA":
                                 raise ValueError("Inpainting images must have an alpha channel")
@@ -573,7 +574,7 @@ class BaseModel:
                             ctrl_img_list = []
                     
                             if gen_config.ctrl_img is not None:
-                                ctrl_img = Image.open(gen_config.ctrl_img).convert("RGB")
+                                ctrl_img = open_static_image(gen_config.ctrl_img, mode="RGB")
                                 # convert to 0 to 1 tensor
                                 ctrl_img = (
                                     TF.to_tensor(ctrl_img)
@@ -583,7 +584,7 @@ class BaseModel:
                                 ctrl_img_list.append(ctrl_img)
                             
                             if gen_config.ctrl_img_1 is not None:
-                                ctrl_img_1 = Image.open(gen_config.ctrl_img_1).convert("RGB")
+                                ctrl_img_1 = open_static_image(gen_config.ctrl_img_1, mode="RGB")
                                 # convert to 0 to 1 tensor
                                 ctrl_img_1 = (
                                     TF.to_tensor(ctrl_img_1)
@@ -592,7 +593,7 @@ class BaseModel:
                                 )
                                 ctrl_img_list.append(ctrl_img_1)
                             if gen_config.ctrl_img_2 is not None:
-                                ctrl_img_2 = Image.open(gen_config.ctrl_img_2).convert("RGB")
+                                ctrl_img_2 = open_static_image(gen_config.ctrl_img_2, mode="RGB")
                                 # convert to 0 to 1 tensor
                                 ctrl_img_2 = (
                                     TF.to_tensor(ctrl_img_2)
@@ -601,7 +602,7 @@ class BaseModel:
                                 )
                                 ctrl_img_list.append(ctrl_img_2)
                             if gen_config.ctrl_img_3 is not None:
-                                ctrl_img_3 = Image.open(gen_config.ctrl_img_3).convert("RGB")
+                                ctrl_img_3 = open_static_image(gen_config.ctrl_img_3, mode="RGB")
                                 # convert to 0 to 1 tensor
                                 ctrl_img_3 = (
                                     TF.to_tensor(ctrl_img_3)

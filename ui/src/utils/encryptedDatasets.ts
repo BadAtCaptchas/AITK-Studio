@@ -21,6 +21,29 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const rememberedKeys = new Map<string, string>();
 const WEBAUTHN_TIMEOUT_MS = 120_000;
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.jxl': 'image/jxl',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.mp4': 'video/mp4',
+  '.avi': 'video/x-msvideo',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.wmv': 'video/x-ms-wmv',
+  '.m4v': 'video/x-m4v',
+  '.flv': 'video/x-flv',
+  '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+};
 
 function copyToArrayBuffer(bytes: ArrayBuffer | ArrayBufferView): ArrayBuffer {
   if (bytes instanceof ArrayBuffer) return bytes;
@@ -458,7 +481,7 @@ export function getMediaKind(file: File): EncryptedDatasetMediaKind | null {
   if (file.type.startsWith('video/')) return 'video';
   if (file.type.startsWith('audio/')) return 'audio';
   const ext = getExtension(file.name).toLowerCase();
-  if (['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'].includes(ext)) return 'image';
+  if (['.jpg', '.jpeg', '.png', '.webp', '.jxl', '.gif', '.bmp'].includes(ext)) return 'image';
   if (['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv', '.webm'].includes(ext)) return 'video';
   if (['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac'].includes(ext)) return 'audio';
   return null;
@@ -471,6 +494,10 @@ export function getExtension(fileName: string) {
 
 export function getBaseName(fileName: string) {
   return fileName.replace(/\.[^.]+$/, '');
+}
+
+export function getMimeTypeForFile(file: File, catalogName = file.name) {
+  return file.type || MIME_BY_EXTENSION[getExtension(catalogName).toLowerCase()] || 'application/octet-stream';
 }
 
 export function captionObjectPath(itemId = randomId()) {
@@ -558,7 +585,7 @@ export async function buildEncryptedDatasetItem(
     id: itemId,
     name: catalogName,
     extension: getExtension(catalogName).toLowerCase(),
-    mimeType: file.type || 'application/octet-stream',
+    mimeType: getMimeTypeForFile(file, catalogName),
     mediaKind,
     objectPath,
     size: file.size,

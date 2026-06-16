@@ -15,6 +15,7 @@ const contentTypeMap: { [key: string]: string } = {
   '.png': 'image/png',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.jxl': 'image/jxl',
   '.svg': 'image/svg+xml',
   '.bmp': 'image/bmp',
   '.mp4': 'video/mp4',

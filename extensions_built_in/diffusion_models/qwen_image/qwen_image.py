@@ -5,6 +5,7 @@ import torch
 import yaml
 from toolkit import train_tools
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from PIL import Image
 from toolkit.models.base_model import BaseModel
 from toolkit.basic import flush
@@ -266,8 +267,7 @@ class QwenImageModel(BaseModel):
             raise NotImplementedError(
                 "Control image generation is not supported in Qwen Image model... yet"
             )
-            control_img = Image.open(gen_config.ctrl_img)
-            control_img = control_img.convert("RGB")
+            control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(

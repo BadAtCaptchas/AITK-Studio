@@ -94,7 +94,7 @@ export default function SampleControlImage({
   // Drag & drop only; click handled via our own hidden input
   const { getRootProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'] },
+    accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.jxl'] },
     multiple: false,
     noClick: true,
     noKeyboard: true,

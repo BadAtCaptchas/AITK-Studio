@@ -92,6 +92,8 @@ test('listDatasetSummaries counts missing captions for plain datasets', async ()
   await fs.writeFile(path.join(plain, 'captioned.txt'), 'caption');
   await fs.writeFile(path.join(plain, 'json_captioned.webp'), 'media');
   await fs.writeFile(path.join(plain, 'json_captioned.json'), JSON.stringify({ caption: 'json caption' }));
+  await fs.writeFile(path.join(plain, 'jxl_captioned.jxl'), 'media');
+  await fs.writeFile(path.join(plain, 'jxl_captioned.txt'), 'caption');
   await fs.writeFile(path.join(plain, 'nested', 'missing.jpg'), 'media');
   await fs.writeFile(path.join(plain, 'notes.txt'), 'orphan text');
   await fs.writeFile(path.join(plain, '_controls', 'control.png'), 'ignored media');
@@ -105,8 +107,8 @@ test('listDatasetSummaries counts missing captions for plain datasets', async ()
   const plainSummary = summaries.find(dataset => dataset.name === 'plain_dataset');
   const lockedSummary = summaries.find(dataset => dataset.name === 'locked_dataset');
 
-  assert.equal(plainSummary.itemCount, 3);
-  assert.equal(plainSummary.captionedItemCount, 2);
+  assert.equal(plainSummary.itemCount, 4);
+  assert.equal(plainSummary.captionedItemCount, 3);
   assert.equal(plainSummary.missingCaptionCount, 1);
   assert.equal(plainSummary.detectedCaptionExt, null);
   assert.equal(lockedSummary.encrypted, true);

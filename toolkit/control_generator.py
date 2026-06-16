@@ -4,10 +4,10 @@ import os
 import torch
 from typing import Literal
 from PIL import Image, ImageFilter, ImageOps
-from PIL.ImageOps import exif_transpose
 from tqdm import tqdm
 
 from torchvision import transforms
+from toolkit.image_io import open_static_image
 
 # supress all warnings
 import warnings
@@ -24,7 +24,7 @@ def flush(garbage_collect=True):
 
 ControlTypes = Literal['depth', 'pose', 'line', 'inpaint', 'mask', 'sapiens2_mask']
 
-img_ext_list = ['.jpg', '.jpeg', '.png', '.webp']
+img_ext_list = ['.jpg', '.jpeg', '.png', '.webp', '.jxl']
 
 
 class ControlGenerator:
@@ -73,8 +73,7 @@ class ControlGenerator:
 
         if image is None:
             # make sure image is loaded if we havent loaded it with another control
-            image = Image.open(img_path).convert('RGB')
-            image = exif_transpose(image)
+            image = open_static_image(img_path, mode='RGB')
 
             # resize to a max of 1mp
             max_size = 1024 * 1024

@@ -261,3 +261,25 @@ test('combineDatasets writes encrypted output without plaintext files', async ()
     'encrypted caption',
   );
 });
+
+test('combineDatasets stores JPEG XL MIME type in encrypted output catalog', async () => {
+  const root = await makeRoot();
+  const outputKey = crypto.randomBytes(32);
+  await writePlainDataset(root, 'plain', [{ path: 'sample.jxl', data: 'jxl bytes', caption: 'jxl caption' }]);
+  await writePlainDataset(root, 'other', [{ path: 'other.png', data: 'png bytes', caption: 'png caption' }]);
+
+  const result = await combineDatasets(root, {
+    sourceDatasets: ['plain', 'other'],
+    outputName: 'encrypted_jxl',
+    outputEncrypted: true,
+    outputEncryptedManifest: manifestForKey(outputKey),
+    outputKeyB64: outputKey.toString('base64'),
+  });
+
+  const catalog = await readOutputCatalog(path.join(root, result.dataset.name), outputKey);
+  const item = catalog.items.find(entry => entry.name === 'sample.jxl');
+
+  assert.equal(item.extension, '.jxl');
+  assert.equal(item.mimeType, 'image/jxl');
+  assert.equal(item.mediaKind, 'image');
+});

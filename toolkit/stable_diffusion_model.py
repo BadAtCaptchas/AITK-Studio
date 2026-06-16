@@ -30,6 +30,7 @@ from toolkit.ip_adapter import IPAdapter
 from toolkit.util.vae import load_vae
 from toolkit import train_tools
 from toolkit.config_modules import ModelConfig, GenerateImageConfig, ModelArch
+from toolkit.image_io import open_static_image
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.models.decorator import Decorator
 from toolkit.paths import KEYMAPS_ROOT
@@ -1479,11 +1480,11 @@ class StableDiffusion:
                     extra = {}
                     validation_image = None
                     if self.adapter is not None and gen_config.adapter_image_path is not None:
-                        validation_image = Image.open(gen_config.adapter_image_path)
                         # if the name doesnt have .inpainting. in it, make sure it is rgb
                         if ".inpaint." not in gen_config.adapter_image_path:
-                            validation_image = validation_image.convert("RGB")
+                            validation_image = open_static_image(gen_config.adapter_image_path, mode="RGB")
                         else:
+                            validation_image = open_static_image(gen_config.adapter_image_path, mode="RGBA", require_alpha=True)
                             # make sure it has an alpha
                             if validation_image.mode != "RGBA":
                                 raise ValueError("Inpainting images must have an alpha channel")

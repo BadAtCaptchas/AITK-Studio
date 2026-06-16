@@ -66,7 +66,7 @@ transforms_dict = {
     'RandomEqualize': transforms.RandomEqualize(p=0.2),
 }
 
-img_ext_list = ['.jpg', '.jpeg', '.png', '.webp']
+img_ext_list = ['.jpg', '.jpeg', '.png', '.webp', '.jxl']
 
 
 def standardize_images(images):
@@ -1070,7 +1070,7 @@ class InpaintControlFileItemDTOMixin:
             inpaint_path = dataset_config.inpaint_path
             # we are using control images
             img_path = kwargs.get('path', None)
-            img_inpaint_ext_list = ['.png', '.webp']
+            img_inpaint_ext_list = ['.png', '.webp', '.jxl']
             file_name_no_ext = os.path.splitext(os.path.basename(img_path))[0]
 
             for ext in img_inpaint_ext_list:

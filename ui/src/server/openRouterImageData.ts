@@ -13,6 +13,7 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
+  '.jxl': 'image/jxl',
   '.gif': 'image/gif',
   '.bmp': 'image/bmp',
 };
@@ -56,7 +57,7 @@ export async function plainOpenRouterImageDataUrl(imgPath: unknown, featureName:
     const responseMime = remoteResponse.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() || '';
     const mimeType = ALLOWED_UPLOAD_MIMES.has(responseMime) ? responseMime : imageMimeForPath(remoteAsset.path);
     if (!mimeType) {
-      throw new Error(`${featureName} supports JPG, PNG, WebP, GIF, and BMP images.`);
+      throw new Error(`${featureName} supports JPG, PNG, WebP, JPEG XL, GIF, and BMP images.`);
     }
     return dataUrlFromBytes(Buffer.from(await remoteResponse.arrayBuffer()), mimeType);
   }
@@ -82,7 +83,7 @@ export async function plainOpenRouterImageDataUrl(imgPath: unknown, featureName:
 
   const mimeType = imageMimeForPath(realImagePath);
   if (!mimeType) {
-    throw new Error(`${featureName} supports JPG, PNG, WebP, GIF, and BMP images.`);
+    throw new Error(`${featureName} supports JPG, PNG, WebP, JPEG XL, GIF, and BMP images.`);
   }
 
   return dataUrlFromBytes(await fs.readFile(realImagePath), mimeType);
@@ -106,7 +107,7 @@ export async function encryptedOpenRouterUploadImageDataUrl(formData: FormData, 
 
   const mimeType = image.type || 'image/jpeg';
   if (!ALLOWED_UPLOAD_MIMES.has(mimeType)) {
-    throw new Error(`${featureName} supports JPG, PNG, WebP, GIF, and BMP images.`);
+    throw new Error(`${featureName} supports JPG, PNG, WebP, JPEG XL, GIF, and BMP images.`);
   }
 
   return dataUrlFromBytes(Buffer.from(await image.arrayBuffer()), mimeType);

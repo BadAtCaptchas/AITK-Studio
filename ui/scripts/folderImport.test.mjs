@@ -21,7 +21,9 @@ test('folder import caption keys pair by normalized relative path stem', () => {
 
 test('folder import treats JSON captions as supported sidecars', () => {
   assert.equal(FOLDER_IMPORT_SUPPORTED_EXTENSIONS.has('.json'), true);
+  assert.equal(FOLDER_IMPORT_SUPPORTED_EXTENSIONS.has('.jxl'), true);
   assert.equal(isFolderImportCaptionSidecarPath('cats/a.json'), true);
+  assert.equal(isFolderImportCaptionSidecarPath('cats/a.jxl'), false);
   assert.equal(isFolderImportCaptionSidecarPath('cats/a.png'), false);
 });
 

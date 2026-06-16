@@ -6,6 +6,7 @@ import torchvision
 import yaml
 from toolkit import train_tools
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.image_io import open_static_image
 from PIL import Image
 from toolkit.models.base_model import BaseModel
 from diffusers import FluxTransformer2DModel, AutoencoderKL
@@ -231,10 +232,10 @@ class Flex2(BaseModel):
         if gen_config.ctrl_img is None:
             control_img = None
         else:
-            control_img = Image.open(gen_config.ctrl_img)
             if ".inpaint." not in gen_config.ctrl_img:
-                control_img = control_img.convert("RGB")
+                control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             else:
+                control_img = open_static_image(gen_config.ctrl_img, mode="RGBA", require_alpha=True)
                 # make sure it has an alpha
                 if control_img.mode != "RGBA":
                     raise ValueError("Inpainting images must have an alpha channel")

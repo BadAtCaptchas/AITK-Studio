@@ -1,4 +1,5 @@
 import base64
+import importlib.util
 import io
 import json
 import os
@@ -10,14 +11,22 @@ from types import SimpleNamespace
 
 import torch
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from PIL import Image, ImageDraw, features
+from PIL import Image, ImageDraw
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+try:
+    if importlib.util.find_spec("pillow_jxl") is None:
+        raise ImportError("pillow_jxl is not importable")
+    import pillow_jxl  # noqa: F401
+    JXL_AVAILABLE = True
+except Exception:
+    JXL_AVAILABLE = False
+
+from toolkit import image_io, image_utils
 from toolkit.config_modules import DatasetConfig
 from toolkit.data_loader import AiToolkitDataset
 from toolkit.encrypted_dataset import EncryptedDatasetReader
-from toolkit import image_utils
 
 
 class FakeSD:
@@ -49,27 +58,40 @@ class FakeSD:
         return 32
 
 
-def _write_rgb_webp(path, size=(96, 80), color=(32, 64, 128)):
-    Image.new("RGB", size, color).save(path, format="WEBP", lossless=True)
+def _write_rgb_jxl(path, size=(96, 80), color=(32, 64, 128)):
+    Image.new("RGB", size, color).save(path, lossless=True)
 
 
-def _write_rgba_webp(path, size=(64, 64)):
+def _write_rgba_jxl(path, size=(64, 64)):
     image = Image.new("RGBA", size, (20, 40, 60, 255))
     alpha = Image.new("L", size, 255)
     draw = ImageDraw.Draw(alpha)
     draw.rectangle((0, 0, size[0] // 2 - 1, size[1] - 1), fill=0)
     image.putalpha(alpha)
-    image.save(path, format="WEBP", lossless=True)
+    image.save(path, lossless=True)
 
 
 def _b64(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
-@unittest.skipUnless(features.check("webp"), "Pillow WebP support is required")
-class WebPDatasetTest(unittest.TestCase):
+class JPEGXLMissingPluginMessageTest(unittest.TestCase):
+    def test_jxl_bytes_without_plugin_raise_clear_error(self):
+        previous = image_io._jpegxl_plugin_available
+        image_io._jpegxl_plugin_available = False
+        try:
+            with self.assertRaisesRegex(image_io.JpegXLSupportError, "pillow-jxl-plugin"):
+                image_io.open_static_image_from_bytes(b"\xff\x0a" + (b"\x00" * 32), source="sample.jxl")
+            with self.assertRaisesRegex(image_io.JpegXLSupportError, "pillow-jxl-plugin"):
+                image_utils.get_image_metadata_from_bytesio(io.BytesIO(b"\xff\x0a" + (b"\x00" * 32)), 34)
+        finally:
+            image_io._jpegxl_plugin_available = previous
+
+
+@unittest.skipUnless(JXL_AVAILABLE, "pillow_jxl is required for JPEG XL encode/decode tests")
+class JPEGXLDatasetTest(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="aitk-webp-")
+        self.root = tempfile.mkdtemp(prefix="aitk-jxl-")
         self.dataset_dir = os.path.join(self.root, "dataset")
         self.inpaint_dir = os.path.join(self.root, "inpaint")
         os.makedirs(self.dataset_dir)
@@ -87,8 +109,14 @@ class WebPDatasetTest(unittest.TestCase):
         kwargs.update(overrides)
         return DatasetConfig(**kwargs)
 
-    def test_static_webp_is_discovered_fast_sized_and_loaded_as_rgb_tensor(self):
-        _write_rgb_webp(os.path.join(self.dataset_dir, "sample.webp"))
+    def _skip_if_alpha_unavailable(self, path):
+        try:
+            image_io.open_static_image(path, mode="RGBA", require_alpha=True)
+        except Exception as exc:
+            self.skipTest(f"pillow_jxl alpha support is unavailable: {exc}")
+
+    def test_static_jxl_is_discovered_fast_sized_and_loaded_as_rgb_tensor(self):
+        _write_rgb_jxl(os.path.join(self.dataset_dir, "sample.jxl"))
 
         dataset = AiToolkitDataset(
             self._dataset_config(fast_image_size=True),
@@ -97,21 +125,27 @@ class WebPDatasetTest(unittest.TestCase):
         )
 
         self.assertEqual(len(dataset.file_list), 1)
-        self.assertEqual(os.path.basename(dataset.file_list[0].path), "sample.webp")
+        self.assertEqual(os.path.basename(dataset.file_list[0].path), "sample.jxl")
         self.assertEqual((dataset.file_list[0].width, dataset.file_list[0].height), (96, 80))
 
         item = dataset._get_single_item(0)
         self.assertEqual(tuple(item.tensor.shape), (3, 32, 32))
         self.assertTrue(torch.isfinite(item.tensor).all())
 
-    def test_fast_metadata_reads_webp_dimensions(self):
-        webp_path = os.path.join(self.dataset_dir, "metadata.webp")
-        _write_rgb_webp(webp_path, size=(123, 77))
+    def test_fast_metadata_reads_jxl_dimensions(self):
+        jxl_path = os.path.join(self.dataset_dir, "metadata.jxl")
+        _write_rgb_jxl(jxl_path, size=(123, 77))
 
-        self.assertEqual(image_utils.get_image_size(webp_path), (123, 77))
+        metadata = image_utils.get_image_metadata(jxl_path)
 
-    def test_alpha_mask_extracts_webp_alpha_channel(self):
-        _write_rgba_webp(os.path.join(self.dataset_dir, "alpha.webp"))
+        self.assertEqual((metadata.width, metadata.height), (123, 77))
+        self.assertEqual(metadata.type, "JPEGXL")
+
+    def test_alpha_mask_extracts_jxl_alpha_channel(self):
+        jxl_path = os.path.join(self.dataset_dir, "alpha.jxl")
+        _write_rgba_jxl(jxl_path)
+        self._skip_if_alpha_unavailable(jxl_path)
+
         dataset = AiToolkitDataset(
             self._dataset_config(buckets=True, alpha_mask=True),
             batch_size=1,
@@ -127,28 +161,34 @@ class WebPDatasetTest(unittest.TestCase):
         self.assertLess(left_alpha, 0.1)
         self.assertGreater(right_alpha, 0.9)
 
-    def test_inpaint_webp_without_alpha_raises_clear_error(self):
+    def test_rgba_jxl_can_feed_inpaint_path(self):
         Image.new("RGB", (64, 64), (10, 20, 30)).save(os.path.join(self.dataset_dir, "plain.png"))
-        _write_rgb_webp(os.path.join(self.inpaint_dir, "plain.webp"), size=(64, 64))
+        inpaint_path = os.path.join(self.inpaint_dir, "plain.jxl")
+        _write_rgba_jxl(inpaint_path, size=(64, 64))
+        self._skip_if_alpha_unavailable(inpaint_path)
+
         dataset = AiToolkitDataset(
             self._dataset_config(buckets=True, inpaint_path=self.inpaint_dir),
             batch_size=1,
             sd=FakeSD(),
         )
 
-        with self.assertRaisesRegex(Exception, "alpha channel"):
-            dataset._get_single_item(0)
+        item = dataset._get_single_item(0)
 
-    def test_encrypted_webp_opens_from_detached_bytes(self):
+        self.assertIsNotNone(item.inpaint_tensor)
+        self.assertEqual(tuple(item.inpaint_tensor.shape), (4, 32, 32))
+
+    def test_encrypted_jxl_opens_from_detached_bytes(self):
         encrypted_root = os.path.join(self.root, "encrypted")
         objects_root = os.path.join(encrypted_root, "objects")
         os.makedirs(objects_root)
         key = os.urandom(32)
         aes = AESGCM(key)
 
-        image = Image.new("RGB", (11, 7), (12, 34, 56))
-        image_io = io.BytesIO()
-        image.save(image_io, format="WEBP", lossless=True)
+        image_path = os.path.join(self.root, "private.jxl")
+        _write_rgb_jxl(image_path, size=(11, 7), color=(12, 34, 56))
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
 
         def encrypt(data: bytes, aad: bytes):
             nonce = os.urandom(12)
@@ -156,23 +196,23 @@ class WebPDatasetTest(unittest.TestCase):
 
         object_path = "objects/media.bin"
         with open(os.path.join(encrypted_root, object_path), "w", encoding="utf-8") as f:
-            json.dump(encrypt(image_io.getvalue(), b"aitk-encrypted-object:objects/media.bin"), f)
+            json.dump(encrypt(image_bytes, b"aitk-encrypted-object:objects/media.bin"), f)
 
         catalog = {
             "version": 1,
             "items": [
                 {
-                    "id": "webp1",
-                    "name": "private.webp",
-                    "extension": ".webp",
-                    "mimeType": "image/webp",
+                    "id": "jxl1",
+                    "name": "private.jxl",
+                    "extension": ".jxl",
+                    "mimeType": "image/jxl",
                     "mediaKind": "image",
                     "objectPath": object_path,
-                    "size": len(image_io.getvalue()),
+                    "size": len(image_bytes),
                     "width": 11,
                     "height": 7,
-                    "createdAt": "2026-05-21T00:00:00Z",
-                    "updatedAt": "2026-05-21T00:00:00Z",
+                    "createdAt": "2026-06-16T00:00:00Z",
+                    "updatedAt": "2026-06-16T00:00:00Z",
                 }
             ],
         }
@@ -190,7 +230,6 @@ class WebPDatasetTest(unittest.TestCase):
 
         reader = EncryptedDatasetReader(encrypted_root, key=key)
         loaded = reader.open_image(reader.items[0], mode="RGB")
-        shutil.rmtree(encrypted_root)
 
         self.assertEqual(loaded.size, (11, 7))
         self.assertEqual(loaded.getpixel((0, 0)), (12, 34, 56))

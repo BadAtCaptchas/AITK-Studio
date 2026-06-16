@@ -928,17 +928,20 @@ class ImageProcessingDTOMixin:
         # if we are caching latents, just do that
         if self.is_latent_cached:
             self.get_latent()
-            if self.has_control_image:
-                self.load_control_image()
-            if self.has_inpaint_image:
-                self.load_inpaint_image()
-            if self.has_clip_image:
-                self.load_clip_image()
-            if self.has_mask_image:
-                self.load_mask_image()
-            if self.has_unconditional:
-                self.load_unconditional_image()
-            return
+            # If requested, keep going so the raw image tensor is available
+            # alongside cached latents for pixel-space losses.
+            if not self.dataset_config.load_image_when_caching_latents:
+                if self.has_control_image:
+                    self.load_control_image()
+                if self.has_inpaint_image:
+                    self.load_inpaint_image()
+                if self.has_clip_image:
+                    self.load_clip_image()
+                if self.has_mask_image:
+                    self.load_mask_image()
+                if self.has_unconditional:
+                    self.load_unconditional_image()
+                return
         if self.is_audio_model:
             self.load_and_process_audio()
             return

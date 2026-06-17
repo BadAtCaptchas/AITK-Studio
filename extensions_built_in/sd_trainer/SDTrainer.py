@@ -950,6 +950,19 @@ class SDTrainer(BaseSDTrainProcess):
                     timestep_weight = timestep_weight.view(-1, 1, 1, 1, 1).detach()
                 loss = loss * timestep_weight
 
+            video_loss_mask = getattr(batch, 'video_loss_mask', None)
+            if video_loss_mask is not None and len(loss.shape) == 5:
+                video_loss_mask = video_loss_mask.to(loss.device, dtype=loss.dtype)
+                if video_loss_mask.dim() == 4:
+                    video_loss_mask = video_loss_mask.unsqueeze(1)
+                while video_loss_mask.dim() < loss.dim():
+                    video_loss_mask = video_loss_mask.unsqueeze(-1)
+                mask_mean = video_loss_mask.mean(
+                    dim=tuple(range(1, video_loss_mask.dim())),
+                    keepdim=True,
+                ).clamp(min=1e-8)
+                loss = loss * video_loss_mask / mask_mean
+
         if self.train_config.do_prior_divergence and prior_pred is not None:
             loss = loss + (torch.nn.functional.mse_loss(pred.float(), prior_pred.float(), reduction="none") * -1.0)
 
@@ -1049,7 +1062,29 @@ class SDTrainer(BaseSDTrainProcess):
         
         # check for audio loss
         if batch.audio_pred is not None and batch.audio_target is not None:
-            audio_loss = torch.nn.functional.mse_loss(batch.audio_pred.float(), batch.audio_target.float(), reduction="mean")
+            audio_loss_element = torch.nn.functional.mse_loss(
+                batch.audio_pred.float(),
+                batch.audio_target.float(),
+                reduction="none",
+            )
+            audio_loss_mask = getattr(batch, 'audio_loss_mask', None)
+            if audio_loss_mask is not None:
+                audio_loss_mask = audio_loss_mask.to(
+                    audio_loss_element.device,
+                    dtype=audio_loss_element.dtype,
+                )
+                if audio_loss_mask.dim() == 2:
+                    audio_loss_mask = audio_loss_mask.unsqueeze(-1)
+                while audio_loss_mask.dim() < audio_loss_element.dim():
+                    audio_loss_mask = audio_loss_mask.unsqueeze(-1)
+                audio_loss = (
+                    audio_loss_element * audio_loss_mask
+                ).mean(dim=tuple(range(1, audio_loss_element.dim()))) / audio_loss_mask.mean(
+                    dim=tuple(range(1, audio_loss_mask.dim()))
+                ).clamp(min=1e-8)
+                audio_loss = audio_loss.mean()
+            else:
+                audio_loss = audio_loss_element.mean()
             audio_loss = audio_loss * self.train_config.audio_loss_multiplier
             loss = loss + audio_loss
 
@@ -1521,6 +1556,7 @@ class SDTrainer(BaseSDTrainProcess):
                     self.sd.text_encoder.to(self.sd.te_torch_dtype)
 
             noisy_latents, noise, timesteps, conditioned_prompts, imgs = self.process_general_training_batch(batch)
+            batch.ltx_strategy = getattr(self.train_config, 'ltx_strategy', None)
             if self.train_config.do_cfg or self.train_config.do_random_cfg:
                 # pick random negative prompts
                 if self.negative_prompt_pool is not None:

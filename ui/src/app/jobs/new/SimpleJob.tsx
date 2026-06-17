@@ -557,6 +557,7 @@ export default function SimpleJob({
     { value: 'linear', label: 'Linear' },
     { value: 'shift', label: 'Shift' },
     { value: 'weighted', label: 'Weighted' },
+    { value: 'shifted_logit_normal', label: 'Shifted logit normal' },
   ];
   const timestepBiasOptions = [
     { value: 'balanced', label: 'Balanced' },

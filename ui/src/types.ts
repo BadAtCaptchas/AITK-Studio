@@ -439,6 +439,31 @@ export interface PhaseAutoAdvanceConfig {
   min_delta_pct?: number;
 }
 
+export type LTXStrategyConditionType = 'first_frame' | 'prefix' | 'suffix';
+
+export interface LTXStrategyCondition {
+  type: LTXStrategyConditionType;
+  probability?: number;
+  tokens?: number;
+  latent_frames?: number;
+  num_latent_frames?: number;
+  temporal_boundary?: number;
+  num_frames?: number;
+  frames?: number;
+  duration?: number;
+  seconds?: number;
+}
+
+export interface LTXStrategyModalityConfig {
+  is_generated: boolean;
+  conditions?: LTXStrategyCondition[];
+}
+
+export interface LTXStrategyConfig {
+  video?: LTXStrategyModalityConfig;
+  audio?: LTXStrategyModalityConfig;
+}
+
 export interface TrainingPhaseConfig {
   name: string;
   steps?: number;
@@ -528,6 +553,7 @@ export interface TrainConfig {
   do_differential_guidance?: boolean;
   differential_guidance_scale?: number;
   audio_loss_multiplier?: number;
+  ltx_strategy?: LTXStrategyConfig;
   max_loss?: number | null;
 }
 

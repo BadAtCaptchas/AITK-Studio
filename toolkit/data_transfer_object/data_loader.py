@@ -251,6 +251,9 @@ class DataLoaderBatchDTO:
             # just for holding noise and preds during training
             self.audio_target: Union[torch.Tensor, None] = None
             self.audio_pred: Union[torch.Tensor, None] = None
+            self.audio_loss_mask: Union[torch.Tensor, None] = None
+            self.video_loss_mask: Union[torch.Tensor, None] = None
+            self.ltx_strategy = None
             
             self.num_frames: int = self.file_items[0].num_frames
 
@@ -506,6 +509,9 @@ class DataLoaderBatchDTO:
         del self.audio_data
         del self.audio_target
         del self.audio_pred
+        del self.audio_loss_mask
+        del self.video_loss_mask
+        del self.ltx_strategy
         del self.first_frame_latents
         del self.audio_latents
         for file_item in self.file_items:

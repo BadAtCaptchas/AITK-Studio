@@ -1374,6 +1374,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         do_double = False
 
                 num_train_timesteps = self.train_config.num_train_timesteps
+                flowmatch_patch_size = 1
 
                 if self.train_config.noise_scheduler in ['custom_lcm']:
                     # we store this value on our custom one
@@ -1402,19 +1403,18 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         num_train_timesteps = self.train_config.next_sample_timesteps
                         timestep_type = 'shift'
                     
-                    patch_size = 1
                     if self.sd.is_flux or 'flex' in self.sd.arch:
                         # flux is a patch size of 1, but latents are divided by 2, so we need to double it
-                        patch_size = 2
+                        flowmatch_patch_size = 2
                     elif hasattr(self.sd.unet, 'config') and hasattr(self.sd.unet.config, 'patch_size'):
-                        patch_size = self.sd.unet.config.patch_size
+                        flowmatch_patch_size = self.sd.unet.config.patch_size
                     
                     self.sd.noise_scheduler.set_train_timesteps(
                         num_train_timesteps,
                         device=self.device_torch,
                         timestep_type=timestep_type,
                         latents=latents,
-                        patch_size=patch_size,
+                        patch_size=flowmatch_patch_size,
                     )
                 else:
                     self.sd.noise_scheduler.set_timesteps(
@@ -1438,13 +1438,38 @@ class BaseSDTrainProcess(BaseTrainProcess):
             max_noise_steps = min(max_noise_steps, num_train_timesteps - 1)
             
                     
+            direct_timesteps = None
             with self.timer('prepare_timesteps_indices'):
 
                 content_or_style = self.train_config.content_or_style
                 if is_reg:
                     content_or_style = self.train_config.content_or_style_reg
 
-                if self.train_config.timestep_type in ['two_step', 'four_step', 'eight_step']:
+                if self.train_config.noise_scheduler == 'flowmatch' and self.train_config.timestep_type == 'shifted_logit_normal':
+                    sampler = getattr(self.sd.noise_scheduler, 'sample_shifted_logit_normal_timesteps', None)
+                    if sampler is None:
+                        raise ValueError("shifted_logit_normal timestep sampling requires a flowmatch scheduler that supports it")
+
+                    min_allowed_timestep = self.sd.noise_scheduler.timesteps[max_noise_steps]
+                    max_allowed_timestep = self.sd.noise_scheduler.timesteps[min_noise_steps]
+                    seq_length = None
+                    if hasattr(self.sd, 'get_latent_sequence_length'):
+                        seq_length = self.sd.get_latent_sequence_length(latents)
+
+                    direct_timesteps = sampler(
+                        batch_size=batch_size,
+                        device=self.device_torch,
+                        latents=latents,
+                        patch_size=flowmatch_patch_size,
+                        seq_length=seq_length,
+                        min_timestep=min_allowed_timestep,
+                        max_timestep=max_allowed_timestep,
+                        dtype=torch.float32,
+                    ).to(self.device_torch)
+                    timestep_indices = self.sd.noise_scheduler.get_nearest_timestep_indices(
+                        direct_timesteps
+                    )
+                elif self.train_config.timestep_type in ['two_step', 'four_step', 'eight_step']:
                     if self.train_config.timestep_type == 'two_step':
                         indice_choices = [0, 499]
                     elif self.train_config.timestep_type == 'four_step':
@@ -1519,7 +1544,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     raise ValueError(f"Unknown content_or_style {content_or_style}")
             with self.timer('convert_timestep_indices_to_timesteps'):
                 # convert the timestep_indices to a timestep
-                timesteps = self.sd.noise_scheduler.timesteps[timestep_indices.long()]
+                if direct_timesteps is not None:
+                    timesteps = direct_timesteps.to(self.device_torch)
+                else:
+                    timesteps = self.sd.noise_scheduler.timesteps[timestep_indices.long()]
                 record_metric = getattr(self, '_record_monitor_metric', None)
                 if callable(record_metric):
                     record_metric('train/batch_size', batch_size)

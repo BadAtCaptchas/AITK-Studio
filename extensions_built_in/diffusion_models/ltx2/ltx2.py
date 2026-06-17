@@ -1,6 +1,6 @@
 from functools import partial
 import os
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import torch
 import torchaudio
@@ -846,6 +846,156 @@ class LTX2Model(BaseModel):
                 )
         return embeds
 
+    def get_latent_sequence_length(self, latents: torch.Tensor) -> int:
+        if latents.dim() == 5:
+            _, _, frames, height, width = latents.shape
+            spatial_patch = int(getattr(self.pipeline, "transformer_spatial_patch_size", 1))
+            temporal_patch = int(getattr(self.pipeline, "transformer_temporal_patch_size", 1))
+            frames = (frames + temporal_patch - 1) // max(1, temporal_patch)
+            height = height // max(1, spatial_patch)
+            width = width // max(1, spatial_patch)
+            return max(1, int(frames * height * width))
+        if latents.dim() == 4:
+            _, _, height, width = latents.shape
+            spatial_patch = int(getattr(self.pipeline, "transformer_spatial_patch_size", 1))
+            return max(1, int((height // max(1, spatial_patch)) * (width // max(1, spatial_patch))))
+        if latents.dim() == 3:
+            return max(1, int(latents.shape[1]))
+        return 1024
+
+    def _get_ltx_strategy(self, batch: "DataLoaderBatchDTO") -> Optional[dict[str, Any]]:
+        strategy = getattr(batch, "ltx_strategy", None)
+        if isinstance(strategy, dict):
+            return strategy
+        return None
+
+    def _get_ltx_modality_config(
+        self,
+        batch: "DataLoaderBatchDTO",
+        modality: str,
+    ) -> dict[str, Any]:
+        strategy = self._get_ltx_strategy(batch)
+        modality_config = strategy.get(modality) if strategy is not None else None
+        if isinstance(modality_config, dict):
+            return modality_config
+
+        if modality == "video":
+            conditions = []
+            if batch.dataset_config.do_i2v and batch.num_frames > 1:
+                conditions.append({"type": "first_frame", "probability": 1.0})
+            return {"is_generated": True, "conditions": conditions}
+
+        return {
+            "is_generated": bool(batch.dataset_config.do_audio),
+            "conditions": [],
+        }
+
+    @staticmethod
+    def _condition_probability_mask(
+        condition: dict[str, Any],
+        batch_size: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        probability = float(condition.get("probability", 1.0))
+        if probability <= 0.0:
+            return torch.zeros((batch_size,), device=device, dtype=torch.bool)
+        if probability >= 1.0:
+            return torch.ones((batch_size,), device=device, dtype=torch.bool)
+        return torch.rand((batch_size,), device=device) < probability
+
+    @staticmethod
+    def _pixel_frames_to_latent_frames(num_frames: int) -> int:
+        if num_frames <= 1:
+            return 1
+        return ((num_frames - 1) // 8) + 1
+
+    def _resolve_condition_units(
+        self,
+        condition: dict[str, Any],
+        total_units: int,
+        modality: str,
+        fps: float = 24.0,
+        audio_units_per_second: Optional[float] = None,
+    ) -> int:
+        for key in ("tokens", "latent_frames", "num_latent_frames", "temporal_boundary"):
+            if condition.get(key) is not None:
+                return max(0, min(total_units, int(condition[key])))
+
+        if modality == "video":
+            if condition.get("num_frames") is not None:
+                return max(
+                    0,
+                    min(total_units, self._pixel_frames_to_latent_frames(int(condition["num_frames"]))),
+                )
+            if condition.get("frames") is not None:
+                return max(
+                    0,
+                    min(total_units, self._pixel_frames_to_latent_frames(int(condition["frames"]))),
+                )
+
+        duration = condition.get("duration", condition.get("seconds", None))
+        if duration is not None:
+            duration = float(duration)
+            if modality == "audio" and audio_units_per_second is not None:
+                return max(0, min(total_units, int(round(duration * audio_units_per_second))))
+            return max(
+                0,
+                min(total_units, self._pixel_frames_to_latent_frames(int(round(duration * fps)))),
+            )
+
+        if modality == "audio" and condition.get("num_frames") is not None and audio_units_per_second is not None:
+            duration = float(condition["num_frames"]) / max(float(fps), 1e-8)
+            return max(0, min(total_units, int(round(duration * audio_units_per_second))))
+
+        return 1 if total_units > 0 else 0
+
+    def _build_temporal_condition_mask(
+        self,
+        conditions: list[dict[str, Any]],
+        total_units: int,
+        batch_size: int,
+        device: torch.device,
+        modality: str,
+        fps: float = 24.0,
+        audio_units_per_second: Optional[float] = None,
+    ) -> torch.Tensor:
+        mask = torch.zeros((batch_size, total_units), device=device, dtype=torch.bool)
+        for condition in conditions:
+            if not isinstance(condition, dict):
+                raise ValueError("LTX strategy conditions must be dictionaries")
+
+            condition_type = condition.get("type")
+            if condition_type == "first_frame" and modality == "video":
+                count = 1
+                from_end = False
+            elif condition_type in ("prefix", "suffix"):
+                count = self._resolve_condition_units(
+                    condition,
+                    total_units,
+                    modality,
+                    fps=fps,
+                    audio_units_per_second=audio_units_per_second,
+                )
+                from_end = condition_type == "suffix"
+            elif condition_type in ("mask", "spatial_crop", "reference", "video_to_audio"):
+                raise NotImplementedError(
+                    f"LTX strategy condition '{condition_type}' is not supported for LTX-2 training in ai-toolkit yet"
+                )
+            else:
+                raise ValueError(f"Unsupported LTX {modality} condition type: {condition_type}")
+
+            if count <= 0:
+                continue
+
+            applies = self._condition_probability_mask(condition, batch_size, device)
+            condition_mask = torch.zeros_like(mask)
+            if from_end:
+                condition_mask[:, -count:] = True
+            else:
+                condition_mask[:, :count] = True
+            mask = mask | (condition_mask & applies.view(batch_size, 1))
+        return mask
+
     def get_noise_prediction(
         self,
         latent_model_input: torch.Tensor,
@@ -866,59 +1016,49 @@ class LTX2Model(BaseModel):
             )
 
             video_timestep = timestep.clone()
+            video_config = self._get_ltx_modality_config(batch, "video")
+            if not bool(video_config.get("is_generated", True)):
+                raise NotImplementedError(
+                    "LTX video conditioning-only training is not supported for LTX-2 training in ai-toolkit yet"
+                )
 
-            # i2v from first frame
-            if batch.dataset_config.do_i2v and batch.num_frames > 1:
-                # check to see if we had it cached
-                if batch.first_frame_latents is not None:
-                    init_latents = batch.first_frame_latents.to(
-                        self.device_torch, dtype=self.torch_dtype
+            video_conditions = video_config.get("conditions", [])
+            batch.video_loss_mask = None
+            if video_conditions:
+                clean_video_latents = batch.latents.to(
+                    self.device_torch, dtype=self.torch_dtype
+                )
+                temporal_condition_mask = self._build_temporal_condition_mask(
+                    video_conditions,
+                    total_units=latent_num_frames,
+                    batch_size=batch_size,
+                    device=self.device_torch,
+                    modality="video",
+                    fps=float(batch.dataset_config.fps),
+                )
+                if temporal_condition_mask.any():
+                    conditioning_mask = temporal_condition_mask.view(
+                        batch_size, 1, latent_num_frames, 1, 1
+                    ).to(device=self.device_torch, dtype=self.torch_dtype)
+                    conditioning_mask = conditioning_mask.expand(
+                        -1, 1, -1, latent_height, latent_width
                     )
-                else:
-                    # extract the first frame and encode it
-                    # videos come in (bs, num_frames, channels, height, width)
-                    # images come in (bs, channels, height, width)
-                    frames = batch.tensor
-                    if len(frames.shape) == 4:
-                        first_frames = frames
-                    elif len(frames.shape) == 5:
-                        first_frames = frames[:, 0]
-                    else:
-                        raise ValueError(f"Unknown frame shape {frames.shape}")
-                    # first frame doesnt have time dim, add it back
-                    init_latents = self.encode_images(
-                        first_frames, device=self.device_torch, dtype=self.torch_dtype
+
+                    latent_model_input = (
+                        clean_video_latents * conditioning_mask
+                        + latent_model_input * (1 - conditioning_mask)
                     )
 
-                # expand the latents to match video frames
-                init_latents = init_latents.repeat(1, 1, latent_num_frames, 1, 1)
-                mask_shape = (
-                    batch_size,
-                    1,
-                    latent_num_frames,
-                    latent_height,
-                    latent_width,
-                )
-                # First condition is image latents and those should be kept clean.
-                conditioning_mask = torch.zeros(
-                    mask_shape, device=self.device_torch, dtype=self.torch_dtype
-                )
-                conditioning_mask[:, :, 0] = 1.0
+                    packed_conditioning_mask = self.pipeline._pack_latents(
+                        conditioning_mask,
+                        patch_size=self.pipeline.transformer_spatial_patch_size,
+                        patch_size_t=self.pipeline.transformer_temporal_patch_size,
+                    )
+                    if packed_conditioning_mask.dim() == 3:
+                        packed_conditioning_mask = packed_conditioning_mask.max(dim=-1).values
 
-                # use conditioning mask to replace latents
-                latent_model_input = (
-                    init_latents * conditioning_mask
-                    + latent_model_input * (1 - conditioning_mask)
-                )
-
-                packed_conditioning_mask = self.pipeline._pack_latents(
-                    conditioning_mask,
-                    patch_size=self.pipeline.transformer_spatial_patch_size,
-                    patch_size_t=self.pipeline.transformer_temporal_patch_size,
-                )
-
-                # set video timestep
-                video_timestep = timestep.unsqueeze(-1) * (1 - packed_conditioning_mask)
+                    video_timestep = timestep.unsqueeze(-1) * (1 - packed_conditioning_mask)
+                    batch.video_loss_mask = (1 - conditioning_mask).detach()
 
             frame_rate = batch.dataset_config.fps
             # check frame dimension
@@ -929,7 +1069,17 @@ class LTX2Model(BaseModel):
                 patch_size_t=self.pipeline.transformer_temporal_patch_size,
             )
 
-            if batch.audio_latents is not None or batch.audio_tensor is not None:
+            audio_config = self._get_ltx_modality_config(batch, "audio")
+            audio_is_generated = bool(audio_config.get("is_generated", False))
+            audio_conditions = audio_config.get("conditions", [])
+            audio_timestep = timestep
+            audio_sigma = timestep
+            batch.audio_target = None
+            batch.audio_pred = None
+            batch.audio_loss_mask = None
+
+            has_audio_data = batch.audio_latents is not None or batch.audio_tensor is not None
+            if has_audio_data:
                 if batch.audio_latents is not None:
                     # we have audio latents cached
                     raw_audio_latents = batch.audio_latents.to(
@@ -941,14 +1091,53 @@ class LTX2Model(BaseModel):
                     raw_audio_latents = self.encode_audio(batch.audio_data)
 
                 audio_num_frames = raw_audio_latents.shape[1]
-                # add the audio targets to the batch for loss calculation later
-                audio_noise = torch.randn_like(raw_audio_latents)
-                batch.audio_target = (audio_noise - raw_audio_latents).detach()
-                audio_latents = self.add_noise(
-                    raw_audio_latents,
-                    audio_noise,
-                    timestep,
-                ).to(self.device_torch, dtype=self.torch_dtype)
+                if audio_is_generated:
+                    # add the audio targets to the batch for loss calculation later
+                    audio_noise = torch.randn_like(raw_audio_latents)
+                    batch.audio_target = (audio_noise - raw_audio_latents).detach()
+                    audio_latents = self.add_noise(
+                        raw_audio_latents,
+                        audio_noise,
+                        timestep,
+                    ).to(self.device_torch, dtype=self.torch_dtype)
+
+                    if audio_conditions:
+                        audio_latents_per_second = (
+                            self.pipeline.audio_sampling_rate
+                            / self.pipeline.audio_hop_length
+                            / float(self.pipeline.audio_vae_temporal_compression_ratio)
+                        )
+                        temporal_audio_mask = self._build_temporal_condition_mask(
+                            audio_conditions,
+                            total_units=audio_num_frames,
+                            batch_size=batch_size,
+                            device=self.device_torch,
+                            modality="audio",
+                            fps=float(frame_rate),
+                            audio_units_per_second=audio_latents_per_second,
+                        )
+                        if temporal_audio_mask.any():
+                            audio_conditioning_mask = temporal_audio_mask.to(
+                                device=self.device_torch, dtype=self.torch_dtype
+                            )
+                            audio_latents = (
+                                raw_audio_latents * audio_conditioning_mask.unsqueeze(-1)
+                                + audio_latents * (1 - audio_conditioning_mask.unsqueeze(-1))
+                            )
+                            audio_timestep = timestep.unsqueeze(-1) * (
+                                1 - audio_conditioning_mask
+                            )
+                            batch.audio_loss_mask = (1 - audio_conditioning_mask).detach()
+                else:
+                    audio_latents = raw_audio_latents.to(
+                        self.device_torch, dtype=self.torch_dtype
+                    )
+                    audio_timestep = torch.zeros(
+                        (batch_size, audio_num_frames),
+                        device=self.device_torch,
+                        dtype=timestep.dtype,
+                    )
+                    audio_sigma = torch.zeros_like(timestep)
             else:
                 # no audio
                 num_mel_bins = self.pipeline.audio_vae.config.mel_bins
@@ -974,6 +1163,8 @@ class LTX2Model(BaseModel):
                     generator=None,
                     latents=None,
                 )
+                if audio_conditions:
+                    raise ValueError("LTX audio prefix/suffix conditioning requires dataset audio")
 
             if self.pipeline.connectors.device != self.transformer.device:
                 self.pipeline.connectors.to(self.transformer.device)
@@ -1017,7 +1208,8 @@ class LTX2Model(BaseModel):
             audio_encoder_hidden_states=connector_audio_prompt_embeds,
             timestep=video_timestep,
             sigma=timestep,  # Used by LTX-2.3
-            audio_timestep=timestep,
+            audio_timestep=audio_timestep,
+            audio_sigma=audio_sigma,
             encoder_attention_mask=connector_attention_mask,
             audio_encoder_attention_mask=connector_attention_mask,
             num_frames=latent_num_frames,

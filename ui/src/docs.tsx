@@ -509,6 +509,15 @@ const docs: { [key: string]: ConfigDoc } = {
       </>
     ),
   },
+  'train.timestep_type': {
+    title: 'Timestep Type',
+    description: (
+      <>
+        Controls how training timesteps are sampled. LTX-2 can use <code>shifted_logit_normal</code>, which follows the
+        Lightricks trainer sampler by shifting the logit-normal distribution based on the latent token count.
+      </>
+    ),
+  },
   'train.audio_loss_multiplier': {
     title: 'Audio Loss Multiplier',
     description: (
@@ -517,6 +526,16 @@ const docs: { [key: string]: ConfigDoc } = {
         the audio to become distorted. If you are noticing this happen, you can increase the audio loss multiplier to
         give more weight to the audio loss. You could try something like 2.0, 10.0 etc. Warning, setting this too high
         could overfit and damage the model.
+      </>
+    ),
+  },
+  'train.ltx_strategy': {
+    title: 'LTX Strategy',
+    description: (
+      <>
+        Optional advanced LTX-2 strategy object. This supports generated video, generated or frozen audio,
+        and <code>first_frame</code>, <code>prefix</code>, or <code>suffix</code> conditions. Reference IC-LoRA, masks,
+        spatial crops, and audio-only/V2A training are not supported yet.
       </>
     ),
   },

@@ -7,6 +7,56 @@ import numpy as np
 from toolkit.timestep_weighing.default_weighing_scheme import default_weighing_scheme
 
 
+def get_shift_for_sequence_length(
+    seq_length: int,
+    min_tokens: int = 1024,
+    max_tokens: int = 4096,
+    min_shift: float = 0.95,
+    max_shift: float = 2.05,
+) -> float:
+    m = (max_shift - min_shift) / (max_tokens - min_tokens)
+    b = min_shift - m * min_tokens
+    return m * seq_length + b
+
+
+def sample_shifted_logit_normal(
+    batch_size: int,
+    seq_length: int,
+    device: torch.device,
+    dtype: torch.dtype = torch.float32,
+    std: float = 1.0,
+    eps: float = 1e-3,
+    uniform_prob: float = 0.1,
+) -> torch.Tensor:
+    mu = get_shift_for_sequence_length(seq_length)
+    normal_999_percentile = 3.0902 * std
+    normal_005_percentile = -2.5758 * std
+
+    normal_samples = torch.randn((batch_size,), device=device, dtype=dtype) * std + mu
+    logitnormal_samples = torch.sigmoid(normal_samples)
+
+    percentile_999 = torch.sigmoid(
+        torch.tensor(mu + normal_999_percentile, device=device, dtype=dtype)
+    )
+    percentile_005 = torch.sigmoid(
+        torch.tensor(mu + normal_005_percentile, device=device, dtype=dtype)
+    )
+
+    zero_terminal_raw = (logitnormal_samples - percentile_005) / (
+        percentile_999 - percentile_005
+    )
+    stretched_logit = torch.where(
+        zero_terminal_raw >= eps,
+        zero_terminal_raw,
+        2 * eps - zero_terminal_raw,
+    )
+    stretched_logit = torch.clamp(stretched_logit, 0, 1)
+
+    uniform = (1 - eps) * torch.rand((batch_size,), device=device, dtype=dtype) + eps
+    prob = torch.rand((batch_size,), device=device, dtype=dtype)
+    return torch.where(prob > uniform_prob, stretched_logit, uniform)
+
+
 def calculate_shift(
     image_seq_len,
     base_seq_len: int = 256,
@@ -88,6 +138,70 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
 
         return sigma
 
+    def _get_sampling_sequence_length(self, latents=None, patch_size=1, seq_length=None) -> int:
+        if seq_length is not None:
+            return max(1, int(seq_length))
+        if latents is None:
+            return 1024
+
+        if latents.dim() == 5:
+            _, _, frames, height, width = latents.shape
+            return max(1, int(frames * height * width // max(1, patch_size**2)))
+        if latents.dim() == 4:
+            _, _, height, width = latents.shape
+            return max(1, int(height * width // max(1, patch_size**2)))
+        if latents.dim() == 3:
+            return max(1, int(latents.shape[1]))
+        return 1024
+
+    def sample_shifted_logit_normal_timesteps(
+        self,
+        batch_size,
+        device,
+        latents=None,
+        patch_size=1,
+        seq_length=None,
+        min_timestep=None,
+        max_timestep=None,
+        dtype=torch.float32,
+    ) -> torch.Tensor:
+        seq_length = self._get_sampling_sequence_length(
+            latents=latents,
+            patch_size=patch_size,
+            seq_length=seq_length,
+        )
+        sigmas = sample_shifted_logit_normal(
+            batch_size=batch_size,
+            seq_length=seq_length,
+            device=device,
+            dtype=dtype,
+        )
+        timesteps = sigmas * self.config.num_train_timesteps
+        if min_timestep is not None or max_timestep is not None:
+            if torch.is_tensor(min_timestep):
+                min_timestep = min_timestep.detach().to(device=device, dtype=dtype)
+            elif min_timestep is not None:
+                min_timestep = torch.tensor(float(min_timestep), device=device, dtype=dtype)
+            if torch.is_tensor(max_timestep):
+                max_timestep = max_timestep.detach().to(device=device, dtype=dtype)
+            elif max_timestep is not None:
+                max_timestep = torch.tensor(float(max_timestep), device=device, dtype=dtype)
+            low = torch.tensor(0.0, device=device, dtype=dtype) if min_timestep is None else min_timestep
+            high = (
+                torch.tensor(float(self.config.num_train_timesteps), device=device, dtype=dtype)
+                if max_timestep is None
+                else max_timestep
+            )
+            clamp_min = torch.minimum(low, high)
+            clamp_max = torch.maximum(low, high)
+            timesteps = torch.maximum(torch.minimum(timesteps, clamp_max), clamp_min)
+        return timesteps
+
+    def get_nearest_timestep_indices(self, timesteps: torch.Tensor) -> torch.Tensor:
+        schedule_timesteps = self.timesteps.to(device=timesteps.device, dtype=timesteps.dtype)
+        distances = torch.abs(timesteps[:, None] - schedule_timesteps[None, :])
+        return torch.argmin(distances, dim=1).long()
+
     def add_noise(
             self,
             original_samples: torch.Tensor,
@@ -117,7 +231,7 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
         patch_size=1
     ):
         self.timestep_type = timestep_type
-        if timestep_type == 'linear' or timestep_type == 'weighted':
+        if timestep_type in ['linear', 'weighted', 'shifted_logit_normal']:
             timesteps = torch.linspace(1000, 1, num_timesteps, device=device)
             self.timesteps = timesteps
             return timesteps

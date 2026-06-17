@@ -45,6 +45,7 @@ const timestepTypeOptions = [
   { value: 'linear', label: 'Linear' },
   { value: 'shift', label: 'Shift' },
   { value: 'weighted', label: 'Weighted' },
+  { value: 'shifted_logit_normal', label: 'Shifted logit normal' },
 ];
 
 const timestepBiasOptions = [

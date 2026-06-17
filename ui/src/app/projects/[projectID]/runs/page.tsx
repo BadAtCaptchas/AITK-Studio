@@ -17,7 +17,7 @@ export default function ProjectRunsPage({ params }: { params: Promise<{ projectI
       title="Runs"
       description="Training, captioning, and generation jobs scoped to this project."
       actions={
-        <Link href={`/jobs/new?project_id=${encodeURIComponent(projectID)}`} className="operator-button h-9">
+        <Link href={`/projects/${encodeURIComponent(projectID)}/runs/new`} className="operator-button h-9">
           <Plus className="h-4 w-4" />
           New Train
         </Link>

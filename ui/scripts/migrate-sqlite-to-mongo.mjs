@@ -71,16 +71,28 @@ function normalizeJob(row) {
 }
 
 async function ensureIndexes(db) {
+  const jobIndexes = await db.collection('jobs').indexes().catch(() => []);
+  await Promise.all(
+    jobIndexes
+      .filter(index => {
+        const entries = Object.entries(index?.key || {});
+        return index.unique === true && entries.length === 1 && entries[0][0] === 'name' && entries[0][1] === 1;
+      })
+      .map(index => db.collection('jobs').dropIndex(index.name).catch(() => undefined)),
+  );
+
   await Promise.all([
     db.collection('jobs').createIndexes([
       { key: { id: 1 }, unique: true },
-      { key: { name: 1 }, unique: true },
+      { key: { project_id: 1, name: 1 }, unique: true },
+      { key: { name: 1 } },
       { key: { status: 1 } },
       { key: { worker_id: 1 } },
       { key: { remote_job_id: 1 } },
       { key: { gpu_ids: 1 } },
       { key: { job_type: 1 } },
       { key: { job_ref: 1 } },
+      { key: { project_id: 1 } },
       { key: { queue_position: 1 } },
     ]),
     db.collection('queues').createIndexes([

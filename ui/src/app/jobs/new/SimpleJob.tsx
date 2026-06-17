@@ -99,6 +99,7 @@ type Props = {
   onOpenRawConfig?: () => void;
   isLoading?: boolean;
   comfyAutoInstall?: boolean;
+  projectID?: string | null;
 };
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -150,6 +151,7 @@ export default function SimpleJob({
   onOpenRawConfig,
   isLoading,
   comfyAutoInstall = false,
+  projectID = null,
 }: Props) {
   const [randomPromptLoadingIndex, setRandomPromptLoadingIndex] = useState<number | null>(null);
   const [encryptedKeyRefreshKey, setEncryptedKeyRefreshKey] = useState(0);
@@ -365,7 +367,11 @@ export default function SimpleJob({
 
     setRandomPromptLoadingIndex(sampleIndex);
     try {
-      const response = await apiClient.post('/api/datasets/randomPrompt', { datasets, encryptedDatasetKeys });
+      const response = await apiClient.post('/api/datasets/randomPrompt', {
+        datasets,
+        encryptedDatasetKeys,
+        ...(projectID ? { project_id: projectID } : {}),
+      });
       const prompt = typeof response.data?.prompt === 'string' ? response.data.prompt.trim() : '';
       if (!prompt) {
         alert('No captions were found in the configured datasets.');
@@ -815,7 +821,7 @@ export default function SimpleJob({
                     disabled={runId !== null}
                     required
                   />
-                  <p className="mt-1 text-xs text-gray-500">A unique name to identify this training job.</p>
+                  <p className="mt-1 text-xs text-gray-500">A name to identify this run inside the current workspace.</p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[0.9fr_1.1fr_0.7fr]">

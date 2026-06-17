@@ -10,6 +10,7 @@ import JobOverview from '@/components/JobOverview';
 import SampleImages, { SampleImagesMenu } from '@/components/SampleImages';
 import { PageNotice, StatusBadge } from '@/components/OperatorPrimitives';
 import useJob from '@/hooks/useJob';
+import { apiClient } from '@/utils/api';
 
 type TabKey = 'overview' | 'samples' | 'loss' | 'config';
 
@@ -34,7 +35,24 @@ export default function ProjectRunDetailPage({
   const jobID = decodeURIComponent(rawJobID);
   const [reloadInterval, setReloadInterval] = useState<number | null>(5000);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [resolvedProjectID, setResolvedProjectID] = useState<string | null>(null);
   const { job, status, refreshJob } = useJob(jobID, reloadInterval);
+
+  useEffect(() => {
+    let cancelled = false;
+    setResolvedProjectID(null);
+    apiClient
+      .get(`/api/projects/${encodeURIComponent(projectID)}/summary`)
+      .then(res => {
+        if (!cancelled) setResolvedProjectID(res.data?.project?.id || projectID);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedProjectID(projectID);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectID]);
 
   useEffect(() => {
     setReloadInterval(current => {
@@ -73,7 +91,7 @@ export default function ProjectRunDetailPage({
             </PageNotice>
           )}
 
-          {job && job.project_id !== projectID && (
+          {job && resolvedProjectID && job.project_id !== resolvedProjectID && (
             <PageNotice tone="warning" title="Run is not attached to this project">
               This job does not match the current project. Open it from the global Jobs page if needed.
             </PageNotice>

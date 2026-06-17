@@ -51,6 +51,14 @@ HidreamModel, HidreamE1Model = _optional_models(
 )
 FLiteModel, = _optional_models(".f_light", (("FLiteModel", "f-lite"),))
 OmniGen2Model, = _optional_models(".omnigen2", (("OmniGen2Model", "omnigen2"),))
+BooguImageModel, BooguImageEditModel, BooguImageTurboModel = _optional_models(
+    ".boogu_image",
+    (
+        ("BooguImageModel", "boogu_image"),
+        ("BooguImageEditModel", "boogu_image_edit"),
+        ("BooguImageTurboModel", "boogu_image_turbo"),
+    ),
+)
 FluxKontextModel, = _optional_models(
     ".flux_kontext", (("FluxKontextModel", "flux_kontext"),)
 )
@@ -120,6 +128,9 @@ AI_TOOLKIT_MODELS = [
     HidreamE1Model,
     FLiteModel,
     OmniGen2Model,
+    BooguImageModel,
+    BooguImageEditModel,
+    BooguImageTurboModel,
     FluxKontextModel,
     Wan225bModel,
     Wan2214bI2VModel,

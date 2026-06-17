@@ -704,7 +704,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo']
 LayerOffloadingBackend = Literal['block', 'legacy']
 
 def _normalize_model_ref(value: Optional[str]) -> str:
@@ -1582,6 +1582,35 @@ def validate_configs(
             )
         if not math.isfinite(model_config.base_lora_strength):
             raise ValueError("model.base_lora_strength must be a finite number.")
+
+    boogu_arches = {'boogu_image', 'boogu_image_edit', 'boogu_image_turbo'}
+    if model_config.arch in boogu_arches:
+        model_ref = str(model_config.name_or_path or '').replace('\\', '/').lower()
+        extras_ref = str(model_config.extras_name_or_path or '').replace('\\', '/').lower()
+        if (
+            model_ref.endswith('-fp8')
+            or extras_ref.endswith('-fp8')
+            or ('boogu-image-0.1-' in model_ref and '-fp8' in model_ref)
+            or ('boogu-image-0.1-' in extras_ref and '-fp8' in extras_ref)
+        ):
+            raise ValueError(
+                "Boogu fp8 repositories are inference-oriented and are not supported for "
+                "AITK training. Use the non-fp8 Boogu repo with model.quantize: true instead."
+            )
+        if network_config is None and (train_config.train_unet or train_config.train_text_encoder):
+            raise ValueError(
+                "Boogu-Image training currently supports LoRA/network training only; "
+                "full base-model fine-tuning is not supported."
+            )
+        if network_config is not None and getattr(network_config, 'type', '').lower() != 'lora':
+            raise ValueError("Boogu-Image training currently supports network.type lora only.")
+        if train_config.train_text_encoder:
+            raise ValueError("Boogu-Image training freezes Qwen3-VL; set train.train_text_encoder to false.")
+        if model_config.arch == 'boogu_image_edit' and train_config.unload_text_encoder:
+            raise ValueError(
+                "Cannot unload the text encoder with boogu_image_edit. Control images are encoded "
+                "into Qwen3-VL prompt embeddings; cache text embeddings instead."
+            )
 
     if (
         network_config is None

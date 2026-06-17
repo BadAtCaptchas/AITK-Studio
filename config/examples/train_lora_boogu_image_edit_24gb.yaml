@@ -1,0 +1,70 @@
+---
+job: extension
+config:
+  name: "my_first_boogu_image_edit_lora_v1"
+  process:
+    - type: "sd_trainer"
+      training_folder: "output"
+      device: cuda:0
+      network:
+        type: "lora"
+        linear: 32
+        linear_alpha: 32
+        transformer_only: true
+      save:
+        dtype: float16
+        save_every: 250
+        max_step_saves_to_keep: 4
+      datasets:
+        - folder_path: "/path/to/images/folder"
+          control_path: "/path/to/control/images/folder"
+          # For multi-reference edit training, replace control_path with:
+          # multi_control_paths: ["/path/to/reference_a", "/path/to/reference_b"]
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          cache_latents_to_disk: true
+          resolution: [1024]
+      train:
+        batch_size: 1
+        gradient_accumulation: 1
+        steps: 3000
+        train_unet: true
+        train_text_encoder: false
+        unload_text_encoder: false
+        gradient_checkpointing: true
+        cache_text_embeddings: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 4e-5
+        timestep_type: "weighted"
+        content_or_style: "content"
+        loss_type: "mse"
+        dtype: bf16
+      model:
+        name_or_path: "Boogu/Boogu-Image-0.1-Edit"
+        arch: "boogu_image_edit"
+        quantize: true
+        qtype: "qfloat8"
+        quantize_te: true
+        qtype_te: "qfloat8"
+        low_vram: true
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 1024
+        height: 1024
+        samples:
+          - prompt: "restyle this image as a studio portrait"
+            ctrl_img: "/path/to/control/image.jpg"
+          - prompt: "change the outfit while preserving the subject"
+            multi_ctrl_imgs:
+              - "/path/to/reference_a.jpg"
+              - "/path/to/reference_b.jpg"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 5
+        sample_steps: 50
+meta:
+  name: "[name]"
+  version: "1.0"

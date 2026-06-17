@@ -40,6 +40,7 @@
         "src/server/captionFiles.ts",
         "src/server/imageDelete.ts",
         "src/server/datasetCaptionBulk.ts",
+        "src/server/datasetCopy.ts",
         "src/server/openRouterImageData.ts",
         "src/server/openRouterBoxes.ts",
         "src/server/openRouterLayerCaption.ts",

@@ -64,6 +64,8 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) (Qwen-Image)
 - [Qwen/Qwen-Image-2512](https://huggingface.co/Qwen/Qwen-Image-2512) (Qwen-Image-2512)
 - [zai-org/GLM-Image](https://huggingface.co/zai-org/GLM-Image) (GLM-Image)
+- [Boogu/Boogu-Image-0.1-Base](https://huggingface.co/Boogu/Boogu-Image-0.1-Base) (Boogu-Image Base)
+- [Boogu/Boogu-Image-0.1-Turbo](https://huggingface.co/Boogu/Boogu-Image-0.1-Turbo) (Boogu-Image Turbo, experimental training)
 - [zlab-princeton/i1-3B](https://huggingface.co/zlab-princeton/i1-3B) (i1-3B)
 - [HiDream-ai/HiDream-I1-Full](https://huggingface.co/HiDream-ai/HiDream-I1-Full) (HiDream)
 - [HiDream-ai/HiDream-O1-Image](https://huggingface.co/HiDream-ai/HiDream-O1-Image) (HiDream-O1)
@@ -81,21 +83,12 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [NucleusAI/Nucleus-Image](https://huggingface.co/NucleusAI/Nucleus-Image) (Nucleus-Image)
 - [Photoroom/prxpixel-t2i](https://huggingface.co/Photoroom/prxpixel-t2i) (PRX Pixel)
 
-HiDream-O1 training defaults to `train.t0_loss_target: true`, so the trainer compares the reconstructed timestep-0 prediction directly against the image latent target. That keeps O1 in its native x0 loss space instead of relying on velocity-space loss weighting to control small-timestep spikes.
-
-GLM-Image is supported for text-to-image sampling and transformer LoRA training through upstream Diffusers `GlmImagePipeline` and `GlmImageTransformer2DModel`. The built-in `glm_image` preset defaults to `zai-org/GLM-Image`, flowmatch scheduling, 1024px samples, 50 sample steps, guidance `1.5`, quantization, and exposed low-VRAM controls. V1 trains transformer LoRA only with `target_lora_modules: ["GlmImageTransformer2DModel"]`.
-
-i1-3B is supported through the built-in `i1` architecture for native text-to-image sampling and transformer LoRA training. It uses `zlab-princeton/i1-3B` for the transformer checkpoint, `google/t5gemma-2b-2b-ul2-it` for text embeddings, and the FLUX.2 VAE from `black-forest-labs/FLUX.2-dev`. The FLUX.2-dev repo is gated on Hugging Face, so request and accept access before running `hf auth login`, or set `model.model_kwargs.vae_name_or_path` to a local FLUX.2-dev root folder or local VAE folder. The 1024-resolution checkpoint uses a fixed square latent grid, so the built-in `i1` training defaults force 1024 square crops and recache i1 latents with square crop dimensions. The preset also defaults to 1024px samples, flowmatch scheduling, guidance `12`, guidance rescale `1.0`, 50 sample steps, quantization, cached text embeddings, and transformer-only LoRA rank `32`.
-
-Ideogram 4 is supported through the built-in `ideogram4` architecture for text-to-image sampling, transformer LoRA training, and full conditional-transformer fine-tuning. Use `ideogram-ai/ideogram-4-nf4`, `ideogram-ai/ideogram-4-fp8`, or `Comfy-Org/Ideogram-4` with `model_kwargs.quantization: "nvfp4"` for packed Comfy NVFP4 LoRA training. The official Ideogram repos are gated Hugging Face models and the weights remain under Ideogram's non-commercial license. The integration vendors the Apache-2.0 official pipeline components locally and does not call external moderation, magic-prompt, or other hosted APIs. Qwen3-VL, the VAE, and the unconditional transformer stay frozen; LoRA and full fine-tune jobs train only the conditional transformer.
-
-Ideogram 4 prompting is JSON-caption-first. JSON dataset captions are recommended for `arch: ideogram4`, but natural-language captions and sample prompts are allowed by default with a runtime warning that outputs may be worse than with structured Ideogram JSON captions. JSON caption schema and key-order issues warn by default, or fail when `model_kwargs.caption_strict: true` is set; users who want to enforce structured captions can also set `model_kwargs.require_json_captions: true`. Training and sampling do not call magic-prompt, moderation, or other hosted APIs. NF4 requires CUDA and `bitsandbytes>=0.49.2`. The FP8 model can be used directly on supported GPUs or dequantized for training with `model_kwargs.dequantize_fp8_transformer: true`. Comfy NVFP4 trains LoRA adapters directly on frozen packed weights; full packed-NVFP4 base-model fine-tuning is rejected unless the base is dequantized first. As an experimental opt-in, `model_kwargs.skip_unconditional_transformer_for_training: true` skips loading the frozen unconditional transformer to reduce VRAM during training; native samples then use conditional-only previews and should not be treated as normal Ideogram asymmetric-CFG samples. Comfy's repo contains weights only, so use `extras_name_or_path` or `model_kwargs.text_encoder_config_name_or_path` to point at `ideogram-ai/ideogram-4-fp8` or a local equivalent for tokenizer and Qwen3-VL config files. AITK Studio also warns at runtime when the active Torch version is below Ideogram's official `torch>=2.11` requirement.
-
 ### Instruction / Edit
 - [black-forest-labs/FLUX.1-Kontext-dev](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev) (FLUX.1-Kontext-dev)
 - [Qwen/Qwen-Image-Edit](https://huggingface.co/Qwen/Qwen-Image-Edit) (Qwen-Image-Edit)
 - [Qwen/Qwen-Image-Edit-2509](https://huggingface.co/Qwen/Qwen-Image-Edit-2509) (Qwen-Image-Edit-2509)
 - [Qwen/Qwen-Image-Edit-2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) (Qwen-Image-Edit-2511)
+- [Boogu/Boogu-Image-0.1-Edit](https://huggingface.co/Boogu/Boogu-Image-0.1-Edit) (Boogu-Image Edit)
 - [HiDream-ai/HiDream-E1-1](https://huggingface.co/HiDream-ai/HiDream-E1-1) (HiDream E1)
 
 ### Video
@@ -602,7 +595,7 @@ train:
 
 Progress displays use the current step without a percentage bar while auto learn is active, because there is no planned final step. Resuming a checkpoint restores the current phase and continues plateau tracking from the saved training state.
 
-For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`. For i1-3B LoRA, see `config/examples/train_lora_i1_24gb.yaml`. For Ideogram 4 LoRA and full fine-tune starting points, see `config/examples/train_lora_ideogram4_48gb.yaml`, `config/examples/train_lora_ideogram4_fp8_48gb.yaml`, `config/examples/train_lora_ideogram4_nvfp4_48gb.yaml`, and `config/examples/train_full_fine_tune_ideogram4.yaml`.
+For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`. For Boogu-Image LoRA starts, see `config/examples/train_lora_boogu_image_24gb.yaml`, `config/examples/train_lora_boogu_image_edit_24gb.yaml`, and `config/examples/train_lora_boogu_image_turbo_experimental_24gb.yaml`. For i1-3B LoRA, see `config/examples/train_lora_i1_24gb.yaml`. For Ideogram 4 LoRA and full fine-tune starting points, see `config/examples/train_lora_ideogram4_48gb.yaml`, `config/examples/train_lora_ideogram4_fp8_48gb.yaml`, `config/examples/train_lora_ideogram4_nvfp4_48gb.yaml`, and `config/examples/train_full_fine_tune_ideogram4.yaml`.
 
 ### Gradio UI
 

@@ -235,6 +235,22 @@ function duplicateKeyToUniqueError(error: unknown): never {
   throw error;
 }
 
+function isSingleFieldIndex(index: Document, field: string) {
+  const key = index?.key || {};
+  const entries = Object.entries(key);
+  return entries.length === 1 && entries[0][0] === field && entries[0][1] === 1;
+}
+
+async function dropLegacyMongoJobNameUniqueIndex(mongo: Db) {
+  const jobs = mongoCollection(mongo, 'jobs');
+  const indexes = await jobs.indexes().catch(() => []);
+  await Promise.all(
+    indexes
+      .filter(index => index.unique === true && isSingleFieldIndex(index, 'name'))
+      .map(index => jobs.dropIndex(index.name).catch(() => undefined)),
+  );
+}
+
 function parseDate(value: unknown, fallback = new Date()) {
   if (value instanceof Date) return value;
   if (typeof value === 'string' || typeof value === 'number') {
@@ -706,10 +722,12 @@ async function readMongoMetrics(
 
 async function ensureMongoIndexes() {
   const mongo = await getMongoDb();
+  await dropLegacyMongoJobNameUniqueIndex(mongo);
   await Promise.all([
     mongoCollection(mongo, 'jobs').createIndexes([
       { key: { id: 1 }, unique: true },
-      { key: { name: 1 }, unique: true },
+      { key: { project_id: 1, name: 1 }, unique: true },
+      { key: { name: 1 } },
       { key: { status: 1 } },
       { key: { worker_id: 1 } },
       { key: { remote_job_id: 1 } },
@@ -921,7 +939,19 @@ export const db = {
         const row = await mongoCollection(mongo, 'jobs').findOne({ name }, { projection: { _id: 0 } });
         return normalizeJob(row);
       }
-      return getPrisma().job.findUnique({ where: { name } });
+      return getPrisma().job.findFirst({ where: { name } });
+    },
+
+    async findByNameInScope(name: string, project_id: string | null): Promise<Job | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'jobs').findOne(
+          { name, project_id: project_id ?? null },
+          { projection: { _id: 0 } },
+        );
+        return normalizeJob(row);
+      }
+      return getPrisma().job.findFirst({ where: { name, project_id: project_id ?? null } });
     },
 
     async findLatestByRef(jobRef: string): Promise<Job | null> {

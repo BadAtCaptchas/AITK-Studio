@@ -78,7 +78,6 @@ export default function ProjectWorkspaceShell({
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const basePath = `/projects/${encodeURIComponent(projectID)}`;
-  const projectQuery = `project_id=${encodeURIComponent(projectID)}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -164,7 +163,7 @@ export default function ProjectWorkspaceShell({
             </div>
             {actions ? <div className="flex flex-none items-center gap-2">{actions}</div> : null}
             <Link
-              href={`/jobs/new?${projectQuery}`}
+              href={`${basePath}/runs/new`}
               className="operator-button h-9 border-emerald-800 bg-emerald-950/70 text-emerald-100 hover:bg-emerald-900"
             >
               <Plus className="h-4 w-4" />

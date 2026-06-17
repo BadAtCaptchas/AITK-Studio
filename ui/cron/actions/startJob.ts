@@ -3,9 +3,10 @@ import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { TOOLKIT_ROOT, getHFToken, getOpenRouterApiKey, getTrainingFolder } from '../paths';
+import { TOOLKIT_ROOT, getHFToken, getOpenRouterApiKey } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
+import { getJobTrainingRoot } from '../../src/server/projects';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
 import {
   getEncryptedDatasetsForJobConfig,
@@ -98,7 +99,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
     };
 
     try {
-      const trainingRoot = await getTrainingFolder();
+      const trainingRoot = await getJobTrainingRoot(job);
       const hfToken = await getHFToken();
       const openRouterApiKey = await getOpenRouterApiKey();
       const tensorBoardEnabled = isTensorBoardEnabled();

@@ -57,7 +57,7 @@ model Project {
 
 model Job {
   id              String   @id @default(uuid())
-  name            String   @unique
+  name            String
   project_id      String?
   worker_id       String   @default("local")
   remote_job_id   String?
@@ -85,6 +85,8 @@ model Job {
   @@index([gpu_ids])
   @@index([job_type])
   @@index([job_ref])
+  @@index([name])
   @@index([project_id])
+  @@index([project_id, name])
 
 }

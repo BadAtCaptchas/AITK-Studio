@@ -88,6 +88,12 @@ function normalizeWorkerId(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : 'local';
 }
 
+function duplicateJobNameError(projectID: string | null) {
+  return projectID
+    ? 'A run with this name already exists in this project.'
+    : 'A global run with this name already exists.';
+}
+
 function isValidJobName(name: unknown) {
   if (typeof name !== 'string' || name.trim().length === 0) {
     return false;
@@ -217,6 +223,12 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
 
+      const targetProjectID = project?.id || existing.project_id || null;
+      const duplicateJob = await db.jobs.findByNameInScope(name, targetProjectID);
+      if (duplicateJob && duplicateJob.id !== id) {
+        return NextResponse.json({ error: duplicateJobNameError(targetProjectID) }, { status: 409 });
+      }
+
       const workerChanged = existing.worker_id !== worker_id;
       let remotePatch: any = {};
       if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
@@ -242,7 +254,7 @@ export async function POST(request: Request) {
 
       const training = await db.jobs.update(id, {
         name,
-        project_id: project?.id || existing.project_id || null,
+        project_id: targetProjectID,
         worker_id,
         remote_job_id: workerChanged ? null : existing.remote_job_id,
         remote_error: workerChanged ? null : existing.remote_error,
@@ -255,11 +267,16 @@ export async function POST(request: Request) {
     } else {
       // find the highest queue position and add 1000
       const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
+      const targetProjectID = project?.id || null;
+      const duplicateJob = await db.jobs.findByNameInScope(name, targetProjectID);
+      if (duplicateJob) {
+        return NextResponse.json({ error: duplicateJobNameError(targetProjectID) }, { status: 409 });
+      }
 
       // Create new training
       const training = await db.jobs.create({
         name,
-        project_id: project?.id || null,
+        project_id: targetProjectID,
         worker_id,
         gpu_ids,
         job_config: JSON.stringify(projectJobConfig),
@@ -271,7 +288,7 @@ export async function POST(request: Request) {
   } catch (error: any) {
     if (error.code === 'P2002') {
       // Handle unique constraint violation, 409=Conflict
-      return NextResponse.json({ error: 'Job name already exists' }, { status: 409 });
+      return NextResponse.json({ error: 'Job name already exists in this workspace' }, { status: 409 });
     }
     console.error(error);
     // Handle other errors

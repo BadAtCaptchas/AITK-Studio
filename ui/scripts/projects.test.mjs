@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanProjectSlug, getProjectRoots, isPathInside, PROJECT_FOLDERS } from '../dist/src/server/projects.js';
+import { copyDatasetBetweenRoots } from '../dist/src/server/datasetCopy.js';
 import {
   DatasetScopeError,
   isPathInside as isDatasetScopePathInside,
@@ -81,6 +83,54 @@ test('dataset roots isolate same dataset names between global and project spaces
   assert.notEqual(projectDatasetPath, globalDatasetPath);
   assert.equal(isDatasetScopePathInside(projectRoots.datasets, projectDatasetPath), true);
   assert.equal(isDatasetScopePathInside(projectRoots.datasets, path.join(projectRoots.datasets, '..', '..', datasetName)), false);
+});
+
+test('copyDatasetBetweenRoots imports a global dataset into a project dataset root', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-dataset-copy-'));
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const sourceDataset = path.join(globalRoot, 'portrait-set');
+
+  await fs.mkdir(sourceDataset, { recursive: true });
+  await fs.writeFile(path.join(sourceDataset, 'sample.txt'), 'caption');
+
+  const firstCopy = await copyDatasetBetweenRoots({
+    datasetPath: sourceDataset,
+    sourceDatasetsRoot: globalRoot,
+    destinationDatasetsRoot: projectDatasetRoot,
+    requestedName: 'portrait-set',
+  });
+  assert.equal(firstCopy.name, 'portrait-set');
+  assert.equal(await fs.readFile(path.join(firstCopy.path, 'sample.txt'), 'utf8'), 'caption');
+
+  const secondCopy = await copyDatasetBetweenRoots({
+    datasetPath: sourceDataset,
+    sourceDatasetsRoot: globalRoot,
+    destinationDatasetsRoot: projectDatasetRoot,
+    requestedName: 'portrait-set',
+  });
+  assert.equal(secondCopy.name, 'portrait-set_2');
+});
+
+test('copyDatasetBetweenRoots rejects source traversal outside the declared root', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-dataset-copy-reject-'));
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const outsideDataset = path.join(tempRoot, 'outside-dataset');
+
+  await fs.mkdir(globalRoot, { recursive: true });
+  await fs.mkdir(outsideDataset, { recursive: true });
+
+  await assert.rejects(
+    () =>
+      copyDatasetBetweenRoots({
+        datasetPath: outsideDataset,
+        sourceDatasetsRoot: globalRoot,
+        destinationDatasetsRoot: projectDatasetRoot,
+        requestedName: 'outside-dataset',
+      }),
+    /inside .*datasets folder/,
+  );
 });
 
 test('project dataset edits reject remote workers', () => {

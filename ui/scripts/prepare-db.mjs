@@ -39,6 +39,10 @@ function sqliteRun(db, sql) {
   });
 }
 
+function sqliteIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
 async function configureSqliteConnection(db) {
   await sqliteRun(db, `PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
   await sqliteRun(db, 'PRAGMA journal_mode=WAL;');
@@ -58,6 +62,102 @@ async function ensureColumn(db, table, name, definition) {
   const columns = await sqliteAll(db, `PRAGMA table_info(${table})`);
   if (!columns.some(column => column.name === name)) {
     await sqliteRun(db, `ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+  }
+}
+
+async function sqliteIndexColumns(db, indexName) {
+  const rows = await sqliteAll(db, `PRAGMA index_info(${sqliteIdentifier(indexName)})`);
+  return rows.sort((a, b) => Number(a.seqno) - Number(b.seqno)).map(row => row.name);
+}
+
+async function rebuildJobTableWithoutNameUnique(db) {
+  const tempTable = '__aitk_job_without_global_name_unique';
+  await sqliteRun(db, `DROP TABLE IF EXISTS ${tempTable};`);
+  await sqliteRun(
+    db,
+    `
+    CREATE TABLE ${tempTable} (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      project_id TEXT,
+      worker_id TEXT NOT NULL DEFAULT 'local',
+      remote_job_id TEXT,
+      remote_sync_at DATETIME,
+      remote_error TEXT,
+      gpu_ids TEXT NOT NULL,
+      job_config TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      status TEXT NOT NULL DEFAULT 'stopped',
+      stop BOOLEAN NOT NULL DEFAULT false,
+      return_to_queue BOOLEAN NOT NULL DEFAULT false,
+      step INTEGER NOT NULL DEFAULT 0,
+      info TEXT NOT NULL DEFAULT '',
+      speed_string TEXT NOT NULL DEFAULT '',
+      queue_position INTEGER NOT NULL DEFAULT 0,
+      pid INTEGER,
+      job_type TEXT NOT NULL DEFAULT 'train',
+      job_ref TEXT,
+      save_now BOOLEAN NOT NULL DEFAULT false
+    );
+    `,
+  );
+  await sqliteRun(
+    db,
+    `
+    INSERT INTO ${tempTable} (
+      id, name, project_id, worker_id, remote_job_id, remote_sync_at, remote_error, gpu_ids, job_config,
+      created_at, updated_at, status, stop, return_to_queue, step, info, speed_string, queue_position,
+      pid, job_type, job_ref, save_now
+    )
+    SELECT
+      id, name, project_id, worker_id, remote_job_id, remote_sync_at, remote_error, gpu_ids, job_config,
+      created_at, updated_at, status, stop, return_to_queue, step, info, speed_string, queue_position,
+      pid, job_type, job_ref, save_now
+    FROM Job;
+    `,
+  );
+  await sqliteRun(db, 'DROP TABLE Job;');
+  await sqliteRun(db, `ALTER TABLE ${tempTable} RENAME TO Job;`);
+}
+
+async function dropLegacySqliteJobNameUniqueIndexes(db) {
+  const indexes = await sqliteAll(db, 'PRAGMA index_list(Job)');
+  let needsRebuild = false;
+  for (const index of indexes) {
+    if (!index.unique) continue;
+    const columns = await sqliteIndexColumns(db, index.name);
+    if (columns.length !== 1 || columns[0] !== 'name') continue;
+    if (String(index.name).startsWith('sqlite_autoindex_')) {
+      needsRebuild = true;
+      continue;
+    }
+    try {
+      await sqliteRun(db, `DROP INDEX ${sqliteIdentifier(index.name)};`);
+    } catch {
+      needsRebuild = true;
+    }
+  }
+  if (needsRebuild) {
+    await rebuildJobTableWithoutNameUnique(db);
+  }
+}
+
+async function applySqliteScopedJobNameIndexes(filename) {
+  const db = new sqlite3.Database(filename);
+  try {
+    await configureSqliteConnection(db);
+    await ensureColumn(db, 'Job', 'project_id', 'TEXT');
+    await dropLegacySqliteJobNameUniqueIndexes(db);
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_name_idx ON Job(name);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_project_id_name_idx ON Job(project_id, name);');
+    await sqliteRun(db, 'CREATE UNIQUE INDEX IF NOT EXISTS Job_global_name_key ON Job(name) WHERE project_id IS NULL;');
+    await sqliteRun(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS Job_project_id_name_key ON Job(project_id, name) WHERE project_id IS NOT NULL;',
+    );
+  } finally {
+    await new Promise(resolve => db.close(resolve));
   }
 }
 
@@ -94,7 +194,7 @@ async function applySqliteCompatibilitySchema(filename) {
       `
       CREATE TABLE IF NOT EXISTS Job (
         id TEXT PRIMARY KEY NOT NULL,
-        name TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
         worker_id TEXT NOT NULL DEFAULT 'local',
         remote_job_id TEXT,
         remote_sync_at DATETIME,
@@ -117,10 +217,25 @@ async function applySqliteCompatibilitySchema(filename) {
       );
       `,
     );
+    await ensureColumn(db, 'Job', 'name', "TEXT NOT NULL DEFAULT ''");
     await ensureColumn(db, 'Job', 'worker_id', "TEXT NOT NULL DEFAULT 'local'");
     await ensureColumn(db, 'Job', 'remote_job_id', 'TEXT');
     await ensureColumn(db, 'Job', 'remote_sync_at', 'DATETIME');
     await ensureColumn(db, 'Job', 'remote_error', 'TEXT');
+    await ensureColumn(db, 'Job', 'gpu_ids', "TEXT NOT NULL DEFAULT ''");
+    await ensureColumn(db, 'Job', 'job_config', "TEXT NOT NULL DEFAULT '{}'");
+    await ensureColumn(db, 'Job', 'created_at', "DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'");
+    await ensureColumn(db, 'Job', 'updated_at', "DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'");
+    await ensureColumn(db, 'Job', 'status', "TEXT NOT NULL DEFAULT 'stopped'");
+    await ensureColumn(db, 'Job', 'stop', 'BOOLEAN NOT NULL DEFAULT false');
+    await ensureColumn(db, 'Job', 'return_to_queue', 'BOOLEAN NOT NULL DEFAULT false');
+    await ensureColumn(db, 'Job', 'step', 'INTEGER NOT NULL DEFAULT 0');
+    await ensureColumn(db, 'Job', 'info', "TEXT NOT NULL DEFAULT ''");
+    await ensureColumn(db, 'Job', 'speed_string', "TEXT NOT NULL DEFAULT ''");
+    await ensureColumn(db, 'Job', 'queue_position', 'INTEGER NOT NULL DEFAULT 0');
+    await ensureColumn(db, 'Job', 'pid', 'INTEGER');
+    await ensureColumn(db, 'Job', 'job_type', "TEXT NOT NULL DEFAULT 'train'");
+    await ensureColumn(db, 'Job', 'job_ref', 'TEXT');
     await ensureColumn(db, 'Job', 'save_now', 'BOOLEAN NOT NULL DEFAULT false');
     await ensureColumn(db, 'Job', 'project_id', 'TEXT');
 
@@ -142,8 +257,8 @@ async function applySqliteCompatibilitySchema(filename) {
     await ensureColumn(db, 'Project', 'description', "TEXT NOT NULL DEFAULT ''");
     await ensureColumn(db, 'Project', 'badge_asset', 'TEXT');
     await ensureColumn(db, 'Project', 'root_path', "TEXT NOT NULL DEFAULT ''");
-    await ensureColumn(db, 'Project', 'created_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
-    await ensureColumn(db, 'Project', 'updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+    await ensureColumn(db, 'Project', 'created_at', "DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'");
+    await ensureColumn(db, 'Project', 'updated_at', "DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'");
 
     await sqliteRun(
       db,
@@ -175,6 +290,14 @@ async function applySqliteCompatibilitySchema(filename) {
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_job_type_idx ON Job(job_type);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_job_ref_idx ON Job(job_ref);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_project_id_idx ON Job(project_id);');
+    await dropLegacySqliteJobNameUniqueIndexes(db);
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_name_idx ON Job(name);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_project_id_name_idx ON Job(project_id, name);');
+    await sqliteRun(db, 'CREATE UNIQUE INDEX IF NOT EXISTS Job_global_name_key ON Job(name) WHERE project_id IS NULL;');
+    await sqliteRun(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS Job_project_id_name_key ON Job(project_id, name) WHERE project_id IS NOT NULL;',
+    );
     await sqliteRun(db, 'CREATE UNIQUE INDEX IF NOT EXISTS Project_slug_key ON Project(slug);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Project_slug_idx ON Project(slug);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS WorkerNode_enabled_idx ON WorkerNode(enabled);');
@@ -192,6 +315,21 @@ async function hasLegacySqliteTables(filename) {
   } finally {
     await new Promise(resolve => db.close(resolve));
   }
+}
+
+function isSingleFieldMongoIndex(index, field) {
+  const entries = Object.entries(index?.key || {});
+  return entries.length === 1 && entries[0][0] === field && entries[0][1] === 1;
+}
+
+async function dropLegacyMongoJobNameUniqueIndex(db) {
+  const jobs = db.collection('jobs');
+  const indexes = await jobs.indexes().catch(() => []);
+  await Promise.all(
+    indexes
+      .filter(index => index.unique === true && isSingleFieldMongoIndex(index, 'name'))
+      .map(index => jobs.dropIndex(index.name).catch(() => undefined)),
+  );
 }
 
 if (!['sqlite', 'mongodb'].includes(provider)) {
@@ -220,6 +358,7 @@ if (provider === 'sqlite') {
       await applySqliteCompatibilitySchema(sqlitePath);
     }
   }
+  await applySqliteScopedJobNameIndexes(sqlitePath);
   await configureSqliteDatabase(sqlitePath);
   process.exit(0);
 }
@@ -233,10 +372,12 @@ const client = new MongoClient(mongoUri);
 try {
   await client.connect();
   const db = client.db(mongoDbName);
+  await dropLegacyMongoJobNameUniqueIndex(db);
   await Promise.all([
     db.collection('jobs').createIndexes([
       { key: { id: 1 }, unique: true },
-      { key: { name: 1 }, unique: true },
+      { key: { project_id: 1, name: 1 }, unique: true },
+      { key: { name: 1 } },
       { key: { status: 1 } },
       { key: { worker_id: 1 } },
       { key: { remote_job_id: 1 } },

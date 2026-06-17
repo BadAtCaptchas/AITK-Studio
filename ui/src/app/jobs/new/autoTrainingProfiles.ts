@@ -44,6 +44,10 @@ const plateauDefaults: Record<PlateauPreset, PhaseAutoAdvanceConfig> = {
   },
 };
 
+const booguImageArchs = ['boogu_image'];
+const booguEditArchs = ['boogu_image_edit'];
+const booguTurboArchs = ['boogu_image_turbo'];
+
 const flowImageArchs = [
   'flux',
   'flux_kontext',
@@ -53,6 +57,7 @@ const flowImageArchs = [
   'zeta_chroma',
   'lumina2',
   'omnigen2',
+  ...booguImageArchs,
   'zimage',
   'zimage:*',
   'prx_pixel',
@@ -72,6 +77,7 @@ const anatomyRealismArchs = [
   ...flowImageArchs,
   ...sdArchs,
   ...qwenImageArchs,
+  ...booguEditArchs,
   'flux2',
   'flux2_klein_4b',
   'flux2_klein_9b',
@@ -253,6 +259,67 @@ export const builtInAutoTrainingProfiles: AutoTrainingProfile[] = [
       phase('Teach subject', 0.00003, 'content', 'standard', { timestep_type: 'weighted' }),
       phase('Stabilize', 0.00002, 'balanced', 'standard', { timestep_type: 'weighted' }),
       phase('Polish style', 0.00001, 'style', 'standard', { timestep_type: 'weighted' }),
+    ],
+  },
+  {
+    id: 'boogu-image-balanced-lora',
+    name: 'Boogu-Image Balanced LoRA',
+    description: 'Balanced Boogu-Image transformer LoRA profile for Base text-to-image training.',
+    modelArchs: booguImageArchs,
+    network: loraNetwork(32, { transformer_only: true }),
+    train: trainDefaults(0.00005, {
+      batch_size: 1,
+      gradient_accumulation: 1,
+      cache_text_embeddings: true,
+      timestep_type: 'weighted',
+      content_or_style: 'content',
+      save_on_phase_change: true,
+    }),
+    phases: [
+      phase('Teach subject', 0.00005, 'content', 'standard', { timestep_type: 'weighted' }),
+      phase('Stabilize', 0.00003, 'balanced', 'standard', { timestep_type: 'weighted' }),
+      phase('Polish style', 0.000015, 'style', 'standard', { timestep_type: 'weighted' }),
+    ],
+  },
+  {
+    id: 'boogu-image-edit-lora',
+    name: 'Boogu-Image Edit LoRA',
+    description: 'Boogu-Image Edit LoRA profile for control-image consistency and edited outputs.',
+    modelArchs: booguEditArchs,
+    network: loraNetwork(32, { transformer_only: true }),
+    train: trainDefaults(0.00004, {
+      batch_size: 1,
+      gradient_accumulation: 1,
+      cache_text_embeddings: true,
+      timestep_type: 'weighted',
+      content_or_style: 'content',
+      save_on_phase_change: true,
+      unload_text_encoder: false,
+    }),
+    phases: [
+      phase('Teach controls', 0.00004, 'content', 'standard', { timestep_type: 'weighted' }),
+      phase('Stabilize edits', 0.000025, 'balanced', 'standard', { timestep_type: 'weighted' }),
+      phase('Polish style', 0.00001, 'style', 'standard', { timestep_type: 'weighted' }),
+    ],
+  },
+  {
+    id: 'boogu-image-turbo-experimental-lora',
+    name: 'Boogu-Image Turbo Experimental LoRA',
+    description: 'Conservative experimental LoRA profile for the 4-step distilled Boogu Turbo model.',
+    modelArchs: booguTurboArchs,
+    network: loraNetwork(16, { transformer_only: true }),
+    train: trainDefaults(0.00002, {
+      batch_size: 1,
+      gradient_accumulation: 1,
+      cache_text_embeddings: true,
+      timestep_type: 'weighted',
+      content_or_style: 'content',
+      save_on_phase_change: true,
+    }),
+    phases: [
+      phase('Teach lightly', 0.00002, 'content', 'standard', { timestep_type: 'weighted' }),
+      phase('Stabilize distilled prior', 0.00001, 'balanced', 'standard', { timestep_type: 'weighted' }),
+      phase('Tiny polish', 0.000005, 'style', 'standard', { timestep_type: 'weighted' }),
     ],
   },
   {

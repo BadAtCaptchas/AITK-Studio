@@ -137,14 +137,14 @@ function getExtractedArchivePath(extractRoot: string, archivePath: string) {
   return resolved;
 }
 
-async function getAvailableJobName(sourceName: string, trainingRoot: string) {
+async function getAvailableJobName(sourceName: string, trainingRoot: string, projectID: string | null) {
   const baseName = safeNameSegment(sourceName, 'imported_job');
   const candidates = [baseName, `${baseName}_imported`];
   let suffix = 2;
 
   while (true) {
     const candidate = candidates.shift() || `${baseName}_imported_${suffix++}`;
-    const existingJob = await db.jobs.findByName(candidate);
+    const existingJob = await db.jobs.findByNameInScope(candidate, projectID);
     const candidateFolder = path.join(trainingRoot, candidate);
     if (!existingJob && !fs.existsSync(candidateFolder)) {
       return candidate;
@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
     const sourceJob = await readJsonFile<any>(path.join(extractRoot, 'job.json'));
     const sourceJobConfig = await readJsonFile<any>(path.join(extractRoot, 'job_config.json'));
     const sourceName = sourceJob?.name || sourceJobConfig?.config?.name || manifest.source.jobName;
-    const importedName = await getAvailableJobName(sourceName, trainingRoot);
+    const importedName = await getAvailableJobName(sourceName, trainingRoot, project?.id || null);
     let warnings = [...(manifest.warnings || [])];
     const modelReferences = Array.isArray(manifest.models?.references) ? manifest.models.references : [];
 

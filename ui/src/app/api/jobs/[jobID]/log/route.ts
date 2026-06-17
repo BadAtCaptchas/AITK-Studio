@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
 import { getJobTrainingRoot } from '@/server/projects';
+import { getTrainingFolder } from '@/server/settings';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -30,6 +31,38 @@ async function readTail(logPath: string) {
   }
 
   return buffer.subarray(0, bytesRead).toString('utf-8');
+}
+
+async function launchLogBelongsToJob(launchLogPath: string, jobID: string) {
+  if (!fs.existsSync(launchLogPath)) return false;
+  const launchLog = await readTail(launchLogPath).catch(() => '');
+  return launchLog.includes(`starting job ${jobID}`);
+}
+
+async function resolveReadableJobLogPath(
+  trainingFolder: string,
+  jobName: string,
+  jobID: string,
+  options: { requireLaunchJobMatch?: boolean } = {},
+) {
+  if (!fs.existsSync(trainingFolder)) return null;
+
+  const trainingFolderRealPath = await fs.promises.realpath(trainingFolder);
+  const jobFolder = path.resolve(trainingFolderRealPath, jobName);
+  const relativePath = path.relative(trainingFolderRealPath, jobFolder);
+  const isPathOutsideTrainingFolder = relativePath.startsWith('..') || path.isAbsolute(relativePath);
+
+  if (isPathOutsideTrainingFolder) {
+    throw new Error('Invalid job path');
+  }
+
+  const logPath = path.join(jobFolder, 'log.txt');
+  const launchLogPath = path.join(jobFolder, LAUNCH_LOG_FILE);
+  if (options.requireLaunchJobMatch && !(await launchLogBelongsToJob(launchLogPath, jobID))) {
+    return null;
+  }
+
+  return fs.existsSync(logPath) ? logPath : fs.existsSync(launchLogPath) ? launchLogPath : null;
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
@@ -60,18 +93,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const trainingFolder = await getJobTrainingRoot(job);
-    const trainingFolderRealPath = await fs.promises.realpath(trainingFolder);
-    const jobFolder = path.resolve(trainingFolderRealPath, job.name);
-    const logPath = path.join(jobFolder, 'log.txt');
-    const launchLogPath = path.join(jobFolder, LAUNCH_LOG_FILE);
-    const relativePath = path.relative(trainingFolderRealPath, jobFolder);
-    const isPathOutsideTrainingFolder = relativePath.startsWith('..') || path.isAbsolute(relativePath);
-
-    if (isPathOutsideTrainingFolder) {
-      return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
+    let readableLogPath = await resolveReadableJobLogPath(trainingFolder, job.name, jobID);
+    if (!readableLogPath && job.project_id) {
+      const globalTrainingFolder = await getTrainingFolder();
+      if (path.resolve(globalTrainingFolder) !== path.resolve(trainingFolder)) {
+        readableLogPath = await resolveReadableJobLogPath(globalTrainingFolder, job.name, jobID, {
+          requireLaunchJobMatch: true,
+        });
+      }
     }
-
-    const readableLogPath = fs.existsSync(logPath) ? logPath : fs.existsSync(launchLogPath) ? launchLogPath : null;
     if (!readableLogPath) {
       return NextResponse.json({ log: '' });
     }
@@ -79,6 +109,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const log = await readTail(readableLogPath);
     return NextResponse.json({ log });
   } catch (error) {
+    if (error instanceof Error && error.message === 'Invalid job path') {
+      return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
+    }
     console.error('Error reading log file:', error);
     return NextResponse.json({ error: 'Error reading log file' }, { status: 500 });
   }

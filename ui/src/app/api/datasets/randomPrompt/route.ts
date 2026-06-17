@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { webcrypto } from 'crypto';
-import { getDatasetsRoot } from '@/server/settings';
+import { resolveDatasetScope } from '@/server/datasetScope';
 import {
   getRandomPromptCaptionExtCandidates,
   normalizeRandomPromptCaptionExt,
@@ -227,12 +227,14 @@ export async function POST(request: Request) {
     const encryptedDatasetKeys = Array.isArray(body?.encryptedDatasetKeys)
       ? (body.encryptedDatasetKeys as EncryptedDatasetStartKey[])
       : [];
+    const projectID = body?.project_id;
 
     if (datasets.length === 0) {
       return NextResponse.json({ error: 'No datasets were provided.' }, { status: 400 });
     }
 
-    const datasetsRoot = path.resolve(await getDatasetsRoot());
+    const { datasetsRoot: rawDatasetsRoot } = await resolveDatasetScope(projectID);
+    const datasetsRoot = path.resolve(rawDatasetsRoot);
     const encryptedKeyMap = normalizeEncryptedKeyMap(encryptedDatasetKeys);
     const state: RandomPromptState = {
       selected: null,

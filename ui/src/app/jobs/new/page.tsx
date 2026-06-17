@@ -42,12 +42,16 @@ type ValidationMessage = {
   message: string;
 };
 
-export default function TrainingForm() {
+export default function TrainingForm({
+  projectIDOverride = null,
+}: {
+  projectIDOverride?: string | null;
+} = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const runId = searchParams.get('id');
   const cloneId = searchParams.get('cloneId');
-  const projectID = searchParams.get('project_id');
+  const projectID = projectIDOverride ?? searchParams.get('project_id');
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [workerID, setWorkerID] = useState('local');
   const { settings, isSettingsLoaded } = useSettings();
@@ -476,7 +480,12 @@ export default function TrainingForm() {
     } catch (error: any) {
       setStatus('error');
       if (error.response?.status === 409) {
-        setValidationMessages([{ level: 'error', message: 'Training name already exists. Choose a different name.' }]);
+        setValidationMessages([
+          {
+            level: 'error',
+            message: error?.response?.data?.error || 'Training name already exists in this workspace. Choose a different name.',
+          },
+        ]);
       } else {
         setValidationMessages([
           { level: 'error', message: error?.response?.data?.error || 'Failed to save job. Please try again.' },
@@ -654,6 +663,7 @@ export default function TrainingForm() {
               trainerLabel={trainerLabel}
               onOpenAdvanced={() => setShowAdvancedView(true)}
               onOpenRawConfig={() => setRawConfigOpen(true)}
+              projectID={projectID}
               isLoading={
                 !isSettingsLoaded || !isGPUInfoLoaded || workerStatus === 'loading' || datasetFetchStatus !== 'success'
               }

@@ -247,12 +247,12 @@ function shouldPreserveLocalJobConfig(existingLocalJob: Job, workerId: string) {
 
 async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job, localJobId?: string) {
   const baseName = remoteJob.name || remoteJob.id;
-  const existing = await db.jobs.findByName(baseName);
+  const existing = await db.jobs.findByNameInScope(baseName, null);
   if (!existing || existing.id === localJobId) return baseName;
   if (existing.worker_id === worker.id && existing.remote_job_id === remoteJob.id) return baseName;
 
   const workerScopedName = `${baseName} (${worker.name})`;
-  const scopedExisting = await db.jobs.findByName(workerScopedName);
+  const scopedExisting = await db.jobs.findByNameInScope(workerScopedName, null);
   if (!scopedExisting || scopedExisting.id === localJobId) return workerScopedName;
   if (scopedExisting.worker_id === worker.id && scopedExisting.remote_job_id === remoteJob.id) return workerScopedName;
 

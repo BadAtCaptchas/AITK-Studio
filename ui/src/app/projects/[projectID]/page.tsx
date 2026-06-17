@@ -147,7 +147,7 @@ export default function ProjectWorkspacePage({ params }: { params: Promise<{ pro
                       <Play className="mx-auto h-9 w-9 text-emerald-300" />
                       <div className="mt-3 text-sm font-semibold text-gray-200">No active run</div>
                       <div className="mt-1 text-sm text-gray-500">Start training or generation scoped to this project.</div>
-                      <Link href={`/jobs/new?project_id=${encodeURIComponent(projectID)}`} className="operator-button mt-4 h-8 py-1 text-xs">
+                      <Link href={`${projectPath}/runs/new`} className="operator-button mt-4 h-8 py-1 text-xs">
                         <Plus className="h-4 w-4" />
                         New Run
                       </Link>

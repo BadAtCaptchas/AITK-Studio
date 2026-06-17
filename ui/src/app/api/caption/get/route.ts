@@ -1,11 +1,11 @@
 /* eslint-disable */
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
 import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     const filepath = imgPath;
 
     // Get allowed directories
-    const allowedDir = await getDatasetsRoot();
+    const { datasetsRoot: allowedDir } = await resolveDatasetScope(body?.project_id);
 
     const resolvedFilePath = path.resolve(filepath);
     const allowedRoot = path.resolve(allowedDir);

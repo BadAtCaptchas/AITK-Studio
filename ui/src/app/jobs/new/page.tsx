@@ -47,12 +47,13 @@ export default function TrainingForm() {
   const searchParams = useSearchParams();
   const runId = searchParams.get('id');
   const cloneId = searchParams.get('cloneId');
+  const projectID = searchParams.get('project_id');
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [workerID, setWorkerID] = useState('local');
   const { settings, isSettingsLoaded } = useSettings();
   const { workers, status: workerStatus } = useWorkers();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
-  const { datasets, status: datasetFetchStatus } = useDatasetList({ includeRemote: true });
+  const { datasets, status: datasetFetchStatus } = useDatasetList({ includeRemote: !projectID, projectID });
   const [datasetOptions, setDatasetOptions] = useState<
     Array<
       SelectOption & {
@@ -124,7 +125,7 @@ export default function TrainingForm() {
       const workerID = dataset.worker_id || 'local';
       const ref = source === 'remote' ? dataset.ref || makeRemoteDatasetRef(workerID, dataset.name) : dataset.ref || '';
       return {
-        value: source === 'remote' ? ref : path.join(settings.DATASETS_FOLDER, dataset.name),
+        value: source === 'remote' ? ref : dataset.path || path.join(settings.DATASETS_FOLDER, dataset.name),
         label:
           source === 'remote'
             ? `${dataset.name}${dataset.encrypted ? ' (encrypted)' : ''} - ${dataset.worker_name || workerID}`
@@ -251,6 +252,7 @@ export default function TrainingForm() {
       .post('/api/datasets/import-remote', {
         worker_id: parsed.workerID,
         datasetName: parsed.datasetName,
+        project_id: projectID || undefined,
       })
       .then(res => {
         const importedName = res.data?.dataset?.name;
@@ -460,10 +462,13 @@ export default function TrainingForm() {
         worker_id: workerID,
         gpu_ids: gpuIDs,
         job_config: preparedJobConfig,
+        project_id: projectID || undefined,
       });
       setStatus('success');
       setValidationMessages([]);
-      if (runId) {
+      if (projectID && !runId) {
+        router.push(`/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(res.data.id)}`);
+      } else if (runId) {
         router.push(`/jobs/${runId}`);
       } else {
         router.push(`/jobs/${res.data.id}`);
@@ -555,7 +560,9 @@ export default function TrainingForm() {
           <Button className="operator-icon-button h-9 w-9 flex-none" onClick={() => history.back()} title="Back">
             <ChevronLeft className="h-5 w-5" />
           </Button>
-          <h1 className="truncate text-lg font-semibold text-gray-100">{runId ? 'Edit Training Job' : 'New Training Job'}</h1>
+          <h1 className="truncate text-lg font-semibold text-gray-100">
+            {runId ? 'Edit Training Job' : projectID ? 'New Project Training Job' : 'New Training Job'}
+          </h1>
         </div>
         <div className="flex-1"></div>
         <div className="hidden min-w-40 md:block">

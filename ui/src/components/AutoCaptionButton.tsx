@@ -7,11 +7,12 @@ import { Loader2 } from 'lucide-react';
 
 type AutoCaptionButtonProps = {
   datasetPath: string;
+  projectID?: string | null;
   setIsAutoCaptioning?: (isAutoCaptioning: boolean) => void;
   encryptedDatasetKeyB64?: string;
 };
 
-export default function AutoCaptionButton({ datasetPath, setIsAutoCaptioning, encryptedDatasetKeyB64 }: AutoCaptionButtonProps) {
+export default function AutoCaptionButton({ datasetPath, projectID = null, setIsAutoCaptioning, encryptedDatasetKeyB64 }: AutoCaptionButtonProps) {
   const [reloadInterval, setReloadInterval] = useState<number | null>(null);
   const { job, refreshJob } = useJobByRef(datasetPath, reloadInterval);
   const isCaptioning = !!job && (job.status === 'running' || job.status === 'queued' || job.status === 'stopping');
@@ -37,9 +38,15 @@ export default function AutoCaptionButton({ datasetPath, setIsAutoCaptioning, en
   return (
     <Button
       className="text-white bg-blue-600 px-3 py-1 rounded-md mr-2"
-      onClick={() => openCaptionDatasetModal(datasetPath, () => {
-        refreshJob();
-      }, { encryptedDatasetKeyB64 })}
+      onClick={() =>
+        openCaptionDatasetModal(
+          datasetPath,
+          () => {
+            refreshJob();
+          },
+          { encryptedDatasetKeyB64, projectID },
+        )
+      }
     >
       Auto Caption
     </Button>

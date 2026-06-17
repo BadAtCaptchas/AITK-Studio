@@ -57,6 +57,23 @@ const COMPOSITION_ORDER = ['background', 'elements'];
 const ELEMENT_OBJ_ORDER = ['type', 'bbox', 'desc', 'color_palette'];
 const ELEMENT_TEXT_ORDER = ['type', 'bbox', 'text', 'desc', 'color_palette'];
 const DEFAULT_COLORS = ['#22D3EE', '#F59E0B', '#A3E635', '#FB7185', '#818CF8', '#34D399'];
+const MEDIUM_OPTIONS = ['photograph', 'illustration', '3d_render', 'painting', 'graphic_design'];
+const MEDIUM_ALIASES: Record<string, string> = {
+  photograph: 'photograph',
+  photo: 'photograph',
+  illustration: 'illustration',
+  '3d render': '3d_render',
+  '3d_render': '3d_render',
+  '3d-render': '3d_render',
+  '3drender': '3d_render',
+  render: '3d_render',
+  '3d': '3d_render',
+  painting: 'painting',
+  'graphic design': 'graphic_design',
+  graphic_design: 'graphic_design',
+  'graphic-design': 'graphic_design',
+  graphic: 'graphic_design',
+};
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -73,27 +90,83 @@ function orderRecord(source: Record<string, any>, preferredOrder: string[]) {
   return next;
 }
 
+function canonMedium(value: unknown) {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  const key = trimmed.replace(/\.+$/, '').trim().toLowerCase();
+  return MEDIUM_ALIASES[key] ?? trimmed;
+}
+
+function styleHasPhotoCues(value: Record<string, any>) {
+  const cueText = ['medium', 'photo', 'art_style', 'aesthetics', 'lighting']
+    .map(key => (typeof value[key] === 'string' ? value[key].toLowerCase() : ''))
+    .join(' ');
+  return /\b(photo|photograph|photographic|camera|lens|depth of field|bokeh|aperture|shutter|exposure|focal length|35mm|50mm|85mm|dslr|mirrorless)\b/.test(cueText);
+}
+
+function inferStyleValue(value: Record<string, any>, styleKey: 'photo' | 'art_style') {
+  for (const key of [styleKey, 'medium', 'aesthetics']) {
+    if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
+  }
+  return styleKey === 'photo' ? 'photograph' : 'artwork';
+}
+
 function normalizeStyleDescription(value: unknown) {
   if (!isRecord(value)) return value;
-  const hasPhoto = Object.prototype.hasOwnProperty.call(value, 'photo');
-  const order = hasPhoto ? STYLE_PHOTO_ORDER : STYLE_ART_ORDER;
-  return orderRecord(value, order);
+  const next = { ...value };
+  const medium = canonMedium(next.medium);
+  if (typeof medium === 'string' && medium) next.medium = medium;
+
+  const hasPhoto = Object.prototype.hasOwnProperty.call(next, 'photo') && next.photo != null;
+  const hasArtStyle = Object.prototype.hasOwnProperty.call(next, 'art_style') && next.art_style != null;
+  let photoBranch: boolean;
+  if (typeof medium === 'string' && MEDIUM_OPTIONS.includes(medium)) {
+    photoBranch = medium === 'photograph';
+  } else if (hasArtStyle && !hasPhoto) {
+    photoBranch = false;
+  } else if (hasPhoto && !hasArtStyle) {
+    photoBranch = true;
+  } else {
+    photoBranch = styleHasPhotoCues(next);
+  }
+
+  const styleKey = photoBranch ? 'photo' : 'art_style';
+  const renderValue =
+    (photoBranch ? next.photo : next.art_style) ||
+    (photoBranch ? next.art_style : next.photo) ||
+    inferStyleValue(next, styleKey);
+  delete next.photo;
+  delete next.art_style;
+  next[styleKey] = renderValue;
+
+  const palette = normalizeIdeogramColorPalette(next.color_palette, 16);
+  if (palette.length > 0) next.color_palette = palette;
+  else delete next.color_palette;
+
+  return orderRecord(next, photoBranch ? STYLE_PHOTO_ORDER : STYLE_ART_ORDER);
 }
 
 function normalizeElement(value: unknown) {
   if (!isRecord(value)) return value;
+  const next = { ...value };
   const rawBoxTuple =
-    value.bbox ?? value.bbox_px ?? value.bboxPx;
+    next.bbox ?? next.bbox_px ?? next.bboxPx;
   if (Array.isArray(rawBoxTuple)) {
-    const source = Array.isArray(value.bbox)
+    const source = Array.isArray(next.bbox)
       ? 'bbox'
-      : Array.isArray(value.bbox_px)
+      : Array.isArray(next.bbox_px)
         ? 'bbox_px'
         : 'bboxPx';
-    value.bbox = boxToArray(arrayToBox(rawBoxTuple, undefined, source) || { y1: 0, x1: 0, y2: 0, x2: 0 });
+    next.bbox = boxToArray(arrayToBox(rawBoxTuple, undefined, source) || { y1: 0, x1: 0, y2: 0, x2: 0 });
   }
-  const order = value.type === 'text' ? ELEMENT_TEXT_ORDER : ELEMENT_OBJ_ORDER;
-  return orderRecord(value, order);
+  if (next.type === 'text' && !Object.prototype.hasOwnProperty.call(next, 'text')) {
+    next.text = '';
+  }
+  const palette = normalizeIdeogramColorPalette(next.color_palette, 5);
+  if (palette.length > 0) next.color_palette = palette;
+  else delete next.color_palette;
+  const order = next.type === 'text' ? ELEMENT_TEXT_ORDER : ELEMENT_OBJ_ORDER;
+  return orderRecord(next, order);
 }
 
 function normalizeComposition(value: unknown) {
@@ -189,7 +262,12 @@ export function normalizeIdeogramColorPalette(value: unknown, maxColors = 5) {
   const seen = new Set<string>();
   const colors: string[] = [];
   value.forEach(item => {
-    const color = typeof item === 'string' ? item.trim().toUpperCase() : '';
+    const raw = typeof item === 'string' ? item.trim() : '';
+    const color = /^#[0-9a-fA-F]{3}$/.test(raw)
+      ? `#${raw.slice(1).split('').map(ch => ch + ch).join('').toUpperCase()}`
+      : /^#[0-9a-fA-F]{6}$/.test(raw)
+        ? `#${raw.slice(1).toUpperCase()}`
+        : '';
     if (!/^#[0-9A-F]{6}$/.test(color) || seen.has(color)) return;
     seen.add(color);
     colors.push(color);
@@ -324,26 +402,25 @@ export function extractIdeogramBoxes(data: unknown, imageSize?: ImageSize): Ideo
   const composition = data.compositional_deconstruction;
   if (!isRecord(composition) || !Array.isArray(composition.elements)) return [];
 
-  return composition.elements.flatMap((rawElement, elementIndex) => {
-    if (!isRecord(rawElement)) return [];
+  const boxes: IdeogramBox[] = [];
+  composition.elements.forEach((rawElement, elementIndex) => {
+    if (!isRecord(rawElement)) return;
     const box = arrayToBox(rawElement.bbox, imageSize) ||
       arrayToBox(rawElement.bbox_px, imageSize, 'bbox_px') ||
       arrayToBox(rawElement.bboxPx, imageSize, 'bboxPx');
-    if (!box) return [];
+    if (!box) return;
     const type: IdeogramElementType = rawElement.type === 'text' ? 'text' : 'obj';
     const labelSource = type === 'text' ? rawElement.text || rawElement.desc : rawElement.desc;
-    const palette = Array.isArray(rawElement.color_palette) ? rawElement.color_palette : [];
-    const color = typeof palette[0] === 'string' ? palette[0] : DEFAULT_COLORS[elementIndex % DEFAULT_COLORS.length];
-    return [
-      {
-        ...box,
-        elementIndex,
-        type,
-        label: labelSource == null ? '' : String(labelSource),
-        color,
-      },
-    ];
+    const palette = normalizeIdeogramColorPalette(rawElement.color_palette);
+    boxes.push({
+      ...box,
+      elementIndex,
+      type,
+      label: labelSource == null ? '' : String(labelSource),
+      color: palette[0] ?? DEFAULT_COLORS[0],
+    });
   });
+  return boxes;
 }
 
 export function serializeIdeogramCaption(data: Record<string, any>) {

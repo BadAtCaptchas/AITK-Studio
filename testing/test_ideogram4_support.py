@@ -977,6 +977,102 @@ class IdeogramJsonCaptionerBehaviorTest(unittest.TestCase):
             ("type", "bbox", "desc", "color_palette"),
         )
 
+    def test_captioner_migrates_old_ideogram_caption_shape(self):
+        captioner = self._json_captioner()
+        raw_caption = {
+            "aspect_ratio": "1:1",
+            "high_level_description": "A flat poster illustration of a green robot.",
+            "style_description": {
+                "aesthetics": "playful, graphic",
+                "lighting": "even poster lighting",
+                "photo": "flat vector, clean edges",
+                "medium": "Illustration.",
+                "color_palette": ["#abc", "#AABBCC", "bad", "#123456"],
+            },
+            "compositional_deconstruction": {
+                "background": "A simple yellow background.",
+                "elements": [
+                    {
+                        "type": "obj",
+                        "bbox": [120, 200, 700, 820],
+                        "color_palette": ["#0f0", "#00FF00", "not-a-color", "#112233"],
+                        "desc": "Green robot with square head and rounded arms.",
+                    },
+                    {
+                        "type": "text",
+                        "bbox": [720, 180, 820, 840],
+                        "color_palette": ["#fff"],
+                        "desc": "White headline text.",
+                    },
+                ],
+            },
+        }
+
+        normalized = captioner.normalize_caption_output(
+            "legacy.jpg", json.dumps(raw_caption)
+        )
+        parsed = json.loads(normalized)
+
+        self.assertEqual(self._caption_warnings(parsed), [])
+        self.assertNotIn("aspect_ratio", parsed)
+        self.assertEqual(
+            tuple(parsed["style_description"].keys()),
+            ("aesthetics", "lighting", "medium", "art_style", "color_palette"),
+        )
+        self.assertEqual(parsed["style_description"]["medium"], "illustration")
+        self.assertEqual(parsed["style_description"]["art_style"], "flat vector, clean edges")
+        self.assertEqual(
+            parsed["style_description"]["color_palette"],
+            ["#AABBCC", "#123456"],
+        )
+        elements = parsed["compositional_deconstruction"]["elements"]
+        self.assertEqual(
+            tuple(elements[0].keys()), ("type", "bbox", "desc", "color_palette")
+        )
+        self.assertEqual(elements[0]["color_palette"], ["#00FF00", "#112233"])
+        self.assertEqual(tuple(elements[1].keys()), ("type", "bbox", "text", "desc", "color_palette"))
+        self.assertEqual(elements[1]["text"], "")
+        self.assertEqual(elements[1]["color_palette"], ["#FFFFFF"])
+
+    def test_model_side_ideogram_digest_is_compact_and_migrates_old_shape(self):
+        from toolkit.ideogram_caption import digest_caption_string
+
+        raw_caption = {
+            "aspect_ratio": "16:9",
+            "high_level_description": "A 3D render of a glass cube.",
+            "style_description": {
+                "aesthetics": "clean",
+                "lighting": "studio",
+                "photo": "octane render",
+                "medium": "3D render.",
+                "color_palette": ["#09f", "#0099FF"],
+            },
+            "compositional_deconstruction": {
+                "background": "Dark studio.",
+                "elements": [{"type": "obj", "desc": "Glass cube."}],
+            },
+        }
+
+        digested = digest_caption_string(json.dumps(raw_caption, indent=2))
+        parsed = json.loads(digested)
+
+        self.assertNotIn("\n", digested)
+        self.assertEqual(
+            digested,
+            json.dumps(parsed, ensure_ascii=False, separators=(",", ":")),
+        )
+        self.assertNotIn("aspect_ratio", parsed)
+        self.assertEqual(parsed["style_description"]["medium"], "3d_render")
+        self.assertEqual(parsed["style_description"]["art_style"], "octane render")
+        self.assertEqual(parsed["style_description"]["color_palette"], ["#0099FF"])
+
+        if Ideogram4Model is not None:
+            model = object.__new__(Ideogram4Model)
+            self.assertEqual(
+                model._sample_prompt_to_json_caption(json.dumps(raw_caption)),
+                digested,
+            )
+
     def test_captioner_infers_art_style_and_orders_text_elements(self):
         captioner = self._json_captioner()
         raw_caption = {
@@ -1725,6 +1821,69 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
                 torch.tensor([[0.5, 1.0, 1.5], [1.0, 1.25, 1.5]]),
             )
         )
+
+
+class Qwen3VLCaptionerPatchTest(unittest.TestCase):
+    def test_patch_qwen_vl_patch_embed_replaces_conv3d_with_linear(self):
+        transformers_module = types.ModuleType("transformers")
+        transformers_module.Qwen3VLForConditionalGeneration = object
+        transformers_module.Qwen3VLMoeForConditionalGeneration = object
+        transformers_module.AutoProcessor = object
+        transformers_module.logging = types.SimpleNamespace(
+            set_verbosity_error=lambda: None
+        )
+
+        optimum_module = types.ModuleType("optimum")
+        quanto_module = types.ModuleType("optimum.quanto")
+        quanto_module.freeze = lambda *_args, **_kwargs: None
+
+        base_captioner_module = types.ModuleType(
+            "extensions_built_in.captioner.BaseCaptioner"
+        )
+        base_captioner_module.BaseCaptioner = object
+        basic_module = types.ModuleType("toolkit.basic")
+        basic_module.flush = lambda *_args, **_kwargs: None
+        quantize_module = types.ModuleType("toolkit.util.quantize")
+        quantize_module.quantize = lambda *_args, **_kwargs: None
+        quantize_module.get_qtype = lambda value: value
+
+        module_name = "extensions_built_in.captioner.Qwen3VLCaptioner"
+        sys.modules.pop(module_name, None)
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "transformers": transformers_module,
+                "optimum": optimum_module,
+                "optimum.quanto": quanto_module,
+                "extensions_built_in.captioner.BaseCaptioner": base_captioner_module,
+                "toolkit.basic": basic_module,
+                "toolkit.util.quantize": quantize_module,
+            },
+        ):
+            from extensions_built_in.captioner.Qwen3VLCaptioner import (
+                patch_qwen_vl_patch_embed,
+            )
+
+        class PatchEmbed(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Conv3d(
+                    2, 3, kernel_size=(1, 2, 2), stride=(1, 2, 2)
+                )
+
+        model = torch.nn.Sequential(PatchEmbed())
+        patch_embed = model[0]
+        hidden_states = torch.randn(5, 8)
+        weight = patch_embed.proj.weight.reshape(patch_embed.proj.weight.shape[0], -1)
+        expected = torch.nn.functional.linear(
+            hidden_states.to(weight.dtype), weight, patch_embed.proj.bias
+        )
+
+        patched = patch_qwen_vl_patch_embed(model)
+        actual = patch_embed(hidden_states)
+
+        self.assertEqual(patched, 1)
+        self.assertTrue(torch.allclose(actual, expected))
 
 
 if __name__ == "__main__":

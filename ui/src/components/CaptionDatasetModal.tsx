@@ -21,6 +21,7 @@ import { defaultIdeogramJsonCaptionPrompt } from '@/helpers/captionOptions';
 
 export interface CaptionDatasetModalState {
   datasetPath: string;
+  projectID?: string | null;
   jobId?: string | null;
   cloneId?: string | null;
   encryptedDatasetKeyB64?: string | null;
@@ -34,6 +35,7 @@ export const openCaptionDatasetModal = (
   datasetPath: string,
   onClose?: () => void,
   options?: {
+    projectID?: string | null;
     jobId?: string | null;
     cloneId?: string | null;
     encryptedDatasetKeyB64?: string | null;
@@ -42,6 +44,7 @@ export const openCaptionDatasetModal = (
 ) => {
   captionDatasetModalState.set({
     datasetPath,
+    projectID: options?.projectID ?? null,
     onClose,
     jobId: options?.jobId ?? null,
     cloneId: options?.cloneId ?? null,
@@ -164,6 +167,7 @@ export const CaptionDatasetModal: React.FC = () => {
         const copied = await apiClient
           .post('/api/datasets/copy', {
             datasetPath: modalInfo.datasetPath,
+            project_id: modalInfo.projectID || undefined,
             suffix: 'json_captions',
           })
           .then(res => res.data);
@@ -188,6 +192,7 @@ export const CaptionDatasetModal: React.FC = () => {
         job_config: jobConfigToSave,
         job_type: 'caption',
         job_ref: jobRef,
+        project_id: modalInfo.projectID || undefined,
       })
       .then(async res => {
         const jobId = res.data.id;

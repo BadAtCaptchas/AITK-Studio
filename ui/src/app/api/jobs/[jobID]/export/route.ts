@@ -3,7 +3,8 @@ import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
+import { getDatasetsRoot } from '@/server/settings';
+import { getJobTrainingRoot, getProjectRoots } from '@/server/projects';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
   TRAINING_JOB_EXPORT_VERSION,
@@ -189,7 +190,7 @@ async function performTrainingJobExport(
 
   const warnings: string[] = [];
   const jobConfig = JSON.parse(job.job_config);
-  const trainingRoot = await getTrainingFolder();
+  const trainingRoot = await getJobTrainingRoot(job);
   throwIfExportCanceled(shouldCancel);
   const jobFolder = path.join(trainingRoot, job.name);
   if (!fs.existsSync(jobFolder)) {
@@ -215,7 +216,8 @@ async function performTrainingJobExport(
     warnings.push('No optimizer.pt file was found; the imported job may resume without optimizer state.');
   }
 
-  const datasetsRoot = await getDatasetsRoot();
+  const project = job.project_id ? await db.projects.findById(job.project_id) : null;
+  const datasetsRoot = project ? (await getProjectRoots(project)).datasets : await getDatasetsRoot();
   const { mappings: datasetMappings, warnings: datasetWarnings } = await collectDatasetArchiveMappings(
     jobConfig,
     includeDatasets,

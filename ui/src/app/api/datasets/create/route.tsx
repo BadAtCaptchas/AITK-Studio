@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { getDatasetsRoot } from '@/server/settings';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import {
   cleanDatasetName,
@@ -9,11 +8,13 @@ import {
   validateEncryptedManifest,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
+import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
+    rejectRemoteProjectScope(workerID, body?.project_id);
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
       const { worker_id, ...remoteBody } = body;
@@ -29,13 +30,13 @@ export async function POST(request: Request) {
     }
 
     let { name, encrypted, encryptedManifest } = body;
+    const { datasetsRoot } = await resolveDatasetScope(body.project_id);
     name = cleanDatasetName(name || '');
     if (!name) {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
 
-    let datasetsPath = await getDatasetsRoot();
-    let datasetPath = resolveDatasetFolder(datasetsPath, name);
+    let datasetPath = resolveDatasetFolder(datasetsRoot, name);
 
     // if folder doesnt exist, create it
     if (!fs.existsSync(datasetPath)) {

@@ -50,6 +50,7 @@
         "src/server/datasetRename.ts",
         "src/server/datasetCombine.ts",
         "src/server/remoteClient.ts",
+        "src/server/datasetScope.ts",
         "src/server/randomPromptCaptions.ts",
         "src/server/trainingAdvisor.ts",
         "src/server/remoteStartProgress.ts",
@@ -57,6 +58,7 @@
         "src/server/queueReorder.ts",
         "src/server/jobStart.ts",
         "src/server/jobsApiList.ts",
+        "src/server/projects.ts",
         "src/server/trainingJobRestart.ts",
         "src/server/remoteAssets.ts",
         "src/server/externalComfy.ts"

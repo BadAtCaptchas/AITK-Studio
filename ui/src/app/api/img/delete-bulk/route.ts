@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import {
   deletePlainImagePaths,
   isImageDeleteError,
@@ -8,6 +7,7 @@ import {
 } from '@/server/imageDelete';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 type RemoteGroup = {
   workerID: string;
@@ -116,8 +116,7 @@ export async function POST(request: Request) {
     const results: ImageDeleteBulkResult[] = [];
 
     if (localPaths.length > 0) {
-      const datasetsRoot = await getDatasetsRoot();
-      const trainingRoot = await getTrainingFolder();
+      const { datasetsRoot, trainingRoot } = await resolveDatasetScope(body?.project_id);
       results.push(await deletePlainImagePaths(localPaths, datasetsRoot, trainingRoot));
     }
 

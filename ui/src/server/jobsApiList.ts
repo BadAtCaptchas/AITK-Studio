@@ -21,10 +21,13 @@ const defaultDeps: ListJobsForJobsApiDeps = {
 };
 
 export async function listJobsForJobsApi(
-  options: { jobType?: string | null; localOnly?: boolean },
+  options: { jobType?: string | null; localOnly?: boolean; projectID?: string | null },
   deps: ListJobsForJobsApiDeps = defaultDeps,
 ) {
   const listOptions: JobsListOptions = { job_type: options.jobType };
+  if (options.projectID) {
+    listOptions.project_id = options.projectID;
+  }
 
   if (options.localOnly) {
     const jobs = await deps.listJobs(listOptions);

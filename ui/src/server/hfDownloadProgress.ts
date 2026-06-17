@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { Job } from '@/types';
-import { getTrainingFolder } from '@/server/settings';
+import { getJobTrainingRoot } from '@/server/projects';
 
 export const HF_DOWNLOAD_PROGRESS_FILE = '.hf_download_progress.json';
 
@@ -114,7 +114,7 @@ function isVisible(progress: HFDownloadProgress) {
 }
 
 export async function getHFDownloadProgress(job: Job): Promise<HFDownloadProgress | null> {
-  const trainingRoot = await getTrainingFolder();
+  const trainingRoot = await getJobTrainingRoot(job);
   const jobFolder = path.resolve(trainingRoot, job.name);
   if (!isPathWithin(trainingRoot, jobFolder)) return null;
 

@@ -8,6 +8,7 @@ import { getDatabaseConfig } from '@/server/db';
 import { getHFToken, getTrainingFolder } from '@/server/settings';
 import { prepareHfTokenEnv } from '@/server/hfTokenEnv';
 import { getToolkitPythonPath } from '@/server/tensorboard';
+import { getProjectRoots, resolveOptionalProject } from '@/server/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -255,19 +256,22 @@ export async function POST(request: NextRequest) {
     }
 
     const gpuIds = typeof body.gpu_ids === 'string' && body.gpu_ids.trim() ? body.gpu_ids.trim() : '0';
-    const trainingRoot = await getTrainingFolder();
+    const project = await resolveOptionalProject(body.project_id);
+    const projectRoots = project ? await getProjectRoots(project) : null;
+    const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
     const hfToken = await getHFToken();
     const dbConfig = getDatabaseConfig();
     const baseName = sanitizeName(jobConfig.config?.name);
     const runName = `${baseName}_${Date.now()}`;
     const runFolder = path.join(trainingRoot, '.inline_generate', runName);
-    const outputFolder = path.join(runFolder, 'samples');
+    const outputFolder = projectRoots ? path.join(projectRoots.outputs, runName) : path.join(runFolder, 'samples');
     const configPath = path.join(runFolder, '.job_config.json');
     const logPath = path.join(runFolder, 'log.txt');
     const launchLogPath = path.join(runFolder, 'launch.log');
     const hfDownloadProgressPath = path.join(runFolder, '.hf_download_progress.json');
     const comfyInstallProgressPath = path.join(runFolder, '.comfy_install_progress.json');
 
+    await fsp.mkdir(runFolder, { recursive: true });
     await fsp.mkdir(outputFolder, { recursive: true });
 
     jobConfig.config.name = runName;

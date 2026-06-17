@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { resolveCaptionWritePath } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: Request) {
   try {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const datasetsPath = await getDatasetsRoot();
+    const { datasetsRoot: datasetsPath } = await resolveDatasetScope(body?.project_id);
     const datasetsRoot = path.resolve(datasetsPath);
     const resolvedImagePath = path.resolve(imgPath);
     const relativeImagePath = path.relative(datasetsRoot, resolvedImagePath);

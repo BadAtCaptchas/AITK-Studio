@@ -108,6 +108,7 @@ function ThumbnailTile({
   bulkSelected,
   datasetName,
   workerID,
+  projectID,
   encryptedKey,
   captionCache,
   onSelect,
@@ -121,6 +122,7 @@ function ThumbnailTile({
   bulkSelected?: boolean;
   datasetName: string;
   workerID: string;
+  projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   captionCache: Map<string, CaptionCacheEntry>;
   onSelect: (index: number) => void;
@@ -161,7 +163,13 @@ function ThumbnailTile({
           {item.kind === 'plain' ? (
             <PlainThumb path={item.path} alt={name} />
           ) : (
-            <EncryptedThumb datasetName={datasetName} workerID={workerID} cryptoKey={encryptedKey} item={item.item} />
+            <EncryptedThumb
+              datasetName={datasetName}
+              workerID={workerID}
+              projectID={projectID}
+              cryptoKey={encryptedKey}
+              item={item.item}
+            />
           )}
           {previewBoxes.length > 0 && (
             <div className="pointer-events-none absolute inset-0">
@@ -250,6 +258,7 @@ export function ImageNavigator({
   selectedIndex,
   datasetName,
   workerID,
+  projectID,
   encryptedKey,
   captionCache,
   captionCacheVersion,
@@ -262,6 +271,7 @@ export function ImageNavigator({
   selectedIndex: number;
   datasetName: string;
   workerID: string;
+  projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   captionCache: Map<string, CaptionCacheEntry>;
   captionCacheVersion: number;
@@ -276,6 +286,7 @@ export function ImageNavigator({
   }) => Promise<BulkCaptionActionResult>;
   onDeleteImages?: (items: DatasetStudioItem[], label?: string) => Promise<DeleteImagesResult>;
 }) {
+  const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [captionKeywordQuery, setCaptionKeywordQuery] = useState('');
@@ -563,7 +574,7 @@ export function ImageNavigator({
       await Promise.all(
         directItems.map(async item => {
           try {
-            const response = await apiClient.post('/api/caption/get', { imgPath: item.path, direct: true }, { signal });
+            const response = await apiClient.post('/api/caption/get', { imgPath: item.path, direct: true, ...projectPayload }, { signal });
             setCacheEntry(item, captionResponseToText(response.data));
           } catch {
             setCacheEntry(item, '');
@@ -573,7 +584,7 @@ export function ImageNavigator({
       if (sidecarItems.length > 0) {
         const response = await apiClient.post(
           '/api/caption/getBatch',
-          { imgPaths: sidecarItems.map(item => item.path) },
+          { imgPaths: sidecarItems.map(item => item.path), ...projectPayload },
           { signal },
         );
         const captions: Record<string, unknown> = response.data?.captions || {};
@@ -611,7 +622,7 @@ export function ImageNavigator({
               try {
                 const response = await apiClient.post(
                   '/api/datasets/encrypted/object',
-                  { datasetName, worker_id: workerID, objectPath: captionPath },
+                  { datasetName, worker_id: workerID, objectPath: captionPath, ...projectPayload },
                   { responseType: 'blob', signal },
                 );
                 const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
@@ -628,7 +639,7 @@ export function ImageNavigator({
       );
       return completed;
     },
-    [datasetName, encryptedKey, setCacheEntry, workerID],
+    [datasetName, encryptedKey, projectPayload, setCacheEntry, workerID],
   );
 
   useEffect(() => {
@@ -935,6 +946,7 @@ export function ImageNavigator({
                               bulkSelected={selectedBulkKeys.has(itemKey(item))}
                               datasetName={datasetName}
                               workerID={workerID}
+                              projectID={projectID}
                               encryptedKey={encryptedKey}
                               captionCache={captionCache}
                               onSelect={commitIndex}
@@ -1056,6 +1068,7 @@ export function ImageNavigator({
                   selected={index === selectedIndex}
                   datasetName={datasetName}
                   workerID={workerID}
+                  projectID={projectID}
                   encryptedKey={encryptedKey}
                   captionCache={captionCache}
                   onSelect={commitIndex}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@headlessui/react';
 import { ArrowRight, FileJson, ImagePlus, Layers, Loader2, Upload, Wand2, X } from 'lucide-react';
 import { TopBar, MainContent } from '@/components/layout';
@@ -317,8 +317,14 @@ function promptHasAnyTrigger(prompt: string, triggerWords: string[]) {
   return triggerWords.some(word => lowerPrompt.includes(word.toLowerCase()));
 }
 
-export default function GeneratePage() {
+type GeneratePageProps = {
+  projectIDOverride?: string | null;
+};
+
+export default function GeneratePage({ projectIDOverride = null }: GeneratePageProps = {}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectID = projectIDOverride ?? searchParams.get('project_id');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loraFileInputRef = useRef<HTMLInputElement | null>(null);
   const inlineAbortControllerRef = useRef<AbortController | null>(null);
@@ -789,13 +795,18 @@ export default function GeneratePage() {
         job_type: 'generate',
         job_ref: useLora ? loraPath.trim() : model.name_or_path,
         job_config: jobConfig,
+        project_id: projectID || undefined,
       });
 
       if (startImmediately) {
         await startJob(res.data.id);
         await startQueue(selectedGpuIDs, 'local');
       }
-      router.push(`/jobs/${res.data.id}`);
+      router.push(
+        projectID
+          ? `/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(res.data.id)}`
+          : `/jobs/${res.data.id}`,
+      );
     } catch (error: any) {
       console.error('Error creating generate job:', error);
       if (error.response?.status === 409) {
@@ -844,6 +855,7 @@ export default function GeneratePage() {
         {
           gpu_ids: selectedGpuIDs,
           job_config: jobConfig,
+          project_id: projectID || undefined,
         },
         { signal: abortController.signal },
       );
@@ -1373,7 +1385,7 @@ export default function GeneratePage() {
 
             <div className="operator-panel p-3">
               <h2 className="mb-4 font-medium text-gray-100">Generation Jobs</h2>
-              <JobsTable job_type="generate" />
+              <JobsTable job_type="generate" projectID={projectID} />
             </div>
           </div>
         </div>

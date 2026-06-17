@@ -5,6 +5,8 @@ from transformers import (
 )
 from collections import OrderedDict
 
+import torch
+import torch.nn.functional as F
 from optimum.quanto import freeze
 from toolkit.basic import flush
 from toolkit.util.quantize import quantize, get_qtype
@@ -17,6 +19,26 @@ import warnings
 transformers.logging.set_verbosity_error()
 warnings.filterwarnings("ignore")
 logging.disable(logging.WARNING)
+
+
+def patch_qwen_vl_patch_embed(model):
+    """Replace Qwen-VL patch Conv3d projections with equivalent linear GEMMs."""
+    patched = 0
+    for module in model.modules():
+        proj = getattr(module, "proj", None)
+        if (
+            isinstance(proj, torch.nn.Conv3d)
+            and tuple(proj.kernel_size) == tuple(proj.stride)
+        ):
+
+            def fast_forward(hidden_states, _proj=proj):
+                weight = _proj.weight.reshape(_proj.weight.shape[0], -1)
+                hidden_states = hidden_states.view(-1, weight.shape[1]).to(weight.dtype)
+                return F.linear(hidden_states, weight, _proj.bias)
+
+            module.forward = fast_forward
+            patched += 1
+    return patched
 
 
 class Qwen3VLCaptioner(BaseCaptioner):
@@ -35,6 +57,7 @@ class Qwen3VLCaptioner(BaseCaptioner):
             dtype=self.torch_dtype,
             device_map="cpu",
         )
+        patch_qwen_vl_patch_embed(self.model)
         if not self.caption_config.low_vram:
             self.model.to(self.device_torch)
         if self.caption_config.quantize:

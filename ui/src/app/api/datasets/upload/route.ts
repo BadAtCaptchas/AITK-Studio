@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import { writeFile, mkdir } from 'fs/promises';
 import { basename, dirname, extname, isAbsolute, join, resolve, relative, sep } from 'path';
-import { getDatasetsRoot } from '@/server/settings';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import {
   isEncryptedDatasetFolder,
@@ -11,6 +10,7 @@ import {
   validateEncryptedManifest,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
+import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 function cleanPathSegment(segment: string, fallback: string) {
   const cleaned = segment
@@ -60,12 +60,13 @@ function nextAvailableFilePath(uploadDir: string, relativeFilePath: string) {
 
 export async function POST(request: NextRequest) {
   try {
-    const datasetsPath = await getDatasetsRoot();
-    if (!datasetsPath) {
-      return NextResponse.json({ error: 'Datasets path not found' }, { status: 500 });
-    }
     const formData = await request.formData();
     const workerID = (formData.get('worker_id') as string) || 'local';
+    rejectRemoteProjectScope(workerID, formData.get('project_id'));
+    const { datasetsRoot } = await resolveDatasetScope(formData.get('project_id'));
+    if (!datasetsRoot) {
+      return NextResponse.json({ error: 'Datasets path not found' }, { status: 500 });
+    }
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
       const remoteFormData = new FormData();
@@ -104,9 +105,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Create upload directory if it doesn't exist
-    const datasetsRoot = resolve(datasetsPath);
-    const uploadDir = resolve(datasetsRoot, datasetName);
-    const uploadDirRelative = relative(datasetsRoot, uploadDir);
+    const resolvedDatasetsRoot = resolve(datasetsRoot);
+    const uploadDir = resolve(resolvedDatasetsRoot, datasetName);
+    const uploadDirRelative = relative(resolvedDatasetsRoot, uploadDir);
 
     if (
       uploadDirRelative === '' ||
@@ -200,9 +201,12 @@ export async function POST(request: NextRequest) {
       message: 'Files uploaded successfully',
       files: savedFiles,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Upload error:', error);
-    return NextResponse.json({ error: 'Error uploading files' }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || 'Error uploading files' },
+      { status: typeof error?.status === 'number' ? error.status : 500 },
+    );
   }
 }
 

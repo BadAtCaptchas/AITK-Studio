@@ -83,6 +83,7 @@ type StudioBoxProvider = (typeof AUTO_BOX_PROVIDERS)[number]['value'];
 export default function DatasetImageStudio({
   datasetName,
   workerID,
+  projectID,
   datasetPath,
   items,
   isAutoCaptioning,
@@ -96,6 +97,7 @@ export default function DatasetImageStudio({
   onSaveEncryptedCaption,
 }: DatasetImageStudioProps) {
   const { workers } = useRemoteOllamaWorkers();
+  const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [captionText, setCaptionText] = useState('');
   const [savedCaption, setSavedCaption] = useState('');
@@ -271,14 +273,18 @@ export default function DatasetImageStudio({
         if (!selectedItem) return;
         if (selectedItem.kind === 'plain') {
           const direct = isPlainTextCaptionItem(selectedItem);
-          const response = await apiClient.post('/api/caption/get', { imgPath: selectedItem.path, ...(direct ? { direct: true } : {}) });
+          const response = await apiClient.post('/api/caption/get', {
+            imgPath: selectedItem.path,
+            ...(direct ? { direct: true } : {}),
+            ...projectPayload,
+          });
           text = captionResponseToText(response.data);
         } else if (encryptedKey) {
           const captionPath = selectedItem.item.captionObjectPath;
           if (captionPath) {
             const response = await apiClient.post(
               '/api/datasets/encrypted/object',
-              { datasetName, worker_id: workerID, objectPath: captionPath },
+              { datasetName, worker_id: workerID, objectPath: captionPath, ...projectPayload },
               { responseType: 'blob' },
             );
             const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
@@ -303,7 +309,7 @@ export default function DatasetImageStudio({
     return () => {
       cancelled = true;
     };
-  }, [datasetName, encryptedKey, selectedItem, selectedKey, workerID, writeCaptionCache]);
+  }, [datasetName, encryptedKey, projectPayload, selectedItem, selectedKey, workerID, writeCaptionCache]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -347,7 +353,12 @@ export default function DatasetImageStudio({
     setIsSaving(true);
     try {
       if (selectedItem.kind === 'plain') {
-        await apiClient.post('/api/img/caption', { imgPath: selectedItem.path, caption: value, direct: isPlainTextCaptionItem(selectedItem) });
+        await apiClient.post('/api/img/caption', {
+          imgPath: selectedItem.path,
+          caption: value,
+          direct: isPlainTextCaptionItem(selectedItem),
+          ...projectPayload,
+        });
       } else if (encryptedKey && onSaveEncryptedCaption) {
         const key = itemKey(selectedItem);
         const targetCaptionPath =
@@ -372,6 +383,7 @@ export default function DatasetImageStudio({
     isDirty,
     isSaving,
     onSaveEncryptedCaption,
+    projectPayload,
     selectedItem,
     selectedKey,
     writeCaptionCache,
@@ -550,6 +562,7 @@ export default function DatasetImageStudio({
         const response = await apiClient.post('/api/datasets/caption-bulk', {
           datasetName,
           worker_id: workerID,
+          ...projectPayload,
           action: request.action,
           query: request.query,
           matchMode: request.matchMode,
@@ -577,7 +590,7 @@ export default function DatasetImageStudio({
       }
       return result;
     },
-    [applyBulkCaptionResult, datasetName, onBulkEncryptedCaptionAction, onRefresh, saveCaption, workerID],
+    [applyBulkCaptionResult, datasetName, onBulkEncryptedCaptionAction, onRefresh, projectPayload, saveCaption, workerID],
   );
 
   const mutateCaption = useCallback(
@@ -666,6 +679,7 @@ export default function DatasetImageStudio({
             refine: autoBoxRefine,
             imageWidth,
             imageHeight,
+            ...projectPayload,
           },
           { timeout: 0 },
         );
@@ -682,7 +696,13 @@ export default function DatasetImageStudio({
           setEncryptedProviderConfirmations(previous => ({ ...previous, [autoBoxProvider]: true }));
         }
 
-        const formData = await createEncryptedImageFormData({ datasetName, workerID, encryptedKey, item: selectedItem.item });
+        const formData = await createEncryptedImageFormData({
+          datasetName,
+          workerID,
+          projectID,
+          encryptedKey,
+          item: selectedItem.item,
+        });
         formData.append('caption', requestCaption);
         formData.append('provider', autoBoxProvider);
         formData.append('model', autoBoxModel);
@@ -742,6 +762,8 @@ export default function DatasetImageStudio({
     encryptedProviderConfirmations,
     isGeneratingBoxes,
     mutateCaption,
+    projectID,
+    projectPayload,
     remoteOllamaWorkerId,
     selectedElementIndex,
     selectedImageSize,
@@ -780,6 +802,7 @@ export default function DatasetImageStudio({
             remoteWorkerId: remoteOllamaWorkerId,
             imageWidth,
             imageHeight,
+            ...projectPayload,
           },
           { timeout: 0 },
         );
@@ -796,7 +819,13 @@ export default function DatasetImageStudio({
           setEncryptedProviderConfirmations(previous => ({ ...previous, [autoBoxProvider]: true }));
         }
 
-        const formData = await createEncryptedImageFormData({ datasetName, workerID, encryptedKey, item: selectedItem.item });
+        const formData = await createEncryptedImageFormData({
+          datasetName,
+          workerID,
+          projectID,
+          encryptedKey,
+          item: selectedItem.item,
+        });
         formData.append('caption', requestCaption);
         formData.append('elementIndex', String(requestElementIndex));
         formData.append('provider', autoBoxProvider);
@@ -866,6 +895,8 @@ export default function DatasetImageStudio({
     encryptedProviderConfirmations,
     layerCaptionDisabledReason,
     mutateLatestCaption,
+    projectID,
+    projectPayload,
     remoteOllamaWorkerId,
     selectedElement,
     selectedElementIndex,
@@ -1227,6 +1258,7 @@ export default function DatasetImageStudio({
                 item={selectedItem}
                 datasetName={datasetName}
                 workerID={workerID}
+                projectID={projectID}
                 cryptoKey={encryptedKey}
                 zoom={zoom}
                 onNaturalSizeChange={setSelectedImageSize}
@@ -1255,6 +1287,7 @@ export default function DatasetImageStudio({
               selectedIndex={selectedIndex}
               datasetName={datasetName}
               workerID={workerID}
+              projectID={projectID}
               encryptedKey={encryptedKey}
               captionCache={captionCacheRef.current}
               captionCacheVersion={captionCacheVersion}

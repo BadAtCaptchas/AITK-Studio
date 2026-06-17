@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
-import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
+import { getJobTrainingRoot } from '@/server/projects';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   try {
-    const trainingFolder = await getTrainingFolder();
+    const trainingFolder = await getJobTrainingRoot(job);
     const trainingFolderRealPath = await fs.promises.realpath(trainingFolder);
     const jobFolder = path.resolve(trainingFolderRealPath, job.name);
     const logPath = path.join(jobFolder, 'log.txt');

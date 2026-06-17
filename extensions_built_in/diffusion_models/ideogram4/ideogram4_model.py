@@ -18,6 +18,7 @@ from toolkit.accelerator import unwrap_model
 from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
 from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.ideogram_caption import digest_caption_string
 from toolkit.memory_management import attach_layer_offloading
 from toolkit.models.base_model import BaseModel
 from toolkit.prompt_utils import PromptEmbeds
@@ -1137,7 +1138,7 @@ class Ideogram4Model(BaseModel):
             parsed = None
 
         if isinstance(parsed, dict):
-            return prompt
+            return digest_caption_string(prompt)
 
         caption = {
             "high_level_description": prompt,
@@ -1160,7 +1161,9 @@ class Ideogram4Model(BaseModel):
                 stacklevel=2,
             )
             self._warned_wrapped_sample_prompt = True
-        return json.dumps(caption, ensure_ascii=False, separators=(",", ":"))
+        return digest_caption_string(
+            json.dumps(caption, ensure_ascii=False, separators=(",", ":"))
+        )
 
     def _normalize_sample_image_config(self, image_config: GenerateImageConfig) -> None:
         image_config.prompt = self._sample_prompt_to_json_caption(image_config.prompt)
@@ -1192,6 +1195,7 @@ class Ideogram4Model(BaseModel):
             move_module_to_device(self.pipeline.text_encoder, self.device_torch)
 
         prompts = [prompt] if isinstance(prompt, str) else prompt
+        prompts = [digest_caption_string(p) for p in prompts]
         for p in prompts:
             self._validate_caption(p)
 

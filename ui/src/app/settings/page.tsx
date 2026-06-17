@@ -868,6 +868,31 @@ export default function Settings() {
                         Keep a backup elsewhere. Changes to datasets by this software are not reversible.
                       </div>
                     </FieldShell>
+
+                    <FieldShell
+                      id="PROJECTS_FOLDER"
+                      label="Projects folder"
+                      detail="Where isolated project sandboxes store datasets, runs, outputs, notes, and assets."
+                    >
+                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                        <input
+                          type="text"
+                          id="PROJECTS_FOLDER"
+                          name="PROJECTS_FOLDER"
+                          value={settings.PROJECTS_FOLDER}
+                          onChange={handleChange}
+                          className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          placeholder="Enter projects folder path"
+                        />
+                        <button
+                          type="button"
+                          className="flex h-full w-12 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
+                          title="Projects folder"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </FieldShell>
                   </div>
                 </section>
 

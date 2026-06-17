@@ -6,7 +6,7 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import { PrismaClient } from '../generated/prisma/client';
 import sqlite3 from 'sqlite3';
 import { TOOLKIT_ROOT } from '../paths';
-import type { Job, Queue, WorkerNode } from '../types';
+import type { Job, Project, Queue, WorkerNode } from '../types';
 import { buildMetricSeriesResult, normalizeMetricMaxPoints } from './metricsDownsample';
 
 export type DatabaseProvider = 'sqlite' | 'mongodb';
@@ -28,6 +28,7 @@ export type SettingRecord = {
 export type JobCreateInput = {
   id?: string;
   name: string;
+  project_id?: string | null;
   worker_id?: string;
   remote_job_id?: string | null;
   remote_sync_at?: Date | string | null;
@@ -76,6 +77,19 @@ export type WorkerNodeCreateInput = {
 };
 
 export type WorkerNodeUpdateInput = Partial<Omit<WorkerNodeCreateInput, 'id'>>;
+
+export type ProjectCreateInput = {
+  id?: string;
+  slug: string;
+  name: string;
+  description?: string;
+  badge_asset?: string | null;
+  root_path?: string;
+};
+
+export type ProjectUpdateInput = Partial<Omit<ProjectCreateInput, 'id' | 'slug'>> & {
+  slug?: string;
+};
 
 export type LossPoint = {
   step: number;
@@ -235,6 +249,7 @@ function normalizeJob(raw: any): Job | null {
   return {
     id: String(raw.id),
     name: String(raw.name ?? ''),
+    project_id: raw.project_id == null ? null : String(raw.project_id),
     worker_id: String(raw.worker_id ?? 'local'),
     remote_job_id: raw.remote_job_id == null ? null : String(raw.remote_job_id),
     remote_sync_at: raw.remote_sync_at == null ? null : parseDate(raw.remote_sync_at),
@@ -254,6 +269,20 @@ function normalizeJob(raw: any): Job | null {
     job_type: String(raw.job_type ?? 'train'),
     job_ref: raw.job_ref == null ? null : String(raw.job_ref),
     save_now: Boolean(raw.save_now),
+  };
+}
+
+function normalizeProject(raw: any): Project | null {
+  if (!raw) return null;
+  return {
+    id: String(raw.id),
+    slug: String(raw.slug ?? ''),
+    name: String(raw.name ?? ''),
+    description: String(raw.description ?? ''),
+    badge_asset: raw.badge_asset == null ? null : String(raw.badge_asset),
+    root_path: String(raw.root_path ?? ''),
+    created_at: parseDate(raw.created_at),
+    updated_at: parseDate(raw.updated_at),
   };
 }
 
@@ -687,7 +716,13 @@ async function ensureMongoIndexes() {
       { key: { gpu_ids: 1 } },
       { key: { job_type: 1 } },
       { key: { job_ref: 1 } },
+      { key: { project_id: 1 } },
       { key: { queue_position: 1 } },
+    ]),
+    mongoCollection(mongo, 'projects').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { slug: 1 }, unique: true },
+      { key: { updated_at: -1 } },
     ]),
     mongoCollection(mongo, 'queues').createIndexes([
       { key: { id: 1 }, unique: true },
@@ -769,6 +804,107 @@ export const db = {
     },
   },
 
+  projects: {
+    async list(): Promise<Project[]> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const rows = await mongoCollection(mongo, 'projects')
+          .find({}, { projection: { _id: 0 } })
+          .sort({ updated_at: -1, name: 1 })
+          .toArray();
+        return rows.map(normalizeProject).filter(Boolean) as Project[];
+      }
+      return getPrisma().project.findMany({
+        orderBy: [{ updated_at: 'desc' }, { name: 'asc' }],
+      });
+    },
+
+    async findById(id: string): Promise<Project | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'projects').findOne({ id }, { projection: { _id: 0 } });
+        return normalizeProject(row);
+      }
+      return getPrisma().project.findUnique({ where: { id } });
+    },
+
+    async findBySlug(slug: string): Promise<Project | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'projects').findOne({ slug }, { projection: { _id: 0 } });
+        return normalizeProject(row);
+      }
+      return getPrisma().project.findUnique({ where: { slug } });
+    },
+
+    async create(input: ProjectCreateInput): Promise<Project> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const now = new Date();
+        const project = normalizeProject({
+          id: input.id || randomUUID(),
+          slug: input.slug,
+          name: input.name,
+          description: input.description ?? '',
+          badge_asset: input.badge_asset ?? null,
+          root_path: input.root_path ?? '',
+          created_at: now,
+          updated_at: now,
+        }) as Project;
+        try {
+          await mongoCollection(mongo, 'projects').insertOne(project);
+        } catch (error) {
+          duplicateKeyToUniqueError(error);
+        }
+        return project;
+      }
+
+      return getPrisma().project.create({
+        data: {
+          slug: input.slug,
+          name: input.name,
+          description: input.description ?? '',
+          badge_asset: input.badge_asset ?? null,
+          root_path: input.root_path ?? '',
+        },
+      });
+    },
+
+    async update(id: string, data: ProjectUpdateInput): Promise<Project> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        try {
+          const result = await mongoCollection(mongo, 'projects').findOneAndUpdate(
+            { id },
+            { $set: { ...data, updated_at: new Date() } },
+            { returnDocument: 'after', projection: { _id: 0 } },
+          );
+          const project = normalizeProject(result);
+          if (!project) throw new Error(`Project not found: ${id}`);
+          return project;
+        } catch (error) {
+          duplicateKeyToUniqueError(error);
+        }
+      }
+
+      return getPrisma().project.update({ where: { id }, data });
+    },
+
+    async delete(id: string): Promise<Project | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const result = await mongoCollection(mongo, 'projects').findOneAndDelete({ id }, { projection: { _id: 0 } });
+        return normalizeProject(result);
+      }
+      try {
+        return await getPrisma().project.delete({ where: { id } });
+      } catch (error: any) {
+        if (error?.code === 'P2025') return null;
+        throw error;
+      }
+    },
+  },
+
   jobs: {
     async findById(id: string): Promise<Job | null> {
       if (isMongoProvider()) {
@@ -810,6 +946,7 @@ export const db = {
         status?: string | string[];
         gpu_ids?: string;
         worker_id?: string;
+        project_id?: string | null;
         order?: 'created_desc' | 'queue_asc';
       } = {},
     ) {
@@ -819,6 +956,7 @@ export const db = {
         if (options.job_type) filter.job_type = options.job_type;
         if (options.gpu_ids) filter.gpu_ids = options.gpu_ids;
         if (options.worker_id) filter.worker_id = options.worker_id;
+        if ('project_id' in options) filter.project_id = options.project_id ?? null;
         if (Array.isArray(options.status)) filter.status = { $in: options.status };
         else if (options.status) filter.status = options.status;
         const sort: Record<string, 1 | -1> = options.order === 'queue_asc' ? { queue_position: 1 } : { created_at: -1 };
@@ -833,6 +971,7 @@ export const db = {
       if (options.job_type) where.job_type = options.job_type;
       if (options.gpu_ids) where.gpu_ids = options.gpu_ids;
       if (options.worker_id) where.worker_id = options.worker_id;
+      if ('project_id' in options) where.project_id = options.project_id ?? null;
       if (Array.isArray(options.status)) where.status = { in: options.status };
       else if (options.status) where.status = options.status;
       return getPrisma().job.findMany({
@@ -886,6 +1025,7 @@ export const db = {
         const job = normalizeJob({
           id: input.id || randomUUID(),
           name: input.name,
+          project_id: input.project_id ?? null,
           worker_id: input.worker_id ?? 'local',
           remote_job_id: input.remote_job_id ?? null,
           remote_sync_at: input.remote_sync_at ?? null,

@@ -122,6 +122,28 @@ async function applySqliteCompatibilitySchema(filename) {
     await ensureColumn(db, 'Job', 'remote_sync_at', 'DATETIME');
     await ensureColumn(db, 'Job', 'remote_error', 'TEXT');
     await ensureColumn(db, 'Job', 'save_now', 'BOOLEAN NOT NULL DEFAULT false');
+    await ensureColumn(db, 'Job', 'project_id', 'TEXT');
+
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS Project (
+        id TEXT PRIMARY KEY NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        badge_asset TEXT,
+        root_path TEXT NOT NULL DEFAULT '',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      `,
+    );
+    await ensureColumn(db, 'Project', 'description', "TEXT NOT NULL DEFAULT ''");
+    await ensureColumn(db, 'Project', 'badge_asset', 'TEXT');
+    await ensureColumn(db, 'Project', 'root_path', "TEXT NOT NULL DEFAULT ''");
+    await ensureColumn(db, 'Project', 'created_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+    await ensureColumn(db, 'Project', 'updated_at', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
 
     await sqliteRun(
       db,
@@ -152,6 +174,9 @@ async function applySqliteCompatibilitySchema(filename) {
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_gpu_ids_idx ON Job(gpu_ids);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_job_type_idx ON Job(job_type);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_job_ref_idx ON Job(job_ref);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_project_id_idx ON Job(project_id);');
+    await sqliteRun(db, 'CREATE UNIQUE INDEX IF NOT EXISTS Project_slug_key ON Project(slug);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Project_slug_idx ON Project(slug);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS WorkerNode_enabled_idx ON WorkerNode(enabled);');
   } finally {
     await new Promise(resolve => db.close(resolve));
@@ -159,7 +184,7 @@ async function applySqliteCompatibilitySchema(filename) {
 }
 
 async function hasLegacySqliteTables(filename) {
-  const currentSchemaTables = new Set(['Settings', 'Queue', 'WorkerNode', 'Job', 'sqlite_sequence']);
+  const currentSchemaTables = new Set(['Settings', 'Queue', 'WorkerNode', 'Job', 'Project', 'sqlite_sequence']);
   const db = new sqlite3.Database(filename);
   try {
     const tables = await sqliteAll(db, "SELECT name FROM sqlite_master WHERE type = 'table'");
@@ -218,7 +243,13 @@ try {
       { key: { gpu_ids: 1 } },
       { key: { job_type: 1 } },
       { key: { job_ref: 1 } },
+      { key: { project_id: 1 } },
       { key: { queue_position: 1 } },
+    ]),
+    db.collection('projects').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { slug: 1 }, unique: true },
+      { key: { updated_at: -1 } },
     ]),
     db.collection('queues').createIndexes([
       { key: { id: 1 }, unique: true },

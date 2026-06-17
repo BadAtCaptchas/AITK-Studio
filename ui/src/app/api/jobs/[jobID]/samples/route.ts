@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
-import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
+import { getJobTrainingRoot } from '@/server/projects';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -50,7 +50,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   }
 
   // setup the training
-  const trainingFolder = await getTrainingFolder();
+  const trainingFolder = await getJobTrainingRoot(job);
 
   const canonicalTrainingFolder = await fs.promises.realpath(path.resolve(trainingFolder)).catch(() => null);
   const samplesFolder = path.resolve(trainingFolder, job.name, 'samples');

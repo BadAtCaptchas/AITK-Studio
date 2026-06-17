@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTrainingFolder } from '@/server/settings';
 import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
+import { getJobTrainingRoot } from '@/server/projects';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { clearDurableEncryptedDatasetKeys } from '@/server/encryptedDatasetSecrets';
 
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json(job);
   }
 
-  const trainingRoot = await getTrainingFolder();
+  const trainingRoot = await getJobTrainingRoot(job);
   const trainingFolder = resolveWithinRoot(trainingRoot, job.name);
 
   if (!trainingFolder) {

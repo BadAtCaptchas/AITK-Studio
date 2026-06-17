@@ -13,6 +13,7 @@ type DatasetListError = {
 type UseDatasetListOptions = {
   includeRemote?: boolean;
   workerID?: string;
+  projectID?: string | null;
 };
 
 export default function useDatasetList(options: UseDatasetListOptions = {}) {
@@ -21,12 +22,14 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const includeRemote = options.includeRemote === true;
   const workerID = options.workerID || 'local';
+  const projectID = options.projectID || null;
 
   const refreshDatasets = () => {
     setStatus('loading');
     const params = new URLSearchParams();
     if (includeRemote) params.set('include_remote', '1');
     if (workerID !== 'local') params.set('worker_id', workerID);
+    if (projectID) params.set('project_id', projectID);
     const query = params.toString();
     apiClient
       .get(`/api/datasets/list${query ? `?${query}` : ''}`)
@@ -56,7 +59,7 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
   };
   useEffect(() => {
     refreshDatasets();
-  }, [includeRemote, workerID]);
+  }, [includeRemote, workerID, projectID]);
 
   return { datasets, setDatasets, errors, status, refreshDatasets };
 }

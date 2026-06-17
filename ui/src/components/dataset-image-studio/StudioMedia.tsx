@@ -15,6 +15,7 @@ import type { DatasetStudioItem, ImageSize } from './types';
 export function useEncryptedObjectUrl(
   datasetName: string,
   workerID: string,
+  projectID: string | null | undefined,
   cryptoKey: CryptoKey | null | undefined,
   item: EncryptedDatasetItem | null,
   enabled = true,
@@ -34,7 +35,11 @@ export function useEncryptedObjectUrl(
     setUrl(null);
 
     apiClient
-      .post('/api/datasets/encrypted/object', { datasetName, worker_id: workerID, objectPath: item.objectPath }, { responseType: 'blob' })
+      .post(
+        '/api/datasets/encrypted/object',
+        { datasetName, worker_id: workerID, objectPath: item.objectPath, ...(projectID ? { project_id: projectID } : {}) },
+        { responseType: 'blob' },
+      )
       .then(async response => {
         const decrypted = await decryptEncryptedObjectBlob(cryptoKey, item.objectPath, response.data as Blob);
         if (cancelled) return;
@@ -52,7 +57,7 @@ export function useEncryptedObjectUrl(
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [cryptoKey, datasetName, enabled, item, workerID]);
+  }, [cryptoKey, datasetName, enabled, item, projectID, workerID]);
 
   return { url, loading };
 }
@@ -108,15 +113,17 @@ export function PlainThumb({ path, alt }: { path: string; alt: string }) {
 export function EncryptedThumb({
   datasetName,
   workerID,
+  projectID,
   cryptoKey,
   item,
 }: {
   datasetName: string;
   workerID: string;
+  projectID?: string | null;
   cryptoKey: CryptoKey | null | undefined;
   item: EncryptedDatasetItem;
 }) {
-  const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, cryptoKey, item);
+  const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, item);
 
   if (loading || !url) {
     return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">Decrypting</div>;
@@ -134,6 +141,7 @@ export function StudioMedia({
   item,
   datasetName,
   workerID,
+  projectID,
   cryptoKey,
   children,
   zoom,
@@ -145,6 +153,7 @@ export function StudioMedia({
   item: DatasetStudioItem;
   datasetName: string;
   workerID: string;
+  projectID?: string | null;
   cryptoKey?: CryptoKey | null;
   children: React.ReactNode;
   zoom: number;
@@ -154,7 +163,7 @@ export function StudioMedia({
   onCancelColorSample?: () => void;
 }) {
   const encryptedItem = item.kind === 'encrypted' ? item.item : null;
-  const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, cryptoKey, encryptedItem);
+  const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, encryptedItem);
   const kind = itemKind(item);
   const src = item.kind === 'plain' ? getMediaUrl(item.path) : url;
   const name = itemName(item);

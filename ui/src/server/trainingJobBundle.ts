@@ -4,6 +4,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from './settings';
 import { db } from './db';
+import { getJobTrainingRoot, getProjectRoots } from './projects';
 import type { WorkerNodeRecord } from './db';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from './remoteDatasetPaths';
 import {
@@ -102,8 +103,9 @@ export async function createRemoteTrainingJobBundle(
     : options.targetWorker
     ? await rewriteSameWorkerRemoteDatasetRefsForWorker(sourceJobConfig, options.targetWorker)
     : sourceJobConfig;
-  const trainingRoot = await getTrainingFolder();
-  const datasetsRoot = await getDatasetsRoot();
+  const trainingRoot = await getJobTrainingRoot(job);
+  const project = job.project_id ? await db.projects.findById(job.project_id) : null;
+  const datasetsRoot = project ? (await getProjectRoots(project)).datasets : await getDatasetsRoot();
   const jobFolder = path.join(trainingRoot, job.name);
   const warnings: string[] = [];
 
@@ -196,7 +198,7 @@ export async function createRemoteTrainingJobBundle(
     job_ref: job.job_ref,
   };
 
-  const bundleRoot = path.join(trainingRoot, '.aitk-remote-bundles');
+  const bundleRoot = path.join(await getTrainingFolder(), '.aitk-remote-bundles');
   const zipPath = path.join(bundleRoot, makeExportFileName(job.name));
   await writeZip(
     zipPath,

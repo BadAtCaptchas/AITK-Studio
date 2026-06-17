@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { analyzeTrainingAdvisor } from '@/server/trainingAdvisor';
 import { db } from '@/server/db';
-import { getTrainingFolder } from '@/server/settings';
+import { getJobTrainingRoot } from '@/server/projects';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import type { JobConfig } from '@/types';
 
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const jobConfig = parseJobConfig(job.job_config);
   if (!jobConfig) return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
 
-  const trainingFolder = await getTrainingFolder();
+  const trainingFolder = await getJobTrainingRoot(job);
   const logPath = path.join(trainingFolder, job.name, 'loss_log.db');
   const metrics = await db.metrics.getMetrics(jobID, logPath, {
     keys: ADVISOR_METRIC_KEYS,

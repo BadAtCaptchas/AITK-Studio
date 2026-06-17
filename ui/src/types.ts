@@ -151,6 +151,17 @@ export interface WorkerNode {
   updated_at: DbDate;
 }
 
+export interface Project {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  badge_asset: string | null;
+  root_path: string;
+  created_at: DbDate;
+  updated_at: DbDate;
+}
+
 export interface RemoteOllamaWorker {
   id: string;
   name: string;
@@ -167,6 +178,7 @@ export interface RemoteOllamaWorker {
 export interface Job {
   id: string;
   name: string;
+  project_id: string | null;
   worker_id: string;
   remote_job_id: string | null;
   remote_sync_at: DbDate | null;

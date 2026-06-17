@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
-import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
+import { getJobTrainingRoot } from '@/server/projects';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  const trainingFolder = await getTrainingFolder();
+  const trainingFolder = await getJobTrainingRoot(job);
   const jobFolder = path.join(trainingFolder, job.name);
 
   if (!fs.existsSync(jobFolder)) {

@@ -59,6 +59,7 @@ export type DeleteImagesResult = {
 export type DatasetImageStudioProps = {
   datasetName: string;
   workerID: string;
+  projectID?: string | null;
   datasetPath?: string | null;
   items: DatasetStudioItem[];
   isAutoCaptioning: boolean;

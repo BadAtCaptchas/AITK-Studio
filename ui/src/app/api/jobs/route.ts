@@ -14,6 +14,7 @@ import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 import { isDirectRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
+import { prepareJobConfigForProject, resolveOptionalProject } from '@/server/projects';
 import type { Job } from '@/types';
 
 
@@ -113,9 +114,11 @@ export async function GET(request: Request) {
   const id = searchParams.get('id');
   const job_ref = searchParams.get('job_ref');
   const job_type = searchParams.get('job_type');
+  const projectParam = searchParams.get('project_id');
   const localOnly = searchParams.get('local_only') === '1';
 
   try {
+    const project = await resolveOptionalProject(projectParam);
     if (id) {
       const job = await db.jobs.findById(id);
       if (job && !isLocalWorker(job.worker_id)) {
@@ -137,7 +140,7 @@ export async function GET(request: Request) {
       return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
 
-    const jobs = await listJobsForJobsApi({ jobType: job_type, localOnly });
+    const jobs = await listJobsForJobsApi({ jobType: job_type, localOnly, projectID: project?.id || null });
     const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
       (job): job is Job => job !== null,
     );
@@ -160,8 +163,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { id, name, job_config } = body;
+    const project = await resolveOptionalProject(body.project_id);
+    const projectJobConfig = project ? await prepareJobConfigForProject(job_config, project) : job_config;
     let worker_id = normalizeWorkerId(body.worker_id);
-    if (isDirectRemoteOllamaCaptionJob(job_config)) {
+    if (isDirectRemoteOllamaCaptionJob(projectJobConfig)) {
       worker_id = 'local';
     }
 
@@ -188,7 +193,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!isSafeJobConfig(job_config)) {
+    if (!isSafeJobConfig(projectJobConfig)) {
       return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
     }
 
@@ -216,7 +221,7 @@ export async function POST(request: Request) {
       let remotePatch: any = {};
       if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
         const worker = await getRemoteWorker(worker_id);
-        const remoteJobConfig = await rewriteSameWorkerRemoteDatasetRefsForWorker(job_config, worker);
+        const remoteJobConfig = await rewriteSameWorkerRemoteDatasetRefsForWorker(projectJobConfig, worker);
         const remoteJob = await remoteJson<any>(worker, '/api/jobs', {
           method: 'POST',
           body: JSON.stringify({
@@ -237,11 +242,12 @@ export async function POST(request: Request) {
 
       const training = await db.jobs.update(id, {
         name,
+        project_id: project?.id || existing.project_id || null,
         worker_id,
         remote_job_id: workerChanged ? null : existing.remote_job_id,
         remote_error: workerChanged ? null : existing.remote_error,
         gpu_ids,
-        job_config: JSON.stringify(job_config),
+        job_config: JSON.stringify(projectJobConfig),
         ...extra,
         ...remotePatch,
       });
@@ -253,9 +259,10 @@ export async function POST(request: Request) {
       // Create new training
       const training = await db.jobs.create({
         name,
+        project_id: project?.id || null,
         worker_id,
         gpu_ids,
-        job_config: JSON.stringify(job_config),
+        job_config: JSON.stringify(projectJobConfig),
         queue_position: newQueuePosition,
         ...extra,
       });

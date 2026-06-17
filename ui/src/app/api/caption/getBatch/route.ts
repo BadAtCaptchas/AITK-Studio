@@ -1,11 +1,11 @@
 /* eslint-disable */
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import { getDatasetsRoot } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -24,7 +24,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'imgPaths must be an array' }, { status: 400 });
   }
 
-  const allowedRoot = path.resolve(await getDatasetsRoot());
+  const { datasetsRoot } = await resolveDatasetScope(body?.project_id);
+  const allowedRoot = path.resolve(datasetsRoot);
   const captions: Record<string, string> = {};
   const remoteGroups = new Map<string, Array<{ ref: string; path: string }>>();
 

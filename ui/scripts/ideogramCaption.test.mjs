@@ -13,6 +13,7 @@ const {
   duplicateIdeogramElement,
   normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
+  normalizeIdeogramColorPalette,
   parseIdeogramCaption,
   rectToBox,
   serializeIdeogramCaption,
@@ -245,6 +246,66 @@ test('caption mutation helpers add, edit, delete, and serialize in schema order'
     'color_palette',
   ]);
   assert.deepEqual(parsed.compositional_deconstruction.elements[0].bbox, [10, 20, 300, 400]);
+});
+
+test('serializeIdeogramCaption migrates old style branch and cleans palettes', () => {
+  const caption = {
+    high_level_description: 'A graphic poster with a robot.',
+    style_description: {
+      aesthetics: 'playful',
+      lighting: 'flat poster lighting',
+      photo: 'bold vector poster',
+      medium: 'Graphic Design.',
+      color_palette: ['#abc', '#AABBCC', 'bad', '#123456'],
+    },
+    compositional_deconstruction: {
+      background: 'Yellow background.',
+      elements: [
+        {
+          type: 'obj',
+          bbox: [10, 20, 300, 400],
+          color_palette: ['#0f0', '#00FF00', 'bad', '#112233'],
+          desc: 'Green robot.',
+        },
+        {
+          type: 'text',
+          bbox: [500, 120, 650, 900],
+          desc: 'White title text.',
+          color_palette: ['#fff'],
+        },
+      ],
+    },
+  };
+
+  const parsed = JSON.parse(serializeIdeogramCaption(caption));
+
+  assert.deepEqual(Object.keys(parsed.style_description), [
+    'aesthetics',
+    'lighting',
+    'medium',
+    'art_style',
+    'color_palette',
+  ]);
+  assert.equal(parsed.style_description.medium, 'graphic_design');
+  assert.equal(parsed.style_description.art_style, 'bold vector poster');
+  assert.deepEqual(parsed.style_description.color_palette, ['#AABBCC', '#123456']);
+  assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[0]), [
+    'type',
+    'bbox',
+    'desc',
+    'color_palette',
+  ]);
+  assert.deepEqual(parsed.compositional_deconstruction.elements[0].color_palette, ['#00FF00', '#112233']);
+  assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[1]), [
+    'type',
+    'bbox',
+    'text',
+    'desc',
+    'color_palette',
+  ]);
+  assert.equal(parsed.compositional_deconstruction.elements[1].text, '');
+  assert.deepEqual(parsed.compositional_deconstruction.elements[1].color_palette, ['#FFFFFF']);
+  assert.deepEqual(normalizeIdeogramColorPalette(['#123', '#112233', '#badbad'], 2), ['#112233', '#BADBAD']);
 });
 
 test('duplicateIdeogramElement inserts a deep-cloned layer above the source', () => {

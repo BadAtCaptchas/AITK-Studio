@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
+import { getAllowedProjectRootIfExists } from '@/server/projects';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ filePath: string[] }> }) {
   const { filePath } = await params;
@@ -13,7 +14,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Get allowed directories
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();
-    const allowedDirs = [datasetRoot, trainingRoot];
+    const projectsRoot = await getAllowedProjectRootIfExists();
+    const allowedDirs = [datasetRoot, trainingRoot, projectsRoot].filter((dir): dir is string => !!dir);
 
     // Check if file exists
     if (!fs.existsSync(decodedFilePath)) {

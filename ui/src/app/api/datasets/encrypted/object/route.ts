@@ -1,12 +1,12 @@
 import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatasetsRoot } from '@/server/settings';
 import {
   isEncryptedDatasetFolder,
   resolveDatasetFolder,
   resolveEncryptedObjectPath,
 } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteFetch } from '@/server/remoteClient';
+import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 function copyResponseHeaders(source: Response) {
   const headers = new Headers();
@@ -19,12 +19,13 @@ function copyResponseHeaders(source: Response) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { datasetName, objectPath, worker_id } = await request.json();
+    const { datasetName, objectPath, worker_id, project_id } = await request.json();
     if (typeof datasetName !== 'string' || typeof objectPath !== 'string') {
       return NextResponse.json({ error: 'Invalid encrypted object request' }, { status: 400 });
     }
 
     if (!isLocalWorker(worker_id)) {
+      rejectRemoteProjectScope(worker_id, project_id);
       const worker = await getRemoteWorker(worker_id);
       const remoteResponse = await remoteFetch(worker, '/api/datasets/encrypted/object', {
         method: 'POST',
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const datasetsRoot = await getDatasetsRoot();
+    const { datasetsRoot } = await resolveDatasetScope(project_id);
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     if (!isEncryptedDatasetFolder(datasetFolder)) {
       return NextResponse.json({ error: 'Encrypted dataset not found' }, { status: 404 });

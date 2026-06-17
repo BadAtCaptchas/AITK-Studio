@@ -1,4 +1,4 @@
-import { defaultDatasetsFolder, defaultDataRoot, defaultTrainFolder } from '../paths';
+import { defaultDatasetsFolder, defaultDataRoot, defaultProjectsFolder, defaultTrainFolder } from '../paths';
 import NodeCache from 'node-cache';
 import { db } from './db';
 
@@ -81,4 +81,19 @@ export const getDataRoot = async () => {
   }
   myCache.set(key, dataRoot);
   return dataRoot;
+};
+
+export const getProjectsRoot = async () => {
+  const key = 'PROJECTS_FOLDER';
+  let projectsRoot = myCache.get(key) as string;
+  if (projectsRoot) {
+    return projectsRoot;
+  }
+  let row = await db.settings.get(key);
+  projectsRoot = defaultProjectsFolder;
+  if (row?.value && row.value !== '') {
+    projectsRoot = row.value;
+  }
+  myCache.set(key, projectsRoot);
+  return projectsRoot;
 };

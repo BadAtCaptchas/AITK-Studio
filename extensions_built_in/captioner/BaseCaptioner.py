@@ -22,6 +22,14 @@ import tqdm
 from toolkit.exceptions import JobStopRequested
 from toolkit.encrypted_dataset import EncryptedDatasetReader, is_encrypted_dataset_path
 from toolkit.image_io import open_static_image
+from toolkit.ideogram_caption import (
+    MAX_ELEMENT_PALETTE,
+    MAX_IMAGE_PALETTE,
+    normalize_caption_dict,
+    normalize_element,
+    normalize_style,
+    sanitize_palette,
+)
 from toolkit.train_tools import get_torch_dtype
 from toolkit.ui_database import UIJobStore
 
@@ -93,8 +101,8 @@ IDEOGRAM_JSON_ELEMENT_KEY_ORDER_TEXT = (
     "desc",
     "color_palette",
 )
-IDEOGRAM_JSON_STYLE_PALETTE_MAX = 16
-IDEOGRAM_JSON_ELEMENT_PALETTE_MAX = 5
+IDEOGRAM_JSON_STYLE_PALETTE_MAX = MAX_IMAGE_PALETTE
+IDEOGRAM_JSON_ELEMENT_PALETTE_MAX = MAX_ELEMENT_PALETTE
 IDEOGRAM_JSON_PHOTO_CUES = (
     "photo",
     "photograph",
@@ -569,6 +577,7 @@ class BaseCaptioner(BaseExtensionProcess):
     def _normalize_ideogram_json_caption(
         self, caption: dict, image_size: Optional[tuple[int, int]] = None
     ) -> dict:
+        caption = normalize_caption_dict(caption)
         normalized = OrderedDict()
         for key in IDEOGRAM_JSON_TOP_LEVEL_KEY_ORDER:
             if key not in caption:
@@ -588,43 +597,7 @@ class BaseCaptioner(BaseExtensionProcess):
         return normalized
 
     def _normalize_ideogram_style_description(self, style_description):
-        if not isinstance(style_description, dict):
-            return style_description
-
-        normalized = OrderedDict(style_description)
-        if "color_palette" in normalized:
-            normalized["color_palette"] = self._normalize_ideogram_color_palette(
-                normalized["color_palette"], IDEOGRAM_JSON_STYLE_PALETTE_MAX
-            )
-        has_photo = "photo" in normalized
-        has_art_style = "art_style" in normalized
-
-        if not has_photo and not has_art_style:
-            style_key = (
-                "photo"
-                if self._style_description_has_photo_cues(normalized)
-                else "art_style"
-            )
-            normalized[style_key] = self._infer_style_description_value(
-                normalized, style_key
-            )
-        elif has_photo and has_art_style:
-            style_key = (
-                "photo"
-                if self._style_description_has_photo_cues(normalized)
-                else "art_style"
-            )
-            drop_key = "art_style" if style_key == "photo" else "photo"
-            normalized.pop(drop_key, None)
-
-        if "photo" in normalized and "art_style" not in normalized:
-            key_order = IDEOGRAM_JSON_STYLE_KEY_ORDER_PHOTO
-        elif "art_style" in normalized and "photo" not in normalized:
-            key_order = IDEOGRAM_JSON_STYLE_KEY_ORDER_NON_PHOTO
-        else:
-            return normalized
-
-        return self._ordered_ideogram_dict(normalized, key_order)
+        return normalize_style(style_description)
 
     @staticmethod
     def _style_description_has_photo_cues(style_description: dict) -> bool:
@@ -693,25 +666,11 @@ class BaseCaptioner(BaseExtensionProcess):
         if element.get("type") == "text":
             if "text" not in element:
                 element["text"] = ""
-            key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_TEXT
-        else:
-            key_order = IDEOGRAM_JSON_ELEMENT_KEY_ORDER_OBJ
-        return self._ordered_ideogram_dict(element, key_order)
+        return normalize_element(element)
 
     @staticmethod
     def _normalize_ideogram_color_palette(palette, max_colors: int):
-        if not isinstance(palette, list):
-            return palette
-
-        normalized = []
-        for color in palette[:max_colors]:
-            if isinstance(color, str):
-                stripped = color.strip()
-                if re.fullmatch(r"#[0-9a-fA-F]{6}", stripped):
-                    normalized.append(stripped.upper())
-                    continue
-            normalized.append(color)
-        return normalized
+        return sanitize_palette(palette, max_colors) or []
 
     @staticmethod
     def _normalize_ideogram_bbox(bbox, image_size: Optional[tuple[int, int]] = None):

@@ -31,6 +31,7 @@ import {
   saveArchiveUploadChunk,
 } from '@/server/archiveUploadChunks';
 import { db } from '@/server/db';
+import { ensureProjectFolders, resolveOptionalProject } from '@/server/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -190,8 +191,12 @@ async function saveJobArchiveUpload(request: NextRequest, uploadPath: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const trainingRoot = await getTrainingFolder();
-  const datasetsRoot = await getDatasetsRoot();
+  const project = await resolveOptionalProject(
+    request.nextUrl.searchParams.get('project_id') || request.headers.get('x-aitk-project-id'),
+  );
+  const projectRoots = project ? await ensureProjectFolders(project) : null;
+  const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
+  const datasetsRoot = projectRoots?.datasets || (await getDatasetsRoot());
   await fsp.mkdir(trainingRoot, { recursive: true });
   await fsp.mkdir(datasetsRoot, { recursive: true });
 
@@ -323,6 +328,7 @@ export async function POST(request: NextRequest) {
       speed_string: '',
       queue_position: queuePosition,
       job_type: 'train',
+      project_id: project?.id || null,
     });
 
     return NextResponse.json({ job, warnings });

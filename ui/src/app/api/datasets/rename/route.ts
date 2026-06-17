@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getDatasetsRoot } from '@/server/settings';
 import { renameDatasetFolder, DatasetRenameError } from '@/server/datasetRename';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { renameSecureCaptionSystemPrompt } from '@/server/secureCaptionSettings';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
+import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 
@@ -13,8 +13,10 @@ export async function POST(request: Request) {
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
     const oldName = body?.oldName ?? body?.name;
     const newName = body?.newName;
+    const projectID = body?.project_id;
 
     if (!isLocalWorker(workerID)) {
+      rejectRemoteProjectScope(workerID, projectID);
       const worker = await getRemoteWorker(workerID);
       const remoteResult = await remoteJson<any>(worker, '/api/datasets/rename', {
         method: 'POST',
@@ -38,9 +40,12 @@ export async function POST(request: Request) {
       });
     }
 
-    const datasetsRoot = await getDatasetsRoot();
+    const scope = await resolveDatasetScope(projectID);
+    const datasetsRoot = scope.datasetsRoot;
     const result = await renameDatasetFolder(datasetsRoot, oldName, newName);
-    await renameSecureCaptionSystemPrompt(result.oldName, result.name);
+    if (!scope.projectID) {
+      await renameSecureCaptionSystemPrompt(result.oldName, result.name);
+    }
     return NextResponse.json(result);
   } catch (error: any) {
     const status =

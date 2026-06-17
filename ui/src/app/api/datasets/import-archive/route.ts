@@ -4,7 +4,7 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
-import { getDatasetsRoot } from '@/server/settings';
+import { resolveDatasetScope } from '@/server/datasetScope';
 import {
   extractZipSafely,
   getExtractedDatasetPath,
@@ -135,7 +135,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const datasetsRoot = await getDatasetsRoot();
+  const projectID = request.nextUrl.searchParams.get('project_id') || request.headers.get('x-aitk-project-id');
+  const { datasetsRoot } = await resolveDatasetScope(projectID);
   await fsp.mkdir(datasetsRoot, { recursive: true });
 
   const chunkUploadRoot = path.join(datasetsRoot, '.aitk-dataset-import-archive-chunks');

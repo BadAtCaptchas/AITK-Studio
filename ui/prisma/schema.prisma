@@ -42,9 +42,23 @@ model WorkerNode {
   @@index([enabled])
 }
 
+model Project {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  description String   @default("")
+  badge_asset String?
+  root_path   String   @default("")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@index([slug])
+}
+
 model Job {
   id              String   @id @default(uuid())
   name            String   @unique
+  project_id      String?
   worker_id       String   @default("local")
   remote_job_id   String?
   remote_sync_at  DateTime?
@@ -71,5 +85,6 @@ model Job {
   @@index([gpu_ids])
   @@index([job_type])
   @@index([job_ref])
+  @@index([project_id])
 
 }

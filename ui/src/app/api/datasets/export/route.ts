@@ -3,21 +3,21 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatasetsRoot } from '@/server/settings';
 import { resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { createDatasetExportArchive, datasetExportFileName } from '@/server/datasetTransfer';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const { datasetName } = await request.json();
+    const { datasetName, project_id } = await request.json();
     if (typeof datasetName !== 'string') {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
 
-    const datasetsRoot = await getDatasetsRoot();
+    const { datasetsRoot } = await resolveDatasetScope(project_id);
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     if (!fs.existsSync(datasetFolder) || !fs.statSync(datasetFolder).isDirectory()) {
       return NextResponse.json({ error: 'Dataset not found' }, { status: 404 });

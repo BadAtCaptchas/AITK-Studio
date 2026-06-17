@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatasetsRoot } from '@/server/settings';
 import {
   combineDatasets,
   datasetCombineRequestHasKeyMaterial,
@@ -9,6 +8,7 @@ import {
 import { getRemoteWorker, isLocalWorker, remoteJson, withoutRemoteRedirects } from '@/server/remoteClient';
 import type { DatasetSummary } from '@/types';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
+import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,10 +26,11 @@ function decorateRemoteDataset(worker: { id: string; name: string }, dataset: Da
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as DatasetCombineRequest & { worker_id?: string };
+    const body = (await request.json()) as DatasetCombineRequest & { worker_id?: string; project_id?: string };
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
     if (!isLocalWorker(workerID)) {
+      rejectRemoteProjectScope(workerID, body.project_id);
       const worker = await getRemoteWorker(workerID);
       const hasKeyMaterial = datasetCombineRequestHasKeyMaterial(body);
       if (
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const datasetsRoot = await getDatasetsRoot();
+    const { datasetsRoot } = await resolveDatasetScope(body.project_id);
     const result = await combineDatasets(datasetsRoot, body);
     return NextResponse.json(result);
   } catch (error) {

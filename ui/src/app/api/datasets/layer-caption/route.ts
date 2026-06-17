@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
       if (!imageWidth || !imageHeight) {
         throw new Error('Image width and height are required for Caption Layer.');
       }
-      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Caption Layer');
+      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Caption Layer', body?.project_id);
     }
 
     const imageSize = { width: imageWidth, height: imageHeight };

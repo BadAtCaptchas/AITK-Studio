@@ -3,7 +3,7 @@ import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
 import { isPathInside, realpathForPath } from '@/server/remoteCaptionSecurity';
-import { getDatasetsRoot } from '@/server/settings';
+import { resolveDatasetScope } from '@/server/datasetScope';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 const MAX_ENCRYPTED_UPLOAD_BYTES = 32 * 1024 * 1024;
@@ -42,7 +42,7 @@ export function nonNegativeIntegerFromValue(value: unknown) {
   return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
-export async function plainOpenRouterImageDataUrl(imgPath: unknown, featureName: string) {
+export async function plainOpenRouterImageDataUrl(imgPath: unknown, featureName: string, projectID?: unknown) {
   if (typeof imgPath !== 'string' || !imgPath.trim()) {
     throw new Error('imgPath is required.');
   }
@@ -62,7 +62,7 @@ export async function plainOpenRouterImageDataUrl(imgPath: unknown, featureName:
     return dataUrlFromBytes(Buffer.from(await remoteResponse.arrayBuffer()), mimeType);
   }
 
-  const datasetsRoot = await getDatasetsRoot();
+  const { datasetsRoot } = await resolveDatasetScope(projectID);
   const resolvedImagePath = path.resolve(imgPath);
   const [realDatasetsRoot, realImagePath] = await Promise.all([
     realpathForPath(datasetsRoot),

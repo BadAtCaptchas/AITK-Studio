@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { getDatasetsRoot } from '@/server/settings';
 import { resolveDatasetDirectoryInsideRoot, isPathInside } from '@/server/remoteCaptionSecurity';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 function safeDatasetCopyName(baseName: string, suffix: string) {
   const safeBase = baseName
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'datasetPath is required' }, { status: 400 });
     }
 
-    const datasetsRoot = await getDatasetsRoot();
+    const { datasetsRoot } = await resolveDatasetScope(body?.project_id);
     const sourcePath = await resolveDatasetDirectoryInsideRoot(path.resolve(datasetPath), datasetsRoot);
     const sourceName = path.basename(sourcePath);
     const requestedName =

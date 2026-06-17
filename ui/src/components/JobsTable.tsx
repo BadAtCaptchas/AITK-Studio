@@ -19,6 +19,7 @@ interface JobsTableProps {
   autoStartQueue?: boolean;
   onlyActive?: boolean;
   job_type?: string | null;
+  projectID?: string | null;
 }
 
 type JobGroup = {
@@ -45,8 +46,8 @@ function jobDisplayTitle(row: Job) {
   return { prefix: 'Train', title: row.name };
 }
 
-export default function JobsTable({ onlyActive = false, job_type = null }: JobsTableProps) {
-  const { jobs, status, refreshJobs } = useJobsList({ onlyActive, reloadInterval: 5000, job_type });
+export default function JobsTable({ onlyActive = false, job_type = null, projectID = null }: JobsTableProps) {
+  const { jobs, status, refreshJobs } = useJobsList({ onlyActive, reloadInterval: 5000, job_type, projectID });
   const { queues, status: queueStatus, refreshQueues } = useQueueList();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
@@ -63,8 +64,9 @@ export default function JobsTable({ onlyActive = false, job_type = null }: JobsT
       key: 'name',
       render: row => {
         const { prefix, title } = jobDisplayTitle(row);
+        const jobHref = projectID ? `/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(row.id)}` : `/jobs/${row.id}`;
         return (
-          <Link href={`/jobs/${row.id}`} className="flex min-w-0 items-center gap-2 font-medium text-gray-100">
+          <Link href={jobHref} className="flex min-w-0 items-center gap-2 font-medium text-gray-100">
             {['running', 'stopping'].includes(row.status) ? (
               <CgSpinner className="h-4 w-4 flex-none animate-spin text-cyan-400" />
             ) : null}

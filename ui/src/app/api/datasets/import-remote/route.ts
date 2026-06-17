@@ -4,7 +4,6 @@ import path from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatasetsRoot } from '@/server/settings';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
 import {
   extractZipSafely,
@@ -14,6 +13,7 @@ import {
 import { isEncryptedDatasetFolder, listDatasetSummaries } from '@/server/encryptedDatasets';
 import { nextAvailablePath } from '@/server/trainingJobTransfer';
 import type { DatasetSummary } from '@/types';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,8 @@ async function writeResponseBodyToFile(response: Response, targetPath: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const datasetsRoot = await getDatasetsRoot();
+  const body = await request.json();
+  const { datasetsRoot } = await resolveDatasetScope(body?.project_id);
   await fsp.mkdir(datasetsRoot, { recursive: true });
 
   const importID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -33,7 +34,6 @@ export async function POST(request: NextRequest) {
   const extractRoot = path.join(workRoot, 'extract');
 
   try {
-    const body = await request.json();
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : '';
     const datasetName = typeof body?.datasetName === 'string' ? body.datasetName : '';
     if (!workerID || !datasetName) {

@@ -7,18 +7,19 @@ import {
   type DatasetCaptionBulkRequest,
   type DatasetCaptionBulkResult,
 } from '@/server/datasetCaptionBulk';
-import { getDatasetsRoot } from '@/server/settings';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as DatasetCaptionBulkRequest & { worker_id?: string };
+    const body = (await request.json()) as DatasetCaptionBulkRequest & { worker_id?: string; project_id?: string };
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
     if (!isLocalWorker(workerID)) {
+      rejectRemoteProjectScope(workerID, body.project_id);
       const worker = await getRemoteWorker(workerID);
       const imgPaths = Array.isArray(body.imgPaths) ? body.imgPaths : [];
       const decoded = decodeRemoteCaptionBulkPaths(imgPaths, workerID);
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(mapRemoteCaptionBulkResult(remoteResult, decoded.refByRemotePath));
     }
 
-    const datasetsRoot = await getDatasetsRoot();
+    const { datasetsRoot } = await resolveDatasetScope(body.project_id);
     const result = await performPlainDatasetCaptionBulkAction(datasetsRoot, body);
     return NextResponse.json(result);
   } catch (error) {

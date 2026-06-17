@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { defaultTrainFolder, defaultDatasetsFolder } from '@/paths';
+import { defaultTrainFolder, defaultDatasetsFolder, defaultProjectsFolder } from '@/paths';
 import { flushCache } from '@/server/settings';
 import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
@@ -66,6 +66,9 @@ export async function GET(request: NextRequest) {
     if (!settingsObject.DATASETS_FOLDER || settingsObject.DATASETS_FOLDER === '') {
       settingsObject.DATASETS_FOLDER = defaultDatasetsFolder;
     }
+    if (!settingsObject.PROJECTS_FOLDER || settingsObject.PROJECTS_FOLDER === '') {
+      settingsObject.PROJECTS_FOLDER = defaultProjectsFolder;
+    }
     settingsObject.TRAINING_ADVISOR_ENABLED = normalizeBooleanSetting(
       settingsObject.TRAINING_ADVISOR_ENABLED,
       false,
@@ -100,6 +103,7 @@ export async function POST(request: NextRequest) {
       OPENROUTER_API_KEY,
       TRAINING_FOLDER,
       DATASETS_FOLDER,
+      PROJECTS_FOLDER,
       TRAINING_ADVISOR_ENABLED,
       COMFY_AUTO_INSTALL,
       COMFY_EXTERNAL_URL,
@@ -113,6 +117,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'DATASETS_FOLDER cannot be filesystem root' }, { status: 400 });
       }
       normalizedDatasetsFolder = resolvedDatasetsFolder;
+    }
+
+    let normalizedProjectsFolder = PROJECTS_FOLDER;
+    if (typeof PROJECTS_FOLDER === 'string' && PROJECTS_FOLDER !== '') {
+      const resolvedProjectsFolder = path.resolve(PROJECTS_FOLDER);
+      if (resolvedProjectsFolder === path.parse(resolvedProjectsFolder).root) {
+        return NextResponse.json({ error: 'PROJECTS_FOLDER cannot be filesystem root' }, { status: 400 });
+      }
+      normalizedProjectsFolder = resolvedProjectsFolder;
     }
 
     let normalizedExternalComfyUrl = '';
@@ -130,6 +143,7 @@ export async function POST(request: NextRequest) {
     const settingsToUpdate: Record<string, string> = {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
+      PROJECTS_FOLDER: normalizedProjectsFolder,
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
       COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,

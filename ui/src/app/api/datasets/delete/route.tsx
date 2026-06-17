@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { getDatasetsRoot } from '@/server/settings';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 function resolveWithinRoot(root: string, target: unknown) {
   if (typeof target !== 'string' || target.trim().length === 0) {
@@ -25,7 +25,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { name } = body;
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
+    const projectID = body?.project_id;
     if (!isLocalWorker(workerID)) {
+      rejectRemoteProjectScope(workerID, projectID);
       const worker = await getRemoteWorker(workerID);
       return NextResponse.json(
         await remoteJson(worker, '/api/datasets/delete', {
@@ -35,7 +37,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const datasetsPath = await getDatasetsRoot();
+    const { datasetsRoot: datasetsPath } = await resolveDatasetScope(projectID);
     const datasetPath = resolveWithinRoot(datasetsPath, name);
 
     if (!datasetPath) {
@@ -50,7 +52,7 @@ export async function POST(request: Request) {
     // delete it and return success
     fs.rmSync(datasetPath, { recursive: true, force: true });
     return NextResponse.json({ success: true });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete dataset' }, { status: 500 });
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || 'Failed to delete dataset' }, { status: error?.status || 500 });
   }
 }

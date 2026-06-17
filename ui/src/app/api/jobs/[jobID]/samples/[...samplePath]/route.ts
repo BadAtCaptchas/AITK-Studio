@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
-import { getTrainingFolder } from '@/server/settings';
 import { db } from '@/server/db';
+import { getJobTrainingRoot } from '@/server/projects';
 
 const contentTypeMap: { [key: string]: string } = {
   '.jpg': 'image/jpeg',
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
     return new NextResponse('Job not found', { status: 404 });
   }
 
-  const trainingFolder = await getTrainingFolder();
+  const trainingFolder = await getJobTrainingRoot(job);
   const canonicalTrainingFolder = await fs.promises.realpath(path.resolve(trainingFolder)).catch(() => null);
   const samplesFolder = path.resolve(trainingFolder, job.name, 'samples');
   const filepath = path.resolve(samplesFolder, sampleSegments[0]);

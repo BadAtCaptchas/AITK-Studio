@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       if (!imageWidth || !imageHeight) {
         throw new Error('Image width and height are required for Auto Boxes.');
       }
-      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Auto Boxes');
+      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Auto Boxes', body?.project_id);
     }
 
     const result = await generateOpenRouterBoxPatches({

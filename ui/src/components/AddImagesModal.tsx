@@ -18,6 +18,7 @@ import { FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS } from '@/utils/folderImport';
 export interface AddImagesModalState {
   datasetName: string;
   workerID?: string;
+  projectID?: string | null;
   onComplete?: () => void;
   openedByDrag?: boolean;
   encrypted?: {
@@ -33,16 +34,22 @@ export const addImagesModalState = createGlobalState<AddImagesModalState | null>
 export const openImagesModal = (
   datasetName: string,
   onComplete: () => void,
-  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID'>,
+  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID' | 'projectID'>,
 ) => {
-  addImagesModalState.set({ datasetName, workerID: options?.workerID, onComplete, encrypted: options?.encrypted });
+  addImagesModalState.set({
+    datasetName,
+    workerID: options?.workerID,
+    projectID: options?.projectID,
+    onComplete,
+    encrypted: options?.encrypted,
+  });
 };
 
 /** Call on a page that knows its datasetName — auto-opens the modal when files are dragged onto the page. */
 export function useOpenImagesModalOnDrag(
   datasetName: string,
   onComplete: () => void,
-  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID'>,
+  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID' | 'projectID'>,
 ) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
@@ -64,6 +71,7 @@ export function useOpenImagesModalOnDrag(
           addImagesModalState.set({
             datasetName,
             workerID: options?.workerID,
+            projectID: options?.projectID,
             onComplete: onCompleteRef.current,
             openedByDrag: true,
             encrypted: options?.encrypted,
@@ -100,7 +108,7 @@ export function useOpenImagesModalOnDrag(
       window.removeEventListener('dragleave', onDragLeave);
       window.removeEventListener('drop', onDrop);
     };
-  }, [datasetName, options?.encrypted, options?.workerID]);
+  }, [datasetName, options?.encrypted, options?.projectID, options?.workerID]);
 }
 
 type AcceptMap = { [mime: string]: string[] };
@@ -135,6 +143,7 @@ export default function AddImagesModal() {
 
   const datasetName = modalInfo?.datasetName ?? '';
   const workerID = modalInfo?.workerID ?? 'local';
+  const projectID = modalInfo?.projectID ?? null;
   const encrypted = modalInfo?.encrypted ?? null;
 
   const uploadSingleFile = useCallback(
@@ -150,6 +159,7 @@ export default function AddImagesModal() {
       formData.append('files', entry.file);
       formData.append('datasetName', datasetName || '');
       if (workerID !== 'local') formData.append('worker_id', workerID);
+      if (projectID) formData.append('project_id', projectID);
 
       try {
         await apiClient.post('/api/datasets/upload', formData, {
@@ -176,7 +186,7 @@ export default function AddImagesModal() {
         return 'error';
       }
     },
-    [datasetName, workerID],
+    [datasetName, projectID, workerID],
   );
 
   const resetState = useCallback(() => {
@@ -234,6 +244,7 @@ export default function AddImagesModal() {
         const formData = new FormData();
         formData.append('datasetName', datasetName);
         if (workerID !== 'local') formData.append('worker_id', workerID);
+        if (projectID) formData.append('project_id', projectID);
         formData.append('encrypted', '1');
         formData.append('manifest', JSON.stringify(nextManifest));
         formData.append('objectPaths', JSON.stringify(encryptedObjects.map(object => object.objectPath)));
@@ -266,7 +277,7 @@ export default function AddImagesModal() {
         setIsUploading(false);
       }
     },
-    [datasetName, encrypted, resetState, setModalInfo, workerID],
+    [datasetName, encrypted, projectID, resetState, setModalInfo, workerID],
   );
 
   const processQueue = useCallback(

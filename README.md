@@ -21,6 +21,7 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 ## Highlights
 
 - Web UI for training jobs, datasets, generation, TensorBoard, queue management, and exports.
+- Project workspaces keep datasets, runs, outputs, notes, and files isolated under their own project folders.
 - CLI-first training still works for config-driven workflows and automation.
 - Supports LoRA, LoKr, full fine-tuning paths for selected models, training phases, and auto-learn profiles.
 - Includes encrypted dataset workflows with password, key-file, and YubiKey-backed unlock modes.
@@ -32,6 +33,7 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [Supported Models](#supported-models)
 - [Quick Start](#quick-start)
 - [Web UI](#web-ui)
+- [Project Workspaces](#project-workspaces)
 - [Developer Utilities](#developer-utilities)
 - [Generation](#generation)
 - [Monitoring and Storage](#monitoring-and-storage)
@@ -234,6 +236,21 @@ Block offloading is currently CUDA-first and is intended for LoRA/network traini
 > **Ideogram external ComfyUI tip:** When using the Ideogram Workflow Builder with external ComfyUI, start ComfyUI with `--fast fp16_accumulation` and `--disable-smart-memory`. Ideogram tends to behave better with those options, and some systems can otherwise hit unexpectedly long generation times.
 
 The AITK Studio UI is the main control surface for creating datasets, starting and stopping jobs, monitoring training, running generation, and exporting work. It can also require a bearer token so the UI is safer to run on a remote machine.
+
+### Project Workspaces
+
+Projects are isolated workspaces for keeping related training work together. Open **Projects** in the UI to create or switch projects, then enter a project's Mission Control view. Each project gets its own sandbox under `PROJECTS_FOLDER` (default: `projects/`) with separate `datasets/`, `configs/`, `runs/`, `outputs/`, `models/`, `assets/`, `notes/`, and `cache/` folders.
+
+Inside a project, the left rail switches between project-local areas:
+
+- **Workspace** shows the Inputs, Active Run, and Outputs flow for that project.
+- **Datasets** lists only project datasets. Clicking a dataset opens the full dataset editor, including upload, caption editing, rename, delete, bulk caption tools, encrypted dataset support, and export/copy/combine actions scoped to the project.
+- **Files** browses the project sandbox, previews supported image/text files, copies paths, downloads files, and supports guarded rename/delete actions.
+- **Runs** shows project-scoped jobs and run details.
+- **Generate** wraps the normal Generate workflow with the project locked, so generated jobs and outputs land in the project sandbox.
+- **Settings** manages project identity and shows sandbox folder health.
+
+Global Dashboard, Jobs, Datasets, and Generate still work as before when no `project_id` is used. Existing global datasets and outputs are not moved automatically; when a global dataset is used inside a project job, AITK Studio copies it into the project sandbox by default so project configs can use local project paths.
 
 ### Run the UI
 

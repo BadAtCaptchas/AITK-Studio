@@ -8,6 +8,9 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const encryptedDatasets = require('../dist/src/server/encryptedDatasets.js');
+const datasetRootCaption = require('../dist/src/server/datasetRootCaption.js');
+const datasetImages = require('../dist/src/server/datasetImages.js');
+const encryptedDatasetUtils = require('../dist/src/utils/encryptedDatasets.js');
 const webauthnPrfCrypto = require('../dist/src/utils/webauthnPrfCrypto.js');
 
 const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
@@ -137,11 +140,94 @@ test('listDatasetSummaries detects clearly JSON-captioned plain datasets', async
   assert.equal(jsonSummary.detectedCaptionExt, 'json');
 });
 
+test('dataset root caption helper reads exact root metadata file first', async () => {
+  const datasetPath = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-root-caption-'));
+  await fs.writeFile(path.join(datasetPath, 'root_caption.TXT'), 'fallback prompt');
+  await fs.writeFile(path.join(datasetPath, datasetRootCaption.ROOT_CAPTION_FILE_NAME), 'exact prompt');
+  await fs.mkdir(path.join(datasetPath, 'nested'));
+  await fs.writeFile(path.join(datasetPath, 'nested', datasetRootCaption.ROOT_CAPTION_FILE_NAME), 'nested prompt');
+
+  assert.equal(datasetRootCaption.isDatasetRootCaptionEntry(datasetPath, datasetPath, 'ROOT_CAPTION.txt'), true);
+  assert.equal(
+    datasetRootCaption.isDatasetRootCaptionEntry(datasetPath, path.join(datasetPath, 'nested'), 'ROOT_CAPTION.txt'),
+    false,
+  );
+  assert.deepEqual(await datasetRootCaption.readDatasetRootCaption(datasetPath), {
+    found: true,
+    systemPrompt: 'exact prompt',
+  });
+});
+
+test('listDatasetSummaries ignores root caption metadata for plain datasets', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-root-caption-summary-'));
+  const datasetPath = path.join(root, 'plain_dataset');
+  await fs.mkdir(datasetPath, { recursive: true });
+  await fs.writeFile(path.join(datasetPath, 'ROOT_CAPTION.txt'), 'system prompt');
+  await fs.writeFile(path.join(datasetPath, 'image.png'), 'media');
+
+  const summaries = await encryptedDatasets.listDatasetSummaries(root);
+  const summary = summaries.find(dataset => dataset.name === 'plain_dataset');
+
+  assert.equal(summary.itemCount, 1);
+  assert.equal(summary.captionedItemCount, 0);
+  assert.equal(summary.missingCaptionCount, 1);
+});
+
+test('dataset item scanner hides root caption metadata from editable items', async () => {
+  const datasetPath = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-root-caption-items-'));
+  await fs.mkdir(path.join(datasetPath, 'nested'));
+  await fs.writeFile(path.join(datasetPath, 'ROOT_CAPTION.txt'), 'system prompt');
+  await fs.writeFile(path.join(datasetPath, 'image.png'), 'media');
+  await fs.writeFile(path.join(datasetPath, 'nested', 'ROOT_CAPTION.txt'), 'nested text item');
+
+  const items = datasetImages.findDatasetItemsRecursively(datasetPath).map(item => path.relative(datasetPath, item));
+
+  assert.deepEqual(items.sort(), ['image.png', path.join('nested', 'ROOT_CAPTION.txt')].sort());
+});
+
 test('validateEncryptedCatalogKey accepts the matching dataset key', () => {
   const key = crypto.randomBytes(32);
   const manifest = manifestForKey(key);
 
   assert.equal(encryptedDatasets.validateEncryptedCatalogKey(manifest, key.toString('base64')), true);
+});
+
+test('encrypted catalog preserves root caption metadata', async () => {
+  const rawKey = crypto.randomBytes(32);
+  const key = await encryptedDatasetUtils.importRawAesKey(rawKey.toString('base64'));
+  const catalog = {
+    version: 1,
+    rootCaption: 'Use this as the system prompt.',
+    items: [],
+  };
+  const { manifest } = await encryptedDatasetUtils.encryptCatalog(catalog, key, manifestForKey(rawKey));
+
+  assert.deepEqual(await encryptedDatasetUtils.decryptCatalog(manifest, key), catalog);
+});
+
+test('encrypted upload utilities do not pair root caption metadata as an item caption', async () => {
+  const files = [
+    {
+      name: 'ROOT_CAPTION.txt',
+      type: 'text/plain',
+      text: async () => 'Dataset-wide system prompt',
+    },
+    {
+      name: 'image.png',
+      type: 'image/png',
+    },
+    {
+      name: 'image.txt',
+      text: async () => 'Image sidecar caption',
+    },
+  ];
+
+  const pairs = encryptedDatasetUtils.pairMediaAndCaptionFiles(files);
+
+  assert.equal(await encryptedDatasetUtils.readRootCaptionFile(files), 'Dataset-wide system prompt');
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].file.name, 'image.png');
+  assert.equal(pairs[0].captionFile.name, 'image.txt');
 });
 
 test('validateEncryptedCatalogKey rejects the wrong dataset key', () => {

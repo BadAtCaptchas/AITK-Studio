@@ -3,15 +3,20 @@ import type {
   EncryptedDatasetItem,
   EncryptedDatasetManifest,
   EncryptedDatasetMediaKind,
-} from '@/types';
+} from '../types';
 import {
   WEBAUTHN_PRF_KDF_TYPE,
   WEBAUTHN_PRF_NATIVE_USB_PROVIDER,
   decryptWithWebAuthnPrfKey,
   encryptWithWebAuthnPrfKey,
   webAuthnPrfWrappedKeyAad,
-} from '@/utils/webauthnPrfCrypto';
-import { isFolderImportCaptionSidecarPath } from '@/utils/folderImport';
+} from './webauthnPrfCrypto';
+import {
+  ROOT_CAPTION_FILE_NAME,
+  isFolderImportCaptionSidecarPath,
+  isRootCaptionPath,
+  normalizeFolderImportRelativePath,
+} from './folderImport';
 
 export const ENCRYPTED_DATASET_FORMAT = 'aitk-encrypted-dataset';
 export const ENCRYPTED_DATASET_VERSION = 1;
@@ -566,6 +571,28 @@ export function pairMediaAndCaptionFiles(files: File[]) {
     file,
     captionFile: captionByBaseName.get(getBaseName(file.name).toLowerCase()) || null,
   }));
+}
+
+export function findRootCaptionFile(files: File[], relativePaths?: string[]) {
+  const candidates = files
+    .map((file, index) => ({
+      file,
+      relativePath: relativePaths?.[index] || file.name,
+    }))
+    .filter(entry => isRootCaptionPath(entry.relativePath));
+
+  return (
+    candidates.find(entry => normalizeFolderImportRelativePath(entry.relativePath) === ROOT_CAPTION_FILE_NAME)?.file ||
+    candidates[0]?.file ||
+    null
+  );
+}
+
+export async function readRootCaptionFile(files: File[], relativePaths?: string[]) {
+  const file = findRootCaptionFile(files, relativePaths);
+  if (!file) return null;
+  const text = await file.text();
+  return text.trim();
 }
 
 export async function buildEncryptedDatasetItem(

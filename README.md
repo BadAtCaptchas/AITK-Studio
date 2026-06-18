@@ -683,6 +683,14 @@ replaced.
 Images are never upscaled but they are downscaled and placed in buckets for batching. **You do not need to crop/resize your images**.
 The loader will automatically resize them and can handle varying aspect ratios. 
 
+### Root auto-caption prompt
+
+For the **Auto Caption** modal, a dataset can include a root-level `ROOT_CAPTION.txt`. When the modal opens for a new caption job, the file contents prefill the `System Prompt` field.
+
+`ROOT_CAPTION.txt` is reserved dataset metadata. Root-level prompt files are hidden from dataset item listings and are not treated as image caption sidecars. Matching is case-insensitive, with exact `ROOT_CAPTION.txt` preferred if duplicates exist. Only the dataset root is used for this prompt; nested files with that name do not set the system prompt.
+
+Encrypted folder imports and uploads also detect root-level `ROOT_CAPTION.txt` before encryption and store its text inside the encrypted catalog metadata. After unlock, encrypted datasets can prefill the main Auto Caption modal the same way. The separate **Secure Remote Captioning** page keeps its existing per-dataset system prompt behavior.
+
 ### Encrypted datasets
 
 The UI can create encrypted datasets for images, video, audio, and captions. Choose **Encrypted** when creating a dataset, then select either:

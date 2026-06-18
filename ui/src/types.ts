@@ -80,6 +80,7 @@ export interface EncryptedDatasetItem {
 export interface EncryptedDatasetCatalog {
   version: 1;
   items: EncryptedDatasetItem[];
+  rootCaption?: string;
 }
 
 export interface DatasetSummary {

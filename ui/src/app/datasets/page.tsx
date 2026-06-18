@@ -39,6 +39,7 @@ import {
   encryptCatalog,
   getMediaKind,
   getRememberedEncryptedDatasetKey,
+  readRootCaptionFile,
   rememberEncryptedDatasetKey,
   unlockEncryptedDatasetKey,
   type DatasetCredentialMode,
@@ -451,7 +452,7 @@ export default function Datasets() {
             const images = Array.isArray(response.data?.images) ? response.data.images : [];
             const firstImagePath = images
               .map((image: { img_path?: unknown }) => (typeof image.img_path === 'string' ? image.img_path : ''))
-              .find(path => path && isPreviewableImagePath(path));
+              .find((imagePath: string) => imagePath && isPreviewableImagePath(imagePath));
             setDatasetPreviewUrls(previous => ({
               ...previous,
               [row.ref]: firstImagePath ? getMediaUrl(firstImagePath) : null,
@@ -1185,7 +1186,15 @@ export default function Datasets() {
     });
 
     const allocateCatalogName = createFlattenedFileNameAllocator();
-    const catalog: EncryptedDatasetCatalog = { version: 1, items: [] };
+    const rootCaption = await readRootCaptionFile(
+      entries.map(entry => entry.file),
+      relativePaths,
+    );
+    const catalog: EncryptedDatasetCatalog = {
+      version: 1,
+      items: [],
+      ...(rootCaption !== null ? { rootCaption } : {}),
+    };
     const encryptedObjects: Array<{ objectPath: string; blob: Blob }> = [];
 
     for (let index = 0; index < entries.length; index += 1) {

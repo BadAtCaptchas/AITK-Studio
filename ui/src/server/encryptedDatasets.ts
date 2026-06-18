@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { TOOLKIT_ROOT } from '../paths';
 import type { DatasetSummary, EncryptedDatasetManifest, EncryptedDatasetStartKey } from '../types';
 import { DATASET_CAPTION_SIDECAR_EXTENSIONS } from './captionFiles';
+import { isDatasetRootCaptionEntry } from './datasetRootCaption';
 
 export const ENCRYPTED_DATASET_MANIFEST = '.aitk_encrypted_dataset.json';
 const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
@@ -72,9 +73,13 @@ function normalizeCaptionExtension(extension: string) {
   return extension.replace(/^\.+/, '').toLowerCase();
 }
 
-function captionSidecars(mediaPath: string) {
+function captionSidecars(mediaPath: string, datasetFolder: string) {
   const parsed = path.parse(mediaPath);
-  return DATASET_CAPTION_EXTENSIONS.filter(captionExt => safeIsFile(path.join(parsed.dir, `${parsed.name}${captionExt}`)));
+  return DATASET_CAPTION_EXTENSIONS.filter(captionExt => {
+    const captionFileName = `${parsed.name}${captionExt}`;
+    if (isDatasetRootCaptionEntry(datasetFolder, parsed.dir, captionFileName)) return false;
+    return safeIsFile(path.join(parsed.dir, captionFileName));
+  });
 }
 
 function detectDominantCaptionExt(summary: Pick<DatasetCaptionSummary, 'itemCount' | 'captionedItemCount' | 'captionExtensionCounts'>) {
@@ -125,7 +130,7 @@ export function summarizePlainDatasetCaptions(datasetFolder: string): DatasetCap
       if (!entry.isFile() || !DATASET_MEDIA_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
 
       summary.itemCount += 1;
-      const sidecars = captionSidecars(entryPath);
+      const sidecars = captionSidecars(entryPath, datasetFolder);
       if (sidecars.length > 0) {
         summary.captionedItemCount += 1;
         sidecars.forEach(extension => {

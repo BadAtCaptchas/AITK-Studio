@@ -32,6 +32,7 @@ type Props = {
   setGpuIDs: (value: string | null) => void;
   gpuList: any;
   showGPUSelect: boolean;
+  onSystemPromptChange?: () => void;
 };
 
 type CaptionEstimate = {
@@ -82,6 +83,7 @@ const CaptionSimpleJob: React.FC<Props> = ({
   setGpuIDs,
   gpuList,
   showGPUSelect,
+  onSystemPromptChange,
 }) => {
   const selectedCaptionOption = captionerTypes.find(option => option.name === jobConfig.config.process[0].type);
   const additionalSections = selectedCaptionOption?.additionalSections || [];
@@ -397,7 +399,10 @@ const CaptionSimpleJob: React.FC<Props> = ({
           <TextAreaInput
             label="System Prompt"
             value={captionConfig.system_prompt || ''}
-            onChange={value => setJobConfig(value, 'config.process[0].caption.system_prompt')}
+            onChange={value => {
+              onSystemPromptChange?.();
+              setJobConfig(value, 'config.process[0].caption.system_prompt');
+            }}
             placeholder="Optional system prompt"
           />
         </div>

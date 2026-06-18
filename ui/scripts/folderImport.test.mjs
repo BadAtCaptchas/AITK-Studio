@@ -5,9 +5,11 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   FOLDER_IMPORT_SUPPORTED_EXTENSIONS,
+  ROOT_CAPTION_FILE_NAME,
   createFlattenedFileNameAllocator,
   flattenedFolderImportFileNames,
   folderImportCaptionKey,
+  isRootCaptionPath,
   isFolderImportCaptionSidecarPath,
   stripFolderImportRoot,
 } = require('../dist/src/utils/folderImport.js');
@@ -25,6 +27,15 @@ test('folder import treats JSON captions as supported sidecars', () => {
   assert.equal(isFolderImportCaptionSidecarPath('cats/a.json'), true);
   assert.equal(isFolderImportCaptionSidecarPath('cats/a.jxl'), false);
   assert.equal(isFolderImportCaptionSidecarPath('cats/a.png'), false);
+});
+
+test('folder import reserves root caption metadata', () => {
+  assert.equal(ROOT_CAPTION_FILE_NAME, 'ROOT_CAPTION.txt');
+  assert.equal(isRootCaptionPath('ROOT_CAPTION.txt'), true);
+  assert.equal(isRootCaptionPath('root_caption.TXT'), true);
+  assert.equal(isRootCaptionPath('cats/ROOT_CAPTION.txt'), false);
+  assert.equal(isFolderImportCaptionSidecarPath('ROOT_CAPTION.txt'), false);
+  assert.equal(isFolderImportCaptionSidecarPath('cats/ROOT_CAPTION.txt'), true);
 });
 
 test('folder import strips one top-level folder for separate imports', () => {

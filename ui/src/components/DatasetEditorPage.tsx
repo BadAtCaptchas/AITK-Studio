@@ -203,9 +203,11 @@ export default function DatasetEditorPage({
     openCaptionDatasetModal(datasetPath, () => refreshImageList(datasetName), {
       encryptedDatasetKeyB64: encryptedRawKeyB64 || undefined,
       projectID,
+      datasetName,
+      rootCaption: encryptedCatalog ? encryptedCatalog.rootCaption ?? null : undefined,
       preset: 'ideogram_json',
     });
-  }, [datasetName, datasetPath, encryptedRawKeyB64, isRemoteDataset, projectID]);
+  }, [datasetName, datasetPath, encryptedCatalog, encryptedRawKeyB64, isRemoteDataset, projectID]);
 
   useEffect(() => {
     if (datasetName) {
@@ -662,9 +664,11 @@ export default function DatasetEditorPage({
           {!isRemoteDataset && (
             <AutoCaptionButton
               datasetPath={datasetPath}
+              datasetName={datasetName}
               projectID={projectID}
               setIsAutoCaptioning={setIsAutoCaptioning}
               encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
+              rootCaption={encryptedCatalog ? encryptedCatalog.rootCaption ?? null : undefined}
             />
           )}
           <Button

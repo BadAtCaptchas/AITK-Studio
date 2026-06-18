@@ -12,6 +12,13 @@ export function folderImportExtension(relativePath: string) {
   return dotIndex > 0 ? fileName.slice(dotIndex).toLowerCase() : '';
 }
 
+export const ROOT_CAPTION_FILE_NAME = 'ROOT_CAPTION.txt';
+
+export function isRootCaptionPath(relativePath: string) {
+  const parts = normalizeFolderImportRelativePath(relativePath).split('/').filter(Boolean);
+  return parts.length === 1 && parts[0].toLowerCase() === ROOT_CAPTION_FILE_NAME.toLowerCase();
+}
+
 export const FOLDER_IMPORT_MEDIA_EXTENSIONS = [
   '.png',
   '.jpg',
@@ -44,6 +51,7 @@ export const FOLDER_IMPORT_SUPPORTED_EXTENSIONS = new Set([
 ]);
 
 export function isFolderImportCaptionSidecarPath(relativePath: string) {
+  if (isRootCaptionPath(relativePath)) return false;
   return FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS.includes(folderImportExtension(relativePath));
 }
 

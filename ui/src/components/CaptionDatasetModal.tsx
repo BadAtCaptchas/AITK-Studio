@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from '@/components/Modal';
 import { createGlobalState } from 'react-global-hooks';
 import { useFromNull } from '@/hooks/useFromNull';
@@ -25,6 +25,8 @@ export interface CaptionDatasetModalState {
   jobId?: string | null;
   cloneId?: string | null;
   encryptedDatasetKeyB64?: string | null;
+  datasetName?: string | null;
+  rootCaption?: string | null;
   preset?: 'ideogram_json' | null;
   onClose?: () => void;
 }
@@ -39,6 +41,8 @@ export const openCaptionDatasetModal = (
     jobId?: string | null;
     cloneId?: string | null;
     encryptedDatasetKeyB64?: string | null;
+    datasetName?: string | null;
+    rootCaption?: string | null;
     preset?: 'ideogram_json' | null;
   },
 ) => {
@@ -49,6 +53,8 @@ export const openCaptionDatasetModal = (
     jobId: options?.jobId ?? null,
     cloneId: options?.cloneId ?? null,
     encryptedDatasetKeyB64: options?.encryptedDatasetKeyB64 ?? null,
+    datasetName: options?.datasetName ?? null,
+    rootCaption: options?.rootCaption !== undefined ? options.rootCaption ?? '' : undefined,
     preset: options?.preset ?? null,
   });
 };
@@ -64,6 +70,8 @@ export const CaptionDatasetModal: React.FC = () => {
   const open = modalInfo !== null;
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local', { enabled: open });
   const isSavingRef = useRef(false);
+  const systemPromptTouchedRef = useRef(false);
+  const rootCaptionRequestRef = useRef(0);
   const [isSaving, setIsSaving] = useState(false);
   const showGPUSelect = !isMac();
   const isLoadingExistingJob = !!(modalInfo?.jobId || modalInfo?.cloneId) && !hasLoadedExistingJob;
@@ -75,6 +83,7 @@ export const CaptionDatasetModal: React.FC = () => {
     setActiveTab('simple');
     setExistingJobName(null);
     setAllowDurableEncryptedResume(false);
+    systemPromptTouchedRef.current = false;
     // set the path_to_caption
     if (modalInfo?.datasetPath) {
       setJobConfig(modalInfo.datasetPath, 'config.process[0].caption.path_to_caption');
@@ -89,6 +98,42 @@ export const CaptionDatasetModal: React.FC = () => {
       setJobConfig(2048, 'config.process[0].caption.max_new_tokens');
     }
   }, [modalInfo]);
+
+  const applyRootCaption = useCallback(
+    (systemPrompt: string | null | undefined) => {
+      if (!modalInfo || modalInfo.jobId || modalInfo.cloneId || systemPromptTouchedRef.current) return;
+      if (systemPrompt == null) return;
+      setJobConfig(systemPrompt, 'config.process[0].caption.system_prompt');
+    },
+    [modalInfo, setJobConfig],
+  );
+
+  useEffect(() => {
+    if (!modalInfo || modalInfo.jobId || modalInfo.cloneId) return;
+    const requestId = ++rootCaptionRequestRef.current;
+
+    if (modalInfo.rootCaption !== undefined) {
+      applyRootCaption(modalInfo.rootCaption);
+      return;
+    }
+
+    if (!modalInfo.datasetName) return;
+
+    apiClient
+      .post('/api/datasets/root-caption', {
+        datasetName: modalInfo.datasetName,
+        project_id: modalInfo.projectID || undefined,
+      })
+      .then(res => {
+        if (rootCaptionRequestRef.current !== requestId) return;
+        if (res.data?.found) {
+          applyRootCaption(res.data.systemPrompt || '');
+        }
+      })
+      .catch(error => {
+        console.warn('Could not load dataset root caption:', error);
+      });
+  }, [applyRootCaption, modalInfo]);
 
   // clone existing caption job
   useEffect(() => {
@@ -270,6 +315,9 @@ export const CaptionDatasetModal: React.FC = () => {
               setGpuIDs={setGpuIDs}
               gpuList={gpuList}
               showGPUSelect={showGPUSelect}
+              onSystemPromptChange={() => {
+                systemPromptTouchedRef.current = true;
+              }}
             />
           ) : (
             <div className="h-[60vh] mt-2">

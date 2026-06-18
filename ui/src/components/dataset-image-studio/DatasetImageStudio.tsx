@@ -90,11 +90,30 @@ type RefusalCaptionAuditResponse = {
   refusals?: Record<string, unknown>;
 };
 type RecaptionModelOption = { value: string; label: string };
+type RecaptionSettingsPreset = {
+  provider: RecaptionProvider;
+  model: string;
+  outputFormat: RecaptionOutputFormat;
+  prompt: string;
+  systemPrompt: string;
+  remoteWorkerId: string;
+  maxNewTokens: number;
+};
+type RecaptionQueueEntry = {
+  id: string;
+  item: DatasetStudioItem;
+  key: string;
+  name: string;
+  existingCaption: string;
+  settings: RecaptionSettingsPreset;
+};
 type OllamaModelListItem = {
   name?: string;
   model?: string;
   details?: Record<string, unknown>;
 };
+
+const RECAPTION_SETTINGS_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionSettings.v1';
 
 function ollamaModelName(model: OllamaModelListItem) {
   return (typeof model.model === 'string' && model.model.trim()) || (typeof model.name === 'string' && model.name.trim()) || '';
@@ -109,6 +128,56 @@ function ollamaModelOptions(models: OllamaModelListItem[]): RecaptionModelOption
       .join(' ');
     return [{ value, label: detail ? `${value} (${detail})` : value }];
   });
+}
+
+function recaptionSettingsStorageKey({
+  datasetName,
+  projectID,
+  datasetPath,
+  workerID,
+}: {
+  datasetName: string;
+  projectID?: string | null;
+  datasetPath?: string | null;
+  workerID: string;
+}) {
+  const dataset = datasetName.trim();
+  if (!dataset) return '';
+  const scope = (projectID || datasetPath || workerID || 'global').trim();
+  return `${RECAPTION_SETTINGS_STORAGE_PREFIX}:${encodeURIComponent(scope)}:${encodeURIComponent(dataset)}`;
+}
+
+function normalizeRecaptionProvider(value: unknown): RecaptionProvider {
+  return AUTO_BOX_PROVIDERS.some(provider => provider.value === value) ? (value as RecaptionProvider) : 'openrouter';
+}
+
+function normalizeRecaptionOutputFormat(value: unknown): RecaptionOutputFormat {
+  return value === 'ideogram_json' ? 'ideogram_json' : 'text';
+}
+
+function readRecaptionSettingsPreset(storageKey: string): RecaptionSettingsPreset | null {
+  if (!storageKey || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<RecaptionSettingsPreset> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const provider = normalizeRecaptionProvider(parsed.provider);
+    const fallbackModel = provider === 'openrouter' ? DEFAULT_OPENROUTER_BOX_MODEL : DEFAULT_OLLAMA_VISION_MODEL;
+    const maxNewTokens = Number(parsed.maxNewTokens);
+    return {
+      provider,
+      model: typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model : fallbackModel,
+      outputFormat: normalizeRecaptionOutputFormat(parsed.outputFormat),
+      prompt: typeof parsed.prompt === 'string' && parsed.prompt.trim() ? parsed.prompt : defaultImageCaptionPrompt,
+      systemPrompt: typeof parsed.systemPrompt === 'string' ? parsed.systemPrompt : '',
+      remoteWorkerId: typeof parsed.remoteWorkerId === 'string' ? parsed.remoteWorkerId : '',
+      maxNewTokens: Number.isFinite(maxNewTokens) && maxNewTokens > 0 ? Math.floor(maxNewTokens) : 256,
+    };
+  } catch (error) {
+    console.warn('Could not load saved recaption settings:', error);
+    return null;
+  }
 }
 
 function scheduleIdleTask(callback: () => void) {
@@ -167,6 +236,9 @@ export default function DatasetImageStudio({
   const [isRecaptionModalOpen, setIsRecaptionModalOpen] = useState(false);
   const [isRecaptioning, setIsRecaptioning] = useState(false);
   const [recaptionMessage, setRecaptionMessage] = useState('');
+  const [hasRecaptionSettingsForDataset, setHasRecaptionSettingsForDataset] = useState(false);
+  const [recaptionQueue, setRecaptionQueue] = useState<RecaptionQueueEntry[]>([]);
+  const [activeRecaptionLabel, setActiveRecaptionLabel] = useState('');
   const [recaptionRootPrompt, setRecaptionRootPrompt] = useState('');
   const [recaptionRootPromptStatus, setRecaptionRootPromptStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [recaptionRemoteModelOptions, setRecaptionRemoteModelOptions] = useState<RecaptionModelOption[]>([]);
@@ -194,6 +266,9 @@ export default function DatasetImageStudio({
   const savedCaptionRef = useRef('');
   const isDirtyRef = useRef(false);
   const selectedKeyRef = useRef('');
+  const isRecaptioningRef = useRef(false);
+  const recaptionQueueRef = useRef<RecaptionQueueEntry[]>([]);
+  const recaptionModelRef = useRef(DEFAULT_OPENROUTER_BOX_MODEL);
   const recaptionSystemPromptRef = useRef('');
   const recaptionSystemPromptTouchedRef = useRef(false);
 
@@ -223,8 +298,11 @@ export default function DatasetImageStudio({
     () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
     [workers],
   );
+  const recaptionStorageKey = useMemo(
+    () => recaptionSettingsStorageKey({ datasetName, projectID, datasetPath, workerID }),
+    [datasetName, datasetPath, projectID, workerID],
+  );
   const autoBoxProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === autoBoxProvider)?.label || 'OpenRouter';
-  const recaptionProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === recaptionProvider)?.label || 'OpenRouter';
   const recaptionModelOptions = useMemo(() => {
     if (recaptionProvider === 'openrouter') return OPENROUTER_BOX_MODELS;
     if (recaptionProvider === 'remote_ollama' && recaptionRemoteModelOptions.length > 0) return recaptionRemoteModelOptions;
@@ -288,6 +366,13 @@ export default function DatasetImageStudio({
     !layerCaptionDisabledReason && !selectedLayerIsCaptioning && !isGeneratingBoxes && !isAutoCaptioning;
   const canRecaptionSelectedImage =
     Boolean(selectedItem) && selectedKind === 'image' && isCaptionLoaded && !isAutoCaptioning && !isSaving;
+  const recaptionFeedback = isRecaptioning
+    ? `Recaptioning${activeRecaptionLabel ? ` ${activeRecaptionLabel}` : ''}${
+        recaptionQueue.length ? `, ${recaptionQueue.length} queued` : ''
+      }.`
+    : recaptionQueue.length
+      ? `${recaptionQueue.length} recaption${recaptionQueue.length === 1 ? '' : 's'} queued.`
+      : recaptionMessage;
 
   useEffect(() => {
     latestCaptionRef.current = captionText;
@@ -296,6 +381,18 @@ export default function DatasetImageStudio({
   useEffect(() => {
     recaptionSystemPromptRef.current = recaptionSystemPrompt;
   }, [recaptionSystemPrompt]);
+
+  useEffect(() => {
+    recaptionModelRef.current = recaptionModel;
+  }, [recaptionModel]);
+
+  useEffect(() => {
+    isRecaptioningRef.current = isRecaptioning;
+  }, [isRecaptioning]);
+
+  useEffect(() => {
+    recaptionQueueRef.current = recaptionQueue;
+  }, [recaptionQueue]);
 
   useEffect(() => {
     savedCaptionRef.current = savedCaption;
@@ -376,6 +473,22 @@ export default function DatasetImageStudio({
     };
   }, [applyRecaptionRootPrompt, datasetName, projectPayload, rootCaption, workerID]);
 
+  useEffect(() => {
+    setHasRecaptionSettingsForDataset(false);
+    const preset = readRecaptionSettingsPreset(recaptionStorageKey);
+    if (!preset) return;
+    setRecaptionProvider(preset.provider);
+    setRecaptionModel(preset.model);
+    setRecaptionOutputFormat(preset.outputFormat);
+    setRecaptionPrompt(preset.prompt);
+    setRecaptionSystemPrompt(preset.systemPrompt);
+    recaptionSystemPromptRef.current = preset.systemPrompt;
+    recaptionSystemPromptTouchedRef.current = true;
+    setRecaptionRemoteWorkerId(preset.remoteWorkerId);
+    setRecaptionMaxNewTokens(preset.maxNewTokens);
+    setHasRecaptionSettingsForDataset(true);
+  }, [recaptionStorageKey, rootCaption]);
+
   const useRecaptionRootPrompt = useCallback(() => {
     recaptionSystemPromptTouchedRef.current = true;
     recaptionSystemPromptRef.current = recaptionRootPrompt;
@@ -383,19 +496,19 @@ export default function DatasetImageStudio({
   }, [recaptionRootPrompt]);
 
   const loadRecaptionRemoteModels = useCallback(
-    async (workerId = recaptionRemoteWorkerId) => {
+    async (workerId = recaptionRemoteWorkerId, preferredModel = recaptionModelRef.current) => {
       if (!workerId) return;
+      const preferred = preferredModel.trim();
       setRecaptionRemoteModelStatus('loading');
       setRecaptionRemoteModelError('');
       setRecaptionRemoteModelOptions([]);
-      setRecaptionModel('');
       try {
         const response = await apiClient.get(`/api/ollama-workers/${encodeURIComponent(workerId)}/models`);
         const options = ollamaModelOptions(response.data?.models || []);
         setRecaptionRemoteModelOptions(options);
         setRecaptionRemoteModelStatus('success');
         setRecaptionModel(currentModel => {
-          const trimmed = currentModel.trim();
+          const trimmed = preferred || currentModel.trim();
           if (!options.length) return '';
           return options.some(option => option.value === trimmed) ? trimmed : options[0].value;
         });
@@ -465,21 +578,17 @@ export default function DatasetImageStudio({
     });
   }, []);
 
-  const appendRecaptionFields = useCallback(
-    (formData: FormData) => {
-      formData.append('provider', recaptionProvider);
-      formData.append('model', recaptionModel);
-      formData.append('outputFormat', recaptionOutputFormat);
-      formData.append('prompt', recaptionPrompt);
-      formData.append('systemPrompt', recaptionSystemPrompt);
-      formData.append('existingCaption', captionText);
-      formData.append('datasetName', datasetName);
-      formData.append('remoteWorkerId', recaptionRemoteWorkerId);
-      formData.append('maxNewTokens', String(recaptionMaxNewTokens));
-    },
+  const currentRecaptionSettings = useCallback(
+    (): RecaptionSettingsPreset => ({
+      provider: recaptionProvider,
+      model: recaptionModel.trim(),
+      outputFormat: recaptionOutputFormat,
+      prompt: recaptionPrompt,
+      systemPrompt: recaptionSystemPrompt,
+      remoteWorkerId: recaptionRemoteWorkerId,
+      maxNewTokens: Math.max(1, Math.floor(Number(recaptionMaxNewTokens) || 1)),
+    }),
     [
-      captionText,
-      datasetName,
       recaptionMaxNewTokens,
       recaptionModel,
       recaptionOutputFormat,
@@ -488,6 +597,37 @@ export default function DatasetImageStudio({
       recaptionRemoteWorkerId,
       recaptionSystemPrompt,
     ],
+  );
+
+  const persistRecaptionSettingsForDataset = useCallback(
+    (settings: RecaptionSettingsPreset) => {
+      if (!recaptionStorageKey || typeof window === 'undefined') {
+        setHasRecaptionSettingsForDataset(true);
+        return;
+      }
+      try {
+        window.localStorage.setItem(recaptionStorageKey, JSON.stringify(settings));
+      } catch (error) {
+        console.warn('Could not save recaption settings:', error);
+      }
+      setHasRecaptionSettingsForDataset(true);
+    },
+    [recaptionStorageKey],
+  );
+
+  const appendRecaptionFields = useCallback(
+    (formData: FormData, settings: RecaptionSettingsPreset, existingCaption: string) => {
+      formData.append('provider', settings.provider);
+      formData.append('model', settings.model);
+      formData.append('outputFormat', settings.outputFormat);
+      formData.append('prompt', settings.prompt);
+      formData.append('systemPrompt', settings.systemPrompt);
+      formData.append('existingCaption', existingCaption);
+      formData.append('datasetName', datasetName);
+      formData.append('remoteWorkerId', settings.remoteWorkerId);
+      formData.append('maxNewTokens', String(settings.maxNewTokens));
+    },
+    [datasetName],
   );
 
   const readCaptionForItem = useCallback(
@@ -707,6 +847,36 @@ export default function DatasetImageStudio({
     setSelectedElementIndex(boxes[0].elementIndex);
   }, [boxes, isIdeogram, selectedKey]);
 
+  const saveCaptionForItem = useCallback(
+    async (targetItem: DatasetStudioItem, targetKey: string, captionValue: string) => {
+      const value = isPlainTextCaptionItem(targetItem) ? captionValue : captionValue.trim();
+      if (targetItem.kind === 'plain') {
+        await apiClient.post('/api/img/caption', {
+          imgPath: targetItem.path,
+          caption: value,
+          direct: isPlainTextCaptionItem(targetItem),
+          ...projectPayload,
+        });
+      } else if (encryptedKey && onSaveEncryptedCaption) {
+        const targetCaptionPath =
+          encryptedCaptionPaths[targetKey] || targetItem.item.captionObjectPath || captionObjectPath(randomId());
+        const encryptedCaption = await encryptCaptionObject(encryptedKey, targetCaptionPath, value);
+        await onSaveEncryptedCaption(targetItem.item, targetCaptionPath, JSON.stringify(encryptedCaption));
+        setEncryptedCaptionPaths(previous => ({ ...previous, [targetKey]: targetCaptionPath }));
+      } else {
+        throw new Error('Encrypted dataset is locked.');
+      }
+
+      if (selectedKeyRef.current === targetKey) {
+        latestCaptionRef.current = value;
+        setCaptionText(value);
+        setSavedCaption(value);
+      }
+      writeCaptionCache(targetKey, { caption: value, saved: value, loaded: true });
+    },
+    [encryptedCaptionPaths, encryptedKey, onSaveEncryptedCaption, projectPayload, writeCaptionCache],
+  );
+
   const saveCaption = useCallback(async (captionOverride?: string) => {
     if (!selectedItem || !isCaptionLoaded || isSaving) return;
     const sourceCaption = captionOverride ?? captionText;
@@ -715,25 +885,7 @@ export default function DatasetImageStudio({
     if (captionOverride !== undefined && value.trim() === savedCaption.trim()) return;
     setIsSaving(true);
     try {
-      if (selectedItem.kind === 'plain') {
-        await apiClient.post('/api/img/caption', {
-          imgPath: selectedItem.path,
-          caption: value,
-          direct: isPlainTextCaptionItem(selectedItem),
-          ...projectPayload,
-        });
-      } else if (encryptedKey && onSaveEncryptedCaption) {
-        const key = itemKey(selectedItem);
-        const targetCaptionPath =
-          encryptedCaptionPaths[key] || selectedItem.item.captionObjectPath || captionObjectPath(randomId());
-        const encryptedCaption = await encryptCaptionObject(encryptedKey, targetCaptionPath, value);
-        await onSaveEncryptedCaption(selectedItem.item, targetCaptionPath, JSON.stringify(encryptedCaption));
-        setEncryptedCaptionPaths(previous => ({ ...previous, [key]: targetCaptionPath }));
-      }
-      latestCaptionRef.current = value;
-      setCaptionText(value);
-      setSavedCaption(value);
-      writeCaptionCache(selectedKey, { caption: value, saved: value, loaded: true });
+      await saveCaptionForItem(selectedItem, selectedKey, value);
     } catch (error) {
       console.error('Caption save failed:', error);
       alert('Failed to save caption. Please try again.');
@@ -743,76 +895,78 @@ export default function DatasetImageStudio({
     }
   }, [
     captionText,
-    encryptedCaptionPaths,
-    encryptedKey,
     isCaptionLoaded,
     isDirty,
     isSaving,
-    onSaveEncryptedCaption,
-    projectPayload,
     savedCaption,
+    saveCaptionForItem,
     selectedItem,
     selectedKey,
-    writeCaptionCache,
   ]);
 
   useEffect(() => {
     saveCaptionRef.current = saveCaption;
   }, [saveCaption]);
 
-  const runSingleRecaption = useCallback(async () => {
-    if (!selectedItem || !canRecaptionSelectedImage || isRecaptioning) return;
-    if (recaptionProvider === 'remote_ollama' && !recaptionRemoteWorkerId) {
+  const runRecaptionQueueEntry = useCallback(async (entry: RecaptionQueueEntry) => {
+    const { item, key, name, existingCaption, settings } = entry;
+    if (!settings.model.trim()) {
+      setRecaptionMessage('Select a model before recaptioning.');
+      return;
+    }
+    if (settings.provider === 'remote_ollama' && !settings.remoteWorkerId) {
       setRecaptionMessage('Select a Remote Ollama endpoint.');
       return;
     }
-    if (selectedItem.kind === 'encrypted' && !encryptedKey) {
+    if (item.kind === 'encrypted' && !encryptedKey) {
       setRecaptionMessage('Unlock the encrypted dataset first.');
       return;
     }
 
+    const providerLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === settings.provider)?.label || settings.provider;
     setIsRecaptioning(true);
-    setRecaptionMessage('');
+    setActiveRecaptionLabel(name);
+    setRecaptionMessage(`Recaptioning ${name}${recaptionQueueRef.current.length ? ` (${recaptionQueueRef.current.length} queued)` : ''}.`);
     try {
       let response;
-      if (selectedItem.kind === 'plain') {
+      if (item.kind === 'plain') {
         response = await apiClient.post(
           '/api/datasets/recaption-single',
           {
-            imgPath: selectedItem.path,
-            provider: recaptionProvider,
-            model: recaptionModel,
-            outputFormat: recaptionOutputFormat,
-            prompt: recaptionPrompt,
-            systemPrompt: recaptionSystemPrompt,
-            existingCaption: captionText,
+            imgPath: item.path,
+            provider: settings.provider,
+            model: settings.model,
+            outputFormat: settings.outputFormat,
+            prompt: settings.prompt,
+            systemPrompt: settings.systemPrompt,
+            existingCaption,
             datasetName,
             worker_id: workerID,
-            remoteWorkerId: recaptionRemoteWorkerId,
-            maxNewTokens: recaptionMaxNewTokens,
+            remoteWorkerId: settings.remoteWorkerId,
+            maxNewTokens: settings.maxNewTokens,
             ...projectPayload,
           },
           { timeout: 0 },
         );
       } else {
-        if (!encryptedProviderConfirmations[`recaption:${recaptionProvider}`]) {
+        if (!encryptedProviderConfirmations[`recaption:${settings.provider}`]) {
           const confirmed = window.confirm(
-            `Recaption will send this decrypted image to ${recaptionProviderLabel}. Continue?`,
+            `Recaption will send this decrypted image to ${providerLabel}. Continue?`,
           );
           if (!confirmed) {
             setRecaptionMessage('Recaption canceled.');
             return;
           }
-          setEncryptedProviderConfirmations(previous => ({ ...previous, [`recaption:${recaptionProvider}`]: true }));
+          setEncryptedProviderConfirmations(previous => ({ ...previous, [`recaption:${settings.provider}`]: true }));
         }
         const formData = await createEncryptedImageFormData({
           datasetName,
           workerID,
           projectID,
           encryptedKey: encryptedKey as CryptoKey,
-          item: selectedItem.item,
+          item: item.item,
         });
-        appendRecaptionFields(formData);
+        appendRecaptionFields(formData, settings, existingCaption);
         response = await apiClient.post('/api/datasets/recaption-single', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 0,
@@ -821,39 +975,95 @@ export default function DatasetImageStudio({
 
       const caption = String(response.data?.caption || '').trim();
       if (!caption) throw new Error('Recaption returned an empty caption.');
-      setUndoStack(previous => [...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)), captionText]);
-      setRedoStack([]);
-      if (recaptionOutputFormat === 'ideogram_json') setCaptionTab('json');
-      await saveCaption(caption);
-      setRecaptionMessage('Recaption saved.');
-      setIsRecaptionModalOpen(false);
+      if (selectedKeyRef.current === key) {
+        setUndoStack(previous => [...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)), latestCaptionRef.current]);
+        setRedoStack([]);
+        if (settings.outputFormat === 'ideogram_json') setCaptionTab('json');
+      }
+      await saveCaptionForItem(item, key, caption);
+      setRecaptionMessage(`${name} recaptioned${recaptionQueueRef.current.length ? `, ${recaptionQueueRef.current.length} queued` : ''}.`);
     } catch (error) {
-      setRecaptionMessage(responseErrorMessage(error, 'Recaption failed. Please try again.'));
+      setRecaptionMessage(`${name}: ${responseErrorMessage(error, 'Recaption failed. Please try again.')}`);
     } finally {
       setIsRecaptioning(false);
+      setActiveRecaptionLabel('');
     }
   }, [
     appendRecaptionFields,
-    canRecaptionSelectedImage,
-    captionText,
     datasetName,
     encryptedKey,
     encryptedProviderConfirmations,
-    isRecaptioning,
     projectID,
     projectPayload,
-    recaptionMaxNewTokens,
-    recaptionModel,
-    recaptionOutputFormat,
-    recaptionPrompt,
-    recaptionProvider,
-    recaptionProviderLabel,
-    recaptionRemoteWorkerId,
-    recaptionSystemPrompt,
-    saveCaption,
-    selectedItem,
+    saveCaptionForItem,
     workerID,
   ]);
+
+  useEffect(() => {
+    if (isRecaptioning || recaptionQueue.length === 0) return;
+    const [nextEntry] = recaptionQueue;
+    setRecaptionQueue(previous => previous.slice(1));
+    void runRecaptionQueueEntry(nextEntry);
+  }, [isRecaptioning, recaptionQueue, runRecaptionQueueEntry]);
+
+  const queueSelectedRecaption = useCallback(() => {
+    if (!selectedItem || !canRecaptionSelectedImage) return;
+    const settings = currentRecaptionSettings();
+    if (!settings.model.trim()) {
+      setRecaptionMessage('Select a model before recaptioning.');
+      setIsRecaptionModalOpen(true);
+      return;
+    }
+    if (settings.provider === 'remote_ollama' && !settings.remoteWorkerId) {
+      setRecaptionMessage('Select a Remote Ollama endpoint.');
+      setIsRecaptionModalOpen(true);
+      return;
+    }
+    if (selectedItem.kind === 'encrypted' && !encryptedKey) {
+      setRecaptionMessage('Unlock the encrypted dataset first.');
+      setIsRecaptionModalOpen(true);
+      return;
+    }
+
+    const entry: RecaptionQueueEntry = {
+      id: randomId(),
+      item: selectedItem,
+      key: selectedKey,
+      name: selectedName,
+      existingCaption: captionText,
+      settings,
+    };
+    persistRecaptionSettingsForDataset(settings);
+    setRecaptionQueue(previous => [...previous, entry]);
+    const queuedTotal = recaptionQueueRef.current.length + (isRecaptioningRef.current ? 1 : 0) + 1;
+    setRecaptionMessage(
+      queuedTotal > 1 ? `${selectedName} queued (${queuedTotal} total).` : `${selectedName} queued.`,
+    );
+    setIsRecaptionModalOpen(false);
+  }, [
+    canRecaptionSelectedImage,
+    captionText,
+    currentRecaptionSettings,
+    encryptedKey,
+    persistRecaptionSettingsForDataset,
+    selectedItem,
+    selectedKey,
+    selectedName,
+  ]);
+
+  const openRecaptionSettings = useCallback(() => {
+    setRecaptionMessage('');
+    setIsRecaptionModalOpen(true);
+  }, []);
+
+  const handleRecaptionClick = useCallback(() => {
+    setRecaptionMessage('');
+    if (hasRecaptionSettingsForDataset) {
+      queueSelectedRecaption();
+      return;
+    }
+    setIsRecaptionModalOpen(true);
+  }, [hasRecaptionSettingsForDataset, queueSelectedRecaption]);
 
   useEffect(() => {
     return () => {
@@ -1831,13 +2041,12 @@ export default function DatasetImageStudio({
                 isSaving={isSaving}
                 isRecaptioning={isRecaptioning}
                 canRecaption={canRecaptionSelectedImage}
+                recaptionFeedback={recaptionFeedback}
                 onCaptionTabChange={setCaptionTab}
                 onCaptionDescriptionChange={handleCaptionDescriptionChange}
                 onCaptionTextChange={handleCaptionTextChange}
-                onRecaption={() => {
-                  setRecaptionMessage('');
-                  setIsRecaptionModalOpen(true);
-                }}
+                onRecaption={handleRecaptionClick}
+                onRecaptionSettings={openRecaptionSettings}
                 onSave={() => void saveCaption()}
               />
             </div>
@@ -1857,7 +2066,7 @@ export default function DatasetImageStudio({
           className="space-y-4 text-gray-200"
           onSubmit={event => {
             event.preventDefault();
-            void runSingleRecaption();
+            queueSelectedRecaption();
           }}
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -2039,10 +2248,10 @@ export default function DatasetImageStudio({
             </button>
             <button
               type="submit"
-              disabled={isRecaptioning || !canRecaptionSelectedImage}
+              disabled={!canRecaptionSelectedImage}
               className="rounded-md bg-cyan-600 px-4 py-2 font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isRecaptioning ? 'Recaptioning...' : 'Recaption'}
+              {isRecaptioning || recaptionQueue.length > 0 ? 'Queue Recaption' : 'Recaption'}
             </button>
           </div>
         </form>

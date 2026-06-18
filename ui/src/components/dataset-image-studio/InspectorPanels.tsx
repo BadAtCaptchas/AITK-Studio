@@ -2,7 +2,7 @@
 
 import classNames from 'classnames';
 import { Button } from '@headlessui/react';
-import { CheckCircle2, ChevronDown, FileJson2, Loader2, Pipette, Save, Trash2, WandSparkles } from 'lucide-react';
+import { CheckCircle2, ChevronDown, FileJson2, Loader2, Pipette, Save, SlidersHorizontal, Trash2, WandSparkles } from 'lucide-react';
 import { rectToBox, type IdeogramElementType, type NormalizedBox } from '@/utils/ideogramCaption';
 import { AUTO_BOX_PROVIDERS, BOX_COLORS, OLLAMA_VISION_MODELS, OPENROUTER_BOX_MODELS } from './constants';
 import { SegmentedButton } from './StudioControls';
@@ -377,10 +377,12 @@ export function CaptionEditorPanel({
   isSaving,
   isRecaptioning,
   canRecaption,
+  recaptionFeedback,
   onCaptionTabChange,
   onCaptionDescriptionChange,
   onCaptionTextChange,
   onRecaption,
+  onRecaptionSettings,
   onSave,
 }: {
   captionTab: CaptionTab;
@@ -395,10 +397,12 @@ export function CaptionEditorPanel({
   isSaving: boolean;
   isRecaptioning?: boolean;
   canRecaption?: boolean;
+  recaptionFeedback?: string;
   onCaptionTabChange: (tab: CaptionTab) => void;
   onCaptionDescriptionChange: (value: string) => void;
   onCaptionTextChange: (value: string) => void;
   onRecaption?: () => void;
+  onRecaptionSettings?: () => void;
   onSave: () => void;
 }) {
   return (
@@ -473,12 +477,21 @@ export function CaptionEditorPanel({
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">
             <Button
-              className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-600/20 px-3 text-sm font-medium leading-none text-cyan-100 hover:bg-cyan-600/30 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-gray-700 bg-gray-900 text-gray-300 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!canRecaption || isAutoCaptioning || isRecaptioning || isSaving}
+              onClick={onRecaptionSettings}
+              title="Recaption settings"
+              aria-label="Recaption settings"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
+            <Button
+              className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-600/20 px-3 text-sm font-medium leading-none text-cyan-100 hover:bg-cyan-600/30 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!canRecaption || isAutoCaptioning || isSaving}
               onClick={onRecaption}
             >
               {isRecaptioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
-              Recaption
+              {isRecaptioning ? 'Queue' : 'Recaption'}
             </Button>
             <Button
               className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-emerald-500/40 bg-emerald-600/20 px-3 text-sm font-medium leading-none text-emerald-100 hover:bg-emerald-600/30 disabled:cursor-not-allowed disabled:opacity-40"
@@ -490,6 +503,11 @@ export function CaptionEditorPanel({
             </Button>
           </div>
         </div>
+        {recaptionFeedback && (
+          <div className="mt-2 truncate text-xs text-cyan-300/80" title={recaptionFeedback}>
+            {recaptionFeedback}
+          </div>
+        )}
       </div>
     </section>
   );

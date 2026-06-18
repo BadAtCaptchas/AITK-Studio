@@ -29,6 +29,7 @@ import {
   syncRemoteDatasetsForJobConfig,
   type RemoteDatasetSyncMapping,
 } from './remoteDatasetSync';
+import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from './settings';
 import { startJobNow } from '../../cron/actions/startJob';
 import type { EncryptedDatasetStartKey, Job, RemoteStartProgress } from '../types';
 
@@ -127,6 +128,9 @@ export async function prepareJobStart(
   const job = await db.jobs.findById(jobID);
   if (!job) {
     failStart({ error: 'Job not found' }, 404);
+  }
+  if (job.project_id && !(await areProjectsEnabled())) {
+    failStart({ error: PROJECT_SPACES_DISABLED_MESSAGE }, 403);
   }
 
   let jobConfig: any;

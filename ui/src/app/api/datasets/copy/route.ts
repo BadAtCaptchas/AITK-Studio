@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { copyDatasetBetweenRoots } from '@/server/datasetCopy';
 
 export async function POST(request: Request) {
@@ -21,9 +21,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json(destination);
   } catch (error) {
+    const status = error instanceof DatasetScopeError ? error.status : 400;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to copy dataset' },
-      { status: 400 },
+      { status },
     );
   }
 }

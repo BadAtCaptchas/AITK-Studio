@@ -5,7 +5,12 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getDatabaseConfig } from '@/server/db';
-import { getHFToken, getTrainingFolder } from '@/server/settings';
+import {
+  getHFToken,
+  getTrainingFolder,
+  isProjectSpacesDisabledError,
+  PROJECT_SPACES_DISABLED_MESSAGE,
+} from '@/server/settings';
 import { prepareHfTokenEnv } from '@/server/hfTokenEnv';
 import { getToolkitPythonPath } from '@/server/tensorboard';
 import { getProjectRoots, resolveOptionalProject } from '@/server/projects';
@@ -340,6 +345,9 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     if (isInlineGenerationCanceledError(error)) {
       return NextResponse.json({ error: error.message }, { status: 499 });
+    }
+    if (isProjectSpacesDisabledError(error)) {
+      return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
     }
     console.error('Inline generation failed:', error);
     return NextResponse.json({ error: error?.message || 'Inline generation failed.' }, { status: 500 });

@@ -5,7 +5,7 @@ import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
 import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -62,6 +62,9 @@ export async function POST(request: NextRequest) {
     return new NextResponse(readCaptionSidecar(resolvedFilePath));
   } catch (error) {
     console.error('Error getting caption:', error);
+    if (error instanceof DatasetScopeError) {
+      return new NextResponse(error.message, { status: error.status });
+    }
     return new NextResponse('Error getting caption', { status: 500 });
   }
 }

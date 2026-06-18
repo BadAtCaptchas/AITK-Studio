@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder, defaultProjectsFolder } from '@/paths';
-import { flushCache } from '@/server/settings';
+import { flushCache, normalizeBooleanSetting, PROJECTS_ENABLED_KEY } from '@/server/settings';
 import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
@@ -13,16 +13,6 @@ type SettingsAccess = {
   authenticated: boolean;
   response: NextResponse | null;
 };
-
-function normalizeBooleanSetting(value: unknown, defaultValue: boolean) {
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (['false', '0', 'off', 'disabled'].includes(normalized)) return 'false';
-    if (['true', '1', 'on', 'enabled'].includes(normalized)) return 'true';
-  }
-  return defaultValue ? 'true' : 'false';
-}
 
 function ensureSettingsAccess(request: NextRequest): SettingsAccess {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -69,6 +59,7 @@ export async function GET(request: NextRequest) {
     if (!settingsObject.PROJECTS_FOLDER || settingsObject.PROJECTS_FOLDER === '') {
       settingsObject.PROJECTS_FOLDER = defaultProjectsFolder;
     }
+    settingsObject.PROJECTS_ENABLED = normalizeBooleanSetting(settingsObject.PROJECTS_ENABLED, true);
     settingsObject.TRAINING_ADVISOR_ENABLED = normalizeBooleanSetting(
       settingsObject.TRAINING_ADVISOR_ENABLED,
       false,
@@ -104,6 +95,7 @@ export async function POST(request: NextRequest) {
       TRAINING_FOLDER,
       DATASETS_FOLDER,
       PROJECTS_FOLDER,
+      PROJECTS_ENABLED,
       TRAINING_ADVISOR_ENABLED,
       COMFY_AUTO_INSTALL,
       COMFY_EXTERNAL_URL,
@@ -140,10 +132,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const existingProjectsEnabled =
+      PROJECTS_ENABLED === undefined ? (await db.settings.get(PROJECTS_ENABLED_KEY))?.value : PROJECTS_ENABLED;
+
     const settingsToUpdate: Record<string, string> = {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       PROJECTS_FOLDER: normalizedProjectsFolder,
+      PROJECTS_ENABLED: normalizeBooleanSetting(existingProjectsEnabled, true),
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
       COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,

@@ -3,6 +3,7 @@ import { db } from '@/server/db';
 import { collectModelReferences, setConfigPathValue } from '@/server/trainingJobTransfer';
 import { normalizeModelReferenceValue, prefetchModelReferences } from '@/server/hfModelPrefetch';
 import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
+import { assertProjectJobEnabled } from '@/server/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
   const job = await db.jobs.findById(jobID);
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  }
+  try {
+    await assertProjectJobEnabled(job);
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
   }
   if (job.job_type !== 'train') {
     return NextResponse.json({ error: 'Only training jobs can download model references' }, { status: 400 });

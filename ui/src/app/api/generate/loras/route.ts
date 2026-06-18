@@ -90,7 +90,7 @@ async function getSafeJobFolder(trainingRoot: string, jobName: string) {
 export async function GET() {
   try {
     const trainingRoot = await getTrainingFolder();
-    const jobs = await db.jobs.list({ job_type: 'train' });
+    const jobs = await db.jobs.list({ job_type: 'train', project_id: null });
     const loras = [];
 
     for (const job of jobs) {

@@ -5,6 +5,7 @@ import {
   plainOpenRouterImageDataUrl,
   positiveNumberFromValue,
 } from '@/server/openRouterImageData';
+import { assertProjectScopeEnabled, DatasetScopeError } from '@/server/datasetScope';
 import { generateOpenRouterBoxPatches } from '@/server/openRouterBoxes';
 import { generateOllamaBoxPatches, generateRemoteOllamaBoxPatches } from '@/server/ollamaVision';
 import { getOpenRouterApiKey } from '@/server/settings';
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
+      await assertProjectScopeEnabled(formData.get('project_id'));
       caption = String(formData.get('caption') || '');
       model = String(formData.get('model') || '');
       provider = normalizeProvider(formData.get('provider'));
@@ -85,9 +87,10 @@ export async function POST(request: NextRequest) {
       }),
     );
   } catch (error) {
+    const status = error instanceof DatasetScopeError ? error.status : 400;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to create boxes.' },
-      { status: 400 },
+      { status },
     );
   }
 }

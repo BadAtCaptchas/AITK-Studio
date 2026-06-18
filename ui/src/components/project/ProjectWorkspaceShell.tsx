@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import type { ProjectSummary } from './types';
+import useSettings from '@/hooks/useSettings';
 
 type ProjectSection = 'workspace' | 'files' | 'datasets' | 'runs' | 'generate' | 'settings';
 
@@ -75,11 +76,19 @@ export default function ProjectWorkspaceShell({
   showHeader?: boolean;
 }) {
   const pathname = usePathname();
+  const { settings, isSettingsLoaded } = useSettings();
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const basePath = `/projects/${encodeURIComponent(projectID)}`;
+  const projectsEnabled = settings.PROJECTS_ENABLED !== 'false';
 
   useEffect(() => {
+    if (!isSettingsLoaded) return;
+    if (!projectsEnabled) {
+      setSummary(null);
+      setStatus('success');
+      return;
+    }
     let cancelled = false;
     setStatus(current => (current === 'success' ? current : 'loading'));
     apiClient
@@ -97,10 +106,40 @@ export default function ProjectWorkspaceShell({
     return () => {
       cancelled = true;
     };
-  }, [projectID, pathname]);
+  }, [projectID, pathname, isSettingsLoaded, projectsEnabled]);
 
   const projectTitle = summary?.project.name || 'Project Mission Control';
   const headerTitle = title || (active === 'workspace' ? 'Workspace' : navItems.find(item => item.section === active)?.label);
+
+  if (isSettingsLoaded && !projectsEnabled) {
+    return (
+      <div className="flex h-full min-h-0 bg-gray-950 text-gray-100">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex h-16 flex-none items-center gap-3 border-b border-gray-900 bg-gray-950 px-4">
+            <FolderOpen className="h-5 w-5 text-amber-300" />
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-semibold">Project spaces are disabled</h1>
+              <p className="truncate text-xs text-gray-500">Existing project data is preserved and hidden until re-enabled.</p>
+            </div>
+          </header>
+          <main className="min-h-0 flex-1 overflow-auto p-4">
+            <div className="max-w-2xl border border-amber-800/60 bg-amber-950/10 p-4">
+              <div className="text-sm font-semibold text-amber-100">Workspaces are currently blocked</div>
+              <p className="mt-1 text-sm text-gray-400">
+                Re-enable Project spaces in Settings to open this workspace, project files, datasets, runs, or generation tools.
+              </p>
+              <Link
+                href="/settings"
+                className="mt-4 inline-flex h-9 items-center border border-cyan-800 bg-cyan-950/40 px-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-900/40"
+              >
+                Open Settings
+              </Link>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id="workspace" className="flex h-full min-h-0 bg-gray-950 text-gray-100">

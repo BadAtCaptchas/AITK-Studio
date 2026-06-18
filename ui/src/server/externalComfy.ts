@@ -164,7 +164,7 @@ async function getSafeJobFolder(trainingRoot: string, jobName: string) {
 
 export async function listToolkitLoras(): Promise<ToolkitLoraSummary[]> {
   const trainingRoot = await getTrainingFolder();
-  const jobs = await db.jobs.list({ job_type: 'train' });
+  const jobs = await db.jobs.list({ job_type: 'train', project_id: null });
   const loras: ToolkitLoraSummary[] = [];
 
   for (const job of jobs) {

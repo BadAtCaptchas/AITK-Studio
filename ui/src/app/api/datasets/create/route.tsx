@@ -8,12 +8,13 @@ import {
   validateEncryptedManifest,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
-import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
+    await assertProjectScopeEnabled(body?.project_id);
     rejectRemoteProjectScope(workerID, body?.project_id);
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);

@@ -1,5 +1,11 @@
 import path from 'path';
-import { getDatasetsRoot, getTrainingFolder } from './settings';
+import {
+  areProjectsEnabled,
+  getDatasetsRoot,
+  getTrainingFolder,
+  isProjectSpacesDisabledError,
+  PROJECT_SPACES_DISABLED_MESSAGE,
+} from './settings';
 import { getProjectRoots, resolveOptionalProject } from './projects';
 import type { Project } from '@/types';
 
@@ -28,8 +34,26 @@ export function projectIDFromSearchParams(request: Request) {
   }
 }
 
+export function hasProjectScopeIdentifier(projectIdentifier: unknown) {
+  return typeof projectIdentifier === 'string' && projectIdentifier.trim().length > 0;
+}
+
+export async function assertProjectScopeEnabled(projectIdentifier: unknown) {
+  if (hasProjectScopeIdentifier(projectIdentifier) && !(await areProjectsEnabled())) {
+    throw new DatasetScopeError(PROJECT_SPACES_DISABLED_MESSAGE, 403);
+  }
+}
+
 export async function resolveDatasetScope(projectIdentifier: unknown): Promise<DatasetScope> {
-  const project = await resolveOptionalProject(projectIdentifier);
+  let project: Project | null = null;
+  try {
+    project = await resolveOptionalProject(projectIdentifier);
+  } catch (error) {
+    if (isProjectSpacesDisabledError(error)) {
+      throw new DatasetScopeError(PROJECT_SPACES_DISABLED_MESSAGE, 403);
+    }
+    throw error;
+  }
   if (project) {
     const roots = await getProjectRoots(project);
     return {
@@ -49,7 +73,7 @@ export async function resolveDatasetScope(projectIdentifier: unknown): Promise<D
 }
 
 export function rejectRemoteProjectScope(workerID: string, projectIdentifier: unknown) {
-  if (workerID !== 'local' && typeof projectIdentifier === 'string' && projectIdentifier.trim()) {
+  if (workerID !== 'local' && hasProjectScopeIdentifier(projectIdentifier)) {
     throw new DatasetScopeError('Project-scoped dataset editing is only available on the local worker.', 400);
   }
 }

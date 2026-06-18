@@ -3,9 +3,53 @@ import NodeCache from 'node-cache';
 import { db } from './db';
 
 const myCache = new NodeCache();
+export const PROJECTS_ENABLED_KEY = 'PROJECTS_ENABLED';
+export const PROJECT_SPACES_DISABLED_MESSAGE = 'Project spaces are disabled';
+
+export class ProjectSpacesDisabledError extends Error {
+  status = 403;
+
+  constructor() {
+    super(PROJECT_SPACES_DISABLED_MESSAGE);
+    this.name = 'ProjectSpacesDisabledError';
+  }
+}
+
+export function normalizeBooleanSetting(value: unknown, defaultValue: boolean) {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['false', '0', 'off', 'disabled'].includes(normalized)) return 'false';
+    if (['true', '1', 'on', 'enabled'].includes(normalized)) return 'true';
+  }
+  return defaultValue ? 'true' : 'false';
+}
+
+export function isProjectSpacesDisabledError(error: unknown) {
+  return (
+    error instanceof ProjectSpacesDisabledError ||
+    ((error as any)?.name === 'ProjectSpacesDisabledError' && (error as any)?.status === 403)
+  );
+}
 
 export const flushCache = () => {
   myCache.flushAll();
+};
+
+export const areProjectsEnabled = async () => {
+  const cached = myCache.get(PROJECTS_ENABLED_KEY) as string | undefined;
+  if (typeof cached === 'string') return cached === 'true';
+
+  const row = await db.settings.get(PROJECTS_ENABLED_KEY);
+  const normalized = normalizeBooleanSetting(row?.value, true);
+  myCache.set(PROJECTS_ENABLED_KEY, normalized);
+  return normalized === 'true';
+};
+
+export const assertProjectsEnabled = async () => {
+  if (!(await areProjectsEnabled())) {
+    throw new ProjectSpacesDisabledError();
+  }
 };
 
 export const getDatasetsRoot = async () => {

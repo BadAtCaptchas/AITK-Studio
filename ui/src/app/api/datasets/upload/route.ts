@@ -10,7 +10,7 @@ import {
   validateEncryptedManifest,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
-import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 function cleanPathSegment(segment: string, fallback: string) {
   const cleaned = segment
@@ -62,8 +62,10 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const workerID = (formData.get('worker_id') as string) || 'local';
-    rejectRemoteProjectScope(workerID, formData.get('project_id'));
-    const { datasetsRoot } = await resolveDatasetScope(formData.get('project_id'));
+    const projectID = formData.get('project_id');
+    await assertProjectScopeEnabled(projectID);
+    rejectRemoteProjectScope(workerID, projectID);
+    const { datasetsRoot } = await resolveDatasetScope(projectID);
     if (!datasetsRoot) {
       return NextResponse.json({ error: 'Datasets path not found' }, { status: 500 });
     }

@@ -8,6 +8,7 @@ import { TopBar, MainContent } from '@/components/layout';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
 import type { Project } from '@/types';
+import useSettings from '@/hooks/useSettings';
 
 type ProjectWithRoots = Project & {
   roots?: {
@@ -64,6 +65,7 @@ function SandboxFolderPreview() {
 }
 
 export default function ProjectsPage() {
+  const { settings, isSettingsLoaded } = useSettings();
   const [projects, setProjects] = useState<ProjectWithRoots[]>([]);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [query, setQuery] = useState('');
@@ -71,6 +73,7 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState('');
   const [createStatus, setCreateStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const [createError, setCreateError] = useState('');
+  const projectsEnabled = settings.PROJECTS_ENABLED !== 'false';
 
   const refreshProjects = () => {
     setStatus('loading');
@@ -87,8 +90,14 @@ export default function ProjectsPage() {
   };
 
   useEffect(() => {
+    if (!isSettingsLoaded) return;
+    if (!projectsEnabled) {
+      setProjects([]);
+      setStatus('success');
+      return;
+    }
     refreshProjects();
-  }, []);
+  }, [isSettingsLoaded, projectsEnabled]);
 
   const filteredProjects = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -130,19 +139,34 @@ export default function ProjectsPage() {
           <h1 className="text-base font-semibold">Projects</h1>
         </div>
         <div className="flex-1"></div>
-        <label className="relative hidden w-full max-w-sm md:block">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-          <input
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            placeholder="Find project..."
-            className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-cyan-700"
-          />
-        </label>
+        {projectsEnabled && (
+          <label className="relative hidden w-full max-w-sm md:block">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Find project..."
+              className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-cyan-700"
+            />
+          </label>
+        )}
       </TopBar>
 
       <MainContent className="bg-gray-950 px-0 pt-12 sm:px-0">
         <div className="mx-auto flex max-w-[1380px] flex-col gap-5 px-3 py-5 sm:px-4 lg:px-5">
+          {isSettingsLoaded && !projectsEnabled ? (
+            <div className="max-w-2xl border border-gray-800 bg-gray-900/40 p-4">
+              <PageNotice tone="warning" title="Project spaces are disabled">
+                Project workspaces are hidden and blocked on the server. Existing project folders and database rows are preserved until you re-enable them.
+              </PageNotice>
+              <Link
+                href="/settings"
+                className="mt-4 inline-flex h-9 items-center gap-2 border border-cyan-800 bg-cyan-950/40 px-3 text-sm font-semibold text-cyan-100 hover:bg-cyan-900/40"
+              >
+                Open Settings
+              </Link>
+            </div>
+          ) : (
           <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
             <div className="min-w-0 border border-gray-800 bg-gray-900/40">
               <div className="border-b border-gray-800 px-4 py-3">
@@ -260,6 +284,7 @@ export default function ProjectsPage() {
               </form>
             </aside>
           </section>
+          )}
         </div>
       </MainContent>
     </>

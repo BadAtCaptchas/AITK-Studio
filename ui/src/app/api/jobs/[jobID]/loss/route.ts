@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { db } from '@/server/db';
-import { getJobTrainingRoot } from '@/server/projects';
+import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -18,6 +18,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const job = await db.jobs.findById(jobID);
   if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  try {
+    await assertProjectJobEnabled(job);
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
+  }
 
   const url = new URL(request.url);
   if (!isLocalWorker(job.worker_id)) {

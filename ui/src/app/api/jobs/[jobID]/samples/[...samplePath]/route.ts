@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
 import { db } from '@/server/db';
-import { getJobTrainingRoot } from '@/server/projects';
+import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
 
 const contentTypeMap: { [key: string]: string } = {
   '.jpg': 'image/jpeg',
@@ -45,6 +45,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
   const job = await db.jobs.findById(jobID);
   if (!job) {
     return new NextResponse('Job not found', { status: 404 });
+  }
+  try {
+    await assertProjectJobEnabled(job);
+  } catch (error: any) {
+    return new NextResponse(error?.message || 'Project spaces are disabled', { status: error?.status || 403 });
   }
 
   const trainingFolder = await getJobTrainingRoot(job);

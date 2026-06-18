@@ -3,7 +3,7 @@ import { renameDatasetFolder, DatasetRenameError } from '@/server/datasetRename'
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { renameSecureCaptionSystemPrompt } from '@/server/secureCaptionSettings';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
-import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +14,7 @@ export async function POST(request: Request) {
     const oldName = body?.oldName ?? body?.name;
     const newName = body?.newName;
     const projectID = body?.project_id;
+    await assertProjectScopeEnabled(projectID);
 
     if (!isLocalWorker(workerID)) {
       rejectRemoteProjectScope(workerID, projectID);

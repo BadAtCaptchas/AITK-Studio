@@ -3,6 +3,7 @@ import { db } from '@/server/db';
 import { isLocalWorker, syncRemoteJob } from '@/server/remoteClient';
 import { getJobRemoteCaptionState } from '@/server/remoteCaptionJobs';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
+import { assertProjectJobEnabled } from '@/server/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,6 +13,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const job = await db.jobs.findById(jobID);
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  }
+  try {
+    await assertProjectJobEnabled(job);
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
   }
   if (isLocalWorker(job.worker_id) || !job.remote_job_id) {
     return NextResponse.json({ error: 'Job is not a remote caption job' }, { status: 400 });

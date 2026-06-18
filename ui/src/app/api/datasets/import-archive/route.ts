@@ -4,7 +4,7 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import {
   extractZipSafely,
   getExtractedDatasetPath,
@@ -136,26 +136,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const projectID = request.nextUrl.searchParams.get('project_id') || request.headers.get('x-aitk-project-id');
-  const { datasetsRoot } = await resolveDatasetScope(projectID);
-  await fsp.mkdir(datasetsRoot, { recursive: true });
-
-  const chunkUploadRoot = path.join(datasetsRoot, '.aitk-dataset-import-archive-chunks');
-  const uploadMode = archiveUploadMode(request);
-  if (uploadMode === 'chunk') {
-    try {
-      await cleanupOldArchiveUploadChunks(chunkUploadRoot);
-      return NextResponse.json(await saveArchiveUploadChunk(request, chunkUploadRoot));
-    } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Failed to upload dataset archive chunk' },
-        { status: 400 },
-      );
-    }
-  }
-
   let workRoot: string | null = null;
 
   try {
+    const { datasetsRoot } = await resolveDatasetScope(projectID);
+    await fsp.mkdir(datasetsRoot, { recursive: true });
+
+    const chunkUploadRoot = path.join(datasetsRoot, '.aitk-dataset-import-archive-chunks');
+    const uploadMode = archiveUploadMode(request);
+    if (uploadMode === 'chunk') {
+      await cleanupOldArchiveUploadChunks(chunkUploadRoot);
+      return NextResponse.json(await saveArchiveUploadChunk(request, chunkUploadRoot));
+    }
+
     const importID = uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     workRoot =
       uploadMode === 'complete'
@@ -196,12 +189,16 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Dataset archive import failed:', error);
     const message = error instanceof Error ? error.message : 'Failed to import dataset archive';
-    const status =
+    let status = 500;
+    if (error instanceof DatasetScopeError) {
+      status = error.status;
+    } else if (
       message === 'file is required' ||
       message.startsWith('Invalid archive upload') ||
       message === 'Dataset payload missing from archive'
-        ? 400
-        : 500;
+    ) {
+      status = 400;
+    }
     return NextResponse.json(
       { error: message },
       { status },

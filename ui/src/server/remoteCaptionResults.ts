@@ -12,7 +12,7 @@ import {
   clearDurableEncryptedDatasetKeys,
   getDurableEncryptedDatasetKeys,
 } from './encryptedDatasetSecrets';
-import { getDatasetsRoot } from './settings';
+import { areProjectsEnabled, getDatasetsRoot } from './settings';
 import { resolveDatasetDirectoryInsideRoot } from './remoteCaptionSecurity';
 import {
   extractZipSafely,
@@ -268,8 +268,10 @@ export async function syncRemoteCaptionResultForJob(
 
 export async function syncRemoteCaptionResults() {
   const jobs = await db.jobs.list({ job_type: 'caption' });
+  const includeProjectJobs = await areProjectsEnabled();
   const results: Job[] = [];
   for (const job of jobs) {
+    if (job.project_id && !includeProjectJobs) continue;
     if (isLocalWorker(job.worker_id) || !job.remote_job_id || !getJobRemoteCaptionState(job)) continue;
     const synced = await syncRemoteJob(job);
     results.push(await syncRemoteCaptionResultForJob(synced));

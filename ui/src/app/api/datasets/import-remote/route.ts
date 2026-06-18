@@ -13,7 +13,7 @@ import {
 import { isEncryptedDatasetFolder, listDatasetSummaries } from '@/server/encryptedDatasets';
 import { nextAvailablePath } from '@/server/trainingJobTransfer';
 import type { DatasetSummary } from '@/types';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,16 +24,17 @@ async function writeResponseBodyToFile(response: Response, targetPath: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { datasetsRoot } = await resolveDatasetScope(body?.project_id);
-  await fsp.mkdir(datasetsRoot, { recursive: true });
-
-  const importID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const workRoot = path.join(datasetsRoot, `.aitk-dataset-import-${importID}`);
-  const uploadPath = path.join(workRoot, 'dataset.zip');
-  const extractRoot = path.join(workRoot, 'extract');
+  let workRoot: string | null = null;
 
   try {
+    const body = await request.json();
+    const { datasetsRoot } = await resolveDatasetScope(body?.project_id);
+    await fsp.mkdir(datasetsRoot, { recursive: true });
+
+    const importID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    workRoot = path.join(datasetsRoot, `.aitk-dataset-import-${importID}`);
+    const uploadPath = path.join(workRoot, 'dataset.zip');
+    const extractRoot = path.join(workRoot, 'extract');
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : '';
     const datasetName = typeof body?.datasetName === 'string' ? body.datasetName : '';
     if (!workerID || !datasetName) {
@@ -79,11 +80,14 @@ export async function POST(request: NextRequest) {
       renamed: importedName !== manifest.dataset.name,
     });
   } catch (error) {
+    const status = error instanceof DatasetScopeError ? error.status : 500;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to import remote dataset' },
-      { status: 500 },
+      { status },
     );
   } finally {
-    await fsp.rm(workRoot, { recursive: true, force: true }).catch(() => undefined);
+    if (workRoot) {
+      await fsp.rm(workRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }

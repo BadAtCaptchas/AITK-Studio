@@ -5,7 +5,7 @@ import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { createDatasetExportArchive, datasetExportFileName } from '@/server/datasetTransfer';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,9 +42,10 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    const status = error instanceof DatasetScopeError ? error.status : 500;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to export dataset' },
-      { status: 500 },
+      { status },
     );
   }
 }

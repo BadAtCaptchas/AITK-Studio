@@ -10,7 +10,7 @@ import {
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
-import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 type EncryptedObjectUpdate = {
   objectPath: string;
@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
     if (typeof datasetName !== 'string') {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
+    await assertProjectScopeEnabled(project_id);
 
     if (!isLocalWorker(worker_id)) {
       rejectRemoteProjectScope(worker_id, project_id);
@@ -67,6 +68,10 @@ export async function POST(request: NextRequest) {
     await writeEncryptedManifest(datasetFolder, nextManifest);
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to update encrypted dataset' }, { status: 400 });
+    const status = error instanceof DatasetScopeError ? error.status : 400;
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to update encrypted dataset' },
+      { status },
+    );
   }
 }

@@ -5,13 +5,19 @@ import { isEncryptedDatasetFolder, readEncryptedManifest, resolveDatasetFolder }
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAccess';
 import { DATASET_TEXT_CAPTION_EXTENSIONS } from '@/server/captionFiles';
-import { DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: Request) {
   const body = await request.json();
   const { datasetName } = body;
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
   const projectID = body?.project_id;
+
+  try {
+    await assertProjectScopeEnabled(projectID);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: error.status || 400 });
+  }
 
   if (!isLocalWorker(workerID)) {
     try {

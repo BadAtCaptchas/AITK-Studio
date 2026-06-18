@@ -2,6 +2,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { NextResponse } from 'next/server';
 import { ensureProjectFolders, isPathInside, resolveProject } from '@/server/projects';
+import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
 
 const TEXT_EXTENSIONS = new Set(['.txt', '.caption', '.json', '.jsonc', '.yaml', '.yml', '.md', '.toml', '.log', '.csv']);
 const MEDIA_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl', '.gif', '.bmp', '.mp4', '.mp3', '.wav', '.flac', '.ogg']);
@@ -67,6 +68,9 @@ async function childrenForDirectory(root: string, folder: string) {
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;
@@ -108,6 +112,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
 export async function PATCH(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;
@@ -128,6 +135,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pr
 export async function DELETE(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;

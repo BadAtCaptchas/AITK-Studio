@@ -2,6 +2,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { NextResponse } from 'next/server';
 import { ensureProjectFolders, isPathInside, resolveProject } from '@/server/projects';
+import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
 
 function ensureApiAccess(request: Request): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -59,6 +60,9 @@ async function listArtifacts(root: string, maxEntries = 250) {
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;

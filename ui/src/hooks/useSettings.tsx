@@ -11,6 +11,7 @@ export interface Settings {
   TRAINING_FOLDER: string;
   DATASETS_FOLDER: string;
   PROJECTS_FOLDER: string;
+  PROJECTS_ENABLED: string;
   TRAINING_ADVISOR_ENABLED: string;
   COMFY_AUTO_INSTALL: string;
   COMFY_EXTERNAL_URL: string;
@@ -24,6 +25,7 @@ export default function useSettings() {
     TRAINING_FOLDER: '',
     DATASETS_FOLDER: '',
     PROJECTS_FOLDER: '',
+    PROJECTS_ENABLED: 'true',
     TRAINING_ADVISOR_ENABLED: 'false',
     COMFY_AUTO_INSTALL: 'false',
     COMFY_EXTERNAL_URL: DEFAULT_EXTERNAL_COMFY_URL,
@@ -42,6 +44,7 @@ export default function useSettings() {
           TRAINING_FOLDER: data.TRAINING_FOLDER || '',
           DATASETS_FOLDER: data.DATASETS_FOLDER || '',
           PROJECTS_FOLDER: data.PROJECTS_FOLDER || '',
+          PROJECTS_ENABLED: data.PROJECTS_ENABLED === 'false' ? 'false' : 'true',
           TRAINING_ADVISOR_ENABLED: data.TRAINING_ADVISOR_ENABLED === 'true' ? 'true' : 'false',
           COMFY_AUTO_INSTALL: data.COMFY_AUTO_INSTALL === 'true' ? 'true' : 'false',
           COMFY_EXTERNAL_URL: data.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,

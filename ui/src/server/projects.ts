@@ -2,7 +2,7 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { db } from './db';
-import { getDatasetsRoot, getProjectsRoot, getTrainingFolder } from './settings';
+import { areProjectsEnabled, assertProjectsEnabled, getDatasetsRoot, getProjectsRoot, getTrainingFolder } from './settings';
 import type { Job, Project } from '@/types';
 
 export const PROJECT_FOLDERS = ['datasets', 'configs', 'runs', 'outputs', 'models', 'assets', 'notes', 'cache'] as const;
@@ -64,6 +64,7 @@ export async function uniqueProjectSlug(preferred: string) {
 }
 
 export async function resolveProject(identifier: string): Promise<Project> {
+  await assertProjectsEnabled();
   const normalized = identifier.trim();
   if (!normalized) throw new ProjectNotFoundError(identifier);
   const project = (await db.projects.findById(normalized)) || (await db.projects.findBySlug(cleanProjectSlug(normalized)));
@@ -99,6 +100,7 @@ export async function ensureProjectFolders(project: Project) {
 }
 
 export async function createProject(input: { name: unknown; slug?: unknown; description?: unknown; badge_asset?: unknown }) {
+  await assertProjectsEnabled();
   const name = safeProjectName(input.name);
   if (!name) {
     const error = new Error('Project name is required');
@@ -165,6 +167,7 @@ async function rewriteDatasetPathValue(value: unknown, roots: ProjectRoots, glob
 }
 
 export async function prepareJobConfigForProject(rawJobConfig: any, project: Project) {
+  await assertProjectsEnabled();
   const jobConfig = JSON.parse(JSON.stringify(rawJobConfig || null));
   const roots = await ensureProjectFolders(project);
   const globalDatasetsRoot = await getDatasetsRoot();
@@ -218,7 +221,14 @@ export async function getJobTrainingRoot(job: Job) {
   return getTrainingFolder();
 }
 
+export async function assertProjectJobEnabled(job: Pick<Job, 'project_id'> | null | undefined) {
+  if (job?.project_id) {
+    await assertProjectsEnabled();
+  }
+}
+
 export async function getAllowedProjectRootIfExists() {
+  if (!(await areProjectsEnabled())) return null;
   const root = path.resolve(await getProjectsRoot());
   return fs.existsSync(root) ? fs.promises.realpath(root).catch(() => root) : null;
 }

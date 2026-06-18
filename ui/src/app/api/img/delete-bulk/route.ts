@@ -7,7 +7,7 @@ import {
 } from '@/server/imageDelete';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 type RemoteGroup = {
   workerID: string;
@@ -131,6 +131,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json(combineBulkResults(results));
   } catch (error) {
+    if (error instanceof DatasetScopeError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (isImageDeleteError(error)) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

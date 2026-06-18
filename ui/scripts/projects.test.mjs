@@ -11,7 +11,37 @@ import {
   rejectRemoteProjectScope,
   resolveDatasetScope,
 } from '../dist/src/server/datasetScope.js';
-import { getDatasetsRoot, getProjectsRoot, getTrainingFolder } from '../dist/src/server/settings.js';
+import {
+  areProjectsEnabled,
+  assertProjectsEnabled,
+  flushCache,
+  getDatasetsRoot,
+  getProjectsRoot,
+  getTrainingFolder,
+  PROJECT_SPACES_DISABLED_MESSAGE,
+  PROJECTS_ENABLED_KEY,
+} from '../dist/src/server/settings.js';
+import { db } from '../dist/src/server/db.js';
+
+async function withProjectsEnabledSetting(value, fn) {
+  const previous = await db.settings.get(PROJECTS_ENABLED_KEY);
+  try {
+    if (value === null) {
+      await db.settings.delete(PROJECTS_ENABLED_KEY);
+    } else {
+      await db.settings.upsert(PROJECTS_ENABLED_KEY, value);
+    }
+    flushCache();
+    return await fn();
+  } finally {
+    if (previous) {
+      await db.settings.upsert(PROJECTS_ENABLED_KEY, previous.value);
+    } else {
+      await db.settings.delete(PROJECTS_ENABLED_KEY);
+    }
+    flushCache();
+  }
+}
 
 test('cleanProjectSlug creates stable URL-safe project slugs', () => {
   assert.equal(cleanProjectSlug('Flux Portrait Set'), 'flux-portrait-set');
@@ -62,6 +92,34 @@ test('resolveDatasetScope keeps omitted project_id on global roots', async () =>
   assert.equal(scope.projectID, null);
   assert.equal(scope.datasetsRoot, await getDatasetsRoot());
   assert.equal(scope.trainingRoot, await getTrainingFolder());
+});
+
+test('project spaces are enabled by default and can be disabled', async () => {
+  await withProjectsEnabledSetting(null, async () => {
+    assert.equal(await areProjectsEnabled(), true);
+    await assert.doesNotReject(() => assertProjectsEnabled());
+  });
+
+  await withProjectsEnabledSetting('false', async () => {
+    assert.equal(await areProjectsEnabled(), false);
+    await assert.rejects(
+      () => assertProjectsEnabled(),
+      error => error?.status === 403 && error.message === PROJECT_SPACES_DISABLED_MESSAGE,
+    );
+  });
+});
+
+test('disabled project spaces reject project-scoped dataset resolution but keep global scope available', async () => {
+  await withProjectsEnabledSetting('false', async () => {
+    await assert.rejects(
+      () => resolveDatasetScope('project-slug'),
+      error => error instanceof DatasetScopeError && error.status === 403 && error.message === PROJECT_SPACES_DISABLED_MESSAGE,
+    );
+
+    const globalScope = await resolveDatasetScope(null);
+    assert.equal(globalScope.projectID, null);
+    assert.equal(globalScope.datasetsRoot, await getDatasetsRoot());
+  });
 });
 
 test('dataset roots isolate same dataset names between global and project spaces', async () => {

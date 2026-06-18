@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { UniqueConstraintError, db } from '@/server/db';
 import { createProject, ensureProjectFolders } from '@/server/projects';
+import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
 
 function ensureApiAccess(request: Request): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -17,6 +18,9 @@ function ensureApiAccess(request: Request): NextResponse | null {
 export async function GET(request: Request) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const projects = await Promise.all(
@@ -35,6 +39,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const body = await request.json();

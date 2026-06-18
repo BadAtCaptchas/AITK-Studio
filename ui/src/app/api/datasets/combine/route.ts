@@ -8,7 +8,7 @@ import {
 import { getRemoteWorker, isLocalWorker, remoteJson, withoutRemoteRedirects } from '@/server/remoteClient';
 import type { DatasetSummary } from '@/types';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
-import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as DatasetCombineRequest & { worker_id?: string; project_id?: string };
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
+    await assertProjectScopeEnabled(body.project_id);
 
     if (!isLocalWorker(workerID)) {
       rejectRemoteProjectScope(workerID, body.project_id);
@@ -66,6 +67,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Dataset combine error:', error);
     if (isDatasetCombineError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof DatasetScopeError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return NextResponse.json(

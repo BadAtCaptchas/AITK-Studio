@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { listDatasetSummaries } from '@/server/encryptedDatasets';
 import { ensureProjectFolders, isPathInside, resolveProject } from '@/server/projects';
+import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
 import type { Job } from '@/types';
 
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'stopping']);
@@ -123,6 +124,9 @@ async function listTree(root: string, maxEntries = 80) {
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;

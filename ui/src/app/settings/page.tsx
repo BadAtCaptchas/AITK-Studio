@@ -18,6 +18,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  FolderKanban,
   FolderOpen,
   KeyRound,
   Loader2,
@@ -891,6 +892,19 @@ export default function Settings() {
                         >
                           <FolderOpen className="h-4 w-4" />
                         </button>
+                      </div>
+                      <div className="mt-3 flex items-center gap-3 border border-gray-900 bg-gray-950 px-3 py-3">
+                        <FolderKanban className="h-5 w-5 flex-none text-gray-500" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-gray-100">Project spaces</div>
+                          <div className="mt-0.5 text-xs text-gray-500">
+                            Hide and block isolated project workspaces without deleting existing project data.
+                          </div>
+                        </div>
+                        <SettingSwitch
+                          checked={settings.PROJECTS_ENABLED !== 'false'}
+                          onChange={checked => setSettings(prev => ({ ...prev, PROJECTS_ENABLED: checked ? 'true' : 'false' }))}
+                        />
                       </div>
                     </FieldShell>
                   </div>

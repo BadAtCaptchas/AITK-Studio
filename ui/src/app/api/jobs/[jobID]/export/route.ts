@@ -3,7 +3,7 @@ import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { getDatasetsRoot } from '@/server/settings';
+import { assertProjectsEnabled, getDatasetsRoot } from '@/server/settings';
 import { getJobTrainingRoot, getProjectRoots } from '@/server/projects';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
@@ -181,6 +181,9 @@ async function performTrainingJobExport(
     const error = new Error('Job not found');
     (error as any).status = 404;
     throw error;
+  }
+  if (job.project_id) {
+    await assertProjectsEnabled();
   }
   if (job.job_type !== 'train') {
     const error = new Error('Only training jobs can be exported');
@@ -521,6 +524,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const checkpointMode = parseCheckpointMode(body.checkpointMode);
     const background = body.background === true;
     const currentJob = await db.jobs.findById(jobID);
+    if (currentJob?.project_id) {
+      await assertProjectsEnabled();
+    }
 
     if (currentJob && !isLocalWorker(currentJob.worker_id)) {
       if (!currentJob.remote_job_id) {

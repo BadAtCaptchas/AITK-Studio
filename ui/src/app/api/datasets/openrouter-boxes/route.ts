@@ -7,6 +7,7 @@ import {
 } from '@/server/openRouterImageData';
 import { generateOpenRouterBoxPatches } from '@/server/openRouterBoxes';
 import { getOpenRouterApiKey } from '@/server/settings';
+import { assertProjectScopeEnabled, DatasetScopeError } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
+      await assertProjectScopeEnabled(formData.get('project_id'));
       caption = String(formData.get('caption') || '');
       model = String(formData.get('model') || '');
       refine = boolFromValue(formData.get('refine'));
@@ -56,9 +58,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
+    const status = error instanceof DatasetScopeError ? error.status : 400;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to create boxes with OpenRouter.' },
-      { status: 400 },
+      { status },
     );
   }
 }

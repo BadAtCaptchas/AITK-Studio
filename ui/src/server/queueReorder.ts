@@ -1,5 +1,6 @@
 import { db } from './db';
 import { getRemoteWorker, isLocalWorker, remoteJson } from './remoteClient';
+import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from './settings';
 import type { Job } from '../types';
 
 const QUEUE_POSITION_STEP = 1000;
@@ -83,6 +84,9 @@ export async function reorderQueueJobs(
   assertJobIds(jobIDs);
 
   const jobs = await loadQueuedJobs(queueID, workerID, jobIDs, deps);
+  if (jobs.some(job => job.project_id) && !(await areProjectsEnabled())) {
+    throw new QueueReorderError(PROJECT_SPACES_DISABLED_MESSAGE, 403);
+  }
 
   if (!deps.isLocalWorker(workerID)) {
     const remoteJobIDs = jobs.map(job => {

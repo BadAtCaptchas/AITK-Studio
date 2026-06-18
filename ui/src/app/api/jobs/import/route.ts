@@ -6,7 +6,12 @@ import yauzl from 'yauzl';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { isMac } from '@/helpers/basic';
-import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
+import {
+  getDatasetsRoot,
+  getTrainingFolder,
+  isProjectSpacesDisabledError,
+  PROJECT_SPACES_DISABLED_MESSAGE,
+} from '@/server/settings';
 import { TOOLKIT_ROOT } from '@/paths';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
@@ -191,32 +196,25 @@ async function saveJobArchiveUpload(request: NextRequest, uploadPath: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const project = await resolveOptionalProject(
-    request.nextUrl.searchParams.get('project_id') || request.headers.get('x-aitk-project-id'),
-  );
-  const projectRoots = project ? await ensureProjectFolders(project) : null;
-  const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
-  const datasetsRoot = projectRoots?.datasets || (await getDatasetsRoot());
-  await fsp.mkdir(trainingRoot, { recursive: true });
-  await fsp.mkdir(datasetsRoot, { recursive: true });
-
-  const chunkUploadRoot = path.join(trainingRoot, '.aitk-job-import-chunks');
-  const uploadMode = archiveUploadMode(request);
-  if (uploadMode === 'chunk') {
-    try {
-      await cleanupOldArchiveUploadChunks(chunkUploadRoot);
-      return NextResponse.json(await saveArchiveUploadChunk(request, chunkUploadRoot));
-    } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Failed to upload job archive chunk' },
-        { status: 400 },
-      );
-    }
-  }
-
   let workRoot: string | null = null;
 
   try {
+    const project = await resolveOptionalProject(
+      request.nextUrl.searchParams.get('project_id') || request.headers.get('x-aitk-project-id'),
+    );
+    const projectRoots = project ? await ensureProjectFolders(project) : null;
+    const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
+    const datasetsRoot = projectRoots?.datasets || (await getDatasetsRoot());
+    await fsp.mkdir(trainingRoot, { recursive: true });
+    await fsp.mkdir(datasetsRoot, { recursive: true });
+
+    const chunkUploadRoot = path.join(trainingRoot, '.aitk-job-import-chunks');
+    const uploadMode = archiveUploadMode(request);
+    if (uploadMode === 'chunk') {
+      await cleanupOldArchiveUploadChunks(chunkUploadRoot);
+      return NextResponse.json(await saveArchiveUploadChunk(request, chunkUploadRoot));
+    }
+
     const importId = uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     workRoot =
       uploadMode === 'complete'
@@ -333,6 +331,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ job, warnings });
   } catch (error) {
+    if (isProjectSpacesDisabledError(error)) {
+      return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+    }
     console.error('Training job import failed:', error);
     const message = error instanceof Error ? error.message : 'Failed to import training job';
     const status = message === 'file is required' || message.startsWith('Invalid archive upload') ? 400 : 500;

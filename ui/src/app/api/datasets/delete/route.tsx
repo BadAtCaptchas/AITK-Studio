@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
-import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 function resolveWithinRoot(root: string, target: unknown) {
   if (typeof target !== 'string' || target.trim().length === 0) {
@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     const { name } = body;
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
     const projectID = body?.project_id;
+    await assertProjectScopeEnabled(projectID);
     if (!isLocalWorker(workerID)) {
       rejectRemoteProjectScope(workerID, projectID);
       const worker = await getRemoteWorker(workerID);

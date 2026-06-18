@@ -53,7 +53,7 @@ test('local-only jobs API listing returns only local jobs without remote sync', 
     },
   );
 
-  assert.deepEqual(calls, [['list', { job_type: 'caption' }]]);
+  assert.deepEqual(calls, [['list', { job_type: 'caption', project_id: null }]]);
   assert.deepEqual(jobs.map(job => job.id), ['local-job', 'legacy-local-job']);
 });
 
@@ -82,7 +82,7 @@ test('jobs API listing still discovers before syncing remote mirrors', async () 
 
   assert.deepEqual(jobs.map(job => job.id), ['local-job']);
   assert.deepEqual(calls[0], ['discover', 'training']);
-  assert.deepEqual(calls[1], ['list', { job_type: 'training' }]);
+  assert.deepEqual(calls[1], ['list', { job_type: 'training', project_id: null }]);
   assert.deepEqual(calls[2][0], 'sync');
   assert.deepEqual(calls[2][1], ['local-job']);
   assert.equal(calls[2][2], discoveredJobIds);

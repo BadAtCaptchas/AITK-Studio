@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { UniqueConstraintError, db } from '@/server/db';
 import { cleanProjectSlug, ensureProjectFolders, resolveProject, safeProjectName } from '@/server/projects';
+import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
 
 function ensureApiAccess(request: Request): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -17,6 +18,9 @@ function ensureApiAccess(request: Request): NextResponse | null {
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;
@@ -30,6 +34,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
 export async function PATCH(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;
@@ -67,6 +74,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pr
 export async function DELETE(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) return accessResponse;
+  if (!(await areProjectsEnabled())) {
+    return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   try {
     const { projectID } = await params;

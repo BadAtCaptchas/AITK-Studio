@@ -5,7 +5,7 @@ import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -24,7 +24,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'imgPaths must be an array' }, { status: 400 });
   }
 
-  const { datasetsRoot } = await resolveDatasetScope(body?.project_id);
+  let datasetsRoot = '';
+  try {
+    const scope = await resolveDatasetScope(body?.project_id);
+    datasetsRoot = scope.datasetsRoot;
+  } catch (error) {
+    if (error instanceof DatasetScopeError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    return NextResponse.json({ error: 'Failed to resolve dataset scope' }, { status: 500 });
+  }
   const allowedRoot = path.resolve(datasetsRoot);
   const captions: Record<string, string> = {};
   const remoteGroups = new Map<string, Array<{ ref: string; path: string }>>();

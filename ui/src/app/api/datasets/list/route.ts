@@ -4,7 +4,7 @@ import { listDatasetSummaries } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import type { DatasetSummary } from '@/types';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
-import { rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 function decorateRemoteDatasets(worker: { id: string; name: string }, datasets: DatasetSummary[]) {
   return datasets.map(dataset => ({
@@ -23,6 +23,7 @@ export async function GET(request: Request) {
     const workerID = searchParams.get('worker_id') || 'local';
     const includeRemote = searchParams.get('include_remote') === '1';
     const projectID = searchParams.get('project_id');
+    await assertProjectScopeEnabled(projectID);
     rejectRemoteProjectScope(workerID, projectID);
 
     if (!isLocalWorker(workerID)) {

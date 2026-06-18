@@ -15,6 +15,11 @@ import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteData
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 import { isDirectRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
 import { prepareJobConfigForProject, resolveOptionalProject } from '@/server/projects';
+import {
+  assertProjectsEnabled,
+  isProjectSpacesDisabledError,
+  PROJECT_SPACES_DISABLED_MESSAGE,
+} from '@/server/settings';
 import type { Job } from '@/types';
 
 
@@ -110,6 +115,12 @@ async function withJobProgress(job: Job) {
   return withComfyInstallProgress(await withHFDownloadProgress(job));
 }
 
+async function assertProjectJobVisible(job: Job | null) {
+  if (job?.project_id) {
+    await assertProjectsEnabled();
+  }
+}
+
 export async function GET(request: Request) {
   const accessResponse = ensureApiAccess(request);
   if (accessResponse) {
@@ -127,6 +138,7 @@ export async function GET(request: Request) {
     const project = await resolveOptionalProject(projectParam);
     if (id) {
       const job = await db.jobs.findById(id);
+      await assertProjectJobVisible(job);
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
         const captionSynced = await syncRemoteCaptionResultForJob(synced);
@@ -137,6 +149,7 @@ export async function GET(request: Request) {
     }
     if (job_ref) {
       const job = await db.jobs.findLatestByRef(job_ref);
+      await assertProjectJobVisible(job);
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
         const captionSynced = await syncRemoteCaptionResultForJob(synced);
@@ -155,6 +168,9 @@ export async function GET(request: Request) {
       jobs: await Promise.all(resultSyncedJobs.map(job => withJobProgress(job))),
     });
   } catch (error) {
+    if (isProjectSpacesDisabledError(error)) {
+      return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+    }
     console.error(error);
     return NextResponse.json({ error: 'Failed to fetch training data' }, { status: 500 });
   }
@@ -222,6 +238,7 @@ export async function POST(request: Request) {
       if (!existing) {
         return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
+      await assertProjectJobVisible(existing);
 
       const targetProjectID = project?.id || existing.project_id || null;
       const duplicateJob = await db.jobs.findByNameInScope(name, targetProjectID);
@@ -286,6 +303,9 @@ export async function POST(request: Request) {
       return NextResponse.json(training);
     }
   } catch (error: any) {
+    if (isProjectSpacesDisabledError(error)) {
+      return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+    }
     if (error.code === 'P2002') {
       // Handle unique constraint violation, 409=Conflict
       return NextResponse.json({ error: 'Job name already exists in this workspace' }, { status: 409 });

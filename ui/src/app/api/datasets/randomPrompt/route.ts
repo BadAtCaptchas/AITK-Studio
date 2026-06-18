@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { webcrypto } from 'crypto';
-import { resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import {
   getRandomPromptCaptionExtCandidates,
   normalizeRandomPromptCaptionExt,
@@ -300,6 +300,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('Error importing random dataset prompt:', error);
+    if (error instanceof DatasetScopeError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: 'Failed to import a random dataset prompt.' }, { status: 500 });
   }
 }

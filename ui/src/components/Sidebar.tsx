@@ -7,9 +7,12 @@ import { FaDiscord } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
 import UpdaterStatus from './UpdaterStatus';
+import useSettings from '@/hooks/useSettings';
 
 const Sidebar = () => {
   const pathname = usePathname();
+  const { settings } = useSettings();
+  const projectsEnabled = settings.PROJECTS_ENABLED !== 'false';
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Projects', href: '/projects', icon: FolderKanban },
@@ -19,7 +22,7 @@ const Sidebar = () => {
     { name: 'Queue', href: '/jobs', icon: ListOrdered },
     { name: 'Datasets', href: '/datasets', icon: Images },
     { name: 'Settings', href: '/settings', icon: Settings },
-  ];
+  ].filter(item => item.name !== 'Projects' || projectsEnabled);
 
   const railButtonClass =
     'flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-500 transition-colors hover:border-gray-800 hover:bg-gray-900/60 hover:text-gray-100';

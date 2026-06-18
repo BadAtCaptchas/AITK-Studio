@@ -278,8 +278,15 @@ test('generateOllamaImageCaption tries chat before generate for Gemma models', a
   const chatBody = JSON.parse(calls.find(call => call.url.endsWith('/api/chat')).body);
   assert.deepEqual(chatBody.messages, [
     { role: 'system', content: 'Return compact training captions.' },
-    { role: 'user', content: 'caption', images: ['aW1n'] },
+    { role: 'user', images: ['aW1n'], content: 'caption' },
   ]);
+  assert.equal('think' in chatBody, false);
+  const chatUserMessageKeys = Object.keys(chatBody.messages[1]);
+  assert.ok(chatUserMessageKeys.indexOf('images') < chatUserMessageKeys.indexOf('content'));
+  const generateBody = JSON.parse(calls.find(call => call.url.endsWith('/api/generate')).body);
+  assert.equal('think' in generateBody, false);
+  const generateBodyKeys = Object.keys(generateBody);
+  assert.ok(generateBodyKeys.indexOf('images') < generateBodyKeys.indexOf('prompt'));
 });
 
 test('generateOllamaImageCaption skips Gemma chat refusal and tries generate', async () => {
@@ -336,7 +343,7 @@ test('generateOllamaImageCaption expands retry budget for thinking-only length r
     .map(call => JSON.parse(call.body));
   assert.deepEqual(
     generationBodies.map(body => body.options.num_predict),
-    [2048, 2048, 4096, 4096, 4096, 4096],
+    [2048, 2048, 4096, 4096, 8192, 8192],
   );
 });
 
@@ -368,7 +375,7 @@ test('generateOllamaImageCaption rejects empty model responses', async () => {
       { model: 'llava', prompt: 'caption', imageBase64: 'aW1n', maxNewTokens: 32 },
       'http://ollama.test',
     ),
-    /empty caption/,
+    /empty or refusal captions/,
   );
 });
 

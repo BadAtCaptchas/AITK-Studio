@@ -50,6 +50,7 @@ const OLLAMA_CAPTION_MAX_ATTEMPTS = 3;
 const OLLAMA_CAPTION_EMPTY_RETRY_DELAY_MS = 2000;
 const OLLAMA_CAPTION_MIN_NUM_PREDICT = 2048;
 const OLLAMA_CAPTION_MAX_NUM_PREDICT = 4096;
+const OLLAMA_CAPTION_THINKING_MAX_NUM_PREDICT = 8192;
 
 export type OllamaModelPullStatus = {
   status: 'ready' | 'pulling' | 'error';
@@ -182,17 +183,22 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function captionNumPredict(maxNewTokens: number | undefined, attempt: number) {
+function captionNumPredict(maxNewTokens: number | undefined, attempt: number, extendedThinkingBudget = false) {
   const requested = Number.isFinite(maxNewTokens) && (maxNewTokens || 0) > 0 ? Math.round(maxNewTokens as number) : 0;
   const baseBudget = Math.max(OLLAMA_CAPTION_MIN_NUM_PREDICT, requested * 4);
   const retryBudget = baseBudget * 2 ** Math.max(0, attempt - 1);
-  return Math.min(OLLAMA_CAPTION_MAX_NUM_PREDICT, retryBudget);
+  return Math.min(extendedThinkingBudget ? OLLAMA_CAPTION_THINKING_MAX_NUM_PREDICT : OLLAMA_CAPTION_MAX_NUM_PREDICT, retryBudget);
 }
 
-function captionBodyForAttempt(body: Record<string, unknown>, maxNewTokens: number | undefined, attempt: number) {
+function captionBodyForAttempt(
+  body: Record<string, unknown>,
+  maxNewTokens: number | undefined,
+  attempt: number,
+  extendedThinkingBudget = false,
+) {
   return {
     ...body,
-    options: { num_predict: captionNumPredict(maxNewTokens, attempt) },
+    options: { num_predict: captionNumPredict(maxNewTokens, attempt, extendedThinkingBudget) },
   };
 }
 
@@ -355,13 +361,22 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
 
   await ensureOllamaModel(model, endpoint);
 
-  const generateBody: Record<string, unknown> = {
-    model,
-    prompt,
-    images: [options.imageBase64],
-    stream: false,
-    keep_alive: '10m',
-  };
+  const gemmaModel = isGemmaOllamaModel(model);
+  const generateBody: Record<string, unknown> = gemmaModel
+    ? {
+        model,
+        images: [options.imageBase64],
+        prompt,
+        stream: false,
+        keep_alive: '10m',
+      }
+    : {
+        model,
+        prompt,
+        images: [options.imageBase64],
+        stream: false,
+        keep_alive: '10m',
+      };
   if (options.systemPrompt?.trim()) {
     generateBody.system = options.systemPrompt.trim();
   }
@@ -370,28 +385,45 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   if (options.systemPrompt?.trim()) {
     messages.push({ role: 'system', content: options.systemPrompt.trim() });
   }
-  messages.push({
-    role: 'user',
-    content: prompt,
-    images: [options.imageBase64],
-  });
-  const chatBody: Record<string, unknown> = {
-    model,
-    messages,
-    stream: false,
-    keep_alive: '10m',
-  };
-  const endpointOrder: OllamaGenerationAttempt['endpoint'][] = isGemmaOllamaModel(model)
+  messages.push(
+    gemmaModel
+      ? {
+          role: 'user',
+          images: [options.imageBase64],
+          content: prompt,
+        }
+      : {
+          role: 'user',
+          content: prompt,
+          images: [options.imageBase64],
+        },
+  );
+  const chatBody: Record<string, unknown> = gemmaModel
+    ? {
+        model,
+        messages,
+        stream: false,
+        keep_alive: '10m',
+      }
+    : {
+        model,
+        messages,
+        stream: false,
+        keep_alive: '10m',
+      };
+  const endpointOrder: OllamaGenerationAttempt['endpoint'][] = gemmaModel
     ? ['chat', 'generate']
     : ['generate', 'chat'];
 
   const attempts: OllamaGenerationAttempt[] = [];
   for (let attempt = 1; attempt <= OLLAMA_CAPTION_MAX_ATTEMPTS; attempt += 1) {
+    const extendedThinkingBudget =
+      gemmaModel || attempts.some(previousAttempt => previousAttempt.hadThinking || previousAttempt.doneReason === 'length');
     for (const generationEndpoint of endpointOrder) {
       const baseBody = generationEndpoint === 'chat' ? chatBody : generateBody;
       const generationAttempt = await runOllamaGenerationAttempt(
         generationEndpoint,
-        captionBodyForAttempt(baseBody, options.maxNewTokens, attempt),
+        captionBodyForAttempt(baseBody, options.maxNewTokens, attempt, extendedThinkingBudget),
         endpoint,
         attempt,
       );
@@ -416,7 +448,7 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     )
     .join(', ');
   throw new Error(
-    `Ollama returned an empty caption${reasons ? ` (${reasons})` : ''}. Confirm the selected model supports image inputs and try a stronger caption prompt.`,
+    `Ollama returned only empty or refusal captions${reasons ? ` (${reasons})` : ''}. Confirm the selected model supports image inputs and try a stronger caption prompt.`,
   );
 }
 

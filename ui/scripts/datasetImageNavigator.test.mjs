@@ -45,6 +45,7 @@ test('navigator search matches filename and 1-based index prefixes', () => {
 test('navigator status classification mirrors caption semantics', () => {
   assert.equal(navigatorStatusForCaption('', false), 'unknown');
   assert.equal(navigatorStatusForCaption('', true), 'missing');
+  assert.equal(navigatorStatusForCaption('I cannot fulfill this request.', true), 'missing');
   assert.equal(navigatorStatusForCaption('plain caption', true), 'plain');
   assert.equal(navigatorStatusForCaption('{"caption":"hello"}', true), 'json');
   assert.equal(navigatorStatusForCaption(unboxedCaption, true), 'json');

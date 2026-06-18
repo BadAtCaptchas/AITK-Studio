@@ -232,6 +232,21 @@ export default function DatasetEditorPage({
   }, [datasetName, datasetRef, effectiveDatasetRoot, encryptedCatalog, encryptedKey, encryptedManifest, projectID, workerID]);
 
   useEffect(() => {
+    if (!encryptedManifest || !encryptedKey) return;
+    let cancelled = false;
+    decryptCatalog(encryptedManifest, encryptedKey)
+      .then(catalog => {
+        if (!cancelled) setEncryptedCatalog(catalog);
+      })
+      .catch(error => {
+        console.warn('Could not refresh encrypted dataset catalog:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [encryptedKey, encryptedManifest]);
+
+  useEffect(() => {
     if (!isRenameModalOpen) {
       setRenameDatasetName(datasetName);
     }

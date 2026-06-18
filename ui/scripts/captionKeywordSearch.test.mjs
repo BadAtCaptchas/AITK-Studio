@@ -9,6 +9,11 @@ const {
   parseCaptionKeywordQuery,
   removeCaptionKeywords,
 } = require('../dist/src/utils/captionKeywordSearch.js');
+const {
+  captionFailureReason,
+  isFailedCaption,
+  isRefusalCaption,
+} = require('../dist/src/utils/captionQuality.js');
 
 const ideogramCaption = JSON.stringify({
   high_level_description: 'A red cat beside a cathedral.',
@@ -36,6 +41,42 @@ test('partial matching can match inside longer words', () => {
 test('multiple keywords use any-keyword semantics', () => {
   assert.equal(captionMatchesKeywords('a small dog', ['cat', 'dog'], 'whole-word'), true);
   assert.equal(captionMatchesKeywords('a small bird', ['cat', 'dog'], 'whole-word'), false);
+});
+
+test('refusal captions are treated as failed and not searchable', () => {
+  const refusals = [
+    'I cannot fulfill this request.',
+    "Sorry, but I can't help with that.",
+    "I'm unable to help with that.",
+    'I can\u2019t provide a caption for this image.',
+    "I won't be able to caption this image.",
+    "Apologies, but I can't caption this image.",
+    'I apologize, but I cannot describe this content.',
+    "I'm afraid I can't answer that request.",
+    'As an AI language model, I cannot assist with that.',
+    'This request violates my content policy.',
+    'That request is outside my safety guidelines.',
+    'Request denied.',
+    'I must refuse this request.',
+    'It would be inappropriate to provide that caption.',
+    'I cannot access the image.',
+    'No image was provided.',
+    'The image is not accessible.',
+    "I don't feel comfortable helping with this.",
+  ];
+
+  for (const refusal of refusals) {
+    assert.equal(isRefusalCaption(refusal), true, refusal);
+    assert.equal(isFailedCaption(refusal), true, refusal);
+    assert.match(captionFailureReason(refusal), /refusal/i);
+    assert.equal(captionMatchesKeywords(refusal, ['request'], 'whole-word'), false);
+  }
+});
+
+test('non-refusal captions with isolated negative wording remain usable', () => {
+  const caption = 'A person cannot reach the top shelf in a bright kitchen.';
+  assert.equal(isRefusalCaption(caption), false);
+  assert.equal(isFailedCaption(caption), false);
 });
 
 test('removeCaptionKeywords removes whole words from plain captions', () => {

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
+import { Modal } from '@/components/Modal';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
+import { defaultIdeogramJsonCaptionPrompt, defaultImageCaptionPrompt } from '@/helpers/captionOptions';
 import {
   captionObjectPath,
   decryptEncryptedObjectBlob,
@@ -41,6 +43,8 @@ import {
   DEFAULT_OPENROUTER_BOX_MODEL,
   MAX_HISTORY,
   MIN_BOX_SPAN,
+  OLLAMA_VISION_MODELS,
+  OPENROUTER_BOX_MODELS,
 } from './constants';
 import { ImageNavigator } from './ImageNavigator';
 import { CaptionEditorPanel, ObjectDetailsPanel } from './InspectorPanels';
@@ -79,6 +83,24 @@ import {
 } from './utils';
 
 type StudioBoxProvider = (typeof AUTO_BOX_PROVIDERS)[number]['value'];
+type RecaptionProvider = StudioBoxProvider;
+type RecaptionOutputFormat = 'text' | 'ideogram_json';
+type RefusalCaptionAuditResponse = {
+  refusals?: Record<string, unknown>;
+};
+
+function scheduleIdleTask(callback: () => void) {
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (idleWindow.requestIdleCallback) {
+    const handle = idleWindow.requestIdleCallback(callback, { timeout: 2500 });
+    return () => idleWindow.cancelIdleCallback?.(handle);
+  }
+  const handle = window.setTimeout(callback, 700);
+  return () => window.clearTimeout(handle);
+}
 
 export default function DatasetImageStudio({
   datasetName,
@@ -113,7 +135,17 @@ export default function DatasetImageStudio({
   const [redoStack, setRedoStack] = useState<string[]>([]);
   const [autoBoxProvider, setAutoBoxProvider] = useState<StudioBoxProvider>('openrouter');
   const [autoBoxModel, setAutoBoxModel] = useState(DEFAULT_OPENROUTER_BOX_MODEL);
+  const [recaptionProvider, setRecaptionProvider] = useState<RecaptionProvider>('openrouter');
+  const [recaptionModel, setRecaptionModel] = useState(DEFAULT_OPENROUTER_BOX_MODEL);
+  const [recaptionOutputFormat, setRecaptionOutputFormat] = useState<RecaptionOutputFormat>('text');
+  const [recaptionPrompt, setRecaptionPrompt] = useState(defaultImageCaptionPrompt);
+  const [recaptionSystemPrompt, setRecaptionSystemPrompt] = useState('');
+  const [recaptionMaxNewTokens, setRecaptionMaxNewTokens] = useState(256);
+  const [isRecaptionModalOpen, setIsRecaptionModalOpen] = useState(false);
+  const [isRecaptioning, setIsRecaptioning] = useState(false);
+  const [recaptionMessage, setRecaptionMessage] = useState('');
   const [remoteOllamaWorkerId, setRemoteOllamaWorkerId] = useState('');
+  const [recaptionRemoteWorkerId, setRecaptionRemoteWorkerId] = useState('');
   const [autoBoxRefine, setAutoBoxRefine] = useState(false);
   const [isGeneratingBoxes, setIsGeneratingBoxes] = useState(false);
   const [autoBoxMessage, setAutoBoxMessage] = useState('');
@@ -131,6 +163,8 @@ export default function DatasetImageStudio({
   const saveCaptionRef = useRef<() => Promise<void>>(async () => undefined);
   const autoSelectKeyRef = useRef('');
   const latestCaptionRef = useRef('');
+  const savedCaptionRef = useRef('');
+  const isDirtyRef = useRef(false);
   const selectedKeyRef = useRef('');
 
   const writeCaptionCache = useCallback((key: string, entry: CaptionCacheEntry) => {
@@ -150,11 +184,18 @@ export default function DatasetImageStudio({
   const selectedKey = selectedItem ? itemKey(selectedItem) : '';
   const selectedName = selectedItem ? itemName(selectedItem) : '';
   const selectedKind = selectedItem ? itemKind(selectedItem) : 'image';
+  const plainAuditItemPaths = useMemo(
+    () => items.flatMap(item => (item.kind === 'plain' ? [item.path] : [])),
+    [items],
+  );
+  const plainAuditKey = useMemo(() => plainAuditItemPaths.join('\n'), [plainAuditItemPaths]);
   const remoteWorkerOptions = useMemo(
     () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
     [workers],
   );
   const autoBoxProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === autoBoxProvider)?.label || 'OpenRouter';
+  const recaptionProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === recaptionProvider)?.label || 'OpenRouter';
+  const recaptionModelOptions = recaptionProvider === 'openrouter' ? OPENROUTER_BOX_MODELS : OLLAMA_VISION_MODELS;
   const captionParse = useMemo(
     () => parseIdeogramCaption(captionText, selectedImageSize ?? undefined),
     [captionText, selectedImageSize],
@@ -211,10 +252,17 @@ export default function DatasetImageStudio({
                   : '';
   const canCaptionSelectedLayer =
     !layerCaptionDisabledReason && !selectedLayerIsCaptioning && !isGeneratingBoxes && !isAutoCaptioning;
+  const canRecaptionSelectedImage =
+    Boolean(selectedItem) && selectedKind === 'image' && isCaptionLoaded && !isAutoCaptioning && !isSaving;
 
   useEffect(() => {
     latestCaptionRef.current = captionText;
   }, [captionText]);
+
+  useEffect(() => {
+    savedCaptionRef.current = savedCaption;
+    isDirtyRef.current = isDirty;
+  }, [isDirty, savedCaption]);
 
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
@@ -232,6 +280,11 @@ export default function DatasetImageStudio({
     setRemoteOllamaWorkerId(remoteWorkerOptions[0].value);
   }, [autoBoxProvider, remoteOllamaWorkerId, remoteWorkerOptions]);
 
+  useEffect(() => {
+    if (recaptionProvider !== 'remote_ollama' || recaptionRemoteWorkerId || remoteWorkerOptions.length === 0) return;
+    setRecaptionRemoteWorkerId(remoteWorkerOptions[0].value);
+  }, [recaptionProvider, recaptionRemoteWorkerId, remoteWorkerOptions]);
+
   const handleAutoBoxProviderChange = useCallback((value: string) => {
     const nextProvider = AUTO_BOX_PROVIDERS.some(provider => provider.value === value)
       ? (value as StudioBoxProvider)
@@ -245,6 +298,90 @@ export default function DatasetImageStudio({
       return !trimmed || trimmed === DEFAULT_OPENROUTER_BOX_MODEL ? DEFAULT_OLLAMA_VISION_MODEL : trimmed;
     });
   }, []);
+
+  const handleRecaptionProviderChange = useCallback((value: string) => {
+    const nextProvider = AUTO_BOX_PROVIDERS.some(provider => provider.value === value)
+      ? (value as RecaptionProvider)
+      : 'openrouter';
+    setRecaptionProvider(nextProvider);
+    setRecaptionModel(currentModel => {
+      const trimmed = currentModel.trim();
+      if (nextProvider === 'openrouter') {
+        return !trimmed || trimmed.startsWith('qwen3.5:') || trimmed.startsWith('gemma4:') ? DEFAULT_OPENROUTER_BOX_MODEL : trimmed;
+      }
+      return !trimmed || trimmed === DEFAULT_OPENROUTER_BOX_MODEL ? DEFAULT_OLLAMA_VISION_MODEL : trimmed;
+    });
+  }, []);
+
+  const handleRecaptionOutputFormatChange = useCallback((value: RecaptionOutputFormat) => {
+    setRecaptionOutputFormat(value);
+    setRecaptionPrompt(currentPrompt => {
+      const trimmed = currentPrompt.trim();
+      if (value === 'ideogram_json') {
+        return !trimmed || trimmed === defaultImageCaptionPrompt ? defaultIdeogramJsonCaptionPrompt : currentPrompt;
+      }
+      return !trimmed || trimmed === defaultIdeogramJsonCaptionPrompt ? defaultImageCaptionPrompt : currentPrompt;
+    });
+    setRecaptionMaxNewTokens(current => {
+      if (value === 'ideogram_json') return current < 2048 ? 2048 : current;
+      return current >= 2048 ? 256 : current;
+    });
+  }, []);
+
+  const appendRecaptionFields = useCallback(
+    (formData: FormData) => {
+      formData.append('provider', recaptionProvider);
+      formData.append('model', recaptionModel);
+      formData.append('outputFormat', recaptionOutputFormat);
+      formData.append('prompt', recaptionPrompt);
+      formData.append('systemPrompt', recaptionSystemPrompt);
+      formData.append('existingCaption', captionText);
+      formData.append('remoteWorkerId', recaptionRemoteWorkerId);
+      formData.append('maxNewTokens', String(recaptionMaxNewTokens));
+    },
+    [
+      captionText,
+      recaptionMaxNewTokens,
+      recaptionModel,
+      recaptionOutputFormat,
+      recaptionPrompt,
+      recaptionProvider,
+      recaptionRemoteWorkerId,
+      recaptionSystemPrompt,
+    ],
+  );
+
+  const readCaptionForItem = useCallback(
+    async (item: DatasetStudioItem, signal?: AbortSignal) => {
+      let text = '';
+      if (item.kind === 'plain') {
+        const direct = isPlainTextCaptionItem(item);
+        const response = await apiClient.post(
+          '/api/caption/get',
+          {
+            imgPath: item.path,
+            ...(direct ? { direct: true } : {}),
+            ...projectPayload,
+          },
+          signal ? { signal } : undefined,
+        );
+        text = captionResponseToText(response.data);
+      } else if (encryptedKey) {
+        const captionPath = item.item.captionObjectPath;
+        if (captionPath) {
+          const response = await apiClient.post(
+            '/api/datasets/encrypted/object',
+            { datasetName, worker_id: workerID, objectPath: captionPath, ...projectPayload },
+            { responseType: 'blob', ...(signal ? { signal } : {}) },
+          );
+          const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
+          text = new TextDecoder().decode(decrypted);
+        }
+      }
+      return text;
+    },
+    [datasetName, encryptedKey, projectPayload, workerID],
+  );
 
   useEffect(() => {
     if (!selectedKey) {
@@ -269,28 +406,8 @@ export default function DatasetImageStudio({
 
     async function loadCaption() {
       try {
-        let text = '';
         if (!selectedItem) return;
-        if (selectedItem.kind === 'plain') {
-          const direct = isPlainTextCaptionItem(selectedItem);
-          const response = await apiClient.post('/api/caption/get', {
-            imgPath: selectedItem.path,
-            ...(direct ? { direct: true } : {}),
-            ...projectPayload,
-          });
-          text = captionResponseToText(response.data);
-        } else if (encryptedKey) {
-          const captionPath = selectedItem.item.captionObjectPath;
-          if (captionPath) {
-            const response = await apiClient.post(
-              '/api/datasets/encrypted/object',
-              { datasetName, worker_id: workerID, objectPath: captionPath, ...projectPayload },
-              { responseType: 'blob' },
-            );
-            const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
-            text = new TextDecoder().decode(decrypted);
-          }
-        }
+        const text = await readCaptionForItem(selectedItem);
         if (cancelled) return;
         setCaptionText(text);
         setSavedCaption(text);
@@ -309,12 +426,116 @@ export default function DatasetImageStudio({
     return () => {
       cancelled = true;
     };
-  }, [datasetName, encryptedKey, projectPayload, selectedItem, selectedKey, workerID, writeCaptionCache]);
+  }, [readCaptionForItem, selectedItem, selectedKey, writeCaptionCache]);
 
   useEffect(() => {
     if (!selectedKey) return;
     writeCaptionCache(selectedKey, { caption: captionText, saved: savedCaption, loaded: isCaptionLoaded });
   }, [captionText, isCaptionLoaded, savedCaption, selectedKey, writeCaptionCache]);
+
+  useEffect(() => {
+    if (plainAuditItemPaths.length === 0) return;
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const runAudit = async () => {
+      try {
+        const response = await apiClient.post<RefusalCaptionAuditResponse>(
+          '/api/datasets/refusal-caption-audit',
+          {
+            datasetName,
+            worker_id: workerID,
+            itemPaths: plainAuditItemPaths,
+            ...projectPayload,
+          },
+          { signal: controller.signal },
+        );
+        if (cancelled || controller.signal.aborted) return;
+        const refusals = response.data?.refusals || {};
+        let cacheChanged = false;
+
+        Object.entries(refusals).forEach(([key, captionValue]) => {
+          if (typeof captionValue !== 'string') return;
+          const previous = captionCacheRef.current.get(key);
+          if (previous?.loaded && previous.caption === captionValue && previous.saved === captionValue) return;
+
+          captionCacheRef.current.set(key, { caption: captionValue, saved: captionValue, loaded: true });
+          cacheChanged = true;
+
+          if (selectedKeyRef.current === key && !isDirtyRef.current) {
+            latestCaptionRef.current = captionValue;
+            setCaptionText(captionValue);
+            setSavedCaption(captionValue);
+            setIsCaptionLoaded(true);
+            setUndoStack([]);
+            setRedoStack([]);
+          }
+        });
+
+        if (cacheChanged) {
+          setCaptionCacheVersion(version => version + 1);
+        }
+      } catch (error: any) {
+        if (error?.name !== 'CanceledError' && error?.name !== 'AbortError' && !controller.signal.aborted) {
+          console.warn('Caption refusal audit failed:', error);
+        }
+      }
+    };
+
+    const cancelScheduledAudit = scheduleIdleTask(() => void runAudit());
+    return () => {
+      cancelled = true;
+      controller.abort();
+      cancelScheduledAudit();
+    };
+  }, [datasetName, plainAuditItemPaths, plainAuditKey, projectPayload, workerID]);
+
+  useEffect(() => {
+    if (!isAutoCaptioning || !selectedItem || !selectedKey) return;
+    const requestKey = selectedKey;
+    const controller = new AbortController();
+    let busy = false;
+
+    const pollSelectedCaption = async () => {
+      if (busy || controller.signal.aborted) return;
+      busy = true;
+      try {
+        const text = await readCaptionForItem(selectedItem, controller.signal);
+        if (controller.signal.aborted || selectedKeyRef.current !== requestKey) return;
+        const cached = captionCacheRef.current.get(requestKey);
+        if (cached?.caption === text && cached.saved === text && cached.loaded) return;
+        captionCacheRef.current.set(requestKey, { caption: text, saved: text, loaded: true });
+        setCaptionCacheVersion(version => version + 1);
+        if (!isDirtyRef.current && savedCaptionRef.current !== text) {
+          latestCaptionRef.current = text;
+          setCaptionText(text);
+          setSavedCaption(text);
+          setIsCaptionLoaded(true);
+          setUndoStack([]);
+          setRedoStack([]);
+        }
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          console.error('Caption refresh failed:', error);
+        }
+      } finally {
+        busy = false;
+      }
+    };
+
+    void pollSelectedCaption();
+    const interval = window.setInterval(pollSelectedCaption, 5000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [isAutoCaptioning, readCaptionForItem, selectedItem, selectedKey]);
+
+  useEffect(() => {
+    if (!isAutoCaptioning || !encryptedKey || !onRefresh) return;
+    const interval = window.setInterval(() => onRefresh(), 5000);
+    return () => window.clearInterval(interval);
+  }, [encryptedKey, isAutoCaptioning, onRefresh]);
 
   useEffect(() => {
     if (!isIdeogram || selectedElementIndex == null) return;
@@ -347,9 +568,12 @@ export default function DatasetImageStudio({
     setSelectedElementIndex(boxes[0].elementIndex);
   }, [boxes, isIdeogram, selectedKey]);
 
-  const saveCaption = useCallback(async () => {
-    if (!selectedItem || !isCaptionLoaded || isSaving || !isDirty) return;
-    const value = isPlainTextCaptionItem(selectedItem) ? captionText : captionText.trim();
+  const saveCaption = useCallback(async (captionOverride?: string) => {
+    if (!selectedItem || !isCaptionLoaded || isSaving) return;
+    const sourceCaption = captionOverride ?? captionText;
+    const value = isPlainTextCaptionItem(selectedItem) ? sourceCaption : sourceCaption.trim();
+    if (captionOverride === undefined && !isDirty) return;
+    if (captionOverride !== undefined && value.trim() === savedCaption.trim()) return;
     setIsSaving(true);
     try {
       if (selectedItem.kind === 'plain') {
@@ -367,11 +591,14 @@ export default function DatasetImageStudio({
         await onSaveEncryptedCaption(selectedItem.item, targetCaptionPath, JSON.stringify(encryptedCaption));
         setEncryptedCaptionPaths(previous => ({ ...previous, [key]: targetCaptionPath }));
       }
+      latestCaptionRef.current = value;
+      setCaptionText(value);
       setSavedCaption(value);
       writeCaptionCache(selectedKey, { caption: value, saved: value, loaded: true });
     } catch (error) {
       console.error('Caption save failed:', error);
       alert('Failed to save caption. Please try again.');
+      if (captionOverride !== undefined) throw error;
     } finally {
       setIsSaving(false);
     }
@@ -384,6 +611,7 @@ export default function DatasetImageStudio({
     isSaving,
     onSaveEncryptedCaption,
     projectPayload,
+    savedCaption,
     selectedItem,
     selectedKey,
     writeCaptionCache,
@@ -392,6 +620,99 @@ export default function DatasetImageStudio({
   useEffect(() => {
     saveCaptionRef.current = saveCaption;
   }, [saveCaption]);
+
+  const runSingleRecaption = useCallback(async () => {
+    if (!selectedItem || !canRecaptionSelectedImage || isRecaptioning) return;
+    if (recaptionProvider === 'remote_ollama' && !recaptionRemoteWorkerId) {
+      setRecaptionMessage('Select a Remote Ollama endpoint.');
+      return;
+    }
+    if (selectedItem.kind === 'encrypted' && !encryptedKey) {
+      setRecaptionMessage('Unlock the encrypted dataset first.');
+      return;
+    }
+
+    setIsRecaptioning(true);
+    setRecaptionMessage('');
+    try {
+      let response;
+      if (selectedItem.kind === 'plain') {
+        response = await apiClient.post(
+          '/api/datasets/recaption-single',
+          {
+            imgPath: selectedItem.path,
+            provider: recaptionProvider,
+            model: recaptionModel,
+            outputFormat: recaptionOutputFormat,
+            prompt: recaptionPrompt,
+            systemPrompt: recaptionSystemPrompt,
+            existingCaption: captionText,
+            remoteWorkerId: recaptionRemoteWorkerId,
+            maxNewTokens: recaptionMaxNewTokens,
+            ...projectPayload,
+          },
+          { timeout: 0 },
+        );
+      } else {
+        if (!encryptedProviderConfirmations[`recaption:${recaptionProvider}`]) {
+          const confirmed = window.confirm(
+            `Recaption will send this decrypted image to ${recaptionProviderLabel}. Continue?`,
+          );
+          if (!confirmed) {
+            setRecaptionMessage('Recaption canceled.');
+            return;
+          }
+          setEncryptedProviderConfirmations(previous => ({ ...previous, [`recaption:${recaptionProvider}`]: true }));
+        }
+        const formData = await createEncryptedImageFormData({
+          datasetName,
+          workerID,
+          projectID,
+          encryptedKey: encryptedKey as CryptoKey,
+          item: selectedItem.item,
+        });
+        appendRecaptionFields(formData);
+        response = await apiClient.post('/api/datasets/recaption-single', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 0,
+        });
+      }
+
+      const caption = String(response.data?.caption || '').trim();
+      if (!caption) throw new Error('Recaption returned an empty caption.');
+      setUndoStack(previous => [...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)), captionText]);
+      setRedoStack([]);
+      if (recaptionOutputFormat === 'ideogram_json') setCaptionTab('json');
+      await saveCaption(caption);
+      setRecaptionMessage('Recaption saved.');
+      setIsRecaptionModalOpen(false);
+    } catch (error) {
+      setRecaptionMessage(responseErrorMessage(error, 'Recaption failed. Please try again.'));
+    } finally {
+      setIsRecaptioning(false);
+    }
+  }, [
+    appendRecaptionFields,
+    canRecaptionSelectedImage,
+    captionText,
+    datasetName,
+    encryptedKey,
+    encryptedProviderConfirmations,
+    isRecaptioning,
+    projectID,
+    projectPayload,
+    recaptionMaxNewTokens,
+    recaptionModel,
+    recaptionOutputFormat,
+    recaptionPrompt,
+    recaptionProvider,
+    recaptionProviderLabel,
+    recaptionRemoteWorkerId,
+    recaptionSystemPrompt,
+    saveCaption,
+    selectedItem,
+    workerID,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -1289,6 +1610,7 @@ export default function DatasetImageStudio({
               workerID={workerID}
               projectID={projectID}
               encryptedKey={encryptedKey}
+              isAutoCaptioning={isAutoCaptioning}
               captionCache={captionCacheRef.current}
               captionCacheVersion={captionCacheVersion}
               onCaptionCacheChange={bumpCaptionCacheVersion}
@@ -1366,15 +1688,160 @@ export default function DatasetImageStudio({
                 isCaptionLoaded={isCaptionLoaded}
                 isDirty={isDirty}
                 isSaving={isSaving}
+                isRecaptioning={isRecaptioning}
+                canRecaption={canRecaptionSelectedImage}
                 onCaptionTabChange={setCaptionTab}
                 onCaptionDescriptionChange={handleCaptionDescriptionChange}
                 onCaptionTextChange={handleCaptionTextChange}
+                onRecaption={() => {
+                  setRecaptionMessage('');
+                  setIsRecaptionModalOpen(true);
+                }}
                 onSave={() => void saveCaption()}
               />
             </div>
           </aside>
         </div>
       </div>
+      <Modal
+        isOpen={isRecaptionModalOpen}
+        onClose={() => {
+          if (!isRecaptioning) setIsRecaptionModalOpen(false);
+        }}
+        title="Recaption Image"
+        size="lg"
+        closeOnOverlayClick={!isRecaptioning}
+      >
+        <form
+          className="space-y-4 text-gray-200"
+          onSubmit={event => {
+            event.preventDefault();
+            void runSingleRecaption();
+          }}
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-gray-400">Provider</span>
+              <select
+                value={recaptionProvider}
+                onChange={event => handleRecaptionProviderChange(event.target.value)}
+                disabled={isRecaptioning}
+                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              >
+                {AUTO_BOX_PROVIDERS.map(provider => (
+                  <option key={provider.value} value={provider.value}>
+                    {provider.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-gray-400">Output</span>
+              <select
+                value={recaptionOutputFormat}
+                onChange={event => handleRecaptionOutputFormatChange(event.target.value as RecaptionOutputFormat)}
+                disabled={isRecaptioning}
+                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              >
+                <option value="text">Text caption</option>
+                <option value="ideogram_json">Ideogram JSON</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-gray-400">Model</span>
+              <input
+                list="recaption-model-options"
+                value={recaptionModel}
+                onChange={event => setRecaptionModel(event.target.value)}
+                disabled={isRecaptioning}
+                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              />
+              <datalist id="recaption-model-options">
+                {recaptionModelOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </datalist>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-gray-400">Max tokens</span>
+              <input
+                type="number"
+                min={1}
+                value={recaptionMaxNewTokens}
+                onChange={event => setRecaptionMaxNewTokens(Math.max(1, Number(event.target.value) || 1))}
+                disabled={isRecaptioning}
+                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              />
+            </label>
+          </div>
+
+          {recaptionProvider === 'remote_ollama' && (
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-medium text-gray-400">Remote Ollama</span>
+              <select
+                value={recaptionRemoteWorkerId}
+                onChange={event => setRecaptionRemoteWorkerId(event.target.value)}
+                disabled={isRecaptioning || remoteWorkerOptions.length === 0}
+                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              >
+                {remoteWorkerOptions.length === 0 && <option value="">No enabled workers</option>}
+                {remoteWorkerOptions.map(worker => (
+                  <option key={worker.value} value={worker.value}>
+                    {worker.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs font-medium text-gray-400">Prompt</span>
+            <textarea
+              value={recaptionPrompt}
+              onChange={event => setRecaptionPrompt(event.target.value)}
+              disabled={isRecaptioning}
+              rows={6}
+              className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+            />
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs font-medium text-gray-400">System prompt</span>
+            <textarea
+              value={recaptionSystemPrompt}
+              onChange={event => setRecaptionSystemPrompt(event.target.value)}
+              disabled={isRecaptioning}
+              rows={3}
+              className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+            />
+          </label>
+
+          {recaptionMessage && <div className="text-sm text-gray-400">{recaptionMessage}</div>}
+
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              disabled={isRecaptioning}
+              onClick={() => setIsRecaptionModalOpen(false)}
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isRecaptioning || !canRecaptionSelectedImage}
+              className="rounded-md bg-cyan-600 px-4 py-2 font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRecaptioning ? 'Recaptioning...' : 'Recaption'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

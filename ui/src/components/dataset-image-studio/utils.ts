@@ -7,6 +7,7 @@ import {
   type IdeogramBox,
   type IdeogramElementType,
 } from '@/utils/ideogramCaption';
+import { isFailedCaption, isRefusalCaption } from '@/utils/captionQuality';
 import { BOX_COLORS, HEX_COLOR_PATTERN } from './constants';
 import type { CaptionStatus, DatasetStudioItem } from './types';
 
@@ -50,7 +51,13 @@ export function clampIndex(value: number, length: number) {
 
 export function statusForCaption(caption: string, loaded: boolean): CaptionStatus {
   if (!loaded) return { dot: 'bg-gray-500', label: '...', title: 'Caption not loaded' };
-  if (!caption.trim()) return { dot: 'bg-rose-400', label: '0%', title: 'Missing caption' };
+  if (isFailedCaption(caption)) {
+    return {
+      dot: 'bg-rose-400',
+      label: '0%',
+      title: isRefusalCaption(caption) ? 'Failed caption' : 'Missing caption',
+    };
+  }
   const parsed = parseIdeogramCaption(caption);
   if (parsed.kind === 'ideogram') {
     return {

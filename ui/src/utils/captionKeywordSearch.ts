@@ -1,4 +1,5 @@
 import { parseIdeogramCaption, serializeIdeogramCaption } from './ideogramCaption';
+import { isFailedCaption } from './captionQuality';
 
 export type CaptionKeywordMatchMode = 'whole-word' | 'partial';
 
@@ -110,6 +111,7 @@ function removeFromJsonTextValues(value: unknown, terms: string[], mode: Caption
 }
 
 export function captionKeywordSearchText(caption: string) {
+  if (isFailedCaption(caption)) return '';
   const parsed = parseIdeogramCaption(caption);
   if (parsed.kind === 'ideogram') return collectJsonTextValues(parsed.data).join('\n');
   if (parsed.kind === 'json') return collectJsonTextValues(parsed.data).join('\n');

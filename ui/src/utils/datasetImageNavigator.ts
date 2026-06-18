@@ -1,4 +1,5 @@
 import { parseIdeogramCaption } from './ideogramCaption';
+import { isFailedCaption } from './captionQuality';
 
 export type DatasetNavigatorFilter = 'all' | 'needs-caption' | 'has-boxes';
 export type DatasetNavigatorStatus = 'unknown' | 'missing' | 'has-boxes' | 'json' | 'plain';
@@ -20,7 +21,7 @@ export function parseNavigatorJump(value: string, itemCount: number) {
 
 export function navigatorStatusForCaption(caption: string, loaded: boolean): DatasetNavigatorStatus {
   if (!loaded) return 'unknown';
-  if (!caption.trim()) return 'missing';
+  if (isFailedCaption(caption)) return 'missing';
   const parsed = parseIdeogramCaption(caption);
   if (parsed.kind === 'ideogram') return parsed.boxes.length > 0 ? 'has-boxes' : 'json';
   if (parsed.kind === 'json') return 'json';

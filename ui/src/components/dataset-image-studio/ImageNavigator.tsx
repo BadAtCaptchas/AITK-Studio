@@ -260,6 +260,7 @@ export function ImageNavigator({
   workerID,
   projectID,
   encryptedKey,
+  isAutoCaptioning,
   captionCache,
   captionCacheVersion,
   onCaptionCacheChange,
@@ -273,6 +274,7 @@ export function ImageNavigator({
   workerID: string;
   projectID?: string | null;
   encryptedKey?: CryptoKey | null;
+  isAutoCaptioning?: boolean;
   captionCache: Map<string, CaptionCacheEntry>;
   captionCacheVersion: number;
   onCaptionCacheChange: () => void;
@@ -361,7 +363,46 @@ export function ImageNavigator({
     () => filterNavigatorEntries(entries, searchQuery, filter),
     [entries, filter, searchQuery],
   );
-  const filteredIndexes = useMemo(() => filteredEntries.map(entry => entry.index), [filteredEntries]);
+  const captionKeywordTerms = useMemo(() => parseCaptionKeywordQuery(captionKeywordQuery), [captionKeywordQuery]);
+  const hasCaptionKeywordFilter = captionKeywordTerms.length > 0;
+  const captionKeywordMatches = useMemo<BulkCaptionMatch[]>(() => {
+    if (!hasCaptionKeywordFilter) return [];
+    return entries.flatMap(entry => {
+      const item = items[entry.index];
+      if (!item) return [];
+      const key = itemKey(item);
+      const cached = captionCache.get(key);
+      if (!cached?.loaded) return [];
+      if (!captionMatchesKeywords(cached.caption, captionKeywordTerms, captionKeywordMode)) return [];
+      return [{ key, index: entry.index, item, caption: cached.caption }];
+    });
+  }, [
+    captionCache,
+    captionCacheVersion,
+    captionKeywordMode,
+    captionKeywordTerms,
+    entries,
+    hasCaptionKeywordFilter,
+    items,
+    localCacheVersion,
+  ]);
+  const captionKeywordMatchIndexSet = useMemo(
+    () => new Set(captionKeywordMatches.map(match => match.index)),
+    [captionKeywordMatches],
+  );
+  const shownEntries = useMemo(
+    () =>
+      hasCaptionKeywordFilter
+        ? filteredEntries.filter(entry => captionKeywordMatchIndexSet.has(entry.index))
+        : filteredEntries,
+    [captionKeywordMatchIndexSet, filteredEntries, hasCaptionKeywordFilter],
+  );
+  const filteredIndexes = useMemo(() => shownEntries.map(entry => entry.index), [shownEntries]);
+  const shownCaptionKeywordMatches = useMemo(() => {
+    if (!hasCaptionKeywordFilter) return [];
+    const shownIndexes = new Set(filteredIndexes);
+    return captionKeywordMatches.filter(match => shownIndexes.has(match.index));
+  }, [captionKeywordMatches, filteredIndexes, hasCaptionKeywordFilter]);
   const selectedBulkItems = useMemo(
     () => items.filter(item => selectedBulkKeys.has(itemKey(item))),
     [items, selectedBulkKeys],
@@ -374,20 +415,7 @@ export function ImageNavigator({
       return Boolean(item && selectedBulkKeys.has(itemKey(item)));
     });
   const statusCounts = useMemo(() => navigatorStatusCounts(entries), [entries]);
-  const captionKeywordTerms = useMemo(() => parseCaptionKeywordQuery(captionKeywordQuery), [captionKeywordQuery]);
   const captionPendingCount = useMemo(() => entries.filter(entry => entry.status === 'unknown').length, [entries]);
-  const captionKeywordMatches = useMemo<BulkCaptionMatch[]>(() => {
-    if (captionKeywordTerms.length === 0) return [];
-    return entries.flatMap(entry => {
-      const item = items[entry.index];
-      if (!item) return [];
-      const key = itemKey(item);
-      const cached = captionCache.get(key);
-      if (!cached?.loaded) return [];
-      if (!captionMatchesKeywords(cached.caption, captionKeywordTerms, captionKeywordMode)) return [];
-      return [{ key, index: entry.index, item, caption: cached.caption }];
-    });
-  }, [captionCache, captionCacheVersion, captionKeywordMode, captionKeywordTerms, entries, items, localCacheVersion]);
   const thumbConfig = THUMB_SIZE_CONFIG[thumbSize];
   const gridColumns = useMemo(
     () => navigatorColumnCount(gridSize.width, thumbConfig.tileWidth, 8),
@@ -407,7 +435,7 @@ export function ImageNavigator({
   const canRunBulkAction =
     Boolean(onBulkCaptionAction) &&
     captionKeywordTerms.length > 0 &&
-    captionKeywordMatches.length > 0 &&
+    shownCaptionKeywordMatches.length > 0 &&
     captionPendingCount === 0 &&
     !bulkBusyAction;
 
@@ -520,12 +548,12 @@ export function ImageNavigator({
         return;
       }
       if (action === 'delete') {
-        const confirmed = window.confirm(`Delete ${captionKeywordMatches.length.toLocaleString()} matching item(s)?`);
+        const confirmed = window.confirm(`Delete ${shownCaptionKeywordMatches.length.toLocaleString()} matching item(s)?`);
         if (!confirmed) return;
       }
       if (action === 'move') {
         const confirmed = window.confirm(
-          `Move ${captionKeywordMatches.length.toLocaleString()} matching item(s) to "${bulkDestinationName.trim()}"?`,
+          `Move ${shownCaptionKeywordMatches.length.toLocaleString()} matching item(s) to "${bulkDestinationName.trim()}"?`,
         );
         if (!confirmed) return;
       }
@@ -538,7 +566,7 @@ export function ImageNavigator({
           query: captionKeywordQuery,
           matchMode: captionKeywordMode,
           destinationName: action === 'move' ? bulkDestinationName.trim() : undefined,
-          matches: captionKeywordMatches,
+          matches: shownCaptionKeywordMatches,
         });
         setBulkMessage(bulkResultMessage(result));
       } catch (error: any) {
@@ -551,10 +579,10 @@ export function ImageNavigator({
       bulkDestinationName,
       bulkResultMessage,
       canRunBulkAction,
-      captionKeywordMatches,
       captionKeywordMode,
       captionKeywordQuery,
       onBulkCaptionAction,
+      shownCaptionKeywordMatches,
     ],
   );
 
@@ -689,6 +717,44 @@ export function ImageNavigator({
   }, [captionCache, drawerOpen, items, notifyCaptionCacheChange, scanEncryptedChunk, scanPlainChunk]);
 
   useEffect(() => {
+    if (!isAutoCaptioning || items.length === 0) return;
+    const controller = new AbortController();
+    let busy = false;
+
+    const refreshMissingCaptions = async () => {
+      if (busy || controller.signal.aborted) return;
+      const targets = items
+        .filter(item => {
+          const cached = captionCache.get(itemKey(item));
+          if (!cached?.loaded) return true;
+          return navigatorStatusForCaption(cached.caption, true) === 'missing';
+        })
+        .slice(0, SCAN_CHUNK_SIZE);
+      if (targets.length === 0) return;
+
+      busy = true;
+      try {
+        await scanPlainChunk(targets, controller.signal);
+        await scanEncryptedChunk(targets, controller.signal);
+        if (!controller.signal.aborted) notifyCaptionCacheChange();
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          console.error('Auto-caption navigator refresh failed:', error);
+        }
+      } finally {
+        busy = false;
+      }
+    };
+
+    void refreshMissingCaptions();
+    const interval = window.setInterval(refreshMissingCaptions, 5000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [captionCache, isAutoCaptioning, items, notifyCaptionCacheChange, scanEncryptedChunk, scanPlainChunk]);
+
+  useEffect(() => {
     return () => scanControllerRef.current?.abort();
   }, []);
 
@@ -786,7 +852,7 @@ export function ImageNavigator({
                   ? `Scanning ${scanProgress}%`
                   : scanState.status === 'error'
                     ? scanState.error || 'Scan failed'
-                    : `${filteredEntries.length.toLocaleString()} shown`}
+                    : `${shownEntries.length.toLocaleString()} shown`}
               </span>
               {statusCounts.unknown > 0 && scanState.status !== 'done' && (
                 <span className="text-gray-500">{statusCounts.unknown.toLocaleString()} pending</span>
@@ -880,7 +946,7 @@ export function ImageNavigator({
 
             <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
               {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />}
-              <span>{captionKeywordMatches.length.toLocaleString()} found</span>
+              <span>{shownCaptionKeywordMatches.length.toLocaleString()} found</span>
               {captionPendingCount > 0 && <span className="text-gray-500">{captionPendingCount.toLocaleString()} pending</span>}
             </div>
 
@@ -962,7 +1028,7 @@ export function ImageNavigator({
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-gray-500">
-                  {filteredEntries.length === 0 ? 'No matching images' : 'Measuring grid'}
+                  {shownEntries.length === 0 ? 'No matching images' : 'Measuring grid'}
                 </div>
               )}
             </div>

@@ -4,7 +4,8 @@ import path from 'path';
 import crypto from 'crypto';
 import { TOOLKIT_ROOT } from '../paths';
 import type { DatasetSummary, EncryptedDatasetManifest, EncryptedDatasetStartKey } from '../types';
-import { DATASET_CAPTION_SIDECAR_EXTENSIONS } from './captionFiles';
+import { DATASET_CAPTION_SIDECAR_EXTENSIONS, readCaptionSidecar } from './captionFiles';
+import { isFailedCaption } from '../utils/captionQuality';
 import { isDatasetRootCaptionEntry } from './datasetRootCaption';
 
 export const ENCRYPTED_DATASET_MANIFEST = '.aitk_encrypted_dataset.json';
@@ -131,7 +132,8 @@ export function summarizePlainDatasetCaptions(datasetFolder: string): DatasetCap
 
       summary.itemCount += 1;
       const sidecars = captionSidecars(entryPath, datasetFolder);
-      if (sidecars.length > 0) {
+      const hasUsableCaption = sidecars.length > 0 && !isFailedCaption(readCaptionSidecar(entryPath));
+      if (hasUsableCaption) {
         summary.captionedItemCount += 1;
         sidecars.forEach(extension => {
           summary.captionExtensionCounts[extension] = (summary.captionExtensionCounts[extension] || 0) + 1;

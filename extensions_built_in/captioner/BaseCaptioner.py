@@ -203,6 +203,120 @@ def _normalize_caption_extension(value: Optional[str], default: str = "txt") -> 
     return normalized or default
 
 
+FIRST_PERSON_REFUSAL = (
+    r"\bi(?:\s+(?:can(?:not|'t)|won't(?:\s+be\s+able\s+to)?"
+    r"|will\s+not(?:\s+be\s+able\s+to)?|would\s+not\s+be\s+able\s+to)"
+    r"|(?:'m|\s+am)\s+(?:unable\s+to|not\s+able\s+to))"
+)
+
+REFUSAL_CAPTION_PATTERNS = [
+    re.compile(
+        rf"{FIRST_PERSON_REFUSAL}\s+"
+        r"(?:fulfill|fulfil|comply\s+with|assist\s+with|help\s+with|process|complete|accommodate)\s+"
+        r"(?:this|that|the|your)\s+(?:request|prompt)\b",
+        re.I,
+    ),
+    re.compile(
+        rf"{FIRST_PERSON_REFUSAL}\s+(?:assist|help|comply)\s+"
+        r"(?:with\s+)?(?:that|this|it|you)\b",
+        re.I,
+    ),
+    re.compile(
+        rf"{FIRST_PERSON_REFUSAL}\s+(?:assist|help|comply)\s+with\s+"
+        r"(?:requests?|content|material|images?|prompts?)\b",
+        re.I,
+    ),
+    re.compile(
+        rf"{FIRST_PERSON_REFUSAL}\s+"
+        r"(?:provide|generate|create|caption|describe|produce|write|answer|respond)\b",
+        re.I,
+    ),
+    re.compile(
+        rf"{FIRST_PERSON_REFUSAL}\s+(?:help|assist)\s+"
+        r"(?:provide|generate|create|caption|describe|produce|write|answer|respond)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:cannot|can't|unable\s+to|not\s+able\s+to)\s+"
+        r"(?:fulfill|fulfil|comply\s+with|assist\s+with|help\s+with|process|complete|accommodate)\s+"
+        r"(?:this|that|the|your)\s+(?:request|prompt)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:(?:i'm|i\s+am)\s+)?sorry\b.{0,120}\b(?:can't|cannot|unable|not\s+able|won't|will\s+not)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:i\s+apologi[sz]e|apologies)\b.{0,120}\b(?:can't|cannot|unable|not\s+able|won't|will\s+not)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:i'm|i\s+am)\s+afraid\b.{0,120}\b(?:can't|cannot|unable|not\s+able|won't|will\s+not)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:as\s+an?\s+(?:ai|language\s+model|assistant)|i\s+am\s+an?\s+(?:ai|language\s+model|assistant))\b"
+        r".{0,160}\b(?:can't|cannot|unable|not\s+able|don't|do\s+not|won't|will\s+not)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:against|violates?|breach(?:es)?)\s+(?:my\s+)?"
+        r"(?:policy|policies|guidelines?|safety\s+guidelines?|content\s+policy)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:not\s+allowed|not\s+permitted|disallowed|prohibited)\s+(?:by|under)\s+"
+        r"(?:the\s+)?(?:policy|policies|guidelines?|safety\s+guidelines?|content\s+policy)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:outside|beyond)\s+(?:my\s+)?"
+        r"(?:policy|policies|guidelines?|safety\s+guidelines?|content\s+policy|capabilities|scope)\b",
+        re.I,
+    ),
+    re.compile(r"\brequest\s+(?:denied|rejected|refused|declined)\b", re.I),
+    re.compile(r"\b(?:i\s+)?(?:must|have\s+to|need\s+to)\s+(?:refuse|decline)\b", re.I),
+    re.compile(
+        r"\b(?:(?:not|isn't)\s+(?:appropriate|safe)|would\s+be\s+(?:inappropriate|unsafe))\b.{0,80}\b"
+        r"(?:assist(?:ing)?|help(?:ing)?|provid(?:e|ing)|generat(?:e|ing)|creat(?:e|ing)|describ(?:e|ing)|caption(?:ing)?|comply(?:ing)?)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\bi\s+(?:do\s+not|don't)\s+(?:feel\s+comfortable|feel\s+able)\b.{0,80}\b"
+        r"(?:assist(?:ing)?|help(?:ing)?|provid(?:e|ing)|generat(?:e|ing)|creat(?:e|ing)|describ(?:e|ing)|caption(?:ing)?|comply(?:ing)?)\b",
+        re.I,
+    ),
+    re.compile(
+        rf"{FIRST_PERSON_REFUSAL}\s+"
+        r"(?:view|see|access|analy[sz]e|process|interpret|inspect)\s+"
+        r"(?:the|this|that)\s+(?:image|file|picture|photo)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:no|without\s+an?)\s+(?:image|file|picture|photo)\s+(?:was\s+)?"
+        r"(?:provided|attached|uploaded|included|available)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:image|file|picture|photo)\s+(?:is|was)\s+(?:not\s+)?"
+        r"(?:accessible|available|provided|attached|uploaded)\b",
+        re.I,
+    ),
+]
+
+
+def is_refusal_caption(caption: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(caption or "").strip())
+    normalized = re.sub(r"[\u2018\u2019]", "'", normalized)
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in REFUSAL_CAPTION_PATTERNS)
+
+
+def is_failed_caption(caption: str) -> bool:
+    return not str(caption or "").strip() or is_refusal_caption(caption)
+
+
 class CaptionConfig:
     def __init__(self, **kwargs):
         self.model_name_or_path = kwargs.get("model_name_or_path", None)
@@ -315,10 +429,14 @@ class BaseCaptioner(BaseExtensionProcess):
                 )
                 if file_caption is None:
                     file_caption = self.get_caption_for_file(file_path)
-                if file_caption is None or str(file_caption).strip() == "":
+                if is_failed_caption(str(file_caption or "")):
                     self.caption_failure_count += 1
-                    last_error_message = "captioner returned no text"
-                    print(f"Error captioning file {file_path}: captioner returned no text")
+                    last_error_message = (
+                        "captioner returned a refusal"
+                        if is_refusal_caption(str(file_caption or ""))
+                        else "captioner returned no text"
+                    )
+                    print(f"Error captioning file {file_path}: {last_error_message}")
                     continue
                 self.save_caption_for_file(file_path, str(file_caption).strip())
                 self.caption_success_count += 1

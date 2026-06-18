@@ -1,6 +1,7 @@
 import type { EncryptedDatasetItem } from '@/types';
 import { apiClient } from '@/utils/api';
 import { decryptEncryptedObjectBlob } from '@/utils/encryptedDatasets';
+import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
 
 export async function createEncryptedImageFormData({
   datasetName,
@@ -17,7 +18,7 @@ export async function createEncryptedImageFormData({
 }) {
   const encryptedResponse = await apiClient.post(
     '/api/datasets/encrypted/object',
-    { datasetName, worker_id: workerID, objectPath: item.objectPath, ...(projectID ? { project_id: projectID } : {}) },
+    buildEncryptedObjectRequestBody({ datasetName, workerID, projectID, objectPath: item.objectPath }),
     { responseType: 'blob' },
   );
   const decrypted = await decryptEncryptedObjectBlob(encryptedKey, item.objectPath, encryptedResponse.data as Blob);

@@ -13,6 +13,7 @@ export function ThumbnailStrip({
   selectedIndex,
   datasetName,
   workerID,
+  projectID,
   encryptedKey,
   captionCache,
   onSelectIndex,
@@ -22,6 +23,7 @@ export function ThumbnailStrip({
   selectedIndex: number;
   datasetName: string;
   workerID: string;
+  projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   captionCache: Map<string, CaptionCacheEntry>;
   onSelectIndex: (index: number) => void;
@@ -65,7 +67,13 @@ export function ThumbnailStrip({
                 {item.kind === 'plain' ? (
                   <PlainThumb path={item.path} alt={itemName(item)} />
                 ) : (
-                  <EncryptedThumb datasetName={datasetName} workerID={workerID} cryptoKey={encryptedKey} item={item.item} />
+                  <EncryptedThumb
+                    datasetName={datasetName}
+                    workerID={workerID}
+                    projectID={projectID}
+                    cryptoKey={encryptedKey}
+                    item={item.item}
+                  />
                 )}
                 {previewBoxes.length > 0 && (
                   <div className="pointer-events-none absolute inset-0">

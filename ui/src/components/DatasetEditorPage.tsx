@@ -35,6 +35,7 @@ import {
   rememberEncryptedDatasetKey,
   unlockEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
+import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
 
@@ -458,7 +459,7 @@ export default function DatasetEditorPage({
   const encryptedObjectUpdate = async (objectPath: string) => {
     const response = await apiClient.post(
       '/api/datasets/encrypted/object',
-      { datasetName, worker_id: workerID, objectPath, ...projectPayload },
+      buildEncryptedObjectRequestBody({ datasetName, workerID, projectID, objectPath }),
       { responseType: 'blob' },
     );
     const bytes = await (response.data as Blob).arrayBuffer();

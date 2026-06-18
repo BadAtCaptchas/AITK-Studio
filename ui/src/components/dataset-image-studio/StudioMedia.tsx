@@ -8,9 +8,25 @@ import type { EncryptedDatasetItem } from '@/types';
 import { apiClient } from '@/utils/api';
 import { isAudio, isTextCaption, isVideo } from '@/utils/basic';
 import { decryptEncryptedObjectBlob } from '@/utils/encryptedDatasets';
+import {
+  loadEncryptedObjectMediaUrl,
+  type EncryptedObjectMediaStatus,
+  type EncryptedObjectRequestBody,
+} from '@/utils/encryptedObjectMediaCache';
 import { getMediaUrl } from '@/utils/media';
 import { itemKind, itemName, sampleImageColorAt } from './utils';
 import type { DatasetStudioItem, ImageSize } from './types';
+
+type EncryptedObjectUrlState = {
+  url: string | null;
+  status: EncryptedObjectMediaStatus;
+  error: unknown;
+};
+
+async function fetchEncryptedObjectBlob(body: EncryptedObjectRequestBody) {
+  const response = await apiClient.post('/api/datasets/encrypted/object', body, { responseType: 'blob' });
+  return response.data as Blob;
+}
 
 export function useEncryptedObjectUrl(
   datasetName: string,
@@ -20,46 +36,50 @@ export function useEncryptedObjectUrl(
   item: EncryptedDatasetItem | null,
   enabled = true,
 ) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [state, setState] = useState<EncryptedObjectUrlState>({
+    url: null,
+    status: 'locked',
+    error: null,
+  });
 
   useEffect(() => {
-    if (!cryptoKey || !item || !enabled) {
-      setUrl(null);
+    if (!item || !enabled) {
+      setState({ url: null, status: 'locked', error: null });
+      return;
+    }
+    if (!cryptoKey) {
+      setState({ url: null, status: 'locked', error: null });
       return;
     }
 
-    let objectUrl: string | null = null;
     let cancelled = false;
-    setLoading(true);
-    setUrl(null);
+    setState({ url: null, status: 'loading', error: null });
 
-    apiClient
-      .post(
-        '/api/datasets/encrypted/object',
-        { datasetName, worker_id: workerID, objectPath: item.objectPath, ...(projectID ? { project_id: projectID } : {}) },
-        { responseType: 'blob' },
-      )
-      .then(async response => {
-        const decrypted = await decryptEncryptedObjectBlob(cryptoKey, item.objectPath, response.data as Blob);
+    loadEncryptedObjectMediaUrl({
+      datasetName,
+      workerID,
+      projectID,
+      cryptoKey,
+      item,
+      loadEncryptedObject: fetchEncryptedObjectBlob,
+      decryptEncryptedObject: decryptEncryptedObjectBlob,
+    })
+      .then(url => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([decrypted], { type: item.mimeType || 'application/octet-stream' }));
-        setUrl(objectUrl);
+        setState({ url, status: 'ready', error: null });
       })
       .catch(error => {
-        if (!cancelled) console.error('Encrypted media load failed:', error);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        console.error('Encrypted media load failed:', error);
+        setState({ url: null, status: 'error', error });
       });
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [cryptoKey, datasetName, enabled, item, projectID, workerID]);
 
-  return { url, loading };
+  return state;
 }
 
 function useElementSize<T extends HTMLElement>() {
@@ -123,13 +143,20 @@ export function EncryptedThumb({
   cryptoKey: CryptoKey | null | undefined;
   item: EncryptedDatasetItem;
 }) {
-  const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, item);
+  const shouldLoadMedia = item.mediaKind !== 'audio';
+  const { url, status } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, item, shouldLoadMedia);
 
-  if (loading || !url) {
-    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">Decrypting</div>;
-  }
   if (item.mediaKind === 'audio') {
     return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>;
+  }
+  if (status === 'locked') {
+    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">Locked</div>;
+  }
+  if (status === 'error') {
+    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-red-300">Load failed</div>;
+  }
+  if (status === 'loading' || !url) {
+    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">Decrypting</div>;
   }
   if (item.mediaKind === 'video') {
     return <video src={url} className="h-full w-full object-cover" muted preload="metadata" />;
@@ -163,7 +190,7 @@ export function StudioMedia({
   onCancelColorSample?: () => void;
 }) {
   const encryptedItem = item.kind === 'encrypted' ? item.item : null;
-  const { url, loading } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, encryptedItem);
+  const { url, status } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, encryptedItem);
   const kind = itemKind(item);
   const src = item.kind === 'plain' ? getMediaUrl(item.path) : url;
   const name = itemName(item);
@@ -189,7 +216,23 @@ export function StudioMedia({
     };
   }, [frameSize.height, frameSize.width, naturalSize, zoom]);
 
-  if (item.kind === 'encrypted' && (loading || !src)) {
+  if (item.kind === 'encrypted' && status === 'locked') {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
+        Unlock the encrypted dataset first.
+      </div>
+    );
+  }
+
+  if (item.kind === 'encrypted' && status === 'error') {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-sm text-red-300">
+        Encrypted media unavailable.
+      </div>
+    );
+  }
+
+  if (item.kind === 'encrypted' && (status === 'loading' || !src)) {
     return (
       <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
         <Loader2 className="mr-2 h-4 w-4 animate-spin" />

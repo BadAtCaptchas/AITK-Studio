@@ -33,6 +33,7 @@
         "src/utils/ideogramWorkflow.ts",
         "src/utils/folderImport.ts",
         "src/utils/encryptedDatasets.ts",
+        "src/utils/encryptedObjectMediaCache.ts",
         "src/utils/webauthnPrfCrypto.ts",
         "src/utils/trainingPhaseSummary.ts",
         "src/server/pythonPath.ts",

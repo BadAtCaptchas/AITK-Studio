@@ -5,7 +5,7 @@ import {
   resolveDatasetFolder,
   resolveEncryptedObjectPath,
 } from '@/server/encryptedDatasets';
-import { getRemoteWorker, isLocalWorker, remoteFetch } from '@/server/remoteClient';
+import { getRemoteWorker, isLocalWorker, RemoteClientError, remoteFetch } from '@/server/remoteClient';
 import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
 
 function copyResponseHeaders(source: Response) {
@@ -15,6 +15,17 @@ function copyResponseHeaders(source: Response) {
     if (value) headers.set(name, value);
   }
   return headers;
+}
+
+function remoteClientErrorResponse(error: RemoteClientError) {
+  if (error.body) {
+    try {
+      return NextResponse.json(JSON.parse(error.body), { status: error.status });
+    } catch {
+      return NextResponse.json({ error: error.body }, { status: error.status });
+    }
+  }
+  return NextResponse.json({ error: error.message }, { status: error.status });
 }
 
 export async function POST(request: NextRequest) {
@@ -71,6 +82,9 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof RemoteClientError) {
+      return remoteClientErrorResponse(error);
+    }
     const status = error instanceof DatasetScopeError ? error.status : 400;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to read encrypted object' },

@@ -11,6 +11,7 @@ const encryptedDatasets = require('../dist/src/server/encryptedDatasets.js');
 const datasetRootCaption = require('../dist/src/server/datasetRootCaption.js');
 const datasetImages = require('../dist/src/server/datasetImages.js');
 const encryptedDatasetUtils = require('../dist/src/utils/encryptedDatasets.js');
+const encryptedObjectMediaCache = require('../dist/src/utils/encryptedObjectMediaCache.js');
 const webauthnPrfCrypto = require('../dist/src/utils/webauthnPrfCrypto.js');
 
 const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
@@ -296,4 +297,244 @@ test('mocked WebAuthn PRF output rejects the wrong security key result', async (
     () => webauthnPrfCrypto.decryptWithWebAuthnPrfKey(wrongPrfOutput, wrapped.nonce, wrapped.data, aad),
     /decrypt|operation|auth|tag/i,
   );
+});
+
+function encryptedMediaItem(objectPath, overrides = {}) {
+  return {
+    objectPath,
+    updatedAt: '2026-06-18T00:00:00.000Z',
+    mimeType: 'image/png',
+    ...overrides,
+  };
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+test('encrypted object request bodies keep project scope local-only', () => {
+  assert.deepEqual(
+    encryptedObjectMediaCache.buildEncryptedObjectRequestBody({
+      datasetName: 'locked',
+      workerID: 'local',
+      projectID: 'project-1',
+      objectPath: 'objects/a.bin',
+    }),
+    {
+      datasetName: 'locked',
+      objectPath: 'objects/a.bin',
+      worker_id: 'local',
+      project_id: 'project-1',
+    },
+  );
+  assert.deepEqual(
+    encryptedObjectMediaCache.buildEncryptedObjectRequestBody({
+      datasetName: 'locked',
+      workerID: 'worker-1',
+      projectID: 'project-1',
+      objectPath: 'objects/a.bin',
+    }),
+    {
+      datasetName: 'locked',
+      objectPath: 'objects/a.bin',
+      worker_id: 'worker-1',
+    },
+  );
+});
+
+test('encrypted object media cache dedupes concurrent loads for the same object', async () => {
+  encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  let fetches = 0;
+  let decrypts = 0;
+  let urls = 0;
+  const options = {
+    datasetName: 'locked',
+    workerID: 'worker-1',
+    cryptoKey: {},
+    item: encryptedMediaItem('objects/a.bin'),
+    loadEncryptedObject: async body => {
+      fetches += 1;
+      assert.equal(body.worker_id, 'worker-1');
+      await delay(5);
+      return new Blob(['encrypted']);
+    },
+    decryptEncryptedObject: async () => {
+      decrypts += 1;
+      return new Uint8Array([1, 2, 3]).buffer;
+    },
+    createObjectUrl: () => {
+      urls += 1;
+      return `blob:${urls}`;
+    },
+    revokeObjectUrl: () => undefined,
+  };
+
+  try {
+    const [first, second] = await Promise.all([
+      encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(options),
+      encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(options),
+    ]);
+
+    assert.equal(first, second);
+    assert.equal(fetches, 1);
+    assert.equal(decrypts, 1);
+    assert.equal(urls, 1);
+  } finally {
+    encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  }
+});
+
+test('encrypted object media cache retries after failed loads', async () => {
+  encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  let fetches = 0;
+  const options = {
+    datasetName: 'locked',
+    workerID: 'worker-1',
+    cryptoKey: {},
+    item: encryptedMediaItem('objects/retry.bin'),
+    loadEncryptedObject: async () => {
+      fetches += 1;
+      if (fetches === 1) throw new Error('temporary remote failure');
+      return new Blob(['encrypted']);
+    },
+    decryptEncryptedObject: async () => new Uint8Array([1]).buffer,
+    createObjectUrl: () => 'blob:retry',
+    revokeObjectUrl: () => undefined,
+  };
+
+  try {
+    await assert.rejects(
+      () => encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(options),
+      /temporary remote failure/,
+    );
+    assert.equal(await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(options), 'blob:retry');
+    assert.equal(fetches, 2);
+  } finally {
+    encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  }
+});
+
+test('encrypted object media cache evicts least-recently-used object URLs', async () => {
+  encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  const revoked = [];
+  let urlID = 0;
+  const base = {
+    datasetName: 'locked',
+    workerID: 'worker-1',
+    cryptoKey: {},
+    loadEncryptedObject: async () => new Blob(['encrypted']),
+    decryptEncryptedObject: async () => new Uint8Array([1]).buffer,
+    createObjectUrl: () => {
+      const url = `blob:${urlID}`;
+      urlID += 1;
+      return url;
+    },
+    revokeObjectUrl: url => revoked.push(url),
+  };
+
+  try {
+    for (let index = 0; index < 129; index += 1) {
+      await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({
+        ...base,
+        item: encryptedMediaItem(`objects/${index}.bin`),
+      });
+    }
+
+    assert.equal(revoked.length, 1);
+    assert.equal(revoked[0], 'blob:0');
+  } finally {
+    encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  }
+});
+
+test('encrypted object media cache limits parallel remote loads', async () => {
+  encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  let active = 0;
+  let maxActive = 0;
+
+  try {
+    await Promise.all(
+      Array.from({ length: 9 }).map((_, index) =>
+        encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({
+          datasetName: 'locked',
+          workerID: 'worker-1',
+          cryptoKey: {},
+          item: encryptedMediaItem(`objects/concurrent-${index}.bin`),
+          loadEncryptedObject: async () => {
+            active += 1;
+            maxActive = Math.max(maxActive, active);
+            await delay(10);
+            active -= 1;
+            return new Blob(['encrypted']);
+          },
+          decryptEncryptedObject: async () => new Uint8Array([1]).buffer,
+          createObjectUrl: () => `blob:concurrent-${index}`,
+          revokeObjectUrl: () => undefined,
+        }),
+      ),
+    );
+
+    assert.equal(maxActive, 4);
+  } finally {
+    encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  }
+});
+
+test('encrypted object media cache keys include worker, local project, dataset, crypto key, object, update time, and MIME type', async () => {
+  encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  const bodies = [];
+  let urlID = 0;
+  const cryptoKeyA = {};
+  const cryptoKeyB = {};
+  const base = {
+    datasetName: 'locked',
+    workerID: 'local',
+    projectID: 'project-a',
+    cryptoKey: cryptoKeyA,
+    item: encryptedMediaItem('objects/same.bin'),
+    loadEncryptedObject: async body => {
+      bodies.push(body);
+      return new Blob(['encrypted']);
+    },
+    decryptEncryptedObject: async () => new Uint8Array([1]).buffer,
+    createObjectUrl: () => {
+      const url = `blob:key-${urlID}`;
+      urlID += 1;
+      return url;
+    },
+    revokeObjectUrl: () => undefined,
+  };
+
+  try {
+    const first = await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(base);
+    assert.equal(await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(base), first);
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, workerID: 'worker-1', projectID: 'project-a' });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, projectID: 'project-b' });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, datasetName: 'other-locked' });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, cryptoKey: cryptoKeyB });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, item: encryptedMediaItem('objects/changed.bin') });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({
+      ...base,
+      item: encryptedMediaItem('objects/same.bin', { updatedAt: '2026-06-18T01:00:00.000Z' }),
+    });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({
+      ...base,
+      item: encryptedMediaItem('objects/same.bin', { mimeType: 'image/webp' }),
+    });
+
+    assert.equal(bodies.length, 8);
+    assert.deepEqual(bodies[0], {
+      datasetName: 'locked',
+      objectPath: 'objects/same.bin',
+      worker_id: 'local',
+      project_id: 'project-a',
+    });
+    assert.deepEqual(bodies[1], {
+      datasetName: 'locked',
+      objectPath: 'objects/same.bin',
+      worker_id: 'worker-1',
+    });
+  } finally {
+    encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
+  }
 });

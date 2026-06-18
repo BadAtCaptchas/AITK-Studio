@@ -38,6 +38,7 @@ import {
   type CaptionKeywordMatchMode,
 } from '@/utils/captionKeywordSearch';
 import { decryptEncryptedObjectBlob } from '@/utils/encryptedDatasets';
+import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
 import { extractIdeogramBoxes, parseIdeogramCaption } from '@/utils/ideogramCaption';
 import type {
   BulkCaptionAction,
@@ -650,7 +651,7 @@ export function ImageNavigator({
               try {
                 const response = await apiClient.post(
                   '/api/datasets/encrypted/object',
-                  { datasetName, worker_id: workerID, objectPath: captionPath, ...projectPayload },
+                  buildEncryptedObjectRequestBody({ datasetName, workerID, projectID, objectPath: captionPath }),
                   { responseType: 'blob', signal },
                 );
                 const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
@@ -667,7 +668,7 @@ export function ImageNavigator({
       );
       return completed;
     },
-    [datasetName, encryptedKey, projectPayload, setCacheEntry, workerID],
+    [datasetName, encryptedKey, projectID, projectPayload, setCacheEntry, workerID],
   );
 
   useEffect(() => {

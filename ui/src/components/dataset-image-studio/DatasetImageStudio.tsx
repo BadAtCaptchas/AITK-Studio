@@ -12,6 +12,7 @@ import {
   encryptCaptionObject,
   randomId,
 } from '@/utils/encryptedDatasets';
+import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
 import {
   addIdeogramElement,
   appendGeneratedIdeogramElements,
@@ -655,7 +656,7 @@ export default function DatasetImageStudio({
         if (captionPath) {
           const response = await apiClient.post(
             '/api/datasets/encrypted/object',
-            { datasetName, worker_id: workerID, objectPath: captionPath, ...projectPayload },
+            buildEncryptedObjectRequestBody({ datasetName, workerID, projectID, objectPath: captionPath }),
             { responseType: 'blob', ...(signal ? { signal } : {}) },
           );
           const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
@@ -664,7 +665,7 @@ export default function DatasetImageStudio({
       }
       return text;
     },
-    [datasetName, encryptedKey, projectPayload, workerID],
+    [datasetName, encryptedKey, projectID, projectPayload, workerID],
   );
 
   useEffect(() => {

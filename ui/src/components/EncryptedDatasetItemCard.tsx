@@ -9,6 +9,7 @@ import {
   captionObjectPath,
   randomId,
 } from '@/utils/encryptedDatasets';
+import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
 import { openConfirm } from './ConfirmModal';
 import AudioPlayer from './AudioPlayer';
 
@@ -44,7 +45,7 @@ const EncryptedDatasetItemCard: React.FC<EncryptedDatasetItemCardProps> = ({
     async (objectPath: string) => {
       const res = await apiClient.post(
         '/api/datasets/encrypted/object',
-        { datasetName, objectPath, worker_id: workerID },
+        buildEncryptedObjectRequestBody({ datasetName, workerID, objectPath }),
         { responseType: 'blob' },
       );
       return res.data as Blob;

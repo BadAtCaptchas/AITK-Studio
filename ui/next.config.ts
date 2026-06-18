@@ -16,7 +16,14 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_APP_VERSION: getAppVersion(),
   },
-  serverExternalPackages: ['macstats', 'osx-temperature-sensor'],
+  serverExternalPackages: [
+    'archiver',
+    'macstats',
+    'node-cache',
+    'osx-temperature-sensor',
+    'systeminformation',
+    'yauzl',
+  ],
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.externals.push('osx-temperature-sensor', 'macstats');

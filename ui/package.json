@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "npm run update_db && node scripts/run-app.mjs --mode dev",
     "build": "node scripts/clean-worker.mjs && tsc -p tsconfig.worker.json && next build",
+    "build:fast": "node scripts/clean-worker.mjs && tsc -p tsconfig.worker.json && next build --experimental-app-only",
     "start": "npm run update_db && node scripts/run-app.mjs --mode start",
     "build_and_start": "npm install && npm run update_db && npm run build && npm run start",
     "sync:local": "node scripts/sync-local-changes.mjs",

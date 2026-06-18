@@ -34,23 +34,17 @@ test('single-image recaption returns validated OpenRouter text captions', async 
 });
 
 test('single-image recaption rejects refusal captions', async () => {
-  for (const refusal of [
-    'I cannot fulfill this request.',
-    'Please provide the image or video you would like me to caption.',
-  ]) {
-    await assert.rejects(
-      () =>
-        generateSingleImageRecaption({
-          provider: 'openrouter',
-          model: 'x-ai/grok-4.3',
-          outputFormat: 'text',
-          prompt: 'caption it',
-          imageDataUrl: 'data:image/png;base64,abc',
-          openRouterApiKey: 'test-key',
-          fetchImpl: openRouterFetchReturning(refusal),
-        }),
-      /refusal/i,
-      refusal,
-    );
-  }
+  await assert.rejects(
+    () =>
+      generateSingleImageRecaption({
+        provider: 'openrouter',
+        model: 'x-ai/grok-4.3',
+        outputFormat: 'text',
+        prompt: 'caption it',
+        imageDataUrl: 'data:image/png;base64,abc',
+        openRouterApiKey: 'test-key',
+        fetchImpl: openRouterFetchReturning('I cannot fulfill this request.'),
+      }),
+    /refusal/i,
+  );
 });

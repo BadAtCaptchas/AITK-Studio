@@ -86,9 +86,6 @@ class OllamaCaptioner(BaseCaptioner):
         value = value.strip()
         return value if ":" in value else f"{value}:latest"
 
-    def _is_gemma_model(self, value: str) -> bool:
-        return self._normalize_model_name(value).lower().startswith("gemma")
-
     def _has_model(self, requested_model: str) -> bool:
         requested = self._normalize_model_name(requested_model)
         data = self._request_json("/api/tags", timeout=30)
@@ -202,18 +199,14 @@ class OllamaCaptioner(BaseCaptioner):
             "keep_alive": "10m",
         }
 
-        endpoint_order = ["chat", "generate"] if self._is_gemma_model(model) else ["generate", "chat"]
-        request_bodies = {
-            "generate": generate_body,
-            "chat": chat_body,
-        }
-
         for attempt in range(1, 4):
             options = {"num_predict": self._caption_num_predict(attempt)}
-            for endpoint in endpoint_order:
-                caption = self._generate_caption_once(endpoint, {**request_bodies[endpoint], "options": options})
-                if caption:
-                    return self.normalize_caption_output(file_path, caption, image_size=image_size)
+            caption = self._generate_caption_once("generate", {**generate_body, "options": options})
+            if caption:
+                return self.normalize_caption_output(file_path, caption, image_size=image_size)
+            caption = self._generate_caption_once("chat", {**chat_body, "options": options})
+            if caption:
+                return self.normalize_caption_output(file_path, caption, image_size=image_size)
             if attempt < 3:
                 time.sleep(2)
 

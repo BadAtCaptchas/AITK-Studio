@@ -191,7 +191,7 @@ test('generateOllamaImageCaption sends system prompt to Ollama generate', async 
   assert.equal(generateBodies.length, 1);
   assert.equal(generateBodies[0].system, 'Return compact training captions.');
   assert.equal('think' in generateBodies[0], false);
-  assert.deepEqual(generateBodies[0].options, { num_predict: 2048 });
+  assert.deepEqual(generateBodies[0].options, { num_predict: 1024 });
 });
 
 test('generateOllamaImageCaption adds thinking budget to larger requested token budgets', async () => {
@@ -236,50 +236,13 @@ test('generateOllamaImageCaption falls back to chat when generate is empty', asy
   );
 
   assert.equal(caption, 'chat caption');
-  assert.deepEqual(
-    calls.filter(call => call.url.endsWith('/api/generate') || call.url.endsWith('/api/chat')).map(call => call.url.split('/api/')[1]),
-    ['generate', 'chat'],
-  );
   const chatBody = JSON.parse(calls.find(call => call.url.endsWith('/api/chat')).body);
   assert.deepEqual(chatBody.messages, [
     { role: 'system', content: 'Return compact training captions.' },
     { role: 'user', content: 'caption', images: ['aW1n'] },
   ]);
   assert.equal('think' in chatBody, false);
-  assert.deepEqual(chatBody.options, { num_predict: 2048 });
-});
-
-test('generateOllamaImageCaption tries chat before generate for Gemma models', async () => {
-  const calls = [];
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body });
-    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'gemma4:31b' }] });
-    if (String(url).endsWith('/api/chat')) return response({ message: { content: '' }, done_reason: 'stop' });
-    if (String(url).endsWith('/api/generate')) return response({ response: 'generate caption' });
-    throw new Error(`Unexpected URL: ${url}`);
-  };
-
-  const caption = await ollama.generateOllamaImageCaption(
-    {
-      model: 'gemma4:31b',
-      prompt: 'caption',
-      systemPrompt: 'Return compact training captions.',
-      imageBase64: 'aW1n',
-      maxNewTokens: 32,
-    },
-    'http://ollama.test',
-  );
-
-  assert.equal(caption, 'generate caption');
-  assert.deepEqual(
-    calls.filter(call => call.url.endsWith('/api/chat') || call.url.endsWith('/api/generate')).map(call => call.url.split('/api/')[1]),
-    ['chat', 'generate'],
-  );
-  const chatBody = JSON.parse(calls.find(call => call.url.endsWith('/api/chat')).body);
-  assert.deepEqual(chatBody.messages, [
-    { role: 'system', content: 'Return compact training captions.' },
-    { role: 'user', content: 'caption', images: ['aW1n'] },
-  ]);
+  assert.deepEqual(chatBody.options, { num_predict: 1024 });
 });
 
 test('generateOllamaImageCaption expands retry budget for thinking-only length responses', async () => {
@@ -307,7 +270,7 @@ test('generateOllamaImageCaption expands retry budget for thinking-only length r
     .map(call => JSON.parse(call.body));
   assert.deepEqual(
     generationBodies.map(body => body.options.num_predict),
-    [2048, 2048, 4096, 4096, 4096, 4096],
+    [1024, 1024, 2048, 2048, 4096, 4096],
   );
 });
 

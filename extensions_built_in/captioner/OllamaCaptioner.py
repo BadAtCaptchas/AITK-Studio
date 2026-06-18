@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from collections import OrderedDict
 
-from .BaseCaptioner import BaseCaptioner, CaptionConfig, is_refusal_caption
+from .BaseCaptioner import BaseCaptioner, CaptionConfig
 
 
 DEFAULT_OLLAMA_USER_AGENT = (
@@ -212,9 +212,9 @@ class OllamaCaptioner(BaseCaptioner):
             options = {"num_predict": self._caption_num_predict(attempt)}
             for endpoint in endpoint_order:
                 caption = self._generate_caption_once(endpoint, {**request_bodies[endpoint], "options": options})
-                if caption and not is_refusal_caption(caption):
+                if caption:
                     return self.normalize_caption_output(file_path, caption, image_size=image_size)
             if attempt < 3:
                 time.sleep(2)
 
-        raise RuntimeError("Ollama returned an empty or refusal caption. Confirm the selected model supports image inputs.")
+        raise RuntimeError("Ollama returned an empty caption. Confirm the selected model supports image inputs.")

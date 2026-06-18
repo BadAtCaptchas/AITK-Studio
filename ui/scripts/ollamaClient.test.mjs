@@ -282,35 +282,6 @@ test('generateOllamaImageCaption tries chat before generate for Gemma models', a
   ]);
 });
 
-test('generateOllamaImageCaption skips Gemma chat refusal and tries generate', async () => {
-  const calls = [];
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), method: init?.method || 'GET', body: init?.body });
-    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'gemma4:31b' }] });
-    if (String(url).endsWith('/api/chat')) {
-      return response({ message: { content: 'Please provide the image or video you would like me to caption.' } });
-    }
-    if (String(url).endsWith('/api/generate')) return response({ response: 'generate caption' });
-    throw new Error(`Unexpected URL: ${url}`);
-  };
-
-  const caption = await ollama.generateOllamaImageCaption(
-    {
-      model: 'gemma4:31b',
-      prompt: 'caption',
-      imageBase64: 'aW1n',
-      maxNewTokens: 32,
-    },
-    'http://ollama.test',
-  );
-
-  assert.equal(caption, 'generate caption');
-  assert.deepEqual(
-    calls.filter(call => call.url.endsWith('/api/chat') || call.url.endsWith('/api/generate')).map(call => call.url.split('/api/')[1]),
-    ['chat', 'generate'],
-  );
-});
-
 test('generateOllamaImageCaption expands retry budget for thinking-only length responses', async () => {
   const calls = [];
   globalThis.fetch = async (url, init) => {

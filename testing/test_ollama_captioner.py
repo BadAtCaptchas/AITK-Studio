@@ -19,12 +19,8 @@ class OllamaCaptionerTest(unittest.TestCase):
         class FakeBaseCaptioner:
             pass
 
-        def fake_is_refusal_caption(value):
-            return "please provide the image or video you would like me to caption" in str(value).lower()
-
         base_module.BaseCaptioner = FakeBaseCaptioner
         base_module.CaptionConfig = FakeCaptionConfig
-        base_module.is_refusal_caption = fake_is_refusal_caption
         sys.modules.pop("extensions_built_in.captioner.OllamaCaptioner", None)
         with mock.patch.dict(
             sys.modules,
@@ -183,22 +179,6 @@ class OllamaCaptionerTest(unittest.TestCase):
         self.assertEqual(caption, "generate caption")
         self.assertEqual([endpoint for endpoint, _body in calls], ["chat", "generate"])
         self.assertEqual(calls[0][1]["messages"][-1]["images"], ["aW1n"])
-
-    def test_get_caption_for_file_skips_gemma_chat_refusal(self):
-        captioner = self.make_captioner()
-        captioner.caption_config.model_name_or_path = "gemma4:31b"
-        calls = self.prepare_get_caption_for_file(
-            captioner,
-            {
-                "chat": "Please provide the image or video you would like me to caption.",
-                "generate": "generate caption",
-            },
-        )
-
-        caption = captioner.get_caption_for_file("image.png")
-
-        self.assertEqual(caption, "generate caption")
-        self.assertEqual([endpoint for endpoint, _body in calls], ["chat", "generate"])
 
 
 if __name__ == "__main__":

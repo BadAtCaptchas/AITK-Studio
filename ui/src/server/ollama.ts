@@ -1,5 +1,3 @@
-import { isRefusalCaption } from '../utils/captionQuality';
-
 export type OllamaModel = {
   name?: string;
   model?: string;
@@ -41,7 +39,6 @@ type OllamaGenerationAttempt = {
   attempt: number;
   numPredict: number;
   caption: string;
-  refused: boolean;
   doneReason: string | null;
   hadThinking: boolean;
 };
@@ -396,7 +393,7 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
         attempt,
       );
       attempts.push(generationAttempt);
-      if (generationAttempt.caption && !generationAttempt.refused) return generationAttempt.caption;
+      if (generationAttempt.caption) return generationAttempt.caption;
     }
 
     if (attempt < OLLAMA_CAPTION_MAX_ATTEMPTS) {
@@ -405,12 +402,10 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   }
 
   const reasons = attempts
-    .filter(attempt => attempt.doneReason || attempt.refused)
+    .filter(attempt => attempt.doneReason)
     .map(
       attempt =>
-        `${attempt.endpoint} attempt ${attempt.attempt}: ${
-          attempt.refused ? 'refusal' : attempt.doneReason
-        } at num_predict ${attempt.numPredict}${
+        `${attempt.endpoint} attempt ${attempt.attempt}: ${attempt.doneReason} at num_predict ${attempt.numPredict}${
           attempt.hadThinking ? ' with thinking' : ''
         }`,
     )
@@ -442,13 +437,11 @@ async function runOllamaGenerationAttempt(
 
   const data = await response.json();
   const numPredict = ((body.options as Record<string, unknown> | undefined)?.num_predict as number | undefined) || 0;
-  const caption = extractOllamaCaptionText(data);
   return {
     endpoint,
     attempt,
     numPredict,
-    caption,
-    refused: caption ? isRefusalCaption(caption) : false,
+    caption: extractOllamaCaptionText(data),
     doneReason: extractOllamaDoneReason(data),
     hadThinking: hasOllamaThinking(data),
   };

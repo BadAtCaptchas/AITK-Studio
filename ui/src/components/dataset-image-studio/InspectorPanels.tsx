@@ -377,6 +377,8 @@ export function CaptionEditorPanel({
   isSaving,
   isRecaptioning,
   canRecaption,
+  isSelectedRecaptionQueued,
+  hasActiveRecaptions,
   hasQueuedRecaptions,
   recaptionFeedback,
   onCaptionTabChange,
@@ -398,6 +400,8 @@ export function CaptionEditorPanel({
   isSaving: boolean;
   isRecaptioning?: boolean;
   canRecaption?: boolean;
+  isSelectedRecaptionQueued?: boolean;
+  hasActiveRecaptions?: boolean;
   hasQueuedRecaptions?: boolean;
   recaptionFeedback?: string;
   onCaptionTabChange: (tab: CaptionTab) => void;
@@ -407,6 +411,14 @@ export function CaptionEditorPanel({
   onRecaptionSettings?: () => void;
   onSave: () => void;
 }) {
+  const recaptionButtonLabel = isRecaptioning
+    ? 'Recaptioning'
+    : isSelectedRecaptionQueued
+      ? 'Queued'
+      : hasActiveRecaptions || hasQueuedRecaptions
+        ? 'Add to Queue'
+        : 'Recaption';
+
   return (
     <section className="mt-3 overflow-hidden rounded-md border border-gray-800 bg-gray-950/80">
       <div className="flex h-12 items-center border-b border-gray-800 px-4">
@@ -489,11 +501,11 @@ export function CaptionEditorPanel({
             </Button>
             <Button
               className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-600/20 px-3 text-sm font-medium leading-none text-cyan-100 hover:bg-cyan-600/30 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!canRecaption || isAutoCaptioning || isSaving}
+              disabled={!canRecaption || isAutoCaptioning || isSaving || isRecaptioning || isSelectedRecaptionQueued}
               onClick={onRecaption}
             >
               {isRecaptioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
-              {isRecaptioning || hasQueuedRecaptions ? 'Add to Queue' : 'Recaption'}
+              {recaptionButtonLabel}
             </Button>
             <Button
               className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-emerald-500/40 bg-emerald-600/20 px-3 text-sm font-medium leading-none text-emerald-100 hover:bg-emerald-600/30 disabled:cursor-not-allowed disabled:opacity-40"

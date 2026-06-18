@@ -239,6 +239,7 @@ export default function DatasetImageStudio({
   const [hasRecaptionSettingsForDataset, setHasRecaptionSettingsForDataset] = useState(false);
   const [recaptionQueue, setRecaptionQueue] = useState<RecaptionQueueEntry[]>([]);
   const [activeRecaptionLabel, setActiveRecaptionLabel] = useState('');
+  const [activeRecaptionKey, setActiveRecaptionKey] = useState('');
   const [recaptionRootPrompt, setRecaptionRootPrompt] = useState('');
   const [recaptionRootPromptStatus, setRecaptionRootPromptStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [recaptionRemoteModelOptions, setRecaptionRemoteModelOptions] = useState<RecaptionModelOption[]>([]);
@@ -366,6 +367,10 @@ export default function DatasetImageStudio({
     !layerCaptionDisabledReason && !selectedLayerIsCaptioning && !isGeneratingBoxes && !isAutoCaptioning;
   const canRecaptionSelectedImage =
     Boolean(selectedItem) && selectedKind === 'image' && isCaptionLoaded && !isAutoCaptioning && !isSaving;
+  const selectedRecaptionIsRunning = Boolean(selectedKey && isRecaptioning && activeRecaptionKey === selectedKey);
+  const selectedRecaptionIsQueued = Boolean(selectedKey && recaptionQueue.some(entry => entry.key === selectedKey));
+  const hasPendingRecaptions = isRecaptioning || recaptionQueue.length > 0;
+  const canQueueSelectedRecaption = canRecaptionSelectedImage && !selectedRecaptionIsRunning && !selectedRecaptionIsQueued;
   const recaptionFeedback = isRecaptioning
     ? `Recaptioning${activeRecaptionLabel ? ` ${activeRecaptionLabel}` : ''}${
         recaptionQueue.length ? `, ${recaptionQueue.length} queued` : ''
@@ -926,6 +931,7 @@ export default function DatasetImageStudio({
     const providerLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === settings.provider)?.label || settings.provider;
     setIsRecaptioning(true);
     setActiveRecaptionLabel(name);
+    setActiveRecaptionKey(key);
     setRecaptionMessage(`Recaptioning ${name}${recaptionQueueRef.current.length ? ` (${recaptionQueueRef.current.length} queued)` : ''}.`);
     try {
       let response;
@@ -987,6 +993,7 @@ export default function DatasetImageStudio({
     } finally {
       setIsRecaptioning(false);
       setActiveRecaptionLabel('');
+      setActiveRecaptionKey('');
     }
   }, [
     appendRecaptionFields,
@@ -1008,6 +1015,14 @@ export default function DatasetImageStudio({
 
   const queueSelectedRecaption = useCallback(() => {
     if (!selectedItem || !canRecaptionSelectedImage) return;
+    if (selectedRecaptionIsRunning) {
+      setRecaptionMessage(`${selectedName} is already being recaptioned.`);
+      return;
+    }
+    if (selectedRecaptionIsQueued) {
+      setRecaptionMessage(`${selectedName} is already queued.`);
+      return;
+    }
     const settings = currentRecaptionSettings();
     if (!settings.model.trim()) {
       setRecaptionMessage('Select a model before recaptioning.');
@@ -1049,6 +1064,8 @@ export default function DatasetImageStudio({
     selectedItem,
     selectedKey,
     selectedName,
+    selectedRecaptionIsQueued,
+    selectedRecaptionIsRunning,
   ]);
 
   const openRecaptionSettings = useCallback(() => {
@@ -2039,8 +2056,10 @@ export default function DatasetImageStudio({
                 isCaptionLoaded={isCaptionLoaded}
                 isDirty={isDirty}
                 isSaving={isSaving}
-                isRecaptioning={isRecaptioning}
-                canRecaption={canRecaptionSelectedImage}
+                isRecaptioning={selectedRecaptionIsRunning}
+                canRecaption={canQueueSelectedRecaption}
+                isSelectedRecaptionQueued={selectedRecaptionIsQueued}
+                hasActiveRecaptions={hasPendingRecaptions}
                 hasQueuedRecaptions={recaptionQueue.length > 0}
                 recaptionFeedback={recaptionFeedback}
                 onCaptionTabChange={setCaptionTab}
@@ -2249,10 +2268,16 @@ export default function DatasetImageStudio({
             </button>
             <button
               type="submit"
-              disabled={!canRecaptionSelectedImage}
+              disabled={!canQueueSelectedRecaption}
               className="rounded-md bg-cyan-600 px-4 py-2 font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isRecaptioning || recaptionQueue.length > 0 ? 'Add to Queue' : 'Recaption'}
+              {selectedRecaptionIsRunning
+                ? 'Recaptioning'
+                : selectedRecaptionIsQueued
+                  ? 'Queued'
+                  : hasPendingRecaptions
+                    ? 'Add to Queue'
+                    : 'Recaption'}
             </button>
           </div>
         </form>

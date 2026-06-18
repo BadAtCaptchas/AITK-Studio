@@ -102,6 +102,8 @@ class BaseCaptionerTest(unittest.TestCase):
             "No image was provided.",
             "The image is not accessible.",
             "I don't feel comfortable helping with this.",
+            "Please provide the image or video you would like me to caption.",
+            "Please upload the photo you would like me to describe.",
         ]
 
         for refusal in refusals:

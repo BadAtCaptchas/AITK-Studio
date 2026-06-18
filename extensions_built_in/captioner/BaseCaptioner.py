@@ -302,6 +302,14 @@ REFUSAL_CAPTION_PATTERNS = [
         r"(?:accessible|available|provided|attached|uploaded)\b",
         re.I,
     ),
+    re.compile(
+        r"\bplease\s+(?:provide|upload|attach|include|send|share)\s+"
+        r"(?:the|an?|your)?\s*(?:image|video|file|picture|photo)"
+        r"(?:\s+or\s+(?:image|video|file|picture|photo))*\s+"
+        r"(?:you\s+would\s+like\s+me\s+to|for\s+me\s+to|to)\s+"
+        r"(?:caption|describe|analy[sz]e|inspect|process)\b",
+        re.I,
+    ),
 ]
 
 

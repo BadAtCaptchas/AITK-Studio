@@ -40,8 +40,26 @@ class OllamaCaptionerTest(unittest.TestCase):
         captioner.ollama_auth_token = ""
         captioner.ollama_user_agent = "AITK-Test-Agent"
         captioner.ollama_model_ready = False
-        captioner.caption_config = SimpleNamespace(model_name_or_path="llava")
+        captioner.caption_config = SimpleNamespace(
+            model_name_or_path="llava",
+            system_prompt="",
+            max_res=None,
+            max_new_tokens=32,
+        )
         return captioner
+
+    def prepare_get_caption_for_file(self, captioner, responses):
+        calls = []
+        captioner.build_caption_prompt = mock.Mock(return_value="caption this image")
+        captioner._image_to_base64 = mock.Mock(return_value=("aW1n", (64, 64)))
+        captioner.normalize_caption_output = mock.Mock(side_effect=lambda _path, caption, image_size=None: caption)
+
+        def fake_generate(endpoint, body):
+            calls.append((endpoint, body))
+            return responses.get(endpoint, "")
+
+        captioner._generate_caption_once = mock.Mock(side_effect=fake_generate)
+        return calls
 
     def test_request_json_sends_user_agent_and_auth_token(self):
         captioner = self.make_captioner()
@@ -139,6 +157,28 @@ class OllamaCaptionerTest(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", side_effect=http_error):
             with self.assertRaisesRegex(RuntimeError, "AITK_OLLAMA_USER_AGENT"):
                 captioner._request_json("/api/tags", timeout=30)
+
+    def test_get_caption_for_file_uses_generate_before_chat_for_non_gemma(self):
+        captioner = self.make_captioner()
+        captioner.caption_config.model_name_or_path = "llava"
+        calls = self.prepare_get_caption_for_file(captioner, {"chat": "chat caption"})
+
+        caption = captioner.get_caption_for_file("image.png")
+
+        self.assertEqual(caption, "chat caption")
+        self.assertEqual([endpoint for endpoint, _body in calls], ["generate", "chat"])
+        self.assertEqual(calls[1][1]["messages"][-1]["images"], ["aW1n"])
+
+    def test_get_caption_for_file_uses_chat_before_generate_for_gemma(self):
+        captioner = self.make_captioner()
+        captioner.caption_config.model_name_or_path = "gemma4:31b"
+        calls = self.prepare_get_caption_for_file(captioner, {"generate": "generate caption"})
+
+        caption = captioner.get_caption_for_file("image.png")
+
+        self.assertEqual(caption, "generate caption")
+        self.assertEqual([endpoint for endpoint, _body in calls], ["chat", "generate"])
+        self.assertEqual(calls[0][1]["messages"][-1]["images"], ["aW1n"])
 
 
 if __name__ == "__main__":

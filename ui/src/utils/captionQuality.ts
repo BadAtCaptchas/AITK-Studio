@@ -39,6 +39,7 @@ const REFUSAL_PATTERNS = [
   ),
   /\b(?:no|without\s+an?)\s+(?:image|file|picture|photo)\s+(?:was\s+)?(?:provided|attached|uploaded|included|available)\b/i,
   /\b(?:image|file|picture|photo)\s+(?:is|was)\s+(?:not\s+)?(?:accessible|available|provided|attached|uploaded)\b/i,
+  /\bplease\s+(?:provide|upload|attach|include|send|share)\s+(?:the|an?|your)?\s*(?:image|video|file|picture|photo)(?:\s+or\s+(?:image|video|file|picture|photo))*\s+(?:you\s+would\s+like\s+me\s+to|for\s+me\s+to|to)\s+(?:caption|describe|analy[sz]e|inspect|process)\b/i,
 ];
 
 export function isRefusalCaption(caption: string) {

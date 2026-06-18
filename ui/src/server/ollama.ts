@@ -93,6 +93,10 @@ export function hasOllamaModel(models: OllamaModel[], requestedModel: string) {
   });
 }
 
+export function isGemmaOllamaModel(model: string) {
+  return normalizeModelName(model).toLowerCase().startsWith('gemma');
+}
+
 async function readOllamaError(response: Response) {
   const body = await response.text().catch(() => '');
   if (!body) return `Ollama returned ${response.status}`;
@@ -374,26 +378,23 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
     stream: false,
     keep_alive: '10m',
   };
+  const endpointOrder: OllamaGenerationAttempt['endpoint'][] = isGemmaOllamaModel(model)
+    ? ['chat', 'generate']
+    : ['generate', 'chat'];
 
   const attempts: OllamaGenerationAttempt[] = [];
   for (let attempt = 1; attempt <= OLLAMA_CAPTION_MAX_ATTEMPTS; attempt += 1) {
-    const generateAttempt = await runOllamaGenerationAttempt(
-      'generate',
-      captionBodyForAttempt(generateBody, options.maxNewTokens, attempt),
-      endpoint,
-      attempt,
-    );
-    attempts.push(generateAttempt);
-    if (generateAttempt.caption) return generateAttempt.caption;
-
-    const chatAttempt = await runOllamaGenerationAttempt(
-      'chat',
-      captionBodyForAttempt(chatBody, options.maxNewTokens, attempt),
-      endpoint,
-      attempt,
-    );
-    attempts.push(chatAttempt);
-    if (chatAttempt.caption) return chatAttempt.caption;
+    for (const generationEndpoint of endpointOrder) {
+      const baseBody = generationEndpoint === 'chat' ? chatBody : generateBody;
+      const generationAttempt = await runOllamaGenerationAttempt(
+        generationEndpoint,
+        captionBodyForAttempt(baseBody, options.maxNewTokens, attempt),
+        endpoint,
+        attempt,
+      );
+      attempts.push(generationAttempt);
+      if (generationAttempt.caption) return generationAttempt.caption;
+    }
 
     if (attempt < OLLAMA_CAPTION_MAX_ATTEMPTS) {
       await sleep(OLLAMA_CAPTION_EMPTY_RETRY_DELAY_MS);

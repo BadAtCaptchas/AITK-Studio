@@ -125,11 +125,10 @@ class OllamaCaptioner(BaseCaptioner):
         image.save(buffer, format="JPEG", quality=95, optimize=True)
         return base64.b64encode(buffer.getvalue()).decode("ascii"), image_size
 
-    def _caption_num_predict(self, attempt: int, extended_thinking_budget: bool = False) -> int:
+    def _caption_num_predict(self, attempt: int) -> int:
         requested = self.caption_config.max_new_tokens or 0
         base_budget = max(2048, int(requested) * 4)
-        max_budget = 8192 if extended_thinking_budget else 4096
-        return min(max_budget, base_budget * (2 ** max(0, attempt - 1)))
+        return min(4096, base_budget * (2 ** max(0, attempt - 1)))
 
     def _extract_caption(self, data: dict) -> str:
         response = data.get("response")
@@ -182,54 +181,35 @@ class OllamaCaptioner(BaseCaptioner):
         model = self.caption_config.model_name_or_path.strip()
         prompt = self.build_caption_prompt(file_path)
         image_base64, image_size = self._image_to_base64(file_path)
-        gemma_model = self._is_gemma_model(model)
-        if gemma_model:
-            generate_body = {
-                "model": model,
-                "images": [image_base64],
-                "prompt": prompt,
-                "stream": False,
-                "keep_alive": "10m",
-            }
-        else:
-            generate_body = {
-                "model": model,
-                "prompt": prompt,
-                "images": [image_base64],
-                "stream": False,
-                "keep_alive": "10m",
-            }
+        generate_body = {
+            "model": model,
+            "prompt": prompt,
+            "images": [image_base64],
+            "stream": False,
+            "keep_alive": "10m",
+        }
         if self.caption_config.system_prompt.strip():
             generate_body["system"] = self.caption_config.system_prompt.strip()
 
         messages = []
         if self.caption_config.system_prompt.strip():
             messages.append({"role": "system", "content": self.caption_config.system_prompt.strip()})
-        if gemma_model:
-            messages.append({"role": "user", "images": [image_base64], "content": prompt})
-            chat_body = {
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                "keep_alive": "10m",
-            }
-        else:
-            messages.append({"role": "user", "content": prompt, "images": [image_base64]})
-            chat_body = {
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                "keep_alive": "10m",
-            }
+        messages.append({"role": "user", "content": prompt, "images": [image_base64]})
+        chat_body = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": "10m",
+        }
 
-        endpoint_order = ["chat", "generate"] if gemma_model else ["generate", "chat"]
+        endpoint_order = ["chat", "generate"] if self._is_gemma_model(model) else ["generate", "chat"]
         request_bodies = {
             "generate": generate_body,
             "chat": chat_body,
         }
 
         for attempt in range(1, 4):
-            options = {"num_predict": self._caption_num_predict(attempt, extended_thinking_budget=gemma_model)}
+            options = {"num_predict": self._caption_num_predict(attempt)}
             for endpoint in endpoint_order:
                 caption = self._generate_caption_once(endpoint, {**request_bodies[endpoint], "options": options})
                 if caption and not is_refusal_caption(caption):

@@ -172,8 +172,6 @@ class OllamaCaptionerTest(unittest.TestCase):
         self.assertEqual(caption, "chat caption")
         self.assertEqual([endpoint for endpoint, _body in calls], ["generate", "chat"])
         self.assertEqual(calls[1][1]["messages"][-1]["images"], ["aW1n"])
-        self.assertNotIn("think", calls[0][1])
-        self.assertNotIn("think", calls[1][1])
 
     def test_get_caption_for_file_uses_chat_before_generate_for_gemma(self):
         captioner = self.make_captioner()
@@ -185,19 +183,6 @@ class OllamaCaptionerTest(unittest.TestCase):
         self.assertEqual(caption, "generate caption")
         self.assertEqual([endpoint for endpoint, _body in calls], ["chat", "generate"])
         self.assertEqual(calls[0][1]["messages"][-1]["images"], ["aW1n"])
-        self.assertNotIn("think", calls[0][1])
-        self.assertNotIn("think", calls[1][1])
-        chat_message_keys = list(calls[0][1]["messages"][-1].keys())
-        generate_body_keys = list(calls[1][1].keys())
-        self.assertLess(chat_message_keys.index("images"), chat_message_keys.index("content"))
-        self.assertLess(generate_body_keys.index("images"), generate_body_keys.index("prompt"))
-        self.assertEqual(calls[0][1]["options"]["num_predict"], 2048)
-
-    def test_caption_num_predict_allows_larger_thinking_budget(self):
-        captioner = self.make_captioner()
-
-        self.assertEqual(captioner._caption_num_predict(3), 4096)
-        self.assertEqual(captioner._caption_num_predict(3, extended_thinking_budget=True), 8192)
 
     def test_get_caption_for_file_skips_gemma_chat_refusal(self):
         captioner = self.make_captioner()

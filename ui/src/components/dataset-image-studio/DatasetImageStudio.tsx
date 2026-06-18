@@ -387,6 +387,8 @@ export default function DatasetImageStudio({
       if (!workerId) return;
       setRecaptionRemoteModelStatus('loading');
       setRecaptionRemoteModelError('');
+      setRecaptionRemoteModelOptions([]);
+      setRecaptionModel('');
       try {
         const response = await apiClient.get(`/api/ollama-workers/${encodeURIComponent(workerId)}/models`);
         const options = ollamaModelOptions(response.data?.models || []);
@@ -394,10 +396,8 @@ export default function DatasetImageStudio({
         setRecaptionRemoteModelStatus('success');
         setRecaptionModel(currentModel => {
           const trimmed = currentModel.trim();
-          if (!options.length || (trimmed && trimmed !== DEFAULT_OPENROUTER_BOX_MODEL && trimmed !== DEFAULT_OLLAMA_VISION_MODEL)) {
-            return currentModel;
-          }
-          return options[0].value;
+          if (!options.length) return '';
+          return options.some(option => option.value === trimmed) ? trimmed : options[0].value;
         });
       } catch (error: any) {
         setRecaptionRemoteModelOptions([]);
@@ -441,9 +441,14 @@ export default function DatasetImageStudio({
       if (nextProvider === 'openrouter') {
         return !trimmed || trimmed.startsWith('qwen3.5:') || trimmed.startsWith('gemma4:') ? DEFAULT_OPENROUTER_BOX_MODEL : trimmed;
       }
+      if (nextProvider === 'remote_ollama') {
+        return recaptionRemoteModelOptions.some(option => option.value === trimmed)
+          ? trimmed
+          : recaptionRemoteModelOptions[0]?.value || '';
+      }
       return !trimmed || trimmed === DEFAULT_OPENROUTER_BOX_MODEL ? DEFAULT_OLLAMA_VISION_MODEL : trimmed;
     });
-  }, []);
+  }, [recaptionRemoteModelOptions]);
 
   const handleRecaptionOutputFormatChange = useCallback((value: RecaptionOutputFormat) => {
     setRecaptionOutputFormat(value);
@@ -1888,20 +1893,41 @@ export default function DatasetImageStudio({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block text-sm">
               <span className="mb-1 block text-xs font-medium text-gray-400">Model</span>
-              <input
-                list="recaption-model-options"
-                value={recaptionModel}
-                onChange={event => setRecaptionModel(event.target.value)}
-                disabled={isRecaptioning}
-                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-              />
-              <datalist id="recaption-model-options">
-                {recaptionModelOptions.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </datalist>
+              {recaptionProvider === 'remote_ollama' ? (
+                <select
+                  value={recaptionModel}
+                  onChange={event => setRecaptionModel(event.target.value)}
+                  disabled={isRecaptioning || recaptionRemoteModelStatus === 'loading' || recaptionRemoteModelOptions.length === 0}
+                  className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {recaptionRemoteModelStatus === 'loading' && <option value="">Loading models...</option>}
+                  {recaptionRemoteModelStatus !== 'loading' && recaptionRemoteModelOptions.length === 0 && (
+                    <option value="">No server models loaded</option>
+                  )}
+                  {recaptionRemoteModelOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <input
+                    list="recaption-model-options"
+                    value={recaptionModel}
+                    onChange={event => setRecaptionModel(event.target.value)}
+                    disabled={isRecaptioning}
+                    className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+                  />
+                  <datalist id="recaption-model-options">
+                    {recaptionModelOptions.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </datalist>
+                </>
+              )}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs font-medium text-gray-400">Max tokens</span>

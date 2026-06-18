@@ -28,6 +28,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   experimental: {
+    webpackBuildWorker: true,
     serverActions: {
       bodySizeLimit: '5gb',
     },

@@ -18,6 +18,7 @@ from diffusers.utils import (
 )
 from diffusers.utils.torch_utils import randn_tensor
 from PIL import Image
+from tqdm import tqdm
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
 
 from boogu.pipelines.boogu.instruct_reasoner_static_skills import (
@@ -1437,12 +1438,12 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
                     # # ###########################################
                     warnings.warn(f"{type(e).__name__}: {e}", UserWarning)
 
-            print(f"✅ Prompt tuning: {num_prompt_tokens} trainable tokens added")
+            print(f"[OK] Prompt tuning: {num_prompt_tokens} trainable tokens added")
             print(
-                f"✅ Extracted {num_instruction_feature_layers} layers of instruction features"
+                f"[OK] Extracted {num_instruction_feature_layers} layers of instruction features"
             )
             print(
-                f"✅ Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
+                f"[OK] Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
             )
 
         else:
@@ -1489,12 +1490,12 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
                         # ###########################################
                         warnings.warn(f"{type(e).__name__}: {e}", UserWarning)
 
-            print("✅ No prompt tuning: use the original instruction features")
+            print("[OK] No prompt tuning: use the original instruction features")
             print(
-                f"✅ Extracted {num_instruction_feature_layers} layers of instruction features"
+                f"[OK] Extracted {num_instruction_feature_layers} layers of instruction features"
             )
             print(
-                f"✅ Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
+                f"[OK] Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
             )
 
         # Optionally remove vision-token features by truncation
@@ -2209,9 +2210,9 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
         else:
             if self.text_instruction_rewriter is None:
                 print(
-                    "⚠️ Please set the text instruction rewriter model if you want to polish the text instruction !"
+                    "[WARN] Please set the text instruction rewriter model if you want to polish the text instruction !"
                 )
-                print("⚠️ Use the user instruction by default.")
+                print("[WARN] Use the user instruction by default.")
                 return instruction
             else:
                 if not isinstance(instruction, (list, tuple)):
@@ -2449,7 +2450,7 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
                         json.dump(ori_and_rewritten_instructions, f)
                 else:
                     print(
-                        "⚠️ Please provide the path to save the rewritten instruction."
+                        "[WARN] Please provide the path to save the rewritten instruction."
                     )
 
         if self.enable_inner_devices_manager:
@@ -3272,7 +3273,7 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
         batch_size = latents.shape[0]
         task_type = self._get_task_type_by_ref_latents(ref_latents)
 
-        print(f"[Pipeline Processing]: The current task_type: {task_type}.")
+        tqdm.write(f"[Pipeline Processing]: The current task_type: {task_type}.")
 
         timesteps, num_inference_steps = retrieve_timesteps(
             self.scheduler,
@@ -4022,12 +4023,12 @@ class BooguImagePromptTuningPipeline(BooguImagePipeline):
                     # ########################################
                     warnings.warn(f"{type(e).__name__}: {e}", UserWarning)
 
-            print(f"✅ Prompt tuning: {num_prompt_tokens} trainable tokens added")
+            print(f"[OK] Prompt tuning: {num_prompt_tokens} trainable tokens added")
             print(
-                f"✅ Extracted {num_instruction_feature_layers} layers of instruction features"
+                f"[OK] Extracted {num_instruction_feature_layers} layers of instruction features"
             )
             print(
-                f"✅ Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
+                f"[OK] Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
             )
 
         else:
@@ -4074,12 +4075,12 @@ class BooguImagePromptTuningPipeline(BooguImagePipeline):
                         # ###########verbose exception############
                         warnings.warn(f"{type(e).__name__}: {e}", UserWarning)
 
-            print("✅ No prompt tuning: use the original instruction features")
+            print("[OK] No prompt tuning: use the original instruction features")
             print(
-                f"✅ Extracted {num_instruction_feature_layers} layers of instruction features"
+                f"[OK] Extracted {num_instruction_feature_layers} layers of instruction features"
             )
             print(
-                f"✅ Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
+                f"[OK] Each layer shape: {instruction_feats[0].shape if isinstance(instruction_feats, list) else instruction_feats.shape}"
             )
 
         # Optionally remove vision-token features by truncation

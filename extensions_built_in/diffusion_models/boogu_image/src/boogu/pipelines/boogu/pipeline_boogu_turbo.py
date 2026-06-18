@@ -24,6 +24,7 @@ from typing import List, Optional, Union
 
 import torch
 from diffusers.utils.torch_utils import randn_tensor
+from tqdm import tqdm
 
 from .pipeline_boogu import BooguImagePipeline
 
@@ -173,7 +174,7 @@ class BooguImageTurboPipeline(BooguImagePipeline):
                 "image_guidance_scale=1.0, and empty_instruction_guidance_scale=0.0."
             )
 
-        print("[Turbo Pipeline Processing]: DMD student few-step T2I inference.")
+        tqdm.write("[Turbo Pipeline Processing]: DMD student few-step T2I inference.")
 
         generator = getattr(self, "_dmd_generator", None)
         dmd_sigmas = self._build_dmd_student_sigmas(

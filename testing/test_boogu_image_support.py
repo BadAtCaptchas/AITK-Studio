@@ -1,6 +1,8 @@
+import importlib.util
 import unittest
 from pathlib import Path
 
+import torch
 import yaml
 
 
@@ -19,6 +21,14 @@ BOOGU_VENDOR_ROOT = (
     / "boogu_image"
     / "src"
     / "boogu"
+)
+BOOGU_TRANSFORMER_PATH = (
+    BOOGU_VENDOR_ROOT / "models" / "transformers" / "transformer_boogu.py"
+)
+BOOGU_ROPE_PATH = BOOGU_VENDOR_ROOT / "models" / "transformers" / "rope.py"
+BOOGU_PIPELINE_PATH = BOOGU_VENDOR_ROOT / "pipelines" / "boogu" / "pipeline_boogu.py"
+BOOGU_TURBO_PIPELINE_PATH = (
+    BOOGU_VENDOR_ROOT / "pipelines" / "boogu" / "pipeline_boogu_turbo.py"
 )
 REGISTRY_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__init__.py"
 CONFIG_MODULES_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
@@ -69,6 +79,19 @@ class BooguImageSupportTest(unittest.TestCase):
         self.assertIn('multi_controls = getattr(batch, "control_tensor_list", None)', source)
         self.assertIn("input_pil_images=input_images", source)
         self.assertIn('"ref_image_refiner"', source)
+        self.assertIn("def _get_mllm_for_generation(self):", source)
+        self.assertIn("if self.sample_prompts_cache is not None:", source)
+        self.assertIn("return None", source)
+        self.assertIn("def _is_fake_text_encoder(module) -> bool:", source)
+        self.assertIn("mllm=self._get_mllm_for_generation()", source)
+        self.assertIn('"device": str(self.device_torch)', source)
+        self.assertIn("instruction = gen_config.prompt or \"\"", source)
+        self.assertIn("negative_instruction = gen_config.negative_prompt or \"\"", source)
+        self.assertIn('"instruction": instruction', source)
+        self.assertIn('"negative_instruction": negative_instruction', source)
+        self.assertIn("unexpected_device_kwarg = (", source)
+        self.assertIn("if not unexpected_device_kwarg:", source)
+        self.assertNotIn("mllm=unwrap_model(self.text_encoder[0])", source)
 
     def test_model_loader_uses_expected_boogu_components_and_rejects_fp8(self):
         source = BOOGU_MODEL_PATH.read_text(encoding="utf-8")
@@ -106,6 +129,53 @@ class BooguImageSupportTest(unittest.TestCase):
 
         for relative_path in expected_files:
             self.assertTrue((BOOGU_VENDOR_ROOT / relative_path).exists(), relative_path)
+
+    def test_vendored_boogu_sampling_guards(self):
+        transformer_source = BOOGU_TRANSFORMER_PATH.read_text(encoding="utf-8")
+        rope_source = BOOGU_ROPE_PATH.read_text(encoding="utf-8")
+        pipeline_source = BOOGU_PIPELINE_PATH.read_text(encoding="utf-8")
+        turbo_pipeline_source = BOOGU_TURBO_PIPELINE_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("patch_size = int(patch_size)", transformer_source)
+        self.assertIn("p = int(self.config.patch_size)", transformer_source)
+        self.assertIn("self.patch_size = int(patch_size)", rope_source)
+        self.assertIn("p = int(self.patch_size)", rope_source)
+        self.assertIn("from tqdm import tqdm", pipeline_source)
+        self.assertIn("tqdm.write(f\"[Pipeline Processing]", pipeline_source)
+        self.assertNotIn("✅", pipeline_source)
+        self.assertNotIn("⚠", pipeline_source)
+        self.assertIn("from tqdm import tqdm", turbo_pipeline_source)
+        self.assertIn(
+            "tqdm.write(\"[Turbo Pipeline Processing]", turbo_pipeline_source
+        )
+
+    def test_rope_accepts_float_attention_masks_and_lengths(self):
+        spec = importlib.util.spec_from_file_location(
+            "boogu_rope_for_test", BOOGU_ROPE_PATH
+        )
+        rope_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rope_module)
+
+        embedder = rope_module.BooguImageDoubleStreamRotaryPosEmbed(
+            theta=10000,
+            axes_dim=(2, 2, 2),
+            axes_lens=(8, 8, 8),
+            patch_size=2.0,
+        )
+        freqs_cis = embedder.get_freqs_cis((2, 2, 2), (8, 8, 8), theta=10000)
+
+        outputs = embedder(
+            freqs_cis,
+            torch.ones(1, 3, dtype=torch.float32),
+            [[0.0]],
+            [4.0],
+            [None],
+            [(4, 4)],
+            torch.device("cpu"),
+        )
+
+        self.assertEqual(outputs[4], [3])
+        self.assertEqual(outputs[5], [7])
 
     def test_model_arch_and_validation_guards(self):
         source = CONFIG_MODULES_PATH.read_text(encoding="utf-8")

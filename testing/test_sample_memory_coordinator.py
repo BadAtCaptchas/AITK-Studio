@@ -117,6 +117,41 @@ class SampleMemoryCoordinatorTest(unittest.TestCase):
             torch.device("cuda")
         )
 
+    def test_status_messages_use_tqdm_write_and_owner_status_hook(self):
+        owner = self.make_owner()
+        owner._status_update = mock.Mock()
+        callback = mock.Mock()
+        coordinator = SampleMemoryCoordinator(owner, status_callback=callback)
+
+        with mock.patch("toolkit.memory_management.sample_coordinator.tqdm.write") as write:
+            coordinator._status("Low-VRAM sample 1/3: encoding prompts")
+
+        write.assert_called_once_with("Low-VRAM sample 1/3: encoding prompts")
+        owner._status_update.assert_called_once_with(
+            "Low-VRAM sample 1/3: encoding prompts"
+        )
+        callback.assert_not_called()
+
+    def test_status_messages_fall_back_to_callback_without_owner_status_hook(self):
+        owner = self.make_owner()
+        callback = mock.Mock()
+        coordinator = SampleMemoryCoordinator(owner, status_callback=callback)
+
+        with mock.patch("toolkit.memory_management.sample_coordinator.tqdm.write") as write:
+            coordinator._status("Low-VRAM sample 1/3: generating image")
+
+        write.assert_called_once_with("Low-VRAM sample 1/3: generating image")
+        callback.assert_called_once_with("Low-VRAM sample 1/3: generating image")
+
+    def test_status_messages_are_quiet_without_status_sink(self):
+        owner = self.make_owner()
+        coordinator = SampleMemoryCoordinator(owner)
+
+        with mock.patch("toolkit.memory_management.sample_coordinator.tqdm.write") as write:
+            coordinator._status("Low-VRAM sample 1/3: encoding prompts")
+
+        write.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

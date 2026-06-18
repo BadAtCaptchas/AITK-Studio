@@ -78,11 +78,15 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
 
   const prefetchedFilePathByValue = getPrefetchedFilePathByValue(result.downloads);
   let updatedConfig = false;
-  for (const reference of modelReferences) {
-    const localModelPath = prefetchedFilePathByValue.get(normalizeModelReferenceValue(reference.value));
-    if (!localModelPath) continue;
-    setConfigPathValue(jobConfig, reference.configPath, localModelPath);
-    updatedConfig = true;
+  if (!job.project_id) {
+    for (const reference of modelReferences) {
+      const localModelPath = prefetchedFilePathByValue.get(normalizeModelReferenceValue(reference.value));
+      if (!localModelPath) continue;
+      setConfigPathValue(jobConfig, reference.configPath, localModelPath);
+      updatedConfig = true;
+    }
+  } else if (prefetchedFilePathByValue.size > 0) {
+    warnings.push('Project run model references were kept as shared Hugging Face/global model references.');
   }
 
   const updatedJob = updatedConfig

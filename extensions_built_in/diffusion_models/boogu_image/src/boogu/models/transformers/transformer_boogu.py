@@ -806,6 +806,7 @@ class BooguImageTransformer2DModel(
     ) -> None:
         """Initialize the Boogu-Image mixed single-double stream transformer model."""
         super().__init__()
+        patch_size = int(patch_size)
 
         # Validate configuration
         if (hidden_size // num_attention_heads) != sum(axes_dim_rope):
@@ -1096,7 +1097,7 @@ class BooguImageTransformer2DModel(
     def flat_and_pad_to_seq(self, hidden_states, ref_image_hidden_states):
         """Flatten patch tokens and pad to batched sequences."""
         batch_size = len(hidden_states)
-        p = self.config.patch_size
+        p = int(self.config.patch_size)
         device = hidden_states[0].device
 
         img_sizes = [(img.size(1), img.size(2)) for img in hidden_states]
@@ -1574,7 +1575,7 @@ class BooguImageTransformer2DModel(
         hidden_states = self.norm_out(hidden_states, temb)
 
         # Reshape back to image format.
-        p = self.config.patch_size
+        p = int(self.config.patch_size)
         output = []
         for i, (img_size, img_len, seq_len) in enumerate(
             zip(img_sizes, l_effective_img_len, seq_lengths)

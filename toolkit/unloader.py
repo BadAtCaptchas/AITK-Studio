@@ -65,6 +65,16 @@ def unload_text_encoder(model: "BaseModel"):
                 text_encoder_list.append(te)
                 setattr(pipe, f"text_encoder_{i}", te)
                 i += 1
+
+            if hasattr(pipe, "mllm"):
+                real_te = pipe.mllm
+                if real_te is not None:
+                    _detach_and_cpu(real_te)
+                te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
+                text_encoder_list.append(te)
+                pipe.mllm = te
+                if hasattr(model, "mllm"):
+                    model.mllm = te
             model.text_encoder = text_encoder_list
         else:
             # only has a single text encoder

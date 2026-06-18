@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Iterable, Iterator, Optional, Sequence
 
 import torch
+from tqdm import tqdm
 
 from toolkit.basic import flush
 
@@ -245,9 +246,29 @@ class SampleMemoryCoordinator:
             module.to(str(device))
 
     def _status(self, message: str) -> None:
+        text = str(message)
+        status_update = getattr(self.owner, "_status_update", None)
+        has_owner_status = callable(status_update)
+        if self.status_callback is None and not has_owner_status:
+            return
+
+        wrote_to_tqdm = False
+        try:
+            tqdm.write(text)
+            wrote_to_tqdm = True
+        except Exception:
+            pass
+
+        if has_owner_status:
+            try:
+                status_update(text)
+                return
+            except Exception:
+                pass
+
         if self.status_callback is None:
             return
         try:
-            self.status_callback(message)
+            self.status_callback(text if wrote_to_tqdm else f"\n{text}")
         except Exception:
             pass

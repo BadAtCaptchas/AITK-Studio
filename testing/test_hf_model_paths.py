@@ -19,17 +19,22 @@ class HubSingleFilePathResolverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HF_TOKEN": ""}), mock.patch(
             "toolkit.hf_model_paths._print_download_status"
         ), mock.patch(
+            "toolkit.hf_model_paths.MODELS_PATH",
+            "C:/aitk/models",
+        ), mock.patch(
             "toolkit.hf_model_paths.hf_hub_download",
-            return_value="C:/cache/model-1k-merge.safetensors",
+            return_value="C:/aitk/models/diffusion_models/model-1k-merge.safetensors",
         ) as hf_hub_download:
             resolved_path = resolve_hub_single_file_path(
                 "zhen-nan/L2P/model-1k-merge.safetensors"
             )
 
-        self.assertEqual(resolved_path, "C:/cache/model-1k-merge.safetensors")
+        expected_dir = os.path.join("C:/aitk/models", "diffusion_models")
+        self.assertEqual(resolved_path, "C:/aitk/models/diffusion_models/model-1k-merge.safetensors")
         hf_hub_download.assert_called_once_with(
             repo_id="zhen-nan/L2P",
             filename="model-1k-merge.safetensors",
+            local_dir=expected_dir,
             token=None,
         )
 
@@ -37,16 +42,35 @@ class HubSingleFilePathResolverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HF_TOKEN": ""}), mock.patch(
             "toolkit.hf_model_paths._print_download_status"
         ), mock.patch(
+            "toolkit.hf_model_paths.MODELS_PATH",
+            "C:/aitk/models",
+        ), mock.patch(
             "toolkit.hf_model_paths.hf_hub_download",
-            return_value="C:/cache/model.safetensors",
+            return_value="C:/aitk/models/diffusion_models/subdir/model.safetensors",
         ) as hf_hub_download:
             resolve_hub_single_file_path("org/repo/subdir/model.safetensors")
 
         hf_hub_download.assert_called_once_with(
             repo_id="org/repo",
             filename="subdir/model.safetensors",
+            local_dir=os.path.join("C:/aitk/models", "diffusion_models"),
             token=None,
         )
+
+    def test_global_model_file_is_reused_without_download(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cached_path = os.path.join(temp_dir, "diffusion_models", "subdir", "model.safetensors")
+            os.makedirs(os.path.dirname(cached_path), exist_ok=True)
+            with open(cached_path, "w", encoding="utf-8"):
+                pass
+
+            with mock.patch("toolkit.hf_model_paths.MODELS_PATH", temp_dir), mock.patch(
+                "toolkit.hf_model_paths.hf_hub_download"
+            ) as hf_hub_download:
+                resolved_path = resolve_hub_single_file_path("org/repo/subdir/model.safetensors")
+
+        self.assertEqual(resolved_path, cached_path)
+        hf_hub_download.assert_not_called()
 
     def test_repo_id_and_local_like_paths_are_returned_without_download(self):
         local_like_paths = [

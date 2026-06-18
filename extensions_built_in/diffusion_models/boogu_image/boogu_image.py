@@ -81,6 +81,10 @@ def _pil_from_value(value) -> Image.Image:
     return open_static_image(value, mode="RGB")
 
 
+def _is_fake_text_encoder(module) -> bool:
+    return module is not None and module.__class__.__name__ == "FakeTextEncoder"
+
+
 class BooguImageModel(BaseModel):
     arch = "boogu_image"
     default_model_path = BOOGU_BASE_MODEL_PATH
@@ -106,6 +110,7 @@ class BooguImageModel(BaseModel):
         self.target_lora_modules = ["BooguImageTransformer2DModel"]
         self._control_latent = None
         self.freqs_cis = None
+        self.mllm = None
 
     @staticmethod
     def get_train_scheduler():
@@ -266,6 +271,7 @@ class BooguImageModel(BaseModel):
         vae.to(self.device_torch, dtype=dtype)
 
         self.vae = vae
+        self.mllm = mllm
         self.text_encoder = [mllm]
         self.tokenizer = [processor]
         self.model = transformer
@@ -275,15 +281,37 @@ class BooguImageModel(BaseModel):
 
         self.print_and_status_update("Model Loaded")
 
+    def _get_mllm_for_generation(self):
+        if self.sample_prompts_cache is not None:
+            return None
+        if isinstance(self.text_encoder, list) and len(self.text_encoder) > 0:
+            encoder = self.text_encoder[0]
+            if not _is_fake_text_encoder(encoder):
+                return unwrap_model(encoder)
+
+        pipeline_mllm = getattr(self.pipeline, "mllm", None)
+        if pipeline_mllm is not None and not _is_fake_text_encoder(pipeline_mllm):
+            return unwrap_model(pipeline_mllm)
+        if self.mllm is not None and not _is_fake_text_encoder(self.mllm):
+            return unwrap_model(self.mllm)
+
+        raise RuntimeError(
+            "Boogu-Image text encoder is unloaded and sample prompt embeddings "
+            "are not cached. Enable train.cache_text_embeddings before unloading "
+            "the text encoder, or disable train.unload_text_encoder for sampling."
+        )
+
     def get_generation_pipeline(self):
         scheduler = BooguFlowMatchEuler.from_config(self.generation_scheduler_config)
         pipeline = self.get_pipeline_cls()(
             transformer=unwrap_model(self.model),
             vae=unwrap_model(self.vae),
             scheduler=scheduler,
-            mllm=unwrap_model(self.text_encoder[0]),
+            mllm=self._get_mllm_for_generation(),
             processor=self.tokenizer[0],
         )
+        pipeline.text_instruction_rewriter = None
+        pipeline.instruction_rewriter_processor = None
         return pipeline.to(self.device_torch)
 
     def _sample_control_images(self, gen_config: GenerateImageConfig):
@@ -320,6 +348,8 @@ class BooguImageModel(BaseModel):
         extra: dict,
     ):
         input_images = self._sample_control_images(gen_config)
+        instruction = gen_config.prompt or ""
+        negative_instruction = gen_config.negative_prompt or ""
 
         text_guidance_scale = gen_config.guidance_scale
         image_guidance_scale = extra.pop("image_guidance_scale", 1.0)
@@ -330,6 +360,8 @@ class BooguImageModel(BaseModel):
             extra.setdefault("use_dmd_student_inference", True)
 
         call_kwargs = {
+            "instruction": instruction,
+            "negative_instruction": negative_instruction,
             "instruction_embeds": conditional_embeds.text_embeds,
             "instruction_attention_mask": conditional_embeds.attention_mask,
             "negative_instruction_embeds": unconditional_embeds.text_embeds,
@@ -342,14 +374,21 @@ class BooguImageModel(BaseModel):
             "latents": gen_config.latents,
             "generator": generator,
             "input_images": input_images,
-            "device": self.device_torch,
+            "device": str(self.device_torch),
             "use_rewrite_text_instruction": False,
             **extra,
         }
 
         try:
             return pipeline(**call_kwargs).images[0]
-        except TypeError:
+        except TypeError as exc:
+            message = str(exc)
+            unexpected_device_kwarg = (
+                "unexpected keyword argument 'device'" in message
+                or 'unexpected keyword argument "device"' in message
+            )
+            if not unexpected_device_kwarg:
+                raise
             call_kwargs.pop("device", None)
             return pipeline(**call_kwargs).images[0]
 

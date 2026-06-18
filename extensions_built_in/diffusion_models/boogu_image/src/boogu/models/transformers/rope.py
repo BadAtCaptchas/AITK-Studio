@@ -25,6 +25,14 @@ from diffusers.models.embeddings import get_1d_rotary_pos_embed
 from einops import repeat
 
 
+def _as_int_list(values) -> List[int]:
+    return [int(value) for value in values]
+
+
+def _as_int_nested_list(values) -> List[List[int]]:
+    return [_as_int_list(value) for value in values]
+
+
 class BooguImageRotaryPosEmbed(nn.Module):
     def __init__(
         self,
@@ -37,7 +45,7 @@ class BooguImageRotaryPosEmbed(nn.Module):
         self.theta = theta
         self.axes_dim = axes_dim
         self.axes_lens = axes_lens
-        self.patch_size = patch_size
+        self.patch_size = int(patch_size)
 
     @staticmethod
     def get_freqs_cis(
@@ -79,10 +87,14 @@ class BooguImageRotaryPosEmbed(nn.Module):
         device,
     ):
         batch_size = len(attention_mask)
-        p = self.patch_size
+        p = int(self.patch_size)
 
-        encoder_seq_len = attention_mask.shape[1]
-        l_effective_cap_len = attention_mask.sum(dim=1).tolist()
+        encoder_seq_len = int(attention_mask.shape[1])
+        l_effective_cap_len = _as_int_list(
+            attention_mask.sum(dim=1).to(torch.int64).tolist()
+        )
+        l_effective_ref_img_len = _as_int_nested_list(l_effective_ref_img_len)
+        l_effective_img_len = _as_int_list(l_effective_img_len)
 
         seq_lengths = [
             cap_len + sum(ref_img_len) + img_len
@@ -232,7 +244,7 @@ class BooguImageDoubleStreamRotaryPosEmbed(nn.Module):
         self.theta = theta
         self.axes_dim = axes_dim
         self.axes_lens = axes_lens
-        self.patch_size = patch_size
+        self.patch_size = int(patch_size)
 
     @staticmethod
     def get_freqs_cis(
@@ -274,10 +286,14 @@ class BooguImageDoubleStreamRotaryPosEmbed(nn.Module):
         device,
     ):
         batch_size = len(attention_mask)
-        p = self.patch_size
+        p = int(self.patch_size)
 
-        encoder_seq_len = attention_mask.shape[1]
-        l_effective_cap_len = attention_mask.sum(dim=1).tolist()
+        encoder_seq_len = int(attention_mask.shape[1])
+        l_effective_cap_len = _as_int_list(
+            attention_mask.sum(dim=1).to(torch.int64).tolist()
+        )
+        l_effective_ref_img_len = _as_int_nested_list(l_effective_ref_img_len)
+        l_effective_img_len = _as_int_list(l_effective_img_len)
 
         seq_lengths = [
             cap_len + sum(ref_img_len) + img_len

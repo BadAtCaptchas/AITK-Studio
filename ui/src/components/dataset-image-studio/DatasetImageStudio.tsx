@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, RotateCcw } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { Modal } from '@/components/Modal';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
@@ -88,6 +89,27 @@ type RecaptionOutputFormat = 'text' | 'ideogram_json';
 type RefusalCaptionAuditResponse = {
   refusals?: Record<string, unknown>;
 };
+type RecaptionModelOption = { value: string; label: string };
+type OllamaModelListItem = {
+  name?: string;
+  model?: string;
+  details?: Record<string, unknown>;
+};
+
+function ollamaModelName(model: OllamaModelListItem) {
+  return (typeof model.model === 'string' && model.model.trim()) || (typeof model.name === 'string' && model.name.trim()) || '';
+}
+
+function ollamaModelOptions(models: OllamaModelListItem[]): RecaptionModelOption[] {
+  return models.flatMap(model => {
+    const value = ollamaModelName(model);
+    if (!value) return [];
+    const detail = [model.details?.parameter_size, model.details?.quantization_level]
+      .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+      .join(' ');
+    return [{ value, label: detail ? `${value} (${detail})` : value }];
+  });
+}
 
 function scheduleIdleTask(callback: () => void) {
   const idleWindow = window as Window & {
@@ -111,6 +133,7 @@ export default function DatasetImageStudio({
   isAutoCaptioning,
   encryptedKey,
   encryptedRawKeyB64,
+  rootCaption,
   onRefresh,
   onAddImages,
   onConvertDatasetToJson,
@@ -144,6 +167,11 @@ export default function DatasetImageStudio({
   const [isRecaptionModalOpen, setIsRecaptionModalOpen] = useState(false);
   const [isRecaptioning, setIsRecaptioning] = useState(false);
   const [recaptionMessage, setRecaptionMessage] = useState('');
+  const [recaptionRootPrompt, setRecaptionRootPrompt] = useState('');
+  const [recaptionRootPromptStatus, setRecaptionRootPromptStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [recaptionRemoteModelOptions, setRecaptionRemoteModelOptions] = useState<RecaptionModelOption[]>([]);
+  const [recaptionRemoteModelStatus, setRecaptionRemoteModelStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [recaptionRemoteModelError, setRecaptionRemoteModelError] = useState('');
   const [remoteOllamaWorkerId, setRemoteOllamaWorkerId] = useState('');
   const [recaptionRemoteWorkerId, setRecaptionRemoteWorkerId] = useState('');
   const [autoBoxRefine, setAutoBoxRefine] = useState(false);
@@ -166,6 +194,8 @@ export default function DatasetImageStudio({
   const savedCaptionRef = useRef('');
   const isDirtyRef = useRef(false);
   const selectedKeyRef = useRef('');
+  const recaptionSystemPromptRef = useRef('');
+  const recaptionSystemPromptTouchedRef = useRef(false);
 
   const writeCaptionCache = useCallback((key: string, entry: CaptionCacheEntry) => {
     captionCacheRef.current.set(key, entry);
@@ -195,7 +225,11 @@ export default function DatasetImageStudio({
   );
   const autoBoxProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === autoBoxProvider)?.label || 'OpenRouter';
   const recaptionProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === recaptionProvider)?.label || 'OpenRouter';
-  const recaptionModelOptions = recaptionProvider === 'openrouter' ? OPENROUTER_BOX_MODELS : OLLAMA_VISION_MODELS;
+  const recaptionModelOptions = useMemo(() => {
+    if (recaptionProvider === 'openrouter') return OPENROUTER_BOX_MODELS;
+    if (recaptionProvider === 'remote_ollama' && recaptionRemoteModelOptions.length > 0) return recaptionRemoteModelOptions;
+    return OLLAMA_VISION_MODELS;
+  }, [recaptionProvider, recaptionRemoteModelOptions]);
   const captionParse = useMemo(
     () => parseIdeogramCaption(captionText, selectedImageSize ?? undefined),
     [captionText, selectedImageSize],
@@ -260,6 +294,10 @@ export default function DatasetImageStudio({
   }, [captionText]);
 
   useEffect(() => {
+    recaptionSystemPromptRef.current = recaptionSystemPrompt;
+  }, [recaptionSystemPrompt]);
+
+  useEffect(() => {
     savedCaptionRef.current = savedCaption;
     isDirtyRef.current = isDirty;
   }, [isDirty, savedCaption]);
@@ -285,6 +323,96 @@ export default function DatasetImageStudio({
     setRecaptionRemoteWorkerId(remoteWorkerOptions[0].value);
   }, [recaptionProvider, recaptionRemoteWorkerId, remoteWorkerOptions]);
 
+  const applyRecaptionRootPrompt = useCallback((value: string) => {
+    const trimmed = value.trim();
+    setRecaptionRootPrompt(trimmed);
+    if (!trimmed || recaptionSystemPromptTouchedRef.current || recaptionSystemPromptRef.current.trim()) return;
+    recaptionSystemPromptRef.current = trimmed;
+    setRecaptionSystemPrompt(trimmed);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    recaptionSystemPromptTouchedRef.current = false;
+    recaptionSystemPromptRef.current = '';
+    setRecaptionRootPrompt('');
+    setRecaptionSystemPrompt('');
+
+    if (rootCaption !== undefined) {
+      const value = rootCaption || '';
+      applyRecaptionRootPrompt(value);
+      setRecaptionRootPromptStatus(value.trim() ? 'success' : 'idle');
+      return;
+    }
+
+    if (!datasetName || workerID !== 'local') {
+      setRecaptionRootPromptStatus('idle');
+      return;
+    }
+
+    setRecaptionRootPromptStatus('loading');
+    apiClient
+      .post('/api/datasets/root-caption', {
+        datasetName,
+        ...projectPayload,
+      })
+      .then(response => {
+        if (cancelled) return;
+        if (response.data?.found) {
+          applyRecaptionRootPrompt(response.data.systemPrompt || '');
+          setRecaptionRootPromptStatus('success');
+        } else {
+          setRecaptionRootPromptStatus('idle');
+        }
+      })
+      .catch(error => {
+        if (cancelled) return;
+        console.warn('Could not load dataset root prompt for recaption:', error);
+        setRecaptionRootPromptStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRecaptionRootPrompt, datasetName, projectPayload, rootCaption, workerID]);
+
+  const useRecaptionRootPrompt = useCallback(() => {
+    recaptionSystemPromptTouchedRef.current = true;
+    recaptionSystemPromptRef.current = recaptionRootPrompt;
+    setRecaptionSystemPrompt(recaptionRootPrompt);
+  }, [recaptionRootPrompt]);
+
+  const loadRecaptionRemoteModels = useCallback(
+    async (workerId = recaptionRemoteWorkerId) => {
+      if (!workerId) return;
+      setRecaptionRemoteModelStatus('loading');
+      setRecaptionRemoteModelError('');
+      try {
+        const response = await apiClient.get(`/api/ollama-workers/${encodeURIComponent(workerId)}/models`);
+        const options = ollamaModelOptions(response.data?.models || []);
+        setRecaptionRemoteModelOptions(options);
+        setRecaptionRemoteModelStatus('success');
+        setRecaptionModel(currentModel => {
+          const trimmed = currentModel.trim();
+          if (!options.length || (trimmed && trimmed !== DEFAULT_OPENROUTER_BOX_MODEL && trimmed !== DEFAULT_OLLAMA_VISION_MODEL)) {
+            return currentModel;
+          }
+          return options[0].value;
+        });
+      } catch (error: any) {
+        setRecaptionRemoteModelOptions([]);
+        setRecaptionRemoteModelStatus('error');
+        setRecaptionRemoteModelError(error?.response?.data?.error || error?.message || 'Could not load Remote Ollama models.');
+      }
+    },
+    [recaptionRemoteWorkerId],
+  );
+
+  useEffect(() => {
+    if (recaptionProvider !== 'remote_ollama' || !recaptionRemoteWorkerId) return;
+    void loadRecaptionRemoteModels(recaptionRemoteWorkerId);
+  }, [loadRecaptionRemoteModels, recaptionProvider, recaptionRemoteWorkerId]);
+
   const handleAutoBoxProviderChange = useCallback((value: string) => {
     const nextProvider = AUTO_BOX_PROVIDERS.some(provider => provider.value === value)
       ? (value as StudioBoxProvider)
@@ -304,6 +432,10 @@ export default function DatasetImageStudio({
       ? (value as RecaptionProvider)
       : 'openrouter';
     setRecaptionProvider(nextProvider);
+    if (nextProvider !== 'remote_ollama') {
+      setRecaptionRemoteModelStatus('idle');
+      setRecaptionRemoteModelError('');
+    }
     setRecaptionModel(currentModel => {
       const trimmed = currentModel.trim();
       if (nextProvider === 'openrouter') {
@@ -336,11 +468,13 @@ export default function DatasetImageStudio({
       formData.append('prompt', recaptionPrompt);
       formData.append('systemPrompt', recaptionSystemPrompt);
       formData.append('existingCaption', captionText);
+      formData.append('datasetName', datasetName);
       formData.append('remoteWorkerId', recaptionRemoteWorkerId);
       formData.append('maxNewTokens', String(recaptionMaxNewTokens));
     },
     [
       captionText,
+      datasetName,
       recaptionMaxNewTokens,
       recaptionModel,
       recaptionOutputFormat,
@@ -647,6 +781,8 @@ export default function DatasetImageStudio({
             prompt: recaptionPrompt,
             systemPrompt: recaptionSystemPrompt,
             existingCaption: captionText,
+            datasetName,
+            worker_id: workerID,
             remoteWorkerId: recaptionRemoteWorkerId,
             maxNewTokens: recaptionMaxNewTokens,
             ...projectPayload,
@@ -1781,22 +1917,48 @@ export default function DatasetImageStudio({
           </div>
 
           {recaptionProvider === 'remote_ollama' && (
-            <label className="block text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-400">Remote Ollama</span>
-              <select
-                value={recaptionRemoteWorkerId}
-                onChange={event => setRecaptionRemoteWorkerId(event.target.value)}
-                disabled={isRecaptioning || remoteWorkerOptions.length === 0}
-                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-              >
-                {remoteWorkerOptions.length === 0 && <option value="">No enabled workers</option>}
-                {remoteWorkerOptions.map(worker => (
-                  <option key={worker.value} value={worker.value}>
-                    {worker.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="space-y-2">
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs font-medium text-gray-400">Remote Ollama</span>
+                  <select
+                    value={recaptionRemoteWorkerId}
+                    onChange={event => setRecaptionRemoteWorkerId(event.target.value)}
+                    disabled={isRecaptioning || remoteWorkerOptions.length === 0}
+                    className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+                  >
+                    {remoteWorkerOptions.length === 0 && <option value="">No enabled workers</option>}
+                    {remoteWorkerOptions.map(worker => (
+                      <option key={worker.value} value={worker.value}>
+                        {worker.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={isRecaptioning || !recaptionRemoteWorkerId || recaptionRemoteModelStatus === 'loading'}
+                  onClick={() => void loadRecaptionRemoteModels()}
+                  className="mt-5 inline-flex h-10 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {recaptionRemoteModelStatus === 'loading' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                  Models
+                </button>
+              </div>
+              {recaptionRemoteModelStatus === 'success' && (
+                <div className="text-xs text-gray-500">
+                  {recaptionRemoteModelOptions.length.toLocaleString()} model
+                  {recaptionRemoteModelOptions.length === 1 ? '' : 's'} loaded.
+                </div>
+              )}
+              {recaptionRemoteModelStatus === 'error' && (
+                <div className="text-xs text-red-400">{recaptionRemoteModelError}</div>
+              )}
+            </div>
           )}
 
           <label className="block text-sm">
@@ -1811,15 +1973,32 @@ export default function DatasetImageStudio({
           </label>
 
           <label className="block text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-400">System prompt</span>
+            <span className="mb-1 flex items-center justify-between gap-3 text-xs font-medium text-gray-400">
+              <span>System prompt</span>
+              {recaptionRootPrompt && (
+                <button
+                  type="button"
+                  disabled={isRecaptioning}
+                  onClick={useRecaptionRootPrompt}
+                  className="text-cyan-300 hover:text-cyan-200 disabled:opacity-45"
+                >
+                  Use ROOT_CAPTION.txt
+                </button>
+              )}
+            </span>
             <textarea
               value={recaptionSystemPrompt}
-              onChange={event => setRecaptionSystemPrompt(event.target.value)}
+              onChange={event => {
+                recaptionSystemPromptTouchedRef.current = true;
+                setRecaptionSystemPrompt(event.target.value);
+              }}
               disabled={isRecaptioning}
               rows={3}
               className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
             />
           </label>
+          {recaptionRootPromptStatus === 'loading' && <div className="text-xs text-gray-500">Loading ROOT_CAPTION.txt</div>}
+          {recaptionRootPromptStatus === 'error' && <div className="text-xs text-red-400">Could not load ROOT_CAPTION.txt.</div>}
 
           {recaptionMessage && <div className="text-sm text-gray-400">{recaptionMessage}</div>}
 

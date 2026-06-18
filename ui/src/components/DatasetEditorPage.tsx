@@ -772,6 +772,7 @@ export default function DatasetEditorPage({
             isAutoCaptioning={isAutoCaptioning}
             encryptedKey={encryptedKey}
             encryptedRawKeyB64={encryptedRawKeyB64}
+            rootCaption={encryptedCatalog.rootCaption ?? null}
             onRefresh={() => refreshImageList(datasetName)}
             onAddImages={() =>
               openImagesModal(datasetName, () => refreshImageList(datasetName), {

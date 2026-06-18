@@ -65,6 +65,7 @@ export type DatasetImageStudioProps = {
   isAutoCaptioning: boolean;
   encryptedKey?: CryptoKey | null;
   encryptedRawKeyB64?: string | null;
+  rootCaption?: string | null;
   onRefresh?: () => void;
   onAddImages: () => void;
   onConvertDatasetToJson?: () => void;

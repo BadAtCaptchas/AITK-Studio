@@ -43,6 +43,28 @@ function sqliteIdentifier(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
 }
 
+function sqliteColumnDefinition(column, overrides = {}) {
+  const name = overrides.name || column.name;
+  const type = overrides.type || column.type || 'TEXT';
+  const nullable = overrides.nullable ?? !column.notnull;
+  const defaultValue = Object.prototype.hasOwnProperty.call(overrides, 'defaultValue')
+    ? overrides.defaultValue
+    : column.dflt_value;
+  const parts = [sqliteIdentifier(name), type];
+
+  if (column.pk) {
+    parts.push('PRIMARY KEY');
+  }
+  if (!nullable) {
+    parts.push('NOT NULL');
+  }
+  if (defaultValue !== null && defaultValue !== undefined) {
+    parts.push(`DEFAULT ${defaultValue}`);
+  }
+
+  return parts.join(' ');
+}
+
 async function configureSqliteConnection(db) {
   await sqliteRun(db, `PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
   await sqliteRun(db, 'PRAGMA journal_mode=WAL;');
@@ -65,60 +87,57 @@ async function ensureColumn(db, table, name, definition) {
   }
 }
 
-async function sqliteIndexColumns(db, indexName) {
-  const rows = await sqliteAll(db, `PRAGMA index_info(${sqliteIdentifier(indexName)})`);
-  return rows.sort((a, b) => Number(a.seqno) - Number(b.seqno)).map(row => row.name);
-}
+async function rebuildJobTableWithColumnOverrides(db, columnOverrides = {}) {
+  const tempTable = '__aitk_job_rebuild';
+  const columns = await sqliteAll(db, 'PRAGMA table_info(Job)');
+  if (columns.length === 0) return;
+  const columnNames = columns.map(column => column.name);
+  const columnList = columnNames.map(sqliteIdentifier).join(', ');
+  const columnDefinitions = columns
+    .map(column => sqliteColumnDefinition(column, columnOverrides[column.name] || {}))
+    .join(',\n      ');
 
-async function rebuildJobTableWithoutNameUnique(db) {
-  const tempTable = '__aitk_job_without_global_name_unique';
   await sqliteRun(db, `DROP TABLE IF EXISTS ${tempTable};`);
   await sqliteRun(
     db,
     `
     CREATE TABLE ${tempTable} (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      project_id TEXT,
-      worker_id TEXT NOT NULL DEFAULT 'local',
-      remote_job_id TEXT,
-      remote_sync_at DATETIME,
-      remote_error TEXT,
-      gpu_ids TEXT NOT NULL,
-      job_config TEXT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      status TEXT NOT NULL DEFAULT 'stopped',
-      stop BOOLEAN NOT NULL DEFAULT false,
-      return_to_queue BOOLEAN NOT NULL DEFAULT false,
-      step INTEGER NOT NULL DEFAULT 0,
-      info TEXT NOT NULL DEFAULT '',
-      speed_string TEXT NOT NULL DEFAULT '',
-      queue_position INTEGER NOT NULL DEFAULT 0,
-      pid INTEGER,
-      job_type TEXT NOT NULL DEFAULT 'train',
-      job_ref TEXT,
-      save_now BOOLEAN NOT NULL DEFAULT false
+      ${columnDefinitions}
     );
     `,
   );
   await sqliteRun(
     db,
     `
-    INSERT INTO ${tempTable} (
-      id, name, project_id, worker_id, remote_job_id, remote_sync_at, remote_error, gpu_ids, job_config,
-      created_at, updated_at, status, stop, return_to_queue, step, info, speed_string, queue_position,
-      pid, job_type, job_ref, save_now
-    )
-    SELECT
-      id, name, project_id, worker_id, remote_job_id, remote_sync_at, remote_error, gpu_ids, job_config,
-      created_at, updated_at, status, stop, return_to_queue, step, info, speed_string, queue_position,
-      pid, job_type, job_ref, save_now
+    INSERT INTO ${tempTable} (${columnList})
+    SELECT ${columnList}
     FROM Job;
     `,
   );
   await sqliteRun(db, 'DROP TABLE Job;');
   await sqliteRun(db, `ALTER TABLE ${tempTable} RENAME TO Job;`);
+}
+
+async function ensureJobProjectIdNullable(db) {
+  await ensureColumn(db, 'Job', 'project_id', 'TEXT');
+  const columns = await sqliteAll(db, 'PRAGMA table_info(Job)');
+  const projectColumn = columns.find(column => column.name === 'project_id');
+  if (projectColumn && Number(projectColumn.notnull) !== 0) {
+    await rebuildJobTableWithColumnOverrides(db, {
+      project_id: { type: 'TEXT', nullable: true, defaultValue: null },
+    });
+  }
+}
+
+async function sqliteIndexColumns(db, indexName) {
+  const rows = await sqliteAll(db, `PRAGMA index_info(${sqliteIdentifier(indexName)})`);
+  return rows.sort((a, b) => Number(a.seqno) - Number(b.seqno)).map(row => row.name);
+}
+
+async function rebuildJobTableWithoutNameUnique(db) {
+  await rebuildJobTableWithColumnOverrides(db, {
+    project_id: { type: 'TEXT', nullable: true, defaultValue: null },
+  });
 }
 
 async function dropLegacySqliteJobNameUniqueIndexes(db) {
@@ -147,7 +166,7 @@ async function applySqliteScopedJobNameIndexes(filename) {
   const db = new sqlite3.Database(filename);
   try {
     await configureSqliteConnection(db);
-    await ensureColumn(db, 'Job', 'project_id', 'TEXT');
+    await ensureJobProjectIdNullable(db);
     await dropLegacySqliteJobNameUniqueIndexes(db);
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_name_idx ON Job(name);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_project_id_name_idx ON Job(project_id, name);');
@@ -237,7 +256,7 @@ async function applySqliteCompatibilitySchema(filename) {
     await ensureColumn(db, 'Job', 'job_type', "TEXT NOT NULL DEFAULT 'train'");
     await ensureColumn(db, 'Job', 'job_ref', 'TEXT');
     await ensureColumn(db, 'Job', 'save_now', 'BOOLEAN NOT NULL DEFAULT false');
-    await ensureColumn(db, 'Job', 'project_id', 'TEXT');
+    await ensureJobProjectIdNullable(db);
 
     await sqliteRun(
       db,

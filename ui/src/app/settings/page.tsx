@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import useSettings from '@/hooks/useSettings';
+import useSettings, { notifySettingsChanged } from '@/hooks/useSettings';
 import useWorkers from '@/hooks/useWorkers';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { TopBar, MainContent } from '@/components/layout';
@@ -248,7 +248,7 @@ function SettingSwitch({ checked, onChange }: { checked: boolean; onChange: (che
 }
 
 export default function Settings() {
-  const { settings, setSettings } = useSettings();
+  const { settings, setSettings, isSettingsLoaded } = useSettings();
   const { workers, setWorkers, refreshWorkers } = useWorkers();
   const { workers: ollamaWorkers, refreshWorkers: refreshOllamaWorkers } = useRemoteOllamaWorkers();
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
@@ -270,6 +270,7 @@ export default function Settings() {
   const workerUpdaterPolls = useRef<Record<string, number>>({});
   const comfyInstallPoll = useRef<number | null>(null);
   const loadedWorkerUpdaterIds = useRef<Set<string>>(new Set());
+  const savedSettingsRef = useRef<string | null>(null);
 
   const updateWorkerUpdaterState = (
     workerID: string,
@@ -453,6 +454,11 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
+    if (!isSettingsLoaded || savedSettingsRef.current !== null) return;
+    savedSettingsRef.current = JSON.stringify(settings);
+  }, [isSettingsLoaded, settings]);
+
+  useEffect(() => {
     workers.forEach(worker => {
       if (!worker.enabled || loadedWorkerUpdaterIds.current.has(worker.id)) return;
       loadedWorkerUpdaterIds.current.add(worker.id);
@@ -509,12 +515,15 @@ export default function Settings() {
   };
 
   const saveSettings = async () => {
+    if (!isSettingsLoaded || status === 'saving' || !hasUnsavedSettings) return;
     setStatus('saving');
 
     apiClient
       .post('/api/settings', settings)
       .then(() => {
+        savedSettingsRef.current = JSON.stringify(settings);
         setStatus('success');
+        notifySettingsChanged(settings);
       })
       .catch(error => {
         console.error('Error saving settings:', error);
@@ -672,7 +681,27 @@ export default function Settings() {
   const firstOllamaWorker = ollamaWorkers.find(worker => worker.enabled) || ollamaWorkers[0] || null;
   const ollamaModelCount = ollamaWorkers.reduce((sum, worker) => sum + (typeof worker.model_count === 'number' ? worker.model_count : 0), 0);
   const hasHealthyOllama = Boolean(firstOllamaWorker && !firstOllamaWorker.last_error);
-  const saveStatusLabel = status === 'saving' ? 'Saving' : status === 'error' ? 'Needs review' : 'Saved';
+  const hasUnsavedSettings = isSettingsLoaded && savedSettingsRef.current !== null && savedSettingsRef.current !== JSON.stringify(settings);
+  const saveStatusLabel = status === 'saving'
+    ? 'Saving'
+    : status === 'error'
+      ? 'Needs review'
+      : hasUnsavedSettings
+        ? 'Unsaved'
+        : status === 'success'
+          ? 'Saved'
+          : isSettingsLoaded
+            ? 'No changes'
+            : 'Loading';
+  const saveStatusTone = status === 'error'
+    ? 'error'
+    : status === 'saving'
+      ? 'saving'
+      : hasUnsavedSettings
+        ? 'unsaved'
+        : status === 'success'
+          ? 'success'
+          : 'idle';
   const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || 'local';
 
   return (
@@ -687,20 +716,30 @@ export default function Settings() {
         <div className="ml-auto flex flex-none items-center gap-2">
           <span
             className={`hidden h-9 items-center gap-2 border px-3 text-sm sm:inline-flex ${
-              status === 'error'
+              saveStatusTone === 'error'
                 ? 'border-rose-500/35 bg-rose-950/20 text-rose-200'
-                : status === 'saving'
+                : saveStatusTone === 'saving'
                   ? 'border-cyan-500/35 bg-cyan-950/20 text-cyan-100'
+                  : saveStatusTone === 'unsaved'
+                    ? 'border-amber-500/35 bg-amber-950/20 text-amber-100'
+                    : saveStatusTone === 'success'
+                      ? 'border-emerald-500/35 bg-emerald-950/20 text-emerald-100'
                   : 'border-cyan-500/25 bg-cyan-950/20 text-gray-300'
             }`}
           >
-            {status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 text-cyan-300" />}
+            {saveStatusTone === 'saving' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : saveStatusTone === 'unsaved' || saveStatusTone === 'error' ? (
+              <AlertTriangle className="h-4 w-4" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
             {saveStatusLabel}
           </span>
           <button
             type="button"
             onClick={saveSettings}
-            disabled={status === 'saving'}
+            disabled={status === 'saving' || !hasUnsavedSettings}
             aria-label="Save settings"
             title="Save settings"
             className="inline-flex h-9 w-10 items-center justify-center gap-2 border border-cyan-500 bg-cyan-500 px-0 text-sm font-semibold text-gray-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-4"

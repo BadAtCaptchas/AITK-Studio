@@ -6,8 +6,21 @@ import { apiClient } from '@/utils/api';
 
 const MAX_EMPTY_POLLS = 10;
 
-function isTerminalProgress(progress: HFDownloadProgress | null) {
-  return progress?.status === 'completed' || progress?.status === 'failed';
+function getUpdatedMs(progress: HFDownloadProgress) {
+  const updatedMs = new Date(progress.updatedAt).getTime();
+  return Number.isFinite(updatedMs) ? updatedMs : null;
+}
+
+function isNewerProgress(nextProgress: HFDownloadProgress, previousUpdatedAt: string | null) {
+  if (!previousUpdatedAt) return true;
+
+  const nextMs = getUpdatedMs(nextProgress);
+  const previousMs = new Date(previousUpdatedAt).getTime();
+  if (nextMs !== null && Number.isFinite(previousMs)) {
+    return nextMs > previousMs;
+  }
+
+  return nextProgress.updatedAt !== previousUpdatedAt;
 }
 
 export default function useJobDownloadProgress(
@@ -20,6 +33,7 @@ export default function useJobDownloadProgress(
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const emptyPollsRef = useRef(0);
   const hasSeenProgressRef = useRef(Boolean(initialProgress));
+  const latestProgressUpdatedAtRef = useRef(initialProgress?.updatedAt || null);
 
   const refreshProgress = useCallback(() => {
     setStatus(current => (current === 'idle' ? 'loading' : current));
@@ -32,9 +46,7 @@ export default function useJobDownloadProgress(
         if (nextProgress) {
           hasSeenProgressRef.current = true;
           emptyPollsRef.current = 0;
-          if (isTerminalProgress(nextProgress)) {
-            setIsPolling(false);
-          }
+          latestProgressUpdatedAtRef.current = nextProgress.updatedAt || null;
         } else {
           emptyPollsRef.current += 1;
           if (hasSeenProgressRef.current || emptyPollsRef.current >= MAX_EMPTY_POLLS) {
@@ -52,8 +64,9 @@ export default function useJobDownloadProgress(
   useEffect(() => {
     emptyPollsRef.current = 0;
     hasSeenProgressRef.current = Boolean(initialProgress);
+    latestProgressUpdatedAtRef.current = initialProgress?.updatedAt || null;
     setProgress(initialProgress);
-    setIsPolling(Boolean(reloadInterval) && !isTerminalProgress(initialProgress));
+    setIsPolling(Boolean(reloadInterval));
   }, [jobID]);
 
   useEffect(() => {
@@ -61,14 +74,22 @@ export default function useJobDownloadProgress(
       setIsPolling(false);
       return;
     }
-    if (isTerminalProgress(initialProgress)) {
-      setIsPolling(false);
-      return;
-    }
 
     emptyPollsRef.current = 0;
     setIsPolling(true);
-  }, [jobID, reloadInterval, initialProgress?.status]);
+  }, [jobID, reloadInterval]);
+
+  useEffect(() => {
+    if (!initialProgress || !isNewerProgress(initialProgress, latestProgressUpdatedAtRef.current)) return;
+
+    latestProgressUpdatedAtRef.current = initialProgress.updatedAt || null;
+    hasSeenProgressRef.current = true;
+    emptyPollsRef.current = 0;
+    setProgress(initialProgress);
+    if (reloadInterval) {
+      setIsPolling(true);
+    }
+  }, [initialProgress, reloadInterval]);
 
   useEffect(() => {
     refreshProgress();

@@ -72,6 +72,30 @@ class HFDownloadProgressReporterTest(unittest.TestCase):
             self.assertEqual(failed["error"], "network failed")
             self.assertEqual(failed["fileName"], "failed.safetensors")
 
+    def test_sequential_download_restarts_after_completed_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            progress_path = os.path.join(tmpdir, ".hf_download_progress.json")
+            reporter = HFDownloadProgressReporter(progress_path)
+
+            first = reporter.start("model-00001-of-00004.safetensors", 100, 0, "huggingface_hub.http_get")
+            reporter.update(first, 100)
+            reporter.finish(first)
+
+            completed = self.read_progress(progress_path)
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(completed["fileName"], "model-00001-of-00004.safetensors")
+
+            second = reporter.start("model-00002-of-00004.safetensors", 200, 0, "huggingface_hub.http_get")
+            reporter.update(second, 50)
+            reporter.write(force=True, status="downloading")
+
+            restarted = self.read_progress(progress_path)
+            self.assertEqual(restarted["status"], "downloading")
+            self.assertEqual(restarted["activeCount"], 1)
+            self.assertEqual(restarted["bytesDownloaded"], 50)
+            self.assertEqual(restarted["bytesTotal"], 200)
+            self.assertEqual(restarted["fileName"], "model-00002-of-00004.safetensors")
+
     def test_tracked_context_forwards_updates_to_wrapped_progress(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             progress_path = os.path.join(tmpdir, ".hf_download_progress.json")

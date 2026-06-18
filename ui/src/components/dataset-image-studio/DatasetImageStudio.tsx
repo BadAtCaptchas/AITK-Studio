@@ -2041,6 +2041,7 @@ export default function DatasetImageStudio({
                 isSaving={isSaving}
                 isRecaptioning={isRecaptioning}
                 canRecaption={canRecaptionSelectedImage}
+                hasQueuedRecaptions={recaptionQueue.length > 0}
                 recaptionFeedback={recaptionFeedback}
                 onCaptionTabChange={setCaptionTab}
                 onCaptionDescriptionChange={handleCaptionDescriptionChange}
@@ -2251,7 +2252,7 @@ export default function DatasetImageStudio({
               disabled={!canRecaptionSelectedImage}
               className="rounded-md bg-cyan-600 px-4 py-2 font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isRecaptioning || recaptionQueue.length > 0 ? 'Queue Recaption' : 'Recaption'}
+              {isRecaptioning || recaptionQueue.length > 0 ? 'Add to Queue' : 'Recaption'}
             </button>
           </div>
         </form>

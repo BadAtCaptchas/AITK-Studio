@@ -377,6 +377,7 @@ export function CaptionEditorPanel({
   isSaving,
   isRecaptioning,
   canRecaption,
+  hasQueuedRecaptions,
   recaptionFeedback,
   onCaptionTabChange,
   onCaptionDescriptionChange,
@@ -397,6 +398,7 @@ export function CaptionEditorPanel({
   isSaving: boolean;
   isRecaptioning?: boolean;
   canRecaption?: boolean;
+  hasQueuedRecaptions?: boolean;
   recaptionFeedback?: string;
   onCaptionTabChange: (tab: CaptionTab) => void;
   onCaptionDescriptionChange: (value: string) => void;
@@ -491,7 +493,7 @@ export function CaptionEditorPanel({
               onClick={onRecaption}
             >
               {isRecaptioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
-              {isRecaptioning ? 'Queue' : 'Recaption'}
+              {isRecaptioning || hasQueuedRecaptions ? 'Add to Queue' : 'Recaption'}
             </Button>
             <Button
               className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-emerald-500/40 bg-emerald-600/20 px-3 text-sm font-medium leading-none text-emerald-100 hover:bg-emerald-600/30 disabled:cursor-not-allowed disabled:opacity-40"
@@ -504,7 +506,10 @@ export function CaptionEditorPanel({
           </div>
         </div>
         {recaptionFeedback && (
-          <div className="mt-2 truncate text-xs text-cyan-300/80" title={recaptionFeedback}>
+          <div
+            className="mt-2 max-h-20 overflow-y-auto break-words rounded-md border border-cyan-500/10 bg-cyan-950/20 px-2 py-1.5 text-xs leading-relaxed text-cyan-200/80"
+            title={recaptionFeedback}
+          >
             {recaptionFeedback}
           </div>
         )}

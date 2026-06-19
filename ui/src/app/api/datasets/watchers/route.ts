@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     if (body?.action === 'run') {
       const id = typeof body?.id === 'string' ? body.id : '';
-      const watcher = (await listDatasetWatchers()).find(item => item.id === id);
+      const watcher = (await listDatasetWatchers({ projectID })).find(item => item.id === id);
       if (!watcher) return NextResponse.json({ error: 'Watcher not found' }, { status: 404 });
       return NextResponse.json({ result: await runDatasetWatcherOnce(watcher, { stableMs: 0 }) });
     }
@@ -93,14 +93,19 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams;
-    const queryProjectID = projectIDFromValue(params.get('project_id'));
-    rejectRemoteWorker(params.get('worker_id'), queryProjectID);
+    let projectID = projectIDFromValue(params.get('project_id'));
+    let workerID: unknown = params.get('worker_id');
+    rejectRemoteWorker(workerID, projectID);
     let id = params.get('id') || '';
     if (!id) {
       const body = await request.json().catch(() => null);
       id = typeof body?.id === 'string' ? body.id : '';
-      rejectRemoteWorker(body?.worker_id, body?.projectID ?? body?.project_id);
+      projectID = projectIDFromValue(body?.projectID ?? body?.project_id);
+      workerID = body?.worker_id;
+      rejectRemoteWorker(workerID, projectID);
     }
+    const scopedWatcher = (await listDatasetWatchers({ projectID })).find(item => item.id === id);
+    if (!scopedWatcher) return NextResponse.json({ error: 'Watcher not found' }, { status: 404 });
     const deleted = await deleteDatasetWatcher(id);
     if (!deleted) return NextResponse.json({ error: 'Watcher not found' }, { status: 404 });
     return NextResponse.json({ deleted });

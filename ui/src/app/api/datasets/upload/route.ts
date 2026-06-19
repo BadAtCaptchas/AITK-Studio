@@ -59,6 +59,14 @@ function nextAvailableFilePath(uploadDir: string, relativeFilePath: string) {
   return candidate;
 }
 
+async function writeDatasetImportMetadataBestEffort(uploadDir: string, sourceFolderPath: string) {
+  try {
+    await writeDatasetImportMetadata(uploadDir, sourceFolderPath);
+  } catch (error) {
+    console.warn('Could not write dataset import metadata:', error);
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -164,7 +172,7 @@ export async function POST(request: NextRequest) {
         savedObjects.push(objectPath);
       }
       await writeEncryptedManifest(uploadDir, manifest);
-      await writeDatasetImportMetadata(uploadDir, sourceFolderPath);
+      await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);
       return NextResponse.json({
         message: 'Encrypted files uploaded successfully',
         objects: savedObjects,
@@ -203,7 +211,7 @@ export async function POST(request: NextRequest) {
       savedFiles.push(filePathRelative);
     }
 
-    await writeDatasetImportMetadata(uploadDir, sourceFolderPath);
+    await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);
 
     return NextResponse.json({
       message: 'Files uploaded successfully',

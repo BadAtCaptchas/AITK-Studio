@@ -154,6 +154,54 @@ test('watcher copies only new media, skips caption sidecars, and preserves relat
   assert.equal(Object.keys(manifest.imports).length, 1);
 });
 
+test('concurrent watcher runs against one dataset do not duplicate imports', async () => {
+  const { dataset, source } = await makeWorkspace();
+  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
+
+  const firstWatcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+  });
+  const secondWatcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+  });
+
+  await Promise.all([
+    runDatasetWatcherOnce(firstWatcher, { now: 1_000, stableMs: 0 }),
+    runDatasetWatcherOnce(secondWatcher, { now: 1_000, stableMs: 0 }),
+  ]);
+  const results = await Promise.all([
+    runDatasetWatcherOnce(firstWatcher, { now: 1_001, stableMs: 0 }),
+    runDatasetWatcherOnce(secondWatcher, { now: 1_001, stableMs: 0 }),
+  ]);
+
+  assert.equal(results.reduce((sum, result) => sum + result.lastImportedCount, 0), 1);
+  assert.equal(await fs.readFile(path.join(dataset, 'a.jpg'), 'utf-8'), 'image-bytes');
+  await assert.rejects(() => fs.stat(path.join(dataset, 'a_2.jpg')), /ENOENT/);
+
+  const manifest = JSON.parse(await fs.readFile(path.join(dataset, DATASET_WATCHER_IMPORT_MANIFEST), 'utf-8'));
+  assert.equal(Object.keys(manifest.imports).length, 1);
+});
+
+test('watcher ignores stale dataset lock left by interrupted scan', async () => {
+  const { dataset, source } = await makeWorkspace();
+  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
+  const lockPath = path.join(dataset, '.aitk_dataset_watch.lock');
+  await fs.writeFile(lockPath, 'stale');
+  await fs.utimes(lockPath, new Date(0), new Date(0));
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+  });
+
+  const result = await runStableImport(watcher, 3_000_000);
+  assert.equal(result.lastImportedCount, 1);
+  assert.equal(await fs.readFile(path.join(dataset, 'a.jpg'), 'utf-8'), 'image-bytes');
+  await assert.rejects(() => fs.stat(lockPath), /ENOENT/);
+});
+
 test('watcher auto-caption writes generated text sidecar for imported images', async () => {
   const { dataset, source } = await makeWorkspace();
   await fs.writeFile(path.join(source, 'a.png'), 'image-bytes');

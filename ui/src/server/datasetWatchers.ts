@@ -10,6 +10,7 @@ import { isEncryptedDatasetFolder, resolveDatasetFolder } from './encryptedDatas
 import { readDatasetRootCaption } from './datasetRootCaption';
 import { getOpenRouterApiKey } from './settings';
 import { generateSingleImageRecaption, type RecaptionProvider, type RecaptionOutputFormat } from './datasetSingleRecaption';
+import { TOOLKIT_ROOT } from '../paths';
 
 export const DATASET_WATCHERS_SETTING_KEY = 'DATASET_WATCHERS_V1';
 export const DATASET_WATCHER_STATUS_SETTING_KEY = 'DATASET_WATCHER_STATUS_V1';
@@ -19,6 +20,10 @@ export const DATASET_WATCHER_STABLE_MS = 2_000;
 
 const DATASET_WATCHER_MANIFEST_VERSION = 1;
 const DATASET_WATCHER_STATUS_VERSION = 1;
+const DATASET_WATCHER_LOCK_STALE_MS = 30 * 60 * 1000;
+const DATASET_WATCHER_LOCK_HEARTBEAT_MS = 60_000;
+const DATASET_WATCHER_SETTINGS_LOCK_STALE_MS = 60_000;
+const DATASET_WATCHER_SETTINGS_LOCK_WAIT_MS = 5_000;
 const MAX_WATCHERS = 100;
 const MAX_WATCHER_PATH_LENGTH = 2048;
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.jxl', '.gif', '.bmp']);
@@ -122,6 +127,10 @@ function pendingByWatcher() {
 
 function nowIso(now = Date.now()) {
   return new Date(now).toISOString();
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function defaultWatcherStatus(state: DatasetWatcherStatus['state'] = 'idle'): DatasetWatcherStatus {
@@ -286,10 +295,12 @@ async function readStatusStore(): Promise<WatcherStatusStore> {
 }
 
 async function writeStatus(id: string, status: DatasetWatcherStatus) {
-  const store = await readStatusStore();
-  store.statuses[id] = status;
-  await db.settings.upsert(DATASET_WATCHER_STATUS_SETTING_KEY, JSON.stringify(store));
-  return status;
+  return withSettingsLock('status', async () => {
+    const store = await readStatusStore();
+    store.statuses[id] = status;
+    await db.settings.upsert(DATASET_WATCHER_STATUS_SETTING_KEY, JSON.stringify(store));
+    return status;
+  });
 }
 
 export function isDatasetWatchersSettingKey(key: string) {
@@ -317,17 +328,20 @@ function assertWatcherLimit(watchers: DatasetWatcherConfig[], id: string) {
 }
 
 export async function saveDatasetWatcher(rawWatcher: unknown) {
-  const watchers = await readWatcherRows();
-  const requestedId = isRecord(rawWatcher) ? asString(rawWatcher.id) : '';
-  const existing = requestedId ? watchers.find(watcher => watcher.id === requestedId) || null : null;
-  const watcher = normalizeIncomingWatcher(rawWatcher, existing);
-  assertWatcherLimit(watchers, watcher.id);
-  await validateDatasetWatcher(watcher);
+  const watcher = await withSettingsLock('registry', async () => {
+    const watchers = await readWatcherRows();
+    const requestedId = isRecord(rawWatcher) ? asString(rawWatcher.id) : '';
+    const existing = requestedId ? watchers.find(item => item.id === requestedId) || null : null;
+    const nextWatcher = normalizeIncomingWatcher(rawWatcher, existing);
+    assertWatcherLimit(watchers, nextWatcher.id);
+    await validateDatasetWatcher(nextWatcher);
 
-  const nextWatchers = existing
-    ? watchers.map(item => (item.id === watcher.id ? watcher : item))
-    : [...watchers, watcher];
-  await writeWatcherRows(nextWatchers);
+    const nextWatchers = existing
+      ? watchers.map(item => (item.id === nextWatcher.id ? nextWatcher : item))
+      : [...watchers, nextWatcher];
+    await writeWatcherRows(nextWatchers);
+    return nextWatcher;
+  });
   await writeStatus(watcher.id, watcher.enabled ? defaultWatcherStatus('idle') : defaultWatcherStatus('disabled'));
   return watcher;
 }
@@ -335,13 +349,19 @@ export async function saveDatasetWatcher(rawWatcher: unknown) {
 export async function deleteDatasetWatcher(id: string) {
   const watcherID = asString(id);
   if (!watcherID) throw new Error('Watcher id is required');
-  const watchers = await readWatcherRows();
-  const existing = watchers.find(watcher => watcher.id === watcherID) || null;
+  const existing = await withSettingsLock('registry', async () => {
+    const watchers = await readWatcherRows();
+    const watcher = watchers.find(item => item.id === watcherID) || null;
+    if (!watcher) return null;
+    await writeWatcherRows(watchers.filter(item => item.id !== watcherID));
+    return watcher;
+  });
   if (!existing) return null;
-  await writeWatcherRows(watchers.filter(watcher => watcher.id !== watcherID));
-  const store = await readStatusStore();
-  delete store.statuses[watcherID];
-  await db.settings.upsert(DATASET_WATCHER_STATUS_SETTING_KEY, JSON.stringify(store));
+  await withSettingsLock('status', async () => {
+    const store = await readStatusStore();
+    delete store.statuses[watcherID];
+    await db.settings.upsert(DATASET_WATCHER_STATUS_SETTING_KEY, JSON.stringify(store));
+  });
   pendingByWatcher().delete(watcherID);
   return existing;
 }
@@ -371,6 +391,58 @@ function dedupe(values: string[]) {
     results.push(value);
   }
   return results;
+}
+
+function settingsLockPath(name: string) {
+  const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_') || 'settings';
+  return path.join(TOOLKIT_ROOT, `.aitk_dataset_watchers_${safeName}.lock`);
+}
+
+async function acquireShortFileLock(lockPath: string, label: string) {
+  const startedAt = Date.now();
+  const lockID = randomUUID();
+  const payload = JSON.stringify({ lockID, label, pid: process.pid, lockedAt: nowIso(startedAt) }, null, 2);
+
+  while (true) {
+    try {
+      const handle = await fsp.open(lockPath, 'wx');
+      try {
+        await handle.writeFile(payload, 'utf-8');
+      } finally {
+        await handle.close();
+      }
+      return async () => {
+        const current = await fsp.readFile(lockPath, 'utf-8').catch(() => '');
+        try {
+          if (JSON.parse(current)?.lockID !== lockID) return;
+        } catch {
+          return;
+        }
+        await fsp.rm(lockPath, { force: true }).catch(() => undefined);
+      };
+    } catch (error: any) {
+      if (error?.code !== 'EEXIST') throw error;
+      const now = Date.now();
+      const stat = await fsp.stat(lockPath).catch(() => null);
+      if (stat && now - stat.mtimeMs > DATASET_WATCHER_SETTINGS_LOCK_STALE_MS) {
+        await fsp.rm(lockPath, { force: true }).catch(() => undefined);
+        continue;
+      }
+      if (now - startedAt > DATASET_WATCHER_SETTINGS_LOCK_WAIT_MS) {
+        throw new Error(`Timed out waiting for dataset watcher ${label} lock`);
+      }
+      await sleep(50);
+    }
+  }
+}
+
+async function withSettingsLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const release = await acquireShortFileLock(settingsLockPath(name), name);
+  try {
+    return await fn();
+  } finally {
+    await release();
+  }
 }
 
 export function datasetWatcherPathCandidates(
@@ -543,22 +615,72 @@ function cleanRelativeImportPath(relativePath: string, fallbackName: string) {
   return path.join(...parts);
 }
 
-function nextAvailableDestination(datasetFolder: string, relativePath: string) {
-  const targetDir = path.resolve(datasetFolder, path.dirname(relativePath));
-  const fileName = path.basename(relativePath);
-  const ext = path.extname(fileName);
-  const stem = ext ? fileName.slice(0, -ext.length) : fileName;
-  let candidate = path.resolve(targetDir, fileName);
-  let suffix = 2;
-  while (fs.existsSync(candidate)) {
-    candidate = path.resolve(targetDir, `${stem}_${suffix}${ext}`);
-    suffix += 1;
-  }
+function destinationForSuffix(datasetFolder: string, relativePath: string, suffix: number) {
+  const parsed = path.parse(relativePath);
+  const fileName = suffix > 1 ? `${parsed.name}_${suffix}${parsed.ext}` : `${parsed.name}${parsed.ext}`;
+  const candidate = path.resolve(datasetFolder, parsed.dir, fileName);
   const relative = path.relative(path.resolve(datasetFolder), candidate);
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('Invalid watcher destination path');
   }
   return candidate;
+}
+
+function sameObservedFile(candidate: SourceCandidate, stat: fs.Stats) {
+  return candidate.size === stat.size && candidate.mtimeMs === stat.mtimeMs;
+}
+
+function watcherLockPath(datasetFolder: string) {
+  return path.join(datasetFolder, '.aitk_dataset_watch.lock');
+}
+
+async function acquireWatcherLock(datasetFolder: string, watcherID: string, now: number) {
+  const lockPath = watcherLockPath(datasetFolder);
+  const lockID = randomUUID();
+  const payload = JSON.stringify({ lockID, watcherID, pid: process.pid, lockedAt: nowIso(now) }, null, 2);
+
+  const openLock = async () => {
+    const handle = await fsp.open(lockPath, 'wx');
+    try {
+      await handle.writeFile(payload, 'utf-8');
+    } finally {
+      await handle.close();
+    }
+  };
+
+  try {
+    await openLock();
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error;
+    const stat = await fsp.stat(lockPath).catch(() => null);
+    if (!stat || now - stat.mtimeMs <= DATASET_WATCHER_LOCK_STALE_MS) {
+      return null;
+    }
+    await fsp.rm(lockPath, { force: true }).catch(() => undefined);
+    try {
+      await openLock();
+    } catch (retryError: any) {
+      if (retryError?.code === 'EEXIST') return null;
+      throw retryError;
+    }
+  }
+
+  const heartbeat = setInterval(() => {
+    const date = new Date();
+    void fsp.utimes(lockPath, date, date).catch(() => undefined);
+  }, DATASET_WATCHER_LOCK_HEARTBEAT_MS);
+  heartbeat.unref?.();
+
+  return async () => {
+    clearInterval(heartbeat);
+    const current = await fsp.readFile(lockPath, 'utf-8').catch(() => '');
+    try {
+      if (JSON.parse(current)?.lockID !== lockID) return;
+    } catch {
+      return;
+    }
+    await fsp.rm(lockPath, { force: true }).catch(() => undefined);
+  };
 }
 
 async function findSourceMedia(sourceRoot: string, includeSubfolders: boolean) {
@@ -678,16 +800,32 @@ async function autoCaptionImportedFile(options: {
 async function copyCandidateIntoDataset(options: {
   watcher: DatasetWatcherConfig;
   datasetFolder: string;
-  sourceRoot: string;
   candidate: SourceCandidate;
 }) {
   const relativePath = options.watcher.preserveRelativePaths
     ? cleanRelativeImportPath(options.candidate.relativePath, path.basename(options.candidate.absolutePath))
     : cleanUploadFileName(path.basename(options.candidate.absolutePath));
-  const destination = nextAvailableDestination(options.datasetFolder, relativePath);
-  await fsp.mkdir(path.dirname(destination), { recursive: true });
-  await fsp.copyFile(options.candidate.absolutePath, destination);
-  return destination;
+
+  for (let suffix = 1; suffix < 10_000; suffix += 1) {
+    const destination = destinationForSuffix(options.datasetFolder, relativePath, suffix);
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    try {
+      await fsp.copyFile(options.candidate.absolutePath, destination, fs.constants.COPYFILE_EXCL);
+    } catch (error: any) {
+      if (error?.code === 'EEXIST') continue;
+      throw error;
+    }
+
+    const sourceStat = await fsp.stat(options.candidate.absolutePath).catch(() => null);
+    if (!sourceStat?.isFile() || !sameObservedFile(options.candidate, sourceStat)) {
+      await fsp.rm(destination, { force: true }).catch(() => undefined);
+      return null;
+    }
+
+    return destination;
+  }
+
+  throw new Error('Could not find an available destination file name');
 }
 
 export async function runDatasetWatcherOnce(
@@ -710,13 +848,28 @@ export async function runDatasetWatcherOnce(
     return { watcherID: watcher.id, ...disabled, importedPaths, captionedPaths };
   }
 
-  await writeStatus(watcher.id, {
-    ...defaultWatcherStatus('scanning'),
-    lastScanAt: nowIso(now),
-  });
+  let releaseLock: (() => Promise<void>) | null = null;
 
   try {
     const { datasetFolder } = await resolveWatcherDataset(watcher);
+    releaseLock = await acquireWatcherLock(datasetFolder, watcher.id, now);
+    if (!releaseLock) {
+      const current = (await readStatusStore()).statuses[watcher.id] || defaultWatcherStatus('scanning');
+      const warning = 'Watcher is already running.';
+      return {
+        watcherID: watcher.id,
+        ...current,
+        warnings: current.warnings.includes(warning) ? current.warnings : [...current.warnings, warning],
+        importedPaths,
+        captionedPaths,
+      };
+    }
+
+    await writeStatus(watcher.id, {
+      ...defaultWatcherStatus('scanning'),
+      lastScanAt: nowIso(now),
+    });
+
     const [sourceRoot, datasetRealPath] = await Promise.all([
       resolveAccessibleDirectory(watcher.sourcePath),
       realpathOrResolve(datasetFolder),
@@ -747,7 +900,12 @@ export async function runDatasetWatcherOnce(
         warnings,
       });
 
-      const destination = await copyCandidateIntoDataset({ watcher, datasetFolder, sourceRoot, candidate });
+      const destination = await copyCandidateIntoDataset({ watcher, datasetFolder, candidate });
+      if (!destination) {
+        warnings.push(`${candidate.relativePath}: Source file changed during import; it will be retried on the next scan.`);
+        pendingByWatcher().get(watcher.id)?.delete(key);
+        continue;
+      }
       const destinationRelativePath = path.relative(datasetFolder, destination);
       manifest.imports[key] = {
         sourceKey: key,
@@ -759,6 +917,7 @@ export async function runDatasetWatcherOnce(
       };
       importedPaths.push(destination);
       pendingByWatcher().get(watcher.id)?.delete(key);
+      await writeImportManifest(datasetFolder, manifest);
 
       if (watcher.autoCaption?.enabled && isAutoCaptionableImage(destination)) {
         state = 'captioning';
@@ -782,12 +941,10 @@ export async function runDatasetWatcherOnce(
         }
       }
     }
-
-    if (importedPaths.length > 0) {
-      await writeImportManifest(datasetFolder, manifest);
-    }
   } catch (error) {
     lastError = error instanceof Error ? error.message : 'Dataset watcher failed';
+  } finally {
+    await releaseLock?.();
   }
 
   const finalStatus: DatasetWatcherStatus = {

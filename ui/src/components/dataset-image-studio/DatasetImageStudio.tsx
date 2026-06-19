@@ -1,11 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, RotateCcw } from 'lucide-react';
 import { apiClient } from '@/utils/api';
-import { Modal } from '@/components/Modal';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
-import { defaultIdeogramJsonCaptionPrompt, defaultImageCaptionPrompt } from '@/helpers/captionOptions';
+import { defaultImageCaptionPrompt } from '@/helpers/captionOptions';
 import {
   captionObjectPath,
   decryptEncryptedObjectBlob,
@@ -38,23 +36,41 @@ import {
 } from '@/utils/ideogramCaption';
 import { resizeOrMoveBox } from '@/utils/annotationGeometry';
 import { AnnotationLayer } from './AnnotationLayer';
-import {
-  AUTO_BOX_PROVIDERS,
-  BOX_COLORS,
-  DEFAULT_OLLAMA_VISION_MODEL,
-  DEFAULT_OPENROUTER_BOX_MODEL,
-  MAX_HISTORY,
-  MIN_BOX_SPAN,
-  OLLAMA_VISION_MODELS,
-  OPENROUTER_BOX_MODELS,
-} from './constants';
+import { BOX_COLORS, DEFAULT_OPENROUTER_BOX_MODEL, MAX_HISTORY, MIN_BOX_SPAN } from './constants';
 import { ImageNavigator } from './ImageNavigator';
 import { CaptionEditorPanel, ObjectDetailsPanel } from './InspectorPanels';
 import { LayersPanel } from './LayersPanel';
+import { RecaptionSettingsModal } from './RecaptionSettingsModal';
 import { StudioMedia } from './StudioMedia';
 import { StudioToolbar } from './StudioToolbar';
 import { ToolRail } from './ToolRail';
 import { appendImageSizeFields, createEncryptedImageFormData } from './openRouterMedia';
+import {
+  appendRecaptionFields,
+  maxNewTokensForRecaptionOutputFormat,
+  modelOptionsForRecaptionProvider,
+  nextAutoBoxModelForProvider,
+  nextRecaptionModelForProvider,
+  normalizeRecaptionProvider,
+  normalizeStudioBoxProvider,
+  normalizedRecaptionMaxNewTokens,
+  ollamaModelOptions,
+  persistedRecaptionQueueEntry,
+  promptForRecaptionOutputFormat,
+  providerLabel,
+  readPersistedRecaptionQueue,
+  readRecaptionSettingsPreset,
+  recaptionQueueStorageKey,
+  recaptionSettingsStorageKey,
+  type PersistedRecaptionQueue,
+  type RecaptionLoadStatus,
+  type RecaptionModelOption,
+  type RecaptionOutputFormat,
+  type RecaptionProvider,
+  type RecaptionQueueEntry,
+  type RecaptionSettingsPreset,
+  type StudioBoxProvider,
+} from './recaption';
 import type {
   BulkCaptionActionRequest,
   BulkCaptionActionResult,
@@ -81,180 +97,13 @@ import {
   reindexLayerIndexSetAfterDelete,
   reindexLayerIndexSetAfterInsert,
   responseErrorMessage,
+  scheduleIdleTask,
   statusForCaption,
 } from './utils';
 
-type StudioBoxProvider = (typeof AUTO_BOX_PROVIDERS)[number]['value'];
-type RecaptionProvider = StudioBoxProvider;
-type RecaptionOutputFormat = 'text' | 'ideogram_json';
 type RefusalCaptionAuditResponse = {
   refusals?: Record<string, unknown>;
 };
-type RecaptionModelOption = { value: string; label: string };
-type RecaptionSettingsPreset = {
-  provider: RecaptionProvider;
-  model: string;
-  outputFormat: RecaptionOutputFormat;
-  prompt: string;
-  systemPrompt: string;
-  remoteWorkerId: string;
-  maxNewTokens: number;
-};
-type RecaptionQueueEntry = {
-  id: string;
-  item: DatasetStudioItem;
-  key: string;
-  name: string;
-  existingCaption: string;
-  settings: RecaptionSettingsPreset;
-};
-type PersistedRecaptionQueueEntry = Omit<RecaptionQueueEntry, 'item'> & {
-  status: 'queued' | 'running';
-  updatedAt: string;
-};
-type PersistedRecaptionQueue = {
-  version: 1;
-  active: PersistedRecaptionQueueEntry | null;
-  queue: PersistedRecaptionQueueEntry[];
-  updatedAt: string;
-};
-type OllamaModelListItem = {
-  name?: string;
-  model?: string;
-  details?: Record<string, unknown>;
-};
-
-const RECAPTION_SETTINGS_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionSettings.v1';
-const RECAPTION_QUEUE_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionQueue.v1';
-
-function ollamaModelName(model: OllamaModelListItem) {
-  return (typeof model.model === 'string' && model.model.trim()) || (typeof model.name === 'string' && model.name.trim()) || '';
-}
-
-function ollamaModelOptions(models: OllamaModelListItem[]): RecaptionModelOption[] {
-  return models.flatMap(model => {
-    const value = ollamaModelName(model);
-    if (!value) return [];
-    const detail = [model.details?.parameter_size, model.details?.quantization_level]
-      .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-      .join(' ');
-    return [{ value, label: detail ? `${value} (${detail})` : value }];
-  });
-}
-
-function recaptionSettingsStorageKey({
-  datasetName,
-  projectID,
-  datasetPath,
-  workerID,
-}: {
-  datasetName: string;
-  projectID?: string | null;
-  datasetPath?: string | null;
-  workerID: string;
-}) {
-  const dataset = datasetName.trim();
-  if (!dataset) return '';
-  const scope = (projectID || datasetPath || workerID || 'global').trim();
-  return `${RECAPTION_SETTINGS_STORAGE_PREFIX}:${encodeURIComponent(scope)}:${encodeURIComponent(dataset)}`;
-}
-
-function recaptionQueueStorageKey({
-  datasetName,
-  projectID,
-  datasetPath,
-  workerID,
-}: {
-  datasetName: string;
-  projectID?: string | null;
-  datasetPath?: string | null;
-  workerID: string;
-}) {
-  const dataset = datasetName.trim();
-  if (!dataset) return '';
-  const scope = (projectID || datasetPath || workerID || 'global').trim();
-  return `${RECAPTION_QUEUE_STORAGE_PREFIX}:${encodeURIComponent(scope)}:${encodeURIComponent(dataset)}`;
-}
-
-function normalizeRecaptionProvider(value: unknown): RecaptionProvider {
-  return AUTO_BOX_PROVIDERS.some(provider => provider.value === value) ? (value as RecaptionProvider) : 'openrouter';
-}
-
-function normalizeRecaptionOutputFormat(value: unknown): RecaptionOutputFormat {
-  return value === 'ideogram_json' ? 'ideogram_json' : 'text';
-}
-
-function readRecaptionSettingsPreset(storageKey: string): RecaptionSettingsPreset | null {
-  if (!storageKey || typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<RecaptionSettingsPreset> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
-    const provider = normalizeRecaptionProvider(parsed.provider);
-    const fallbackModel = provider === 'openrouter' ? DEFAULT_OPENROUTER_BOX_MODEL : DEFAULT_OLLAMA_VISION_MODEL;
-    const maxNewTokens = Number(parsed.maxNewTokens);
-    return {
-      provider,
-      model: typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model : fallbackModel,
-      outputFormat: normalizeRecaptionOutputFormat(parsed.outputFormat),
-      prompt: typeof parsed.prompt === 'string' && parsed.prompt.trim() ? parsed.prompt : defaultImageCaptionPrompt,
-      systemPrompt: typeof parsed.systemPrompt === 'string' ? parsed.systemPrompt : '',
-      remoteWorkerId: typeof parsed.remoteWorkerId === 'string' ? parsed.remoteWorkerId : '',
-      maxNewTokens: Number.isFinite(maxNewTokens) && maxNewTokens > 0 ? Math.floor(maxNewTokens) : 256,
-    };
-  } catch (error) {
-    console.warn('Could not load saved recaption settings:', error);
-    return null;
-  }
-}
-
-function persistedRecaptionQueueEntry(
-  entry: RecaptionQueueEntry,
-  status: PersistedRecaptionQueueEntry['status'],
-): PersistedRecaptionQueueEntry {
-  return {
-    id: entry.id,
-    key: entry.key,
-    name: entry.name,
-    existingCaption: entry.existingCaption,
-    settings: entry.settings,
-    status,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function readPersistedRecaptionQueue(storageKey: string): PersistedRecaptionQueue | null {
-  if (!storageKey || typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<PersistedRecaptionQueue> | null;
-    if (!parsed || parsed.version !== 1) return null;
-    return {
-      version: 1,
-      active: parsed.active || null,
-      queue: Array.isArray(parsed.queue) ? parsed.queue : [],
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
-    };
-  } catch (error) {
-    console.warn('Could not load saved recaption queue:', error);
-    return null;
-  }
-}
-
-function scheduleIdleTask(callback: () => void) {
-  const idleWindow = window as Window & {
-    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
-    cancelIdleCallback?: (handle: number) => void;
-  };
-  if (idleWindow.requestIdleCallback) {
-    const handle = idleWindow.requestIdleCallback(callback, { timeout: 2500 });
-    return () => idleWindow.cancelIdleCallback?.(handle);
-  }
-  const handle = window.setTimeout(callback, 700);
-  return () => window.clearTimeout(handle);
-}
 
 export default function DatasetImageStudio({
   datasetName,
@@ -306,9 +155,9 @@ export default function DatasetImageStudio({
   const [activeRecaptionLabel, setActiveRecaptionLabel] = useState('');
   const [activeRecaptionKey, setActiveRecaptionKey] = useState('');
   const [recaptionRootPrompt, setRecaptionRootPrompt] = useState('');
-  const [recaptionRootPromptStatus, setRecaptionRootPromptStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [recaptionRootPromptStatus, setRecaptionRootPromptStatus] = useState<RecaptionLoadStatus>('idle');
   const [recaptionRemoteModelOptions, setRecaptionRemoteModelOptions] = useState<RecaptionModelOption[]>([]);
-  const [recaptionRemoteModelStatus, setRecaptionRemoteModelStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [recaptionRemoteModelStatus, setRecaptionRemoteModelStatus] = useState<RecaptionLoadStatus>('idle');
   const [recaptionRemoteModelError, setRecaptionRemoteModelError] = useState('');
   const [remoteOllamaWorkerId, setRemoteOllamaWorkerId] = useState('');
   const [recaptionRemoteWorkerId, setRecaptionRemoteWorkerId] = useState('');
@@ -356,10 +205,7 @@ export default function DatasetImageStudio({
   const selectedKey = selectedItem ? itemKey(selectedItem) : '';
   const selectedName = selectedItem ? itemName(selectedItem) : '';
   const selectedKind = selectedItem ? itemKind(selectedItem) : 'image';
-  const plainAuditItemPaths = useMemo(
-    () => items.flatMap(item => (item.kind === 'plain' ? [item.path] : [])),
-    [items],
-  );
+  const plainAuditItemPaths = useMemo(() => items.flatMap(item => (item.kind === 'plain' ? [item.path] : [])), [items]);
   const plainAuditKey = useMemo(() => plainAuditItemPaths.join('\n'), [plainAuditItemPaths]);
   const remoteWorkerOptions = useMemo(
     () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
@@ -377,11 +223,9 @@ export default function DatasetImageStudio({
     () => recaptionQueueStorageKey({ datasetName, projectID, datasetPath, workerID }),
     [datasetName, datasetPath, projectID, workerID],
   );
-  const autoBoxProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === autoBoxProvider)?.label || 'OpenRouter';
+  const autoBoxProviderLabel = providerLabel(autoBoxProvider);
   const recaptionModelOptions = useMemo(() => {
-    if (recaptionProvider === 'openrouter') return OPENROUTER_BOX_MODELS;
-    if (recaptionProvider === 'remote_ollama' && recaptionRemoteModelOptions.length > 0) return recaptionRemoteModelOptions;
-    return OLLAMA_VISION_MODELS;
+    return modelOptionsForRecaptionProvider(recaptionProvider, recaptionRemoteModelOptions);
   }, [recaptionProvider, recaptionRemoteModelOptions]);
   const captionParse = useMemo(
     () => parseIdeogramCaption(captionText, selectedImageSize ?? undefined),
@@ -390,15 +234,20 @@ export default function DatasetImageStudio({
   const isIdeogram = captionParse.kind === 'ideogram';
   const boxes = isIdeogram ? captionParse.boxes : [];
   const selectedElement =
-    isIdeogram && selectedElementIndex != null ? captionParse.elements[selectedElementIndex] ?? null : null;
+    isIdeogram && selectedElementIndex != null ? (captionParse.elements[selectedElementIndex] ?? null) : null;
   const selectedBox = boxes.find(box => box.elementIndex === selectedElementIndex) || null;
   const selectedLayerCaptionKey =
     selectedKey && selectedElementIndex != null ? layerCaptionRequestKey(selectedKey, selectedElementIndex) : '';
-  const selectedLayerIsCaptioning = Boolean(selectedLayerCaptionKey && captioningLayerKeys.has(selectedLayerCaptionKey));
-  const hasCurrentImageCaptioningLayer = Boolean(
-    selectedKey && Array.from(captioningLayerKeys).some(requestKey => isLayerCaptionRequestForItem(requestKey, selectedKey)),
+  const selectedLayerIsCaptioning = Boolean(
+    selectedLayerCaptionKey && captioningLayerKeys.has(selectedLayerCaptionKey),
   );
-  const selectedLayerCaptionMessage = selectedLayerCaptionKey ? layerCaptionMessages[selectedLayerCaptionKey] || '' : '';
+  const hasCurrentImageCaptioningLayer = Boolean(
+    selectedKey &&
+      Array.from(captioningLayerKeys).some(requestKey => isLayerCaptionRequestForItem(requestKey, selectedKey)),
+  );
+  const selectedLayerCaptionMessage = selectedLayerCaptionKey
+    ? layerCaptionMessages[selectedLayerCaptionKey] || ''
+    : '';
   const selectedPalette = Array.isArray(selectedElement?.color_palette) ? selectedElement.color_palette : [];
   const isDirty = captionText.trim() !== savedCaption.trim();
   const captionStatus = statusForCaption(captionText, isCaptionLoaded);
@@ -418,7 +267,8 @@ export default function DatasetImageStudio({
             : !selectedImageSize
               ? 'Image size pending.'
               : '';
-  const canGenerateAutoBoxes = !autoBoxDisabledReason && !isGeneratingBoxes && !hasCurrentImageCaptioningLayer && !isAutoCaptioning;
+  const canGenerateAutoBoxes =
+    !autoBoxDisabledReason && !isGeneratingBoxes && !hasCurrentImageCaptioningLayer && !isAutoCaptioning;
   const selectedLayerHasCaptionTarget = Boolean(selectedBox || layerCaptionTargetText(selectedElement));
   const layerCaptionDisabledReason = !isCaptionLoaded
     ? 'Load the caption first.'
@@ -444,7 +294,8 @@ export default function DatasetImageStudio({
   const selectedRecaptionIsRunning = Boolean(selectedKey && isRecaptioning && activeRecaptionKey === selectedKey);
   const selectedRecaptionIsQueued = Boolean(selectedKey && recaptionQueue.some(entry => entry.key === selectedKey));
   const hasPendingRecaptions = isRecaptioning || recaptionQueue.length > 0;
-  const canQueueSelectedRecaption = canRecaptionSelectedImage && !selectedRecaptionIsRunning && !selectedRecaptionIsQueued;
+  const canQueueSelectedRecaption =
+    canRecaptionSelectedImage && !selectedRecaptionIsRunning && !selectedRecaptionIsQueued;
   const recaptionFeedback = isRecaptioning
     ? `Recaptioning${activeRecaptionLabel ? ` ${activeRecaptionLabel}` : ''}${
         recaptionQueue.length ? `, ${recaptionQueue.length} queued` : ''
@@ -516,9 +367,7 @@ export default function DatasetImageStudio({
     }
 
     setRecaptionQueue(restored);
-    setRecaptionMessage(
-      `Restored ${restored.length} recaption${restored.length === 1 ? '' : 's'} after refresh.`,
-    );
+    setRecaptionMessage(`Restored ${restored.length} recaption${restored.length === 1 ? '' : 's'} after refresh.`);
   }, [isRecaptioning, items, recaptionQueue.length, recaptionQueueStorageKeyValue]);
 
   useEffect(() => {
@@ -642,6 +491,12 @@ export default function DatasetImageStudio({
     setRecaptionSystemPrompt(recaptionRootPrompt);
   }, [recaptionRootPrompt]);
 
+  const handleRecaptionSystemPromptChange = useCallback((value: string) => {
+    recaptionSystemPromptTouchedRef.current = true;
+    recaptionSystemPromptRef.current = value;
+    setRecaptionSystemPrompt(value);
+  }, []);
+
   const loadRecaptionRemoteModels = useCallback(
     async (workerId = recaptionRemoteWorkerId, preferredModel = recaptionModelRef.current) => {
       if (!workerId) return;
@@ -651,7 +506,7 @@ export default function DatasetImageStudio({
       setRecaptionRemoteModelOptions([]);
       try {
         const response = await apiClient.get(`/api/ollama-workers/${encodeURIComponent(workerId)}/models`);
-        const options = ollamaModelOptions(response.data?.models || []);
+        const options = ollamaModelOptions(response.data?.models);
         setRecaptionRemoteModelOptions(options);
         setRecaptionRemoteModelStatus('success');
         setRecaptionModel(currentModel => {
@@ -662,7 +517,9 @@ export default function DatasetImageStudio({
       } catch (error: any) {
         setRecaptionRemoteModelOptions([]);
         setRecaptionRemoteModelStatus('error');
-        setRecaptionRemoteModelError(error?.response?.data?.error || error?.message || 'Could not load Remote Ollama models.');
+        setRecaptionRemoteModelError(
+          error?.response?.data?.error || error?.message || 'Could not load Remote Ollama models.',
+        );
       }
     },
     [recaptionRemoteWorkerId],
@@ -674,55 +531,30 @@ export default function DatasetImageStudio({
   }, [loadRecaptionRemoteModels, recaptionProvider, recaptionRemoteWorkerId]);
 
   const handleAutoBoxProviderChange = useCallback((value: string) => {
-    const nextProvider = AUTO_BOX_PROVIDERS.some(provider => provider.value === value)
-      ? (value as StudioBoxProvider)
-      : 'openrouter';
+    const nextProvider = normalizeStudioBoxProvider(value);
     setAutoBoxProvider(nextProvider);
-    setAutoBoxModel(currentModel => {
-      const trimmed = currentModel.trim();
-      if (nextProvider === 'openrouter') {
-        return !trimmed || trimmed.startsWith('qwen3.5:') ? DEFAULT_OPENROUTER_BOX_MODEL : trimmed;
-      }
-      return !trimmed || trimmed === DEFAULT_OPENROUTER_BOX_MODEL ? DEFAULT_OLLAMA_VISION_MODEL : trimmed;
-    });
+    setAutoBoxModel(currentModel => nextAutoBoxModelForProvider(nextProvider, currentModel));
   }, []);
 
-  const handleRecaptionProviderChange = useCallback((value: string) => {
-    const nextProvider = AUTO_BOX_PROVIDERS.some(provider => provider.value === value)
-      ? (value as RecaptionProvider)
-      : 'openrouter';
-    setRecaptionProvider(nextProvider);
-    if (nextProvider !== 'remote_ollama') {
-      setRecaptionRemoteModelStatus('idle');
-      setRecaptionRemoteModelError('');
-    }
-    setRecaptionModel(currentModel => {
-      const trimmed = currentModel.trim();
-      if (nextProvider === 'openrouter') {
-        return !trimmed || trimmed.startsWith('qwen3.5:') || trimmed.startsWith('gemma4:') ? DEFAULT_OPENROUTER_BOX_MODEL : trimmed;
+  const handleRecaptionProviderChange = useCallback(
+    (value: string) => {
+      const nextProvider = normalizeRecaptionProvider(value);
+      setRecaptionProvider(nextProvider);
+      if (nextProvider !== 'remote_ollama') {
+        setRecaptionRemoteModelStatus('idle');
+        setRecaptionRemoteModelError('');
       }
-      if (nextProvider === 'remote_ollama') {
-        return recaptionRemoteModelOptions.some(option => option.value === trimmed)
-          ? trimmed
-          : recaptionRemoteModelOptions[0]?.value || '';
-      }
-      return !trimmed || trimmed === DEFAULT_OPENROUTER_BOX_MODEL ? DEFAULT_OLLAMA_VISION_MODEL : trimmed;
-    });
-  }, [recaptionRemoteModelOptions]);
+      setRecaptionModel(currentModel =>
+        nextRecaptionModelForProvider(nextProvider, currentModel, recaptionRemoteModelOptions),
+      );
+    },
+    [recaptionRemoteModelOptions],
+  );
 
   const handleRecaptionOutputFormatChange = useCallback((value: RecaptionOutputFormat) => {
     setRecaptionOutputFormat(value);
-    setRecaptionPrompt(currentPrompt => {
-      const trimmed = currentPrompt.trim();
-      if (value === 'ideogram_json') {
-        return !trimmed || trimmed === defaultImageCaptionPrompt ? defaultIdeogramJsonCaptionPrompt : currentPrompt;
-      }
-      return !trimmed || trimmed === defaultIdeogramJsonCaptionPrompt ? defaultImageCaptionPrompt : currentPrompt;
-    });
-    setRecaptionMaxNewTokens(current => {
-      if (value === 'ideogram_json') return current < 2048 ? 2048 : current;
-      return current >= 2048 ? 256 : current;
-    });
+    setRecaptionPrompt(currentPrompt => promptForRecaptionOutputFormat(value, currentPrompt));
+    setRecaptionMaxNewTokens(current => maxNewTokensForRecaptionOutputFormat(value, current));
   }, []);
 
   const currentRecaptionSettings = useCallback(
@@ -733,7 +565,7 @@ export default function DatasetImageStudio({
       prompt: recaptionPrompt,
       systemPrompt: recaptionSystemPrompt,
       remoteWorkerId: recaptionRemoteWorkerId,
-      maxNewTokens: Math.max(1, Math.floor(Number(recaptionMaxNewTokens) || 1)),
+      maxNewTokens: normalizedRecaptionMaxNewTokens(recaptionMaxNewTokens),
     }),
     [
       recaptionMaxNewTokens,
@@ -760,21 +592,6 @@ export default function DatasetImageStudio({
       setHasRecaptionSettingsForDataset(true);
     },
     [recaptionStorageKey],
-  );
-
-  const appendRecaptionFields = useCallback(
-    (formData: FormData, settings: RecaptionSettingsPreset, existingCaption: string) => {
-      formData.append('provider', settings.provider);
-      formData.append('model', settings.model);
-      formData.append('outputFormat', settings.outputFormat);
-      formData.append('prompt', settings.prompt);
-      formData.append('systemPrompt', settings.systemPrompt);
-      formData.append('existingCaption', existingCaption);
-      formData.append('datasetName', datasetName);
-      formData.append('remoteWorkerId', settings.remoteWorkerId);
-      formData.append('maxNewTokens', String(settings.maxNewTokens));
-    },
-    [datasetName],
   );
 
   const readCaptionForItem = useCallback(
@@ -1045,131 +862,134 @@ export default function DatasetImageStudio({
     [encryptedCaptionPaths, encryptedKey, onSaveEncryptedCaption, projectPayload, writeCaptionCache],
   );
 
-  const saveCaption = useCallback(async (captionOverride?: string) => {
-    if (!selectedItem || !isCaptionLoaded || isSaving) return;
-    const sourceCaption = captionOverride ?? captionText;
-    const value = isPlainTextCaptionItem(selectedItem) ? sourceCaption : sourceCaption.trim();
-    if (captionOverride === undefined && !isDirty) return;
-    if (captionOverride !== undefined && value.trim() === savedCaption.trim()) return;
-    setIsSaving(true);
-    try {
-      await saveCaptionForItem(selectedItem, selectedKey, value);
-    } catch (error) {
-      console.error('Caption save failed:', error);
-      alert('Failed to save caption. Please try again.');
-      if (captionOverride !== undefined) throw error;
-    } finally {
-      setIsSaving(false);
-    }
-  }, [
-    captionText,
-    isCaptionLoaded,
-    isDirty,
-    isSaving,
-    savedCaption,
-    saveCaptionForItem,
-    selectedItem,
-    selectedKey,
-  ]);
+  const saveCaption = useCallback(
+    async (captionOverride?: string) => {
+      if (!selectedItem || !isCaptionLoaded || isSaving) return;
+      const sourceCaption = captionOverride ?? captionText;
+      const value = isPlainTextCaptionItem(selectedItem) ? sourceCaption : sourceCaption.trim();
+      if (captionOverride === undefined && !isDirty) return;
+      if (captionOverride !== undefined && value.trim() === savedCaption.trim()) return;
+      setIsSaving(true);
+      try {
+        await saveCaptionForItem(selectedItem, selectedKey, value);
+      } catch (error) {
+        console.error('Caption save failed:', error);
+        alert('Failed to save caption. Please try again.');
+        if (captionOverride !== undefined) throw error;
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [captionText, isCaptionLoaded, isDirty, isSaving, savedCaption, saveCaptionForItem, selectedItem, selectedKey],
+  );
 
   useEffect(() => {
     saveCaptionRef.current = saveCaption;
   }, [saveCaption]);
 
-  const runRecaptionQueueEntry = useCallback(async (entry: RecaptionQueueEntry) => {
-    const { item, key, name, existingCaption, settings } = entry;
-    if (!settings.model.trim()) {
-      setRecaptionMessage('Select a model before recaptioning.');
-      return;
-    }
-    if (settings.provider === 'remote_ollama' && !settings.remoteWorkerId) {
-      setRecaptionMessage('Select a Remote Ollama endpoint.');
-      return;
-    }
-    if (item.kind === 'encrypted' && !encryptedKey) {
-      setRecaptionMessage('Unlock the encrypted dataset first.');
-      return;
-    }
+  const runRecaptionQueueEntry = useCallback(
+    async (entry: RecaptionQueueEntry) => {
+      const { item, key, name, existingCaption, settings } = entry;
+      if (!settings.model.trim()) {
+        setRecaptionMessage('Select a model before recaptioning.');
+        return;
+      }
+      if (settings.provider === 'remote_ollama' && !settings.remoteWorkerId) {
+        setRecaptionMessage('Select a Remote Ollama endpoint.');
+        return;
+      }
+      if (item.kind === 'encrypted' && !encryptedKey) {
+        setRecaptionMessage('Unlock the encrypted dataset first.');
+        return;
+      }
 
-    const providerLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === settings.provider)?.label || settings.provider;
-    setActiveRecaptionEntry(entry);
-    setIsRecaptioning(true);
-    setActiveRecaptionLabel(name);
-    setActiveRecaptionKey(key);
-    setRecaptionMessage(`Recaptioning ${name}${recaptionQueueRef.current.length ? ` (${recaptionQueueRef.current.length} queued)` : ''}.`);
-    try {
-      let response;
-      if (item.kind === 'plain') {
-        response = await apiClient.post(
-          '/api/datasets/recaption-single',
-          {
-            imgPath: item.path,
-            provider: settings.provider,
-            model: settings.model,
-            outputFormat: settings.outputFormat,
-            prompt: settings.prompt,
-            systemPrompt: settings.systemPrompt,
-            existingCaption,
-            datasetName,
-            worker_id: workerID,
-            remoteWorkerId: settings.remoteWorkerId,
-            maxNewTokens: settings.maxNewTokens,
-            ...projectPayload,
-          },
-          { timeout: 0 },
-        );
-      } else {
-        if (!encryptedProviderConfirmations[`recaption:${settings.provider}`]) {
-          const confirmed = window.confirm(
-            `Recaption will send this decrypted image to ${providerLabel}. Continue?`,
+      const recaptionProviderLabel = providerLabel(settings.provider);
+      setActiveRecaptionEntry(entry);
+      setIsRecaptioning(true);
+      setActiveRecaptionLabel(name);
+      setActiveRecaptionKey(key);
+      setRecaptionMessage(
+        `Recaptioning ${name}${recaptionQueueRef.current.length ? ` (${recaptionQueueRef.current.length} queued)` : ''}.`,
+      );
+      try {
+        let response;
+        if (item.kind === 'plain') {
+          response = await apiClient.post(
+            '/api/datasets/recaption-single',
+            {
+              imgPath: item.path,
+              provider: settings.provider,
+              model: settings.model,
+              outputFormat: settings.outputFormat,
+              prompt: settings.prompt,
+              systemPrompt: settings.systemPrompt,
+              existingCaption,
+              datasetName,
+              worker_id: workerID,
+              remoteWorkerId: settings.remoteWorkerId,
+              maxNewTokens: settings.maxNewTokens,
+              ...projectPayload,
+            },
+            { timeout: 0 },
           );
-          if (!confirmed) {
-            setRecaptionMessage('Recaption canceled.');
-            return;
+        } else {
+          if (!encryptedProviderConfirmations[`recaption:${settings.provider}`]) {
+            const confirmed = window.confirm(
+              `Recaption will send this decrypted image to ${recaptionProviderLabel}. Continue?`,
+            );
+            if (!confirmed) {
+              setRecaptionMessage('Recaption canceled.');
+              return;
+            }
+            setEncryptedProviderConfirmations(previous => ({ ...previous, [`recaption:${settings.provider}`]: true }));
           }
-          setEncryptedProviderConfirmations(previous => ({ ...previous, [`recaption:${settings.provider}`]: true }));
+          const formData = await createEncryptedImageFormData({
+            datasetName,
+            workerID,
+            projectID,
+            encryptedKey: encryptedKey as CryptoKey,
+            item: item.item,
+          });
+          appendRecaptionFields(formData, settings, existingCaption, datasetName);
+          response = await apiClient.post('/api/datasets/recaption-single', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 0,
+          });
         }
-        const formData = await createEncryptedImageFormData({
-          datasetName,
-          workerID,
-          projectID,
-          encryptedKey: encryptedKey as CryptoKey,
-          item: item.item,
-        });
-        appendRecaptionFields(formData, settings, existingCaption);
-        response = await apiClient.post('/api/datasets/recaption-single', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 0,
-        });
-      }
 
-      const caption = String(response.data?.caption || '').trim();
-      if (!caption) throw new Error('Recaption returned an empty caption.');
-      if (selectedKeyRef.current === key) {
-        setUndoStack(previous => [...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)), latestCaptionRef.current]);
-        setRedoStack([]);
-        if (settings.outputFormat === 'ideogram_json') setCaptionTab('json');
+        const caption = String(response.data?.caption || '').trim();
+        if (!caption) throw new Error('Recaption returned an empty caption.');
+        if (selectedKeyRef.current === key) {
+          setUndoStack(previous => [
+            ...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)),
+            latestCaptionRef.current,
+          ]);
+          setRedoStack([]);
+          if (settings.outputFormat === 'ideogram_json') setCaptionTab('json');
+        }
+        await saveCaptionForItem(item, key, caption);
+        setRecaptionMessage(
+          `${name} recaptioned${recaptionQueueRef.current.length ? `, ${recaptionQueueRef.current.length} queued` : ''}.`,
+        );
+      } catch (error) {
+        setRecaptionMessage(`${name}: ${responseErrorMessage(error, 'Recaption failed. Please try again.')}`);
+      } finally {
+        setActiveRecaptionEntry(null);
+        setIsRecaptioning(false);
+        setActiveRecaptionLabel('');
+        setActiveRecaptionKey('');
       }
-      await saveCaptionForItem(item, key, caption);
-      setRecaptionMessage(`${name} recaptioned${recaptionQueueRef.current.length ? `, ${recaptionQueueRef.current.length} queued` : ''}.`);
-    } catch (error) {
-      setRecaptionMessage(`${name}: ${responseErrorMessage(error, 'Recaption failed. Please try again.')}`);
-    } finally {
-      setActiveRecaptionEntry(null);
-      setIsRecaptioning(false);
-      setActiveRecaptionLabel('');
-      setActiveRecaptionKey('');
-    }
-  }, [
-    appendRecaptionFields,
-    datasetName,
-    encryptedKey,
-    encryptedProviderConfirmations,
-    projectID,
-    projectPayload,
-    saveCaptionForItem,
-    workerID,
-  ]);
+    },
+    [
+      datasetName,
+      encryptedKey,
+      encryptedProviderConfirmations,
+      projectID,
+      projectPayload,
+      saveCaptionForItem,
+      workerID,
+    ],
+  );
 
   useEffect(() => {
     if (isRecaptioning || recaptionQueue.length === 0) return;
@@ -1216,9 +1036,7 @@ export default function DatasetImageStudio({
     persistRecaptionSettingsForDataset(settings);
     setRecaptionQueue(previous => [...previous, entry]);
     const queuedTotal = recaptionQueueRef.current.length + (isRecaptioningRef.current ? 1 : 0) + 1;
-    setRecaptionMessage(
-      queuedTotal > 1 ? `${selectedName} queued (${queuedTotal} total).` : `${selectedName} queued.`,
-    );
+    setRecaptionMessage(queuedTotal > 1 ? `${selectedName} queued (${queuedTotal} total).` : `${selectedName} queued.`);
     setIsRecaptionModalOpen(false);
   }, [
     canRecaptionSelectedImage,
@@ -1358,7 +1176,10 @@ export default function DatasetImageStudio({
 
   const handleDeleteCurrentImage = useCallback(() => {
     if (!selectedItem) return;
-    void handleDeleteImages([selectedItem], isPlainTextCaptionItem(selectedItem) ? 'current text file' : 'current image');
+    void handleDeleteImages(
+      [selectedItem],
+      isPlainTextCaptionItem(selectedItem) ? 'current text file' : 'current image',
+    );
   }, [handleDeleteImages, selectedItem]);
 
   const applyBulkCaptionResult = useCallback(
@@ -1444,7 +1265,15 @@ export default function DatasetImageStudio({
       }
       return result;
     },
-    [applyBulkCaptionResult, datasetName, onBulkEncryptedCaptionAction, onRefresh, projectPayload, saveCaption, workerID],
+    [
+      applyBulkCaptionResult,
+      datasetName,
+      onBulkEncryptedCaptionAction,
+      onRefresh,
+      projectPayload,
+      saveCaption,
+      workerID,
+    ],
   );
 
   const mutateCaption = useCallback(
@@ -1579,14 +1408,16 @@ export default function DatasetImageStudio({
       const patches =
         elementCount > 0 ? normalizeGeneratedBoxPatches({ boxes: response.data?.boxes }, elementCount, 2) : [];
       const generatedElements =
-        elementCount === 0 ? normalizeGeneratedElementBoxes({ generatedElements: response.data?.generatedElements }, 2, 20) : [];
+        elementCount === 0
+          ? normalizeGeneratedElementBoxes({ generatedElements: response.data?.generatedElements }, 2, 20)
+          : [];
       if (patches.length === 0 && generatedElements.length === 0) {
         throw new Error(`${autoBoxProviderLabel} did not return any usable boxes.`);
       }
 
       let appliedCount = 0;
       const nextSelection =
-        generatedElements.length > 0 ? elementCount : selectedElementIndex ?? patches[0]?.elementIndex ?? null;
+        generatedElements.length > 0 ? elementCount : (selectedElementIndex ?? patches[0]?.elementIndex ?? null);
       mutateCaption(data => {
         if (generatedElements.length > 0) {
           const result = appendGeneratedIdeogramElements(data, generatedElements as GeneratedElementBox[]);
@@ -1627,7 +1458,13 @@ export default function DatasetImageStudio({
   ]);
 
   const handleCaptionSelectedLayer = useCallback(async () => {
-    if (!selectedItem || layerCaptionDisabledReason || selectedLayerIsCaptioning || selectedElementIndex == null || !selectedElement) {
+    if (
+      !selectedItem ||
+      layerCaptionDisabledReason ||
+      selectedLayerIsCaptioning ||
+      selectedElementIndex == null ||
+      !selectedElement
+    ) {
       return;
     }
 
@@ -1698,7 +1535,7 @@ export default function DatasetImageStudio({
       }
       const latestParsed = parseIdeogramCaption(latestCaptionRef.current, selectedImageSize ?? undefined);
       const currentElement =
-        latestParsed.kind === 'ideogram' ? latestParsed.elements[requestElementIndex] ?? null : null;
+        latestParsed.kind === 'ideogram' ? (latestParsed.elements[requestElementIndex] ?? null) : null;
       if (!pendingCaptionLayerStillMatches(currentElement, requestElement)) {
         setLayerCaptionMessageForKey(requestLayerKey, 'Layer changed while Caption Layer was running. Rerun it.');
         return;
@@ -1715,7 +1552,8 @@ export default function DatasetImageStudio({
       const currentHasBox = Boolean(arrayToBox(currentElement?.bbox));
       const generatedBox = currentHasBox ? null : arrayToBox(response.data?.bbox);
       if (!desc) throw new Error(`${autoBoxProviderLabel} did not return a usable layer caption.`);
-      if (!currentHasBox && !generatedBox) throw new Error(`${autoBoxProviderLabel} did not return a usable layer box.`);
+      if (!currentHasBox && !generatedBox)
+        throw new Error(`${autoBoxProviderLabel} did not return a usable layer box.`);
 
       const updated = mutateLatestCaption(data => {
         updateIdeogramElementField(data, requestElementIndex, 'desc', desc);
@@ -1735,7 +1573,10 @@ export default function DatasetImageStudio({
       );
     } catch (error) {
       console.error('Caption Layer failed:', error);
-      setLayerCaptionMessageForKey(requestLayerKey, responseErrorMessage(error, 'Caption Layer failed. Please try again.'));
+      setLayerCaptionMessageForKey(
+        requestLayerKey,
+        responseErrorMessage(error, 'Caption Layer failed. Please try again.'),
+      );
     } finally {
       setLayerCaptioningForKey(requestLayerKey, false);
     }
@@ -1779,7 +1620,10 @@ export default function DatasetImageStudio({
     setRedoStack(previous => {
       const nextCaption = previous[0];
       if (!nextCaption) return previous;
-      setUndoStack(undoStackValue => [...undoStackValue.slice(Math.max(0, undoStackValue.length - MAX_HISTORY + 1)), captionText]);
+      setUndoStack(undoStackValue => [
+        ...undoStackValue.slice(Math.max(0, undoStackValue.length - MAX_HISTORY + 1)),
+        captionText,
+      ]);
       latestCaptionRef.current = nextCaption;
       setCaptionText(nextCaption);
       return previous.slice(1);
@@ -1973,7 +1817,8 @@ export default function DatasetImageStudio({
         return;
       }
       if (isTyping) return;
-      const isArrowKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
+      const isArrowKey =
+        event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
       if (isArrowKey) {
         // Nudge the selected (unlocked) box with arrow keys; otherwise navigate images.
         if (selectedBox && selectedElementIndex != null && !lockedLayerIndexes.has(selectedElementIndex)) {
@@ -2042,7 +1887,8 @@ export default function DatasetImageStudio({
       ? captionParse.data.high_level_description
       : captionText;
   const selectedLayerColor =
-    selectedBox?.color || (selectedElementIndex != null ? BOX_COLORS[selectedElementIndex % BOX_COLORS.length] : BOX_COLORS[0]);
+    selectedBox?.color ||
+    (selectedElementIndex != null ? BOX_COLORS[selectedElementIndex % BOX_COLORS.length] : BOX_COLORS[0]);
   const layerCaptionStatus =
     (selectedLayerIsCaptioning ? 'Captioning layer...' : selectedLayerCaptionMessage) ||
     (selectedElement && layerCaptionDisabledReason ? layerCaptionDisabledReason : '');
@@ -2055,7 +1901,9 @@ export default function DatasetImageStudio({
   if (items.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
-        <div className="border border-dashed border-gray-700 bg-gray-900/60 px-6 py-5 text-sm">No editable media or text files found.</div>
+        <div className="border border-dashed border-gray-700 bg-gray-900/60 px-6 py-5 text-sm">
+          No editable media or text files found.
+        </div>
       </div>
     );
   }
@@ -2239,212 +2087,40 @@ export default function DatasetImageStudio({
           </aside>
         </div>
       </div>
-      <Modal
+      <RecaptionSettingsModal
         isOpen={isRecaptionModalOpen}
+        provider={recaptionProvider}
+        outputFormat={recaptionOutputFormat}
+        model={recaptionModel}
+        modelOptions={recaptionModelOptions}
+        maxNewTokens={recaptionMaxNewTokens}
+        prompt={recaptionPrompt}
+        systemPrompt={recaptionSystemPrompt}
+        rootPrompt={recaptionRootPrompt}
+        rootPromptStatus={recaptionRootPromptStatus}
+        remoteWorkerId={recaptionRemoteWorkerId}
+        remoteWorkerOptions={remoteWorkerOptions}
+        remoteModelOptions={recaptionRemoteModelOptions}
+        remoteModelStatus={recaptionRemoteModelStatus}
+        remoteModelError={recaptionRemoteModelError}
+        message={recaptionMessage}
+        isRecaptioning={isRecaptioning}
+        canQueueSelectedRecaption={canQueueSelectedRecaption}
+        selectedRecaptionIsRunning={selectedRecaptionIsRunning}
+        selectedRecaptionIsQueued={selectedRecaptionIsQueued}
+        hasPendingRecaptions={hasPendingRecaptions}
         onClose={() => setIsRecaptionModalOpen(false)}
-        title="Recaption Image"
-        size="lg"
-        closeOnOverlayClick
-      >
-        <form
-          className="space-y-4 text-gray-200"
-          onSubmit={event => {
-            event.preventDefault();
-            queueSelectedRecaption();
-          }}
-        >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-400">Provider</span>
-              <select
-                value={recaptionProvider}
-                onChange={event => handleRecaptionProviderChange(event.target.value)}
-                disabled={isRecaptioning}
-                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-              >
-                {AUTO_BOX_PROVIDERS.map(provider => (
-                  <option key={provider.value} value={provider.value}>
-                    {provider.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-400">Output</span>
-              <select
-                value={recaptionOutputFormat}
-                onChange={event => handleRecaptionOutputFormatChange(event.target.value as RecaptionOutputFormat)}
-                disabled={isRecaptioning}
-                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-              >
-                <option value="text">Text caption</option>
-                <option value="ideogram_json">Ideogram JSON</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-400">Model</span>
-              {recaptionProvider === 'remote_ollama' ? (
-                <select
-                  value={recaptionModel}
-                  onChange={event => setRecaptionModel(event.target.value)}
-                  disabled={isRecaptioning || recaptionRemoteModelStatus === 'loading' || recaptionRemoteModelOptions.length === 0}
-                  className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {recaptionRemoteModelStatus === 'loading' && <option value="">Loading models...</option>}
-                  {recaptionRemoteModelStatus !== 'loading' && recaptionRemoteModelOptions.length === 0 && (
-                    <option value="">No server models loaded</option>
-                  )}
-                  {recaptionRemoteModelOptions.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <>
-                  <input
-                    list="recaption-model-options"
-                    value={recaptionModel}
-                    onChange={event => setRecaptionModel(event.target.value)}
-                    disabled={isRecaptioning}
-                    className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-                  />
-                  <datalist id="recaption-model-options">
-                    {recaptionModelOptions.map(option => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </datalist>
-                </>
-              )}
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-xs font-medium text-gray-400">Max tokens</span>
-              <input
-                type="number"
-                min={1}
-                value={recaptionMaxNewTokens}
-                onChange={event => setRecaptionMaxNewTokens(Math.max(1, Number(event.target.value) || 1))}
-                disabled={isRecaptioning}
-                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-              />
-            </label>
-          </div>
-
-          {recaptionProvider === 'remote_ollama' && (
-            <div className="space-y-2">
-              <div className="grid grid-cols-[1fr_auto] gap-2">
-                <label className="block text-sm">
-                  <span className="mb-1 block text-xs font-medium text-gray-400">Remote Ollama</span>
-                  <select
-                    value={recaptionRemoteWorkerId}
-                    onChange={event => setRecaptionRemoteWorkerId(event.target.value)}
-                    disabled={isRecaptioning || remoteWorkerOptions.length === 0}
-                    className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-                  >
-                    {remoteWorkerOptions.length === 0 && <option value="">No enabled workers</option>}
-                    {remoteWorkerOptions.map(worker => (
-                      <option key={worker.value} value={worker.value}>
-                        {worker.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  disabled={isRecaptioning || !recaptionRemoteWorkerId || recaptionRemoteModelStatus === 'loading'}
-                  onClick={() => void loadRecaptionRemoteModels()}
-                  className="mt-5 inline-flex h-10 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  {recaptionRemoteModelStatus === 'loading' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RotateCcw className="h-4 w-4" />
-                  )}
-                  Models
-                </button>
-              </div>
-              {recaptionRemoteModelStatus === 'success' && (
-                <div className="text-xs text-gray-500">
-                  {recaptionRemoteModelOptions.length.toLocaleString()} model
-                  {recaptionRemoteModelOptions.length === 1 ? '' : 's'} loaded.
-                </div>
-              )}
-              {recaptionRemoteModelStatus === 'error' && (
-                <div className="text-xs text-red-400">{recaptionRemoteModelError}</div>
-              )}
-            </div>
-          )}
-
-          <label className="block text-sm">
-            <span className="mb-1 block text-xs font-medium text-gray-400">Prompt</span>
-            <textarea
-              value={recaptionPrompt}
-              onChange={event => setRecaptionPrompt(event.target.value)}
-              disabled={isRecaptioning}
-              rows={6}
-              className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-            />
-          </label>
-
-          <label className="block text-sm">
-            <span className="mb-1 flex items-center justify-between gap-3 text-xs font-medium text-gray-400">
-              <span>System prompt</span>
-              {recaptionRootPrompt && (
-                <button
-                  type="button"
-                  disabled={isRecaptioning}
-                  onClick={useRecaptionRootPrompt}
-                  className="text-cyan-300 hover:text-cyan-200 disabled:opacity-45"
-                >
-                  Use ROOT_CAPTION.txt
-                </button>
-              )}
-            </span>
-            <textarea
-              value={recaptionSystemPrompt}
-              onChange={event => {
-                recaptionSystemPromptTouchedRef.current = true;
-                setRecaptionSystemPrompt(event.target.value);
-              }}
-              disabled={isRecaptioning}
-              rows={3}
-              className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
-            />
-          </label>
-          {recaptionRootPromptStatus === 'loading' && <div className="text-xs text-gray-500">Loading ROOT_CAPTION.txt</div>}
-          {recaptionRootPromptStatus === 'error' && <div className="text-xs text-red-400">Could not load ROOT_CAPTION.txt.</div>}
-
-          {recaptionMessage && <div className="text-sm text-gray-400">{recaptionMessage}</div>}
-
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => setIsRecaptionModalOpen(false)}
-              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600"
-            >
-              {isRecaptioning ? 'Close' : 'Cancel'}
-            </button>
-            <button
-              type="submit"
-              disabled={!canQueueSelectedRecaption}
-              className="rounded-md bg-cyan-600 px-4 py-2 font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {selectedRecaptionIsRunning
-                ? 'Recaptioning'
-                : selectedRecaptionIsQueued
-                  ? 'Queued'
-                  : hasPendingRecaptions
-                    ? 'Add to Queue'
-                    : 'Recaption'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+        onSubmit={queueSelectedRecaption}
+        onProviderChange={handleRecaptionProviderChange}
+        onOutputFormatChange={handleRecaptionOutputFormatChange}
+        onModelChange={setRecaptionModel}
+        onMaxNewTokensChange={setRecaptionMaxNewTokens}
+        onPromptChange={setRecaptionPrompt}
+        onSystemPromptChange={handleRecaptionSystemPromptChange}
+        onUseRootPrompt={useRecaptionRootPrompt}
+        onRemoteWorkerChange={setRecaptionRemoteWorkerId}
+        onLoadRemoteModels={() => void loadRecaptionRemoteModels()}
+      />
     </div>
   );
 }

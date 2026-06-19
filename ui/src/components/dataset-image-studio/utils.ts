@@ -64,9 +64,7 @@ export function statusForCaption(caption: string, loaded: boolean): CaptionStatu
       dot: parsed.boxes.length > 0 ? 'bg-emerald-400' : 'bg-blue-400',
       label: parsed.boxes.length > 0 ? '100%' : 'JSON',
       title:
-        parsed.boxes.length > 0
-          ? `${parsed.boxes.length} box${parsed.boxes.length === 1 ? '' : 'es'}`
-          : 'JSON caption',
+        parsed.boxes.length > 0 ? `${parsed.boxes.length} box${parsed.boxes.length === 1 ? '' : 'es'}` : 'JSON caption',
     };
   }
   if (parsed.kind === 'json') return { dot: 'bg-amber-400', label: 'JSON', title: parsed.error };
@@ -86,6 +84,19 @@ export function responseErrorMessage(error: any, fallback: string) {
   return fallback;
 }
 
+export function scheduleIdleTask(callback: () => void) {
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (idleWindow.requestIdleCallback) {
+    const handle = idleWindow.requestIdleCallback(callback, { timeout: 2500 });
+    return () => idleWindow.cancelIdleCallback?.(handle);
+  }
+  const handle = window.setTimeout(callback, 700);
+  return () => window.clearTimeout(handle);
+}
+
 export function normalizeHexColor(value: unknown) {
   const color = typeof value === 'string' ? value.trim().toUpperCase() : '';
   return HEX_COLOR_PATTERN.test(color) ? color : null;
@@ -99,8 +110,14 @@ export function sampleImageColorAt(image: HTMLImageElement, clientX: number, cli
   const rect = image.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0 || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
 
-  const x = Math.max(0, Math.min(image.naturalWidth - 1, Math.floor(((clientX - rect.left) / rect.width) * image.naturalWidth)));
-  const y = Math.max(0, Math.min(image.naturalHeight - 1, Math.floor(((clientY - rect.top) / rect.height) * image.naturalHeight)));
+  const x = Math.max(
+    0,
+    Math.min(image.naturalWidth - 1, Math.floor(((clientX - rect.left) / rect.width) * image.naturalWidth)),
+  );
+  const y = Math.max(
+    0,
+    Math.min(image.naturalHeight - 1, Math.floor(((clientY - rect.top) / rect.height) * image.naturalHeight)),
+  );
   const canvas = document.createElement('canvas');
   canvas.width = 1;
   canvas.height = 1;

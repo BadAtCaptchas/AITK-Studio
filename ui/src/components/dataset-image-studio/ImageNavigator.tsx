@@ -324,6 +324,13 @@ export function ImageNavigator({
     scanControllerRef.current = null;
     scanStartedRef.current = false;
     setScanState({ status: 'idle', scanned: 0, total: items.length });
+  }, [items.length]);
+
+  useEffect(() => {
+    scanControllerRef.current?.abort();
+    scanControllerRef.current = null;
+    scanStartedRef.current = false;
+    setScanState({ status: 'idle', scanned: 0, total: items.length });
     setSearchQuery('');
     setCaptionKeywordQuery('');
     setCaptionKeywordMode('whole-word');
@@ -334,7 +341,7 @@ export function ImageNavigator({
     setIsBulkDeletingImages(false);
     setDeleteSelectionMessage('');
     setFilter('all');
-  }, [datasetName, items, workerID]);
+  }, [datasetName, workerID]);
 
   const notifyCaptionCacheChange = useCallback(() => {
     setLocalCacheVersion(version => version + 1);

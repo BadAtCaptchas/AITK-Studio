@@ -309,9 +309,17 @@ export function isDatasetWatchersSettingKey(key: string) {
 
 export async function listDatasetWatchers(filter: { datasetName?: string; projectID?: string | null } = {}) {
   const watchers = await readWatcherRows();
+  const rawProjectID = 'projectID' in filter ? normalizeProjectID(filter.projectID) : null;
+  const canonicalProjectID =
+    'projectID' in filter && rawProjectID ? (await resolveDatasetScope(rawProjectID)).projectID : rawProjectID;
+  const acceptedProjectIDs = new Set([rawProjectID, canonicalProjectID].filter(Boolean) as string[]);
   return watchers.filter(watcher => {
     if (filter.datasetName && watcher.datasetName !== filter.datasetName) return false;
-    if ('projectID' in filter && (watcher.projectID || null) !== (filter.projectID || null)) return false;
+    if ('projectID' in filter) {
+      const watcherProjectID = watcher.projectID || null;
+      if (!canonicalProjectID && watcherProjectID) return false;
+      if (canonicalProjectID && !acceptedProjectIDs.has(watcherProjectID || '')) return false;
+    }
     return true;
   });
 }
@@ -334,7 +342,8 @@ export async function saveDatasetWatcher(rawWatcher: unknown) {
     const existing = requestedId ? watchers.find(item => item.id === requestedId) || null : null;
     const nextWatcher = normalizeIncomingWatcher(rawWatcher, existing);
     assertWatcherLimit(watchers, nextWatcher.id);
-    await validateDatasetWatcher(nextWatcher);
+    const validation = await validateDatasetWatcher(nextWatcher);
+    nextWatcher.projectID = validation.projectID;
 
     const nextWatchers = existing
       ? watchers.map(item => (item.id === nextWatcher.id ? nextWatcher : item))
@@ -534,7 +543,7 @@ async function resolveWatcherDataset(watcher: Pick<DatasetWatcherConfig, 'datase
 }
 
 export async function validateDatasetWatcher(watcher: DatasetWatcherConfig) {
-  const { datasetFolder } = await resolveWatcherDataset(watcher);
+  const { scope, datasetFolder } = await resolveWatcherDataset(watcher);
   const [sourceRealPath, datasetRealPath] = await Promise.all([
     resolveAccessibleDirectory(watcher.sourcePath),
     realpathOrResolve(datasetFolder),
@@ -543,7 +552,7 @@ export async function validateDatasetWatcher(watcher: DatasetWatcherConfig) {
   if (isPathInsideOrSame(sourceRealPath, datasetRealPath) || isPathInsideOrSame(datasetRealPath, sourceRealPath)) {
     throw new Error('Watch folder cannot overlap the destination dataset folder');
   }
-  return { sourceRealPath, datasetFolder, datasetRealPath };
+  return { sourceRealPath, datasetFolder, datasetRealPath, projectID: scope.projectID };
 }
 
 function manifestPath(datasetFolder: string) {

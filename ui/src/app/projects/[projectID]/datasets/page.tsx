@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Database, FolderInput, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { openConfirm } from '@/components/ConfirmModal';
+import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
@@ -433,7 +434,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 {filteredDatasets.map(dataset => (
                   <div
                     key={dataset.name}
-                    className="grid grid-cols-[minmax(0,1fr)_72px_72px_36px] items-center gap-2 px-3 py-3 text-sm hover:bg-gray-900/70 sm:grid-cols-[minmax(0,1fr)_120px_120px_44px] sm:gap-3"
+                    className="grid grid-cols-[minmax(0,1fr)_72px_72px_70px] items-center gap-2 px-3 py-3 text-sm hover:bg-gray-900/70 sm:grid-cols-[minmax(0,1fr)_120px_120px_76px] sm:gap-3"
                   >
                     <Link
                       href={`${projectPath}/datasets/${encodeURIComponent(dataset.name)}`}
@@ -451,16 +452,33 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                     </Link>
                     <span className="truncate text-xs text-gray-500">{dataset.itemCount ?? 0} media</span>
                     <span className="truncate text-xs text-gray-500">{dataset.encrypted ? 'Encrypted' : 'Local'}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteDataset(dataset)}
-                      disabled={actionStatus !== 'idle'}
-                      className="inline-flex h-7 w-7 items-center justify-center justify-self-end rounded-sm text-gray-400 transition-colors hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
-                      title="Delete dataset"
-                      aria-label={`Delete ${dataset.name}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <span className="flex items-center justify-end gap-1">
+                      {!dataset.encrypted && (
+                        <DatasetWatchFoldersButton
+                          datasetName={dataset.name}
+                          projectID={projectID}
+                          workerID="local"
+                          defaultSourcePath={dataset.importSourcePath}
+                          label={`Watch folders for ${dataset.name}`}
+                          icon="eye"
+                          iconOnly
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-cyan-700 hover:text-white sm:h-8 sm:w-8"
+                          onRefresh={() => {
+                            void refreshSummary();
+                          }}
+                        />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDataset(dataset)}
+                        disabled={actionStatus !== 'idle'}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                        title="Delete dataset"
+                        aria-label={`Delete ${dataset.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </span>
                   </div>
                 ))}
                 {summary && filteredDatasets.length === 0 && (

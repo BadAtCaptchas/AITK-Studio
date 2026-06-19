@@ -12,16 +12,19 @@ const {
   DATASET_WATCHER_IMPORT_MANIFEST,
   datasetWatcherPathCandidates,
   getDatasetWatcherStatuses,
+  listDatasetWatchers,
   runDatasetWatcherOnce,
   saveDatasetWatcher,
 } = require('../dist/src/server/datasetWatchers.js');
 
 const originalSettings = dbModule.db.settings;
+const originalProjects = dbModule.db.projects;
 const originalFetch = globalThis.fetch;
 const tempRoots = [];
 
 afterEach(async () => {
   dbModule.db.settings = originalSettings;
+  dbModule.db.projects = originalProjects;
   settingsModule.flushCache();
   globalThis.fetch = originalFetch;
   globalThis.__aitkDatasetWatcherPending = new Map();
@@ -49,6 +52,17 @@ function installSettingsStore(initial = {}) {
   return store;
 }
 
+function installProjectStore(projects) {
+  dbModule.db.projects = {
+    async findById(id) {
+      return projects.find(project => project.id === id) || null;
+    },
+    async findBySlug(slug) {
+      return projects.find(project => project.slug === slug) || null;
+    },
+  };
+}
+
 async function makeWorkspace() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-watchers-'));
   tempRoots.push(root);
@@ -62,6 +76,37 @@ async function makeWorkspace() {
     OPENROUTER_API_KEY: 'test-openrouter-key',
   });
   return { root, datasetsRoot, dataset, source };
+}
+
+async function makeProjectWorkspace() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-watchers-project-'));
+  tempRoots.push(root);
+  const datasetsRoot = path.join(root, 'datasets');
+  const projectsRoot = path.join(root, 'projects');
+  const project = {
+    id: 'project-1',
+    slug: 'project-one',
+    name: 'Project One',
+    description: '',
+    badge_asset: null,
+    root_path: path.join(projectsRoot, 'project-one'),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const projectDataset = path.join(project.root_path, 'datasets', 'cats');
+  const globalDataset = path.join(datasetsRoot, 'cats');
+  const source = path.join(root, 'source');
+  await fs.mkdir(projectDataset, { recursive: true });
+  await fs.mkdir(globalDataset, { recursive: true });
+  await fs.mkdir(source, { recursive: true });
+  installSettingsStore({
+    DATASETS_FOLDER: datasetsRoot,
+    PROJECTS_FOLDER: projectsRoot,
+    PROJECTS_ENABLED: 'true',
+    OPENROUTER_API_KEY: 'test-openrouter-key',
+  });
+  installProjectStore([project]);
+  return { project, projectDataset, globalDataset, source };
 }
 
 async function runStableImport(watcher, start = 1_000) {
@@ -200,6 +245,26 @@ test('watcher ignores stale dataset lock left by interrupted scan', async () => 
   assert.equal(result.lastImportedCount, 1);
   assert.equal(await fs.readFile(path.join(dataset, 'a.jpg'), 'utf-8'), 'image-bytes');
   await assert.rejects(() => fs.stat(lockPath), /ENOENT/);
+});
+
+test('project-space watchers resolve project slugs and import into project datasets', async () => {
+  const { project, projectDataset, globalDataset, source } = await makeProjectWorkspace();
+  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    projectID: project.slug,
+    sourcePath: source,
+  });
+
+  assert.equal(watcher.projectID, project.id);
+  const listed = await listDatasetWatchers({ datasetName: 'cats', projectID: project.slug });
+  assert.deepEqual(listed.map(item => item.id), [watcher.id]);
+
+  const result = await runStableImport(watcher, 4_000);
+  assert.equal(result.lastImportedCount, 1);
+  assert.equal(await fs.readFile(path.join(projectDataset, 'a.jpg'), 'utf-8'), 'image-bytes');
+  await assert.rejects(() => fs.stat(path.join(globalDataset, 'a.jpg')), /ENOENT/);
 });
 
 test('watcher auto-caption writes generated text sidecar for imported images', async () => {

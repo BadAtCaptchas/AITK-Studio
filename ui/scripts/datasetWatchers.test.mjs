@@ -129,6 +129,24 @@ function openRouterFetchReturning(content) {
   };
 }
 
+function openRouterFetchAssertingSystemPrompt(expectedSystemPrompt, content) {
+  return async (url, init) => {
+    assert.equal(String(url), 'https://openrouter.ai/api/v1/chat/completions');
+    const body = JSON.parse(String(init?.body || '{}'));
+    assert.equal(body.messages?.[0]?.role, 'system');
+    assert.equal(body.messages?.[0]?.content, expectedSystemPrompt);
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content } }],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  };
+}
+
 test('watcher path candidates translate common Windows and WSL path forms', () => {
   assert.ok(
     datasetWatcherPathCandidates('C:\\Users\\me\\Pictures', {
@@ -334,6 +352,39 @@ test('watcher auto-caption writes generated text sidecar for imported images', a
   assert.equal(result.lastImportedCount, 1);
   assert.equal(result.lastCaptionedCount, 1);
   assert.equal(await fs.readFile(path.join(dataset, 'a.txt'), 'utf-8'), 'A small orange cat on a blue chair.');
+});
+
+test('watcher syncs ROOT_CAPTION.txt before auto-captioning imported images', async () => {
+  const { dataset, source } = await makeWorkspace();
+  globalThis.fetch = openRouterFetchAssertingSystemPrompt(
+    'Use a concise dataset-wide system prompt.',
+    'A concise generated caption.',
+  );
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+    includeSubfolders: true,
+    autoCaption: {
+      enabled: true,
+      provider: 'openrouter',
+      model: 'x-ai/grok-4.3',
+      outputFormat: 'text',
+      prompt: 'caption it',
+      maxNewTokens: 64,
+    },
+  });
+  await fs.mkdir(path.join(source, 'nested'), { recursive: true });
+  await fs.writeFile(path.join(source, 'ROOT_CAPTION.txt'), 'Use a concise dataset-wide system prompt.');
+  await fs.writeFile(path.join(source, 'nested', 'ROOT_CAPTION.txt'), 'nested root caption is just a sidecar');
+  await fs.writeFile(path.join(source, 'a.png'), 'image-bytes');
+
+  const result = await runStableImport(watcher);
+  assert.equal(result.lastImportedCount, 2);
+  assert.equal(result.lastCaptionedCount, 1);
+  assert.equal(await fs.readFile(path.join(dataset, 'ROOT_CAPTION.txt'), 'utf-8'), 'Use a concise dataset-wide system prompt.');
+  assert.equal(await fs.readFile(path.join(dataset, 'a.txt'), 'utf-8'), 'A concise generated caption.');
+  await assert.rejects(() => fs.stat(path.join(dataset, 'nested', 'ROOT_CAPTION.txt')), /ENOENT/);
 });
 
 test('watcher auto-caption failure keeps media uncaptioned and records status', async () => {

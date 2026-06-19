@@ -3,6 +3,7 @@ import {
   deleteDatasetWatcher,
   getDatasetWatcherStatuses,
   listDatasetWatchers,
+  readWatcherSourceRootCaption,
   runDatasetWatcherOnce,
   saveDatasetWatcher,
 } from '@/server/datasetWatchers';
@@ -35,6 +36,12 @@ export async function GET(request: NextRequest) {
     const projectID = projectIDFromValue(params.get('project_id'));
     const workerID = params.get('worker_id') || 'local';
     rejectRemoteWorker(workerID, projectID);
+
+    if (params.get('action') === 'root-caption') {
+      const sourcePath = params.get('sourcePath') || '';
+      if (!sourcePath.trim()) return NextResponse.json({ found: false, systemPrompt: '' });
+      return NextResponse.json(await readWatcherSourceRootCaption(sourcePath));
+    }
 
     const watchers = await listDatasetWatchers({ datasetName, projectID });
     return NextResponse.json({

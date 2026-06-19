@@ -7,7 +7,7 @@ import { resolveDatasetScope } from './datasetScope';
 import { DATASET_MEDIA_EXTENSIONS } from './datasetImages';
 import { DATASET_TEXT_CAPTION_EXTENSIONS, captionSidecarPath } from './captionFiles';
 import { isEncryptedDatasetFolder, resolveDatasetFolder } from './encryptedDatasets';
-import { readDatasetRootCaption } from './datasetRootCaption';
+import { isRootCaptionFileName, readDatasetRootCaption, ROOT_CAPTION_FILE_NAME } from './datasetRootCaption';
 import { getOpenRouterApiKey } from './settings';
 import { generateSingleImageRecaption, type RecaptionProvider, type RecaptionOutputFormat } from './datasetSingleRecaption';
 import { TOOLKIT_ROOT } from '../paths';
@@ -100,6 +100,7 @@ type DatasetWatcherRunOptions = {
 };
 
 type SourceCandidate = {
+  kind: 'media' | 'root_caption';
   absolutePath: string;
   relativePath: string;
   size: number;
@@ -562,6 +563,11 @@ export async function validateDatasetWatcher(watcher: DatasetWatcherConfig) {
   return { sourceRealPath, datasetFolder, datasetRealPath, projectID: scope.projectID };
 }
 
+export async function readWatcherSourceRootCaption(sourcePath: string) {
+  const sourceRoot = await resolveAccessibleDirectory(sourcePath);
+  return readDatasetRootCaption(sourceRoot);
+}
+
 function manifestPath(datasetFolder: string) {
   return path.join(datasetFolder, DATASET_WATCHER_IMPORT_MANIFEST);
 }
@@ -586,6 +592,7 @@ async function writeImportManifest(datasetFolder: string, manifest: DatasetWatch
 }
 
 function destinationRelativePathForCandidate(watcher: DatasetWatcherConfig, candidate: SourceCandidate) {
+  if (candidate.kind === 'root_caption') return ROOT_CAPTION_FILE_NAME;
   return watcher.preserveRelativePaths
     ? cleanRelativeImportPath(candidate.relativePath, path.basename(candidate.absolutePath))
     : cleanUploadFileName(path.basename(candidate.absolutePath));
@@ -653,6 +660,11 @@ function isMediaFile(filePath: string) {
 
 function isCaptionSidecar(filePath: string) {
   return CAPTION_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function isSourceRootCaptionPath(relativePath: string) {
+  const parts = relativePath.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.length === 1 && isRootCaptionFileName(parts[0]);
 }
 
 function isAutoCaptionableImage(filePath: string) {
@@ -771,14 +783,24 @@ async function findSourceMedia(sourceRoot: string, includeSubfolders: boolean) {
         if (includeSubfolders) stack.push({ absolutePath, relativePath });
         continue;
       }
-      if (!entry.isFile() || isCaptionSidecar(entry.name) || !isMediaFile(entry.name)) continue;
+      if (!entry.isFile()) continue;
       const stat = await fsp.stat(absolutePath).catch(() => null);
       if (!stat?.isFile()) continue;
-      results.push({ absolutePath, relativePath, size: stat.size, mtimeMs: stat.mtimeMs });
+
+      if (isSourceRootCaptionPath(relativePath)) {
+        results.push({ kind: 'root_caption', absolutePath, relativePath, size: stat.size, mtimeMs: stat.mtimeMs });
+        continue;
+      }
+
+      if (isCaptionSidecar(entry.name) || !isMediaFile(entry.name)) continue;
+      results.push({ kind: 'media', absolutePath, relativePath, size: stat.size, mtimeMs: stat.mtimeMs });
     }
   }
 
-  return results.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  return results.sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === 'root_caption' ? -1 : 1;
+    return left.relativePath.localeCompare(right.relativePath);
+  });
 }
 
 function sourceKey(filePath: string) {
@@ -801,6 +823,7 @@ async function seedImportManifestBaseline(
     let added = 0;
 
     for (const candidate of candidates) {
+      if (candidate.kind === 'root_caption') continue;
       const key = sourceKey(candidate.absolutePath);
       if (manifest.imports[key]) continue;
       manifest.imports[key] = {
@@ -914,6 +937,19 @@ async function copyCandidateIntoDataset(options: {
 }) {
   const relativePath = destinationRelativePathForCandidate(options.watcher, options.candidate);
 
+  if (options.candidate.kind === 'root_caption') {
+    const destination = destinationForSuffix(options.datasetFolder, relativePath, 1);
+    const tmp = `${destination}.${process.pid}.${Date.now()}.tmp`;
+    await fsp.copyFile(options.candidate.absolutePath, tmp);
+    const sourceStat = await fsp.stat(options.candidate.absolutePath).catch(() => null);
+    if (!sourceStat?.isFile() || !sameObservedFile(options.candidate, sourceStat)) {
+      await fsp.rm(tmp, { force: true }).catch(() => undefined);
+      return null;
+    }
+    await fsp.rename(tmp, destination);
+    return destination;
+  }
+
   for (let suffix = 1; suffix < 10_000; suffix += 1) {
     const destination = destinationForSuffix(options.datasetFolder, relativePath, suffix);
     await fsp.mkdir(path.dirname(destination), { recursive: true });
@@ -1002,7 +1038,14 @@ export async function runDatasetWatcherOnce(
 
     for (const candidate of candidates) {
       const key = sourceKey(candidate.absolutePath);
-      if (manifest.imports[key]) continue;
+      const existingImport = manifest.imports[key];
+      if (
+        existingImport &&
+        (candidate.kind !== 'root_caption' ||
+          (existingImport.size === candidate.size && existingImport.mtimeMs === candidate.mtimeMs))
+      ) {
+        continue;
+      }
       if (!isStableCandidate(pendingScope, key, candidate, now, stableMs)) continue;
 
       state = 'importing';
@@ -1050,7 +1093,7 @@ export async function runDatasetWatcherOnce(
       pendingByScope().get(pendingScope)?.delete(key);
       await writeImportManifest(datasetFolder, manifest);
 
-      if (watcher.autoCaption?.enabled && isAutoCaptionableImage(destination)) {
+      if (watcher.autoCaption?.enabled && candidate.kind === 'media' && isAutoCaptionableImage(destination)) {
         state = 'captioning';
         await writeStatus(watcher.id, {
           state,

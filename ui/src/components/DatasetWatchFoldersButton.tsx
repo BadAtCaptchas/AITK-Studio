@@ -168,6 +168,9 @@ export default function DatasetWatchFoldersButton({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const statusRefreshSignatureRef = useRef('');
+  const systemPromptTouchedRef = useRef(false);
+  const autoSystemPromptRef = useRef('');
+  const rootCaptionSourceRef = useRef('');
   const { workers } = useRemoteOllamaWorkers({ enabled: open });
 
   const remoteWorkerOptions = useMemo(
@@ -252,10 +255,75 @@ export default function DatasetWatchFoldersButton({
     setForm(current => (current.id || current.sourcePath.trim() ? current : { ...current, sourcePath: defaultSourcePath }));
   }, [defaultSourcePath]);
 
+  useEffect(() => {
+    if (!open || !form.autoCaptionEnabled) return;
+    const sourcePath = form.sourcePath.trim();
+    if (!sourcePath || systemPromptTouchedRef.current) return;
+    if (form.systemPrompt.trim() && form.systemPrompt !== autoSystemPromptRef.current) return;
+
+    const sourceSignature = [workerID, projectID || '', sourcePath].join('\n');
+    if (rootCaptionSourceRef.current === sourceSignature) return;
+    rootCaptionSourceRef.current = sourceSignature;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      apiClient
+        .get('/api/datasets/watchers', {
+          params: {
+            action: 'root-caption',
+            sourcePath,
+            worker_id: workerID,
+            ...(projectID ? { project_id: projectID } : {}),
+          },
+        })
+        .then(res => {
+          if (cancelled) return;
+          const systemPrompt = typeof res.data?.systemPrompt === 'string' ? res.data.systemPrompt.trim() : '';
+          if (!res.data?.found || !systemPrompt) return;
+          setForm(current => {
+            if (
+              current.sourcePath.trim() !== sourcePath ||
+              !current.autoCaptionEnabled ||
+              systemPromptTouchedRef.current ||
+              (current.systemPrompt.trim() && current.systemPrompt !== autoSystemPromptRef.current)
+            ) {
+              return current;
+            }
+            autoSystemPromptRef.current = systemPrompt;
+            return { ...current, systemPrompt };
+          });
+        })
+        .catch(requestError => {
+          if (!cancelled) console.warn('Could not load watch folder ROOT_CAPTION.txt:', requestError);
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form.autoCaptionEnabled, form.sourcePath, form.systemPrompt, open, projectID, workerID]);
+
   const updateForm = <K extends keyof DatasetWatcherForm>(key: K, value: DatasetWatcherForm[K]) => {
+    if (key === 'systemPrompt') {
+      systemPromptTouchedRef.current = true;
+      autoSystemPromptRef.current = '';
+    }
+    if (key === 'sourcePath') {
+      rootCaptionSourceRef.current = '';
+    }
     setForm(current => {
       if (key === 'enabled' && value === true && !current.id && !current.sourcePath.trim() && defaultSourcePath) {
         return { ...current, enabled: true, sourcePath: defaultSourcePath };
+      }
+      if (
+        key === 'sourcePath' &&
+        !systemPromptTouchedRef.current &&
+        current.systemPrompt &&
+        current.systemPrompt === autoSystemPromptRef.current
+      ) {
+        autoSystemPromptRef.current = '';
+        return { ...current, sourcePath: value as string, systemPrompt: '' };
       }
       return { ...current, [key]: value };
     });
@@ -279,7 +347,12 @@ export default function DatasetWatchFoldersButton({
     }));
   };
 
-  const resetForm = () => setForm(emptyForm(defaultSourcePath || ''));
+  const resetForm = () => {
+    systemPromptTouchedRef.current = false;
+    autoSystemPromptRef.current = '';
+    rootCaptionSourceRef.current = '';
+    setForm(emptyForm(defaultSourcePath || ''));
+  };
 
   const saveWatcher = async () => {
     setIsSaving(true);
@@ -312,7 +385,13 @@ export default function DatasetWatchFoldersButton({
         : await apiClient.post('/api/datasets/watchers', payload);
       const saved = res.data?.watcher;
       await loadWatchers();
-      if (saved) setForm(formFromWatcher(saved));
+      if (saved) {
+        const nextForm = formFromWatcher(saved);
+        systemPromptTouchedRef.current = Boolean(nextForm.systemPrompt.trim());
+        autoSystemPromptRef.current = '';
+        rootCaptionSourceRef.current = '';
+        setForm(nextForm);
+      }
     } catch (requestError: any) {
       setError(requestError?.response?.data?.error || requestError?.message || 'Failed to save watch folder.');
     } finally {
@@ -398,7 +477,13 @@ export default function DatasetWatchFoldersButton({
                           <button
                             type="button"
                             className="operator-icon-button"
-                            onClick={() => setForm(formFromWatcher(watcher))}
+                            onClick={() => {
+                              const nextForm = formFromWatcher(watcher);
+                              systemPromptTouchedRef.current = Boolean(nextForm.systemPrompt.trim());
+                              autoSystemPromptRef.current = '';
+                              rootCaptionSourceRef.current = '';
+                              setForm(nextForm);
+                            }}
                             title="Edit"
                           >
                             <Save className="h-3.5 w-3.5" />

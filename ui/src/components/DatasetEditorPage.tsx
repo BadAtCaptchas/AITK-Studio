@@ -22,9 +22,11 @@ import { isImage, pathJoin } from '@/utils/basic';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
+import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadge';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import useDatasetWatcherLiveRefresh from '@/hooks/useDatasetWatcherLiveRefresh';
+import { aggregateAutoCaptionProgress } from '@/utils/datasetWatcherStatus';
 import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
 import {
   arrayBufferToBase64,
@@ -121,13 +123,18 @@ export default function DatasetEditorPage({
       });
   };
 
-  const hasActiveDatasetWatchers = useDatasetWatcherLiveRefresh({
+  const datasetWatcherLive = useDatasetWatcherLiveRefresh({
     enabled: status === 'success' && canUseWatchFolders,
     datasetName,
     projectID,
     workerID,
     onRefresh: () => refreshImageList(datasetName, { background: true }),
   });
+  const hasActiveDatasetWatchers = datasetWatcherLive.hasActiveWatchers;
+  const autoCaptionProgress = useMemo(
+    () => aggregateAutoCaptionProgress(datasetWatcherLive.watchers, datasetWatcherLive.statuses, datasetName),
+    [datasetName, datasetWatcherLive.statuses, datasetWatcherLive.watchers],
+  );
 
   const encryptedUploadOptions = useMemo(() => {
     if (!encryptedManifest || !encryptedCatalog || !encryptedKey) return undefined;
@@ -778,8 +785,8 @@ export default function DatasetEditorPage({
             <Pencil className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Rename</span>
           </Button>
-          {!isRemoteDataset && (
-            !encryptedManifest && (
+          {!isRemoteDataset && !encryptedManifest && (
+            <>
               <DatasetWatchFoldersButton
                 datasetName={datasetName}
                 projectID={projectID}
@@ -788,7 +795,8 @@ export default function DatasetEditorPage({
                 label="Watch Folders"
                 onRefresh={() => refreshImageList(datasetName, { background: true })}
               />
-            )
+              <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden sm:inline-flex" />
+            </>
           )}
           {!isRemoteDataset && (
             <AutoCaptionButton

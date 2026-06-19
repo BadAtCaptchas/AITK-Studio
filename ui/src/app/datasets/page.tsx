@@ -30,10 +30,12 @@ import {
 import { openConfirm } from '@/components/ConfirmModal';
 import DatasetFolderIcon from '@/components/DatasetFolderIcon';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
+import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadge';
 import { TopBar, MainContent } from '@/components/layout';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
 import { useRouter } from 'next/navigation';
+import { aggregateAutoCaptionProgressByDataset } from '@/utils/datasetWatcherStatus';
 import {
   buildEncryptedDatasetItem,
   createEmptyEncryptedManifest,
@@ -427,11 +429,15 @@ export default function Datasets() {
   const [isLoadingHfPreview, setIsLoadingHfPreview] = useState(false);
   const [isImportingHfDataset, setIsImportingHfDataset] = useState(false);
 
-  useDatasetWatcherLiveRefresh({
+  const datasetWatcherLive = useDatasetWatcherLiveRefresh({
     enabled: status === 'success',
     workerID: 'local',
     onRefresh: () => refreshDatasets({ background: true }),
   });
+  const autoCaptionProgressByDataset = useMemo(
+    () => aggregateAutoCaptionProgressByDataset(datasetWatcherLive.watchers, datasetWatcherLive.statuses),
+    [datasetWatcherLive.statuses, datasetWatcherLive.watchers],
+  );
 
   useEffect(() => {
     const rememberedView = readStoredDatasetView();
@@ -1680,7 +1686,10 @@ export default function Datasets() {
                   </div>
                   <div className="px-3 py-2 text-xs text-gray-400">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
                   <div className="px-3 py-2">
-                    <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />
+                      <DatasetWatcherProgressBadge progress={autoCaptionProgressByDataset[row.name]} />
+                    </div>
                   </div>
                   <div className="min-w-0 px-3 py-2">{renderSourceBadge(row)}</div>
                   <div className="px-3 py-2">{renderTypeBadge(row)}</div>
@@ -1735,6 +1744,7 @@ export default function Datasets() {
               <div className="mt-1 truncate text-center text-xs text-gray-500">
                 {datasetCaptionLabel(row.dataset, row.unlocked)}
               </div>
+              <DatasetWatcherProgressBadge progress={autoCaptionProgressByDataset[row.name]} className="mx-auto mt-2" />
             </div>
           );
         })}

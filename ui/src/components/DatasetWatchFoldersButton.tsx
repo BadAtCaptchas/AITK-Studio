@@ -50,6 +50,10 @@ type DatasetWatcherStatus = {
   lastImportedAt: string | null;
   lastImportedCount: number;
   lastCaptionedCount: number;
+  autoCaptionTotalCount?: number;
+  autoCaptionPendingCount?: number;
+  autoCaptionCompletedCount?: number;
+  autoCaptionActivePath?: string | null;
   lastError: string | null;
   warnings: string[];
 };
@@ -129,6 +133,20 @@ function formatDate(value: string | null | undefined) {
   if (!value) return 'Never';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'Never' : date.toLocaleString();
+}
+
+function watcherAutoCaptionLabel(status?: DatasetWatcherStatus) {
+  const pending = Math.max(0, Math.floor(Number(status?.autoCaptionPendingCount || 0)));
+  if (pending <= 0) return '';
+  const total = Math.max(0, Math.floor(Number(status?.autoCaptionTotalCount || 0)));
+  const completed = Math.max(0, Math.floor(Number(status?.autoCaptionCompletedCount || 0)));
+  const progress = total > 0 ? `${completed.toLocaleString()}/${total.toLocaleString()}` : completed.toLocaleString();
+  return `Captioning ${progress}, ${pending.toLocaleString()} left`;
+}
+
+function watcherAutoCaptionTitle(status?: DatasetWatcherStatus) {
+  const activePath = status?.autoCaptionActivePath;
+  return activePath ? `Auto-captioning ${activePath}` : 'Auto-captioning imported images';
 }
 
 function formFromWatcher(watcher: DatasetWatcher): DatasetWatcherForm {
@@ -219,12 +237,22 @@ export default function DatasetWatchFoldersButton({
             watcherStatus.lastImportedAt || '',
             watcherStatus.lastImportedCount || 0,
             watcherStatus.lastCaptionedCount || 0,
+            watcherStatus.autoCaptionTotalCount || 0,
+            watcherStatus.autoCaptionPendingCount || 0,
+            watcherStatus.autoCaptionCompletedCount || 0,
+            watcherStatus.autoCaptionActivePath || '',
           ].join(':');
         })
         .join('|');
       const hasImportedWork = Object.values(nextStatuses).some(status => {
         const watcherStatus = status as DatasetWatcherStatus;
-        return Boolean(watcherStatus.lastImportedAt || watcherStatus.lastImportedCount || watcherStatus.lastCaptionedCount);
+        return Boolean(
+          watcherStatus.lastImportedAt ||
+            watcherStatus.lastImportedCount ||
+            watcherStatus.lastCaptionedCount ||
+            watcherStatus.autoCaptionPendingCount ||
+            watcherStatus.autoCaptionCompletedCount,
+        );
       });
       if (
         (statusRefreshSignatureRef.current && refreshSignature !== statusRefreshSignatureRef.current) ||
@@ -460,6 +488,7 @@ export default function DatasetWatchFoldersButton({
                 )}
                 {watchers.map(watcher => {
                   const status = statuses[watcher.id];
+                  const autoCaptionLabel = watcherAutoCaptionLabel(status);
                   return (
                     <div key={watcher.id} className="border-b border-gray-800 px-3 py-3 last:border-b-0">
                       <div className="flex min-w-0 items-start gap-2">
@@ -469,6 +498,11 @@ export default function DatasetWatchFoldersButton({
                             <StatusBadge status={stateForBadge(status)} label={stateLabel(status)} />
                             <span>Imported {status?.lastImportedCount || 0}</span>
                             <span>Captioned {status?.lastCaptionedCount || 0}</span>
+                            {autoCaptionLabel && (
+                              <span className="text-fuchsia-200" title={watcherAutoCaptionTitle(status)}>
+                                {autoCaptionLabel}
+                              </span>
+                            )}
                           </div>
                           <div className="mt-1 text-xs text-gray-500">Last scan: {formatDate(status?.lastScanAt)}</div>
                           {status?.lastError && <div className="mt-1 truncate text-xs text-red-400">{status.lastError}</div>}

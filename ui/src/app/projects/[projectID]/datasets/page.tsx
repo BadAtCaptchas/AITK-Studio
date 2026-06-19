@@ -7,10 +7,12 @@ import { Database, FolderInput, Loader2, Plus, Search, Trash2, Upload } from 'lu
 import { Modal } from '@/components/Modal';
 import { openConfirm } from '@/components/ConfirmModal';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
+import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadge';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import useDatasetWatcherLiveRefresh from '@/hooks/useDatasetWatcherLiveRefresh';
 import { apiClient } from '@/utils/api';
+import { aggregateAutoCaptionProgressByDataset } from '@/utils/datasetWatcherStatus';
 import {
   createEmptyEncryptedManifest,
   getRememberedEncryptedDatasetKey,
@@ -85,7 +87,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       });
   };
 
-  useDatasetWatcherLiveRefresh({
+  const datasetWatcherLive = useDatasetWatcherLiveRefresh({
     enabled: status === 'success',
     projectID,
     workerID: 'local',
@@ -93,6 +95,10 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       void refreshSummary();
     },
   });
+  const autoCaptionProgressByDataset = useMemo(
+    () => aggregateAutoCaptionProgressByDataset(datasetWatcherLive.watchers, datasetWatcherLive.statuses),
+    [datasetWatcherLive.statuses, datasetWatcherLive.watchers],
+  );
 
   useEffect(() => {
     setStatus('loading');
@@ -457,6 +463,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-gray-100">{dataset.name}</span>
                           <span className="block truncate text-xs text-gray-500">{dataset.path || dataset.ref || 'project dataset'}</span>
+                          <DatasetWatcherProgressBadge progress={autoCaptionProgressByDataset[dataset.name]} compact className="mt-1" />
                         </span>
                       </span>
                     </Link>

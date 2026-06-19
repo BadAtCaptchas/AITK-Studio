@@ -2,18 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
-
-type DatasetWatcherListItem = {
-  id: string;
-  enabled?: boolean;
-};
-
-type DatasetWatcherStatus = {
-  lastScanAt?: string | null;
-  lastImportedAt?: string | null;
-  lastImportedCount?: number;
-  lastCaptionedCount?: number;
-};
+import type { DatasetWatcherListItem, DatasetWatcherStatus } from '@/utils/datasetWatcherStatus';
 
 type DatasetWatcherLiveRefreshOptions = {
   enabled: boolean;
@@ -28,7 +17,27 @@ function watcherStatusSignature(statuses: Record<string, DatasetWatcherStatus>) 
   return Object.entries(statuses)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([id, status]) =>
-      [id, status.lastImportedAt || '', status.lastImportedCount || 0, status.lastCaptionedCount || 0].join(':'),
+      [
+        id,
+        status.lastImportedAt || '',
+        status.lastImportedCount || 0,
+        status.lastCaptionedCount || 0,
+        status.autoCaptionTotalCount || 0,
+        status.autoCaptionPendingCount || 0,
+        status.autoCaptionCompletedCount || 0,
+        status.autoCaptionActivePath || '',
+      ].join(':'),
+    )
+    .join('|');
+}
+
+function datasetRefreshSignature(statuses: Record<string, DatasetWatcherStatus>) {
+  return Object.entries(statuses)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, status]) =>
+      [id, status.lastImportedAt || '', status.lastImportedCount || 0, status.lastCaptionedCount || 0, status.lastError || ''].join(
+        ':',
+      ),
     )
     .join('|');
 }
@@ -40,7 +49,12 @@ function watcherStatusesHaveRecentWork(statuses: Record<string, DatasetWatcherSt
 
     const scanAt = status.lastScanAt ? Date.parse(status.lastScanAt) : NaN;
     if (!Number.isFinite(scanAt) || scanAt < sinceMs) return false;
-    return Boolean((status.lastImportedCount || 0) > 0 || (status.lastCaptionedCount || 0) > 0);
+    return Boolean(
+      (status.lastImportedCount || 0) > 0 ||
+        (status.lastCaptionedCount || 0) > 0 ||
+        (status.autoCaptionPendingCount || 0) > 0 ||
+        (status.autoCaptionCompletedCount || 0) > 0,
+    );
   });
 }
 
@@ -53,8 +67,11 @@ export default function useDatasetWatcherLiveRefresh({
   onRefresh,
 }: DatasetWatcherLiveRefreshOptions) {
   const [hasActiveWatchers, setHasActiveWatchers] = useState(false);
+  const [watchers, setWatchers] = useState<DatasetWatcherListItem[]>([]);
+  const [statuses, setStatuses] = useState<Record<string, DatasetWatcherStatus>>({});
   const onRefreshRef = useRef(onRefresh);
-  const signatureRef = useRef('');
+  const statusSignatureRef = useRef('');
+  const refreshSignatureRef = useRef('');
   const initializedRef = useRef(false);
   const busyRef = useRef(false);
   const startedAtRef = useRef(Date.now());
@@ -64,7 +81,8 @@ export default function useDatasetWatcherLiveRefresh({
   }, [onRefresh]);
 
   useEffect(() => {
-    signatureRef.current = '';
+    statusSignatureRef.current = '';
+    refreshSignatureRef.current = '';
     initializedRef.current = false;
     startedAtRef.current = Date.now();
   }, [datasetName, enabled, projectID, workerID]);
@@ -72,6 +90,8 @@ export default function useDatasetWatcherLiveRefresh({
   useEffect(() => {
     if (!enabled) {
       setHasActiveWatchers(false);
+      setWatchers([]);
+      setStatuses({});
       return;
     }
 
@@ -93,13 +113,18 @@ export default function useDatasetWatcherLiveRefresh({
         const watchers = Array.isArray(res.data?.watchers) ? (res.data.watchers as DatasetWatcherListItem[]) : [];
         const statuses = (res.data?.statuses || {}) as Record<string, DatasetWatcherStatus>;
         setHasActiveWatchers(watchers.some(watcher => watcher.enabled !== false));
+        setWatchers(watchers);
 
-        const signature = watcherStatusSignature(statuses);
+        const statusSignature = watcherStatusSignature(statuses);
+        const refreshSignature = datasetRefreshSignature(statuses);
         const initialized = initializedRef.current;
-        const changed = initialized && signature !== signatureRef.current;
+        const statusChanged = !initialized || statusSignature !== statusSignatureRef.current;
+        const changed = initialized && refreshSignature !== refreshSignatureRef.current;
         const recentInitialWork = !initialized && watcherStatusesHaveRecentWork(statuses, startedAtRef.current);
 
-        signatureRef.current = signature;
+        if (statusChanged) setStatuses(statuses);
+        statusSignatureRef.current = statusSignature;
+        refreshSignatureRef.current = refreshSignature;
         initializedRef.current = true;
 
         if (changed || recentInitialWork) onRefreshRef.current();
@@ -107,6 +132,8 @@ export default function useDatasetWatcherLiveRefresh({
         if (!cancelled) {
           console.warn('Dataset watcher status refresh failed:', error);
           setHasActiveWatchers(false);
+          setWatchers([]);
+          setStatuses({});
         }
       } finally {
         busyRef.current = false;
@@ -121,5 +148,5 @@ export default function useDatasetWatcherLiveRefresh({
     };
   }, [datasetName, enabled, intervalMs, projectID, workerID]);
 
-  return hasActiveWatchers;
+  return { hasActiveWatchers, watchers, statuses };
 }

@@ -147,6 +147,14 @@ function openRouterFetchAssertingSystemPrompt(expectedSystemPrompt, content) {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 test('watcher path candidates translate common Windows and WSL path forms', () => {
   assert.ok(
     datasetWatcherPathCandidates('C:\\Users\\me\\Pictures', {
@@ -219,6 +227,28 @@ test('watcher copies only new media, skips caption sidecars, and preserves relat
 
   const manifest = JSON.parse(await fs.readFile(path.join(dataset, DATASET_WATCHER_IMPORT_MANIFEST), 'utf-8'));
   assert.equal(Object.keys(manifest.imports).length, 1);
+});
+
+test('watcher flatten mode imports collisions into dataset root', async () => {
+  const { dataset, source } = await makeWorkspace();
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+    includeSubfolders: true,
+    preserveRelativePaths: false,
+  });
+  await fs.mkdir(path.join(source, 'left'), { recursive: true });
+  await fs.mkdir(path.join(source, 'right'), { recursive: true });
+  await fs.writeFile(path.join(source, 'left', 'same.jpg'), 'left-image');
+  await fs.writeFile(path.join(source, 'right', 'same.jpg'), 'right-image');
+
+  const result = await runStableImport(watcher);
+  assert.equal(result.lastImportedCount, 2);
+  assert.equal(await fs.readFile(path.join(dataset, 'same.jpg'), 'utf-8'), 'left-image');
+  assert.equal(await fs.readFile(path.join(dataset, 'same_2.jpg'), 'utf-8'), 'right-image');
+  await assert.rejects(() => fs.stat(path.join(dataset, 'left', 'same.jpg')), /ENOENT/);
+  await assert.rejects(() => fs.stat(path.join(dataset, 'right', 'same.jpg')), /ENOENT/);
 });
 
 test('watcher creation baselines existing source media without duplicating dataset files', async () => {
@@ -330,6 +360,42 @@ test('project-space watchers resolve project slugs and import into project datas
   await assert.rejects(() => fs.stat(path.join(globalDataset, 'a.jpg')), /ENOENT/);
 });
 
+test('multiple project-space watchers import source-relative files into the same dataset target', async () => {
+  const { project, projectDataset, source } = await makeProjectWorkspace();
+  const workspaceRoot = path.dirname(source);
+  const sourceOne = path.join(workspaceRoot, 'watcher-one');
+  const sourceTwo = path.join(workspaceRoot, 'watcher-two');
+  await fs.mkdir(path.join(sourceOne, 'nested'), { recursive: true });
+  await fs.mkdir(path.join(sourceTwo, 'nested'), { recursive: true });
+
+  const firstWatcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    projectID: project.slug,
+    sourcePath: sourceOne,
+    includeSubfolders: true,
+    preserveRelativePaths: true,
+  });
+  const secondWatcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    projectID: project.slug,
+    sourcePath: sourceTwo,
+    includeSubfolders: true,
+    preserveRelativePaths: true,
+  });
+
+  await fs.writeFile(path.join(sourceOne, 'nested', 'item.jpg'), 'from-first-watcher');
+  await fs.writeFile(path.join(sourceTwo, 'nested', 'item.jpg'), 'from-second-watcher');
+
+  const firstResult = await runStableImport(firstWatcher, 5_000);
+  const secondResult = await runStableImport(secondWatcher, 6_000);
+  assert.equal(firstResult.lastImportedCount, 1);
+  assert.equal(secondResult.lastImportedCount, 1);
+  assert.equal(await fs.readFile(path.join(projectDataset, 'nested', 'item.jpg'), 'utf-8'), 'from-first-watcher');
+  assert.equal(await fs.readFile(path.join(projectDataset, 'nested', 'item_2.jpg'), 'utf-8'), 'from-second-watcher');
+  await assert.rejects(() => fs.stat(path.join(projectDataset, 'watcher-one', 'nested', 'item.jpg')), /ENOENT/);
+  await assert.rejects(() => fs.stat(path.join(projectDataset, 'watcher-two', 'nested', 'item.jpg')), /ENOENT/);
+});
+
 test('watcher auto-caption writes generated text sidecar for imported images', async () => {
   const { dataset, source } = await makeWorkspace();
   globalThis.fetch = openRouterFetchReturning('A small orange cat on a blue chair.');
@@ -351,7 +417,83 @@ test('watcher auto-caption writes generated text sidecar for imported images', a
   const result = await runStableImport(watcher);
   assert.equal(result.lastImportedCount, 1);
   assert.equal(result.lastCaptionedCount, 1);
+  assert.equal(result.autoCaptionTotalCount, 1);
+  assert.equal(result.autoCaptionPendingCount, 0);
+  assert.equal(result.autoCaptionCompletedCount, 1);
   assert.equal(await fs.readFile(path.join(dataset, 'a.txt'), 'utf-8'), 'A small orange cat on a blue chair.');
+});
+
+test('watcher auto-caption status reports live pending progress', async () => {
+  const { dataset, source } = await makeWorkspace();
+  const firstStarted = deferred();
+  const firstRelease = deferred();
+  const secondStarted = deferred();
+  const secondRelease = deferred();
+  let fetchCount = 0;
+  globalThis.fetch = async url => {
+    assert.equal(String(url), 'https://openrouter.ai/api/v1/chat/completions');
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      firstStarted.resolve();
+      await firstRelease.promise;
+    } else {
+      secondStarted.resolve();
+      await secondRelease.promise;
+    }
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: `Caption ${fetchCount}` } }],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  };
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+    autoCaption: {
+      enabled: true,
+      provider: 'openrouter',
+      model: 'x-ai/grok-4.3',
+      outputFormat: 'text',
+      prompt: 'caption it',
+      maxNewTokens: 64,
+    },
+  });
+  await fs.writeFile(path.join(source, 'a.png'), 'a-bytes');
+  await fs.writeFile(path.join(source, 'b.png'), 'b-bytes');
+
+  await runDatasetWatcherOnce(watcher, { now: 7_000, stableMs: 0 });
+  const runPromise = runDatasetWatcherOnce(watcher, { now: 7_001, stableMs: 0 });
+
+  await firstStarted.promise;
+  let statuses = await getDatasetWatcherStatuses([watcher.id]);
+  assert.equal(statuses[watcher.id].state, 'captioning');
+  assert.equal(statuses[watcher.id].autoCaptionTotalCount, 2);
+  assert.equal(statuses[watcher.id].autoCaptionPendingCount, 2);
+  assert.equal(statuses[watcher.id].autoCaptionCompletedCount, 0);
+  assert.equal(statuses[watcher.id].autoCaptionActivePath, 'a.png');
+
+  firstRelease.resolve();
+  await secondStarted.promise;
+  statuses = await getDatasetWatcherStatuses([watcher.id]);
+  assert.equal(statuses[watcher.id].autoCaptionTotalCount, 2);
+  assert.equal(statuses[watcher.id].autoCaptionPendingCount, 1);
+  assert.equal(statuses[watcher.id].autoCaptionCompletedCount, 1);
+  assert.equal(statuses[watcher.id].autoCaptionActivePath, 'b.png');
+
+  secondRelease.resolve();
+  const result = await runPromise;
+  assert.equal(result.lastImportedCount, 2);
+  assert.equal(result.lastCaptionedCount, 2);
+  assert.equal(result.autoCaptionPendingCount, 0);
+  assert.equal(result.autoCaptionCompletedCount, 2);
+  assert.equal(result.autoCaptionActivePath, null);
+  assert.equal(await fs.readFile(path.join(dataset, 'a.txt'), 'utf-8'), 'Caption 1');
+  assert.equal(await fs.readFile(path.join(dataset, 'b.txt'), 'utf-8'), 'Caption 2');
 });
 
 test('watcher syncs ROOT_CAPTION.txt before auto-captioning imported images', async () => {
@@ -408,6 +550,9 @@ test('watcher auto-caption failure keeps media uncaptioned and records status', 
   const result = await runStableImport(watcher);
   assert.equal(result.lastImportedCount, 1);
   assert.equal(result.lastCaptionedCount, 0);
+  assert.equal(result.autoCaptionTotalCount, 1);
+  assert.equal(result.autoCaptionPendingCount, 0);
+  assert.equal(result.autoCaptionCompletedCount, 1);
   assert.equal(result.state, 'error');
   assert.match(result.lastError, /refusal/i);
   assert.equal(await fs.readFile(path.join(dataset, 'a.png'), 'utf-8'), 'image-bytes');

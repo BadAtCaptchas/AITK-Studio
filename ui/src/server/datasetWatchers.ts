@@ -63,6 +63,10 @@ export type DatasetWatcherStatus = {
   lastImportedAt: string | null;
   lastImportedCount: number;
   lastCaptionedCount: number;
+  autoCaptionTotalCount: number;
+  autoCaptionPendingCount: number;
+  autoCaptionCompletedCount: number;
+  autoCaptionActivePath: string | null;
   lastError: string | null;
   warnings: string[];
 };
@@ -141,6 +145,10 @@ function defaultWatcherStatus(state: DatasetWatcherStatus['state'] = 'idle'): Da
     lastImportedAt: null,
     lastImportedCount: 0,
     lastCaptionedCount: 0,
+    autoCaptionTotalCount: 0,
+    autoCaptionPendingCount: 0,
+    autoCaptionCompletedCount: 0,
+    autoCaptionActivePath: null,
     lastError: null,
     warnings: [],
   };
@@ -176,6 +184,11 @@ function normalizeMaxNewTokens(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.round(parsed);
+}
+
+function normalizeCount(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
 function normalizeAutoCaption(value: unknown): DatasetWatcherAutoCaptionConfig | null {
@@ -253,8 +266,15 @@ function normalizeStatus(raw: unknown): DatasetWatcherStatus | null {
     state,
     lastScanAt: typeof raw.lastScanAt === 'string' ? raw.lastScanAt : null,
     lastImportedAt: typeof raw.lastImportedAt === 'string' ? raw.lastImportedAt : null,
-    lastImportedCount: Number.isFinite(Number(raw.lastImportedCount)) ? Number(raw.lastImportedCount) : 0,
-    lastCaptionedCount: Number.isFinite(Number(raw.lastCaptionedCount)) ? Number(raw.lastCaptionedCount) : 0,
+    lastImportedCount: normalizeCount(raw.lastImportedCount),
+    lastCaptionedCount: normalizeCount(raw.lastCaptionedCount),
+    autoCaptionTotalCount: normalizeCount(raw.autoCaptionTotalCount),
+    autoCaptionPendingCount: normalizeCount(raw.autoCaptionPendingCount),
+    autoCaptionCompletedCount: normalizeCount(raw.autoCaptionCompletedCount),
+    autoCaptionActivePath:
+      typeof raw.autoCaptionActivePath === 'string' && raw.autoCaptionActivePath.trim()
+        ? raw.autoCaptionActivePath
+        : null,
     lastError: typeof raw.lastError === 'string' && raw.lastError.trim() ? raw.lastError : null,
     warnings: Array.isArray(raw.warnings) ? raw.warnings.filter((item): item is string => typeof item === 'string') : [],
   };
@@ -671,6 +691,10 @@ function isAutoCaptionableImage(filePath: string) {
   return IMAGE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
+function isAutoCaptionCandidate(watcher: DatasetWatcherConfig, candidate: SourceCandidate) {
+  return watcher.autoCaption?.enabled === true && candidate.kind === 'media' && isAutoCaptionableImage(candidate.absolutePath);
+}
+
 function cleanPathSegment(segment: string, fallback: string) {
   const cleaned = segment
     .trim()
@@ -984,6 +1008,40 @@ export async function runDatasetWatcherOnce(
   let lastError: string | null = null;
   let state: DatasetWatcherStatus['state'] = watcher.enabled ? 'scanning' : 'disabled';
   let previousStatus: DatasetWatcherStatus = defaultWatcherStatus();
+  let autoCaptionTotalCount = 0;
+  let autoCaptionPendingCount = 0;
+  let autoCaptionCompletedCount = 0;
+  let autoCaptionActivePath: string | null = null;
+
+  const writeRunStatus = async (nextState: DatasetWatcherStatus['state']) => {
+    state = nextState;
+    return writeStatus(watcher.id, {
+      state,
+      lastScanAt: nowIso(now),
+      lastImportedAt: importedPaths.length > 0 ? nowIso(now) : previousStatus.lastImportedAt,
+      lastImportedCount: importedPaths.length,
+      lastCaptionedCount: captionedPaths.length,
+      autoCaptionTotalCount,
+      autoCaptionPendingCount,
+      autoCaptionCompletedCount,
+      autoCaptionActivePath,
+      lastError,
+      warnings,
+    });
+  };
+
+  const dropAutoCaptionCandidate = (candidate: SourceCandidate) => {
+    if (!isAutoCaptionCandidate(watcher, candidate)) return;
+    autoCaptionPendingCount = Math.max(autoCaptionPendingCount - 1, 0);
+    autoCaptionTotalCount = Math.max(autoCaptionTotalCount - 1, autoCaptionCompletedCount);
+    autoCaptionActivePath = null;
+  };
+
+  const completeAutoCaptionAttempt = () => {
+    autoCaptionCompletedCount += 1;
+    autoCaptionPendingCount = Math.max(autoCaptionPendingCount - 1, 0);
+    autoCaptionActivePath = null;
+  };
 
   if (!watcher.enabled) {
     const disabled = await writeStatus(watcher.id, {
@@ -1011,15 +1069,7 @@ export async function runDatasetWatcherOnce(
       };
     }
 
-    await writeStatus(watcher.id, {
-      ...previousStatus,
-      state: 'scanning',
-      lastScanAt: nowIso(now),
-      lastImportedCount: 0,
-      lastCaptionedCount: 0,
-      lastError: null,
-      warnings: [],
-    });
+    await writeRunStatus('scanning');
 
     const [sourceRoot, datasetRealPath] = await Promise.all([
       resolveAccessibleDirectory(watcher.sourcePath),
@@ -1036,6 +1086,7 @@ export async function runDatasetWatcherOnce(
     const pendingScope = `${pathKey(datasetFolder)}\n${pathKey(sourceRoot)}`;
     prunePending(pendingScope, activeKeys);
 
+    const processableCandidates: SourceCandidate[] = [];
     for (const candidate of candidates) {
       const key = sourceKey(candidate.absolutePath);
       const existingImport = manifest.imports[key];
@@ -1047,17 +1098,19 @@ export async function runDatasetWatcherOnce(
         continue;
       }
       if (!isStableCandidate(pendingScope, key, candidate, now, stableMs)) continue;
+      processableCandidates.push(candidate);
+    }
 
-      state = 'importing';
-      await writeStatus(watcher.id, {
-        state,
-        lastScanAt: nowIso(now),
-        lastImportedAt: importedPaths.length > 0 ? nowIso(now) : previousStatus.lastImportedAt,
-        lastImportedCount: importedPaths.length,
-        lastCaptionedCount: captionedPaths.length,
-        lastError,
-        warnings,
-      });
+    autoCaptionTotalCount = processableCandidates.filter(candidate => isAutoCaptionCandidate(watcher, candidate)).length;
+    autoCaptionPendingCount = autoCaptionTotalCount;
+    if (autoCaptionTotalCount > 0) {
+      await writeRunStatus('scanning');
+    }
+
+    for (const candidate of processableCandidates) {
+      const key = sourceKey(candidate.absolutePath);
+
+      await writeRunStatus('importing');
 
       const existingDestination = await findExistingMatchingDestination({ watcher, datasetFolder, candidate });
       if (existingDestination) {
@@ -1071,6 +1124,7 @@ export async function runDatasetWatcherOnce(
         };
         pendingByScope().get(pendingScope)?.delete(key);
         await writeImportManifest(datasetFolder, manifest);
+        dropAutoCaptionCandidate(candidate);
         continue;
       }
 
@@ -1078,6 +1132,8 @@ export async function runDatasetWatcherOnce(
       if (!destination) {
         warnings.push(`${candidate.relativePath}: Source file changed during import; it will be retried on the next scan.`);
         pendingByScope().get(pendingScope)?.delete(key);
+        dropAutoCaptionCandidate(candidate);
+        await writeRunStatus('importing');
         continue;
       }
       const destinationRelativePath = path.relative(datasetFolder, destination);
@@ -1093,17 +1149,9 @@ export async function runDatasetWatcherOnce(
       pendingByScope().get(pendingScope)?.delete(key);
       await writeImportManifest(datasetFolder, manifest);
 
-      if (watcher.autoCaption?.enabled && candidate.kind === 'media' && isAutoCaptionableImage(destination)) {
-        state = 'captioning';
-        await writeStatus(watcher.id, {
-          state,
-          lastScanAt: nowIso(now),
-          lastImportedAt: nowIso(now),
-          lastImportedCount: importedPaths.length,
-          lastCaptionedCount: captionedPaths.length,
-          lastError,
-          warnings,
-        });
+      if (isAutoCaptionCandidate(watcher, candidate) && isAutoCaptionableImage(destination)) {
+        autoCaptionActivePath = destinationRelativePath;
+        await writeRunStatus('captioning');
         try {
           if (await autoCaptionImportedFile({ watcher, datasetFolder, importedPath: destination })) {
             captionedPaths.push(destination);
@@ -1112,6 +1160,9 @@ export async function runDatasetWatcherOnce(
           const message = error instanceof Error ? error.message : 'Auto-caption failed';
           lastError = message;
           warnings.push(`${path.basename(destination)}: ${message}`);
+        } finally {
+          completeAutoCaptionAttempt();
+          await writeRunStatus(autoCaptionPendingCount > 0 ? 'captioning' : 'importing');
         }
       }
     }
@@ -1127,6 +1178,10 @@ export async function runDatasetWatcherOnce(
     lastImportedAt: importedPaths.length > 0 ? nowIso(now) : previousStatus.lastImportedAt,
     lastImportedCount: importedPaths.length,
     lastCaptionedCount: captionedPaths.length,
+    autoCaptionTotalCount,
+    autoCaptionPendingCount: 0,
+    autoCaptionCompletedCount,
+    autoCaptionActivePath: null,
     lastError,
     warnings,
   };

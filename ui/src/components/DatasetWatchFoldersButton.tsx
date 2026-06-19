@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
 import { Eye, FolderSync, Loader2, Play, Plus, Save, Trash2, X } from 'lucide-react';
 import { Modal } from '@/components/Modal';
@@ -167,6 +167,7 @@ export default function DatasetWatchFoldersButton({
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+  const statusRefreshSignatureRef = useRef('');
   const { workers } = useRemoteOllamaWorkers({ enabled: open });
 
   const remoteWorkerOptions = useMemo(
@@ -177,6 +178,10 @@ export default function DatasetWatchFoldersButton({
     if (form.provider === 'openrouter') return OPENROUTER_BOX_MODELS.map(option => ({ ...option }));
     return OLLAMA_VISION_MODELS.map(option => ({ ...option }));
   }, [form.provider]);
+
+  useEffect(() => {
+    statusRefreshSignatureRef.current = '';
+  }, [datasetName, projectID, workerID]);
 
   useEffect(() => {
     if (form.provider !== 'remote_ollama' || form.remoteWorkerId || remoteWorkerOptions.length === 0) return;
@@ -200,13 +205,37 @@ export default function DatasetWatchFoldersButton({
         },
       });
       setWatchers(res.data?.watchers || []);
-      setStatuses(res.data?.statuses || {});
+      const nextStatuses = res.data?.statuses || {};
+      setStatuses(nextStatuses);
+      const refreshSignature = Object.entries(nextStatuses)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([id, status]) => {
+          const watcherStatus = status as DatasetWatcherStatus;
+          return [
+            id,
+            watcherStatus.lastImportedAt || '',
+            watcherStatus.lastImportedCount || 0,
+            watcherStatus.lastCaptionedCount || 0,
+          ].join(':');
+        })
+        .join('|');
+      const hasImportedWork = Object.values(nextStatuses).some(status => {
+        const watcherStatus = status as DatasetWatcherStatus;
+        return Boolean(watcherStatus.lastImportedAt || watcherStatus.lastImportedCount || watcherStatus.lastCaptionedCount);
+      });
+      if (
+        (statusRefreshSignatureRef.current && refreshSignature !== statusRefreshSignatureRef.current) ||
+        (!statusRefreshSignatureRef.current && hasImportedWork)
+      ) {
+        onRefresh?.();
+      }
+      statusRefreshSignatureRef.current = refreshSignature;
     } catch (requestError: any) {
       setError(requestError?.response?.data?.error || requestError?.message || 'Failed to load watch folders.');
     } finally {
       setIsLoading(false);
     }
-  }, [datasetName, open, projectID, workerID]);
+  }, [datasetName, onRefresh, open, projectID, workerID]);
 
   useEffect(() => {
     void loadWatchers();

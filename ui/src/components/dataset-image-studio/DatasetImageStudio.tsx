@@ -669,6 +669,27 @@ export default function DatasetImageStudio({
   );
 
   useEffect(() => {
+    const activeKeys = new Set(items.map(itemKey));
+    const dirtySelectedKey = isDirtyRef.current ? selectedKeyRef.current : '';
+    let cacheChanged = false;
+
+    for (const key of Array.from(captionCacheRef.current.keys())) {
+      if (key === dirtySelectedKey && activeKeys.has(key)) continue;
+      cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
+    }
+
+    const selectedKey = selectedKeyRef.current;
+    if (selectedKey && selectedKey !== dirtySelectedKey && activeKeys.has(selectedKey)) {
+      latestCaptionRef.current = '';
+      setCaptionText('');
+      setSavedCaption('');
+      setIsCaptionLoaded(false);
+    }
+
+    if (cacheChanged) bumpCaptionCacheVersion();
+  }, [bumpCaptionCacheVersion, items]);
+
+  useEffect(() => {
     if (!selectedKey) {
       setCaptionText('');
       setSavedCaption('');

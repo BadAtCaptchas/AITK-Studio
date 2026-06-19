@@ -108,6 +108,16 @@ type RecaptionQueueEntry = {
   existingCaption: string;
   settings: RecaptionSettingsPreset;
 };
+type PersistedRecaptionQueueEntry = Omit<RecaptionQueueEntry, 'item'> & {
+  status: 'queued' | 'running';
+  updatedAt: string;
+};
+type PersistedRecaptionQueue = {
+  version: 1;
+  active: PersistedRecaptionQueueEntry | null;
+  queue: PersistedRecaptionQueueEntry[];
+  updatedAt: string;
+};
 type OllamaModelListItem = {
   name?: string;
   model?: string;
@@ -115,6 +125,7 @@ type OllamaModelListItem = {
 };
 
 const RECAPTION_SETTINGS_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionSettings.v1';
+const RECAPTION_QUEUE_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionQueue.v1';
 
 function ollamaModelName(model: OllamaModelListItem) {
   return (typeof model.model === 'string' && model.model.trim()) || (typeof model.name === 'string' && model.name.trim()) || '';
@@ -148,6 +159,23 @@ function recaptionSettingsStorageKey({
   return `${RECAPTION_SETTINGS_STORAGE_PREFIX}:${encodeURIComponent(scope)}:${encodeURIComponent(dataset)}`;
 }
 
+function recaptionQueueStorageKey({
+  datasetName,
+  projectID,
+  datasetPath,
+  workerID,
+}: {
+  datasetName: string;
+  projectID?: string | null;
+  datasetPath?: string | null;
+  workerID: string;
+}) {
+  const dataset = datasetName.trim();
+  if (!dataset) return '';
+  const scope = (projectID || datasetPath || workerID || 'global').trim();
+  return `${RECAPTION_QUEUE_STORAGE_PREFIX}:${encodeURIComponent(scope)}:${encodeURIComponent(dataset)}`;
+}
+
 function normalizeRecaptionProvider(value: unknown): RecaptionProvider {
   return AUTO_BOX_PROVIDERS.some(provider => provider.value === value) ? (value as RecaptionProvider) : 'openrouter';
 }
@@ -177,6 +205,40 @@ function readRecaptionSettingsPreset(storageKey: string): RecaptionSettingsPrese
     };
   } catch (error) {
     console.warn('Could not load saved recaption settings:', error);
+    return null;
+  }
+}
+
+function persistedRecaptionQueueEntry(
+  entry: RecaptionQueueEntry,
+  status: PersistedRecaptionQueueEntry['status'],
+): PersistedRecaptionQueueEntry {
+  return {
+    id: entry.id,
+    key: entry.key,
+    name: entry.name,
+    existingCaption: entry.existingCaption,
+    settings: entry.settings,
+    status,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function readPersistedRecaptionQueue(storageKey: string): PersistedRecaptionQueue | null {
+  if (!storageKey || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedRecaptionQueue> | null;
+    if (!parsed || parsed.version !== 1) return null;
+    return {
+      version: 1,
+      active: parsed.active || null,
+      queue: Array.isArray(parsed.queue) ? parsed.queue : [],
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+    };
+  } catch (error) {
+    console.warn('Could not load saved recaption queue:', error);
     return null;
   }
 }
@@ -240,6 +302,7 @@ export default function DatasetImageStudio({
   const [recaptionMessage, setRecaptionMessage] = useState('');
   const [hasRecaptionSettingsForDataset, setHasRecaptionSettingsForDataset] = useState(false);
   const [recaptionQueue, setRecaptionQueue] = useState<RecaptionQueueEntry[]>([]);
+  const [activeRecaptionEntry, setActiveRecaptionEntry] = useState<RecaptionQueueEntry | null>(null);
   const [activeRecaptionLabel, setActiveRecaptionLabel] = useState('');
   const [activeRecaptionKey, setActiveRecaptionKey] = useState('');
   const [recaptionRootPrompt, setRecaptionRootPrompt] = useState('');
@@ -271,6 +334,7 @@ export default function DatasetImageStudio({
   const selectedKeyRef = useRef('');
   const isRecaptioningRef = useRef(false);
   const recaptionQueueRef = useRef<RecaptionQueueEntry[]>([]);
+  const hydratedRecaptionQueueKeyRef = useRef('');
   const recaptionModelRef = useRef(DEFAULT_OPENROUTER_BOX_MODEL);
   const recaptionSystemPromptRef = useRef('');
   const recaptionSystemPromptTouchedRef = useRef(false);
@@ -307,6 +371,10 @@ export default function DatasetImageStudio({
   );
   const recaptionStorageKey = useMemo(
     () => recaptionSettingsStorageKey({ datasetName, projectID, datasetPath, workerID }),
+    [datasetName, datasetPath, projectID, workerID],
+  );
+  const recaptionQueueStorageKeyValue = useMemo(
+    () => recaptionQueueStorageKey({ datasetName, projectID, datasetPath, workerID }),
     [datasetName, datasetPath, projectID, workerID],
   );
   const autoBoxProviderLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === autoBoxProvider)?.label || 'OpenRouter';
@@ -404,6 +472,72 @@ export default function DatasetImageStudio({
   useEffect(() => {
     recaptionQueueRef.current = recaptionQueue;
   }, [recaptionQueue]);
+
+  useEffect(() => {
+    hydratedRecaptionQueueKeyRef.current = '';
+  }, [recaptionQueueStorageKeyValue]);
+
+  useEffect(() => {
+    const storageKey = recaptionQueueStorageKeyValue;
+    if (!storageKey || hydratedRecaptionQueueKeyRef.current === storageKey) return;
+    if (isRecaptioning || recaptionQueue.length > 0) return;
+
+    const persisted = readPersistedRecaptionQueue(storageKey);
+    if (!persisted || (!persisted.active && persisted.queue.length === 0)) {
+      hydratedRecaptionQueueKeyRef.current = storageKey;
+      return;
+    }
+
+    const itemByKey = new Map(items.map(item => [itemKey(item), item] as const));
+    if (itemByKey.size === 0) return;
+
+    const seen = new Set<string>();
+    const restored = [persisted.active, ...persisted.queue].flatMap(persistedEntry => {
+      if (!persistedEntry || seen.has(persistedEntry.key)) return [];
+      const item = itemByKey.get(persistedEntry.key);
+      if (!item) return [];
+      seen.add(persistedEntry.key);
+      return [
+        {
+          id: persistedEntry.id || randomId(),
+          item,
+          key: persistedEntry.key,
+          name: persistedEntry.name || itemName(item),
+          existingCaption: persistedEntry.existingCaption || '',
+          settings: persistedEntry.settings,
+        },
+      ];
+    });
+
+    hydratedRecaptionQueueKeyRef.current = storageKey;
+    if (restored.length === 0) {
+      window.localStorage.removeItem(storageKey);
+      return;
+    }
+
+    setRecaptionQueue(restored);
+    setRecaptionMessage(
+      `Restored ${restored.length} recaption${restored.length === 1 ? '' : 's'} after refresh.`,
+    );
+  }, [isRecaptioning, items, recaptionQueue.length, recaptionQueueStorageKeyValue]);
+
+  useEffect(() => {
+    const storageKey = recaptionQueueStorageKeyValue;
+    if (!storageKey || hydratedRecaptionQueueKeyRef.current !== storageKey || typeof window === 'undefined') return;
+
+    if (!activeRecaptionEntry && recaptionQueue.length === 0) {
+      window.localStorage.removeItem(storageKey);
+      return;
+    }
+
+    const snapshot: PersistedRecaptionQueue = {
+      version: 1,
+      active: activeRecaptionEntry ? persistedRecaptionQueueEntry(activeRecaptionEntry, 'running') : null,
+      queue: recaptionQueue.map(entry => persistedRecaptionQueueEntry(entry, 'queued')),
+      updatedAt: new Date().toISOString(),
+    };
+    window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
+  }, [activeRecaptionEntry, recaptionQueue, recaptionQueueStorageKeyValue]);
 
   useEffect(() => {
     savedCaptionRef.current = savedCaption;
@@ -958,6 +1092,7 @@ export default function DatasetImageStudio({
     }
 
     const providerLabel = AUTO_BOX_PROVIDERS.find(provider => provider.value === settings.provider)?.label || settings.provider;
+    setActiveRecaptionEntry(entry);
     setIsRecaptioning(true);
     setActiveRecaptionLabel(name);
     setActiveRecaptionKey(key);
@@ -1020,6 +1155,7 @@ export default function DatasetImageStudio({
     } catch (error) {
       setRecaptionMessage(`${name}: ${responseErrorMessage(error, 'Recaption failed. Please try again.')}`);
     } finally {
+      setActiveRecaptionEntry(null);
       setIsRecaptioning(false);
       setActiveRecaptionLabel('');
       setActiveRecaptionKey('');

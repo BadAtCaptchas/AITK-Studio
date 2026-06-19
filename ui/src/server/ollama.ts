@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { guardedFetch } from './networkPolicy';
 
 export type OllamaModel = {
   name?: string;
@@ -92,7 +93,9 @@ export function hasOllamaModel(models: OllamaModel[], requestedModel: string) {
   const normalizedRequested = normalizeModelName(requestedModel);
   return models.some(model => {
     const candidates = [model.model, model.name].filter((value): value is string => typeof value === 'string');
-    return candidates.some(candidate => candidate === requestedModel || normalizeModelName(candidate) === normalizedRequested);
+    return candidates.some(
+      candidate => candidate === requestedModel || normalizeModelName(candidate) === normalizedRequested,
+    );
   });
 }
 
@@ -125,7 +128,7 @@ async function fetchOllama(
     headers.set('Authorization', `Bearer ${authToken}`);
   }
   try {
-    return { response: await fetch(url, { ...init, headers }), url };
+    return { response: await guardedFetch(url, { ...init, headers }, `Ollama ${operation}`), url };
   } catch (error) {
     throw new Error(
       `Ollama ${operation} failed at ${url}: ${ollamaFetchErrorMessage(error)}. Confirm Ollama is running and AITK_OLLAMA_BASE_URL points to the remote server's local Ollama.`,

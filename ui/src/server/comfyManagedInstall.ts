@@ -5,6 +5,7 @@ import path from 'path';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getToolkitPythonPath } from '@/server/pythonPath';
 import { getComfyInstallProgressAtPath, type ComfyInstallProgress } from '@/server/comfyInstallProgress';
+import { isOfflineModeEnabled, offlineChildProcessEnv } from '@/server/networkPolicy';
 
 const MANAGED_COMFY_ROOT = path.resolve(process.env.AITK_COMFY_ROOT || path.join(TOOLKIT_ROOT, '.aitk_comfy', 'ComfyUI'));
 const MANAGED_COMFY_STATE_DIR = path.join(TOOLKIT_ROOT, '.aitk_comfy');
@@ -121,6 +122,17 @@ export async function getComfyManagedInstallStatus(): Promise<ComfyManagedInstal
 }
 
 export async function startComfyManagedInstall(): Promise<ComfyManagedInstallStatus> {
+  if (await isOfflineModeEnabled()) {
+    writeProgress(
+      'failed',
+      'offline-mode',
+      'Managed ComfyUI install is blocked by offline mode',
+      null,
+      'Disable offline mode before installing managed ComfyUI.',
+    );
+    return getComfyManagedInstallStatus();
+  }
+
   const current = await getComfyManagedInstallStatus();
   if (current.installing) return current;
 
@@ -149,6 +161,7 @@ export async function startComfyManagedInstall(): Promise<ComfyManagedInstallSta
       ...process.env,
       AITK_COMFY_INSTALL_PROGRESS_PATH: MANAGED_COMFY_PROGRESS_PATH,
       PYTHONUNBUFFERED: '1',
+      ...offlineChildProcessEnv(await isOfflineModeEnabled()),
     },
     windowsHide: true,
     stdio: ['ignore', logFd, logFd],

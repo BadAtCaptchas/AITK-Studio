@@ -6,8 +6,11 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.getcwd())
 
+from toolkit.network_policy import install_offline_network_guard
 from toolkit.comfy.install_progress import PROGRESS_PATH_ENV, ComfyInstallProgressReporter
 from toolkit.comfy.runtime import ManagedComfyRuntime
+
+install_offline_network_guard()
 
 
 def main():

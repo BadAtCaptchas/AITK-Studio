@@ -13,6 +13,8 @@ export interface Settings {
   DATASETS_FOLDER: string;
   PROJECTS_FOLDER: string;
   PROJECTS_ENABLED: string;
+  OFFLINE_MODE: string;
+  OFFLINE_MODE_LOCKED: string;
   TRAINING_ADVISOR_ENABLED: string;
   COMFY_AUTO_INSTALL: string;
   COMFY_EXTERNAL_URL: string;
@@ -26,6 +28,8 @@ const defaultSettings: Settings = {
   DATASETS_FOLDER: '',
   PROJECTS_FOLDER: '',
   PROJECTS_ENABLED: 'true',
+  OFFLINE_MODE: 'false',
+  OFFLINE_MODE_LOCKED: 'false',
   TRAINING_ADVISOR_ENABLED: 'false',
   COMFY_AUTO_INSTALL: 'false',
   COMFY_EXTERNAL_URL: DEFAULT_EXTERNAL_COMFY_URL,
@@ -40,6 +44,8 @@ function normalizeSettings(data: Partial<Settings> = {}): Settings {
     DATASETS_FOLDER: data.DATASETS_FOLDER || '',
     PROJECTS_FOLDER: data.PROJECTS_FOLDER || '',
     PROJECTS_ENABLED: data.PROJECTS_ENABLED === 'false' ? 'false' : 'true',
+    OFFLINE_MODE: data.OFFLINE_MODE === 'true' ? 'true' : 'false',
+    OFFLINE_MODE_LOCKED: data.OFFLINE_MODE_LOCKED === 'true' ? 'true' : 'false',
     TRAINING_ADVISOR_ENABLED: data.TRAINING_ADVISOR_ENABLED === 'true' ? 'true' : 'false',
     COMFY_AUTO_INSTALL: data.COMFY_AUTO_INSTALL === 'true' ? 'true' : 'false',
     COMFY_EXTERNAL_URL: data.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,

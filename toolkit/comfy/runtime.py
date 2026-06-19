@@ -9,6 +9,7 @@ from typing import Optional
 from toolkit.comfy.client import ComfyClient
 from toolkit.comfy.errors import ComfyConfigError, ComfyError
 from toolkit.comfy.install_progress import ComfyInstallProgressReporter
+from toolkit.network_policy import is_offline_mode_enabled
 from toolkit.paths import TOOLKIT_ROOT
 
 
@@ -87,6 +88,10 @@ class ManagedComfyRuntime:
         self.install()
 
     def install(self):
+        if is_offline_mode_enabled():
+            message = "Managed ComfyUI install is blocked by offline mode"
+            self.progress.failed('offline-mode', message, root=self.root)
+            raise ComfyConfigError(message)
         os.makedirs(os.path.dirname(self.root), exist_ok=True)
         self._run_install_command(
             ['git', 'clone', COMFY_REPO_URL, self.root],

@@ -10,11 +10,8 @@ import {
   readSafetensorsMetadata,
   splitTriggerWords,
 } from './loraLibrary';
-import {
-  classTypesFromWorkflow,
-  requiredIdeogramModels,
-  type IdeogramRequiredModel,
-} from '../utils/ideogramWorkflow';
+import { classTypesFromWorkflow, requiredIdeogramModels, type IdeogramRequiredModel } from '../utils/ideogramWorkflow';
+import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
 
 export const COMFY_EXTERNAL_URL_KEY = 'COMFY_EXTERNAL_URL';
 export const COMFY_EXTERNAL_LORA_DIR_KEY = 'COMFY_EXTERNAL_LORA_DIR';
@@ -250,12 +247,19 @@ export async function comfyRequest<T = unknown>({
   const url = comfyUrl(serverUrl, path, query);
   let response: Response;
   try {
-    response = await fetchImpl(url, {
+    const init: RequestInit = {
       method,
       signal,
       headers: body == null ? undefined : { 'Content-Type': 'application/json' },
       body: body == null ? undefined : JSON.stringify(body),
-    });
+    };
+    response =
+      fetchImpl === fetch
+        ? await guardedFetch(url, init, 'External ComfyUI request')
+        : await (async () => {
+            await assertUrlAllowedByOfflineMode(url, 'External ComfyUI request');
+            return fetchImpl(url, init);
+          })();
   } catch (error) {
     throw new ExternalComfyError(
       `Could not reach ComfyUI at ${serverUrl}: ${error instanceof Error ? error.message : String(error)}`,
@@ -264,7 +268,10 @@ export async function comfyRequest<T = unknown>({
   }
 
   if (!response.ok) {
-    throw new ExternalComfyError(`ComfyUI request failed for ${path}: ${await readErrorDetail(response)}`, response.status);
+    throw new ExternalComfyError(
+      `ComfyUI request failed for ${path}: ${await readErrorDetail(response)}`,
+      response.status,
+    );
   }
   if (!expectJson) {
     return (await response.arrayBuffer()) as T;
@@ -316,14 +323,19 @@ export async function listExternalComfyLoras(serverUrl: string, fetchImpl?: Fetc
     const modelNames = await comfyRequest<string[]>({ serverUrl, path: '/models/loras', fetchImpl });
     return {
       source: 'models' as const,
-      loras: Array.from(new Set((Array.isArray(modelNames) ? modelNames : []).map(String))).sort((a, b) => a.localeCompare(b)),
+      loras: Array.from(new Set((Array.isArray(modelNames) ? modelNames : []).map(String))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
     };
   } catch {
     return { source: 'none' as const, loras: [] };
   }
 }
 
-function nodePreflightItems(workflow: Record<string, unknown>, objectInfo: Record<string, unknown>): ComfyPreflightItem[] {
+function nodePreflightItems(
+  workflow: Record<string, unknown>,
+  objectInfo: Record<string, unknown>,
+): ComfyPreflightItem[] {
   return classTypesFromWorkflow(workflow).map(classType => ({
     id: `node:${classType}`,
     label: `Node: ${classType}`,
@@ -504,7 +516,8 @@ export async function copyToolkitLoraToExternalComfy({
   const destinationRootReal = await fs.promises.realpath(destinationRoot).catch(() => null);
   if (!destinationRootReal) throw new ExternalComfyError('External ComfyUI LoRA folder does not exist.', 400);
   const destinationStat = await fs.promises.stat(destinationRootReal).catch(() => null);
-  if (!destinationStat?.isDirectory()) throw new ExternalComfyError('External ComfyUI LoRA folder is not a directory.', 400);
+  if (!destinationStat?.isDirectory())
+    throw new ExternalComfyError('External ComfyUI LoRA folder is not a directory.', 400);
 
   const requestedReal = await fs.promises.realpath(path.resolve(toolkitPath || '')).catch(() => null);
   if (!requestedReal) throw new ExternalComfyError('Toolkit LoRA file was not found.', 404);

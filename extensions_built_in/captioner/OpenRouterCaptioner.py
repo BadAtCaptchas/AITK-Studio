@@ -9,6 +9,7 @@ from collections import OrderedDict
 from typing import Optional
 
 from .BaseCaptioner import BaseCaptioner, CaptionConfig, IDEOGRAM_JSON_SCHEMA
+from toolkit.network_policy import assert_url_allowed
 
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -83,8 +84,10 @@ class OpenRouterCaptioner(BaseCaptioner):
 
     def _request_json(self, payload: dict, timeout: int = 900) -> dict:
         body = json.dumps(payload).encode("utf-8")
+        url = f"{self.caption_config.base_url}/chat/completions"
+        assert_url_allowed(url, "OpenRouter caption request")
         request = urllib.request.Request(
-            f"{self.caption_config.base_url}/chat/completions",
+            url,
             data=body,
             headers=self._headers(),
             method="POST",

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { guardedFetch } from '@/server/networkPolicy';
 
 export async function GET() {
   const appUrl = process.env.OSTRIS_CLOUD_APP_URL;
@@ -9,10 +10,10 @@ export async function GET() {
   }
 
   try {
-    const res = await fetch(`${appUrl}/api/machine/me`, {
+    const res = await guardedFetch(`${appUrl}/api/machine/me`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       cache: 'no-store',
-    });
+    }, 'Ostris Cloud balance');
 
     if (!res.ok) {
       return NextResponse.json({

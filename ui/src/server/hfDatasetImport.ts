@@ -10,6 +10,7 @@ import { listDatasetSummaries } from './encryptedDatasets';
 import { prepareHfTokenEnv } from './hfTokenEnv';
 import { getToolkitPythonPath } from './pythonPath';
 import { getHFToken } from './settings';
+import { isOfflineModeEnabled } from './networkPolicy';
 import { nextAvailablePath, safeNameSegment } from './trainingJobTransfer';
 
 export type HfDatasetCaptionMode = 'auto' | 'none' | 'column';
@@ -241,6 +242,9 @@ function defaultOutputName(request: HfDatasetImportRequest) {
 
 export async function previewHfDatasetImport(rawRequest: unknown) {
   const request = normalizeHfDatasetImportRequest(rawRequest);
+  if (await isOfflineModeEnabled()) {
+    throw new Error('Hugging Face dataset preview is blocked while offline mode is enabled.');
+  }
   return runHfDatasetScript<HfDatasetPreviewResult>(
     {
       ...request,
@@ -252,6 +256,9 @@ export async function previewHfDatasetImport(rawRequest: unknown) {
 
 export async function importHfDataset(datasetsRoot: string, rawRequest: unknown): Promise<HfDatasetImportResult> {
   const request = normalizeHfDatasetImportRequest(rawRequest);
+  if (await isOfflineModeEnabled()) {
+    throw new Error('Hugging Face dataset import is blocked while offline mode is enabled.');
+  }
   await fsp.mkdir(datasetsRoot, { recursive: true });
 
   const importID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;

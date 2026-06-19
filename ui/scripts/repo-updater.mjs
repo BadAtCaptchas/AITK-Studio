@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MongoClient } from 'mongodb';
+import sqlite3 from 'sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
 const UI_ROOT = path.resolve(path.dirname(__filename), '..');
@@ -12,6 +14,10 @@ const REQUEST_PATH = path.join(TMP_ROOT, 'repo-update-request.json');
 const PID_PATH = path.join(TMP_ROOT, 'repo-updater.pid');
 const VERSION_PATH = path.join(TOOLKIT_ROOT, 'version.py');
 const RESTART_SCRIPT = path.join(UI_ROOT, 'scripts', 'restart-ui.mjs');
+const DB_PROVIDER = (process.env.AITK_DB_PROVIDER || 'sqlite').trim().toLowerCase();
+const SQLITE_PATH = path.resolve(process.env.AITK_SQLITE_PATH || path.join(TOOLKIT_ROOT, 'aitk_db.db'));
+const MONGO_URI = process.env.AITK_MONGODB_URI?.trim();
+const MONGO_DB_NAME = process.env.AITK_MONGODB_DB?.trim() || 'ai_toolkit';
 
 const DEFAULT_REPO_OWNER = 'BadAtCaptchas';
 const DEFAULT_REPO_NAME = 'AITK-Studio';
@@ -54,6 +60,64 @@ function nowIso() {
 function truthyEnv(value) {
   if (!value) return false;
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function truthySetting(value) {
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(String(value || '').trim().toLowerCase());
+}
+
+function readSqliteSetting(key) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const db = new sqlite3.Database(SQLITE_PATH, sqlite3.OPEN_READONLY, error => {
+      if (error) {
+        finish(null);
+        return;
+      }
+      db.get('SELECT value FROM Settings WHERE key = ?', [key], (queryError, row) => {
+        db.close(() => undefined);
+        finish(queryError ? null : row?.value ?? null);
+      });
+    });
+  });
+}
+
+async function readMongoSetting(key) {
+  if (!MONGO_URI) return null;
+  const client = new MongoClient(MONGO_URI);
+  try {
+    await client.connect();
+    const row = await client.db(MONGO_DB_NAME).collection('settings').findOne({ key }, { projection: { _id: 0, value: 1 } });
+    return row?.value ?? null;
+  } catch {
+    return null;
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+async function isOfflineModeEnabled() {
+  if (truthyEnv(process.env.AITK_OFFLINE_MODE) || truthyEnv(process.env.AI_TOOLKIT_OFFLINE_MODE)) {
+    return true;
+  }
+  const value = DB_PROVIDER === 'mongodb' ? await readMongoSetting('OFFLINE_MODE') : await readSqliteSetting('OFFLINE_MODE');
+  return truthySetting(value);
+}
+
+async function writeOfflineStatus(trigger = 'offline-mode') {
+  return writeStatus({
+    state: 'disabled',
+    message: 'Update checks are disabled by offline mode',
+    trigger,
+    checkedAt: nowIso(),
+    nextCheckAt: null,
+    error: null,
+  });
 }
 
 function getIntervalMinutes() {
@@ -290,6 +354,10 @@ async function readLocalVersion() {
 }
 
 async function githubGet(pathname, options = {}) {
+  if (await isOfflineModeEnabled()) {
+    throw new Error('GitHub update checks are blocked by offline mode');
+  }
+
   if (typeof fetch !== 'function') {
     throw new Error('This Node.js runtime does not provide fetch for GitHub update checks');
   }
@@ -556,6 +624,11 @@ async function checkForUpdates(trigger) {
     return;
   }
 
+  if (await isOfflineModeEnabled()) {
+    await writeOfflineStatus(trigger);
+    return;
+  }
+
   isChecking = true;
   const startedAt = nowIso();
   const previous = (await readJson(STATUS_PATH)) || {};
@@ -766,6 +839,11 @@ async function writeUpdateBlocked(localInfo, remoteInfo, result, reason, started
 
 async function applyGitUpdate(trigger) {
   if (isChecking || isUpdating || isStopping) {
+    return;
+  }
+
+  if (await isOfflineModeEnabled()) {
+    await writeOfflineStatus(trigger);
     return;
   }
 
@@ -1083,6 +1161,11 @@ async function writePid() {
 async function start() {
   await ensureTmpRoot();
   await writePid();
+
+  if (await isOfflineModeEnabled()) {
+    await writeOfflineStatus('startup');
+    return;
+  }
 
   if (truthyEnv(process.env.AITK_UPDATE_CHECK_DISABLED)) {
     await writeStatus({

@@ -1,8 +1,4 @@
-import {
-  arrayToBox,
-  boxToArray,
-  parseIdeogramCaption,
-} from '../utils/ideogramCaption';
+import { arrayToBox, boxToArray, parseIdeogramCaption } from '../utils/ideogramCaption';
 import {
   cleanString,
   extractMessageText,
@@ -15,6 +11,7 @@ import {
   requireImageSize,
   type OpenRouterUsage,
 } from './openRouterBoxes';
+import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
 
 type ImageSize = {
   width?: number | null;
@@ -173,7 +170,8 @@ async function callOpenRouterLayerCaption({
   prompt: string;
   fetchImpl: typeof fetch;
 }): Promise<OpenRouterLayerCaptionCallResult> {
-  const response = await fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
+  const init: RequestInit = {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -204,7 +202,14 @@ async function callOpenRouterLayerCaption({
         },
       ],
     }),
-  });
+  };
+  const response =
+    fetchImpl === fetch
+      ? await guardedFetch(url, init, 'OpenRouter layer caption')
+      : await (async () => {
+          await assertUrlAllowedByOfflineMode(url, 'OpenRouter layer caption');
+          return fetchImpl(url, init);
+        })();
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -258,7 +263,10 @@ export function parseLayerCaptionResponse(
   const parsed = parseJsonObject(content, providerName);
   if (!isRecord(parsed)) throw new Error(`${providerName} did not return a JSON object.`);
   const text = cleanString(parsed.text || parsed.visibleText).slice(0, 240);
-  const desc = (cleanString(parsed.desc || parsed.description || parsed.caption) || (type === 'text' && text ? `Visible text: ${text}` : '')).slice(0, 600);
+  const desc = (
+    cleanString(parsed.desc || parsed.description || parsed.caption) ||
+    (type === 'text' && text ? `Visible text: ${text}` : '')
+  ).slice(0, 600);
   if (!desc) throw new Error(`${providerName} did not return a usable layer caption.`);
   const bbox = usableCaptionBox(rawPixelBbox(parsed), imageSize);
   if (requiresBbox && !bbox) throw new Error(`${providerName} did not return a usable layer box.`);

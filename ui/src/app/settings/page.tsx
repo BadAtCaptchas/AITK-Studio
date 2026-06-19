@@ -117,6 +117,7 @@ const emptyWorkerForm = {
   base_url: '',
   api_token: '',
   enabled: true,
+  offline_bypass_enabled: false,
 };
 
 const emptyOllamaWorkerForm = {
@@ -125,6 +126,7 @@ const emptyOllamaWorkerForm = {
   base_url: '',
   auth_token: '',
   enabled: true,
+  offline_bypass_enabled: false,
 };
 
 function formatUpdaterTime(value?: string | null) {
@@ -226,16 +228,17 @@ function StatusDot({ tone = 'ok' }: { tone?: 'ok' | 'warn' | 'idle' }) {
   );
 }
 
-function SettingSwitch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+function SettingSwitch({ checked, onChange, disabled = false }: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      onClick={() => onChange(!checked)}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
       className={`relative inline-flex h-6 w-11 flex-none items-center rounded-full border border-gray-700 transition-colors ${
         checked ? 'bg-cyan-500/90' : 'bg-gray-700'
-      }`}
+      } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
     >
       <span className="sr-only">Toggle setting</span>
       <span
@@ -560,6 +563,7 @@ export default function Settings() {
       base_url: worker.base_url,
       api_token: '',
       enabled: worker.enabled,
+      offline_bypass_enabled: worker.offline_bypass_enabled,
     });
   };
 
@@ -649,6 +653,7 @@ export default function Settings() {
       base_url: worker.base_url,
       auth_token: '',
       enabled: worker.enabled,
+      offline_bypass_enabled: worker.offline_bypass_enabled,
     });
   };
 
@@ -956,6 +961,21 @@ export default function Settings() {
                   </div>
                   <div className="border border-gray-900">
                     <div className="flex items-center gap-3 border-b border-gray-900 px-3 py-3">
+                      <AlertTriangle className="h-5 w-5 flex-none text-gray-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-gray-100">Offline mode</div>
+                        <div className="mt-0.5 text-xs text-gray-500">
+                          Block outbound requests except local/private IPs and explicitly exempt worker hosts.
+                          {settings.OFFLINE_MODE_LOCKED === 'true' ? ' Forced on by AITK_OFFLINE_MODE.' : ''}
+                        </div>
+                      </div>
+                      <SettingSwitch
+                        checked={settings.OFFLINE_MODE === 'true'}
+                        disabled={settings.OFFLINE_MODE_LOCKED === 'true'}
+                        onChange={checked => setSettings(prev => ({ ...prev, OFFLINE_MODE: checked ? 'true' : 'false' }))}
+                      />
+                    </div>
+                    <div className="flex items-center gap-3 border-b border-gray-900 px-3 py-3">
                       <TerminalSquare className="h-5 w-5 flex-none text-gray-500" />
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-gray-100">Training Advisor (experimental)</div>
@@ -1114,6 +1134,20 @@ export default function Settings() {
                             />
                             Enabled
                           </label>
+                          <label className="flex items-center gap-2 text-sm text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={workerForm.offline_bypass_enabled}
+                              onChange={e => setWorkerForm(prev => ({ ...prev, offline_bypass_enabled: e.target.checked }))}
+                              className="h-4 w-4 accent-amber-500"
+                            />
+                            Bypass offline mode
+                          </label>
+                          {workerForm.offline_bypass_enabled && (
+                            <p className="text-xs text-amber-300 sm:col-span-2">
+                              This trusts the worker host even when offline mode is enabled.
+                            </p>
+                          )}
                           <div className="flex justify-end gap-2">
                             {workerForm.id && (
                               <button
@@ -1172,6 +1206,9 @@ export default function Settings() {
                                       {worker.last_status}
                                       {worker.last_error ? `: ${worker.last_error}` : ''}
                                     </div>
+                                    {worker.offline_bypass_enabled && (
+                                      <div className="mt-1 text-xs text-amber-300">Offline bypass enabled</div>
+                                    )}
                                     <div className="mt-2 text-xs text-gray-500">
                                       Updater: {updaterLabel} · {updaterDetail}
                                     </div>
@@ -1231,15 +1268,26 @@ export default function Settings() {
                               placeholder={ollamaWorkerForm.id ? 'Leave blank to keep existing bearer token' : 'Optional bearer token'}
                             />
                             <div className="flex items-center justify-between gap-2">
-                              <label className="flex items-center gap-2 text-sm text-gray-300">
-                                <input
-                                  type="checkbox"
-                                  checked={ollamaWorkerForm.enabled}
-                                  onChange={e => setOllamaWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                                  className="h-4 w-4 accent-cyan-500"
-                                />
-                                Enabled
-                              </label>
+                              <div className="space-y-2">
+                                <label className="flex items-center gap-2 text-sm text-gray-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={ollamaWorkerForm.enabled}
+                                    onChange={e => setOllamaWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                                    className="h-4 w-4 accent-cyan-500"
+                                  />
+                                  Enabled
+                                </label>
+                                <label className="flex items-center gap-2 text-sm text-gray-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={ollamaWorkerForm.offline_bypass_enabled}
+                                    onChange={e => setOllamaWorkerForm(prev => ({ ...prev, offline_bypass_enabled: e.target.checked }))}
+                                    className="h-4 w-4 accent-amber-500"
+                                  />
+                                  Bypass offline mode
+                                </label>
+                              </div>
                               <div className="flex gap-2">
                                 {ollamaWorkerForm.id && (
                                   <button
@@ -1259,6 +1307,9 @@ export default function Settings() {
                                 </button>
                               </div>
                             </div>
+                            {ollamaWorkerForm.offline_bypass_enabled && (
+                              <p className="text-xs text-amber-300">This trusts the endpoint host even when offline mode is enabled.</p>
+                            )}
                             {ollamaWorkerStatus === 'error' && <p className="text-sm text-rose-400">Failed to save Remote Ollama endpoint.</p>}
                           </form>
                           <div className="mt-4 divide-y divide-gray-900 border-y border-gray-900">
@@ -1272,6 +1323,9 @@ export default function Settings() {
                                     {typeof worker.model_count === 'number' ? `: ${worker.model_count} model${worker.model_count === 1 ? '' : 's'}` : ''}
                                     {worker.last_error ? `: ${worker.last_error}` : ''}
                                   </div>
+                                  {worker.offline_bypass_enabled && (
+                                    <div className="mt-1 text-xs text-amber-300">Offline bypass enabled</div>
+                                  )}
                                 </div>
                                 <div className="flex flex-none gap-2">
                                   <button type="button" className="h-8 border border-gray-800 px-2 text-xs" onClick={() => checkOllamaWorker(worker.id)}>Health</button>

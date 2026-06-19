@@ -1,6 +1,7 @@
 import { assertUsableCaption } from '../utils/captionQuality';
 import { parseIdeogramCaption } from '../utils/ideogramCaption';
 import { generateOllamaImageCaption } from './ollama';
+import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
 import { endpointForRemoteOllamaWorker, getRemoteOllamaWorker } from './remoteOllamaWorkers';
 
 export type RecaptionProvider = 'openrouter' | 'ollama' | 'remote_ollama';
@@ -198,7 +199,8 @@ async function generateOpenRouterRecaption({
     };
   }
 
-  const response = await fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
+  const init: RequestInit = {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -206,7 +208,14 @@ async function generateOpenRouterRecaption({
       'X-Title': 'AI Toolkit Dataset Studio',
     },
     body: JSON.stringify(body),
-  });
+  };
+  const response =
+    fetchImpl === fetch
+      ? await guardedFetch(url, init, 'OpenRouter single-image recaption')
+      : await (async () => {
+          await assertUrlAllowedByOfflineMode(url, 'OpenRouter single-image recaption');
+          return fetchImpl(url, init);
+        })();
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     const message =
@@ -221,7 +230,8 @@ async function generateOpenRouterRecaption({
 export async function generateSingleImageRecaption(request: SingleRecaptionRequest) {
   const provider = normalizeRecaptionProvider(request.provider);
   const outputFormat = normalizeRecaptionOutputFormat(request.outputFormat);
-  const model = (request.model || '').trim() || (provider === 'openrouter' ? DEFAULT_OPENROUTER_MODEL : DEFAULT_OLLAMA_MODEL);
+  const model =
+    (request.model || '').trim() || (provider === 'openrouter' ? DEFAULT_OPENROUTER_MODEL : DEFAULT_OLLAMA_MODEL);
   const prompt = buildSingleRecaptionPrompt(request.prompt, outputFormat, request.existingCaption);
   const maxNewTokens = normalizeMaxNewTokens(request.maxNewTokens, outputFormat);
   let rawCaption = '';

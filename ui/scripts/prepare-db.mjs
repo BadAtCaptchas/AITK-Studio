@@ -288,6 +288,7 @@ async function applySqliteCompatibilitySchema(filename) {
         base_url TEXT NOT NULL,
         api_token TEXT NOT NULL,
         enabled BOOLEAN NOT NULL DEFAULT true,
+        offline_bypass_enabled BOOLEAN NOT NULL DEFAULT false,
         last_status TEXT NOT NULL DEFAULT 'unknown',
         last_error TEXT,
         last_checked_at DATETIME,
@@ -298,6 +299,7 @@ async function applySqliteCompatibilitySchema(filename) {
       );
       `,
     );
+    await ensureColumn(db, 'WorkerNode', 'offline_bypass_enabled', 'BOOLEAN NOT NULL DEFAULT false');
 
     await sqliteRun(db, 'CREATE UNIQUE INDEX IF NOT EXISTS Queue_worker_id_gpu_ids_key ON Queue(worker_id, gpu_ids);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Queue_worker_id_idx ON Queue(worker_id);');

@@ -4,6 +4,7 @@ import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { isEncryptedDatasetFolder } from '@/server/encryptedDatasets';
 import { REMOTE_CAPTION_MEDIA_EXTENSIONS, resolveDatasetDirectoryInsideRoot } from '@/server/remoteCaptionSecurity';
+import { guardedFetch } from '@/server/networkPolicy';
 
 type OpenRouterModel = {
   id: string;
@@ -69,7 +70,7 @@ function countCaptionTargets(
 
 async function fetchOpenRouterModel(modelId: string): Promise<OpenRouterModel | null> {
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/models', { cache: 'no-store' });
+    const response = await guardedFetch('https://openrouter.ai/api/v1/models', { cache: 'no-store' }, 'OpenRouter pricing');
     if (!response.ok) return null;
     const data = (await response.json()) as { data?: OpenRouterModel[] };
     return data.data?.find(model => model.id === modelId) || null;

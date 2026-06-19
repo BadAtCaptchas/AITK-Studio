@@ -7,6 +7,7 @@ import { getHFToken } from './settings';
 import { prepareHfTokenEnv } from './hfTokenEnv';
 import { getToolkitPythonPath } from './pythonPath';
 import type { ModelReference } from './trainingJobTransfer';
+import { isOfflineModeEnabled } from './networkPolicy';
 
 type HfModelPrefetchResult = {
   handledValues: string[];
@@ -120,6 +121,13 @@ async function runModelPrefetchScript(inputPath: string): Promise<HfModelPrefetc
 }
 
 export async function prefetchModelReferences(references: ModelReference[]): Promise<HfModelPrefetchResult> {
+  if (await isOfflineModeEnabled()) {
+    return {
+      handledValues: [],
+      warnings: ['Model reference downloads are blocked while offline mode is enabled.'],
+    };
+  }
+
   if (!references.length) {
     return { handledValues: [], warnings: [] };
   }

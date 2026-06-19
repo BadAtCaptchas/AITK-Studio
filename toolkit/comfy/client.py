@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from toolkit.image_io import open_static_image_from_bytes
 
 from toolkit.comfy.errors import ComfyError, ComfyWorkflowError
+from toolkit.network_policy import assert_url_allowed
 
 
 class ComfyClient:
@@ -27,6 +28,8 @@ class ComfyClient:
         url = self.server_url + path
         if query:
             url += '?' + urllib.parse.urlencode(query)
+
+        assert_url_allowed(url, "ComfyUI request")
 
         body = None
         headers = {}

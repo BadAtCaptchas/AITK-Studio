@@ -3,6 +3,7 @@ import requests
 import os
 import json
 import tqdm
+from toolkit.network_policy import assert_url_allowed
 
 
 class ModelCache:
@@ -79,6 +80,7 @@ def get_model_download_info(model_id: int, model_version_id: int = None):
     endpoint = f"https://civitai.com/api/v1/models/{model_id}"
 
     # get the json
+    assert_url_allowed(endpoint, "Civitai model metadata request")
     response = requests.get(endpoint)
     response.raise_for_status()
     model_data = response.json()
@@ -182,6 +184,7 @@ def get_model_path_from_url(url: str):
         print(f"Did not find model locally, downloading from model from: {download_url}")
 
         # use tqdm to show status of downlod
+        assert_url_allowed(download_url, "Civitai model download")
         response = requests.get(download_url, stream=True)
         response.raise_for_status()
         total_size_in_bytes = int(response.headers.get('content-length', 0))

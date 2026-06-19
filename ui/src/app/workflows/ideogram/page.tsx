@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { TopBar, MainContent } from '@/components/layout';
 import { ProgressBar, StatusBadge } from '@/components/OperatorPrimitives';
+import useSettings from '@/hooks/useSettings';
 import { apiClient } from '@/utils/api';
 import {
   buildIdeogramComfyWorkflow,
@@ -49,7 +50,16 @@ import {
 
 type PanelTab = 'preview' | 'json' | 'comfy';
 type ToolMode = 'select' | 'move' | 'object' | 'text';
-type BoxDragMode = 'move' | 'resize-n' | 'resize-e' | 'resize-s' | 'resize-w' | 'resize-ne' | 'resize-se' | 'resize-sw' | 'resize-nw';
+type BoxDragMode =
+  | 'move'
+  | 'resize-n'
+  | 'resize-e'
+  | 'resize-s'
+  | 'resize-w'
+  | 'resize-ne'
+  | 'resize-se'
+  | 'resize-sw'
+  | 'resize-nw';
 type PreflightStatus = 'found' | 'missing' | 'unknown';
 
 type PreflightItem = {
@@ -83,9 +93,10 @@ type PreviewImage = {
   source: PreviewImageSource;
 };
 
-type ResultImage = ComfyImageRef & PreviewImage & {
-  source: 'result';
-};
+type ResultImage = ComfyImageRef &
+  PreviewImage & {
+    source: 'result';
+  };
 
 type ToolkitLoraSummary = {
   id: string;
@@ -171,6 +182,32 @@ function normalizedWsUrl(serverUrl: string, clientId: string) {
   return url.toString();
 }
 
+function clientUrlLooksLocalPrivate(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) return true;
+    if (
+      hostname.includes(':') &&
+      (hostname === '::1' || hostname.startsWith('fe80:') || hostname.startsWith('fc') || hostname.startsWith('fd'))
+    ) {
+      return true;
+    }
+
+    const parts = hostname.split('.').map(part => Number(part));
+    if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+    const [first, second] = parts;
+    return (
+      first === 127 ||
+      first === 10 ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 169 && second === 254)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function generationStatusLabel(status: GenerationState['status']) {
   if (status === 'connecting') return 'Connecting';
   if (status === 'queued') return 'Queued';
@@ -196,15 +233,7 @@ function formatElapsed(start: number | null, nowTick: number) {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-function Field({
-  label,
-  children,
-  detail,
-}: {
-  label: string;
-  children: React.ReactNode;
-  detail?: string;
-}) {
+function Field({ label, children, detail }: { label: string; children: React.ReactNode; detail?: string }) {
   return (
     <label className="block">
       <div className="mb-1 flex items-center justify-between gap-2">
@@ -273,15 +302,7 @@ function NumberInput({
   );
 }
 
-function Select({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-}) {
+function Select({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[] }) {
   return (
     <select
       value={value}
@@ -428,20 +449,48 @@ function clampNormRange(value: number, min: number, max: number) {
 const MIN_BOX_SPAN = 20;
 
 const BOX_RESIZE_HANDLES: Array<{ mode: Exclude<BoxDragMode, 'move'>; title: string; className: string }> = [
-  { mode: 'resize-n', title: 'Resize from top', className: 'left-1/2 -top-1.5 h-3 w-9 -translate-x-1/2 cursor-ns-resize rounded-sm' },
-  { mode: 'resize-e', title: 'Resize from right', className: '-right-1.5 top-1/2 h-9 w-3 -translate-y-1/2 cursor-ew-resize rounded-sm' },
-  { mode: 'resize-s', title: 'Resize from bottom', className: '-bottom-1.5 left-1/2 h-3 w-9 -translate-x-1/2 cursor-ns-resize rounded-sm' },
-  { mode: 'resize-w', title: 'Resize from left', className: '-left-1.5 top-1/2 h-9 w-3 -translate-y-1/2 cursor-ew-resize rounded-sm' },
+  {
+    mode: 'resize-n',
+    title: 'Resize from top',
+    className: 'left-1/2 -top-1.5 h-3 w-9 -translate-x-1/2 cursor-ns-resize rounded-sm',
+  },
+  {
+    mode: 'resize-e',
+    title: 'Resize from right',
+    className: '-right-1.5 top-1/2 h-9 w-3 -translate-y-1/2 cursor-ew-resize rounded-sm',
+  },
+  {
+    mode: 'resize-s',
+    title: 'Resize from bottom',
+    className: '-bottom-1.5 left-1/2 h-3 w-9 -translate-x-1/2 cursor-ns-resize rounded-sm',
+  },
+  {
+    mode: 'resize-w',
+    title: 'Resize from left',
+    className: '-left-1.5 top-1/2 h-9 w-3 -translate-y-1/2 cursor-ew-resize rounded-sm',
+  },
   { mode: 'resize-nw', title: 'Resize from top left', className: '-left-1.5 -top-1.5 h-3 w-3 cursor-nwse-resize' },
   { mode: 'resize-ne', title: 'Resize from top right', className: '-right-1.5 -top-1.5 h-3 w-3 cursor-nesw-resize' },
-  { mode: 'resize-sw', title: 'Resize from bottom left', className: '-bottom-1.5 -left-1.5 h-3 w-3 cursor-nesw-resize' },
-  { mode: 'resize-se', title: 'Resize from bottom right', className: '-bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize' },
+  {
+    mode: 'resize-sw',
+    title: 'Resize from bottom left',
+    className: '-bottom-1.5 -left-1.5 h-3 w-3 cursor-nesw-resize',
+  },
+  {
+    mode: 'resize-se',
+    title: 'Resize from bottom right',
+    className: '-bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize',
+  },
 ];
 
 function normalizeHexColorInput(value: string) {
   const compact = value.trim().replace(/\s+/g, '').replace(/^#/, '');
   if (/^[0-9a-fA-F]{3}$/.test(compact)) {
-    return `#${compact.split('').map(char => `${char}${char}`).join('').toUpperCase()}`;
+    return `#${compact
+      .split('')
+      .map(char => `${char}${char}`)
+      .join('')
+      .toUpperCase()}`;
   }
   if (/^[0-9a-fA-F]{6}$/.test(compact)) {
     return `#${compact.toUpperCase()}`;
@@ -516,7 +565,9 @@ function PaletteEditor({
   onChange: (colors: string[]) => void;
   label?: string;
 }) {
-  const normalizedColors = colors.map(color => normalizeHexColorInput(color)).filter((color): color is string => Boolean(color));
+  const normalizedColors = colors
+    .map(color => normalizeHexColorInput(color))
+    .filter((color): color is string => Boolean(color));
   const addColor = () => {
     const nextColor = PALETTE_FALLBACKS.find(color => !normalizedColors.includes(color)) || '#64748B';
     onChange([...normalizedColors, nextColor]);
@@ -566,6 +617,7 @@ function PaletteEditor({
 }
 
 export default function IdeogramWorkflowBuilderPage() {
+  const { settings } = useSettings();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const historyInputRef = useRef<HTMLInputElement | null>(null);
@@ -616,8 +668,10 @@ export default function IdeogramWorkflowBuilderPage() {
   const selectedElement = state.elements[selectedElementIndex] || null;
   const selectedPreset = IDEOGRAM4_QUALITY_PRESETS[state.qualityPreset];
   const canvasAspect = parseIdeogramAspectRatio(state.aspectRatio);
-  const isGenerationRunning = generation.status === 'connecting' || generation.status === 'queued' || generation.status === 'executing';
+  const isGenerationRunning =
+    generation.status === 'connecting' || generation.status === 'queued' || generation.status === 'executing';
   const canGenerate = Boolean(serverUrl && preflight?.ok && !isGenerationRunning);
+  const offlineModeEnabled = settings.OFFLINE_MODE === 'true';
   const stepPercent = generation.maxStep > 0 ? Math.round((generation.step / generation.maxStep) * 100) : 0;
   const externalLoraSet = useMemo(() => new Set(externalLoras), [externalLoras]);
   const missingLoras = useMemo(
@@ -631,7 +685,10 @@ export default function IdeogramWorkflowBuilderPage() {
   const favoriteHistoryEntries = useMemo(() => historyEntries.filter(entry => entry.favorite), [historyEntries]);
   const recentHistoryEntries = useMemo(() => historyEntries.filter(entry => !entry.favorite), [historyEntries]);
   const activeHistoryEntry = useMemo(
-    () => historyEntries.find(entry => entry.id === activeHistoryId || (!!generation.promptId && entry.promptId === generation.promptId)) || null,
+    () =>
+      historyEntries.find(
+        entry => entry.id === activeHistoryId || (!!generation.promptId && entry.promptId === generation.promptId),
+      ) || null,
     [activeHistoryId, generation.promptId, historyEntries],
   );
   const suppressCanvasImageClickRef = useRef(false);
@@ -658,7 +715,9 @@ export default function IdeogramWorkflowBuilderPage() {
       setLoraMessage('');
       try {
         const response = await apiClient.get('/api/comfy/external/loras', { params: { server_url: url } });
-        const nextExternalLoras = Array.isArray(response.data?.externalLoras) ? response.data.externalLoras.map(String) : [];
+        const nextExternalLoras = Array.isArray(response.data?.externalLoras)
+          ? response.data.externalLoras.map(String)
+          : [];
         const nextToolkitLoras = Array.isArray(response.data?.toolkitLoras) ? response.data.toolkitLoras : [];
         setExternalLoras(nextExternalLoras);
         setExternalLoraSource(response.data?.externalSource || '');
@@ -669,7 +728,11 @@ export default function IdeogramWorkflowBuilderPage() {
         }
         setCopyToolkitPath(current => current || nextToolkitLoras[0]?.path || '');
         setLoraStatus('idle');
-        setLoraMessage(nextExternalLoras.length > 0 ? `${nextExternalLoras.length} external LoRAs found.` : 'No external LoRAs reported by ComfyUI.');
+        setLoraMessage(
+          nextExternalLoras.length > 0
+            ? `${nextExternalLoras.length} external LoRAs found.`
+            : 'No external LoRAs reported by ComfyUI.',
+        );
       } catch (error: any) {
         setLoraStatus('error');
         setLoraMessage(error.response?.data?.error || 'Could not refresh external LoRAs.');
@@ -764,18 +827,18 @@ export default function IdeogramWorkflowBuilderPage() {
     };
   }, [clearResultObjectUrls]);
 
-  const updateState = useCallback(
-    (updater: (current: IdeogramWorkflowState) => IdeogramWorkflowState) => {
-      setState(current => updater(cloneIdeogramWorkflowState(current)));
-    },
-    [],
-  );
+  const updateState = useCallback((updater: (current: IdeogramWorkflowState) => IdeogramWorkflowState) => {
+    setState(current => updater(cloneIdeogramWorkflowState(current)));
+  }, []);
 
   const saveServerUrl = useCallback(async () => {
     setSettingsStatus('saving');
     setSettingsMessage('');
     try {
-      const response = await apiClient.post('/api/comfy/external/settings', { server_url: serverUrlDraft, lora_dir: loraDirDraft });
+      const response = await apiClient.post('/api/comfy/external/settings', {
+        server_url: serverUrlDraft,
+        lora_dir: loraDirDraft,
+      });
       const nextUrl = response.data?.serverUrl || '';
       const nextLoraDir = response.data?.loraDir || '';
       setServerUrl(nextUrl || DEFAULT_EXTERNAL_COMFY_URL);
@@ -1080,7 +1143,9 @@ export default function IdeogramWorkflowBuilderPage() {
         if (options.applyWorkflow && isRecord(response.data?.state)) {
           await saveWorkflowHistoryEntry({
             stateSnapshot: response.data.state as IdeogramWorkflowState,
-            workflowSnapshot: isRecord(response.data?.workflow) ? response.data.workflow : buildIdeogramComfyWorkflow(response.data.state),
+            workflowSnapshot: isRecord(response.data?.workflow)
+              ? response.data.workflow
+              : buildIdeogramComfyWorkflow(response.data.state),
             serverUrlSnapshot: serverUrl,
             promptId,
             images: Array.isArray(response.data?.images) ? response.data.images : [],
@@ -1179,6 +1244,10 @@ export default function IdeogramWorkflowBuilderPage() {
           resolve();
           return;
         }
+        if (offlineModeEnabled && !clientUrlLooksLocalPrivate(serverUrl)) {
+          resolve();
+          return;
+        }
         try {
           wsRef.current?.close();
           const socket = new WebSocket(normalizedWsUrl(serverUrl, clientId));
@@ -1237,7 +1306,7 @@ export default function IdeogramWorkflowBuilderPage() {
           resolve();
         }
       }),
-    [serverUrl],
+    [offlineModeEnabled, serverUrl],
   );
 
   const generate = useCallback(async () => {
@@ -1297,14 +1366,25 @@ export default function IdeogramWorkflowBuilderPage() {
         message: 'Failed to queue prompt.',
       }));
     }
-  }, [clearResultObjectUrls, connectProgressSocket, pollHistoryUntilComplete, saveWorkflowHistoryEntry, serverUrl, state]);
+  }, [
+    clearResultObjectUrls,
+    connectProgressSocket,
+    pollHistoryUntilComplete,
+    saveWorkflowHistoryEntry,
+    serverUrl,
+    state,
+  ]);
 
   const cancelGeneration = useCallback(async () => {
     generationAbortRef.current = true;
     wsRef.current?.close();
     const promptId = generation.promptId;
-    const stateSnapshot = activeHistoryEntry?.state ? cloneIdeogramWorkflowState(activeHistoryEntry.state) : cloneIdeogramWorkflowState(state);
-    const workflowSnapshot = isRecord(activeHistoryEntry?.workflow) ? activeHistoryEntry.workflow : buildIdeogramComfyWorkflow(stateSnapshot);
+    const stateSnapshot = activeHistoryEntry?.state
+      ? cloneIdeogramWorkflowState(activeHistoryEntry.state)
+      : cloneIdeogramWorkflowState(state);
+    const workflowSnapshot = isRecord(activeHistoryEntry?.workflow)
+      ? activeHistoryEntry.workflow
+      : buildIdeogramComfyWorkflow(stateSnapshot);
     const serverUrlSnapshot = activeHistoryEntry?.serverUrl || serverUrl;
     const images = activeHistoryEntry?.images || [];
     try {
@@ -1344,21 +1424,35 @@ export default function IdeogramWorkflowBuilderPage() {
       }
       setGeneration({
         ...EMPTY_GENERATION,
-        status: entry.status === 'error' ? 'error' : entry.status === 'queued' ? 'queued' : entry.status === 'canceled' ? 'canceled' : 'completed',
+        status:
+          entry.status === 'error'
+            ? 'error'
+            : entry.status === 'queued'
+              ? 'queued'
+              : entry.status === 'canceled'
+                ? 'canceled'
+                : 'completed',
         promptId: entry.promptId,
         clientId: '',
         queuePosition: '-',
         executingNode: '-',
         step: entry.steps,
         maxStep: entry.steps,
-        message: entry.status === 'queued' ? 'Loaded queued workflow.' : entry.status === 'canceled' ? 'Loaded canceled generation.' : 'Loaded workflow history.',
+        message:
+          entry.status === 'queued'
+            ? 'Loaded queued workflow.'
+            : entry.status === 'canceled'
+              ? 'Loaded canceled generation.'
+              : 'Loaded workflow history.',
         error: entry.status === 'error' ? 'This saved generation ended with an error.' : '',
       });
       if (entry.images.length > 0) {
         try {
           await fetchResultImages(entry.images, entry.serverUrl || serverUrl);
         } catch (error: any) {
-          setHistoryMessage(error.response?.data?.error || 'Workflow loaded, but its saved result image could not be restored.');
+          setHistoryMessage(
+            error.response?.data?.error || 'Workflow loaded, but its saved result image could not be restored.',
+          );
         }
       } else {
         setCanvasImage(current => (current?.source === 'result' ? null : current));
@@ -1535,7 +1629,8 @@ export default function IdeogramWorkflowBuilderPage() {
         deleteSelectedElement();
         return;
       }
-      const isArrowKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
+      const isArrowKey =
+        event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
       if (!isArrowKey) return;
       event.preventDefault();
       const step = event.shiftKey ? 20 : 5;
@@ -1681,11 +1776,19 @@ export default function IdeogramWorkflowBuilderPage() {
               </div>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-[11px] text-gray-500">
-              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">{entry.aspectRatio.split(' ')[0]}</span>
-              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">{entry.steps} steps</span>
-              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">CFG {entry.cfg}</span>
+              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">
+                {entry.aspectRatio.split(' ')[0]}
+              </span>
+              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">
+                {entry.steps} steps
+              </span>
+              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">
+                CFG {entry.cfg}
+              </span>
             </div>
-            {entry.promptId ? <div className="mt-2 truncate font-mono text-[11px] text-gray-600">{entry.promptId}</div> : null}
+            {entry.promptId ? (
+              <div className="mt-2 truncate font-mono text-[11px] text-gray-600">{entry.promptId}</div>
+            ) : null}
             <div className="mt-3 flex gap-2">
               <ActionButton onClick={() => void loadWorkflowHistoryEntry(entry)} tone={active ? 'cyan' : 'neutral'}>
                 <History className="h-4 w-4" />
@@ -1705,7 +1808,10 @@ export default function IdeogramWorkflowBuilderPage() {
     <section className="rounded-sm border border-gray-800 bg-gray-950 p-3">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-100">Generation Progress</h2>
-        <StatusBadge status={generationBadgeStatus(generation.status)} label={generationStatusLabel(generation.status)} />
+        <StatusBadge
+          status={generationBadgeStatus(generation.status)}
+          label={generationStatusLabel(generation.status)}
+        />
       </div>
       <div className="grid grid-cols-[7rem_1fr] gap-y-3 text-xs">
         <span className="text-gray-500">Prompt ID</span>
@@ -1719,7 +1825,11 @@ export default function IdeogramWorkflowBuilderPage() {
         <span className="text-gray-500">Elapsed</span>
         <span className="text-gray-300">{formatElapsed(generation.elapsedStart, nowTick)}</span>
       </div>
-      <ProgressBar value={stepPercent} className="mt-4" tone={generation.status === 'error' ? 'danger' : generation.status === 'completed' ? 'success' : 'info'} />
+      <ProgressBar
+        value={stepPercent}
+        className="mt-4"
+        tone={generation.status === 'error' ? 'danger' : generation.status === 'completed' ? 'success' : 'info'}
+      />
       <div className="mt-3 text-xs text-gray-400">{generation.error || generation.message}</div>
       {isGenerationRunning && (
         <div className="mt-4 flex justify-end">
@@ -1762,7 +1872,15 @@ export default function IdeogramWorkflowBuilderPage() {
             ) : (
               <span className={classNames('h-2 w-2 rounded-full', preflight?.ok ? 'bg-emerald-400' : 'bg-amber-300')} />
             )}
-            <span>{isPreflighting ? 'Checking Comfy' : preflight?.ok ? 'Comfy ready' : serverUrl ? 'Check Comfy' : 'Set Comfy URL'}</span>
+            <span>
+              {isPreflighting
+                ? 'Checking Comfy'
+                : preflight?.ok
+                  ? 'Comfy ready'
+                  : serverUrl
+                    ? 'Check Comfy'
+                    : 'Set Comfy URL'}
+            </span>
           </button>
         </div>
 
@@ -1814,11 +1932,7 @@ export default function IdeogramWorkflowBuilderPage() {
             disabled={!isGenerationRunning && !canGenerate}
             tone={isGenerationRunning ? 'rose' : 'cyan'}
           >
-            {isGenerationRunning ? (
-              <X className="h-4 w-4" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
+            {isGenerationRunning ? <X className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
             {isGenerationRunning ? 'Cancel' : 'Generate'}
           </ActionButton>
         </div>
@@ -1871,7 +1985,10 @@ export default function IdeogramWorkflowBuilderPage() {
                 />
               </Field>
 
-              <PaletteEditor colors={state.style.colorPalette} onChange={colors => setStyleField('colorPalette', colors)} />
+              <PaletteEditor
+                colors={state.style.colorPalette}
+                onChange={colors => setStyleField('colorPalette', colors)}
+              />
 
               <Field label="Quality Preset" detail={`default ${selectedPreset.steps} steps`}>
                 <div className="grid grid-cols-3 overflow-hidden rounded-sm border border-gray-800">
@@ -1888,7 +2005,9 @@ export default function IdeogramWorkflowBuilderPage() {
                       }
                       className={classNames(
                         'h-9 border-r border-gray-800 px-2 text-xs last:border-r-0',
-                        state.qualityPreset === option ? 'bg-cyan-500/15 text-cyan-100' : 'bg-gray-950 text-gray-400 hover:bg-gray-900',
+                        state.qualityPreset === option
+                          ? 'bg-cyan-500/15 text-cyan-100'
+                          : 'bg-gray-950 text-gray-400 hover:bg-gray-900',
                       )}
                     >
                       {option}
@@ -1906,22 +2025,43 @@ export default function IdeogramWorkflowBuilderPage() {
                   />
                 </Field>
                 <Field label="Megapixels">
-                  <NumberInput value={state.megapixels} min={0.25} max={4} step={0.25} onChange={value => updateState(current => ({ ...current, megapixels: value }))} />
+                  <NumberInput
+                    value={state.megapixels}
+                    min={0.25}
+                    max={4}
+                    step={0.25}
+                    onChange={value => updateState(current => ({ ...current, megapixels: value }))}
+                  />
                 </Field>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Steps">
-                  <NumberInput value={state.steps} min={1} max={120} step={1} onChange={value => updateState(current => ({ ...current, steps: Math.max(1, Math.round(value)) }))} />
+                  <NumberInput
+                    value={state.steps}
+                    min={1}
+                    max={120}
+                    step={1}
+                    onChange={value => updateState(current => ({ ...current, steps: Math.max(1, Math.round(value)) }))}
+                  />
                 </Field>
                 <Field label="CFG">
-                  <NumberInput value={state.guiderCfg} min={0} max={20} step={0.1} onChange={value => updateState(current => ({ ...current, guiderCfg: value }))} />
+                  <NumberInput
+                    value={state.guiderCfg}
+                    min={0}
+                    max={20}
+                    step={0.1}
+                    onChange={value => updateState(current => ({ ...current, guiderCfg: value }))}
+                  />
                 </Field>
               </div>
 
               <div className="grid grid-cols-[1fr_auto] gap-2">
                 <Field label="Seed">
-                  <NumberInput value={state.seed} onChange={value => updateState(current => ({ ...current, seed: value }))} />
+                  <NumberInput
+                    value={state.seed}
+                    onChange={value => updateState(current => ({ ...current, seed: value }))}
+                  />
                 </Field>
                 <div className="pt-5">
                   <ActionButton onClick={randomSeed}>
@@ -1940,7 +2080,11 @@ export default function IdeogramWorkflowBuilderPage() {
                         : 'External choices load on Check Comfy'}
                     </div>
                   </div>
-                  <button type="button" onClick={addLora} className="text-xs font-medium text-cyan-300 hover:text-cyan-100">
+                  <button
+                    type="button"
+                    onClick={addLora}
+                    className="text-xs font-medium text-cyan-300 hover:text-cyan-100"
+                  >
                     Add
                   </button>
                 </div>
@@ -1975,13 +2119,27 @@ export default function IdeogramWorkflowBuilderPage() {
                           </div>
                           <div className="mt-2 grid grid-cols-2 gap-2">
                             <Field label="Model">
-                              <NumberInput value={lora.strengthModel} min={-10} max={10} step={0.05} onChange={value => updateLora(index, { strengthModel: value })} />
+                              <NumberInput
+                                value={lora.strengthModel}
+                                min={-10}
+                                max={10}
+                                step={0.05}
+                                onChange={value => updateLora(index, { strengthModel: value })}
+                              />
                             </Field>
                             <Field label="CLIP">
-                              <NumberInput value={lora.strengthClip} min={-10} max={10} step={0.05} onChange={value => updateLora(index, { strengthClip: value })} />
+                              <NumberInput
+                                value={lora.strengthClip}
+                                min={-10}
+                                max={10}
+                                step={0.05}
+                                onChange={value => updateLora(index, { strengthClip: value })}
+                              />
                             </Field>
                           </div>
-                          {missing ? <div className="mt-2 text-xs text-amber-300">Missing in external ComfyUI.</div> : null}
+                          {missing ? (
+                            <div className="mt-2 text-xs text-amber-300">Missing in external ComfyUI.</div>
+                          ) : null}
                         </div>
                       );
                     })
@@ -1990,7 +2148,8 @@ export default function IdeogramWorkflowBuilderPage() {
 
                 {missingLoras.length > 0 ? (
                   <div className="mt-2 rounded-sm border border-amber-900/70 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
-                    {missingLoras.length} selected LoRA{missingLoras.length === 1 ? '' : 's'} need to be installed in external ComfyUI.
+                    {missingLoras.length} selected LoRA{missingLoras.length === 1 ? '' : 's'} need to be installed in
+                    external ComfyUI.
                   </div>
                 ) : null}
 
@@ -2024,12 +2183,18 @@ export default function IdeogramWorkflowBuilderPage() {
                       disabled={!copyToolkitPath || loraStatus === 'copying'}
                       tone={loraStatus === 'copying' ? 'neutral' : 'emerald'}
                     >
-                      {loraStatus === 'copying' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+                      {loraStatus === 'copying' ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
                       Copy
                     </ActionButton>
                   </div>
                   {loraMessage ? (
-                    <div className={classNames('mt-2 text-xs', loraStatus === 'error' ? 'text-rose-300' : 'text-gray-400')}>
+                    <div
+                      className={classNames('mt-2 text-xs', loraStatus === 'error' ? 'text-rose-300' : 'text-gray-400')}
+                    >
                       {loraMessage}
                     </div>
                   ) : null}
@@ -2058,23 +2223,39 @@ export default function IdeogramWorkflowBuilderPage() {
                 onPointerDown={startCanvasPan}
                 className={classNames(
                   'operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-hidden bg-[#03070b] p-4',
-                  activeTool === 'object' || activeTool === 'text' ? 'cursor-crosshair' : isCanvasPanning ? 'cursor-grabbing' : 'cursor-grab',
+                  activeTool === 'object' || activeTool === 'text'
+                    ? 'cursor-crosshair'
+                    : isCanvasPanning
+                      ? 'cursor-grabbing'
+                      : 'cursor-grab',
                 )}
               >
-                <div data-canvas-ui="true" className="absolute right-3 top-3 z-10 flex flex-col gap-2 rounded-sm border border-gray-800 bg-gray-950/90 p-2">
+                <div
+                  data-canvas-ui="true"
+                  className="absolute right-3 top-3 z-10 flex flex-col gap-2 rounded-sm border border-gray-800 bg-gray-950/90 p-2"
+                >
                   <IconButton title="Select" active={activeTool === 'select'} onClick={() => setActiveTool('select')}>
                     <MousePointer2 className="h-4 w-4" />
                   </IconButton>
                   <IconButton title="Pan canvas" active={activeTool === 'move'} onClick={() => setActiveTool('move')}>
                     <Move className="h-4 w-4" />
                   </IconButton>
-                  <IconButton title="Add object" active={activeTool === 'object'} onClick={() => setActiveTool('object')}>
+                  <IconButton
+                    title="Add object"
+                    active={activeTool === 'object'}
+                    onClick={() => setActiveTool('object')}
+                  >
                     <Square className="h-4 w-4" />
                   </IconButton>
                   <IconButton title="Add text" active={activeTool === 'text'} onClick={() => setActiveTool('text')}>
                     <span className="text-sm font-semibold">T</span>
                   </IconButton>
-                  <IconButton title="Delete selected" danger disabled={!selectedElement} onClick={deleteSelectedElement}>
+                  <IconButton
+                    title="Delete selected"
+                    danger
+                    disabled={!selectedElement}
+                    onClick={deleteSelectedElement}
+                  >
                     <Trash2 className="h-4 w-4" />
                   </IconButton>
                 </div>
@@ -2087,7 +2268,9 @@ export default function IdeogramWorkflowBuilderPage() {
                   }}
                 >
                   <div className="flex w-full items-center justify-between text-xs text-gray-500">
-                    <span>{canvasAspect.width}:{canvasAspect.height}</span>
+                    <span>
+                      {canvasAspect.width}:{canvasAspect.height}
+                    </span>
                     <span>{state.aspectRatio}</span>
                   </div>
                   <div
@@ -2095,7 +2278,11 @@ export default function IdeogramWorkflowBuilderPage() {
                     onPointerDown={onCanvasPointerDown}
                     className={classNames(
                       'relative overflow-hidden border border-gray-700 bg-[#071017] shadow-[0_0_0_1px_rgba(34,211,238,0.06)]',
-                      activeTool === 'object' || activeTool === 'text' ? 'cursor-crosshair' : isCanvasPanning ? 'cursor-grabbing' : 'cursor-grab',
+                      activeTool === 'object' || activeTool === 'text'
+                        ? 'cursor-crosshair'
+                        : isCanvasPanning
+                          ? 'cursor-grabbing'
+                          : 'cursor-grab',
                     )}
                     style={{
                       aspectRatio: canvasAspect.css,
@@ -2140,7 +2327,10 @@ export default function IdeogramWorkflowBuilderPage() {
                         <div
                           key={`${element.type}-${index}`}
                           data-box-node="true"
-                          className={classNames('absolute cursor-move select-none border-2', selected ? 'z-20' : 'z-10')}
+                          className={classNames(
+                            'absolute cursor-move select-none border-2',
+                            selected ? 'z-20' : 'z-10',
+                          )}
                           style={{ ...boxStyle(element), borderColor: selected ? color : `${color}B8` }}
                           onPointerDown={event => startBoxDrag(event, index, activeTool === 'move' ? 'move' : 'move')}
                         >
@@ -2156,7 +2346,10 @@ export default function IdeogramWorkflowBuilderPage() {
                               selected ? 'border-cyan-300' : 'border-gray-500',
                             )}
                           >
-                            <span className="h-1.5 w-1.5 flex-none rounded-full ring-1 ring-white/25" style={{ backgroundColor: color }} />
+                            <span
+                              className="h-1.5 w-1.5 flex-none rounded-full ring-1 ring-white/25"
+                              style={{ backgroundColor: color }}
+                            />
                             <span className="truncate">{element.type === 'text' ? 'Text' : 'Object'}</span>
                           </button>
                           {selected ? (
@@ -2194,7 +2387,11 @@ export default function IdeogramWorkflowBuilderPage() {
                       </button>
                     ) : null}
                     {canvasImage?.source === 'result' ? (
-                      <button type="button" onClick={() => setCanvasImage(importedImage)} className="text-cyan-300 hover:text-cyan-100">
+                      <button
+                        type="button"
+                        onClick={() => setCanvasImage(importedImage)}
+                        className="text-cyan-300 hover:text-cyan-100"
+                      >
                         Clear preview
                       </button>
                     ) : null}
@@ -2223,7 +2420,9 @@ export default function IdeogramWorkflowBuilderPage() {
                       {historyEntries.length}
                     </span>
                   </button>
-                  <div className="hidden text-xs text-gray-500 lg:block">{generation.promptId ? `Prompt ${generation.promptId}` : 'No active prompt'}</div>
+                  <div className="hidden text-xs text-gray-500 lg:block">
+                    {generation.promptId ? `Prompt ${generation.promptId}` : 'No active prompt'}
+                  </div>
                 </div>
               </div>
               <div className="grid min-h-0 flex-1 gap-2 p-3 lg:grid-cols-[minmax(0,1fr)_260px]">
@@ -2243,10 +2442,15 @@ export default function IdeogramWorkflowBuilderPage() {
                         <div className="flex h-44 w-full items-center justify-center bg-[#050a0f]">
                           <img src={image.objectUrl} alt={image.filename} className="h-full w-full object-contain" />
                         </div>
-                        <div className="truncate border-t border-gray-800 px-2 py-1 text-xs text-gray-400">{filenameBase(image.filename)}</div>
+                        <div className="truncate border-t border-gray-800 px-2 py-1 text-xs text-gray-400">
+                          {filenameBase(image.filename)}
+                        </div>
                       </button>
                     ) : (
-                      <div key={index} className="flex h-full min-h-44 flex-col items-center justify-center rounded-sm border border-dashed border-gray-800 bg-gray-950 text-center text-xs text-gray-500">
+                      <div
+                        key={index}
+                        className="flex h-full min-h-44 flex-col items-center justify-center rounded-sm border border-dashed border-gray-800 bg-gray-950 text-center text-xs text-gray-500"
+                      >
                         <Sparkles className="mb-3 h-5 w-5" />
                         Waiting
                       </div>
@@ -2277,13 +2481,21 @@ export default function IdeogramWorkflowBuilderPage() {
                     >
                       <Star className={classNames('h-4 w-4', activeHistoryEntry?.favorite ? 'fill-current' : '')} />
                     </IconButton>
-                    <IconButton title="Copy prompt ID" disabled={!generation.promptId} onClick={() => void copyText(generation.promptId, 'Prompt ID copied.')}>
+                    <IconButton
+                      title="Copy prompt ID"
+                      disabled={!generation.promptId}
+                      onClick={() => void copyText(generation.promptId, 'Prompt ID copied.')}
+                    >
                       <Copy className="h-4 w-4" />
                     </IconButton>
                     <IconButton title="Download JSON" onClick={exportJson}>
                       <Download className="h-4 w-4" />
                     </IconButton>
-                    <IconButton title="Open external ComfyUI" disabled={!serverUrl} onClick={() => window.open(serverUrl, '_blank', 'noopener,noreferrer')}>
+                    <IconButton
+                      title="Open external ComfyUI"
+                      disabled={!serverUrl}
+                      onClick={() => window.open(serverUrl, '_blank', 'noopener,noreferrer')}
+                    >
                       <ExternalLink className="h-4 w-4" />
                     </IconButton>
                   </div>
@@ -2374,10 +2586,18 @@ export default function IdeogramWorkflowBuilderPage() {
                           key={`${element.type}-${index}`}
                           type="button"
                           onClick={() => setSelectedElementIndex(index)}
-                          className={classNames('flex w-full min-w-0 items-center gap-2 px-1 py-2 text-left text-xs', index === selectedElementIndex ? 'text-cyan-100' : 'text-gray-400')}
+                          className={classNames(
+                            'flex w-full min-w-0 items-center gap-2 px-1 py-2 text-left text-xs',
+                            index === selectedElementIndex ? 'text-cyan-100' : 'text-gray-400',
+                          )}
                         >
-                          <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ backgroundColor: element.color_palette?.[0] || '#64748B' }} />
-                          <span className="min-w-0 flex-1 truncate">{element.type}: {elementLabel(element)}</span>
+                          <span
+                            className="h-2.5 w-2.5 flex-none rounded-full"
+                            style={{ backgroundColor: element.color_palette?.[0] || '#64748B' }}
+                          />
+                          <span className="min-w-0 flex-1 truncate">
+                            {element.type}: {elementLabel(element)}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -2401,7 +2621,10 @@ export default function IdeogramWorkflowBuilderPage() {
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <h2 className="text-sm font-semibold text-gray-100">Workflow JSON (ComfyUI API)</h2>
                       <div className="flex gap-1">
-                        <IconButton title="Copy JSON" onClick={() => void copyText(workflowJson, 'Workflow JSON copied.')}>
+                        <IconButton
+                          title="Copy JSON"
+                          onClick={() => void copyText(workflowJson, 'Workflow JSON copied.')}
+                        >
                           <Clipboard className="h-4 w-4" />
                         </IconButton>
                         <IconButton title="Import JSON file" onClick={() => fileInputRef.current?.click()}>
@@ -2418,7 +2641,11 @@ export default function IdeogramWorkflowBuilderPage() {
                       rows={24}
                       className="operator-scrollbar-none h-[340px] w-full resize-none rounded-sm border border-gray-800 bg-[#050a0f] p-3 font-mono text-xs leading-relaxed text-cyan-50 outline-none"
                     />
-                    {importMessage ? <div className="mt-2 rounded-sm border border-gray-800 bg-gray-900 px-3 py-2 text-xs text-gray-300">{importMessage}</div> : null}
+                    {importMessage ? (
+                      <div className="mt-2 rounded-sm border border-gray-800 bg-gray-900 px-3 py-2 text-xs text-gray-300">
+                        {importMessage}
+                      </div>
+                    ) : null}
                   </section>
                   {renderGenerationProgressPanel()}
                 </div>
@@ -2430,20 +2657,39 @@ export default function IdeogramWorkflowBuilderPage() {
                     <h2 className="mb-3 text-sm font-semibold text-gray-100">External ComfyUI</h2>
                     <Field label="Server URL">
                       <div className="grid grid-cols-[1fr_auto] gap-2">
-                        <TextInput value={serverUrlDraft} onChange={setServerUrlDraft} placeholder="http://127.0.0.1:8188" />
+                        <TextInput
+                          value={serverUrlDraft}
+                          onChange={setServerUrlDraft}
+                          placeholder="http://127.0.0.1:8188"
+                        />
                         <ActionButton onClick={saveServerUrl} disabled={settingsStatus === 'saving'}>
-                          {settingsStatus === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                          {settingsStatus === 'saving' ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="h-4 w-4" />
+                          )}
                           Save
                         </ActionButton>
                       </div>
                     </Field>
                     <div className="mt-3">
                       <Field label="LoRA Folder" detail="external models/loras">
-                        <TextInput value={loraDirDraft} onChange={setLoraDirDraft} placeholder="E:\\ComfyUI\\models\\loras" />
+                        <TextInput
+                          value={loraDirDraft}
+                          onChange={setLoraDirDraft}
+                          placeholder="E:\\ComfyUI\\models\\loras"
+                        />
                       </Field>
                     </div>
                     {settingsMessage ? (
-                      <div className={classNames('mt-2 rounded-sm border px-3 py-2 text-xs', settingsStatus === 'error' ? 'border-rose-900 bg-rose-950/20 text-rose-200' : 'border-gray-800 bg-gray-900 text-gray-300')}>
+                      <div
+                        className={classNames(
+                          'mt-2 rounded-sm border px-3 py-2 text-xs',
+                          settingsStatus === 'error'
+                            ? 'border-rose-900 bg-rose-950/20 text-rose-200'
+                            : 'border-gray-800 bg-gray-900 text-gray-300',
+                        )}
+                      >
                         {settingsMessage}
                       </div>
                     ) : null}
@@ -2494,8 +2740,16 @@ export default function IdeogramWorkflowBuilderPage() {
                 <p className="mt-0.5 text-xs text-gray-500">Load prior Ideogram generations or pin favorites.</p>
               </div>
               <div className="flex flex-none items-center gap-2">
-                <IconButton title="Refresh generation history" disabled={historyStatus === 'loading'} onClick={() => void refreshWorkflowHistory()}>
-                  {historyStatus === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <IconButton
+                  title="Refresh generation history"
+                  disabled={historyStatus === 'loading'}
+                  onClick={() => void refreshWorkflowHistory()}
+                >
+                  {historyStatus === 'loading' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
                 </IconButton>
                 <IconButton title="Close generation history" onClick={() => setHistoryOpen(false)}>
                   <X className="h-4 w-4" />
@@ -2520,7 +2774,14 @@ export default function IdeogramWorkflowBuilderPage() {
                   </div>
                 </div>
                 {historyMessage ? (
-                  <div className={classNames('mt-3 rounded-sm border px-3 py-2 text-xs', historyStatus === 'error' ? 'border-rose-900 bg-rose-950/20 text-rose-200' : 'border-gray-800 bg-gray-900 text-gray-300')}>
+                  <div
+                    className={classNames(
+                      'mt-3 rounded-sm border px-3 py-2 text-xs',
+                      historyStatus === 'error'
+                        ? 'border-rose-900 bg-rose-950/20 text-rose-200'
+                        : 'border-gray-800 bg-gray-900 text-gray-300',
+                    )}
+                  >
                     {historyMessage}
                   </div>
                 ) : null}
@@ -2531,7 +2792,8 @@ export default function IdeogramWorkflowBuilderPage() {
                   <History className="mb-3 h-7 w-7 text-gray-600" />
                   <h2 className="text-sm font-semibold text-gray-200">No generation history yet</h2>
                   <p className="mt-1 max-w-sm text-xs leading-5 text-gray-500">
-                    Generated workflows will appear here with their settings, prompt ID, result refs, and favorite state.
+                    Generated workflows will appear here with their settings, prompt ID, result refs, and favorite
+                    state.
                   </p>
                 </section>
               ) : null}
@@ -2548,7 +2810,9 @@ export default function IdeogramWorkflowBuilderPage() {
 
               {recentHistoryEntries.length > 0 ? (
                 <section>
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Recent Generations</div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Recent Generations
+                  </div>
                   <div className="space-y-2">{recentHistoryEntries.map(renderHistoryEntry)}</div>
                 </section>
               ) : null}
@@ -2570,7 +2834,9 @@ export default function IdeogramWorkflowBuilderPage() {
           >
             <div className="flex h-12 flex-none items-center justify-between gap-3 border-b border-gray-800 px-3">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-gray-100">{filenameBase(lightboxImage.filename)}</div>
+                <div className="truncate text-sm font-semibold text-gray-100">
+                  {filenameBase(lightboxImage.filename)}
+                </div>
                 <div className="text-xs capitalize text-gray-500">{lightboxImage.source}</div>
               </div>
               <div className="flex items-center gap-2">
@@ -2583,7 +2849,10 @@ export default function IdeogramWorkflowBuilderPage() {
                 >
                   <ImageIcon className="h-4 w-4" />
                 </IconButton>
-                <IconButton title="Open image in new tab" onClick={() => window.open(lightboxImage.objectUrl, '_blank', 'noopener,noreferrer')}>
+                <IconButton
+                  title="Open image in new tab"
+                  onClick={() => window.open(lightboxImage.objectUrl, '_blank', 'noopener,noreferrer')}
+                >
                   <ExternalLink className="h-4 w-4" />
                 </IconButton>
                 <IconButton title="Close preview" onClick={() => setLightboxImage(null)}>
@@ -2592,7 +2861,11 @@ export default function IdeogramWorkflowBuilderPage() {
               </div>
             </div>
             <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3">
-              <img src={lightboxImage.objectUrl} alt={lightboxImage.filename} className="max-h-[calc(92dvh-4.5rem)] max-w-full object-contain" />
+              <img
+                src={lightboxImage.objectUrl}
+                alt={lightboxImage.filename}
+                className="max-h-[calc(92dvh-4.5rem)] max-w-full object-contain"
+              />
             </div>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import { TOOLKIT_ROOT } from '../paths';
+import { isOfflineModeEnabled } from './networkPolicy';
 
 export type RepoUpdateState =
   | 'pending'
@@ -239,6 +240,20 @@ export async function getRepoUpdateStatus() {
 export type RepoUpdateRequestAction = 'check' | 'apply' | 'restart';
 
 export async function requestRepoUpdateCheck(action: RepoUpdateRequestAction = 'check') {
+  if (await isOfflineModeEnabled()) {
+    return {
+      success: false,
+      request: null,
+      status: {
+        ...(await getRepoUpdateStatus()),
+        state: 'disabled',
+        message: 'Update checks are disabled by offline mode',
+        nextCheckAt: null,
+        updatedAt: nowIso(),
+      },
+    };
+  }
+
   const request = {
     action,
     requestedAt: nowIso(),

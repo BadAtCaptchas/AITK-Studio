@@ -31,6 +31,7 @@ model WorkerNode {
   base_url        String
   api_token       String
   enabled         Boolean  @default(true)
+  offline_bypass_enabled Boolean @default(false)
   last_status     String   @default("unknown")
   last_error      String?
   last_checked_at DateTime?

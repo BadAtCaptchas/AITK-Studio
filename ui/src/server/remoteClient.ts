@@ -4,6 +4,7 @@ import { createReadStream, existsSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { db, type WorkerNodeRecord } from './db';
+import { guardedFetch } from './networkPolicy';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
 import { getJobRemoteCaptionState } from './remoteCaptionJobs';
 import {
@@ -97,12 +98,18 @@ async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: 
     fetchInit.signal?.addEventListener('abort', onAbort, { once: true });
   }
 
-  const response = await fetch(remoteUrl(worker, routePath), {
-    ...fetchInit,
-    headers,
-    cache: 'no-store',
-    signal,
-  }).finally(() => {
+  const url = remoteUrl(worker, routePath);
+  const response = await guardedFetch(
+    url,
+    {
+      ...fetchInit,
+      headers,
+      cache: 'no-store',
+      redirect: fetchInit.redirect ?? 'manual',
+      signal,
+    },
+    `remote worker ${worker.name}`,
+  ).finally(() => {
     if (timeout) clearTimeout(timeout);
     if (onAbort) fetchInit.signal?.removeEventListener('abort', onAbort);
   });
@@ -123,7 +130,11 @@ export async function remoteFetch(worker: WorkerNodeRecord, routePath: string, i
   return remoteRequest(worker, routePath, init);
 }
 
-export async function remoteJson<T>(worker: WorkerNodeRecord, routePath: string, init: RemoteRequestInit = {}): Promise<T> {
+export async function remoteJson<T>(
+  worker: WorkerNodeRecord,
+  routePath: string,
+  init: RemoteRequestInit = {},
+): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body != null && !headers.has('Content-Type') && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
@@ -137,11 +148,7 @@ export function withoutRemoteRedirects(init: RequestInit): RequestInit {
   return { ...init, redirect: 'manual' };
 }
 
-export async function remoteProxyFetch(
-  worker: WorkerNodeRecord,
-  routePath: string,
-  headersToForward: Headers,
-) {
+export async function remoteProxyFetch(worker: WorkerNodeRecord, routePath: string, headersToForward: Headers) {
   const headers = new Headers();
   const range = headersToForward.get('range');
   if (range) headers.set('range', range);
@@ -353,11 +360,7 @@ function logRemoteDiscoveryError(workerId: string, workerName: string, error: un
   const now = Date.now();
   const state = remoteDiscoveryErrorLogState.get(workerId);
 
-  if (
-    !state ||
-    state.signature !== signature ||
-    now - state.lastLoggedAt >= REMOTE_DISCOVERY_ERROR_LOG_INTERVAL_MS
-  ) {
+  if (!state || state.signature !== signature || now - state.lastLoggedAt >= REMOTE_DISCOVERY_ERROR_LOG_INTERVAL_MS) {
     const suffix = state?.suppressedCount
       ? ` (${state.suppressedCount} repeated discovery error${state.suppressedCount === 1 ? '' : 's'} suppressed)`
       : '';
@@ -515,40 +518,48 @@ async function remoteZipFileJson<T>(
     const chunkSize = Math.max(0, end - start + 1);
     const body =
       chunkSize > 0
-        ? Readable.toWeb(createReadStream(options.filePath, { start, end })) as unknown as BodyInit
-        : Readable.toWeb(Readable.from([Buffer.alloc(0)])) as unknown as BodyInit;
+        ? (Readable.toWeb(createReadStream(options.filePath, { start, end })) as unknown as BodyInit)
+        : (Readable.toWeb(Readable.from([Buffer.alloc(0)])) as unknown as BodyInit);
 
-    await remoteJson(worker, appendQueryParams(routePath, {
-      aitk_upload: 'chunk',
-      uploadID,
-      chunkIndex,
-      chunksTotal,
-    }), {
-      method: 'POST',
-      body,
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': String(chunkSize),
-        'X-AITK-File-Name': fileName,
-      },
-      duplex: 'half',
-    } as RequestInit & { duplex: 'half' });
+    await remoteJson(
+      worker,
+      appendQueryParams(routePath, {
+        aitk_upload: 'chunk',
+        uploadID,
+        chunkIndex,
+        chunksTotal,
+      }),
+      {
+        method: 'POST',
+        body,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(chunkSize),
+          'X-AITK-File-Name': fileName,
+        },
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' },
+    );
 
     uploadedFileBytes = Math.min(fileStat.size, uploadedFileBytes + chunkSize);
     reportProgress();
   }
 
-  const completeResult = await remoteJson<T | RemoteArchiveImportStatus<T>>(worker, appendQueryParams(routePath, {
-    aitk_upload: 'complete',
-    uploadID,
-    chunksTotal,
-    background: options.backgroundComplete ? '1' : null,
-  }), {
-    method: 'POST',
-    headers: {
-      'X-AITK-File-Name': fileName,
+  const completeResult = await remoteJson<T | RemoteArchiveImportStatus<T>>(
+    worker,
+    appendQueryParams(routePath, {
+      aitk_upload: 'complete',
+      uploadID,
+      chunksTotal,
+      background: options.backgroundComplete ? '1' : null,
+    }),
+    {
+      method: 'POST',
+      headers: {
+        'X-AITK-File-Name': fileName,
+      },
     },
-  });
+  );
 
   if (options.backgroundComplete && isRemoteArchiveImportStatus<T>(completeResult)) {
     if (completeResult.status === 'completed') {
@@ -576,9 +587,9 @@ export async function uploadBundleToWorker(
     worker,
     appendQueryParam('/api/jobs/import', 'gpu_ids', gpuIds),
     {
-    filePath: zipPath,
-    fileName: path.basename(zipPath),
-    onProgress,
+      filePath: zipPath,
+      fileName: path.basename(zipPath),
+      onProgress,
     },
   );
 }
@@ -603,16 +614,12 @@ export async function uploadDatasetArchiveToWorker(
     dataset: { name: string; encrypted: boolean; path?: string };
     path: string;
     renamed: boolean;
-  }>(
-    worker,
-    appendQueryParam('/api/datasets/import-archive', 'preferredName', preferredName),
-    {
-      filePath: zipPath,
-      fileName: path.basename(zipPath),
-      onProgress,
-      backgroundComplete: true,
-    },
-  );
+  }>(worker, appendQueryParam('/api/datasets/import-archive', 'preferredName', preferredName), {
+    filePath: zipPath,
+    fileName: path.basename(zipPath),
+    onProgress,
+    backgroundComplete: true,
+  });
 }
 
 export async function fetchWorkerGpu(worker: WorkerNodeRecord) {

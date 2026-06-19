@@ -14,6 +14,7 @@ import {
 import { prepareHfTokenEnv } from '@/server/hfTokenEnv';
 import { getToolkitPythonPath } from '@/server/tensorboard';
 import { getProjectRoots, resolveOptionalProject } from '@/server/projects';
+import { isOfflineModeEnabled, offlineChildProcessEnv } from '@/server/networkPolicy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -310,6 +311,7 @@ export async function POST(request: NextRequest) {
       AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
       PYTHONUNBUFFERED: '1',
       HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
+      ...offlineChildProcessEnv(await isOfflineModeEnabled()),
     };
 
     const preparedHfEnv = await prepareHfTokenEnv({

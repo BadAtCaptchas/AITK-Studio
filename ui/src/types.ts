@@ -143,6 +143,7 @@ export interface WorkerNode {
   name: string;
   base_url: string;
   enabled: boolean;
+  offline_bypass_enabled: boolean;
   last_status: string;
   last_error: string | null;
   last_checked_at: DbDate | null;
@@ -168,6 +169,7 @@ export interface RemoteOllamaWorker {
   name: string;
   base_url: string;
   enabled: boolean;
+  offline_bypass_enabled: boolean;
   last_status: string;
   last_error: string | null;
   last_checked_at: DbDate | null;

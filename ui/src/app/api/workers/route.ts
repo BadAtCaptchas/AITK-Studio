@@ -27,11 +27,12 @@ export async function POST(request: NextRequest) {
     const baseUrl = normalizeWorkerBaseUrl(asString(body.base_url));
     const apiToken = asString(body.api_token);
     const enabled = body.enabled !== false;
+    const offlineBypassEnabled = body.offline_bypass_enabled === true;
 
     if (!name) return NextResponse.json({ error: 'Worker name is required' }, { status: 400 });
 
     if (id) {
-      const patch: any = { name, base_url: baseUrl, enabled };
+      const patch: any = { name, base_url: baseUrl, enabled, offline_bypass_enabled: offlineBypassEnabled };
       if (apiToken) patch.api_token = apiToken;
       const worker = await db.workerNodes.update(id, patch);
       return NextResponse.json(toPublicWorker(worker));
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
       base_url: baseUrl,
       api_token: apiToken,
       enabled,
+      offline_bypass_enabled: offlineBypassEnabled,
     });
     return NextResponse.json(toPublicWorker(worker));
   } catch (error: any) {

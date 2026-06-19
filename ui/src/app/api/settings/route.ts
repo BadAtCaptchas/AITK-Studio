@@ -5,6 +5,7 @@ import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
 import { isRemoteOllamaWorkersSettingKey } from '@/server/remoteOllamaWorkers';
+import { getOfflineModeState, OFFLINE_MODE_SETTING_KEY } from '@/server/networkPolicy';
 import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyLoraDir, normalizeExternalComfyUrl } from '@/server/externalComfy';
 import { IDEOGRAM_WORKFLOW_HISTORY_KEY } from '@/server/ideogramWorkflowHistory';
 import path from 'path';
@@ -60,6 +61,9 @@ export async function GET(request: NextRequest) {
       settingsObject.PROJECTS_FOLDER = defaultProjectsFolder;
     }
     settingsObject.PROJECTS_ENABLED = normalizeBooleanSetting(settingsObject.PROJECTS_ENABLED, true);
+    const offlineModeState = await getOfflineModeState();
+    settingsObject[OFFLINE_MODE_SETTING_KEY] = offlineModeState.enabled ? 'true' : 'false';
+    settingsObject.OFFLINE_MODE_LOCKED = offlineModeState.lockedByEnv ? 'true' : 'false';
     settingsObject.TRAINING_ADVISOR_ENABLED = normalizeBooleanSetting(
       settingsObject.TRAINING_ADVISOR_ENABLED,
       false,
@@ -96,6 +100,7 @@ export async function POST(request: NextRequest) {
       DATASETS_FOLDER,
       PROJECTS_FOLDER,
       PROJECTS_ENABLED,
+      OFFLINE_MODE,
       TRAINING_ADVISOR_ENABLED,
       COMFY_AUTO_INSTALL,
       COMFY_EXTERNAL_URL,
@@ -134,12 +139,18 @@ export async function POST(request: NextRequest) {
 
     const existingProjectsEnabled =
       PROJECTS_ENABLED === undefined ? (await db.settings.get(PROJECTS_ENABLED_KEY))?.value : PROJECTS_ENABLED;
+    const offlineModeState = await getOfflineModeState();
+    const existingOfflineMode =
+      OFFLINE_MODE === undefined ? (await db.settings.get(OFFLINE_MODE_SETTING_KEY))?.value : OFFLINE_MODE;
 
     const settingsToUpdate: Record<string, string> = {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       PROJECTS_FOLDER: normalizedProjectsFolder,
       PROJECTS_ENABLED: normalizeBooleanSetting(existingProjectsEnabled, true),
+      [OFFLINE_MODE_SETTING_KEY]: offlineModeState.lockedByEnv
+        ? 'true'
+        : normalizeBooleanSetting(existingOfflineMode, false),
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
       COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,

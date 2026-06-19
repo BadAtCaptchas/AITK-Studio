@@ -11,6 +11,7 @@ from collections import OrderedDict
 
 from .BaseCaptioner import BaseCaptioner, CaptionConfig
 from .secure_remote_crypto import decrypt_secure_caption_json, encrypt_secure_caption_json
+from toolkit.network_policy import assert_url_allowed
 
 
 class SecureRemoteOllamaCaptionConfig(CaptionConfig):
@@ -32,8 +33,10 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
 
     def _post_secure_request(self, path: str, envelope: dict, timeout: int, operation: str) -> dict:
         body = json.dumps(envelope).encode("utf-8")
+        url = f"{self.remote_base_url}{path}"
+        assert_url_allowed(url, operation)
         request = urllib.request.Request(
-            f"{self.remote_base_url}{path}",
+            url,
             data=body,
             headers={
                 "Authorization": f"Bearer {self.remote_token}",

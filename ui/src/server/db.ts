@@ -69,6 +69,7 @@ export type WorkerNodeCreateInput = {
   base_url: string;
   api_token: string;
   enabled?: boolean;
+  offline_bypass_enabled?: boolean;
   last_status?: string;
   last_error?: string | null;
   last_checked_at?: Date | string | null;
@@ -244,11 +245,11 @@ function isSingleFieldIndex(index: Document, field: string) {
 async function dropLegacyMongoJobNameUniqueIndex(mongo: Db) {
   const jobs = mongoCollection(mongo, 'jobs');
   const indexes = await jobs.indexes().catch(() => []);
-  await Promise.all(
-    indexes
-      .filter(index => index.unique === true && isSingleFieldIndex(index, 'name'))
-      .map(index => jobs.dropIndex(index.name).catch(() => undefined)),
-  );
+  const legacyIndexNames = indexes
+    .filter(index => index.unique === true && isSingleFieldIndex(index, 'name'))
+    .map(index => index.name)
+    .filter((name): name is string => typeof name === 'string');
+  await Promise.all(legacyIndexNames.map(name => jobs.dropIndex(name).catch(() => undefined)));
 }
 
 function parseDate(value: unknown, fallback = new Date()) {
@@ -320,6 +321,7 @@ function normalizeWorkerNode(raw: any): WorkerNodeRecord | null {
     base_url: String(raw.base_url ?? ''),
     api_token: String(raw.api_token ?? ''),
     enabled: Boolean(raw.enabled ?? true),
+    offline_bypass_enabled: Boolean(raw.offline_bypass_enabled ?? false),
     last_status: String(raw.last_status ?? 'unknown'),
     last_error: raw.last_error == null ? null : String(raw.last_error),
     last_checked_at: raw.last_checked_at == null ? null : parseDate(raw.last_checked_at),
@@ -549,11 +551,9 @@ async function readSqliteMetrics(
         continue;
       }
 
-      const total = await sqliteGet<{ count: number }>(
-        sqlite,
-        `SELECT COUNT(*) AS count FROM metrics WHERE key = ?`,
-        [key],
-      );
+      const total = await sqliteGet<{ count: number }>(sqlite, `SELECT COUNT(*) AS count FROM metrics WHERE key = ?`, [
+        key,
+      ]);
       const latestRow = await sqliteGet<{
         step: number;
         wall_time: number;
@@ -763,7 +763,11 @@ async function ensureMongoIndexes() {
 }
 
 async function nextMongoQueueId(queues: Collection<Document>) {
-  const latest = await queues.find({}, { projection: { _id: 0, id: 1 } }).sort({ id: -1 }).limit(1).next();
+  const latest = await queues
+    .find({}, { projection: { _id: 0, id: 1 } })
+    .sort({ id: -1 })
+    .limit(1)
+    .next();
   return Number(latest?.id ?? 0) + 1;
 }
 
@@ -1241,6 +1245,7 @@ export const db = {
           base_url: input.base_url,
           api_token: input.api_token,
           enabled: input.enabled ?? true,
+          offline_bypass_enabled: input.offline_bypass_enabled ?? false,
           last_status: input.last_status ?? 'unknown',
           last_error: input.last_error ?? null,
           last_checked_at: input.last_checked_at ?? null,
@@ -1281,11 +1286,14 @@ export const db = {
     async delete(id: string): Promise<WorkerNodeRecord | null> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
-        const result = await mongoCollection(mongo, 'worker_nodes').findOneAndDelete({ id }, { projection: { _id: 0 } });
+        const result = await mongoCollection(mongo, 'worker_nodes').findOneAndDelete(
+          { id },
+          { projection: { _id: 0 } },
+        );
         return normalizeWorkerNode(result);
       }
       try {
-        return await getPrisma().workerNode.delete({ where: { id } }) as WorkerNodeRecord;
+        return (await getPrisma().workerNode.delete({ where: { id } })) as WorkerNodeRecord;
       } catch (error: any) {
         if (error?.code === 'P2025') return null;
         throw error;

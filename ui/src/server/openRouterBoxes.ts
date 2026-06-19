@@ -7,6 +7,7 @@ import {
   type GeneratedElementBox,
   type GeneratedBoxPatch,
 } from '../utils/ideogramCaption';
+import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
 
 export const DEFAULT_OPENROUTER_BOX_MODEL = 'x-ai/grok-4.3';
 export const OPENROUTER_BOX_MODELS = ['x-ai/grok-4.3'] as const;
@@ -91,7 +92,8 @@ const OPENROUTER_BOX_RESPONSE_SCHEMA = {
           type: {
             type: 'string',
             enum: ['obj', 'text'],
-            description: 'Ideogram element type. Use text only for visible glyphs, signs, labels, or readable text regions.',
+            description:
+              'Ideogram element type. Use text only for visible glyphs, signs, labels, or readable text regions.',
           },
           bbox: {
             type: 'array',
@@ -426,7 +428,8 @@ async function callOpenRouterBoxes({
   prompt: string;
   fetchImpl: typeof fetch;
 }): Promise<OpenRouterCallResult> {
-  const response = await fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
+  const init: RequestInit = {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -457,7 +460,14 @@ async function callOpenRouterBoxes({
         },
       ],
     }),
-  });
+  };
+  const response =
+    fetchImpl === fetch
+      ? await guardedFetch(url, init, 'OpenRouter auto boxes')
+      : await (async () => {
+          await assertUrlAllowedByOfflineMode(url, 'OpenRouter auto boxes');
+          return fetchImpl(url, init);
+        })();
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -487,7 +497,11 @@ export function parseBoxResponse(
   return boxes;
 }
 
-export function parseGeneratedElementResponse(content: string, imageSize: RequiredImageSize, providerName = 'OpenRouter') {
+export function parseGeneratedElementResponse(
+  content: string,
+  imageSize: RequiredImageSize,
+  providerName = 'OpenRouter',
+) {
   const parsed = parseJsonObject(content, providerName);
   const generatedElements = pixelGeneratedElementBoxes(parsed, imageSize, 2, 20);
   if (generatedElements.length === 0) {
@@ -507,7 +521,13 @@ export async function generateOpenRouterBoxPatches(options: GenerateOpenRouterBo
   const model = normalizeOpenRouterBoxModel(options.model);
   const fetchImpl = options.fetchImpl || fetch;
   const firstPrompt = buildOpenRouterBoxPrompt(options.caption, imageSize);
-  const first = await callOpenRouterBoxes({ apiKey, imageDataUrl: options.imageDataUrl, model, prompt: firstPrompt, fetchImpl });
+  const first = await callOpenRouterBoxes({
+    apiKey,
+    imageDataUrl: options.imageDataUrl,
+    model,
+    prompt: firstPrompt,
+    fetchImpl,
+  });
   let boxes: GeneratedBoxPatch[] = [];
   let generatedElements: GeneratedElementBox[] = [];
   if (parsed.elements.length > 0) {
@@ -520,7 +540,13 @@ export async function generateOpenRouterBoxPatches(options: GenerateOpenRouterBo
 
   if (options.refine) {
     const refinePrompt = buildOpenRouterBoxPrompt(options.caption, imageSize, boxes, generatedElements);
-    const second = await callOpenRouterBoxes({ apiKey, imageDataUrl: options.imageDataUrl, model, prompt: refinePrompt, fetchImpl });
+    const second = await callOpenRouterBoxes({
+      apiKey,
+      imageDataUrl: options.imageDataUrl,
+      model,
+      prompt: refinePrompt,
+      fetchImpl,
+    });
     if (parsed.elements.length > 0) {
       const refinedBoxes = parseBoxResponse(second.content, parsed.elements.length, imageSize);
       if (refinedBoxes.length > 0) {

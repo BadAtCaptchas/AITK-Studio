@@ -23,6 +23,7 @@ import {
   rewriteDirectRemoteOllamaCaptionersForLocalOllama,
 } from '../../src/server/secureRemoteCaptionJobs';
 import { getRemoteOllamaWorker } from '../../src/server/remoteOllamaWorkers';
+import { hostnamesFromUrls, isOfflineModeEnabled, offlineChildProcessEnv } from '../../src/server/networkPolicy';
 import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
@@ -49,6 +50,7 @@ async function getSecureRemoteOllamaWorker(workerId: string) {
     id: worker.id,
     base_url: normalizeWorkerBaseUrl(worker.base_url),
     api_token: worker.api_token,
+    offline_bypass_enabled: Boolean(worker.offline_bypass_enabled),
   };
 }
 
@@ -129,11 +131,15 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const directRemoteOllamaWorkerId = getDirectRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaWorkerId = getSecureRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaEnv: Record<string, string> = {};
+      const offlineAllowedHosts = new Set<string>();
       if (directRemoteOllamaWorkerId) {
         const worker = await getRemoteOllamaWorker(directRemoteOllamaWorkerId);
         secureRemoteOllamaEnv.AITK_OLLAMA_BASE_URL = worker.base_url;
         if (worker.auth_token) {
           secureRemoteOllamaEnv.AITK_OLLAMA_AUTH_TOKEN = worker.auth_token;
+        }
+        if (worker.offline_bypass_enabled) {
+          hostnamesFromUrls([worker.base_url]).forEach(host => offlineAllowedHosts.add(host));
         }
         rewriteDirectRemoteOllamaCaptionersForLocalOllama(jobConfig);
       } else if (secureRemoteOllamaWorkerId) {
@@ -141,6 +147,9 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_BASE_URL = worker.base_url;
         secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_TOKEN = worker.api_token;
         secureRemoteOllamaEnv.AITK_SECURE_CAPTION_REMOTE_WORKER_ID = worker.id;
+        if (worker.offline_bypass_enabled) {
+          hostnamesFromUrls([worker.base_url]).forEach(host => offlineAllowedHosts.add(host));
+        }
       }
       const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
       const durableEncryptedDatasetKeys = await getDurableEncryptedDatasetKeys(jobID);
@@ -201,6 +210,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
+        ...offlineChildProcessEnv(await isOfflineModeEnabled(), offlineAllowedHosts),
         ...secureRemoteOllamaEnv,
       };
       if (openRouterApiKey) {
@@ -269,12 +279,17 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
           void db.jobs
             .findById(jobID)
             .then(currentJob => {
-              if (currentJob?.status === 'running' && (pid == null || currentJob.pid == null || currentJob.pid === pid)) {
-                return db.jobs.update(jobID, {
-                  status: 'completed',
-                  pid: null,
-                  info: 'Job completed',
-                }).then(() => clearDurableEncryptedDatasetKeys(jobID));
+              if (
+                currentJob?.status === 'running' &&
+                (pid == null || currentJob.pid == null || currentJob.pid === pid)
+              ) {
+                return db.jobs
+                  .update(jobID, {
+                    status: 'completed',
+                    pid: null,
+                    info: 'Job completed',
+                  })
+                  .then(() => clearDurableEncryptedDatasetKeys(jobID));
               }
               return null;
             })
@@ -301,7 +316,10 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       cleanupSensitiveEnv();
       console.error('Error launching process:', error);
       if (launchLogPath) {
-        appendLaunchLog(launchLogPath, `[launcher] Error launching process: ${error?.stack || error?.message || error}`);
+        appendLaunchLog(
+          launchLogPath,
+          `[launcher] Error launching process: ${error?.stack || error?.message || error}`,
+        );
       }
       await db.jobs
         .update(jobID, {

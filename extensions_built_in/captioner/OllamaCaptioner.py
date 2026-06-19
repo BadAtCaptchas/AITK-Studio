@@ -8,6 +8,7 @@ import urllib.request
 from collections import OrderedDict
 
 from .BaseCaptioner import BaseCaptioner, CaptionConfig
+from toolkit.network_policy import assert_url_allowed
 
 
 DEFAULT_OLLAMA_USER_AGENT = (
@@ -59,8 +60,10 @@ class OllamaCaptioner(BaseCaptioner):
             headers["User-Agent"] = self.ollama_user_agent
         if self.ollama_auth_token:
             headers["Authorization"] = f"Bearer {self.ollama_auth_token}"
+        url = f"{self.ollama_base_url}{route_path}"
+        assert_url_allowed(url, "Ollama caption request")
         request = urllib.request.Request(
-            f"{self.ollama_base_url}{route_path}",
+            url,
             data=data,
             headers=headers,
             method="GET" if payload is None else "POST",

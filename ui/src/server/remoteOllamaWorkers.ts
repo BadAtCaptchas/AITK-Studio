@@ -22,6 +22,7 @@ type RemoteOllamaWorkerInput = {
   auth_token?: string;
   clear_auth_token?: boolean;
   enabled?: boolean;
+  offline_bypass_enabled?: boolean;
 };
 
 function nowIso() {
@@ -68,6 +69,7 @@ function normalizeRemoteOllamaWorker(raw: any): RemoteOllamaWorkerRecord | null 
     base_url: baseUrl.replace(/\/+$/, ''),
     auth_token: asString(raw.auth_token),
     enabled: raw.enabled !== false,
+    offline_bypass_enabled: raw.offline_bypass_enabled === true,
     last_status: asString(raw.last_status) || 'unknown',
     last_error: asNullableString(raw.last_error),
     last_checked_at: asNullableString(raw.last_checked_at),
@@ -165,6 +167,7 @@ export async function saveRemoteOllamaWorker(input: RemoteOllamaWorkerInput) {
     base_url: baseUrl,
     auth_token: authToken,
     enabled: input.enabled !== false,
+    offline_bypass_enabled: input.offline_bypass_enabled === true,
     last_status: existing?.last_status || 'unknown',
     last_error: existing?.last_error || null,
     last_checked_at: existing?.last_checked_at || null,

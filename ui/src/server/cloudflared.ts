@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { pipeline } from 'stream/promises';
 import zlib from 'zlib';
 import { TOOLKIT_ROOT } from '../paths';
+import { isOfflineModeEnabled } from './networkPolicy';
 
 export type CloudflaredStatus = {
   configured: boolean;
@@ -361,6 +362,10 @@ async function extractCloudflaredFromTgz(archivePath: string, destinationPath: s
 }
 
 export async function downloadCloudflared(): Promise<CloudflaredDownloadResult> {
+  if (await isOfflineModeEnabled()) {
+    throw new Error('cloudflared download is blocked while offline mode is enabled.');
+  }
+
   if (hasExplicitCloudflaredBin()) {
     throw new Error('AITK_CLOUDFLARED_BIN is set. Install cloudflared at that path or unset it to use the local downloader.');
   }
@@ -453,6 +458,7 @@ function isPidRunning(pid: number) {
 
 export async function getCloudflaredStatus(): Promise<CloudflaredStatus> {
   const config = getCloudflaredConfig();
+  const offlineMode = await isOfflineModeEnabled();
   const downloadInfo = getCloudflaredDownloadInfoForPlatform();
   const detected = await commandLooksRunnable(config.bin);
   const pid = await readPid();
@@ -464,7 +470,9 @@ export async function getCloudflaredStatus(): Promise<CloudflaredStatus> {
   }
 
   let error: string | null = null;
-  if (config.enabled && !process.env.AI_TOOLKIT_AUTH) {
+  if (offlineMode) {
+    error = 'cloudflared is blocked while offline mode is enabled.';
+  } else if (config.enabled && !process.env.AI_TOOLKIT_AUTH) {
     error = 'AI_TOOLKIT_AUTH is required when cloudflared is enabled.';
   } else if (config.enabled && !detected) {
     error = 'cloudflared binary was not found. Download it from Settings or set AITK_CLOUDFLARED_BIN.';
@@ -488,12 +496,22 @@ export async function getCloudflaredStatus(): Promise<CloudflaredStatus> {
     publicUrl: config.publicUrl || generatedPublicUrl,
     targetUrl: config.targetUrl,
     metricsAddr: config.metricsAddr,
-    message: running ? 'cloudflared is running' : config.enabled ? 'cloudflared is not running' : 'cloudflared is disabled',
+    message: offlineMode
+      ? 'cloudflared is blocked by offline mode'
+      : running
+        ? 'cloudflared is running'
+        : config.enabled
+          ? 'cloudflared is not running'
+          : 'cloudflared is disabled',
     error,
   };
 }
 
 async function assertStartable(options: { autoDownload?: boolean } = {}) {
+  if (await isOfflineModeEnabled()) {
+    throw new Error('cloudflared cannot start while offline mode is enabled.');
+  }
+
   const config = getCloudflaredConfig();
   if (!config.enabled) {
     throw new Error('cloudflared is not enabled. Set AITK_CLOUDFLARED_ENABLED=1.');

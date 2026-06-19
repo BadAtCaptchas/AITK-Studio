@@ -7,6 +7,14 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from toolkit.network_policy import install_offline_network_guard
+
+install_offline_network_guard()
+
 try:
     from PIL import Image as PILImage
 except ImportError:  # pragma: no cover - surfaced as a clear runtime error in main

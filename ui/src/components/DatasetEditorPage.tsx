@@ -21,6 +21,7 @@ import useSettings from '@/hooks/useSettings';
 import { isImage, pathJoin } from '@/utils/basic';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
+import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import type { EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
@@ -707,6 +708,16 @@ export default function DatasetEditorPage({
             <Pencil className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Rename</span>
           </Button>
+          {!isRemoteDataset && (
+            !encryptedManifest && (
+              <DatasetWatchFoldersButton
+                datasetName={datasetName}
+                projectID={projectID}
+                workerID={workerID}
+                onRefresh={() => refreshImageList(datasetName)}
+              />
+            )
+          )}
           {!isRemoteDataset && (
             <AutoCaptionButton
               datasetPath={datasetPath}

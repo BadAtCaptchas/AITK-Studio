@@ -48,6 +48,7 @@
         "src/server/datasetDelete.ts",
         "src/server/datasetCaptionBulk.ts",
         "src/server/datasetSingleRecaption.ts",
+        "src/server/datasetWatchers.ts",
         "src/server/datasetCopy.ts",
         "src/server/openRouterImageData.ts",
         "src/server/openRouterBoxes.ts",

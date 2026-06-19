@@ -5,6 +5,7 @@ import { getTrainingFolder } from './paths';
 import { getCloudflaredConfig, startCloudflared, stopCloudflared } from '../src/server/cloudflared';
 import { purgeLegacyDurableEncryptedDatasetKeys } from '../src/server/encryptedDatasetSecrets';
 import { syncRemoteCaptionResults } from '../src/server/remoteCaptionResults';
+import { runDatasetWatchersIfDue } from '../src/server/datasetWatchers';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
@@ -44,6 +45,7 @@ class CronWorker {
   async loop() {
     await processQueue();
     await syncRemoteCaptionResults();
+    await runDatasetWatchersIfDue();
   }
 
   async stop() {

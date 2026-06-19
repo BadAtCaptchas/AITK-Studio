@@ -41,6 +41,7 @@ import { reorderQueue, startQueue, stopQueue } from '@/utils/queue';
 type QueueWorkbenchProps = {
   filterText: string;
   focusGpuIDs?: string | null;
+  includeProjectActive?: boolean;
 };
 
 type TabKey = 'active' | 'history' | 'failed' | 'all';
@@ -148,6 +149,20 @@ function formatRelative(value: Job['updated_at']) {
 
 function shortID(value: string) {
   return value.length > 10 ? `${value.slice(0, 10)}...` : value;
+}
+
+function jobDetailHref(job: Job) {
+  if (job.project_id) {
+    return `/projects/${encodeURIComponent(job.project_id)}/runs/${encodeURIComponent(job.id)}`;
+  }
+  return `/jobs/${encodeURIComponent(job.id)}`;
+}
+
+function jobEditHref(job: Job) {
+  if (job.project_id) {
+    return `/projects/${encodeURIComponent(job.project_id)}/runs/new?id=${encodeURIComponent(job.id)}`;
+  }
+  return `/jobs/new?id=${encodeURIComponent(job.id)}`;
 }
 
 function sortHistoryJobs(jobs: Job[], sort: SortKey) {
@@ -633,7 +648,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
           </div>
           <div className="mt-1 text-xs uppercase tracking-wide text-gray-500">{prefix}</div>
         </div>
-        <Link href={`/jobs/${job.id}`} className="operator-icon-button h-8 w-8" title="Open job" aria-label="Open job">
+        <Link href={jobDetailHref(job)} className="operator-icon-button h-8 w-8" title="Open job" aria-label="Open job">
           <ArrowRight className="h-4 w-4" />
         </Link>
       </div>
@@ -663,7 +678,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
         <section className="border-b border-gray-900 px-4 py-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-gray-100">Recent Events</h3>
-            <Link href={`/jobs/${job.id}`} className="text-xs text-blue-300 hover:text-blue-200">
+            <Link href={jobDetailHref(job)} className="text-xs text-blue-300 hover:text-blue-200">
               View full log
             </Link>
           </div>
@@ -694,7 +709,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-sm">
             <Link
-              href={`/jobs/${job.id}`}
+              href={jobDetailHref(job)}
               className="inline-flex h-9 items-center gap-2 border border-blue-800 bg-blue-950/40 px-3 text-blue-100 hover:bg-blue-900"
             >
               <PlayCircle className="h-4 w-4" />
@@ -702,7 +717,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
             </Link>
             {job.job_type === 'train' && actions.canEdit ? (
               <Link
-                href={`/jobs/new?id=${job.id}`}
+                href={jobEditHref(job)}
                 className="inline-flex h-9 items-center gap-2 border border-gray-800 bg-gray-950 px-3 text-gray-200 hover:bg-gray-900"
               >
                 <Settings className="h-4 w-4" />
@@ -720,7 +735,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
               <Info className="h-4 w-4 text-blue-300" />
               Having issues?
             </div>
-            <Link href={`/jobs/${job.id}`} className="mt-2 inline-flex items-center gap-2 text-xs text-blue-300 hover:text-blue-200">
+            <Link href={jobDetailHref(job)} className="mt-2 inline-flex items-center gap-2 text-xs text-blue-300 hover:text-blue-200">
               Check job details
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
@@ -743,9 +758,9 @@ function EmptyInspector() {
   );
 }
 
-export default function QueueWorkbench({ filterText, focusGpuIDs }: QueueWorkbenchProps) {
+export default function QueueWorkbench({ filterText, focusGpuIDs, includeProjectActive = false }: QueueWorkbenchProps) {
   const router = useRouter();
-  const { jobs, status, refreshJobs } = useJobsList({ reloadInterval: 5000 });
+  const { jobs, status, refreshJobs } = useJobsList({ reloadInterval: 5000, includeProjectActive });
   const { queues, status: queueStatus, refreshQueues } = useQueueList();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
@@ -777,7 +792,8 @@ export default function QueueWorkbench({ filterText, focusGpuIDs }: QueueWorkben
       setSelectedJobID(jobID);
       return;
     }
-    router.push(`/jobs/${jobID}`);
+    const job = jobs.find(candidate => candidate.id === jobID);
+    router.push(job ? jobDetailHref(job) : `/jobs/${encodeURIComponent(jobID)}`);
   };
 
   const filteredJobs = useMemo(() => {

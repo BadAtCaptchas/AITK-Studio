@@ -20,6 +20,7 @@ interface JobsTableProps {
   onlyActive?: boolean;
   job_type?: string | null;
   projectID?: string | null;
+  includeProjectActive?: boolean;
 }
 
 type JobGroup = {
@@ -46,8 +47,27 @@ function jobDisplayTitle(row: Job) {
   return { prefix: 'Train', title: row.name };
 }
 
-export default function JobsTable({ onlyActive = false, job_type = null, projectID = null }: JobsTableProps) {
-  const { jobs, status, refreshJobs } = useJobsList({ onlyActive, reloadInterval: 5000, job_type, projectID });
+function jobDetailHref(job: Job, projectID: string | null) {
+  const routeProjectID = projectID || job.project_id;
+  if (routeProjectID) {
+    return `/projects/${encodeURIComponent(routeProjectID)}/runs/${encodeURIComponent(job.id)}`;
+  }
+  return `/jobs/${encodeURIComponent(job.id)}`;
+}
+
+export default function JobsTable({
+  onlyActive = false,
+  job_type = null,
+  projectID = null,
+  includeProjectActive = false,
+}: JobsTableProps) {
+  const { jobs, status, refreshJobs } = useJobsList({
+    onlyActive,
+    reloadInterval: 5000,
+    job_type,
+    projectID,
+    includeProjectActive,
+  });
   const { queues, status: queueStatus, refreshQueues } = useQueueList();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
@@ -64,7 +84,7 @@ export default function JobsTable({ onlyActive = false, job_type = null, project
       key: 'name',
       render: row => {
         const { prefix, title } = jobDisplayTitle(row);
-        const jobHref = projectID ? `/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(row.id)}` : `/jobs/${row.id}`;
+        const jobHref = jobDetailHref(row, projectID);
         return (
           <Link href={jobHref} className="flex min-w-0 items-center gap-2 font-medium text-gray-100">
             {['running', 'stopping'].includes(row.status) ? (

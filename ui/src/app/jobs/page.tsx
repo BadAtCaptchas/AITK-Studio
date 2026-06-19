@@ -493,7 +493,7 @@ export default function Dashboard() {
             />
           </label>
         </div>
-        <QueueWorkbench key={jobsTableKey} filterText={filterText} focusGpuIDs={gpuIDs} />
+        <QueueWorkbench key={jobsTableKey} filterText={filterText} focusGpuIDs={gpuIDs} includeProjectActive />
       </MainContent>
     </>
   );

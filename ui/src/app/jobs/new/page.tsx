@@ -470,8 +470,8 @@ export default function TrainingForm({
       });
       setStatus('success');
       setValidationMessages([]);
-      if (projectID && !runId) {
-        router.push(`/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(res.data.id)}`);
+      if (projectID) {
+        router.push(`/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(res.data.id || runId)}`);
       } else if (runId) {
         router.push(`/jobs/${runId}`);
       } else {

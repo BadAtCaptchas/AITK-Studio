@@ -158,6 +158,27 @@ const actionButtonClass = 'operator-icon-button align-middle';
 const dangerousActionButtonClass =
   'operator-icon-button align-middle hover:border-rose-800 hover:bg-rose-950/50 hover:text-rose-100';
 
+function jobDetailHref(job: Job) {
+  if (job.project_id) {
+    return `/projects/${encodeURIComponent(job.project_id)}/runs/${encodeURIComponent(job.id)}`;
+  }
+  return `/jobs/${encodeURIComponent(job.id)}`;
+}
+
+function jobEditHref(job: Job) {
+  if (job.project_id) {
+    return `/projects/${encodeURIComponent(job.project_id)}/runs/new?id=${encodeURIComponent(job.id)}`;
+  }
+  return `/jobs/new?id=${encodeURIComponent(job.id)}`;
+}
+
+function jobCloneHref(job: Job) {
+  if (job.project_id) {
+    return `/projects/${encodeURIComponent(job.project_id)}/runs/new?cloneId=${encodeURIComponent(job.id)}`;
+  }
+  return `/jobs/new?cloneId=${encodeURIComponent(job.id)}`;
+}
+
 export default function JobActionBar({
   job,
   onRefresh,
@@ -538,7 +559,7 @@ export default function JobActionBar({
         </Button>
       )}
       {!hideView && (
-        <Link href={`/jobs/${job.id}`} className={actionButtonClass} title="View job" aria-label="View job">
+        <Link href={jobDetailHref(job)} className={actionButtonClass} title="View job" aria-label="View job">
           <Eye className="h-4 w-4" />
         </Link>
       )}
@@ -572,7 +593,7 @@ export default function JobActionBar({
         </Button>
       )}
       {job.job_type === 'train' && canEdit && (
-        <Link href={`/jobs/new?id=${job.id}`} className={actionButtonClass} title="Edit job" aria-label="Edit job">
+        <Link href={jobEditHref(job)} className={actionButtonClass} title="Edit job" aria-label="Edit job">
           <Pen className="h-4 w-4" />
         </Link>
       )}
@@ -621,7 +642,7 @@ export default function JobActionBar({
           {job.job_type === 'train' && (
             <MenuItem>
               <Link
-                href={`/jobs/new?cloneId=${job.id}`}
+                href={jobCloneHref(job)}
                 className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
               >
                 Clone Job

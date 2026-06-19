@@ -34,7 +34,7 @@ function clampPercent(value: number) {
 
 export default function Dashboard() {
   const { gpuList, isGPUInfoLoaded, status: gpuStatus } = useGPUInfo();
-  const { jobs } = useJobsList({ onlyActive: true, reloadInterval: 5000 });
+  const { jobs } = useJobsList({ onlyActive: true, reloadInterval: 5000, includeProjectActive: true });
   const { queues } = useQueueList();
 
   const runningJobs = jobs.filter(job => ['running', 'stopping'].includes(job.status)).length;
@@ -261,7 +261,7 @@ export default function Dashboard() {
                 View all
               </Link>
             </div>
-            <JobsTable onlyActive />
+            <JobsTable onlyActive includeProjectActive />
           </section>
         </div>
       </MainContent>

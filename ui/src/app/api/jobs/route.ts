@@ -133,6 +133,7 @@ export async function GET(request: Request) {
   const job_type = searchParams.get('job_type');
   const projectParam = searchParams.get('project_id');
   const localOnly = searchParams.get('local_only') === '1';
+  const includeProjectActive = searchParams.get('include_project_active') === '1';
 
   try {
     const project = await resolveOptionalProject(projectParam);
@@ -159,7 +160,12 @@ export async function GET(request: Request) {
       return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
 
-    const jobs = await listJobsForJobsApi({ jobType: job_type, localOnly, projectID: project?.id || null });
+    const jobs = await listJobsForJobsApi({
+      jobType: job_type,
+      localOnly,
+      projectID: project?.id || null,
+      includeProjectActive,
+    });
     const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
       (job): job is Job => job !== null,
     );

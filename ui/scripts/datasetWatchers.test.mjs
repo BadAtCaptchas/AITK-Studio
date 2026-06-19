@@ -174,9 +174,6 @@ test('watcher creation rejects missing and overlapping source folders', async ()
 
 test('watcher copies only new media, skips caption sidecars, and preserves relative paths', async () => {
   const { dataset, source } = await makeWorkspace();
-  await fs.mkdir(path.join(source, 'nested'), { recursive: true });
-  await fs.writeFile(path.join(source, 'nested', 'a.jpg'), 'image-bytes');
-  await fs.writeFile(path.join(source, 'nested', 'a.txt'), 'caption that should not be copied');
 
   const watcher = await saveDatasetWatcher({
     datasetName: 'cats',
@@ -184,6 +181,9 @@ test('watcher copies only new media, skips caption sidecars, and preserves relat
     includeSubfolders: true,
     preserveRelativePaths: true,
   });
+  await fs.mkdir(path.join(source, 'nested'), { recursive: true });
+  await fs.writeFile(path.join(source, 'nested', 'a.jpg'), 'image-bytes');
+  await fs.writeFile(path.join(source, 'nested', 'a.txt'), 'caption that should not be copied');
 
   const first = await runStableImport(watcher);
   assert.equal(first.lastImportedCount, 1);
@@ -199,9 +199,50 @@ test('watcher copies only new media, skips caption sidecars, and preserves relat
   assert.equal(Object.keys(manifest.imports).length, 1);
 });
 
-test('concurrent watcher runs against one dataset do not duplicate imports', async () => {
+test('watcher creation baselines existing source media without duplicating dataset files', async () => {
+  const { dataset, source } = await makeWorkspace();
+  await fs.mkdir(path.join(source, 'nested'), { recursive: true });
+  await fs.mkdir(path.join(dataset, 'nested'), { recursive: true });
+  await fs.writeFile(path.join(source, 'nested', 'a.jpg'), 'image-bytes');
+  await fs.writeFile(path.join(dataset, 'nested', 'a.jpg'), 'image-bytes');
+  await fs.writeFile(path.join(source, 'nested', 'a.txt'), 'caption that should not be copied');
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+    includeSubfolders: true,
+    preserveRelativePaths: true,
+  });
+
+  const first = await runStableImport(watcher);
+  assert.equal(first.lastImportedCount, 0);
+  await assert.rejects(() => fs.stat(path.join(dataset, 'nested', 'a_2.jpg')), /ENOENT/);
+
+  const manifest = JSON.parse(await fs.readFile(path.join(dataset, DATASET_WATCHER_IMPORT_MANIFEST), 'utf-8'));
+  assert.equal(Object.keys(manifest.imports).length, 1);
+});
+
+test('legacy watcher without a baseline records matching existing destinations instead of copying duplicates', async () => {
   const { dataset, source } = await makeWorkspace();
   await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
+  await fs.writeFile(path.join(dataset, 'a.jpg'), 'image-bytes');
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+  });
+  await fs.rm(path.join(dataset, DATASET_WATCHER_IMPORT_MANIFEST), { force: true });
+
+  const first = await runStableImport(watcher);
+  assert.equal(first.lastImportedCount, 0);
+  await assert.rejects(() => fs.stat(path.join(dataset, 'a_2.jpg')), /ENOENT/);
+
+  const manifest = JSON.parse(await fs.readFile(path.join(dataset, DATASET_WATCHER_IMPORT_MANIFEST), 'utf-8'));
+  assert.equal(Object.keys(manifest.imports).length, 1);
+});
+
+test('concurrent watcher runs against one dataset do not duplicate imports', async () => {
+  const { dataset, source } = await makeWorkspace();
 
   const firstWatcher = await saveDatasetWatcher({
     datasetName: 'cats',
@@ -211,6 +252,7 @@ test('concurrent watcher runs against one dataset do not duplicate imports', asy
     datasetName: 'cats',
     sourcePath: source,
   });
+  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
 
   await Promise.all([
     runDatasetWatcherOnce(firstWatcher, { now: 1_000, stableMs: 0 }),
@@ -231,15 +273,14 @@ test('concurrent watcher runs against one dataset do not duplicate imports', asy
 
 test('watcher ignores stale dataset lock left by interrupted scan', async () => {
   const { dataset, source } = await makeWorkspace();
-  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
-  const lockPath = path.join(dataset, '.aitk_dataset_watch.lock');
-  await fs.writeFile(lockPath, 'stale');
-  await fs.utimes(lockPath, new Date(0), new Date(0));
-
   const watcher = await saveDatasetWatcher({
     datasetName: 'cats',
     sourcePath: source,
   });
+  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
+  const lockPath = path.join(dataset, '.aitk_dataset_watch.lock');
+  await fs.writeFile(lockPath, 'stale');
+  await fs.utimes(lockPath, new Date(0), new Date(0));
 
   const result = await runStableImport(watcher, 3_000_000);
   assert.equal(result.lastImportedCount, 1);
@@ -249,13 +290,13 @@ test('watcher ignores stale dataset lock left by interrupted scan', async () => 
 
 test('project-space watchers resolve project slugs and import into project datasets', async () => {
   const { project, projectDataset, globalDataset, source } = await makeProjectWorkspace();
-  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
 
   const watcher = await saveDatasetWatcher({
     datasetName: 'cats',
     projectID: project.slug,
     sourcePath: source,
   });
+  await fs.writeFile(path.join(source, 'a.jpg'), 'image-bytes');
 
   assert.equal(watcher.projectID, project.id);
   const listed = await listDatasetWatchers({ datasetName: 'cats', projectID: project.slug });
@@ -269,7 +310,6 @@ test('project-space watchers resolve project slugs and import into project datas
 
 test('watcher auto-caption writes generated text sidecar for imported images', async () => {
   const { dataset, source } = await makeWorkspace();
-  await fs.writeFile(path.join(source, 'a.png'), 'image-bytes');
   globalThis.fetch = openRouterFetchReturning('A small orange cat on a blue chair.');
 
   const watcher = await saveDatasetWatcher({
@@ -284,6 +324,7 @@ test('watcher auto-caption writes generated text sidecar for imported images', a
       maxNewTokens: 64,
     },
   });
+  await fs.writeFile(path.join(source, 'a.png'), 'image-bytes');
 
   const result = await runStableImport(watcher);
   assert.equal(result.lastImportedCount, 1);
@@ -293,7 +334,6 @@ test('watcher auto-caption writes generated text sidecar for imported images', a
 
 test('watcher auto-caption failure keeps media uncaptioned and records status', async () => {
   const { dataset, source } = await makeWorkspace();
-  await fs.writeFile(path.join(source, 'a.png'), 'image-bytes');
   globalThis.fetch = openRouterFetchReturning('I cannot fulfill this request.');
 
   const watcher = await saveDatasetWatcher({
@@ -308,6 +348,7 @@ test('watcher auto-caption failure keeps media uncaptioned and records status', 
       maxNewTokens: 64,
     },
   });
+  await fs.writeFile(path.join(source, 'a.png'), 'image-bytes');
 
   const result = await runStableImport(watcher);
   assert.equal(result.lastImportedCount, 1);

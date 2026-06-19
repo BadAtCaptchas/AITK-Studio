@@ -344,6 +344,13 @@ export async function saveDatasetWatcher(rawWatcher: unknown) {
     assertWatcherLimit(watchers, nextWatcher.id);
     const validation = await validateDatasetWatcher(nextWatcher);
     nextWatcher.projectID = validation.projectID;
+    const shouldSeedBaseline =
+      !existing ||
+      existing.sourcePath !== nextWatcher.sourcePath ||
+      existing.includeSubfolders !== nextWatcher.includeSubfolders;
+    if (shouldSeedBaseline) {
+      await seedImportManifestBaseline(nextWatcher, validation);
+    }
 
     const nextWatchers = existing
       ? watchers.map(item => (item.id === nextWatcher.id ? nextWatcher : item))
@@ -578,6 +585,64 @@ async function writeImportManifest(datasetFolder: string, manifest: DatasetWatch
   await fsp.rename(tmp, target);
 }
 
+function destinationRelativePathForCandidate(watcher: DatasetWatcherConfig, candidate: SourceCandidate) {
+  return watcher.preserveRelativePaths
+    ? cleanRelativeImportPath(candidate.relativePath, path.basename(candidate.absolutePath))
+    : cleanUploadFileName(path.basename(candidate.absolutePath));
+}
+
+async function filesHaveSameContent(leftPath: string, rightPath: string) {
+  const [leftStat, rightStat] = await Promise.all([
+    fsp.stat(leftPath).catch(() => null),
+    fsp.stat(rightPath).catch(() => null),
+  ]);
+  if (!leftStat?.isFile() || !rightStat?.isFile() || leftStat.size !== rightStat.size) return false;
+  if (leftStat.size === 0) return true;
+
+  let leftHandle: Awaited<ReturnType<typeof fsp.open>> | null = null;
+  let rightHandle: Awaited<ReturnType<typeof fsp.open>> | null = null;
+  try {
+    leftHandle = await fsp.open(leftPath, 'r');
+    rightHandle = await fsp.open(rightPath, 'r');
+    const chunkSize = 1024 * 1024;
+    const leftBuffer = Buffer.allocUnsafe(chunkSize);
+    const rightBuffer = Buffer.allocUnsafe(chunkSize);
+    let position = 0;
+
+    while (position < leftStat.size) {
+      const length = Math.min(chunkSize, leftStat.size - position);
+      const [leftRead, rightRead] = await Promise.all([
+        leftHandle.read(leftBuffer, 0, length, position),
+        rightHandle.read(rightBuffer, 0, length, position),
+      ]);
+      if (leftRead.bytesRead !== rightRead.bytesRead || leftRead.bytesRead === 0) return false;
+      if (
+        Buffer.compare(
+          leftBuffer.subarray(0, leftRead.bytesRead),
+          rightBuffer.subarray(0, rightRead.bytesRead),
+        ) !== 0
+      ) {
+        return false;
+      }
+      position += leftRead.bytesRead;
+    }
+
+    return true;
+  } finally {
+    await Promise.all([leftHandle?.close(), rightHandle?.close()]);
+  }
+}
+
+async function findExistingMatchingDestination(options: {
+  watcher: DatasetWatcherConfig;
+  datasetFolder: string;
+  candidate: SourceCandidate;
+}) {
+  const relativePath = destinationRelativePathForCandidate(options.watcher, options.candidate);
+  const destination = destinationForSuffix(options.datasetFolder, relativePath, 1);
+  return (await filesHaveSameContent(options.candidate.absolutePath, destination)) ? destination : null;
+}
+
 function isHiddenPathSegment(name: string) {
   return name.startsWith('.');
 }
@@ -720,6 +785,43 @@ function sourceKey(filePath: string) {
   return pathKey(filePath);
 }
 
+async function seedImportManifestBaseline(
+  watcher: DatasetWatcherConfig,
+  validation: { sourceRealPath: string; datasetFolder: string },
+) {
+  const now = Date.now();
+  const releaseLock = await acquireWatcherLock(validation.datasetFolder, watcher.id, now);
+  if (!releaseLock) {
+    throw new Error('Dataset watcher is currently syncing. Try saving the watcher again after the current scan finishes.');
+  }
+
+  try {
+    const manifest = await readImportManifest(validation.datasetFolder);
+    const candidates = await findSourceMedia(validation.sourceRealPath, watcher.includeSubfolders);
+    let added = 0;
+
+    for (const candidate of candidates) {
+      const key = sourceKey(candidate.absolutePath);
+      if (manifest.imports[key]) continue;
+      manifest.imports[key] = {
+        sourceKey: key,
+        sourcePath: candidate.absolutePath,
+        destinationRelativePath: destinationRelativePathForCandidate(watcher, candidate),
+        importedAt: nowIso(now),
+        size: candidate.size,
+        mtimeMs: candidate.mtimeMs,
+      };
+      added += 1;
+    }
+
+    if (added > 0) {
+      await writeImportManifest(validation.datasetFolder, manifest);
+    }
+  } finally {
+    await releaseLock();
+  }
+}
+
 function isStableCandidate(
   pendingScope: string,
   key: string,
@@ -810,9 +912,7 @@ async function copyCandidateIntoDataset(options: {
   datasetFolder: string;
   candidate: SourceCandidate;
 }) {
-  const relativePath = options.watcher.preserveRelativePaths
-    ? cleanRelativeImportPath(options.candidate.relativePath, path.basename(options.candidate.absolutePath))
-    : cleanUploadFileName(path.basename(options.candidate.absolutePath));
+  const relativePath = destinationRelativePathForCandidate(options.watcher, options.candidate);
 
   for (let suffix = 1; suffix < 10_000; suffix += 1) {
     const destination = destinationForSuffix(options.datasetFolder, relativePath, suffix);
@@ -908,6 +1008,21 @@ export async function runDatasetWatcherOnce(
         lastError,
         warnings,
       });
+
+      const existingDestination = await findExistingMatchingDestination({ watcher, datasetFolder, candidate });
+      if (existingDestination) {
+        manifest.imports[key] = {
+          sourceKey: key,
+          sourcePath: candidate.absolutePath,
+          destinationRelativePath: path.relative(datasetFolder, existingDestination),
+          importedAt: nowIso(now),
+          size: candidate.size,
+          mtimeMs: candidate.mtimeMs,
+        };
+        pendingByScope().get(pendingScope)?.delete(key);
+        await writeImportManifest(datasetFolder, manifest);
+        continue;
+      }
 
       const destination = await copyCandidateIntoDataset({ watcher, datasetFolder, candidate });
       if (!destination) {

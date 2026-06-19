@@ -24,7 +24,7 @@ import AutoCaptionButton from '@/components/AutoCaptionButton';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
-import type { EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
+import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
 import {
   arrayBufferToBase64,
   captionObjectPath,
@@ -85,6 +85,7 @@ export default function DatasetEditorPage({
   const [renameDatasetError, setRenameDatasetError] = useState('');
   const [isDeletingDataset, setIsDeletingDataset] = useState(false);
   const [datasetActionError, setDatasetActionError] = useState('');
+  const [defaultWatchSourcePath, setDefaultWatchSourcePath] = useState('');
   const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
   const effectiveDatasetRoot = datasetRoot || settings?.DATASETS_FOLDER || '';
   const datasetPath = useMemo(
@@ -219,6 +220,39 @@ export default function DatasetEditorPage({
       refreshImageList(datasetName);
     }
   }, [datasetName, projectPayload, workerID]);
+
+  useEffect(() => {
+    if (!datasetName || isRemoteDataset) {
+      setDefaultWatchSourcePath('');
+      return;
+    }
+
+    let cancelled = false;
+    apiClient
+      .get('/api/datasets/list', {
+        params: {
+          worker_id: workerID,
+          ...projectPayload,
+        },
+      })
+      .then(res => {
+        if (cancelled) return;
+        const rawDatasets = Array.isArray(res.data)
+          ? res.data
+          : Array.isArray(res.data?.datasets)
+            ? res.data.datasets
+            : [];
+        const dataset = rawDatasets.find((item: DatasetSummary) => item?.name === datasetName);
+        setDefaultWatchSourcePath(typeof dataset?.importSourcePath === 'string' ? dataset.importSourcePath : '');
+      })
+      .catch(() => {
+        if (!cancelled) setDefaultWatchSourcePath('');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetName, isRemoteDataset, projectPayload, workerID]);
 
   useEffect(() => {
     if (!encryptedManifest || encryptedKey || encryptedCatalog) return;
@@ -714,6 +748,7 @@ export default function DatasetEditorPage({
                 datasetName={datasetName}
                 projectID={projectID}
                 workerID={workerID}
+                defaultSourcePath={defaultWatchSourcePath}
                 onRefresh={() => refreshImageList(datasetName)}
               />
             )

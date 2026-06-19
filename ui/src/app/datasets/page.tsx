@@ -283,6 +283,49 @@ function relativePathForFile(file: File) {
   return ((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name).replace(/\\/g, '/');
 }
 
+function fileSystemPathForFile(file: File) {
+  const value = (file as File & { path?: unknown }).path;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function dirnameFromClientPath(filePath: string) {
+  const trimmed = filePath.trim().replace(/[\\/]+$/, '');
+  const lastSlash = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return lastSlash > 0 ? trimmed.slice(0, lastSlash) : '';
+}
+
+function restoreClientPathSeparators(normalizedPath: string, sourcePath: string) {
+  if (sourcePath.includes('\\')) return normalizedPath.replace(/\//g, '\\');
+  return normalizedPath;
+}
+
+function sourceFolderPathForEntry(entry: FolderImportEntry) {
+  const filePath = fileSystemPathForFile(entry.file);
+  if (!filePath) return '';
+  const relativeInsideSource = stripFolderImportRoot(entry.relativePath, entry.file.name).replace(/^\/+/, '');
+  const normalizedFilePath = filePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const normalizedRelativePath = relativeInsideSource.replace(/\\/g, '/').replace(/^\/+/, '');
+  const suffix = normalizedRelativePath ? `/${normalizedRelativePath}` : '';
+
+  if (suffix && normalizedFilePath.toLowerCase().endsWith(suffix.toLowerCase())) {
+    return restoreClientPathSeparators(normalizedFilePath.slice(0, -suffix.length), filePath);
+  }
+
+  return dirnameFromClientPath(filePath);
+}
+
+function sourceFolderPathForEntries(entries: FolderImportEntry[]) {
+  const sourcePaths = Array.from(
+    new Set(
+      entries
+        .map(sourceFolderPathForEntry)
+        .map(value => value.trim())
+        .filter(Boolean),
+    ),
+  );
+  return sourcePaths.length === 1 ? sourcePaths[0] : '';
+}
+
 function nextClientDatasetName(preferredName: string, usedNames: Set<string>) {
   const baseName = cleanClientDatasetName(preferredName) || 'imported_folder';
   let candidate = baseName;
@@ -1131,6 +1174,8 @@ export default function Datasets() {
     formData.append('failIfDatasetExists', '1');
     formData.append('preserveRelativePaths', '1');
     formData.append('relativePaths', JSON.stringify(relativePaths));
+    const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
+    if (sourceFolderPath) formData.append('sourceFolderPath', sourceFolderPath);
     entries.forEach(entry => {
       formData.append('files', entry.file);
     });
@@ -1250,6 +1295,8 @@ export default function Datasets() {
     if (workerID !== 'local') formData.append('worker_id', workerID);
     formData.append('encrypted', '1');
     formData.append('manifest', JSON.stringify(encryptedPayload.manifest));
+    const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
+    if (sourceFolderPath) formData.append('sourceFolderPath', sourceFolderPath);
     formData.append(
       'objectPaths',
       JSON.stringify(encryptedPayload.encryptedObjects.map(encryptedObject => encryptedObject.objectPath)),

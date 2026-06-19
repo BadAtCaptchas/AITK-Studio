@@ -74,13 +74,14 @@ type Props = {
   datasetName: string;
   projectID?: string | null;
   workerID?: string;
+  defaultSourcePath?: string | null;
   onRefresh?: () => void;
 };
 
-const emptyForm = (): DatasetWatcherForm => ({
+const emptyForm = (defaultSourcePath = ''): DatasetWatcherForm => ({
   id: null,
   enabled: true,
-  sourcePath: '',
+  sourcePath: defaultSourcePath,
   includeSubfolders: true,
   preserveRelativePaths: true,
   autoCaptionEnabled: false,
@@ -148,12 +149,13 @@ export default function DatasetWatchFoldersButton({
   datasetName,
   projectID = null,
   workerID = 'local',
+  defaultSourcePath = '',
   onRefresh,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [watchers, setWatchers] = useState<DatasetWatcher[]>([]);
   const [statuses, setStatuses] = useState<Record<string, DatasetWatcherStatus>>({});
-  const [form, setForm] = useState<DatasetWatcherForm>(() => emptyForm());
+  const [form, setForm] = useState<DatasetWatcherForm>(() => emptyForm(defaultSourcePath || ''));
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -199,8 +201,18 @@ export default function DatasetWatchFoldersButton({
     return () => window.clearInterval(interval);
   }, [loadWatchers, open]);
 
+  useEffect(() => {
+    if (!defaultSourcePath) return;
+    setForm(current => (current.id || current.sourcePath.trim() ? current : { ...current, sourcePath: defaultSourcePath }));
+  }, [defaultSourcePath]);
+
   const updateForm = <K extends keyof DatasetWatcherForm>(key: K, value: DatasetWatcherForm[K]) => {
-    setForm(current => ({ ...current, [key]: value }));
+    setForm(current => {
+      if (key === 'enabled' && value === true && !current.id && !current.sourcePath.trim() && defaultSourcePath) {
+        return { ...current, enabled: true, sourcePath: defaultSourcePath };
+      }
+      return { ...current, [key]: value };
+    });
   };
 
   const handleProviderChange = (value: string) => {
@@ -221,7 +233,7 @@ export default function DatasetWatchFoldersButton({
     }));
   };
 
-  const resetForm = () => setForm(emptyForm());
+  const resetForm = () => setForm(emptyForm(defaultSourcePath || ''));
 
   const saveWatcher = async () => {
     setIsSaving(true);

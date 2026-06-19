@@ -8,6 +8,7 @@ import {
   isEncryptedDatasetFolder,
   resolveEncryptedObjectPath,
   validateEncryptedManifest,
+  writeDatasetImportMetadata,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
 import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
@@ -88,6 +89,8 @@ export async function POST(request: NextRequest) {
     const encrypted = formData.get('encrypted') === '1';
     const preserveRelativePaths = formData.get('preserveRelativePaths') === '1';
     const failIfDatasetExists = formData.get('failIfDatasetExists') === '1';
+    const rawSourceFolderPath = formData.get('sourceFolderPath');
+    const sourceFolderPath = typeof rawSourceFolderPath === 'string' ? rawSourceFolderPath : '';
     const relativePathsText = formData.get('relativePaths');
     let relativePaths: string[] = [];
     if (typeof relativePathsText === 'string' && relativePathsText.trim()) {
@@ -161,6 +164,7 @@ export async function POST(request: NextRequest) {
         savedObjects.push(objectPath);
       }
       await writeEncryptedManifest(uploadDir, manifest);
+      await writeDatasetImportMetadata(uploadDir, sourceFolderPath);
       return NextResponse.json({
         message: 'Encrypted files uploaded successfully',
         objects: savedObjects,
@@ -198,6 +202,8 @@ export async function POST(request: NextRequest) {
       await writeFile(filePath, buffer);
       savedFiles.push(filePathRelative);
     }
+
+    await writeDatasetImportMetadata(uploadDir, sourceFolderPath);
 
     return NextResponse.json({
       message: 'Files uploaded successfully',

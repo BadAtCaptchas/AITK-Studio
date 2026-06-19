@@ -329,10 +329,13 @@ export async function listFilesRecursive(root: string, shouldInclude: (absoluteP
 }
 
 const DATASET_CACHE_DIR_NAMES = new Set(['_latent_cache', '_clip_vision_cache', '_t_e_cache']);
+const DATASET_LOCAL_METADATA_FILES = new Set(['.aitk_dataset_metadata.json', '.aitk_dataset_watch_imports.json']);
 
 export function shouldIncludeDatasetExportPath(_absolutePath: string, relativePath: string) {
   const normalized = relativePath.replace(/\\/g, '/');
+  const basename = path.basename(relativePath);
   if (!normalized) return true;
+  if (DATASET_LOCAL_METADATA_FILES.has(basename)) return false;
 
   return !normalized.split('/').some(segment => DATASET_CACHE_DIR_NAMES.has(segment));
 }

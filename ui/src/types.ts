@@ -95,6 +95,7 @@ export interface DatasetSummary {
   worker_name?: string;
   ref?: string;
   path?: string;
+  importSourcePath?: string | null;
 }
 
 export interface EncryptedDatasetStartKey {

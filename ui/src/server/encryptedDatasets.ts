@@ -9,6 +9,7 @@ import { isFailedCaption } from '../utils/captionQuality';
 import { isDatasetRootCaptionEntry } from './datasetRootCaption';
 
 export const ENCRYPTED_DATASET_MANIFEST = '.aitk_encrypted_dataset.json';
+export const DATASET_METADATA_FILE = '.aitk_dataset_metadata.json';
 const CATALOG_AAD = Buffer.from('aitk-encrypted-catalog:v1', 'utf8');
 const AES_GCM_AUTH_TAG_BYTES = 16;
 const AES_GCM_NONCE_BYTES = 12;
@@ -55,6 +56,13 @@ export type DatasetCaptionSummary = {
   missingCaptionCount: number;
   detectedCaptionExt: string | null;
   captionExtensionCounts: Record<string, number>;
+};
+
+type DatasetMetadata = {
+  version: 1;
+  importSourcePath?: string;
+  importedAt?: string;
+  updatedAt?: string;
 };
 
 function isPathInside(parent: string, child: string) {
@@ -158,6 +166,51 @@ export function cleanDatasetName(name: string) {
 
 export function encryptedManifestPath(datasetFolder: string) {
   return path.join(datasetFolder, ENCRYPTED_DATASET_MANIFEST);
+}
+
+export function datasetMetadataPath(datasetFolder: string) {
+  return path.join(datasetFolder, DATASET_METADATA_FILE);
+}
+
+function normalizeMetadataPath(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 2048) return null;
+  return trimmed;
+}
+
+function readDatasetMetadataSync(datasetFolder: string): DatasetMetadata | null {
+  const metadataPath = datasetMetadataPath(datasetFolder);
+  if (!fs.existsSync(metadataPath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+    if (parsed?.version !== 1) return null;
+    const importSourcePath = normalizeMetadataPath(parsed.importSourcePath);
+    return {
+      version: 1,
+      ...(importSourcePath ? { importSourcePath } : {}),
+      ...(typeof parsed.importedAt === 'string' ? { importedAt: parsed.importedAt } : {}),
+      ...(typeof parsed.updatedAt === 'string' ? { updatedAt: parsed.updatedAt } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function writeDatasetImportMetadata(datasetFolder: string, importSourcePath: unknown) {
+  const normalizedSourcePath = normalizeMetadataPath(importSourcePath);
+  if (!normalizedSourcePath) return null;
+  const metadataPath = datasetMetadataPath(datasetFolder);
+  const existing = readDatasetMetadataSync(datasetFolder);
+  const now = new Date().toISOString();
+  const metadata: DatasetMetadata = {
+    version: 1,
+    importSourcePath: normalizedSourcePath,
+    importedAt: existing?.importedAt || now,
+    updatedAt: now,
+  };
+  await fsp.writeFile(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
+  return metadata;
 }
 
 export function isEncryptedDatasetFolder(datasetFolder: string) {
@@ -323,6 +376,7 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
     .map(entry => {
       const datasetFolder = path.join(datasetsRoot, entry.name);
       const encrypted = isEncryptedDatasetFolder(datasetFolder);
+      const metadata = readDatasetMetadataSync(datasetFolder);
       if (encrypted) {
         return {
           name: entry.name,
@@ -336,6 +390,7 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
           worker_name: 'Local',
           ref: `aitk-dataset://local/${encodeURIComponent(entry.name)}`,
           path: datasetFolder,
+          importSourcePath: metadata?.importSourcePath || null,
         };
       }
 
@@ -352,6 +407,7 @@ export async function listDatasetSummaries(datasetsRoot: string): Promise<Datase
         worker_name: 'Local',
         ref: `aitk-dataset://local/${encodeURIComponent(entry.name)}`,
         path: datasetFolder,
+        importSourcePath: metadata?.importSourcePath || null,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));

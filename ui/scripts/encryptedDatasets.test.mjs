@@ -176,6 +176,23 @@ test('listDatasetSummaries ignores root caption metadata for plain datasets', as
   assert.equal(summary.missingCaptionCount, 1);
 });
 
+test('listDatasetSummaries exposes local folder import source metadata', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-import-source-summary-'));
+  const datasetPath = path.join(root, 'plain_dataset');
+  const sourcePath = path.join(root, 'source_folder');
+  await fs.mkdir(datasetPath, { recursive: true });
+  await encryptedDatasets.writeDatasetImportMetadata(datasetPath, sourcePath);
+
+  const summaries = await encryptedDatasets.listDatasetSummaries(root);
+  const summary = summaries.find(dataset => dataset.name === 'plain_dataset');
+
+  assert.equal(summary.importSourcePath, sourcePath);
+  assert.equal(
+    JSON.parse(await fs.readFile(path.join(datasetPath, encryptedDatasets.DATASET_METADATA_FILE), 'utf8')).importSourcePath,
+    sourcePath,
+  );
+});
+
 test('dataset item scanner hides root caption metadata from editable items', async () => {
   const datasetPath = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-root-caption-items-'));
   await fs.mkdir(path.join(datasetPath, 'nested'));

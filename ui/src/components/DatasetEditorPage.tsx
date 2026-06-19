@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Ban, ImageOff, Loader2, Pencil } from 'lucide-react';
+import { ArrowLeft, Ban, ImageOff, Loader2, Pencil, Trash2 } from 'lucide-react';
 import DatasetImageStudio, {
   type BulkCaptionActionRequest,
   type BulkCaptionActionResult,
@@ -13,6 +13,7 @@ import { Button } from '@headlessui/react';
 import AddImagesModal, { openImagesModal, useOpenImagesModalOnDrag } from '@/components/AddImagesModal';
 import DatasetFolderIcon from '@/components/DatasetFolderIcon';
 import { Modal } from '@/components/Modal';
+import { openConfirm } from '@/components/ConfirmModal';
 import { TextInput } from '@/components/formInputs';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
@@ -81,6 +82,8 @@ export default function DatasetEditorPage({
   const [renameDatasetName, setRenameDatasetName] = useState(datasetName);
   const [isRenamingDataset, setIsRenamingDataset] = useState(false);
   const [renameDatasetError, setRenameDatasetError] = useState('');
+  const [isDeletingDataset, setIsDeletingDataset] = useState(false);
+  const [datasetActionError, setDatasetActionError] = useState('');
   const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
   const effectiveDatasetRoot = datasetRoot || settings?.DATASETS_FOLDER || '';
   const datasetPath = useMemo(
@@ -310,6 +313,32 @@ export default function DatasetEditorPage({
     } finally {
       setIsRenamingDataset(false);
     }
+  };
+
+  const handleDeleteDataset = () => {
+    if (isDeletingDataset) return;
+    openConfirm({
+      title: 'Delete Dataset',
+      message: `Are you sure you want to delete the dataset "${datasetName}"? This action cannot be undone.`,
+      type: 'warning',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        setIsDeletingDataset(true);
+        setDatasetActionError('');
+        try {
+          await apiClient.post('/api/datasets/delete', {
+            name: datasetName,
+            worker_id: workerID,
+            ...projectPayload,
+          });
+          router.replace(returnHref || '/datasets');
+        } catch (error: any) {
+          setDatasetActionError(error?.response?.data?.error || error?.message || 'Failed to delete dataset.');
+        } finally {
+          setIsDeletingDataset(false);
+        }
+      },
+    });
   };
 
   const PageInfoContent = useMemo(() => {
@@ -671,6 +700,7 @@ export default function DatasetEditorPage({
           <Button
             className="operator-button whitespace-nowrap py-1 text-sm"
             onClick={openRenameModal}
+            disabled={isDeletingDataset}
             title="Rename dataset"
             aria-label="Rename dataset"
           >
@@ -689,7 +719,7 @@ export default function DatasetEditorPage({
           )}
           <Button
             className="operator-button whitespace-nowrap py-1 text-sm"
-            disabled={!!encryptedManifest && !encryptedCatalog}
+            disabled={isDeletingDataset || (!!encryptedManifest && !encryptedCatalog)}
             onClick={() =>
               openImagesModal(datasetName, () => refreshImageList(datasetName), {
                 ...encryptedUploadOptions,
@@ -701,9 +731,24 @@ export default function DatasetEditorPage({
             <span className="sm:hidden">+ Add</span>
             <span className="hidden sm:inline">Add Images</span>
           </Button>
+          <Button
+            className="operator-button whitespace-nowrap border-red-900/70 bg-red-950/60 py-1 text-sm text-red-100 hover:bg-red-900"
+            onClick={handleDeleteDataset}
+            disabled={isDeletingDataset}
+            title="Delete dataset"
+            aria-label="Delete dataset"
+          >
+            {isDeletingDataset ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">Delete</span>
+          </Button>
         </div>
       </TopBar>
       <MainContent className="!top-14 !h-[calc(100%-3.5rem)] overflow-hidden !px-0 !pt-0 sm:!px-0">
+        {datasetActionError && (
+          <PageNotice tone="danger" title="Dataset action failed" className="mx-auto mt-4 max-w-xl">
+            {datasetActionError}
+          </PageNotice>
+        )}
         {encryptedManifest && !encryptedCatalog && (
           <div className="mx-auto mt-10 max-w-md border border-gray-700 bg-gray-900 p-5 text-gray-200">
             <h2 className="text-base font-semibold">Encrypted Dataset Locked</h2>

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { cleanProjectSlug, getProjectRoots, isPathInside, PROJECT_FOLDERS } from '../dist/src/server/projects.js';
 import { copyDatasetBetweenRoots } from '../dist/src/server/datasetCopy.js';
+import { deleteDatasetFolder } from '../dist/src/server/datasetDelete.js';
 import {
   DatasetScopeError,
   isPathInside as isDatasetScopePathInside,
@@ -189,6 +190,46 @@ test('copyDatasetBetweenRoots rejects source traversal outside the declared root
       }),
     /inside .*datasets folder/,
   );
+});
+
+test('deleteDatasetFolder removes only the project-scoped dataset', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-dataset-delete-'));
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const datasetName = 'same-name';
+  const globalDataset = path.join(globalRoot, datasetName);
+  const projectDataset = path.join(projectDatasetRoot, datasetName);
+
+  await fs.mkdir(globalDataset, { recursive: true });
+  await fs.mkdir(projectDataset, { recursive: true });
+  await fs.writeFile(path.join(globalDataset, 'sample.txt'), 'global');
+  await fs.writeFile(path.join(projectDataset, 'sample.txt'), 'project');
+
+  const result = await deleteDatasetFolder(projectDatasetRoot, datasetName);
+
+  assert.equal(result.success, true);
+  assert.equal(result.deleted, true);
+  await assert.rejects(() => fs.access(projectDataset));
+  assert.equal(await fs.readFile(path.join(globalDataset, 'sample.txt'), 'utf8'), 'global');
+});
+
+test('deleteDatasetFolder rejects traversal and ignores missing datasets', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-dataset-delete-invalid-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const dataset = path.join(projectDatasetRoot, 'keep-me');
+
+  await fs.mkdir(dataset, { recursive: true });
+  await fs.writeFile(path.join(dataset, 'sample.txt'), 'project');
+
+  await assert.rejects(
+    () => deleteDatasetFolder(projectDatasetRoot, '../keep-me'),
+    error => error?.status === 400 && /Invalid dataset path/.test(error.message),
+  );
+  assert.equal(await fs.readFile(path.join(dataset, 'sample.txt'), 'utf8'), 'project');
+
+  const missing = await deleteDatasetFolder(projectDatasetRoot, 'missing');
+  assert.equal(missing.success, true);
+  assert.equal(missing.deleted, false);
 });
 
 test('project dataset edits reject remote workers', () => {

@@ -1,24 +1,7 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { deleteDatasetFolder, DatasetDeleteError } from '@/server/datasetDelete';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
-
-function resolveWithinRoot(root: string, target: unknown) {
-  if (typeof target !== 'string' || target.trim().length === 0) {
-    return null;
-  }
-
-  const resolvedRoot = path.resolve(root);
-  const resolvedPath = path.resolve(resolvedRoot, target);
-  const relativePath = path.relative(resolvedRoot, resolvedPath);
-
-  if (relativePath === '' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-    return null;
-  }
-
-  return resolvedPath;
-}
 
 export async function POST(request: Request) {
   try {
@@ -39,21 +22,15 @@ export async function POST(request: Request) {
     }
 
     const { datasetsRoot: datasetsPath } = await resolveDatasetScope(projectID);
-    const datasetPath = resolveWithinRoot(datasetsPath, name);
-
-    if (!datasetPath) {
-      return NextResponse.json({ error: 'Invalid dataset path' }, { status: 400 });
-    }
-
-    // if folder doesnt exist, ignore
-    if (!fs.existsSync(datasetPath)) {
-      return NextResponse.json({ success: true });
-    }
-
-    // delete it and return success
-    fs.rmSync(datasetPath, { recursive: true, force: true });
-    return NextResponse.json({ success: true });
+    const result = await deleteDatasetFolder(datasetsPath, name);
+    return NextResponse.json({ success: result.success });
   } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Failed to delete dataset' }, { status: error?.status || 500 });
+    const status =
+      error instanceof DatasetDeleteError
+        ? error.status
+        : typeof error?.status === 'number'
+          ? error.status
+          : 500;
+    return NextResponse.json({ error: error?.message || 'Failed to delete dataset' }, { status });
   }
 }

@@ -45,6 +45,7 @@
         "src/server/datasetImages.ts",
         "src/server/datasetRefusalCaptionAudit.ts",
         "src/server/imageDelete.ts",
+        "src/server/datasetDelete.ts",
         "src/server/datasetCaptionBulk.ts",
         "src/server/datasetSingleRecaption.ts",
         "src/server/datasetCopy.ts",

@@ -3,8 +3,9 @@
 import { use, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Database, FolderInput, Loader2, Plus, Search, Upload } from 'lucide-react';
+import { Database, FolderInput, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { Modal } from '@/components/Modal';
+import { openConfirm } from '@/components/ConfirmModal';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
@@ -48,7 +49,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [actionStatus, setActionStatus] = useState<'idle' | 'creating' | 'uploading' | 'importing'>('idle');
+  const [actionStatus, setActionStatus] = useState<'idle' | 'creating' | 'uploading' | 'importing' | 'deleting'>('idle');
   const [actionError, setActionError] = useState('');
   const [filterText, setFilterText] = useState('');
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -70,7 +71,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
   const [importError, setImportError] = useState('');
 
   const refreshSummary = () => {
-    apiClient
+    return apiClient
       .get(`/api/projects/${encodeURIComponent(projectID)}/summary`)
       .then(res => {
         setSummary(res.data);
@@ -337,6 +338,31 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     }
   };
 
+  const handleDeleteDataset = (dataset: DatasetSummary) => {
+    if (actionStatus !== 'idle') return;
+    openConfirm({
+      title: 'Delete Dataset',
+      message: `Are you sure you want to delete the dataset "${dataset.name}"? This action cannot be undone.`,
+      type: 'warning',
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        setActionStatus('deleting');
+        setActionError('');
+        try {
+          await apiClient.post('/api/datasets/delete', {
+            name: dataset.name,
+            project_id: projectID,
+          });
+          await refreshSummary();
+        } catch (error: any) {
+          setActionError(error?.response?.data?.error || error?.message || 'Failed to delete dataset.');
+        } finally {
+          setActionStatus('idle');
+        }
+      },
+    });
+  };
+
   return (
     <ProjectWorkspaceShell
       projectID={projectID}
@@ -405,23 +431,37 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
             ) : (
               <div className="divide-y divide-gray-800">
                 {filteredDatasets.map(dataset => (
-                  <Link
+                  <div
                     key={dataset.name}
-                    href={`${projectPath}/datasets/${encodeURIComponent(dataset.name)}`}
-                    className="grid grid-cols-[minmax(0,1fr)_120px_120px] items-center gap-3 px-3 py-3 text-sm hover:bg-gray-900/70"
+                    className="grid grid-cols-[minmax(0,1fr)_72px_72px_36px] items-center gap-2 px-3 py-3 text-sm hover:bg-gray-900/70 sm:grid-cols-[minmax(0,1fr)_120px_120px_44px] sm:gap-3"
                   >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-sm border border-gray-800 bg-gray-900">
-                        <Database className="h-4 w-4 text-cyan-200" />
+                    <Link
+                      href={`${projectPath}/datasets/${encodeURIComponent(dataset.name)}`}
+                      className="min-w-0"
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 flex-none items-center justify-center rounded-sm border border-gray-800 bg-gray-900">
+                          <Database className="h-4 w-4 text-cyan-200" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-gray-100">{dataset.name}</span>
+                          <span className="block truncate text-xs text-gray-500">{dataset.path || dataset.ref || 'project dataset'}</span>
+                        </span>
                       </span>
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-gray-100">{dataset.name}</div>
-                        <div className="truncate text-xs text-gray-500">{dataset.path || dataset.ref || 'project dataset'}</div>
-                      </div>
-                    </div>
-                    <span className="text-xs text-gray-500">{dataset.itemCount ?? 0} media</span>
-                    <span className="text-xs text-gray-500">{dataset.encrypted ? 'Encrypted' : 'Local'}</span>
-                  </Link>
+                    </Link>
+                    <span className="truncate text-xs text-gray-500">{dataset.itemCount ?? 0} media</span>
+                    <span className="truncate text-xs text-gray-500">{dataset.encrypted ? 'Encrypted' : 'Local'}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDataset(dataset)}
+                      disabled={actionStatus !== 'idle'}
+                      className="inline-flex h-7 w-7 items-center justify-center justify-self-end rounded-sm text-gray-400 transition-colors hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                      title="Delete dataset"
+                      aria-label={`Delete ${dataset.name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 ))}
                 {summary && filteredDatasets.length === 0 && (
                   <div className="flex min-h-[320px] items-center justify-center px-6 text-center">

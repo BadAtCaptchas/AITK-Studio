@@ -201,6 +201,7 @@ export default function DatasetImageStudio({
   datasetPath,
   items,
   isAutoCaptioning,
+  liveCaptionRefresh = false,
   encryptedKey,
   encryptedRawKeyB64,
   rootCaption,
@@ -797,7 +798,8 @@ export default function DatasetImageStudio({
   }, [datasetName, plainAuditItemPaths, plainAuditKey, projectPayload, workerID]);
 
   useEffect(() => {
-    if (!isAutoCaptioning || !selectedItem || !selectedKey) return;
+    const shouldLiveRefreshCaption = isAutoCaptioning || liveCaptionRefresh;
+    if (!shouldLiveRefreshCaption || !selectedItem || !selectedKey) return;
     const requestKey = selectedKey;
     const controller = new AbortController();
     let busy = false;
@@ -835,7 +837,7 @@ export default function DatasetImageStudio({
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [isAutoCaptioning, readCaptionForItem, selectedItem, selectedKey]);
+  }, [isAutoCaptioning, liveCaptionRefresh, readCaptionForItem, selectedItem, selectedKey]);
 
   useEffect(() => {
     if (!isAutoCaptioning || !encryptedKey || !onRefresh) return;
@@ -2001,6 +2003,7 @@ export default function DatasetImageStudio({
               projectID={projectID}
               encryptedKey={encryptedKey}
               isAutoCaptioning={isAutoCaptioning}
+              liveCaptionRefresh={liveCaptionRefresh}
               captionCache={captionCacheRef.current}
               captionCacheVersion={captionCacheVersion}
               onCaptionCacheChange={bumpCaptionCacheVersion}

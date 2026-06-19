@@ -262,6 +262,7 @@ export function ImageNavigator({
   projectID,
   encryptedKey,
   isAutoCaptioning,
+  liveCaptionRefresh,
   captionCache,
   captionCacheVersion,
   onCaptionCacheChange,
@@ -276,6 +277,7 @@ export function ImageNavigator({
   projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   isAutoCaptioning?: boolean;
+  liveCaptionRefresh?: boolean;
   captionCache: Map<string, CaptionCacheEntry>;
   captionCacheVersion: number;
   onCaptionCacheChange: () => void;
@@ -718,7 +720,8 @@ export function ImageNavigator({
   }, [captionCache, drawerOpen, items, notifyCaptionCacheChange, scanEncryptedChunk, scanPlainChunk]);
 
   useEffect(() => {
-    if (!isAutoCaptioning || items.length === 0) return;
+    const shouldLiveRefreshCaptions = isAutoCaptioning || liveCaptionRefresh;
+    if (!shouldLiveRefreshCaptions || items.length === 0) return;
     const controller = new AbortController();
     let busy = false;
 
@@ -753,7 +756,15 @@ export function ImageNavigator({
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [captionCache, isAutoCaptioning, items, notifyCaptionCacheChange, scanEncryptedChunk, scanPlainChunk]);
+  }, [
+    captionCache,
+    isAutoCaptioning,
+    items,
+    liveCaptionRefresh,
+    notifyCaptionCacheChange,
+    scanEncryptedChunk,
+    scanPlainChunk,
+  ]);
 
   useEffect(() => {
     return () => scanControllerRef.current?.abort();

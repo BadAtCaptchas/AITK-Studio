@@ -8,6 +8,7 @@ const {
   groupNavigatorRows,
   matchesNavigatorSearch,
   navigatorColumnCount,
+  navigatorStatusCounts,
   navigatorStatusForCaption,
   parseNavigatorJump,
 } = require('../dist/src/utils/datasetImageNavigator.js');
@@ -57,10 +58,22 @@ test('filterNavigatorEntries combines search and status filters', () => {
     { index: 0, name: 'a.png', status: 'missing' },
     { index: 1, name: 'boxed.png', status: 'has-boxes' },
     { index: 2, name: 'plain.png', status: 'plain' },
+    { index: 3, name: 'pending.png', status: 'unknown' },
   ];
-  assert.deepEqual(filterNavigatorEntries(entries, '', 'needs-caption').map(entry => entry.index), [0]);
+  assert.deepEqual(filterNavigatorEntries(entries, '', 'needs-caption').map(entry => entry.index), [0, 3]);
   assert.deepEqual(filterNavigatorEntries(entries, '', 'has-boxes').map(entry => entry.index), [1]);
   assert.deepEqual(filterNavigatorEntries(entries, 'plain', 'all').map(entry => entry.index), [2]);
+});
+
+test('navigator needs-caption counts include pending caption lookups', () => {
+  assert.deepEqual(
+    navigatorStatusCounts([
+      { index: 0, name: 'missing.png', status: 'missing' },
+      { index: 1, name: 'pending.png', status: 'unknown' },
+      { index: 2, name: 'boxed.png', status: 'has-boxes' },
+    ]),
+    { total: 3, missing: 2, hasBoxes: 1, unknown: 1 },
+  );
 });
 
 test('groupNavigatorRows chunks indexes by measured column count', () => {

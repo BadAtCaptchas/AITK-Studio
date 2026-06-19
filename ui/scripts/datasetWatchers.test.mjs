@@ -195,6 +195,10 @@ test('watcher copies only new media, skips caption sidecars, and preserves relat
   assert.equal(second.lastImportedCount, 0);
   await assert.rejects(() => fs.stat(path.join(dataset, 'nested', 'a_2.jpg')), /ENOENT/);
 
+  const statuses = await getDatasetWatcherStatuses([watcher.id]);
+  assert.equal(statuses[watcher.id].lastImportedAt, new Date(1_001).toISOString());
+  assert.equal(statuses[watcher.id].lastImportedCount, 0);
+
   const manifest = JSON.parse(await fs.readFile(path.join(dataset, DATASET_WATCHER_IMPORT_MANIFEST), 'utf-8'));
   assert.equal(Object.keys(manifest.imports).length, 1);
 });

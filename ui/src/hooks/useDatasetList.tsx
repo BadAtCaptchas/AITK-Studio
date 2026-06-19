@@ -24,8 +24,8 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
   const workerID = options.workerID || 'local';
   const projectID = options.projectID || null;
 
-  const refreshDatasets = () => {
-    setStatus('loading');
+  const refreshDatasets = (refreshOptions: { background?: boolean } = {}) => {
+    if (!refreshOptions.background) setStatus('loading');
     const params = new URLSearchParams();
     if (includeRemote) params.set('include_remote', '1');
     if (workerID !== 'local') params.set('worker_id', workerID);
@@ -54,7 +54,7 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
       .catch(error => {
         console.error('Error fetching datasets:', error);
         setErrors([]);
-        setStatus('error');
+        if (!refreshOptions.background) setStatus('error');
       });
   };
   useEffect(() => {

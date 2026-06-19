@@ -63,6 +63,7 @@ export type DatasetImageStudioProps = {
   datasetPath?: string | null;
   items: DatasetStudioItem[];
   isAutoCaptioning: boolean;
+  liveCaptionRefresh?: boolean;
   encryptedKey?: CryptoKey | null;
   encryptedRawKeyB64?: string | null;
   rootCaption?: string | null;

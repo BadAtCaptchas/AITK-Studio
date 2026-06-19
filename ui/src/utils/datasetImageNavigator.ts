@@ -37,7 +37,7 @@ export function matchesNavigatorSearch(entry: Pick<DatasetNavigatorEntry, 'index
 
 export function matchesNavigatorFilter(status: DatasetNavigatorStatus, filter: DatasetNavigatorFilter) {
   if (filter === 'all') return true;
-  if (filter === 'needs-caption') return status === 'missing';
+  if (filter === 'needs-caption') return status === 'missing' || status === 'unknown';
   if (filter === 'has-boxes') return status === 'has-boxes';
   return true;
 }
@@ -68,7 +68,7 @@ export function navigatorStatusCounts(entries: DatasetNavigatorEntry[]) {
   return entries.reduce(
     (counts, entry) => {
       counts.total += 1;
-      if (entry.status === 'missing') counts.missing += 1;
+      if (entry.status === 'missing' || entry.status === 'unknown') counts.missing += 1;
       if (entry.status === 'has-boxes') counts.hasBoxes += 1;
       if (entry.status === 'unknown') counts.unknown += 1;
       return counts;

@@ -5,6 +5,7 @@ import { Modal } from '@/components/Modal';
 import Link from 'next/link';
 import { TextInput } from '@/components/formInputs';
 import useDatasetList from '@/hooks/useDatasetList';
+import useDatasetWatcherLiveRefresh from '@/hooks/useDatasetWatcherLiveRefresh';
 import { Button } from '@headlessui/react';
 import {
   AlertTriangle,
@@ -425,6 +426,12 @@ export default function Datasets() {
   const [hfImportError, setHfImportError] = useState('');
   const [isLoadingHfPreview, setIsLoadingHfPreview] = useState(false);
   const [isImportingHfDataset, setIsImportingHfDataset] = useState(false);
+
+  useDatasetWatcherLiveRefresh({
+    enabled: status === 'success',
+    workerID: 'local',
+    onRefresh: () => refreshDatasets({ background: true }),
+  });
 
   useEffect(() => {
     const rememberedView = readStoredDatasetView();
@@ -1528,7 +1535,7 @@ export default function Datasets() {
           className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-cyan-700 hover:text-white ${
             compact ? 'h-7 w-7' : 'h-8 w-8'
           }`}
-          onRefresh={refreshDatasets}
+          onRefresh={() => refreshDatasets({ background: true })}
         />
       )}
       <button

@@ -24,6 +24,7 @@ import AutoCaptionButton from '@/components/AutoCaptionButton';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
+import useDatasetWatcherLiveRefresh from '@/hooks/useDatasetWatcherLiveRefresh';
 import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetManifest } from '@/types';
 import {
   arrayBufferToBase64,
@@ -92,9 +93,10 @@ export default function DatasetEditorPage({
     () => (effectiveDatasetRoot ? pathJoin(effectiveDatasetRoot, datasetName) : datasetName),
     [datasetName, effectiveDatasetRoot],
   );
+  const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
 
-  const refreshImageList = (dbName: string) => {
-    setStatus('loading');
+  const refreshImageList = (dbName: string, options: { background?: boolean } = {}) => {
+    if (!options.background) setStatus('loading');
     apiClient
       .post('/api/datasets/listImages', { datasetName: dbName, worker_id: workerID, ...projectPayload })
       .then((res: any) => {
@@ -115,9 +117,17 @@ export default function DatasetEditorPage({
       })
       .catch(error => {
         console.error('Error fetching images:', error);
-        setStatus('error');
+        if (!options.background) setStatus('error');
       });
   };
+
+  const hasActiveDatasetWatchers = useDatasetWatcherLiveRefresh({
+    enabled: status === 'success' && canUseWatchFolders,
+    datasetName,
+    projectID,
+    workerID,
+    onRefresh: () => refreshImageList(datasetName, { background: true }),
+  });
 
   const encryptedUploadOptions = useMemo(() => {
     if (!encryptedManifest || !encryptedCatalog || !encryptedKey) return undefined;
@@ -376,7 +386,6 @@ export default function DatasetEditorPage({
     });
   };
 
-  const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
   const PageInfoContent = (() => {
     let icon = null;
     let text = '';
@@ -444,7 +453,7 @@ export default function DatasetEditorPage({
                     workerID={workerID}
                     defaultSourcePath={defaultWatchSourcePath}
                     className="operator-button whitespace-nowrap border-cyan-800 bg-cyan-950/70 text-cyan-100"
-                    onRefresh={() => refreshImageList(datasetName)}
+                    onRefresh={() => refreshImageList(datasetName, { background: true })}
                   />
                 )}
               </div>
@@ -777,7 +786,7 @@ export default function DatasetEditorPage({
                 workerID={workerID}
                 defaultSourcePath={defaultWatchSourcePath}
                 label="Watch Folders"
-                onRefresh={() => refreshImageList(datasetName)}
+                onRefresh={() => refreshImageList(datasetName, { background: true })}
               />
             )
           )}
@@ -870,6 +879,7 @@ export default function DatasetEditorPage({
             datasetPath={!isRemoteDataset ? datasetPath : null}
             items={plainStudioItems}
             isAutoCaptioning={isAutoCaptioning}
+            liveCaptionRefresh={hasActiveDatasetWatchers}
             onRefresh={() => refreshImageList(datasetName)}
             onAddImages={() =>
               openImagesModal(datasetName, () => refreshImageList(datasetName), {

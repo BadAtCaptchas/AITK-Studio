@@ -947,6 +947,7 @@ export async function runDatasetWatcherOnce(
   const warnings: string[] = [];
   let lastError: string | null = null;
   let state: DatasetWatcherStatus['state'] = watcher.enabled ? 'scanning' : 'disabled';
+  let previousStatus: DatasetWatcherStatus = defaultWatcherStatus();
 
   if (!watcher.enabled) {
     const disabled = await writeStatus(watcher.id, {
@@ -959,6 +960,7 @@ export async function runDatasetWatcherOnce(
   let releaseLock: (() => Promise<void>) | null = null;
 
   try {
+    previousStatus = (await readStatusStore()).statuses[watcher.id] || defaultWatcherStatus();
     const { datasetFolder } = await resolveWatcherDataset(watcher);
     releaseLock = await acquireWatcherLock(datasetFolder, watcher.id, now);
     if (!releaseLock) {
@@ -974,8 +976,13 @@ export async function runDatasetWatcherOnce(
     }
 
     await writeStatus(watcher.id, {
-      ...defaultWatcherStatus('scanning'),
+      ...previousStatus,
+      state: 'scanning',
       lastScanAt: nowIso(now),
+      lastImportedCount: 0,
+      lastCaptionedCount: 0,
+      lastError: null,
+      warnings: [],
     });
 
     const [sourceRoot, datasetRealPath] = await Promise.all([
@@ -1002,7 +1009,7 @@ export async function runDatasetWatcherOnce(
       await writeStatus(watcher.id, {
         state,
         lastScanAt: nowIso(now),
-        lastImportedAt: importedPaths.length > 0 ? nowIso(now) : null,
+        lastImportedAt: importedPaths.length > 0 ? nowIso(now) : previousStatus.lastImportedAt,
         lastImportedCount: importedPaths.length,
         lastCaptionedCount: captionedPaths.length,
         lastError,
@@ -1074,7 +1081,7 @@ export async function runDatasetWatcherOnce(
   const finalStatus: DatasetWatcherStatus = {
     state: lastError ? 'error' : 'idle',
     lastScanAt: nowIso(now),
-    lastImportedAt: importedPaths.length > 0 ? nowIso(now) : null,
+    lastImportedAt: importedPaths.length > 0 ? nowIso(now) : previousStatus.lastImportedAt,
     lastImportedCount: importedPaths.length,
     lastCaptionedCount: captionedPaths.length,
     lastError,

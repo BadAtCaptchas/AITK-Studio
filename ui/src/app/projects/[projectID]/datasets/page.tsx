@@ -9,6 +9,7 @@ import { openConfirm } from '@/components/ConfirmModal';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
 import { PageNotice } from '@/components/OperatorPrimitives';
+import useDatasetWatcherLiveRefresh from '@/hooks/useDatasetWatcherLiveRefresh';
 import { apiClient } from '@/utils/api';
 import {
   createEmptyEncryptedManifest,
@@ -83,6 +84,15 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
         setStatus('error');
       });
   };
+
+  useDatasetWatcherLiveRefresh({
+    enabled: status === 'success',
+    projectID,
+    workerID: 'local',
+    onRefresh: () => {
+      void refreshSummary();
+    },
+  });
 
   useEffect(() => {
     setStatus('loading');

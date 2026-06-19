@@ -2105,12 +2105,10 @@ export default function DatasetImageStudio({
       </div>
       <Modal
         isOpen={isRecaptionModalOpen}
-        onClose={() => {
-          if (!isRecaptioning) setIsRecaptionModalOpen(false);
-        }}
+        onClose={() => setIsRecaptionModalOpen(false)}
         title="Recaption Image"
         size="lg"
-        closeOnOverlayClick={!isRecaptioning}
+        closeOnOverlayClick
       >
         <form
           className="space-y-4 text-gray-200"
@@ -2290,11 +2288,10 @@ export default function DatasetImageStudio({
           <div className="flex justify-end gap-3">
             <button
               type="button"
-              disabled={isRecaptioning}
               onClick={() => setIsRecaptionModalOpen(false)}
-              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600"
             >
-              Cancel
+              {isRecaptioning ? 'Close' : 'Cancel'}
             </button>
             <button
               type="submit"

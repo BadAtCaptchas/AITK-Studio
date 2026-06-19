@@ -118,7 +118,7 @@ declare global {
   var __aitkDatasetWatcherLastPollAt: number | undefined;
 }
 
-function pendingByWatcher() {
+function pendingByScope() {
   if (!globalThis.__aitkDatasetWatcherPending) {
     globalThis.__aitkDatasetWatcherPending = new Map();
   }
@@ -362,7 +362,6 @@ export async function deleteDatasetWatcher(id: string) {
     delete store.statuses[watcherID];
     await db.settings.upsert(DATASET_WATCHER_STATUS_SETTING_KEY, JSON.stringify(store));
   });
-  pendingByWatcher().delete(watcherID);
   return existing;
 }
 
@@ -713,17 +712,17 @@ function sourceKey(filePath: string) {
 }
 
 function isStableCandidate(
-  watcherID: string,
+  pendingScope: string,
   key: string,
   candidate: SourceCandidate,
   now: number,
   stableMs: number,
 ) {
-  const allPending = pendingByWatcher();
-  const watcherPending = allPending.get(watcherID) || new Map<string, PendingSourceObservation>();
-  allPending.set(watcherID, watcherPending);
-  const previous = watcherPending.get(key);
-  watcherPending.set(key, {
+  const allPending = pendingByScope();
+  const scopePending = allPending.get(pendingScope) || new Map<string, PendingSourceObservation>();
+  allPending.set(pendingScope, scopePending);
+  const previous = scopePending.get(key);
+  scopePending.set(key, {
     size: candidate.size,
     mtimeMs: candidate.mtimeMs,
     firstSeenAt:
@@ -738,8 +737,8 @@ function isStableCandidate(
   );
 }
 
-function prunePending(watcherID: string, activeKeys: Set<string>) {
-  const pending = pendingByWatcher().get(watcherID);
+function prunePending(pendingScope: string, activeKeys: Set<string>) {
+  const pending = pendingByScope().get(pendingScope);
   if (!pending) return;
   for (const key of pending.keys()) {
     if (!activeKeys.has(key)) pending.delete(key);
@@ -882,12 +881,13 @@ export async function runDatasetWatcherOnce(
     const manifest = await readImportManifest(datasetFolder);
     const candidates = await findSourceMedia(sourceRoot, watcher.includeSubfolders);
     const activeKeys = new Set(candidates.map(candidate => sourceKey(candidate.absolutePath)));
-    prunePending(watcher.id, activeKeys);
+    const pendingScope = `${pathKey(datasetFolder)}\n${pathKey(sourceRoot)}`;
+    prunePending(pendingScope, activeKeys);
 
     for (const candidate of candidates) {
       const key = sourceKey(candidate.absolutePath);
       if (manifest.imports[key]) continue;
-      if (!isStableCandidate(watcher.id, key, candidate, now, stableMs)) continue;
+      if (!isStableCandidate(pendingScope, key, candidate, now, stableMs)) continue;
 
       state = 'importing';
       await writeStatus(watcher.id, {
@@ -903,7 +903,7 @@ export async function runDatasetWatcherOnce(
       const destination = await copyCandidateIntoDataset({ watcher, datasetFolder, candidate });
       if (!destination) {
         warnings.push(`${candidate.relativePath}: Source file changed during import; it will be retried on the next scan.`);
-        pendingByWatcher().get(watcher.id)?.delete(key);
+        pendingByScope().get(pendingScope)?.delete(key);
         continue;
       }
       const destinationRelativePath = path.relative(datasetFolder, destination);
@@ -916,7 +916,7 @@ export async function runDatasetWatcherOnce(
         mtimeMs: candidate.mtimeMs,
       };
       importedPaths.push(destination);
-      pendingByWatcher().get(watcher.id)?.delete(key);
+      pendingByScope().get(pendingScope)?.delete(key);
       await writeImportManifest(datasetFolder, manifest);
 
       if (watcher.autoCaption?.enabled && isAutoCaptionableImage(destination)) {

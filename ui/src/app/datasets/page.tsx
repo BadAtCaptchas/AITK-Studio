@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { openConfirm } from '@/components/ConfirmModal';
 import DatasetFolderIcon from '@/components/DatasetFolderIcon';
+import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import { TopBar, MainContent } from '@/components/layout';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
@@ -1515,6 +1516,20 @@ export default function Datasets() {
             <Download className="h-4 w-4" />
           )}
         </button>
+      )}
+      {row.source === 'local' && !row.encrypted && (
+        <DatasetWatchFoldersButton
+          datasetName={row.name}
+          workerID={row.worker_id}
+          defaultSourcePath={row.dataset.importSourcePath}
+          label={`Watch folders for ${row.name}`}
+          icon="eye"
+          iconOnly
+          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-cyan-700 hover:text-white ${
+            compact ? 'h-7 w-7' : 'h-8 w-8'
+          }`}
+          onRefresh={refreshDatasets}
+        />
       )}
       <button
         type="button"

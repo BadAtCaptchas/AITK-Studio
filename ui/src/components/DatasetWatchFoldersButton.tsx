@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@headlessui/react';
-import { FolderSync, Loader2, Play, Plus, Save, Trash2, X } from 'lucide-react';
+import { Eye, FolderSync, Loader2, Play, Plus, Save, Trash2, X } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { Checkbox, CreatableSelectInput, NumberInput, SelectInput, TextAreaInput, TextInput } from '@/components/formInputs';
 import { StatusBadge } from '@/components/OperatorPrimitives';
@@ -75,6 +75,10 @@ type Props = {
   projectID?: string | null;
   workerID?: string;
   defaultSourcePath?: string | null;
+  label?: string;
+  className?: string;
+  icon?: 'folderSync' | 'eye';
+  iconOnly?: boolean;
   onRefresh?: () => void;
 };
 
@@ -150,6 +154,10 @@ export default function DatasetWatchFoldersButton({
   projectID = null,
   workerID = 'local',
   defaultSourcePath = '',
+  label = 'Watch Folders',
+  className = 'operator-button whitespace-nowrap py-1 text-sm',
+  icon = 'folderSync',
+  iconOnly = false,
   onRefresh,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -159,7 +167,7 @@ export default function DatasetWatchFoldersButton({
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
-  const { workers } = useRemoteOllamaWorkers();
+  const { workers } = useRemoteOllamaWorkers({ enabled: open });
 
   const remoteWorkerOptions = useMemo(
     () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
@@ -169,6 +177,15 @@ export default function DatasetWatchFoldersButton({
     if (form.provider === 'openrouter') return OPENROUTER_BOX_MODELS.map(option => ({ ...option }));
     return OLLAMA_VISION_MODELS.map(option => ({ ...option }));
   }, [form.provider]);
+
+  useEffect(() => {
+    if (form.provider !== 'remote_ollama' || form.remoteWorkerId || remoteWorkerOptions.length === 0) return;
+    setForm(current =>
+      current.provider === 'remote_ollama' && !current.remoteWorkerId
+        ? { ...current, remoteWorkerId: remoteWorkerOptions[0].value }
+        : current,
+    );
+  }, [form.provider, form.remoteWorkerId, remoteWorkerOptions]);
 
   const loadWatchers = useCallback(async () => {
     if (!open) return;
@@ -312,12 +329,13 @@ export default function DatasetWatchFoldersButton({
       setIsSaving(false);
     }
   };
+  const TriggerIcon = icon === 'eye' ? Eye : FolderSync;
 
   return (
     <>
-      <Button className="operator-button whitespace-nowrap py-1 text-sm" onClick={() => setOpen(true)} title="Watch folders">
-        <FolderSync className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Watch</span>
+      <Button className={className} onClick={() => setOpen(true)} title={label} aria-label={label}>
+        <TriggerIcon className="h-3.5 w-3.5" />
+        <span className={iconOnly ? 'sr-only' : ''}>{label}</span>
       </Button>
       <Modal isOpen={open} onClose={() => setOpen(false)} title="Watch Folders" size="xl">
         <div className="space-y-4 text-sm text-gray-300">

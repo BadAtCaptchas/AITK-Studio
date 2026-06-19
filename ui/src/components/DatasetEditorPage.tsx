@@ -376,7 +376,8 @@ export default function DatasetEditorPage({
     });
   };
 
-  const PageInfoContent = useMemo(() => {
+  const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
+  const PageInfoContent = (() => {
     let icon = null;
     let text = '';
     let subtitle = '';
@@ -422,11 +423,37 @@ export default function DatasetEditorPage({
           <div>
             <h3 className="text-sm font-semibold">{text}</h3>
             <p className="mt-1 text-sm opacity-75">{subtitle}</p>
+            {status === 'success' && !encryptedManifest && imgList.length === 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  className="operator-button whitespace-nowrap border-blue-800 bg-blue-950/70 text-blue-100"
+                  onClick={() =>
+                    openImagesModal(datasetName, () => refreshImageList(datasetName), {
+                      ...encryptedUploadOptions,
+                      workerID,
+                      projectID,
+                    })
+                  }
+                >
+                  Add Images
+                </Button>
+                {canUseWatchFolders && (
+                  <DatasetWatchFoldersButton
+                    datasetName={datasetName}
+                    projectID={projectID}
+                    workerID={workerID}
+                    defaultSourcePath={defaultWatchSourcePath}
+                    className="operator-button whitespace-nowrap border-cyan-800 bg-cyan-950/70 text-cyan-100"
+                    onRefresh={() => refreshImageList(datasetName)}
+                  />
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
-  }, [status, imgList.length, encryptedManifest]);
+  })();
 
   const saveEncryptedCaption = async (
     item: EncryptedDatasetItem,
@@ -749,6 +776,7 @@ export default function DatasetEditorPage({
                 projectID={projectID}
                 workerID={workerID}
                 defaultSourcePath={defaultWatchSourcePath}
+                label="Watch Folders"
                 onRefresh={() => refreshImageList(datasetName)}
               />
             )

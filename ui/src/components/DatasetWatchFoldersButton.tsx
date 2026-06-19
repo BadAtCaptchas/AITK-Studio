@@ -195,6 +195,10 @@ export default function DatasetWatchFoldersButton({
     () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
     [workers],
   );
+  const remoteWorkerOptionValues = useMemo(
+    () => new Set(remoteWorkerOptions.map(option => option.value)),
+    [remoteWorkerOptions],
+  );
   const modelOptions = useMemo(() => {
     if (form.provider === 'openrouter') return OPENROUTER_BOX_MODELS.map(option => ({ ...option }));
     return OLLAMA_VISION_MODELS.map(option => ({ ...option }));
@@ -205,13 +209,15 @@ export default function DatasetWatchFoldersButton({
   }, [datasetName, projectID, workerID]);
 
   useEffect(() => {
-    if (form.provider !== 'remote_ollama' || form.remoteWorkerId || remoteWorkerOptions.length === 0) return;
+    if (form.provider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
+    if (form.remoteWorkerId && remoteWorkerOptionValues.has(form.remoteWorkerId)) return;
     setForm(current =>
-      current.provider === 'remote_ollama' && !current.remoteWorkerId
+      current.provider === 'remote_ollama' &&
+      (!current.remoteWorkerId || !remoteWorkerOptionValues.has(current.remoteWorkerId))
         ? { ...current, remoteWorkerId: remoteWorkerOptions[0].value }
         : current,
     );
-  }, [form.provider, form.remoteWorkerId, remoteWorkerOptions]);
+  }, [form.provider, form.remoteWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
 
   const loadWatchers = useCallback(async () => {
     if (!open) return;
@@ -371,7 +377,11 @@ export default function DatasetWatchFoldersButton({
             ? current.model
             : DEFAULT_OLLAMA_VISION_MODEL,
       remoteWorkerId:
-        provider === 'remote_ollama' ? current.remoteWorkerId || remoteWorkerOptions[0]?.value || '' : current.remoteWorkerId,
+        provider === 'remote_ollama'
+          ? current.remoteWorkerId && remoteWorkerOptionValues.has(current.remoteWorkerId)
+            ? current.remoteWorkerId
+            : remoteWorkerOptions[0]?.value || ''
+          : current.remoteWorkerId,
     }));
   };
 

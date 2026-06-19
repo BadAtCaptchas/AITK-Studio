@@ -13,7 +13,6 @@ import {
 import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
-import { isDirectRemoteOllamaCaptionJob } from '@/server/secureRemoteCaptionJobs';
 import { prepareJobConfigForProject, resolveOptionalProject } from '@/server/projects';
 import {
   assertProjectsEnabled,
@@ -193,10 +192,7 @@ export async function POST(request: Request) {
     const { id, name, job_config } = body;
     const project = await resolveOptionalProject(body.project_id);
     const projectJobConfig = project ? await prepareJobConfigForProject(job_config, project) : job_config;
-    let worker_id = normalizeWorkerId(body.worker_id);
-    if (isDirectRemoteOllamaCaptionJob(projectJobConfig)) {
-      worker_id = 'local';
-    }
+    const worker_id = normalizeWorkerId(body.worker_id);
 
     if (!isValidJobName(name)) {
       return NextResponse.json({ error: 'Invalid job name' }, { status: 400 });

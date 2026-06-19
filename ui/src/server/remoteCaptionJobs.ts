@@ -173,5 +173,6 @@ export function buildRemoteOllamaCaptionJobConfig(
   info.process.device = 'cpu';
   info.caption.path_to_caption = options.remoteDatasetPath;
   delete info.caption.remote_worker_id;
+  delete info.caption.remote_ollama_worker_id;
   return next;
 }

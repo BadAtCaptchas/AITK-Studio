@@ -123,6 +123,25 @@ export async function dispatchRemoteCaptionJob(options: {
 
   if (job.remote_job_id) {
     const state = currentJobConfig.config?.remote_caption;
+    if (typeof state?.remoteDatasetPath === 'string' && state.remoteDatasetPath.trim()) {
+      const remoteJobName = remoteCaptionRemoteJobName(job);
+      const remoteJobConfig = buildRemoteOllamaCaptionJobConfig(currentJobConfig, {
+        remoteDatasetPath: state.remoteDatasetPath,
+        remoteJobName,
+      });
+      await remoteJson<Job>(worker, '/api/jobs', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: job.remote_job_id,
+          name: remoteJobName,
+          worker_id: 'local',
+          gpu_ids: job.gpu_ids,
+          job_config: remoteJobConfig,
+          job_type: 'caption',
+          job_ref: state.remoteDatasetPath,
+        }),
+      });
+    }
     const encryptedKeys =
       options.encrypted && typeof state?.remoteDatasetPath === 'string'
         ? encryptedKeyForRemoteDataset(realOriginalDatasetPath, options.encryptedKeysForLaunch, state.remoteDatasetPath)

@@ -301,6 +301,10 @@ export default function DatasetImageStudio({
     () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
     [workers],
   );
+  const remoteWorkerOptionValues = useMemo(
+    () => new Set(remoteWorkerOptions.map(option => option.value)),
+    [remoteWorkerOptions],
+  );
   const recaptionStorageKey = useMemo(
     () => recaptionSettingsStorageKey({ datasetName, projectID, datasetPath, workerID }),
     [datasetName, datasetPath, projectID, workerID],
@@ -418,14 +422,16 @@ export default function DatasetImageStudio({
   }, [selectedItem, selectedKey]);
 
   useEffect(() => {
-    if (autoBoxProvider !== 'remote_ollama' || remoteOllamaWorkerId || remoteWorkerOptions.length === 0) return;
+    if (autoBoxProvider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
+    if (remoteOllamaWorkerId && remoteWorkerOptionValues.has(remoteOllamaWorkerId)) return;
     setRemoteOllamaWorkerId(remoteWorkerOptions[0].value);
-  }, [autoBoxProvider, remoteOllamaWorkerId, remoteWorkerOptions]);
+  }, [autoBoxProvider, remoteOllamaWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
 
   useEffect(() => {
-    if (recaptionProvider !== 'remote_ollama' || recaptionRemoteWorkerId || remoteWorkerOptions.length === 0) return;
+    if (recaptionProvider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
+    if (recaptionRemoteWorkerId && remoteWorkerOptionValues.has(recaptionRemoteWorkerId)) return;
     setRecaptionRemoteWorkerId(remoteWorkerOptions[0].value);
-  }, [recaptionProvider, recaptionRemoteWorkerId, remoteWorkerOptions]);
+  }, [recaptionProvider, recaptionRemoteWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
 
   const applyRecaptionRootPrompt = useCallback((value: string) => {
     const trimmed = value.trim();

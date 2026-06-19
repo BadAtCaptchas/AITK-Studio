@@ -25,6 +25,7 @@ test('detects and rewrites remote Ollama caption dispatch config', () => {
             path_to_caption: '/datasets/cats',
             caption_extension: 'txt',
             remote_worker_id: 'worker-1',
+            remote_ollama_worker_id: 'central-ollama-1',
           },
         },
       ],
@@ -42,6 +43,7 @@ test('detects and rewrites remote Ollama caption dispatch config', () => {
   assert.equal(remoteConfig.config.process[0].type, 'OllamaCaptioner');
   assert.equal(remoteConfig.config.process[0].caption.path_to_caption, '/remote/datasets/cats_remote');
   assert.equal('remote_worker_id' in remoteConfig.config.process[0].caption, false);
+  assert.equal('remote_ollama_worker_id' in remoteConfig.config.process[0].caption, false);
   assert.equal(centralConfig.config.process[0].type, 'SecureRemoteOllamaCaptioner');
 });
 

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const ollama = require('../dist/src/server/ollama.js');
+const sharp = require('sharp');
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
@@ -190,8 +191,45 @@ test('generateOllamaImageCaption sends system prompt to Ollama generate', async 
   assert.equal(caption, 'a caption');
   assert.equal(generateBodies.length, 1);
   assert.equal(generateBodies[0].system, 'Return compact training captions.');
+  assert.deepEqual(generateBodies[0].images, ['aW1n']);
   assert.equal('think' in generateBodies[0], false);
-  assert.deepEqual(generateBodies[0].options, { num_predict: 1024 });
+  assert.deepEqual(generateBodies[0].options, { num_predict: 2048 });
+});
+
+test('generateOllamaImageCaption converts WebP image payloads to JPEG before sending', async () => {
+  const webpBuffer = await sharp({
+    create: {
+      width: 1,
+      height: 1,
+      channels: 4,
+      background: { r: 255, g: 0, b: 0, alpha: 0.5 },
+    },
+  })
+    .webp()
+    .toBuffer();
+  const webpBase64 = webpBuffer.toString('base64');
+  let sentImageBase64 = '';
+
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
+    if (String(url).endsWith('/api/generate')) {
+      const body = JSON.parse(init.body);
+      sentImageBase64 = body.images[0];
+      return response({ response: 'a converted caption' });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const caption = await ollama.generateOllamaImageCaption(
+    { model: 'llava', prompt: 'caption', imageBase64: webpBase64, maxNewTokens: 32 },
+    'http://ollama.test',
+  );
+
+  const sentImage = Buffer.from(sentImageBase64, 'base64');
+  assert.equal(caption, 'a converted caption');
+  assert.notEqual(sentImageBase64, webpBase64);
+  assert.equal(webpBuffer.subarray(0, 4).toString('ascii'), 'RIFF');
+  assert.deepEqual(Array.from(sentImage.subarray(0, 3)), [0xff, 0xd8, 0xff]);
 });
 
 test('generateOllamaImageCaption adds thinking budget to larger requested token budgets', async () => {
@@ -242,7 +280,7 @@ test('generateOllamaImageCaption falls back to chat when generate is empty', asy
     { role: 'user', content: 'caption', images: ['aW1n'] },
   ]);
   assert.equal('think' in chatBody, false);
-  assert.deepEqual(chatBody.options, { num_predict: 1024 });
+  assert.deepEqual(chatBody.options, { num_predict: 2048 });
 });
 
 test('generateOllamaImageCaption expands retry budget for thinking-only length responses', async () => {
@@ -270,7 +308,7 @@ test('generateOllamaImageCaption expands retry budget for thinking-only length r
     .map(call => JSON.parse(call.body));
   assert.deepEqual(
     generationBodies.map(body => body.options.num_predict),
-    [1024, 1024, 2048, 2048, 4096, 4096],
+    [2048, 2048, 4096, 4096, 4096, 4096],
   );
 });
 

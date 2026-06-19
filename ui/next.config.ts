@@ -21,6 +21,7 @@ const nextConfig: NextConfig = {
     'macstats',
     'node-cache',
     'osx-temperature-sensor',
+    'sharp',
     'systeminformation',
     'yauzl',
   ],

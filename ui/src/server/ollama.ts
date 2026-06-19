@@ -1,3 +1,5 @@
+import sharp from 'sharp';
+
 export type OllamaModel = {
   name?: string;
   model?: string;
@@ -47,6 +49,7 @@ const OLLAMA_CAPTION_MAX_ATTEMPTS = 3;
 const OLLAMA_CAPTION_EMPTY_RETRY_DELAY_MS = 2000;
 const OLLAMA_CAPTION_MIN_NUM_PREDICT = 2048;
 const OLLAMA_CAPTION_MAX_NUM_PREDICT = 4096;
+const JPEG_CONVERSION_QUALITY = 95;
 
 export type OllamaModelPullStatus = {
   status: 'ready' | 'pulling' | 'error';
@@ -173,6 +176,30 @@ function hasOllamaThinking(data: unknown) {
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isWebpBuffer(buffer: Buffer) {
+  return (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  );
+}
+
+async function prepareOllamaImageBase64(imageBase64: string) {
+  const imageBuffer = Buffer.from(imageBase64, 'base64');
+  if (!isWebpBuffer(imageBuffer)) return imageBase64;
+
+  try {
+    const jpegBuffer = await sharp(imageBuffer, { pages: 1 })
+      .flatten({ background: '#ffffff' })
+      .jpeg({ quality: JPEG_CONVERSION_QUALITY })
+      .toBuffer();
+    return jpegBuffer.toString('base64');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown conversion error';
+    throw new Error(`Failed to convert WebP image to JPEG for Ollama captioning: ${message}`);
+  }
 }
 
 function captionNumPredict(maxNewTokens: number | undefined, attempt: number) {
@@ -346,12 +373,14 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   if (!prompt) throw new Error('Caption prompt is required');
   if (!options.imageBase64) throw new Error('Image payload is required');
 
+  const imageBase64 = await prepareOllamaImageBase64(options.imageBase64);
+
   await ensureOllamaModel(model, endpoint);
 
   const generateBody: Record<string, unknown> = {
     model,
     prompt,
-    images: [options.imageBase64],
+    images: [imageBase64],
     stream: false,
     keep_alive: '10m',
   };
@@ -366,7 +395,7 @@ export async function generateOllamaImageCaption(options: OllamaGenerateOptions,
   messages.push({
     role: 'user',
     content: prompt,
-    images: [options.imageBase64],
+    images: [imageBase64],
   });
   const chatBody: Record<string, unknown> = {
     model,

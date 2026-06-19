@@ -136,9 +136,15 @@ export default function ProjectRunDetailPage({
                 </div>
               </section>
 
-              <section className="min-h-[520px] border border-gray-800 bg-gray-950">
+              <section
+                className={`border border-gray-800 bg-gray-950 ${
+                  activeTab === 'samples'
+                    ? 'relative h-[calc(100vh-15rem)] min-h-[520px] overflow-hidden'
+                    : 'min-h-[520px]'
+                }`}
+              >
                 {activeTab === 'overview' && <JobOverview job={job} />}
-                {activeTab === 'samples' && <SampleImages job={job} />}
+                {activeTab === 'samples' && <SampleImages job={job} layout="panel" />}
                 {activeTab === 'loss' && <JobLossGraph job={job} />}
                 {activeTab === 'config' && <JobConfigViewer job={job} />}
               </section>

@@ -1,32 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
-import path from 'path';
 import { Readable } from 'stream';
 import { db } from '@/server/db';
-import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
-
-const contentTypeMap: { [key: string]: string } = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-  '.jxl': 'image/jxl',
-  '.mp4': 'video/mp4',
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.flac': 'audio/flac',
-  '.ogg': 'audio/ogg',
-};
+import { assertProjectJobEnabled } from '@/server/projects';
+import { resolveJobSampleFile } from '@/server/jobSamples';
 
 type SampleRouteParams = {
   jobID: string;
   samplePath: string[];
 };
-
-function isPathInsideRoot(root: string, filepath: string) {
-  const relativePath = path.relative(root, filepath);
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
-}
 
 export async function GET(request: NextRequest, { params }: { params: Promise<SampleRouteParams> }) {
   const { jobID, samplePath } = await params;
@@ -34,12 +16,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
 
   if (sampleSegments.length !== 1) {
     return new NextResponse('Invalid sample path', { status: 400 });
-  }
-
-  const ext = path.extname(sampleSegments[0]).toLowerCase();
-  const contentType = contentTypeMap[ext];
-  if (!contentType) {
-    return new NextResponse('Unsupported media type', { status: 415 });
   }
 
   const job = await db.jobs.findById(jobID);
@@ -52,28 +28,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
     return new NextResponse(error?.message || 'Project spaces are disabled', { status: error?.status || 403 });
   }
 
-  const trainingFolder = await getJobTrainingRoot(job);
-  const canonicalTrainingFolder = await fs.promises.realpath(path.resolve(trainingFolder)).catch(() => null);
-  const samplesFolder = path.resolve(trainingFolder, job.name, 'samples');
-  const filepath = path.resolve(samplesFolder, sampleSegments[0]);
-  const canonicalSamplesFolder = await fs.promises.realpath(samplesFolder).catch(() => null);
-  const canonicalPath = await fs.promises.realpath(filepath).catch(() => null);
-
-  if (
-    !canonicalTrainingFolder ||
-    !canonicalSamplesFolder ||
-    !canonicalPath ||
-    !isPathInsideRoot(canonicalTrainingFolder, canonicalSamplesFolder) ||
-    !isPathInsideRoot(canonicalSamplesFolder, canonicalPath)
-  ) {
+  const sampleFile = await resolveJobSampleFile(job, sampleSegments[0]);
+  if (!sampleFile) {
     return new NextResponse('File not found', { status: 404 });
   }
 
-  const stat = await fs.promises.stat(canonicalPath).catch(() => null);
-  if (!stat || !stat.isFile()) {
-    return new NextResponse('File not found', { status: 404 });
-  }
-
+  const { path: canonicalPath, stat, contentType } = sampleFile;
   const etag = `W/"${stat.ino.toString(36)}-${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
   const cacheControl = 'public, max-age=86400, immutable';
 

@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import path from 'path';
-import fs from 'fs';
 import { db } from '@/server/db';
-import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
+import { assertProjectJobEnabled } from '@/server/projects';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -11,11 +9,7 @@ import {
   remoteJson,
 } from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
-
-function isPathInsideRoot(root: string, filepath: string) {
-  const relativePath = path.relative(root, filepath);
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
-}
+import { listJobSampleUrls } from '@/server/jobSamples';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
@@ -54,38 +48,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
     }
   }
 
-  // setup the training
-  const trainingFolder = await getJobTrainingRoot(job);
-
-  const canonicalTrainingFolder = await fs.promises.realpath(path.resolve(trainingFolder)).catch(() => null);
-  const samplesFolder = path.resolve(trainingFolder, job.name, 'samples');
-  const canonicalSamplesFolder = await fs.promises.realpath(samplesFolder).catch(() => null);
-  if (
-    !canonicalTrainingFolder ||
-    !canonicalSamplesFolder ||
-    !isPathInsideRoot(canonicalTrainingFolder, canonicalSamplesFolder)
-  ) {
-    return NextResponse.json({ samples: [] });
-  }
-
-  const allowedSampleExtensions = new Set([
-    '.png',
-    '.jpg',
-    '.jpeg',
-    '.webp',
-    '.jxl',
-    '.mp4',
-    '.mp3',
-    '.wav',
-    '.flac',
-    '.ogg',
-  ]);
-
-  const samples = fs
-    .readdirSync(canonicalSamplesFolder, { withFileTypes: true })
-    .filter(entry => entry.isFile() && allowedSampleExtensions.has(path.extname(entry.name).toLowerCase()))
-    .map(entry => `/api/jobs/${encodeURIComponent(job.id)}/samples/${encodeURIComponent(entry.name)}`)
-    .sort();
+  const samples = await listJobSampleUrls(job);
 
   return NextResponse.json({ samples });
 }

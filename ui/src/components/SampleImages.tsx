@@ -102,9 +102,10 @@ export const SampleImagesMenu = ({ job }: SampleImagesMenuProps) => {
 
 interface SampleImagesProps {
   job: Job;
+  layout?: 'page' | 'panel';
 }
 
-export default function SampleImages({ job }: SampleImagesProps) {
+export default function SampleImages({ job, layout = 'page' }: SampleImagesProps) {
   const { sampleImages, status, refreshSampleImages } = useSampleImages(job.id, 5000);
   const [selectedSamplePath, setSelectedSamplePath] = useState<string | null>(null);
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
@@ -286,9 +287,17 @@ export default function SampleImages({ job }: SampleImagesProps) {
     }
     return null;
   }, [job]);
+  const isPanelLayout = layout === 'panel';
 
   return (
-    <div ref={scrollParentCallback} className="absolute top-[80px] left-0 right-0 bottom-0 overflow-y-auto">
+    <div
+      ref={scrollParentCallback}
+      className={classNames(
+        isPanelLayout
+          ? 'relative h-full min-h-[520px] overflow-y-auto'
+          : 'absolute top-[80px] left-0 right-0 bottom-0 overflow-y-auto',
+      )}
+    >
       <div className="pb-4">
         {PageInfoContent}
         {sampleImages && rows.length > 0 && scrollParent && (
@@ -341,14 +350,20 @@ export default function SampleImages({ job }: SampleImagesProps) {
         refreshSampleImages={refreshSampleImages}
       />
       <div
-        className="fixed top-20 mt-4 right-6 w-10 h-10 rounded-full bg-gray-900 shadow-lg flex items-center justify-center text-white opacity-80 hover:opacity-100 cursor-pointer"
+        className={classNames(
+          'z-10 w-10 h-10 rounded-full bg-gray-900 shadow-lg flex items-center justify-center text-white opacity-80 hover:opacity-100 cursor-pointer',
+          isPanelLayout ? 'absolute top-4 right-4' : 'fixed top-20 mt-4 right-6',
+        )}
         onClick={scrollToTop}
         title="Scroll to Top"
       >
         <FaCaretUp className="text-gray-500 dark:text-gray-400" />
       </div>
       <div
-        className="fixed bottom-5 right-6 w-10 h-10 rounded-full bg-gray-900 shadow-lg flex items-center justify-center text-white opacity-80 hover:opacity-100 cursor-pointer"
+        className={classNames(
+          'z-10 w-10 h-10 rounded-full bg-gray-900 shadow-lg flex items-center justify-center text-white opacity-80 hover:opacity-100 cursor-pointer',
+          isPanelLayout ? 'absolute bottom-4 right-4' : 'fixed bottom-5 right-6',
+        )}
         onClick={scrollToBottom}
         title="Scroll to Bottom"
       >

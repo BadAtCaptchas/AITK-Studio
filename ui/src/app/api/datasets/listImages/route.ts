@@ -34,6 +34,7 @@ function imageEntry(imgPath: string) {
     img_path: imgPath,
     added_at: addedAtForStat(stat),
     captioned_at: captionedAtForItem(imgPath),
+    size_bytes: stat.size,
   };
 }
 

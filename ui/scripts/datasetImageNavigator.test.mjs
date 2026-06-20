@@ -123,6 +123,52 @@ test('sortNavigatorEntries sorts date fields by direction with missing dates las
   assert.deepEqual(sortNavigatorEntries(entries, 'captioned', 'desc').map(entry => entry.index), [2, 1, 0]);
 });
 
+test('sortNavigatorEntries naturally sorts file names', () => {
+  const entries = [
+    { index: 0, name: 'image_10.png', status: 'plain' },
+    { index: 1, name: 'image_2.png', status: 'plain' },
+    { index: 2, name: 'image_1.png', status: 'plain' },
+  ];
+  assert.deepEqual(sortNavigatorEntries(entries, 'name', 'asc').map(entry => entry.index), [2, 1, 0]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'name', 'desc').map(entry => entry.index), [0, 1, 2]);
+});
+
+test('sortNavigatorEntries sorts extensions and media types with missing values last', () => {
+  const entries = [
+    { index: 0, name: 'a', status: 'plain', extension: 'png', mediaType: 'image' },
+    { index: 1, name: 'b', status: 'plain', extension: 'txt', mediaType: 'text' },
+    { index: 2, name: 'c', status: 'plain', extension: null, mediaType: null },
+    { index: 3, name: 'd', status: 'plain', extension: 'mp4', mediaType: 'video' },
+  ];
+  assert.deepEqual(sortNavigatorEntries(entries, 'extension', 'asc').map(entry => entry.index), [3, 0, 1, 2]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'extension', 'desc').map(entry => entry.index), [1, 0, 3, 2]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'media-type', 'asc').map(entry => entry.index), [0, 1, 3, 2]);
+});
+
+test('sortNavigatorEntries sorts file size and caption length numerically', () => {
+  const entries = [
+    { index: 0, name: 'small.png', status: 'plain', sizeBytes: 120, captionLength: 14 },
+    { index: 1, name: 'missing.png', status: 'plain', sizeBytes: null, captionLength: null },
+    { index: 2, name: 'large.png', status: 'plain', sizeBytes: 4000, captionLength: 92 },
+  ];
+  assert.deepEqual(sortNavigatorEntries(entries, 'size', 'desc').map(entry => entry.index), [2, 0, 1]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'size', 'asc').map(entry => entry.index), [0, 2, 1]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'caption-length', 'desc').map(entry => entry.index), [2, 0, 1]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'caption-length', 'asc').map(entry => entry.index), [0, 2, 1]);
+});
+
+test('sortNavigatorEntries sorts caption status with unloaded captions last', () => {
+  const entries = [
+    { index: 0, name: 'plain.png', status: 'plain' },
+    { index: 1, name: 'pending.png', status: 'unknown' },
+    { index: 2, name: 'boxed.png', status: 'has-boxes' },
+    { index: 3, name: 'missing.png', status: 'missing' },
+    { index: 4, name: 'json.png', status: 'json' },
+  ];
+  assert.deepEqual(sortNavigatorEntries(entries, 'caption-status', 'asc').map(entry => entry.index), [3, 0, 4, 2, 1]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'caption-status', 'desc').map(entry => entry.index), [2, 4, 0, 3, 1]);
+});
+
 test('sortNavigatorEntries falls back to original index for date ties and invalid dates', () => {
   const entries = [
     { index: 4, name: 'late-tie.png', status: 'plain', captionedAt: '2026-01-01T00:00:00.000Z' },

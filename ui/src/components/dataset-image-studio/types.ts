@@ -6,6 +6,7 @@ export type DatasetStudioItem =
       path: string;
       addedAt?: string | null;
       captionedAt?: string | null;
+      sizeBytes?: number | null;
     }
   | {
       kind: 'encrypted';

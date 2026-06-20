@@ -60,6 +60,7 @@ type DatasetImageListItem = {
   img_path: string;
   added_at?: string | null;
   captioned_at?: string | null;
+  size_bytes?: number | null;
 };
 
 export default function DatasetEditorPage({
@@ -224,6 +225,7 @@ export default function DatasetEditorPage({
         path: img.img_path,
         addedAt: img.added_at ?? null,
         captionedAt: img.captioned_at ?? null,
+        sizeBytes: typeof img.size_bytes === 'number' ? img.size_bytes : null,
       })),
     [imgList],
   );

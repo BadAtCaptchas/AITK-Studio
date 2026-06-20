@@ -2,10 +2,8 @@
 
 import classNames from 'classnames';
 import {
-  ArrowDown,
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -54,7 +52,7 @@ import type {
   DeleteImagesResult,
 } from './types';
 import { EncryptedThumb, PlainThumb } from './StudioMedia';
-import { captionResponseToText, clampIndex, isPlainTextCaptionItem, itemKey, itemName, statusForCaption } from './utils';
+import { captionResponseToText, clampIndex, isPlainTextCaptionItem, itemKey, itemKind, itemName, statusForCaption } from './utils';
 
 type ThumbSize = 'sm' | 'md' | 'lg';
 type ScanState = {
@@ -105,6 +103,34 @@ function previewBoxesForCaption(cached?: CaptionCacheEntry) {
 
 function StatusDot({ status }: { status: ReturnType<typeof statusForCaption> }) {
   return <span className={classNames('h-2 w-2 flex-shrink-0 rounded-full', status.dot)} />;
+}
+
+function itemExtension(item: DatasetStudioItem) {
+  const rawName = item.kind === 'encrypted' ? item.item.extension || item.item.name : item.path;
+  const cleanName = rawName.split(/[?#]/, 1)[0];
+  const fileName = cleanName.split(/[\\/]/).pop() || cleanName;
+  const dotIndex = fileName.lastIndexOf('.');
+  const extension = dotIndex >= 0 ? fileName.slice(dotIndex + 1).trim().toLowerCase() : '';
+  return extension || null;
+}
+
+function defaultSortDirection(mode: DatasetNavigatorSortMode): DatasetNavigatorSortDirection {
+  if (mode === 'name' || mode === 'extension' || mode === 'media-type' || mode === 'caption-status') return 'asc';
+  return 'desc';
+}
+
+function sortDirectionLabel(mode: DatasetNavigatorSortMode, direction: DatasetNavigatorSortDirection) {
+  if (mode === 'original') return '--';
+  if (mode === 'name' || mode === 'extension' || mode === 'media-type') return direction === 'asc' ? 'A-Z' : 'Z-A';
+  if (mode === 'size' || mode === 'caption-length') return direction === 'desc' ? 'Largest' : 'Smallest';
+  if (mode === 'added' || mode === 'captioned') return direction === 'desc' ? 'Newest' : 'Oldest';
+  return direction === 'asc' ? 'Needs' : 'Done';
+}
+
+function sortDirectionTitle(mode: DatasetNavigatorSortMode, direction: DatasetNavigatorSortDirection) {
+  if (mode === 'original') return 'Choose a sort first';
+  if (mode === 'caption-status') return direction === 'asc' ? 'Needs caption first' : 'Captioned first';
+  return `${sortDirectionLabel(mode, direction)} first`;
 }
 
 function ThumbnailTile({
@@ -317,6 +343,8 @@ export function ImageNavigator({
   const [scanState, setScanState] = useState<ScanState>({ status: 'idle', scanned: 0, total: items.length });
   const scanStartedRef = useRef(false);
   const scanControllerRef = useRef<AbortController | null>(null);
+  const gridRowsRef = useRef<number[][]>([]);
+  const autoScrollKeyRef = useRef('');
   const [gridScroller, setGridScroller] = useState<HTMLDivElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { ref: gridMeasureRef, size: gridSize } = useElementSize<HTMLDivElement>();
@@ -373,8 +401,12 @@ export function ImageNavigator({
           index,
           name: itemName(item),
           status: navigatorStatusForCaption(cached?.caption || '', Boolean(cached?.loaded)),
+          extension: itemExtension(item),
+          mediaType: itemKind(item),
+          sizeBytes: item.kind === 'plain' ? item.sizeBytes ?? null : item.item.size,
           addedAt: item.kind === 'plain' ? item.addedAt ?? null : item.item.createdAt,
           captionedAt: item.kind === 'plain' ? item.captionedAt ?? null : item.item.captionObjectPath ? item.item.updatedAt : null,
+          captionLength: cached?.loaded ? cached.caption.trim().length : null,
         };
       }),
     [captionCache, captionCacheVersion, items, localCacheVersion],
@@ -464,10 +496,18 @@ export function ImageNavigator({
     captionPendingCount === 0 &&
     !bulkBusyAction;
   const sortOptions: Array<{ value: DatasetNavigatorSortMode; label: string }> = [
-    { value: 'original', label: 'Original' },
-    { value: 'added', label: 'Added' },
-    { value: 'captioned', label: 'Captioned' },
+    { value: 'original', label: 'Original Order' },
+    { value: 'name', label: 'File Name' },
+    { value: 'extension', label: 'File Extension' },
+    { value: 'media-type', label: 'Media Type' },
+    { value: 'size', label: 'File Size' },
+    { value: 'added', label: 'Date Added' },
+    { value: 'captioned', label: 'Date Captioned' },
+    { value: 'caption-status', label: 'Caption Status' },
+    { value: 'caption-length', label: 'Caption Length' },
   ];
+  const directionLabel = sortDirectionLabel(sortMode, sortDirection);
+  const directionTitle = sortDirectionTitle(sortMode, sortDirection);
 
   const commitIndex = useCallback(
     (index: number) => {
@@ -798,12 +838,43 @@ export function ImageNavigator({
   }, []);
 
   useEffect(() => {
-    if (!drawerOpen || gridRows.length === 0) return;
-    const rowIndex = gridRows.findIndex(row => row.includes(selectedIndex));
+    gridRowsRef.current = gridRows;
+  }, [gridRows]);
+
+  useEffect(() => {
+    if (!drawerOpen) {
+      autoScrollKeyRef.current = '';
+      return;
+    }
+
+    const autoScrollKey = [
+      selectedIndex,
+      sortMode,
+      sortDirection,
+      filter,
+      searchQuery.trim().toLowerCase(),
+      captionKeywordQuery.trim().toLowerCase(),
+      captionKeywordMode,
+      gridColumns,
+    ].join('|');
+    if (autoScrollKeyRef.current === autoScrollKey) return;
+    autoScrollKeyRef.current = autoScrollKey;
+
+    const rowIndex = gridRowsRef.current.findIndex(row => row.includes(selectedIndex));
     if (rowIndex >= 0) {
       window.setTimeout(() => virtuosoRef.current?.scrollToIndex({ index: rowIndex, align: 'center' }), 0);
     }
-  }, [drawerOpen, gridRows, selectedIndex]);
+  }, [
+    captionKeywordMode,
+    captionKeywordQuery,
+    drawerOpen,
+    filter,
+    gridColumns,
+    searchQuery,
+    selectedIndex,
+    sortDirection,
+    sortMode,
+  ]);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -883,32 +954,37 @@ export function ImageNavigator({
             </div>
 
             <div className="flex h-9 overflow-hidden rounded-md border border-gray-800 bg-gray-950 text-xs">
-              {sortOptions.map(option => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    setSortMode(option.value);
-                    if (option.value !== 'original' && option.value !== sortMode) setSortDirection('desc');
-                  }}
-                  className={classNames('border-r border-gray-800 px-3 last:border-r-0 hover:bg-gray-900', {
-                    'bg-gray-800 text-white': sortMode === option.value,
-                    'text-gray-400': sortMode !== option.value,
-                  })}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            {sortMode !== 'original' && (
-              <IconButton
-                title={sortDirection === 'desc' ? 'Newest first' : 'Oldest first'}
-                onClick={() => setSortDirection(direction => (direction === 'desc' ? 'asc' : 'desc'))}
+              <span className="flex h-full items-center border-r border-gray-800 px-2 text-[10px] font-semibold uppercase text-gray-500">
+                Sort
+              </span>
+              <select
+                value={sortMode}
+                onChange={event => {
+                  const nextMode = event.target.value as DatasetNavigatorSortMode;
+                  setSortMode(nextMode);
+                  if (nextMode !== sortMode) setSortDirection(defaultSortDirection(nextMode));
+                }}
+                className="h-full min-w-[154px] bg-gray-950 px-2 text-sm text-gray-100 outline-none hover:bg-gray-900 focus:bg-gray-900"
+                aria-label="Sort image grid"
+                title="Sort image grid"
               >
-                {sortDirection === 'desc' ? <ArrowDown className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
-              </IconButton>
-            )}
+                {sortOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                title={directionTitle}
+                aria-label={directionTitle}
+                disabled={sortMode === 'original'}
+                onClick={() => setSortDirection(direction => (direction === 'desc' ? 'asc' : 'desc'))}
+                className="flex h-full w-16 items-center justify-center border-l border-gray-800 px-2 text-[11px] font-medium text-gray-300 hover:bg-gray-900 disabled:cursor-not-allowed disabled:text-gray-600"
+              >
+                {directionLabel}
+              </button>
+            </div>
 
             <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
               {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />}

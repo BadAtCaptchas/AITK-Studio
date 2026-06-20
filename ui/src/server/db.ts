@@ -958,18 +958,20 @@ export const db = {
       return getPrisma().job.findFirst({ where: { name, project_id: project_id ?? null } });
     },
 
-    async findLatestByRef(jobRef: string): Promise<Job | null> {
+    async findLatestByRef(jobRef: string, jobType?: string | null): Promise<Job | null> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
+        const filter: Document = { job_ref: jobRef };
+        if (jobType) filter.job_type = jobType;
         const row = await mongoCollection(mongo, 'jobs')
-          .find({ job_ref: jobRef }, { projection: { _id: 0 } })
+          .find(filter, { projection: { _id: 0 } })
           .sort({ updated_at: -1 })
           .limit(1)
           .next();
         return normalizeJob(row);
       }
       return getPrisma().job.findFirst({
-        where: { job_ref: jobRef },
+        where: { job_ref: jobRef, ...(jobType ? { job_type: jobType } : {}) },
         orderBy: { updated_at: 'desc' },
       });
     },

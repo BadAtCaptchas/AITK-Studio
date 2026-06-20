@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
-export default function useJobByRef(jobRef: string | null, reloadInterval: null | number = null) {
+export default function useJobByRef(
+  jobRef: string | null,
+  reloadInterval: null | number = null,
+  jobType: string | null = null,
+) {
   const [job, setJob] = useState<Job | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
@@ -15,8 +19,10 @@ export default function useJobByRef(jobRef: string | null, reloadInterval: null 
       return;
     }
     setStatus('loading');
+    const params = new URLSearchParams({ job_ref: jobRef });
+    if (jobType) params.set('job_type', jobType);
     apiClient
-      .get(`/api/jobs?job_ref=${jobRef}`)
+      .get(`/api/jobs?${params.toString()}`)
       .then(res => res.data)
       .then(data => {
         setJob(data);
@@ -24,9 +30,10 @@ export default function useJobByRef(jobRef: string | null, reloadInterval: null 
       })
       .catch(error => {
         console.error('Error fetching job:', error);
+        setJob(null);
         setStatus('error');
       });
-  }, [jobRef]);
+  }, [jobRef, jobType]);
 
   useEffect(() => {
     refreshJob();

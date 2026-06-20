@@ -5,6 +5,8 @@ import useJobByRef from '@/hooks/useJobByRef';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 
+const ACTIVE_CAPTION_STATUSES = new Set(['running', 'queued', 'stopping']);
+
 type AutoCaptionButtonProps = {
   datasetPath: string;
   datasetName: string;
@@ -23,8 +25,8 @@ export default function AutoCaptionButton({
   rootCaption,
 }: AutoCaptionButtonProps) {
   const [reloadInterval, setReloadInterval] = useState<number | null>(null);
-  const { job, refreshJob } = useJobByRef(datasetPath, reloadInterval);
-  const isCaptioning = !!job && (job.status === 'running' || job.status === 'queued' || job.status === 'stopping');
+  const { job, refreshJob } = useJobByRef(datasetPath, reloadInterval, 'caption');
+  const isCaptioning = !!job && job.job_type === 'caption' && ACTIVE_CAPTION_STATUSES.has(job.status);
 
   useEffect(() => {
     setReloadInterval(isCaptioning ? 5000 : null);

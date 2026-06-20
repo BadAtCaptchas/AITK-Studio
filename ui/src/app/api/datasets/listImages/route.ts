@@ -4,7 +4,38 @@ import { isEncryptedDatasetFolder, readEncryptedManifest, resolveDatasetFolder }
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAccess';
 import { findDatasetItemsRecursively } from '@/server/datasetImages';
+import { findExistingCaptionSidecar, isTextCaptionFilePath } from '@/server/captionFiles';
 import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+
+function dateToIso(date: Date | undefined) {
+  if (!date) return null;
+  const ms = date.getTime();
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? date.toISOString() : null;
+}
+
+function addedAtForStat(stat: fs.Stats) {
+  return dateToIso(stat.birthtime) || dateToIso(stat.ctime) || dateToIso(stat.mtime);
+}
+
+function captionedAtForItem(itemPath: string) {
+  try {
+    const captionPath = isTextCaptionFilePath(itemPath) ? itemPath : findExistingCaptionSidecar(itemPath);
+    if (!captionPath) return null;
+    const stat = fs.statSync(captionPath);
+    return stat.isFile() ? dateToIso(stat.mtime) : null;
+  } catch {
+    return null;
+  }
+}
+
+function imageEntry(imgPath: string) {
+  const stat = fs.statSync(imgPath);
+  return {
+    img_path: imgPath,
+    added_at: addedAtForStat(stat),
+    captioned_at: captionedAtForItem(imgPath),
+  };
+}
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -71,7 +102,7 @@ export async function POST(request: Request) {
     imageFiles.sort((a, b) => a.localeCompare(b));
 
     return NextResponse.json({
-      images: imageFiles.map(imgPath => ({ img_path: imgPath })),
+      images: imageFiles.map(imageEntry),
     });
   } catch (error) {
     console.error('Error finding images:', error);

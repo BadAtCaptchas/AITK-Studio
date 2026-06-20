@@ -2,8 +2,10 @@
 
 import classNames from 'classnames';
 import {
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -30,7 +32,10 @@ import {
   navigatorStatusCounts,
   navigatorStatusForCaption,
   parseNavigatorJump,
+  sortNavigatorEntries,
   type DatasetNavigatorFilter,
+  type DatasetNavigatorSortDirection,
+  type DatasetNavigatorSortMode,
 } from '@/utils/datasetImageNavigator';
 import {
   captionMatchesKeywords,
@@ -303,6 +308,8 @@ export function ImageNavigator({
   const [isBulkDeletingImages, setIsBulkDeletingImages] = useState(false);
   const [deleteSelectionMessage, setDeleteSelectionMessage] = useState('');
   const [filter, setFilter] = useState<DatasetNavigatorFilter>('all');
+  const [sortMode, setSortMode] = useState<DatasetNavigatorSortMode>('original');
+  const [sortDirection, setSortDirection] = useState<DatasetNavigatorSortDirection>('desc');
   const [thumbSize, setThumbSize] = useState<ThumbSize>('md');
   const [jumpText, setJumpText] = useState('');
   const [scrubValue, setScrubValue] = useState(selectedIndex + 1);
@@ -341,6 +348,8 @@ export function ImageNavigator({
     setIsBulkDeletingImages(false);
     setDeleteSelectionMessage('');
     setFilter('all');
+    setSortMode('original');
+    setSortDirection('desc');
   }, [datasetName, workerID]);
 
   const notifyCaptionCacheChange = useCallback(() => {
@@ -364,6 +373,8 @@ export function ImageNavigator({
           index,
           name: itemName(item),
           status: navigatorStatusForCaption(cached?.caption || '', Boolean(cached?.loaded)),
+          addedAt: item.kind === 'plain' ? item.addedAt ?? null : item.item.createdAt,
+          captionedAt: item.kind === 'plain' ? item.captionedAt ?? null : item.item.captionObjectPath ? item.item.updatedAt : null,
         };
       }),
     [captionCache, captionCacheVersion, items, localCacheVersion],
@@ -372,6 +383,10 @@ export function ImageNavigator({
   const filteredEntries = useMemo(
     () => filterNavigatorEntries(entries, searchQuery, filter),
     [entries, filter, searchQuery],
+  );
+  const sortedEntries = useMemo(
+    () => sortNavigatorEntries(filteredEntries, sortMode, sortDirection),
+    [filteredEntries, sortDirection, sortMode],
   );
   const captionKeywordTerms = useMemo(() => parseCaptionKeywordQuery(captionKeywordQuery), [captionKeywordQuery]);
   const hasCaptionKeywordFilter = captionKeywordTerms.length > 0;
@@ -403,9 +418,9 @@ export function ImageNavigator({
   const shownEntries = useMemo(
     () =>
       hasCaptionKeywordFilter
-        ? filteredEntries.filter(entry => captionKeywordMatchIndexSet.has(entry.index))
-        : filteredEntries,
-    [captionKeywordMatchIndexSet, filteredEntries, hasCaptionKeywordFilter],
+        ? sortedEntries.filter(entry => captionKeywordMatchIndexSet.has(entry.index))
+        : sortedEntries,
+    [captionKeywordMatchIndexSet, hasCaptionKeywordFilter, sortedEntries],
   );
   const filteredIndexes = useMemo(() => shownEntries.map(entry => entry.index), [shownEntries]);
   const shownCaptionKeywordMatches = useMemo(() => {
@@ -448,6 +463,11 @@ export function ImageNavigator({
     shownCaptionKeywordMatches.length > 0 &&
     captionPendingCount === 0 &&
     !bulkBusyAction;
+  const sortOptions: Array<{ value: DatasetNavigatorSortMode; label: string }> = [
+    { value: 'original', label: 'Original' },
+    { value: 'added', label: 'Added' },
+    { value: 'captioned', label: 'Captioned' },
+  ];
 
   const commitIndex = useCallback(
     (index: number) => {
@@ -862,6 +882,34 @@ export function ImageNavigator({
               ))}
             </div>
 
+            <div className="flex h-9 overflow-hidden rounded-md border border-gray-800 bg-gray-950 text-xs">
+              {sortOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setSortMode(option.value);
+                    if (option.value !== 'original' && option.value !== sortMode) setSortDirection('desc');
+                  }}
+                  className={classNames('border-r border-gray-800 px-3 last:border-r-0 hover:bg-gray-900', {
+                    'bg-gray-800 text-white': sortMode === option.value,
+                    'text-gray-400': sortMode !== option.value,
+                  })}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {sortMode !== 'original' && (
+              <IconButton
+                title={sortDirection === 'desc' ? 'Newest first' : 'Oldest first'}
+                onClick={() => setSortDirection(direction => (direction === 'desc' ? 'asc' : 'desc'))}
+              >
+                {sortDirection === 'desc' ? <ArrowDown className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+              </IconButton>
+            )}
+
             <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
               {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />}
               {scanState.status === 'done' && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
@@ -1007,7 +1055,7 @@ export function ImageNavigator({
           </div>
 
           <div ref={gridMeasureRef} className="relative min-h-0 flex-1">
-            <div ref={setGridScroller} className="operator-scrollbar-none absolute inset-0 overflow-y-auto px-2 py-2 xl:px-3">
+            <div ref={setGridScroller} className="absolute inset-0 overflow-y-auto px-2 py-2 xl:px-3">
               {gridScroller && gridRows.length > 0 ? (
                 <Virtuoso
                   ref={virtuosoRef}

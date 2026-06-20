@@ -56,6 +56,12 @@ type DatasetEditorPageProps = {
   projectName?: string | null;
 };
 
+type DatasetImageListItem = {
+  img_path: string;
+  added_at?: string | null;
+  captioned_at?: string | null;
+};
+
 export default function DatasetEditorPage({
   datasetName,
   projectID = null,
@@ -63,7 +69,7 @@ export default function DatasetEditorPage({
   returnHref = null,
   projectName = null,
 }: DatasetEditorPageProps) {
-  const [imgList, setImgList] = useState<{ img_path: string }[]>([]);
+  const [imgList, setImgList] = useState<DatasetImageListItem[]>([]);
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -114,7 +120,7 @@ export default function DatasetEditorPage({
         setEncryptedCatalog(null);
         setEncryptedKey(null);
         setEncryptedRawKeyB64(null);
-        setImgList(data.images);
+        setImgList(Array.isArray(data.images) ? data.images : []);
         setStatus('success');
       })
       .catch(error => {
@@ -212,7 +218,13 @@ export default function DatasetEditorPage({
   }, [imgList]);
 
   const plainStudioItems = useMemo<DatasetStudioItem[]>(
-    () => imgList.map(img => ({ kind: 'plain' as const, path: img.img_path })),
+    () =>
+      imgList.map(img => ({
+        kind: 'plain' as const,
+        path: img.img_path,
+        addedAt: img.added_at ?? null,
+        captionedAt: img.captioned_at ?? null,
+      })),
     [imgList],
   );
 
@@ -220,6 +232,12 @@ export default function DatasetEditorPage({
     () => (encryptedCatalog?.items || []).map(item => ({ kind: 'encrypted' as const, item })),
     [encryptedCatalog?.items],
   );
+
+  const handlePlainItemCaptioned = useCallback((targetPath: string, captionedAt: string | null) => {
+    setImgList(previous =>
+      previous.map(image => (image.img_path === targetPath ? { ...image, captioned_at: captionedAt } : image)),
+    );
+  }, []);
 
   const openJsonConversion = useCallback(() => {
     if (isRemoteDataset) return;
@@ -898,6 +916,7 @@ export default function DatasetEditorPage({
             }
             onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
             onDeleteImages={handleDeleteImages}
+            onPlainItemCaptioned={handlePlainItemCaptioned}
           />
         )}
         {status === 'success' && encryptedCatalog && encryptedKey && encryptedStudioItems.length > 0 && (

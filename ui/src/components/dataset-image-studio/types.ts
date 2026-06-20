@@ -4,6 +4,8 @@ export type DatasetStudioItem =
   | {
       kind: 'plain';
       path: string;
+      addedAt?: string | null;
+      captionedAt?: string | null;
     }
   | {
       kind: 'encrypted';
@@ -71,6 +73,7 @@ export type DatasetImageStudioProps = {
   onAddImages: () => void;
   onConvertDatasetToJson?: () => void;
   onDeleteImages?: (items: DatasetStudioItem[]) => Promise<DeleteImagesResult>;
+  onPlainItemCaptioned?: (path: string, captionedAt: string | null) => void;
   onBulkEncryptedCaptionAction?: (request: BulkCaptionActionRequest) => Promise<BulkCaptionActionResult>;
   onSaveEncryptedCaption?: (
     item: EncryptedDatasetItem,

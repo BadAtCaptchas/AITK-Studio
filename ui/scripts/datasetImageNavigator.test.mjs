@@ -11,6 +11,7 @@ const {
   navigatorStatusCounts,
   navigatorStatusForCaption,
   parseNavigatorJump,
+  sortNavigatorEntries,
 } = require('../dist/src/utils/datasetImageNavigator.js');
 
 const boxedCaption = JSON.stringify({
@@ -88,4 +89,46 @@ test('groupNavigatorRows chunks indexes by measured column count', () => {
 test('navigatorColumnCount derives stable columns from container and tile widths', () => {
   assert.equal(navigatorColumnCount(500, 120, 8), 3);
   assert.equal(navigatorColumnCount(100, 120, 8), 1);
+});
+
+test('sortNavigatorEntries preserves original order for original mode', () => {
+  const entries = [
+    { index: 2, name: 'c.png', status: 'plain', addedAt: '2026-01-03T00:00:00.000Z' },
+    { index: 0, name: 'a.png', status: 'plain', addedAt: '2026-01-01T00:00:00.000Z' },
+    { index: 1, name: 'b.png', status: 'plain', addedAt: '2026-01-02T00:00:00.000Z' },
+  ];
+  assert.deepEqual(sortNavigatorEntries(entries, 'original', 'desc').map(entry => entry.index), [2, 0, 1]);
+});
+
+test('sortNavigatorEntries sorts date fields by direction with missing dates last', () => {
+  const entries = [
+    { index: 0, name: 'missing.png', status: 'plain', addedAt: null, captionedAt: null },
+    {
+      index: 1,
+      name: 'older.png',
+      status: 'plain',
+      addedAt: '2026-01-01T00:00:00.000Z',
+      captionedAt: '2026-01-05T00:00:00.000Z',
+    },
+    {
+      index: 2,
+      name: 'newer.png',
+      status: 'plain',
+      addedAt: '2026-01-03T00:00:00.000Z',
+      captionedAt: '2026-01-07T00:00:00.000Z',
+    },
+  ];
+  assert.deepEqual(sortNavigatorEntries(entries, 'added', 'desc').map(entry => entry.index), [2, 1, 0]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'added', 'asc').map(entry => entry.index), [1, 2, 0]);
+  assert.deepEqual(sortNavigatorEntries(entries, 'captioned', 'desc').map(entry => entry.index), [2, 1, 0]);
+});
+
+test('sortNavigatorEntries falls back to original index for date ties and invalid dates', () => {
+  const entries = [
+    { index: 4, name: 'late-tie.png', status: 'plain', captionedAt: '2026-01-01T00:00:00.000Z' },
+    { index: 2, name: 'early-tie.png', status: 'plain', captionedAt: '2026-01-01T00:00:00.000Z' },
+    { index: 1, name: 'invalid.png', status: 'plain', captionedAt: 'not-a-date' },
+    { index: 3, name: 'missing.png', status: 'plain', captionedAt: null },
+  ];
+  assert.deepEqual(sortNavigatorEntries(entries, 'captioned', 'desc').map(entry => entry.index), [2, 4, 1, 3]);
 });

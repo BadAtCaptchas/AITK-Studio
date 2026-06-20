@@ -120,6 +120,7 @@ export default function DatasetImageStudio({
   onAddImages,
   onConvertDatasetToJson,
   onDeleteImages,
+  onPlainItemCaptioned,
   onBulkEncryptedCaptionAction,
   onSaveEncryptedCaption,
 }: DatasetImageStudioProps) {
@@ -836,12 +837,16 @@ export default function DatasetImageStudio({
     async (targetItem: DatasetStudioItem, targetKey: string, captionValue: string) => {
       const value = isPlainTextCaptionItem(targetItem) ? captionValue : captionValue.trim();
       if (targetItem.kind === 'plain') {
-        await apiClient.post('/api/img/caption', {
+        const response = await apiClient.post('/api/img/caption', {
           imgPath: targetItem.path,
           caption: value,
           direct: isPlainTextCaptionItem(targetItem),
           ...projectPayload,
         });
+        onPlainItemCaptioned?.(
+          targetItem.path,
+          typeof response.data?.captioned_at === 'string' ? response.data.captioned_at : null,
+        );
       } else if (encryptedKey && onSaveEncryptedCaption) {
         const targetCaptionPath =
           encryptedCaptionPaths[targetKey] || targetItem.item.captionObjectPath || captionObjectPath(randomId());
@@ -859,7 +864,7 @@ export default function DatasetImageStudio({
       }
       writeCaptionCache(targetKey, { caption: value, saved: value, loaded: true });
     },
-    [encryptedCaptionPaths, encryptedKey, onSaveEncryptedCaption, projectPayload, writeCaptionCache],
+    [encryptedCaptionPaths, encryptedKey, onPlainItemCaptioned, onSaveEncryptedCaption, projectPayload, writeCaptionCache],
   );
 
   const saveCaption = useCallback(

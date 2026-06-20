@@ -45,8 +45,9 @@ export async function POST(request: Request) {
     const captionPath = resolveCaptionWritePath(resolvedImagePath, captionText);
     // save caption to file
     fs.writeFileSync(captionPath, captionText);
+    const captionedAt = fs.statSync(captionPath).mtime.toISOString();
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, captioned_at: captionedAt });
   } catch (error) {
     if (error instanceof DatasetScopeError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

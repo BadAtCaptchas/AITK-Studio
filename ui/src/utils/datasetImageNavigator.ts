@@ -3,11 +3,15 @@ import { isFailedCaption } from './captionQuality';
 
 export type DatasetNavigatorFilter = 'all' | 'needs-caption' | 'has-boxes';
 export type DatasetNavigatorStatus = 'unknown' | 'missing' | 'has-boxes' | 'json' | 'plain';
+export type DatasetNavigatorSortMode = 'original' | 'added' | 'captioned';
+export type DatasetNavigatorSortDirection = 'asc' | 'desc';
 
 export type DatasetNavigatorEntry = {
   index: number;
   name: string;
   status: DatasetNavigatorStatus;
+  addedAt?: string | null;
+  captionedAt?: string | null;
 };
 
 export function parseNavigatorJump(value: string, itemCount: number) {
@@ -48,6 +52,31 @@ export function filterNavigatorEntries(
   filter: DatasetNavigatorFilter,
 ) {
   return entries.filter(entry => matchesNavigatorSearch(entry, query) && matchesNavigatorFilter(entry.status, filter));
+}
+
+function dateMs(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function sortNavigatorEntries(
+  entries: DatasetNavigatorEntry[],
+  mode: DatasetNavigatorSortMode,
+  direction: DatasetNavigatorSortDirection,
+) {
+  if (mode === 'original') return entries;
+
+  const field = mode === 'added' ? 'addedAt' : 'captionedAt';
+  return [...entries].sort((left, right) => {
+    const leftMs = dateMs(left[field]);
+    const rightMs = dateMs(right[field]);
+    if (leftMs == null && rightMs == null) return left.index - right.index;
+    if (leftMs == null) return 1;
+    if (rightMs == null) return -1;
+    const dateDelta = direction === 'asc' ? leftMs - rightMs : rightMs - leftMs;
+    return dateDelta || left.index - right.index;
+  });
 }
 
 export function groupNavigatorRows(indexes: number[], columns: number) {

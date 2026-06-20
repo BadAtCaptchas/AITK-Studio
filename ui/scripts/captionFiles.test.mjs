@@ -29,6 +29,13 @@ test('readCaptionSidecar prefers converted JSON over legacy text captions', asyn
   assert.equal(readCaptionSidecar(mediaPath), '{"caption":"converted json caption"}');
 });
 
+test('readCaptionSidecar removes triple dash caption separators', async () => {
+  const { mediaPath } = await makeMediaFile();
+  await fs.writeFile(captionSidecarPath(mediaPath, '.txt'), '---\nA black cat---on a red chair.\n---');
+
+  assert.equal(readCaptionSidecar(mediaPath), 'A black cat on a red chair.');
+});
+
 test('resolveCaptionWritePath keeps edits on the active JSON sidecar', async () => {
   const { mediaPath } = await makeMediaFile();
   await fs.writeFile(captionSidecarPath(mediaPath, '.txt'), 'legacy text caption');

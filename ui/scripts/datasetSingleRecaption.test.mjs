@@ -33,6 +33,20 @@ test('single-image recaption returns validated OpenRouter text captions', async 
   assert.equal(result.provider, 'openrouter');
 });
 
+test('single-image recaption removes triple dash separators from generated captions', async () => {
+  const result = await generateSingleImageRecaption({
+    provider: 'openrouter',
+    model: 'x-ai/grok-4.3',
+    outputFormat: 'text',
+    prompt: 'caption it',
+    imageDataUrl: 'data:image/png;base64,abc',
+    openRouterApiKey: 'test-key',
+    fetchImpl: openRouterFetchReturning('---\nA red jacket---on a studio chair.\n---'),
+  });
+
+  assert.equal(result.caption, 'A red jacket on a studio chair.');
+});
+
 test('single-image recaption rejects refusal captions', async () => {
   await assert.rejects(
     () =>

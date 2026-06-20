@@ -1,4 +1,4 @@
-import { assertUsableCaption } from '../utils/captionQuality';
+import { assertUsableCaption, sanitizeCaptionText } from '../utils/captionQuality';
 import { parseIdeogramCaption } from '../utils/ideogramCaption';
 import { generateOllamaImageCaption } from './ollama';
 import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
@@ -140,7 +140,7 @@ function extractOpenRouterMessageText(data: unknown) {
 }
 
 function validateGeneratedCaption(caption: string, outputFormat: RecaptionOutputFormat) {
-  const trimmed = caption.trim();
+  const trimmed = sanitizeCaptionText(caption).trim();
   assertUsableCaption(trimmed);
   if (outputFormat === 'ideogram_json') {
     const parsed = parseIdeogramCaption(trimmed);

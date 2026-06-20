@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { guardedFetch } from './networkPolicy';
+import { sanitizeCaptionText } from '../utils/captionQuality';
 
 export type OllamaModel = {
   name?: string;
@@ -143,16 +144,16 @@ async function throwOllamaResponseError(response: Response, url: string, operati
 function extractOllamaCaptionText(data: unknown) {
   if (typeof data !== 'object' || data === null) return '';
   const record = data as Record<string, unknown>;
-  if (typeof record.response === 'string') return record.response.trim();
+  if (typeof record.response === 'string') return sanitizeCaptionText(record.response).trim();
 
   const message = record.message;
   if (typeof message === 'object' && message !== null) {
     const content = (message as Record<string, unknown>).content;
-    if (typeof content === 'string') return content.trim();
+    if (typeof content === 'string') return sanitizeCaptionText(content).trim();
   }
 
   const text = record.text;
-  if (typeof text === 'string') return text.trim();
+  if (typeof text === 'string') return sanitizeCaptionText(text).trim();
 
   return '';
 }

@@ -327,6 +327,21 @@ test('generateOllamaImageCaption accepts message content response shape', async 
   assert.equal(caption, 'nested caption');
 });
 
+test('generateOllamaImageCaption removes triple dash separators from model responses', async () => {
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });
+    if (String(url).endsWith('/api/generate')) return response({ response: '---\na clean caption---with detail\n---' });
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const caption = await ollama.generateOllamaImageCaption(
+    { model: 'llava', prompt: 'caption', imageBase64: 'aW1n', maxNewTokens: 32 },
+    'http://ollama.test',
+  );
+
+  assert.equal(caption, 'a clean caption with detail');
+});
+
 test('generateOllamaImageCaption rejects empty model responses', async () => {
   globalThis.fetch = async url => {
     if (String(url).endsWith('/api/tags')) return response({ models: [{ model: 'llava:latest' }] });

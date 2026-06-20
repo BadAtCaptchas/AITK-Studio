@@ -41,6 +41,11 @@ const REFUSAL_PATTERNS = [
   /\b(?:image|file|picture|photo)\s+(?:is|was)\s+(?:not\s+)?(?:accessible|available|provided|attached|uploaded)\b/i,
 ];
 
+export function sanitizeCaptionText(caption: string) {
+  if (!caption.includes('---')) return caption;
+  return caption.replace(/[ \t]*-{3,}[ \t]*/g, ' ').replace(/^[ \t]+$/gm, '').trim();
+}
+
 export function isRefusalCaption(caption: string) {
   const normalized = caption.trim().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ');
   if (!normalized) return false;

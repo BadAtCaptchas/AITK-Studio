@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { sanitizeCaptionText } from '../utils/captionQuality';
 
 export const DATASET_CAPTION_SIDECAR_EXTENSIONS = ['.json', '.txt', '.caption', '.sdxl', '.md'];
 export const DATASET_TEXT_CAPTION_EXTENSIONS = ['.json', '.txt', '.caption', '.sdxl', '.md'];
@@ -30,12 +31,12 @@ export function findExistingCaptionSidecar(mediaPath: string) {
 
 export function readCaptionSidecar(mediaPath: string) {
   if (isTextCaptionFilePath(mediaPath) && fs.existsSync(mediaPath) && fs.statSync(mediaPath).isFile()) {
-    return fs.readFileSync(mediaPath, 'utf-8');
+    return sanitizeCaptionText(fs.readFileSync(mediaPath, 'utf-8'));
   }
 
   const captionPath = findExistingCaptionSidecar(mediaPath);
   if (!captionPath) return '';
-  return fs.readFileSync(captionPath, 'utf-8');
+  return sanitizeCaptionText(fs.readFileSync(captionPath, 'utf-8'));
 }
 
 export function resolveCaptionWritePath(mediaPath: string, caption: string) {

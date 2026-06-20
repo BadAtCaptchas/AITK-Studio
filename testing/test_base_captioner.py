@@ -65,12 +65,13 @@ class BaseCaptionerTest(unittest.TestCase):
                 BaseCaptioner,
                 is_failed_caption,
                 is_refusal_caption,
+                sanitize_caption_text,
             )
 
-        return BaseCaptioner, is_failed_caption, is_refusal_caption
+        return BaseCaptioner, is_failed_caption, is_refusal_caption, sanitize_caption_text
 
     def make_captioner(self, caption):
-        BaseCaptioner, _is_failed_caption, _is_refusal_caption = self.import_base_captioner()
+        BaseCaptioner, _is_failed_caption, _is_refusal_caption, _sanitize_caption_text = self.import_base_captioner()
         captioner = object.__new__(BaseCaptioner)
         captioner.file_paths = ["image.png"]
         captioner.caption_success_count = 0
@@ -82,7 +83,7 @@ class BaseCaptionerTest(unittest.TestCase):
         return BaseCaptioner, captioner
 
     def test_refusal_caption_is_failed(self):
-        _BaseCaptioner, is_failed_caption, is_refusal_caption = self.import_base_captioner()
+        _BaseCaptioner, is_failed_caption, is_refusal_caption, _sanitize_caption_text = self.import_base_captioner()
         refusals = [
             "I cannot fulfill this request.",
             "Sorry, but I can't help with that.",
@@ -110,10 +111,29 @@ class BaseCaptionerTest(unittest.TestCase):
                 self.assertTrue(is_failed_caption(refusal))
 
     def test_negative_wording_in_caption_is_not_failed(self):
-        _BaseCaptioner, is_failed_caption, is_refusal_caption = self.import_base_captioner()
+        _BaseCaptioner, is_failed_caption, is_refusal_caption, _sanitize_caption_text = self.import_base_captioner()
         caption = "A person cannot reach the top shelf in a bright kitchen."
         self.assertFalse(is_refusal_caption(caption))
         self.assertFalse(is_failed_caption(caption))
+
+    def test_caption_separator_is_sanitized(self):
+        _BaseCaptioner, _is_failed_caption, _is_refusal_caption, sanitize_caption_text = self.import_base_captioner()
+
+        self.assertEqual(
+            sanitize_caption_text("---\nA black cat---on a red chair.\n---"),
+            "A black cat on a red chair.",
+        )
+
+    def test_caption_loop_saves_sanitized_caption(self):
+        BaseCaptioner, captioner = self.make_captioner("---\nA black cat---on a red chair.\n---")
+
+        BaseCaptioner.run_caption_loop(captioner)
+
+        self.assertEqual(captioner.caption_success_count, 1)
+        captioner.save_caption_for_file.assert_called_once_with(
+            "image.png",
+            "A black cat on a red chair.",
+        )
 
     def test_caption_loop_does_not_save_refusal_caption(self):
         BaseCaptioner, captioner = self.make_captioner("I cannot fulfill this request.")

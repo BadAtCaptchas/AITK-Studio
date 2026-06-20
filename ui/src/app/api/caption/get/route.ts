@@ -6,6 +6,7 @@ import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
 import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
+import { sanitizeCaptionText } from '@/utils/captionQuality';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -30,6 +31,15 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({ imgPath: remoteAsset.path }),
         headers: { 'Content-Type': 'application/json' },
       });
+      if (remoteResponse.ok) {
+        return new NextResponse(sanitizeCaptionText(await remoteResponse.text()), {
+          status: remoteResponse.status,
+          headers: {
+            'Content-Type': remoteResponse.headers.get('content-type') || 'text/plain; charset=utf-8',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
       return new NextResponse(remoteResponse.body, {
         status: remoteResponse.status,
         headers: {

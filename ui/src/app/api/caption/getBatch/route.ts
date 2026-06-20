@@ -6,6 +6,7 @@ import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { readCaptionSidecar } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
+import { sanitizeCaptionText } from '@/utils/captionQuality';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
         });
         const remoteCaptions = remoteData?.captions || {};
         entries.forEach(entry => {
-          captions[entry.ref] = remoteCaptions[entry.path] ?? '';
+          captions[entry.ref] = sanitizeCaptionText(remoteCaptions[entry.path] ?? '');
         });
       } catch {
         entries.forEach(entry => {

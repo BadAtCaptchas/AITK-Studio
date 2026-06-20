@@ -203,6 +203,18 @@ def _normalize_caption_extension(value: Optional[str], default: str = "txt") -> 
     return normalized or default
 
 
+CAPTION_SEPARATOR_RE = re.compile(r"[ \t]*-{3,}[ \t]*")
+
+
+def sanitize_caption_text(caption: str) -> str:
+    text = str(caption or "")
+    if "---" not in text:
+        return text
+    text = CAPTION_SEPARATOR_RE.sub(" ", text)
+    text = re.sub(r"^[ \t]+$", "", text, flags=re.MULTILINE)
+    return text.strip()
+
+
 FIRST_PERSON_REFUSAL = (
     r"\bi(?:\s+(?:can(?:not|'t)|won't(?:\s+be\s+able\s+to)?"
     r"|will\s+not(?:\s+be\s+able\s+to)?|would\s+not\s+be\s+able\s+to)"
@@ -429,16 +441,17 @@ class BaseCaptioner(BaseExtensionProcess):
                 )
                 if file_caption is None:
                     file_caption = self.get_caption_for_file(file_path)
-                if is_failed_caption(str(file_caption or "")):
+                file_caption = sanitize_caption_text(str(file_caption or "")).strip()
+                if is_failed_caption(file_caption):
                     self.caption_failure_count += 1
                     last_error_message = (
                         "captioner returned a refusal"
-                        if is_refusal_caption(str(file_caption or ""))
+                        if is_refusal_caption(file_caption)
                         else "captioner returned no text"
                     )
                     print(f"Error captioning file {file_path}: {last_error_message}")
                     continue
-                self.save_caption_for_file(file_path, str(file_caption).strip())
+                self.save_caption_for_file(file_path, file_caption)
                 self.caption_success_count += 1
             except Exception as e:
                 self.caption_failure_count += 1
@@ -474,6 +487,7 @@ class BaseCaptioner(BaseExtensionProcess):
         return image
 
     def save_caption_for_file(self, file_path: str, caption: str):
+        caption = sanitize_caption_text(caption).strip()
         if self.encrypted_reader is not None:
             self.encrypted_reader.save_caption(self.encrypted_items_by_path[file_path], caption)
             return
@@ -498,7 +512,7 @@ class BaseCaptioner(BaseExtensionProcess):
     def get_source_caption_for_file(self, file_path: str) -> str:
         if self.encrypted_reader is not None:
             try:
-                return (
+                return sanitize_caption_text(
                     self.encrypted_reader.get_caption(
                         self.encrypted_items_by_path[file_path]
                     )
@@ -515,7 +529,7 @@ class BaseCaptioner(BaseExtensionProcess):
             return ""
         try:
             with open(source_path, "r", encoding="utf-8") as f:
-                return f.read().strip()
+                return sanitize_caption_text(f.read()).strip()
         except Exception:
             return ""
 
@@ -546,13 +560,14 @@ class BaseCaptioner(BaseExtensionProcess):
         caption: str,
         image_size: Optional[tuple[int, int]] = None,
     ) -> str:
+        caption = sanitize_caption_text(str(caption))
         if not self.is_ideogram_json_output():
-            return str(caption).strip()
+            return caption.strip()
 
-        parsed = self._parse_json_caption(str(caption))
+        parsed = self._parse_json_caption(caption)
         parsed = self._normalize_ideogram_json_caption(parsed, image_size=image_size)
         self._warn_for_ideogram_json_issues(parsed, file_path)
-        return json.dumps(parsed, ensure_ascii=False, indent=2)
+        return sanitize_caption_text(json.dumps(parsed, ensure_ascii=False, indent=2)).strip()
 
     def get_preserved_ideogram_json_caption_for_file(
         self, file_path: str
@@ -569,12 +584,12 @@ class BaseCaptioner(BaseExtensionProcess):
             parsed = self._normalize_ideogram_json_caption(parsed)
             if self._ideogram_caption_verifier().verify(parsed):
                 return None
-            return json.dumps(parsed, ensure_ascii=False, indent=2)
+            return sanitize_caption_text(json.dumps(parsed, ensure_ascii=False, indent=2)).strip()
         except Exception:
             return None
 
     def _parse_json_caption(self, caption: str) -> dict:
-        text = caption.strip()
+        text = sanitize_caption_text(caption).strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
             text = re.sub(r"\s*```$", "", text)

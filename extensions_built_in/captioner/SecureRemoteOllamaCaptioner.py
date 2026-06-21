@@ -3,13 +3,14 @@ import hashlib
 import io
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
 import uuid
 from collections import OrderedDict
 
-from .BaseCaptioner import BaseCaptioner, CaptionConfig
+from .BaseCaptioner import BaseCaptioner, CaptionConfig, FatalCaptionError
 from .secure_remote_crypto import decrypt_secure_caption_json, encrypt_secure_caption_json
 from toolkit.network_policy import assert_url_allowed
 
@@ -55,8 +56,13 @@ class SecureRemoteOllamaCaptioner(BaseCaptioner):
             except Exception:
                 pass
             raise RuntimeError(f"{operation} failed: {message}") from exc
-        except TimeoutError as exc:
-            raise RuntimeError(f"{operation} failed after {timeout}s") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise FatalCaptionError(f"{operation} timed out after {timeout}s") from exc
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, (TimeoutError, socket.timeout)):
+                raise FatalCaptionError(f"{operation} timed out after {timeout}s") from exc
+            raise RuntimeError(f"{operation} failed: {exc.reason}") from exc
 
         try:
             return json.loads(raw)

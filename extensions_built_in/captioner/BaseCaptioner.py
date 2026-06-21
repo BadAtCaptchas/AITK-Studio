@@ -35,6 +35,10 @@ from toolkit.ui_database import UIJobStore
 
 AITK_Status = Literal["running", "stopped", "error", "completed"]
 
+
+class FatalCaptionError(RuntimeError):
+    """Abort the caption job instead of continuing to the next file."""
+
 IDEOGRAM_JSON_OUTPUT_FORMAT = "ideogram_json"
 
 IDEOGRAM_JSON_FORMAT_REQUIREMENTS = """Use this exact JSON contract:
@@ -453,6 +457,11 @@ class BaseCaptioner(BaseExtensionProcess):
                     continue
                 self.save_caption_for_file(file_path, file_caption)
                 self.caption_success_count += 1
+            except FatalCaptionError as e:
+                self.caption_failure_count += 1
+                last_error_message = str(e)
+                print(f"Fatal captioning error for file {file_path}: {e}")
+                raise
             except Exception as e:
                 self.caption_failure_count += 1
                 last_error_message = str(e)

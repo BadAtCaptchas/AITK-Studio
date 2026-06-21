@@ -2,12 +2,13 @@ import base64
 import io
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
 from collections import OrderedDict
 
-from .BaseCaptioner import BaseCaptioner, CaptionConfig
+from .BaseCaptioner import BaseCaptioner, CaptionConfig, FatalCaptionError
 from toolkit.network_policy import assert_url_allowed
 
 
@@ -71,6 +72,10 @@ class OllamaCaptioner(BaseCaptioner):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
+        except (TimeoutError, socket.timeout) as exc:
+            raise FatalCaptionError(
+                f"Ollama request to {route_path} timed out after {timeout}s"
+            ) from exc
         except urllib.error.HTTPError as exc:
             message = exc.read().decode("utf-8", errors="replace")[:500]
             try:
@@ -84,6 +89,13 @@ class OllamaCaptioner(BaseCaptioner):
                     "try setting AITK_OLLAMA_USER_AGENT or using the secure remote Ollama worker."
                 )
             raise RuntimeError(f"Ollama request to {route_path} failed with HTTP {exc.code}: {message}") from exc
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, (TimeoutError, socket.timeout)):
+                raise FatalCaptionError(
+                    f"Ollama request to {route_path} timed out after {timeout}s"
+                ) from exc
+            raise RuntimeError(f"Ollama request to {route_path} failed: {exc.reason}") from exc
 
     def _normalize_model_name(self, value: str) -> str:
         value = value.strip()

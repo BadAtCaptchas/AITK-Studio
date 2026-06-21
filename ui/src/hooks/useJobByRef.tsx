@@ -8,6 +8,7 @@ export default function useJobByRef(
   jobRef: string | null,
   reloadInterval: null | number = null,
   jobType: string | null = null,
+  projectID: string | null = null,
 ) {
   const [job, setJob] = useState<Job | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -21,6 +22,7 @@ export default function useJobByRef(
     setStatus('loading');
     const params = new URLSearchParams({ job_ref: jobRef });
     if (jobType) params.set('job_type', jobType);
+    if (projectID) params.set('project_id', projectID);
     apiClient
       .get(`/api/jobs?${params.toString()}`)
       .then(res => res.data)
@@ -33,7 +35,7 @@ export default function useJobByRef(
         setJob(null);
         setStatus('error');
       });
-  }, [jobRef, jobType]);
+  }, [jobRef, jobType, projectID]);
 
   useEffect(() => {
     refreshJob();

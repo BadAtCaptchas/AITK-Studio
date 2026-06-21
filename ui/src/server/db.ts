@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { MongoClient, type Collection, type Db, type Document } from 'mongodb';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
-import { PrismaClient } from '../generated/prisma/client';
+import { Prisma, PrismaClient } from '../generated/prisma/client';
 import sqlite3 from 'sqlite3';
 import { TOOLKIT_ROOT } from '../paths';
 import type { Job, Project, Queue, WorkerNode } from '../types';
@@ -958,11 +958,12 @@ export const db = {
       return getPrisma().job.findFirst({ where: { name, project_id: project_id ?? null } });
     },
 
-    async findLatestByRef(jobRef: string, jobType?: string | null): Promise<Job | null> {
+    async findLatestByRef(jobRef: string, jobType?: string | null, project_id?: string | null): Promise<Job | null> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
         const filter: Document = { job_ref: jobRef };
         if (jobType) filter.job_type = jobType;
+        if (project_id !== undefined) filter.project_id = project_id ?? null;
         const row = await mongoCollection(mongo, 'jobs')
           .find(filter, { projection: { _id: 0 } })
           .sort({ updated_at: -1 })
@@ -970,8 +971,10 @@ export const db = {
           .next();
         return normalizeJob(row);
       }
+      const where: Prisma.JobWhereInput = { job_ref: jobRef, ...(jobType ? { job_type: jobType } : {}) };
+      if (project_id !== undefined) where.project_id = project_id ?? null;
       return getPrisma().job.findFirst({
-        where: { job_ref: jobRef, ...(jobType ? { job_type: jobType } : {}) },
+        where,
         orderBy: { updated_at: 'desc' },
       });
     },

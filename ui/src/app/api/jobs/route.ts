@@ -148,7 +148,7 @@ export async function GET(request: Request) {
       return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
     if (job_ref) {
-      const job = await db.jobs.findLatestByRef(job_ref, job_type);
+      const job = await db.jobs.findLatestByRef(job_ref, job_type, project?.id ?? null);
       await assertProjectJobVisible(job);
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);

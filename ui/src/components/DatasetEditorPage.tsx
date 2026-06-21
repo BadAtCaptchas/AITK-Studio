@@ -97,11 +97,12 @@ export default function DatasetEditorPage({
   const [datasetActionError, setDatasetActionError] = useState('');
   const [defaultWatchSourcePath, setDefaultWatchSourcePath] = useState('');
   const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
-  const effectiveDatasetRoot = datasetRoot || settings?.DATASETS_FOLDER || '';
+  const effectiveDatasetRoot = projectID ? datasetRoot || '' : datasetRoot || settings?.DATASETS_FOLDER || '';
   const datasetPath = useMemo(
     () => (effectiveDatasetRoot ? pathJoin(effectiveDatasetRoot, datasetName) : datasetName),
     [datasetName, effectiveDatasetRoot],
   );
+  const canUseDatasetCaptionJob = !isRemoteDataset && (!projectID || !!effectiveDatasetRoot);
   const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
 
   const refreshImageList = (dbName: string, options: { background?: boolean } = {}) => {
@@ -818,7 +819,7 @@ export default function DatasetEditorPage({
               <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden sm:inline-flex" />
             </>
           )}
-          {!isRemoteDataset && (
+          {canUseDatasetCaptionJob && (
             <AutoCaptionButton
               datasetPath={datasetPath}
               datasetName={datasetName}

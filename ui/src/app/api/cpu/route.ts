@@ -3,7 +3,7 @@ import si from 'systeminformation';
 import { createRequire } from 'module';
 import os from 'os';
 import { CpuInfo } from '@/types';
-import { fetchWorkerCpu, getRemoteWorker, isLocalWorker } from '@/server/remoteClient';
+import { fetchWorkerCpu, getRemoteWorker, isLocalWorker, runRemoteBackgroundPoll } from '@/server/remoteClient';
 
 const isMac = os.platform() === 'darwin';
 
@@ -12,7 +12,11 @@ export async function GET(request: Request) {
     const workerID = new URL(request.url).searchParams.get('worker_id') || 'local';
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
-      return NextResponse.json(await fetchWorkerCpu(worker));
+      const poll = await runRemoteBackgroundPoll(worker, 'CPU telemetry', () => fetchWorkerCpu(worker));
+      if ('reason' in poll) {
+        return NextResponse.json({ error: `Remote CPU telemetry unavailable: ${poll.reason}` }, { status: 503 });
+      }
+      return NextResponse.json(poll.value);
     }
 
     const cpuInfoRaw = await si.cpu();

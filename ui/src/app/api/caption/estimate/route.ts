@@ -4,24 +4,7 @@ import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
 import { isEncryptedDatasetFolder } from '@/server/encryptedDatasets';
 import { REMOTE_CAPTION_MEDIA_EXTENSIONS, resolveDatasetDirectoryInsideRoot } from '@/server/remoteCaptionSecurity';
-import { guardedFetch } from '@/server/networkPolicy';
-
-type OpenRouterModel = {
-  id: string;
-  name?: string;
-  pricing?: {
-    prompt?: string;
-    completion?: string;
-  };
-};
-
-const FALLBACK_OPENROUTER_PRICING: Record<string, { prompt: number; completion: number; name: string }> = {
-  'x-ai/grok-4.3': {
-    prompt: 0.00000125,
-    completion: 0.0000025,
-    name: 'xAI: Grok 4.3',
-  },
-};
+import { getOpenRouterCaptionPricing } from '@/server/openRouterPricing';
 
 function normalizeExtension(value: unknown, fallback: string) {
   return (typeof value === 'string' ? value : fallback).trim().replace(/^\.+/, '').toLowerCase() || fallback;
@@ -68,43 +51,6 @@ function countCaptionTargets(
   return count;
 }
 
-async function fetchOpenRouterModel(modelId: string): Promise<OpenRouterModel | null> {
-  try {
-    const response = await guardedFetch('https://openrouter.ai/api/v1/models', { cache: 'no-store' }, 'OpenRouter pricing');
-    if (!response.ok) return null;
-    const data = (await response.json()) as { data?: OpenRouterModel[] };
-    return data.data?.find(model => model.id === modelId) || null;
-  } catch {
-    return null;
-  }
-}
-
-async function openRouterPricing(modelId: string) {
-  const model = await fetchOpenRouterModel(modelId);
-  const prompt = Number(model?.pricing?.prompt);
-  const completion = Number(model?.pricing?.completion);
-  if (Number.isFinite(prompt) && prompt >= 0 && Number.isFinite(completion) && completion >= 0) {
-    return {
-      modelName: model?.name || modelId,
-      prompt,
-      completion,
-      source: 'openrouter',
-    };
-  }
-
-  const fallback = FALLBACK_OPENROUTER_PRICING[modelId];
-  if (fallback) {
-    return {
-      modelName: fallback.name,
-      prompt: fallback.prompt,
-      completion: fallback.completion,
-      source: 'fallback',
-    };
-  }
-
-  return null;
-}
-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -141,7 +87,7 @@ export async function POST(request: Request) {
     }
 
     const model = typeof body?.model === 'string' ? body.model.trim() : '';
-    const pricing = model ? await openRouterPricing(model) : null;
+    const pricing = model ? await getOpenRouterCaptionPricing(model) : null;
     if (!pricing) {
       return NextResponse.json({
         encrypted: false,

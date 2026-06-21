@@ -25,10 +25,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const body = await request.json().catch(() => ({}));
-    const synced = await syncRemoteJob(job);
+    const synced = await syncRemoteJob(job, { background: false });
     const result = await syncRemoteCaptionResultForJob(synced, {
       force: body?.force === true,
       retryFailed: true,
+      background: false,
     });
     const state = getJobRemoteCaptionState(result);
     if (state?.downloadStatus === 'failed') {

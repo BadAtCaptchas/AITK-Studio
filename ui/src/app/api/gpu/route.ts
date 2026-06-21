@@ -3,7 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import os from 'os';
-import { getRemoteWorker, isLocalWorker, fetchWorkerGpu } from '@/server/remoteClient';
+import { getRemoteWorker, isLocalWorker, fetchWorkerGpu, runRemoteBackgroundPoll } from '@/server/remoteClient';
 
 const execAsync = promisify(exec);
 
@@ -99,7 +99,16 @@ export async function GET(request: Request) {
     const workerID = new URL(request.url).searchParams.get('worker_id') || 'local';
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
-      return NextResponse.json(await fetchWorkerGpu(worker));
+      const poll = await runRemoteBackgroundPoll(worker, 'GPU telemetry', () => fetchWorkerGpu(worker));
+      if ('reason' in poll) {
+        return NextResponse.json({
+          hasNvidiaSmi: false,
+          isMac: false,
+          gpus: [],
+          error: `Remote GPU telemetry unavailable: ${poll.reason}`,
+        });
+      }
+      return NextResponse.json(poll.value);
     }
 
     // Get platform

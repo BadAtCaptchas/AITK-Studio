@@ -178,3 +178,34 @@ test('jobs API listing still discovers before syncing remote mirrors', async () 
   assert.deepEqual(calls[2][1], ['local-job']);
   assert.equal(calls[2][2], discoveredJobIds);
 });
+
+test('jobs API listing returns cached remote mirrors when remote polling is skipped', async () => {
+  const calls = [];
+  const localJob = makeJob({ id: 'local-job', worker_id: 'local' });
+  const cachedMirrorJob = makeJob({ id: 'cached-mirror', worker_id: 'worker-1', remote_job_id: 'remote-job' });
+
+  const jobs = await listJobsForJobsApi(
+    { jobType: 'training', localOnly: false },
+    {
+      discoverRemoteJobs: async jobType => {
+        calls.push(['discover', jobType]);
+        return new Set();
+      },
+      listJobs: async options => {
+        calls.push(['list', options]);
+        return [localJob, cachedMirrorJob];
+      },
+      syncRemoteJobs: async listedJobs => {
+        calls.push(['sync', listedJobs.map(job => job.id)]);
+        return listedJobs;
+      },
+    },
+  );
+
+  assert.deepEqual(jobs.map(job => job.id), ['local-job', 'cached-mirror']);
+  assert.deepEqual(calls, [
+    ['discover', 'training'],
+    ['list', { job_type: 'training', project_id: null }],
+    ['sync', ['local-job', 'cached-mirror']],
+  ]);
+});

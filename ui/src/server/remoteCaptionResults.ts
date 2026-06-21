@@ -20,8 +20,11 @@ import {
   readDatasetExportManifest,
 } from './datasetTransfer';
 import {
+  getRemoteBackgroundPollEligibility,
   getRemoteWorker,
   isLocalWorker,
+  noteRemoteBackgroundPollFailure,
+  noteRemoteBackgroundPollSuccess,
   remoteFetch,
   remoteJson,
   syncRemoteJob,
@@ -161,7 +164,7 @@ async function cleanupRemoteDataset(job: Job, state: RemoteCaptionState) {
 
 export async function syncRemoteCaptionResultForJob(
   job: Job,
-  options: { force?: boolean; retryFailed?: boolean } = {},
+  options: { force?: boolean; retryFailed?: boolean; background?: boolean } = {},
 ) {
   if (isLocalWorker(job.worker_id) || !job.remote_job_id) return job;
   const state = getJobRemoteCaptionState(job);
@@ -172,6 +175,14 @@ export async function syncRemoteCaptionResultForJob(
   if (job.status !== 'completed') return job;
   if (!state.remoteDatasetName) return job;
 
+  const background = options.background !== false;
+  const worker = await getRemoteWorker(job.worker_id);
+  const pollFeature = `remote caption result sync ${job.id}`;
+  if (background) {
+    const eligibility = await getRemoteBackgroundPollEligibility(worker, pollFeature);
+    if (!eligibility.allowed) return job;
+  }
+
   const syncs = activeSyncs();
   if (syncs.has(job.id)) return job;
   syncs.add(job.id);
@@ -179,6 +190,7 @@ export async function syncRemoteCaptionResultForJob(
   const datasetsRoot = await getDatasetsRoot();
   let workRoot: string | null = null;
   let workingJob = job;
+  let markedDownloading = false;
 
   try {
     const downloadStartedAt = nowIso();
@@ -188,18 +200,41 @@ export async function syncRemoteCaptionResultForJob(
       downloadStartedAt,
       lastError: null,
     });
+    markedDownloading = true;
 
     await fsp.mkdir(datasetsRoot, { recursive: true });
     workRoot = await fsp.mkdtemp(path.join(datasetsRoot, `.aitk-remote-caption-result-${job.id}-`));
     const zipPath = path.join(workRoot, 'dataset.zip');
     const extractRoot = path.join(workRoot, 'extract');
 
-    const worker = await getRemoteWorker(workingJob.worker_id);
-    const remoteResponse = await remoteFetch(worker, '/api/datasets/export', {
-      method: 'POST',
-      body: JSON.stringify({ datasetName: state.remoteDatasetName }),
-      headers: { 'Content-Type': 'application/json' },
-    });
+    let remoteResponse: Response;
+    try {
+      remoteResponse = await remoteFetch(worker, '/api/datasets/export', {
+        method: 'POST',
+        body: JSON.stringify({ datasetName: state.remoteDatasetName }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (background) noteRemoteBackgroundPollSuccess(worker, pollFeature);
+    } catch (error) {
+      if (background && noteRemoteBackgroundPollFailure(worker, error, pollFeature)) {
+        if (markedDownloading) {
+          return updateRemoteCaptionState(
+            workingJob,
+            {
+              downloadStatus: state.downloadStatus,
+              downloadStartedAt: state.downloadStartedAt,
+              lastError: state.lastError ?? null,
+            },
+            {
+              info: job.info,
+              remote_error: job.remote_error,
+            },
+          );
+        }
+        return job;
+      }
+      throw error;
+    }
     await writeResponseBodyToFile(remoteResponse, zipPath);
     await extractZipSafely(zipPath, extractRoot);
 

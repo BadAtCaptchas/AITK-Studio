@@ -16,7 +16,7 @@
     "test:flux-guidance": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/fluxGuidancePolicy.test.mjs",
     "test:tensorboard": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
     "test:ltx-training": "node --test scripts/ltxTrainingOptions.test.mjs",
-    "test:remote": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs scripts/remoteClient.test.mjs scripts/jobsApiList.test.mjs",
+    "test:remote": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs scripts/remoteClient.test.mjs scripts/jobsApiList.test.mjs scripts/queueSync.test.mjs scripts/openRouterPricing.test.mjs",
     "test:queue-reorder": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/queueReorder.test.mjs",
     "test:projects": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/projects.test.mjs",
     "test:lifecycle": "node --test scripts/appLifecycle.test.mjs",

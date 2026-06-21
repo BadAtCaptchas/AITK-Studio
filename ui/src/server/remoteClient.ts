@@ -4,7 +4,14 @@ import { createReadStream, existsSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { db, type WorkerNodeRecord } from './db';
-import { guardedFetch } from './networkPolicy';
+import {
+  getOfflineBypassHostnames,
+  guardedFetch,
+  isLocalPrivateIp,
+  isOfflineModeEnabled,
+  normalizeHostname,
+  OfflineModeError,
+} from './networkPolicy';
 import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
 import { getJobRemoteCaptionState } from './remoteCaptionJobs';
 import {
@@ -15,7 +22,9 @@ import {
 } from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
 
-const REMOTE_DISCOVERY_TIMEOUT_MS = 15_000;
+const REMOTE_BACKGROUND_POLL_TIMEOUT_MS = 5_000;
+const REMOTE_BACKGROUND_COOLDOWN_MS = 30_000;
+const REMOTE_BACKGROUND_LOG_INTERVAL_MS = 5 * 60 * 1000;
 
 type RemoteRequestInit = RequestInit & { timeoutMs?: number };
 
@@ -42,9 +51,43 @@ type RemoteDiscoveryErrorLogState = {
 
 const REMOTE_DISCOVERY_ERROR_LOG_INTERVAL_MS = 5 * 60 * 1000;
 
+type RemoteBackgroundPollLogState = {
+  signature: string;
+  lastLoggedAt: number;
+  suppressedCount: number;
+};
+
+type RemoteBackgroundPollCooldownState = {
+  reason: string;
+  until: number;
+};
+
+type RemoteBackgroundPollEligibility =
+  | {
+      allowed: true;
+    }
+  | {
+      allowed: false;
+      reason: string;
+    };
+
+type RemoteBackgroundPollResult<T> =
+  | {
+      skipped: false;
+      value: T;
+    }
+  | {
+      skipped: true;
+      reason: string;
+    };
+
 declare global {
   // eslint-disable-next-line no-var
   var __remoteDiscoveryErrorLogState: Map<string, RemoteDiscoveryErrorLogState> | undefined;
+  // eslint-disable-next-line no-var
+  var __remoteBackgroundPollLogState: Map<string, RemoteBackgroundPollLogState> | undefined;
+  // eslint-disable-next-line no-var
+  var __remoteBackgroundPollCooldownState: Map<string, RemoteBackgroundPollCooldownState> | undefined;
 }
 
 const remoteDiscoveryErrorLogState =
@@ -52,6 +95,20 @@ const remoteDiscoveryErrorLogState =
 
 if (!globalThis.__remoteDiscoveryErrorLogState) {
   globalThis.__remoteDiscoveryErrorLogState = remoteDiscoveryErrorLogState;
+}
+
+const remoteBackgroundPollLogState =
+  globalThis.__remoteBackgroundPollLogState ?? new Map<string, RemoteBackgroundPollLogState>();
+
+if (!globalThis.__remoteBackgroundPollLogState) {
+  globalThis.__remoteBackgroundPollLogState = remoteBackgroundPollLogState;
+}
+
+const remoteBackgroundPollCooldownState =
+  globalThis.__remoteBackgroundPollCooldownState ?? new Map<string, RemoteBackgroundPollCooldownState>();
+
+if (!globalThis.__remoteBackgroundPollCooldownState) {
+  globalThis.__remoteBackgroundPollCooldownState = remoteBackgroundPollCooldownState;
 }
 
 export function isLocalWorker(workerId: string | null | undefined) {
@@ -80,6 +137,207 @@ export async function getRemoteWorker(workerId: string): Promise<WorkerNodeRecor
 function remoteUrl(worker: WorkerNodeRecord, routePath: string) {
   const suffix = routePath.startsWith('/') ? routePath : `/${routePath}`;
   return `${normalizeWorkerBaseUrl(worker.base_url)}${suffix}`;
+}
+
+function workerPollKey(worker: Pick<WorkerNodeRecord, 'id' | 'base_url'>) {
+  return worker.id || normalizeWorkerBaseUrl(worker.base_url);
+}
+
+function workerHostname(worker: Pick<WorkerNodeRecord, 'base_url'>) {
+  try {
+    return normalizeHostname(new URL(normalizeWorkerBaseUrl(worker.base_url)).hostname);
+  } catch {
+    return '';
+  }
+}
+
+function isLocalHostname(hostname: string) {
+  return hostname === 'localhost' || hostname.endsWith('.localhost');
+}
+
+async function isWorkerAllowedInOfflineMode(worker: WorkerNodeRecord) {
+  if (worker.offline_bypass_enabled) return true;
+  const hostname = workerHostname(worker);
+  if (!hostname) return false;
+  if (isLocalHostname(hostname) || isLocalPrivateIp(hostname)) return true;
+  const allowedHosts = await getOfflineBypassHostnames();
+  return allowedHosts.has(hostname);
+}
+
+function logRemoteBackgroundPoll(worker: WorkerNodeRecord, feature: string, message: string, level: 'info' | 'warn') {
+  const key = `${workerPollKey(worker)}:${feature}`;
+  const signature = message;
+  const now = Date.now();
+  const state = remoteBackgroundPollLogState.get(key);
+
+  if (!state || state.signature !== signature || now - state.lastLoggedAt >= REMOTE_BACKGROUND_LOG_INTERVAL_MS) {
+    const suffix = state?.suppressedCount
+      ? ` (${state.suppressedCount} repeated background poll message${state.suppressedCount === 1 ? '' : 's'} suppressed)`
+      : '';
+    const log = level === 'warn' ? console.warn : console.info;
+    log(`${message}${suffix}`);
+    remoteBackgroundPollLogState.set(key, {
+      signature,
+      lastLoggedAt: now,
+      suppressedCount: 0,
+    });
+    return;
+  }
+
+  state.suppressedCount += 1;
+}
+
+function clearRemoteBackgroundPollLog(worker: WorkerNodeRecord, feature: string) {
+  const key = `${workerPollKey(worker)}:${feature}`;
+  const state = remoteBackgroundPollLogState.get(key);
+  if (state?.suppressedCount) {
+    console.info(
+      `Remote background poll recovered for ${worker.name} ${feature} (${state.suppressedCount} repeated message${
+        state.suppressedCount === 1 ? '' : 's'
+      } suppressed)`,
+    );
+  }
+  remoteBackgroundPollLogState.delete(key);
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error || 'Remote worker polling failed');
+}
+
+function getErrorName(error: unknown) {
+  if (error instanceof Error && error.name) return error.name;
+  if (typeof error === 'object' && error !== null) {
+    const name = (error as Record<string, unknown>).name;
+    return typeof name === 'string' ? name : '';
+  }
+  return '';
+}
+
+function getNestedErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object') return null;
+  const record = error as Record<string, unknown>;
+  const code = record.code;
+  if (typeof code === 'string' && code) return code;
+  return getNestedErrorCode(record.cause);
+}
+
+function isCloudflareTunnelUnavailable(error: unknown) {
+  return (
+    error instanceof RemoteClientError &&
+    error.status === 530 &&
+    (/Cloudflare Tunnel error/i.test(error.body) || /Error<\/span>\s*<span>1033<\/span>/i.test(error.body))
+  );
+}
+
+const TRANSIENT_REMOTE_ERROR_CODES = new Set([
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+const TRANSIENT_REMOTE_HTTP_STATUSES = new Set([408, 429, 502, 503, 504, 522, 523, 524, 530]);
+
+export function isTransientRemoteBackgroundPollError(error: unknown) {
+  if (isCloudflareTunnelUnavailable(error)) return true;
+  if (error instanceof RemoteClientError) return TRANSIENT_REMOTE_HTTP_STATUSES.has(error.status);
+  if (error instanceof OfflineModeError) return /DNS lookup failed/i.test(error.message);
+  if (getErrorName(error) === 'AbortError' || /aborted|timed out|timeout/i.test(getErrorMessage(error))) return true;
+  const code = getNestedErrorCode(error);
+  return !!code && TRANSIENT_REMOTE_ERROR_CODES.has(code);
+}
+
+function transientRemoteErrorReason(error: unknown) {
+  if (isCloudflareTunnelUnavailable(error)) return 'Cloudflare tunnel is unavailable';
+  const code = getNestedErrorCode(error);
+  const message = getErrorMessage(error);
+  return code ? `${code}: ${message}` : message;
+}
+
+export async function getRemoteBackgroundPollEligibility(
+  worker: WorkerNodeRecord,
+  feature = 'background polling',
+): Promise<RemoteBackgroundPollEligibility> {
+  const key = workerPollKey(worker);
+  const now = Date.now();
+  const cooldown = remoteBackgroundPollCooldownState.get(key);
+  if (cooldown && now < cooldown.until) {
+    const seconds = Math.max(1, Math.ceil((cooldown.until - now) / 1000));
+    const reason = `cooling down for ${seconds}s after ${cooldown.reason}`;
+    logRemoteBackgroundPoll(
+      worker,
+      feature,
+      `Skipping ${feature} for worker ${worker.name}: ${reason}.`,
+      'info',
+    );
+    return { allowed: false, reason };
+  }
+  if (cooldown) {
+    remoteBackgroundPollCooldownState.delete(key);
+  }
+
+  if (!(await isOfflineModeEnabled())) return { allowed: true };
+  if (await isWorkerAllowedInOfflineMode(worker)) return { allowed: true };
+
+  const reason = 'offline mode is enabled and this worker is not allowed for offline polling';
+  logRemoteBackgroundPoll(worker, feature, `Skipping ${feature} for worker ${worker.name}: ${reason}.`, 'info');
+  return { allowed: false, reason };
+}
+
+export function noteRemoteBackgroundPollSuccess(worker: WorkerNodeRecord, feature = 'background polling') {
+  remoteBackgroundPollCooldownState.delete(workerPollKey(worker));
+  clearRemoteBackgroundPollLog(worker, feature);
+}
+
+export function noteRemoteBackgroundPollFailure(
+  worker: WorkerNodeRecord,
+  error: unknown,
+  feature = 'background polling',
+) {
+  if (!isTransientRemoteBackgroundPollError(error)) return false;
+  const reason = transientRemoteErrorReason(error);
+  remoteBackgroundPollCooldownState.set(workerPollKey(worker), {
+    reason,
+    until: Date.now() + REMOTE_BACKGROUND_COOLDOWN_MS,
+  });
+  logRemoteBackgroundPoll(
+    worker,
+    feature,
+    `Remote ${feature} for worker ${worker.name} failed; background polling will retry after cooldown: ${reason}.`,
+    'warn',
+  );
+  return true;
+}
+
+export async function runRemoteBackgroundPoll<T>(
+  worker: WorkerNodeRecord,
+  feature: string,
+  task: () => Promise<T>,
+): Promise<RemoteBackgroundPollResult<T>> {
+  const eligibility = await getRemoteBackgroundPollEligibility(worker, feature);
+  if ('reason' in eligibility) return { skipped: true, reason: eligibility.reason };
+
+  try {
+    const value = await task();
+    noteRemoteBackgroundPollSuccess(worker, feature);
+    return { skipped: false, value };
+  } catch (error) {
+    if (noteRemoteBackgroundPollFailure(worker, error, feature)) {
+      return { skipped: true, reason: transientRemoteErrorReason(error) };
+    }
+    throw error;
+  }
+}
+
+export function resetRemoteBackgroundPollingStateForTests() {
+  remoteBackgroundPollLogState.clear();
+  remoteBackgroundPollCooldownState.clear();
 }
 
 async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: RemoteRequestInit = {}) {
@@ -160,8 +418,8 @@ export async function fetchRemoteJob(workerId: string, remoteJobId: string) {
   return fetchWorkerJob(worker, remoteJobId);
 }
 
-async function fetchWorkerJob(worker: WorkerNodeRecord, remoteJobId: string) {
-  return remoteJson<Job | null>(worker, `/api/jobs?id=${encodeURIComponent(remoteJobId)}`);
+async function fetchWorkerJob(worker: WorkerNodeRecord, remoteJobId: string, init: RemoteRequestInit = {}) {
+  return remoteJson<Job | null>(worker, `/api/jobs?id=${encodeURIComponent(remoteJobId)}`, init);
 }
 
 export function isRemoteJobMissingError(error: unknown) {
@@ -194,7 +452,7 @@ export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string
   const query = new URLSearchParams({ local_only: '1' });
   if (jobType) query.set('job_type', jobType);
   return remoteJson<{ jobs: Job[] }>(worker, `/api/jobs?${query.toString()}`, {
-    timeoutMs: REMOTE_DISCOVERY_TIMEOUT_MS,
+    timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS,
   });
 }
 
@@ -303,12 +561,23 @@ async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
   return synced;
 }
 
-export async function syncRemoteJob(localJob: Job) {
+export async function syncRemoteJob(localJob: Job, options: { background?: boolean } = {}) {
   if (isLocalWorker(localJob.worker_id) || !localJob.remote_job_id) return localJob;
 
   try {
     const worker = await getRemoteWorker(localJob.worker_id);
-    const remoteJob = await fetchWorkerJob(worker, localJob.remote_job_id);
+    let remoteJob: Job | null;
+    if (options.background === false) {
+      remoteJob = await fetchWorkerJob(worker, localJob.remote_job_id);
+    } else {
+      const poll = await runRemoteBackgroundPoll(worker, `job sync ${localJob.id}`, () =>
+        fetchWorkerJob(worker, localJob.remote_job_id as string, {
+          timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS,
+        }),
+      );
+      if ('reason' in poll) return localJob;
+      remoteJob = poll.value;
+    }
     if (!remoteJob) {
       return markRemoteJobMissing(localJob);
     }
@@ -343,10 +612,7 @@ export async function syncRemoteJobs(jobs: Job[], alreadySyncedJobIds = new Set<
 
 function remoteDiscoveryErrorMessage(workerName: string, error: unknown) {
   if (error instanceof RemoteClientError) {
-    const cloudflareTunnelUnavailable =
-      error.status === 530 &&
-      (/Cloudflare Tunnel error/i.test(error.body) || /Error<\/span>\s*<span>1033<\/span>/i.test(error.body));
-    const detail = cloudflareTunnelUnavailable ? 'Cloudflare tunnel is unavailable' : error.message;
+    const detail = isCloudflareTunnelUnavailable(error) ? 'Cloudflare tunnel is unavailable' : error.message;
     return `Failed to discover jobs for worker ${workerName}: ${detail}`;
   }
   return `Failed to discover jobs for worker ${workerName}: ${
@@ -395,7 +661,9 @@ export async function discoverRemoteJobs(jobType?: string | null) {
     workers.map(async workerRecord => {
       try {
         const worker = await getRemoteWorker(workerRecord.id);
-        const data = await fetchWorkerJobs(worker, jobType);
+        const poll = await runRemoteBackgroundPoll(worker, 'job discovery', () => fetchWorkerJobs(worker, jobType));
+        if ('reason' in poll) return;
+        const data = poll.value;
         const syncedJobs = await Promise.all(
           (data.jobs || []).map(remoteJob => upsertRemoteJobMirror(worker, remoteJob)),
         );
@@ -601,7 +869,7 @@ export async function fetchWorkerHealth(worker: WorkerNodeRecord) {
     cloudflared: unknown;
     ollama?: unknown;
     timestamp: string;
-  }>(worker, '/api/remote/health');
+  }>(worker, '/api/remote/health', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS });
 }
 
 export async function uploadDatasetArchiveToWorker(
@@ -623,13 +891,13 @@ export async function uploadDatasetArchiveToWorker(
 }
 
 export async function fetchWorkerGpu(worker: WorkerNodeRecord) {
-  return remoteJson<GPUApiResponse>(worker, '/api/gpu');
+  return remoteJson<GPUApiResponse>(worker, '/api/gpu', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS });
 }
 
 export async function fetchWorkerCpu(worker: WorkerNodeRecord) {
-  return remoteJson<CpuInfo>(worker, '/api/cpu');
+  return remoteJson<CpuInfo>(worker, '/api/cpu', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS });
 }
 
 export async function fetchWorkerQueues(worker: WorkerNodeRecord) {
-  return remoteJson<{ queues: Queue[] }>(worker, '/api/queue');
+  return remoteJson<{ queues: Queue[] }>(worker, '/api/queue', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS });
 }

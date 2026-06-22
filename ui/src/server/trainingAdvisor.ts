@@ -521,7 +521,7 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const usesAdaptiveProdigyLr = optimizer.startsWith('prodigy');
   const arch = String(processConfig.model?.arch ?? '');
   const baseArch = arch.split(':')[0];
-  const networkType = String(processConfig.network?.type ?? '');
+  const networkType = String(processConfig.network?.type ?? '').trim().toLowerCase();
   const guidanceBypassPolicy = getFluxGuidanceBypassPolicy({
     arch,
     name_or_path: processConfig.model?.name_or_path,
@@ -540,6 +540,10 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
     /flux\.2-klein-base-[49]b|asymflux\.2-klein-9b/i.test(
       String(processConfig.model?.name_or_path ?? ''),
     );
+  const isFlux2KleinArch =
+    baseArch === 'flux2_klein_4b' ||
+    baseArch === 'flux2_klein_9b' ||
+    /flux\.2-klein-base-[49]b/i.test(String(processConfig.model?.name_or_path ?? ''));
   const isOfficialFluxGuidanceBypassPolicy =
     baseArch === 'flux' ||
     baseArch === 'flux_kontext' ||
@@ -670,6 +674,21 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
         'SEGA distillation does not support this model',
         `SEGA distillation is enabled for ${arch || 'an unknown model architecture'}.`,
         'Use FLUX.2 or FLUX.2 Klein, or disable SEGA distillation.',
+        undefined,
+        ['config.process[0].model.arch', 'config.process[0].train.sega_distill'],
+      );
+    }
+
+    if (isFlux2KleinArch) {
+      addFinding(
+        findings,
+        'info',
+        'preflight',
+        'config',
+        'train.sega_distill.experimental_klein',
+        'Klein SEGA distillation is experimental',
+        'SEGA distillation for FLUX.2 Klein is a local AITK Studio experiment, not upstream ai-toolkit parity behavior.',
+        'Run a baseline with train.sega_distill disabled when comparing Klein training quality to upstream.',
         undefined,
         ['config.process[0].model.arch', 'config.process[0].train.sega_distill'],
       );

@@ -205,6 +205,11 @@ class BucketsMixin:
             for start_idx in range(0, len(bucket.file_list_idx), self.batch_size):
                 end_idx = min(start_idx + self.batch_size, len(bucket.file_list_idx))
                 batch = bucket.file_list_idx[start_idx:end_idx]
+                # Keep bucketed batches at the requested batch size. Some training
+                # paths assume stable batch shape even when a bucket has a short tail.
+                if len(batch) < self.batch_size and len(batch) > 0:
+                    pad = [batch[i % len(batch)] for i in range(self.batch_size - len(batch))]
+                    batch = batch + pad
                 self.batch_indices.append(batch)
 
     def shuffle_buckets(self: 'AiToolkitDataset'):

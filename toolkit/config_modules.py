@@ -1670,7 +1670,8 @@ def validate_configs(
             raise ValueError(
                 f"SEGA distillation currently supports {sorted(supported_sega_arches)}, got {model_config.arch}."
             )
-        if network_config is None or getattr(network_config, 'type', None) != 'lora':
+        network_type = str(getattr(network_config, 'type', '')).lower() if network_config is not None else ''
+        if network_config is None or network_type != 'lora':
             raise ValueError("SEGA distillation currently requires network.type to be lora.")
         if train_config.diff_output_preservation:
             raise ValueError("SEGA distillation cannot be combined with differential output preservation.")

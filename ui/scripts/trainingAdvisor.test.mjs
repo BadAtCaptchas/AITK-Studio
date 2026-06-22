@@ -433,6 +433,40 @@ test('preflight accepts compatible SEGA distillation configuration with teacher 
   assert.ok(ids.has('train.sega_distill.teacher_cost'));
 });
 
+test('preflight accepts mixed-case LoRA network type for SEGA distillation', () => {
+  const dataset = makeDataset({ 'one.png': 'fake', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.sega_distill = true;
+  processConfig.model.arch = 'flux2';
+  processConfig.network.type = 'LoRA';
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(!ids.has('train.sega_distill.non_lora'));
+  assert.ok(ids.has('train.sega_distill.teacher_cost'));
+});
+
+test('preflight labels Klein SEGA distillation as experimental parity behavior', () => {
+  const dataset = makeDataset({ 'one.png': 'fake', 'one.txt': 'caption' });
+  const config = baseConfig(dataset);
+  const processConfig = config.config.process[0];
+  processConfig.train.sega_distill = true;
+  processConfig.train.bypass_guidance_embedding = false;
+  processConfig.model.arch = 'flux2_klein_9b';
+  processConfig.model.name_or_path = 'black-forest-labs/FLUX.2-klein-base-9B';
+  processConfig.network.type = 'lora';
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(!ids.has('train.sega_distill.unsupported_arch'));
+  assert.ok(!ids.has('train.sega_distill.non_lora'));
+  assert.ok(ids.has('train.sega_distill.experimental_klein'));
+  assert.ok(ids.has('train.sega_distill.teacher_cost'));
+});
+
 test('preflight reports auto training phases that cannot advance', () => {
   const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
   const config = baseConfig(dataset);

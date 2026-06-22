@@ -286,6 +286,15 @@ class SegaDistillConfigTest(unittest.TestCase):
             NetworkConfig(type="lora"),
         )
 
+    def test_sega_distill_validation_accepts_mixed_case_lora(self):
+        validate_configs(
+            TrainConfig(sega_distill=True),
+            ModelConfig(arch="flux2", name_or_path="black-forest-labs/FLUX.2-dev"),
+            SaveConfig(save_format="diffusers"),
+            [],
+            NetworkConfig(type="LoRA"),
+        )
+
     def test_sega_distill_validation_accepts_zimage_lora(self):
         validate_configs(
             TrainConfig(sega_distill=True),

@@ -407,7 +407,7 @@ class DataLoaderBatchDTO:
                 # find one to use as a base
                 base_unconditional_tensor = None
                 for x in self.file_items:
-                    if x.unaugmented_tensor is not None:
+                    if x.unconditional_tensor is not None:
                         base_unconditional_tensor = x.unconditional_tensor
                         break
                 unconditional_tensor = []

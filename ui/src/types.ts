@@ -524,6 +524,7 @@ export interface TrainConfig {
   content_or_style: string;
   optimizer: string;
   lr: number;
+  text_encoder_lr?: number;
   ema_config?: EMAConfig;
   dtype: string;
   unload_text_encoder: boolean;

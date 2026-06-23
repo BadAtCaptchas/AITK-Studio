@@ -1221,6 +1221,36 @@ export default function SimpleJob({
                       />
                     </FormGroup>
                     <FormGroup label="Text encoder">
+                      {!disableSections.includes('train.train_text_encoder') && (
+                        <Checkbox
+                          label="Train TE"
+                          checked={processConfig.train.train_text_encoder || false}
+                          docKey={'train.train_text_encoder'}
+                          onChange={value => {
+                            setJobConfig(value, 'config.process[0].train.train_text_encoder');
+                            if (value) {
+                              setJobConfig(false, 'config.process[0].train.unload_text_encoder');
+                              setJobConfig(false, 'config.process[0].train.cache_text_embeddings');
+                              if (processConfig.datasets.some(dataset => dataset.cache_text_embeddings)) {
+                                setJobConfig(
+                                  processConfig.datasets.map(dataset => ({ ...dataset, cache_text_embeddings: false })),
+                                  'config.process[0].datasets',
+                                );
+                              }
+                            }
+                          }}
+                        />
+                      )}
+                      {textEncoderTrainingEnabled && (
+                        <NumberInput
+                          label="TE learning rate"
+                          value={processConfig.train.text_encoder_lr ?? processConfig.train.lr ?? null}
+                          docKey={'train.text_encoder_lr'}
+                          onChange={value => setJobConfig(value ?? undefined, 'config.process[0].train.text_encoder_lr')}
+                          placeholder={`${processConfig.train.lr || 0.0001}`}
+                          min={0}
+                        />
+                      )}
                       {!disableSections.includes('train.unload_text_encoder') && (
                         <Checkbox
                           label="Unload TE"

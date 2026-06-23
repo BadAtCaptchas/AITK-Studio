@@ -12,6 +12,7 @@ type DisableableSections =
   | 'trigger_word'
   | 'train.diff_output_preservation'
   | 'train.blank_prompt_preservation'
+  | 'train.train_text_encoder'
   | 'train.unload_text_encoder'
   | 'slider';
 

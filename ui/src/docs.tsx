@@ -162,6 +162,23 @@ const docs: { [key: string]: ConfigDoc } = {
       </>
     ),
   },
+  'train.train_text_encoder': {
+    title: 'Train Text Encoder',
+    description: (
+      <>
+        Trains the text encoder along with the selected training target. This uses more VRAM and cannot be combined
+        with unloading the text encoder or cached text embeddings.
+      </>
+    ),
+  },
+  'train.text_encoder_lr': {
+    title: 'Text Encoder Learning Rate',
+    description: (
+      <>
+        Learning rate used for text encoder parameters. When unset, the trainer uses the main learning rate.
+      </>
+    ),
+  },
   'train.cache_text_embeddings': {
     title: 'Cache Text Embeddings',
     description: (

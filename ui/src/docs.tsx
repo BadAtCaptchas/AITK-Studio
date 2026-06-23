@@ -158,7 +158,7 @@ const docs: { [key: string]: ConfigDoc } = {
     description: (
       <>
         Unloading text encoder will cache the trigger word and the sample prompts and unload the text encoder from the
-        GPU. Captions in for the dataset will be ignored
+        GPU. Captions in for the dataset will be ignored. This cannot be used while training the text encoder.
       </>
     ),
   },
@@ -170,7 +170,7 @@ const docs: { [key: string]: ConfigDoc } = {
         <br />
         Caching text embeddings will process and cache all the text embeddings from the text encoder to the disk. The
         text encoder will be unloaded from the GPU. This does not work with things that dynamically change the prompt
-        such as trigger words, caption dropout, etc.
+        such as trigger words, caption dropout, etc. This cannot be used while training the text encoder.
       </>
     ),
   },

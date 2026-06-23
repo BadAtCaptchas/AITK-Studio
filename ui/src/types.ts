@@ -407,6 +407,7 @@ export interface DatasetConfig {
   is_reg: boolean;
   network_weight: number;
   cache_latents_to_disk?: boolean;
+  cache_text_embeddings?: boolean;
   resolution: number[];
   controls: string[];
   control_path?: string | null;

@@ -187,6 +187,7 @@ export default function SimpleJob({
   const isAudioModel = !!(modelArch?.group === 'audio');
   const autoTrain = !!jobConfig.config.process[0].train.auto_train;
   const trainConfig = jobConfig.config.process[0].train;
+  const textEncoderTrainingEnabled = !!trainConfig.train_text_encoder;
   const modelArchName = jobConfig.config.process[0].model.arch;
   const supportsSegaDistill = segaDistillArchs.has(modelArchName.split(':')[0]);
   const segaDistillEnabled = !!trainConfig.sega_distill;
@@ -325,6 +326,29 @@ export default function SimpleJob({
       document.removeEventListener('visibilitychange', refreshRememberedKeys);
     };
   }, []);
+
+  useEffect(() => {
+    if (!textEncoderTrainingEnabled) return;
+    if (trainConfig.unload_text_encoder) {
+      setJobConfig(false, 'config.process[0].train.unload_text_encoder');
+    }
+    if (trainConfig.cache_text_embeddings) {
+      setJobConfig(false, 'config.process[0].train.cache_text_embeddings');
+    }
+    const datasets = jobConfig.config.process[0].datasets;
+    if (datasets.some(dataset => dataset.cache_text_embeddings)) {
+      setJobConfig(
+        datasets.map(dataset => ({ ...dataset, cache_text_embeddings: false })),
+        'config.process[0].datasets',
+      );
+    }
+  }, [
+    jobConfig.config.process[0].datasets,
+    setJobConfig,
+    textEncoderTrainingEnabled,
+    trainConfig.cache_text_embeddings,
+    trainConfig.unload_text_encoder,
+  ]);
 
   const setSamplePromptValue = (sampleIndex: number, prompt: string) => {
     if (modelArch?.sampleTags && taggedSampleArr?.[sampleIndex]) {
@@ -1202,6 +1226,7 @@ export default function SimpleJob({
                           label="Unload TE"
                           checked={processConfig.train.unload_text_encoder || false}
                           docKey={'train.unload_text_encoder'}
+                          disabled={textEncoderTrainingEnabled}
                           onChange={value => {
                             setJobConfig(value, 'config.process[0].train.unload_text_encoder');
                             if (value) setJobConfig(false, 'config.process[0].train.cache_text_embeddings');
@@ -1212,6 +1237,7 @@ export default function SimpleJob({
                         label="Cache embeddings"
                         checked={processConfig.train.cache_text_embeddings || false}
                         docKey={'train.cache_text_embeddings'}
+                        disabled={textEncoderTrainingEnabled}
                         onChange={value => {
                           setJobConfig(value, 'config.process[0].train.cache_text_embeddings');
                           if (value) setJobConfig(false, 'config.process[0].train.unload_text_encoder');

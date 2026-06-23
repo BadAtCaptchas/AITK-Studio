@@ -500,6 +500,29 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
     );
   }
 
+  const textEmbeddingCacheDatasetPaths = (processConfig.datasets ?? [])
+    .map((dataset, index) => (dataset.cache_text_embeddings ? `config.process[0].datasets[${index}].cache_text_embeddings` : null))
+    .filter((value): value is string => value !== null);
+  const textEncoderConflictPaths = [
+    train?.unload_text_encoder ? 'config.process[0].train.unload_text_encoder' : null,
+    train?.cache_text_embeddings ? 'config.process[0].train.cache_text_embeddings' : null,
+    ...textEmbeddingCacheDatasetPaths,
+  ].filter((value): value is string => value !== null);
+  if (train?.train_text_encoder && textEncoderConflictPaths.length > 0) {
+    addFinding(
+      findings,
+      'critical',
+      'preflight',
+      'config',
+      'train.text_encoder.cache_conflict',
+      'Text encoder training conflicts with cached embeddings',
+      'The text encoder cannot be trained while it is unloaded or while text embeddings are cached.',
+      'Set train.unload_text_encoder, train.cache_text_embeddings, and dataset cache_text_embeddings to false before training the text encoder.',
+      textEncoderConflictPaths,
+      ['config.process[0].train.train_text_encoder', ...textEncoderConflictPaths],
+    );
+  }
+
   const effectiveBatch = getEffectiveBatch(processConfig);
   if (effectiveBatch >= 8) {
     addFinding(

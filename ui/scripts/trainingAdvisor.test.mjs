@@ -140,6 +140,23 @@ function findingIds(result) {
   return new Set(result.findings.map(finding => finding.id));
 }
 
+test('preflight reports text encoder training with cached embeddings', () => {
+  const dataset = makeDataset({
+    'one.jpg': 'image',
+    'one.txt': 'caption',
+  });
+  const config = baseConfig(dataset);
+  const process = config.config.process[0];
+  process.model.low_vram = true;
+  process.train.train_text_encoder = true;
+  process.train.cache_text_embeddings = true;
+
+  const result = analyzeTrainingAdvisor(config, { scanFileLimit: 20 });
+  const ids = findingIds(result);
+
+  assert.ok(ids.has('train.text_encoder.cache_conflict'));
+});
+
 test('preflight reports official FLUX guidance bypass mismatch', () => {
   const dataset = makeDataset({
     'one.jpg': 'image',

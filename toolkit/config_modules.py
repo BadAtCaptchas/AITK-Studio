@@ -1645,6 +1645,18 @@ def validate_configs(
 
     # see if any datasets are caching text embeddings
     is_caching_text_embeddings = any(dataset.cache_text_embeddings for dataset in dataset_configs)
+    if train_config.train_text_encoder:
+        if train_config.unload_text_encoder:
+            raise ValueError(
+                "Cannot unload the text encoder when train.train_text_encoder is true. "
+                "Set train.unload_text_encoder to false before training the text encoder."
+            )
+        if train_config.cache_text_embeddings or is_caching_text_embeddings:
+            raise ValueError(
+                "Cannot cache text embeddings when train.train_text_encoder is true. "
+                "Set train.cache_text_embeddings and dataset cache_text_embeddings to false before training the text encoder."
+            )
+
     if is_caching_text_embeddings:
         
         # check if they are doing differential output preservation

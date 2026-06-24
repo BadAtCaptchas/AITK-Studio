@@ -20,7 +20,11 @@ import torch
 from safetensors.torch import load_file, save_file
 
 import huggingface_hub
-from huggingface_hub.errors import EntryNotFoundError
+from huggingface_hub.errors import (
+    EntryNotFoundError,
+    LocalEntryNotFoundError,
+    OfflineModeIsEnabled,
+)
 from diffusers import AutoencoderKLQwenImage
 from transformers import (
     AutoTokenizer,
@@ -41,6 +45,7 @@ from toolkit.accelerator import unwrap_model
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
 from toolkit.memory_management import MemoryManager
+from toolkit.hf_offline import is_hf_offline_mode
 
 from .src.mmdit import (
     DoubleSharedModulation,
@@ -97,7 +102,8 @@ def _load_mmdit_state_dict(name_or_path: str, filename: Optional[str]) -> dict:
 
     ``name_or_path`` may be: a ``.safetensors`` file, a directory containing one
     (``filename`` or the lone ``.safetensors`` in it), or a hub repo id (the
-    file ``filename`` is downloaded, defaulting to ``model.safetensors``).
+    file ``filename`` is downloaded, defaulting to the repo suffix such as
+    ``raw.safetensors`` or ``turbo.safetensors``).
     """
     if name_or_path.endswith(".safetensors") and os.path.isfile(name_or_path):
         return load_file(name_or_path)
@@ -123,6 +129,20 @@ def _load_mmdit_state_dict(name_or_path: str, filename: Optional[str]) -> dict:
         path = huggingface_hub.hf_hub_download(
             repo_id=name_or_path, filename=fname, token=HF_TOKEN
         )
+    except (LocalEntryNotFoundError, OfflineModeIsEnabled) as e:
+        if is_hf_offline_mode():
+            raise RuntimeError(
+                f"Krea2 checkpoint {fname!r} for hub repo {name_or_path!r} is not "
+                "available in the local Hugging Face cache, and offline mode is "
+                "enabled. Disable offline mode and download the referenced models "
+                "first, or set model.name_or_path/model.model_kwargs.checkpoint_filename "
+                "to a local cached .safetensors checkpoint."
+            ) from e
+        raise FileNotFoundError(
+            f"Could not download {fname!r} from hub repo {name_or_path!r}, and it "
+            "was not found in the local Hugging Face cache. Check your connection "
+            "or set model.name_or_path to a local .safetensors checkpoint."
+        ) from e
     except EntryNotFoundError as e:
         raise FileNotFoundError(
             f"Could not find {fname!r} in hub repo {name_or_path!r}. Set "

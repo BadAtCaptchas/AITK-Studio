@@ -72,6 +72,7 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [ideogram-ai/ideogram-4-nf4](https://huggingface.co/ideogram-ai/ideogram-4-nf4) (Ideogram 4 NF4)
 - [ideogram-ai/ideogram-4-fp8](https://huggingface.co/ideogram-ai/ideogram-4-fp8) (Ideogram 4 FP8)
 - [Comfy-Org/Ideogram-4](https://huggingface.co/Comfy-Org/Ideogram-4) (Ideogram 4 Comfy NVFP4/FP8 weights)
+- [krea/Krea-2-Raw](https://huggingface.co/krea/Krea-2-Raw) (Krea 2)
 - [OmniGen2/OmniGen2](https://huggingface.co/OmniGen2/OmniGen2) (OmniGen2)
 - [Tongyi-MAI/Z-Image-Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) (Z-Image Turbo)
 - [Tongyi-MAI/Z-Image](https://huggingface.co/Tongyi-MAI/Z-Image) (Z-Image)

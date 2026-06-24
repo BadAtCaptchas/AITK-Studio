@@ -237,7 +237,11 @@ class StableDiffusion:
         
         # can be used on models to invalidate cache if things change.
         self.latent_space_version = None
-        
+
+        # Some models use masks as conditioning inputs and should not apply
+        # those masks to the loss.
+        self.do_masked_loss = True
+
     # properties for old arch for backwards compatibility
     @property
     def is_xl(self):

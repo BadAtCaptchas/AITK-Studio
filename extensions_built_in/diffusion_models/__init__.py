@@ -118,6 +118,7 @@ I1Model, = _optional_models(".i1", (("I1Model", "i1"),))
 PRXPixelT2IModel, = _optional_models(
     ".prx_pixel_t2i", (("PRXPixelT2IModel", "prx_pixel"),)
 )
+Krea2Model, = _optional_models(".krea2", (("Krea2Model", "krea2"),))
 
 
 AI_TOOLKIT_MODELS = [
@@ -154,4 +155,5 @@ AI_TOOLKIT_MODELS = [
     GlmImageModel,
     I1Model,
     PRXPixelT2IModel,
+    Krea2Model,
 ]

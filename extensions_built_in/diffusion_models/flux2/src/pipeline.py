@@ -224,6 +224,10 @@ class Flux2Pipeline(DiffusionPipeline):
                 raise ValueError(
                     f"Unsupported text_encoder_type: {self.text_encoder_type}"
                 )
+        else:
+            prompt_embeds = prompt_embeds.to(device=device)
+            if prompt_embeds_mask is not None:
+                prompt_embeds_mask = prompt_embeds_mask.to(device=device)
 
         _, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
@@ -298,6 +302,7 @@ class Flux2Pipeline(DiffusionPipeline):
         return_dict: bool = True,
         max_sequence_length: int = 512,
         control_img_list: Optional[List[PIL.Image.Image]] = None,
+        device: Optional[Union[torch.device, str]] = None,
     ):
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
@@ -319,7 +324,10 @@ class Flux2Pipeline(DiffusionPipeline):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        device = self._execution_device
+        if device is None:
+            device = self._execution_device
+        else:
+            device = torch.device(device)
 
         # 3. Encode the prompt
 
@@ -333,6 +341,8 @@ class Flux2Pipeline(DiffusionPipeline):
         )
 
         txt, txt_ids = batched_prc_txt(prompt_embeds)
+        txt = txt.to(device=device)
+        txt_ids = txt_ids.to(device=device)
         neg_txt, neg_txt_ids = None, None
 
         if do_guidance:
@@ -346,6 +356,8 @@ class Flux2Pipeline(DiffusionPipeline):
             )
 
             neg_txt, neg_txt_ids = batched_prc_txt(negative_prompt_embeds)
+            neg_txt = neg_txt.to(device=device)
+            neg_txt_ids = neg_txt_ids.to(device=device)
 
         # 4. Prepare latent variables\
         latents = self.prepare_latents(
@@ -360,6 +372,8 @@ class Flux2Pipeline(DiffusionPipeline):
         )
 
         packed_latents, img_ids = batched_prc_img(latents)
+        packed_latents = packed_latents.to(device=device)
+        img_ids = img_ids.to(device=device)
 
         timesteps = get_schedule(num_inference_steps, packed_latents.shape[1])
 
@@ -376,6 +390,8 @@ class Flux2Pipeline(DiffusionPipeline):
             img_cond_seq, img_cond_seq_ids = encode_image_refs(
                 self.vae, control_img_list
             )
+            img_cond_seq = img_cond_seq.to(device=device, dtype=packed_latents.dtype)
+            img_cond_seq_ids = img_cond_seq_ids.to(device=device)
         else:
             img_cond_seq, img_cond_seq_ids = None, None
 
@@ -438,7 +454,7 @@ class Flux2Pipeline(DiffusionPipeline):
         if output_type == "latent":
             image = latents
         else:
-            latents = latents.to(self.vae.dtype)
+            latents = latents.to(device=self.vae.device, dtype=self.vae.dtype)
             image = self.vae.decode(latents).float()
 
             image = self.image_processor.postprocess(image, output_type=output_type)

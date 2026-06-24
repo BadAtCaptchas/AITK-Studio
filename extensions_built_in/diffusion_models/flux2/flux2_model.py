@@ -536,6 +536,7 @@ class Flux2Model(BaseModel):
             latents=gen_config.latents,
             generator=generator,
             control_img_list=control_img_list,
+            device=self.device_torch,
             **extra,
         ).images[0]
         return img

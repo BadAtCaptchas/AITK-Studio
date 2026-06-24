@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Database, FolderInput, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { Copy, Database, FolderInput, FolderOutput, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { openConfirm } from '@/components/ConfirmModal';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
@@ -20,6 +20,34 @@ import {
 } from '@/utils/encryptedDatasets';
 import type { ProjectSummary } from '@/components/project/types';
 import type { DatasetSummary } from '@/types';
+
+type ProjectDatasetActionStatus = 'idle' | 'creating' | 'uploading' | 'importing' | 'copying' | 'moving' | 'deleting';
+
+type TransferItemResult = {
+  sourceName: string;
+  destinationName: string | null;
+  sourcePath: string;
+  destinationPath: string | null;
+  copied: boolean;
+  deleted: boolean;
+  rewrittenJobCount: number;
+  error?: string;
+};
+
+type TransferResponse = {
+  operation: 'copy' | 'move';
+  results: TransferItemResult[];
+  copiedCount: number;
+  movedCount: number;
+  failedCount: number;
+  rewrittenJobCount: number;
+};
+
+type TransferNotice = {
+  tone: 'success' | 'warning';
+  title: string;
+  message: string;
+};
 
 function safeDatasetNameFromFile(file: File) {
   return (
@@ -53,8 +81,9 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [actionStatus, setActionStatus] = useState<'idle' | 'creating' | 'uploading' | 'importing' | 'deleting'>('idle');
+  const [actionStatus, setActionStatus] = useState<ProjectDatasetActionStatus>('idle');
   const [actionError, setActionError] = useState('');
+  const [actionNotice, setActionNotice] = useState<TransferNotice | null>(null);
   const [filterText, setFilterText] = useState('');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newDatasetName, setNewDatasetName] = useState('');
@@ -162,6 +191,12 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     (dataset.path ? getRememberedEncryptedDatasetKey(dataset.path) : null) ||
     getRememberedEncryptedDatasetKey(dataset.name);
 
+  const rememberedProjectDatasetKey = (dataset: DatasetSummary) =>
+    getRememberedEncryptedDatasetKey(`project:${projectID}:${dataset.name}`) ||
+    (dataset.path ? getRememberedEncryptedDatasetKey(dataset.path) : null) ||
+    (dataset.ref ? getRememberedEncryptedDatasetKey(dataset.ref) : null) ||
+    getRememberedEncryptedDatasetKey(dataset.name);
+
   const rememberProjectEncryptedKey = (datasetName: string, rawKeyB64: string, datasetPath?: string) => {
     rememberEncryptedDatasetKey(datasetName, rawKeyB64);
     rememberEncryptedDatasetKey(`project:${projectID}:${datasetName}`, rawKeyB64);
@@ -169,6 +204,12 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     if (summary?.roots.datasets) {
       rememberEncryptedDatasetKey(`${summary.roots.datasets.replace(/[\\/]+$/, '')}\\${datasetName}`, rawKeyB64);
     }
+  };
+
+  const rememberGlobalEncryptedKey = (datasetName: string, rawKeyB64: string, datasetPath?: string | null) => {
+    rememberEncryptedDatasetKey(datasetName, rawKeyB64);
+    rememberEncryptedDatasetKey(`aitk-dataset://local/${encodeURIComponent(datasetName)}`, rawKeyB64);
+    if (datasetPath) rememberEncryptedDatasetKey(datasetPath, rawKeyB64);
   };
 
   const openCreateModal = () => {
@@ -179,6 +220,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     setDatasetPasswordConfirm('');
     setCreateError('');
     setActionError('');
+    setActionNotice(null);
     setCreateModalOpen(true);
   };
 
@@ -203,6 +245,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     }
     setActionStatus('creating');
     setActionError('');
+    setActionNotice(null);
     setCreateError('');
     try {
       let encryptedManifest = null;
@@ -236,6 +279,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     setUploadDatasetName(safeDatasetNameFromFile(nextFiles[0]));
     setUploadError('');
     setActionError('');
+    setActionNotice(null);
     setUploadModalOpen(true);
   };
 
@@ -281,6 +325,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     setImportFilterText('');
     setImportError('');
     setActionError('');
+    setActionNotice(null);
     void loadGlobalDatasetsForImport();
   };
 
@@ -311,6 +356,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
 
     setActionStatus('uploading');
     setActionError('');
+    setActionNotice(null);
     setUploadError('');
     try {
       await apiClient.post('/api/datasets/upload', form);
@@ -335,6 +381,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
 
     setActionStatus('importing');
     setActionError('');
+    setActionNotice(null);
     setImportError('');
     try {
       const res = await apiClient.post('/api/datasets/copy', {
@@ -355,6 +402,121 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     }
   };
 
+  const summarizeTransferResult = (data: TransferResponse) => {
+    const failedResults = data.results.filter(result => result.error);
+    const completed = data.operation === 'move' ? data.movedCount : data.copiedCount;
+    const actionLabel = data.operation === 'move' ? 'moved' : 'copied';
+    const rewriteDetail =
+      data.operation === 'move' && data.rewrittenJobCount > 0
+        ? ` Rewrote ${data.rewrittenJobCount} job config${data.rewrittenJobCount === 1 ? '' : 's'}.`
+        : '';
+    const failureDetail =
+      failedResults.length > 0
+        ? ` ${failedResults
+            .slice(0, 2)
+            .map(result => `${result.sourceName}: ${result.error}`)
+            .join(' ')}`
+        : '';
+    return {
+      tone: failedResults.length > 0 ? ('warning' as const) : ('success' as const),
+      title:
+        failedResults.length > 0
+          ? `${completed} dataset${completed === 1 ? '' : 's'} ${actionLabel}, ${failedResults.length} failed`
+          : `${completed} dataset${completed === 1 ? '' : 's'} ${actionLabel} to global`,
+      message: `${data.copiedCount} copied.${rewriteDetail}${failureDetail}`,
+    };
+  };
+
+  const rememberTransferredEncryptedKeys = (datasets: DatasetSummary[], data: TransferResponse) => {
+    const datasetByName = new Map(datasets.map(dataset => [dataset.name, dataset]));
+    data.results.forEach(result => {
+      if (!result.copied || !result.destinationName) return;
+      const sourceDataset = datasetByName.get(result.sourceName);
+      if (!sourceDataset?.encrypted) return;
+      const rememberedKey = rememberedProjectDatasetKey(sourceDataset);
+      if (rememberedKey) {
+        rememberGlobalEncryptedKey(result.destinationName, rememberedKey, result.destinationPath);
+      }
+    });
+  };
+
+  const transferProjectDatasets = async (
+    operation: 'copy' | 'move',
+    datasetsToTransfer: DatasetSummary[],
+    all = false,
+  ) => {
+    if (actionStatus !== 'idle') return;
+    if (datasetsToTransfer.length === 0) {
+      setActionError('No project datasets are available to transfer.');
+      setActionNotice(null);
+      return;
+    }
+
+    setActionStatus(operation === 'move' ? 'moving' : 'copying');
+    setActionError('');
+    setActionNotice(null);
+    try {
+      const payload: Record<string, unknown> = {
+        source_project_id: projectID,
+        operation,
+        all,
+      };
+      if (!all) {
+        payload.dataset_names = datasetsToTransfer.map(dataset => dataset.name);
+      }
+
+      const res = await apiClient.post('/api/datasets/transfer', payload);
+      const data = res.data as TransferResponse;
+      rememberTransferredEncryptedKeys(datasetsToTransfer, data);
+      await refreshSummary();
+      setActionNotice(summarizeTransferResult(data));
+    } catch (error: any) {
+      setActionError(error?.response?.data?.error || error?.message || 'Failed to transfer project datasets.');
+    } finally {
+      setActionStatus('idle');
+    }
+  };
+
+  const copyDatasetToGlobal = (dataset: DatasetSummary) => {
+    void transferProjectDatasets('copy', [dataset]);
+  };
+
+  const moveDatasetToGlobal = (dataset: DatasetSummary) => {
+    if (actionStatus !== 'idle') return;
+    openConfirm({
+      title: 'Move Dataset To Global',
+      message: `Move "${dataset.name}" to global datasets? Project job configs that reference this dataset will be rewritten before the project copy is removed.`,
+      type: 'warning',
+      confirmText: 'Move',
+      onConfirm: async () => {
+        await transferProjectDatasets('move', [dataset]);
+      },
+    });
+  };
+
+  const copyAllDatasetsToGlobal = () => {
+    void transferProjectDatasets('copy', summary?.datasets || [], true);
+  };
+
+  const moveAllDatasetsToGlobal = () => {
+    if (actionStatus !== 'idle') return;
+    const datasetCount = summary?.datasets.length || 0;
+    if (datasetCount === 0) {
+      setActionError('No project datasets are available to move.');
+      setActionNotice(null);
+      return;
+    }
+    openConfirm({
+      title: 'Move All Datasets To Global',
+      message: `Move all ${datasetCount} project dataset${datasetCount === 1 ? '' : 's'} to global datasets? Project job configs will be rewritten before project copies are removed.`,
+      type: 'warning',
+      confirmText: 'Move All',
+      onConfirm: async () => {
+        await transferProjectDatasets('move', summary?.datasets || [], true);
+      },
+    });
+  };
+
   const handleDeleteDataset = (dataset: DatasetSummary) => {
     if (actionStatus !== 'idle') return;
     openConfirm({
@@ -365,6 +527,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       onConfirm: async () => {
         setActionStatus('deleting');
         setActionError('');
+        setActionNotice(null);
         try {
           await apiClient.post('/api/datasets/delete', {
             name: dataset.name,
@@ -388,6 +551,28 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       description="Project-owned inputs and captions."
       actions={
         <>
+          <button
+            type="button"
+            onClick={copyAllDatasetsToGlobal}
+            disabled={actionStatus !== 'idle' || (summary?.datasets.length || 0) === 0}
+            className="operator-button h-9"
+            title="Copy all project datasets to global datasets"
+            aria-label="Copy all project datasets to global datasets"
+          >
+            {actionStatus === 'copying' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+            <span className="hidden sm:inline">Copy All</span>
+          </button>
+          <button
+            type="button"
+            onClick={moveAllDatasetsToGlobal}
+            disabled={actionStatus !== 'idle' || (summary?.datasets.length || 0) === 0}
+            className="operator-button h-9"
+            title="Move all project datasets to global datasets"
+            aria-label="Move all project datasets to global datasets"
+          >
+            {actionStatus === 'moving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOutput className="h-4 w-4" />}
+            <span className="hidden sm:inline">Move All</span>
+          </button>
           <button type="button" onClick={openImportModal} disabled={actionStatus !== 'idle'} className="operator-button h-9">
             {actionStatus === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}
             <span className="hidden sm:inline">Import</span>
@@ -415,6 +600,11 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
           {actionError && (
             <PageNotice tone="danger" title="Dataset action failed">
               {actionError}
+            </PageNotice>
+          )}
+          {actionNotice && (
+            <PageNotice tone={actionNotice.tone} title={actionNotice.title}>
+              {actionNotice.message}
             </PageNotice>
           )}
           {status === 'error' && (
@@ -450,7 +640,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 {filteredDatasets.map(dataset => (
                   <div
                     key={dataset.name}
-                    className="grid grid-cols-[minmax(0,1fr)_72px_72px_70px] items-center gap-2 px-3 py-3 text-sm hover:bg-gray-900/70 sm:grid-cols-[minmax(0,1fr)_120px_120px_76px] sm:gap-3"
+                    className="grid grid-cols-[minmax(0,1fr)_72px_72px_116px] items-center gap-2 px-3 py-3 text-sm hover:bg-gray-900/70 sm:grid-cols-[minmax(0,1fr)_120px_120px_144px] sm:gap-3"
                   >
                     <Link
                       href={`${projectPath}/datasets/${encodeURIComponent(dataset.name)}`}
@@ -485,6 +675,26 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                           }}
                         />
                       )}
+                      <button
+                        type="button"
+                        onClick={() => copyDatasetToGlobal(dataset)}
+                        disabled={actionStatus !== 'idle'}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-cyan-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                        title="Copy to global datasets"
+                        aria-label={`Copy ${dataset.name} to global datasets`}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveDatasetToGlobal(dataset)}
+                        disabled={actionStatus !== 'idle'}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-amber-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                        title="Move to global datasets"
+                        aria-label={`Move ${dataset.name} to global datasets`}
+                      >
+                        <FolderOutput className="h-4 w-4" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleDeleteDataset(dataset)}

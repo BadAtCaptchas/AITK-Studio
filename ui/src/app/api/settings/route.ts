@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     if (!settingsObject.PROJECTS_FOLDER || settingsObject.PROJECTS_FOLDER === '') {
       settingsObject.PROJECTS_FOLDER = defaultProjectsFolder;
     }
-    settingsObject.PROJECTS_ENABLED = normalizeBooleanSetting(settingsObject.PROJECTS_ENABLED, true);
+    settingsObject.PROJECTS_ENABLED = normalizeBooleanSetting(settingsObject.PROJECTS_ENABLED, false);
     const offlineModeState = await getOfflineModeState();
     settingsObject[OFFLINE_MODE_SETTING_KEY] = offlineModeState.enabled ? 'true' : 'false';
     settingsObject.OFFLINE_MODE_LOCKED = offlineModeState.lockedByEnv ? 'true' : 'false';
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
       TRAINING_FOLDER,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       PROJECTS_FOLDER: normalizedProjectsFolder,
-      PROJECTS_ENABLED: normalizeBooleanSetting(existingProjectsEnabled, true),
+      PROJECTS_ENABLED: normalizeBooleanSetting(existingProjectsEnabled, false),
       [OFFLINE_MODE_SETTING_KEY]: offlineModeState.lockedByEnv
         ? 'true'
         : normalizeBooleanSetting(existingOfflineMode, false),

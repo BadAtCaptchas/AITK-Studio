@@ -41,7 +41,7 @@ export const areProjectsEnabled = async () => {
   if (typeof cached === 'string') return cached === 'true';
 
   const row = await db.settings.get(PROJECTS_ENABLED_KEY);
-  const normalized = normalizeBooleanSetting(row?.value, true);
+  const normalized = normalizeBooleanSetting(row?.value, false);
   myCache.set(PROJECTS_ENABLED_KEY, normalized);
   return normalized === 'true';
 };

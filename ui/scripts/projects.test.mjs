@@ -6,6 +6,7 @@ import test from 'node:test';
 import { cleanProjectSlug, getProjectRoots, isPathInside, PROJECT_FOLDERS } from '../dist/src/server/projects.js';
 import { copyDatasetBetweenRoots } from '../dist/src/server/datasetCopy.js';
 import { deleteDatasetFolder } from '../dist/src/server/datasetDelete.js';
+import { transferProjectDatasetsToGlobal } from '../dist/src/server/datasetTransfer.js';
 import {
   DatasetScopeError,
   isPathInside as isDatasetScopePathInside,
@@ -42,6 +43,55 @@ async function withProjectsEnabledSetting(value, fn) {
     }
     flushCache();
   }
+}
+
+async function listDatasetSummariesForTest(datasetsRoot) {
+  await fs.mkdir(datasetsRoot, { recursive: true });
+  const entries = await fs.readdir(datasetsRoot, { withFileTypes: true });
+  return entries
+    .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map(entry => ({
+      name: entry.name,
+      encrypted: false,
+      source: 'local',
+      worker_id: 'local',
+      worker_name: 'Local',
+      path: path.join(datasetsRoot, entry.name),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function createTransferDeps({ projectID = 'project-1', projectDatasetsRoot, globalDatasetsRoot, jobs = [], updateJobConfig }) {
+  const jobStore = jobs.map(job => ({ ...job }));
+  const deps = {
+    resolveDatasetScope: async projectIdentifier =>
+      projectIdentifier
+        ? {
+            project: { id: projectID },
+            projectID,
+            datasetsRoot: projectDatasetsRoot,
+            trainingRoot: path.join(path.dirname(projectDatasetsRoot), 'runs'),
+          }
+        : {
+            project: null,
+            projectID: null,
+            datasetsRoot: globalDatasetsRoot,
+            trainingRoot: path.join(path.dirname(globalDatasetsRoot), 'runs'),
+          },
+    listDatasetSummaries: listDatasetSummariesForTest,
+    copyDatasetBetweenRoots,
+    deleteDatasetFolder,
+    listProjectJobs: async () => jobStore,
+    updateJobConfig:
+      updateJobConfig ||
+      (async (jobID, jobConfig) => {
+        const job = jobStore.find(item => item.id === jobID);
+        if (!job) throw new Error(`Job not found: ${jobID}`);
+        job.job_config = jobConfig;
+        return job;
+      }),
+  };
+  return { deps, jobs: jobStore };
 }
 
 test('cleanProjectSlug creates stable URL-safe project slugs', () => {
@@ -95,18 +145,18 @@ test('resolveDatasetScope keeps omitted project_id on global roots', async () =>
   assert.equal(scope.trainingRoot, await getTrainingFolder());
 });
 
-test('project spaces are enabled by default and can be disabled', async () => {
+test('project spaces are disabled by default and can be enabled', async () => {
   await withProjectsEnabledSetting(null, async () => {
-    assert.equal(await areProjectsEnabled(), true);
-    await assert.doesNotReject(() => assertProjectsEnabled());
-  });
-
-  await withProjectsEnabledSetting('false', async () => {
     assert.equal(await areProjectsEnabled(), false);
     await assert.rejects(
       () => assertProjectsEnabled(),
       error => error?.status === 403 && error.message === PROJECT_SPACES_DISABLED_MESSAGE,
     );
+  });
+
+  await withProjectsEnabledSetting('true', async () => {
+    assert.equal(await areProjectsEnabled(), true);
+    await assert.doesNotReject(() => assertProjectsEnabled());
   });
 });
 
@@ -230,6 +280,245 @@ test('deleteDatasetFolder rejects traversal and ignores missing datasets', async
   const missing = await deleteDatasetFolder(projectDatasetRoot, 'missing');
   assert.equal(missing.success, true);
   assert.equal(missing.deleted, false);
+});
+
+test('transferProjectDatasetsToGlobal copies a single project dataset to global', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-copy-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const sourceDataset = path.join(projectDatasetRoot, 'portrait-set');
+
+  await fs.mkdir(sourceDataset, { recursive: true });
+  await fs.writeFile(path.join(sourceDataset, 'sample.txt'), 'project');
+
+  const { deps } = createTransferDeps({ projectDatasetsRoot: projectDatasetRoot, globalDatasetsRoot: globalRoot });
+  const result = await transferProjectDatasetsToGlobal(
+    { sourceProjectID: 'project-1', operation: 'copy', datasetNames: ['portrait-set'] },
+    deps,
+  );
+
+  assert.equal(result.copiedCount, 1);
+  assert.equal(result.movedCount, 0);
+  assert.equal(result.failedCount, 0);
+  assert.equal(result.results[0].destinationName, 'portrait-set');
+  assert.equal(await fs.readFile(path.join(globalRoot, 'portrait-set', 'sample.txt'), 'utf8'), 'project');
+  assert.equal(await fs.readFile(path.join(sourceDataset, 'sample.txt'), 'utf8'), 'project');
+});
+
+test('transferProjectDatasetsToGlobal suffixes global destination conflicts', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-conflict-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+
+  await fs.mkdir(path.join(projectDatasetRoot, 'same-name'), { recursive: true });
+  await fs.mkdir(path.join(globalRoot, 'same-name'), { recursive: true });
+  await fs.writeFile(path.join(projectDatasetRoot, 'same-name', 'sample.txt'), 'project');
+  await fs.writeFile(path.join(globalRoot, 'same-name', 'sample.txt'), 'global');
+
+  const { deps } = createTransferDeps({ projectDatasetsRoot: projectDatasetRoot, globalDatasetsRoot: globalRoot });
+  const result = await transferProjectDatasetsToGlobal(
+    { sourceProjectID: 'project-1', operation: 'copy', datasetNames: ['same-name'] },
+    deps,
+  );
+
+  assert.equal(result.results[0].destinationName, 'same-name_2');
+  assert.equal(await fs.readFile(path.join(globalRoot, 'same-name', 'sample.txt'), 'utf8'), 'global');
+  assert.equal(await fs.readFile(path.join(globalRoot, 'same-name_2', 'sample.txt'), 'utf8'), 'project');
+});
+
+test('transferProjectDatasetsToGlobal moves one dataset and rewrites project job refs', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-move-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const sourceDataset = path.join(projectDatasetRoot, 'portrait-set');
+  const sourceControlPath = path.join(sourceDataset, 'controls');
+
+  await fs.mkdir(sourceControlPath, { recursive: true });
+  await fs.writeFile(path.join(sourceDataset, 'sample.txt'), 'project');
+
+  const jobs = [
+    {
+      id: 'job-1',
+      name: 'portrait-job',
+      status: 'stopped',
+      job_config: JSON.stringify({
+        config: {
+          process: [
+            {
+              datasets: [
+                {
+                  folder_path: sourceDataset,
+                  control_path: [sourceControlPath],
+                  mask_path: path.join(sourceDataset, 'masks'),
+                },
+              ],
+              caption: { path_to_caption: sourceDataset },
+            },
+          ],
+        },
+      }),
+    },
+  ];
+  const { deps, jobs: jobStore } = createTransferDeps({ projectDatasetsRoot: projectDatasetRoot, globalDatasetsRoot: globalRoot, jobs });
+
+  const result = await transferProjectDatasetsToGlobal(
+    { sourceProjectID: 'project-1', operation: 'move', datasetNames: ['portrait-set'] },
+    deps,
+  );
+  const destinationPath = path.join(globalRoot, 'portrait-set');
+  const rewrittenConfig = JSON.parse(jobStore[0].job_config);
+  const rewrittenProcess = rewrittenConfig.config.process[0];
+
+  assert.equal(result.movedCount, 1);
+  assert.equal(result.failedCount, 0);
+  assert.equal(result.results[0].rewrittenJobCount, 1);
+  await assert.rejects(() => fs.access(sourceDataset));
+  assert.equal(await fs.readFile(path.join(destinationPath, 'sample.txt'), 'utf8'), 'project');
+  assert.equal(rewrittenProcess.datasets[0].folder_path, destinationPath);
+  assert.equal(rewrittenProcess.datasets[0].control_path[0], path.join(destinationPath, 'controls'));
+  assert.equal(rewrittenProcess.datasets[0].mask_path, path.join(destinationPath, 'masks'));
+  assert.equal(rewrittenProcess.caption.path_to_caption, destinationPath);
+});
+
+test('transferProjectDatasetsToGlobal copies all project datasets without deleting sources', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-copy-all-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+
+  await fs.mkdir(path.join(projectDatasetRoot, 'a'), { recursive: true });
+  await fs.mkdir(path.join(projectDatasetRoot, 'b'), { recursive: true });
+  await fs.mkdir(path.join(projectDatasetRoot, '.hidden'), { recursive: true });
+  await fs.writeFile(path.join(projectDatasetRoot, 'a', 'sample.txt'), 'a');
+  await fs.writeFile(path.join(projectDatasetRoot, 'b', 'sample.txt'), 'b');
+
+  const { deps } = createTransferDeps({ projectDatasetsRoot: projectDatasetRoot, globalDatasetsRoot: globalRoot });
+  const result = await transferProjectDatasetsToGlobal({ sourceProjectID: 'project-1', operation: 'copy', all: true }, deps);
+
+  assert.deepEqual(result.results.map(item => item.sourceName), ['a', 'b']);
+  assert.equal(result.copiedCount, 2);
+  assert.equal(result.movedCount, 0);
+  assert.equal(await fs.readFile(path.join(projectDatasetRoot, 'a', 'sample.txt'), 'utf8'), 'a');
+  assert.equal(await fs.readFile(path.join(projectDatasetRoot, 'b', 'sample.txt'), 'utf8'), 'b');
+  assert.equal(await fs.readFile(path.join(globalRoot, 'a', 'sample.txt'), 'utf8'), 'a');
+  assert.equal(await fs.readFile(path.join(globalRoot, 'b', 'sample.txt'), 'utf8'), 'b');
+  await assert.rejects(() => fs.access(path.join(globalRoot, '.hidden')));
+});
+
+test('transferProjectDatasetsToGlobal moves all datasets and rewrites refs', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-move-all-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const sourceA = path.join(projectDatasetRoot, 'a');
+  const sourceB = path.join(projectDatasetRoot, 'b');
+
+  await fs.mkdir(sourceA, { recursive: true });
+  await fs.mkdir(sourceB, { recursive: true });
+  await fs.writeFile(path.join(sourceA, 'sample.txt'), 'a');
+  await fs.writeFile(path.join(sourceB, 'sample.txt'), 'b');
+
+  const jobs = [
+    {
+      id: 'job-1',
+      name: 'bulk-job',
+      status: 'stopped',
+      job_config: JSON.stringify({
+        config: {
+          process: [
+            {
+              datasets: [{ folder_path: sourceA }, { folder_path: sourceB }],
+            },
+          ],
+        },
+      }),
+    },
+  ];
+  const { deps, jobs: jobStore } = createTransferDeps({ projectDatasetsRoot: projectDatasetRoot, globalDatasetsRoot: globalRoot, jobs });
+  const result = await transferProjectDatasetsToGlobal({ sourceProjectID: 'project-1', operation: 'move', all: true }, deps);
+  const rewrittenDatasets = JSON.parse(jobStore[0].job_config).config.process[0].datasets;
+
+  assert.equal(result.movedCount, 2);
+  assert.equal(result.failedCount, 0);
+  await assert.rejects(() => fs.access(sourceA));
+  await assert.rejects(() => fs.access(sourceB));
+  assert.equal(rewrittenDatasets[0].folder_path, path.join(globalRoot, 'a'));
+  assert.equal(rewrittenDatasets[1].folder_path, path.join(globalRoot, 'b'));
+});
+
+test('transferProjectDatasetsToGlobal keeps source when move rewrite fails', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-rewrite-fail-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const sourceDataset = path.join(projectDatasetRoot, 'portrait-set');
+
+  await fs.mkdir(sourceDataset, { recursive: true });
+  await fs.writeFile(path.join(sourceDataset, 'sample.txt'), 'project');
+
+  const jobs = [
+    {
+      id: 'job-1',
+      name: 'portrait-job',
+      status: 'stopped',
+      job_config: JSON.stringify({ config: { process: [{ datasets: [{ folder_path: sourceDataset }] }] } }),
+    },
+  ];
+  const { deps } = createTransferDeps({
+    projectDatasetsRoot: projectDatasetRoot,
+    globalDatasetsRoot: globalRoot,
+    jobs,
+    updateJobConfig: async () => {
+      throw new Error('database unavailable');
+    },
+  });
+  const result = await transferProjectDatasetsToGlobal(
+    { sourceProjectID: 'project-1', operation: 'move', datasetNames: ['portrait-set'] },
+    deps,
+  );
+
+  assert.equal(result.copiedCount, 1);
+  assert.equal(result.movedCount, 0);
+  assert.equal(result.failedCount, 1);
+  assert.match(result.results[0].error, /kept the project dataset/i);
+  assert.equal(await fs.readFile(path.join(sourceDataset, 'sample.txt'), 'utf8'), 'project');
+  assert.equal(await fs.readFile(path.join(globalRoot, 'portrait-set', 'sample.txt'), 'utf8'), 'project');
+});
+
+test('transferProjectDatasetsToGlobal blocks move for running referenced jobs', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-running-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const sourceDataset = path.join(projectDatasetRoot, 'portrait-set');
+
+  await fs.mkdir(sourceDataset, { recursive: true });
+  await fs.writeFile(path.join(sourceDataset, 'sample.txt'), 'project');
+
+  const jobs = [
+    {
+      id: 'job-1',
+      name: 'running-job',
+      status: 'running',
+      job_config: JSON.stringify({ config: { process: [{ datasets: [{ folder_path: sourceDataset }] }] } }),
+    },
+  ];
+  const { deps } = createTransferDeps({ projectDatasetsRoot: projectDatasetRoot, globalDatasetsRoot: globalRoot, jobs });
+
+  await assert.rejects(
+    () => transferProjectDatasetsToGlobal({ sourceProjectID: 'project-1', operation: 'move', datasetNames: ['portrait-set'] }, deps),
+    error => error?.status === 409 && /running-job/.test(error.message),
+  );
+  assert.equal(await fs.readFile(path.join(sourceDataset, 'sample.txt'), 'utf8'), 'project');
+  await assert.rejects(() => fs.access(path.join(globalRoot, 'portrait-set')));
+});
+
+test('transferProjectDatasetsToGlobal rejects traversal dataset names', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-invalid-'));
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const { deps } = createTransferDeps({ projectDatasetsRoot: projectDatasetRoot, globalDatasetsRoot: globalRoot });
+
+  await assert.rejects(
+    () => transferProjectDatasetsToGlobal({ sourceProjectID: 'project-1', operation: 'copy', datasetNames: ['../bad'] }, deps),
+    /path separators/,
+  );
 });
 
 test('project dataset edits reject remote workers', () => {

@@ -1,6 +1,7 @@
 import { defaultDatasetsFolder, defaultDataRoot, defaultTrainFolder } from '../paths';
 import NodeCache from 'node-cache';
 import { db } from './db';
+import { normalizeStoragePathSetting } from './pathContainment';
 
 const myCache = new NodeCache();
 
@@ -16,8 +17,11 @@ export const getDatasetsRoot = async () => {
   }
   let row = await db.settings.get('DATASETS_FOLDER');
   datasetsPath = defaultDatasetsFolder;
-  if (row?.value && row.value !== '') {
-    datasetsPath = row.value;
+  const normalizedDatasetsPath = normalizeStoragePathSetting(row?.value, defaultDatasetsFolder, {
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+  });
+  if (normalizedDatasetsPath) {
+    datasetsPath = normalizedDatasetsPath;
   }
   myCache.set(key, datasetsPath);
   return datasetsPath as string;
@@ -31,8 +35,11 @@ export const getTrainingFolder = async () => {
   }
   let row = await db.settings.get(key);
   trainingRoot = defaultTrainFolder;
-  if (row?.value && row.value !== '') {
-    trainingRoot = row.value;
+  const normalizedTrainingRoot = normalizeStoragePathSetting(row?.value, defaultTrainFolder, {
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+  });
+  if (normalizedTrainingRoot) {
+    trainingRoot = normalizedTrainingRoot;
   }
   myCache.set(key, trainingRoot);
   return trainingRoot as string;
@@ -76,8 +83,11 @@ export const getDataRoot = async () => {
   }
   let row = await db.settings.get(key);
   dataRoot = defaultDataRoot;
-  if (row?.value && row.value !== '') {
-    dataRoot = row.value;
+  const normalizedDataRoot = normalizeStoragePathSetting(row?.value, defaultDataRoot, {
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+  });
+  if (normalizedDataRoot) {
+    dataRoot = normalizedDataRoot;
   }
   myCache.set(key, dataRoot);
   return dataRoot;

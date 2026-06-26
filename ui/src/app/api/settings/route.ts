@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder } from '@/paths';
 import { flushCache } from '@/server/settings';
+import { normalizeStoragePathSetting } from '@/server/pathContainment';
 import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
-import path from 'path';
 
 type SettingsAccess = {
   authenticated: boolean;
@@ -53,18 +53,15 @@ export async function GET(request: NextRequest) {
       acc[setting.key] = setting.value;
       return acc;
     }, {});
-    // if TRAINING_FOLDER is not set, use default
-    if (!settingsObject.TRAINING_FOLDER || settingsObject.TRAINING_FOLDER === '') {
-      settingsObject.TRAINING_FOLDER = defaultTrainFolder;
-    }
-    // if DATASETS_FOLDER is not set, use default
-    if (!settingsObject.DATASETS_FOLDER || settingsObject.DATASETS_FOLDER === '') {
-      settingsObject.DATASETS_FOLDER = defaultDatasetsFolder;
-    }
-    settingsObject.TRAINING_ADVISOR_ENABLED = normalizeBooleanSetting(
-      settingsObject.TRAINING_ADVISOR_ENABLED,
-      false,
-    );
+    settingsObject.TRAINING_FOLDER =
+      normalizeStoragePathSetting(settingsObject.TRAINING_FOLDER, defaultTrainFolder, {
+        allowExternal: access.authenticated,
+      }) || defaultTrainFolder;
+    settingsObject.DATASETS_FOLDER =
+      normalizeStoragePathSetting(settingsObject.DATASETS_FOLDER, defaultDatasetsFolder, {
+        allowExternal: access.authenticated,
+      }) || defaultDatasetsFolder;
+    settingsObject.TRAINING_ADVISOR_ENABLED = normalizeBooleanSetting(settingsObject.TRAINING_ADVISOR_ENABLED, false);
     settingsObject.COMFY_AUTO_INSTALL = normalizeBooleanSetting(settingsObject.COMFY_AUTO_INSTALL, false);
     if (!access.authenticated) {
       settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
@@ -95,17 +92,32 @@ export async function POST(request: NextRequest) {
       COMFY_AUTO_INSTALL,
     } = body;
 
-    let normalizedDatasetsFolder = DATASETS_FOLDER;
-    if (typeof DATASETS_FOLDER === 'string' && DATASETS_FOLDER !== '') {
-      const resolvedDatasetsFolder = path.resolve(DATASETS_FOLDER);
-      if (resolvedDatasetsFolder === path.parse(resolvedDatasetsFolder).root) {
-        return NextResponse.json({ error: 'DATASETS_FOLDER cannot be filesystem root' }, { status: 400 });
-      }
-      normalizedDatasetsFolder = resolvedDatasetsFolder;
+    const normalizedTrainingFolder = normalizeStoragePathSetting(TRAINING_FOLDER, defaultTrainFolder, {
+      allowExternal: access.authenticated,
+    });
+    if (!normalizedTrainingFolder) {
+      return NextResponse.json(
+        {
+          error: 'TRAINING_FOLDER must stay inside the default training folder unless authentication is enabled',
+        },
+        { status: 400 },
+      );
+    }
+
+    const normalizedDatasetsFolder = normalizeStoragePathSetting(DATASETS_FOLDER, defaultDatasetsFolder, {
+      allowExternal: access.authenticated,
+    });
+    if (!normalizedDatasetsFolder) {
+      return NextResponse.json(
+        {
+          error: 'DATASETS_FOLDER must stay inside the default datasets folder unless authentication is enabled',
+        },
+        { status: 400 },
+      );
     }
 
     const settingsToUpdate: Record<string, string> = {
-      TRAINING_FOLDER,
+      TRAINING_FOLDER: normalizedTrainingFolder,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),

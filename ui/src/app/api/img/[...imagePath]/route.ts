@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
+import { isPathWithinRoot } from '@/server/pathContainment';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteProxyFetch } from '@/server/remoteClient';
 import { isRemoteDatasetAssetRequestAuthorized } from '@/server/remoteDatasetAssetAccess';
@@ -74,11 +75,6 @@ async function resolveExistingDir(dir: string) {
   return fs.promises.realpath(path.resolve(dir)).catch(() => null);
 }
 
-function isPathInsideRoot(root: string, filepath: string) {
-  const relativePath = path.relative(root, filepath);
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
-}
-
 export async function GET(request: NextRequest, { params }: { params: ImageRouteParams }) {
   const { imagePath } = await params;
   try {
@@ -111,14 +107,14 @@ export async function GET(request: NextRequest, { params }: { params: ImageRoute
     const dataRoot = await getDataRoot();
 
     const [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot] = await Promise.all(
-      [datasetRoot, trainingRoot, dataRoot].map(dir => resolveExistingDir(dir)),
+      [datasetRoot, trainingRoot, dataRoot].map((dir) => resolveExistingDir(dir)),
     );
     const allowedDirs = [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot].filter(
       (dir): dir is string => dir !== null,
     );
 
     const canonicalPath = await fs.promises.realpath(filepath).catch(() => null);
-    if (!canonicalPath || !allowedDirs.some(allowedDir => isPathInsideRoot(allowedDir, canonicalPath))) {
+    if (!canonicalPath || !allowedDirs.some((allowedDir) => isPathWithinRoot(allowedDir, canonicalPath))) {
       console.warn(`Access denied: ${filepath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
     }

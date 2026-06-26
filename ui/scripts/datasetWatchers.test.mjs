@@ -68,7 +68,7 @@ async function makeWorkspace() {
   tempRoots.push(root);
   const datasetsRoot = path.join(root, 'datasets');
   const dataset = path.join(datasetsRoot, 'cats');
-  const source = path.join(root, 'source');
+  const source = path.join(datasetsRoot, 'source');
   await fs.mkdir(dataset, { recursive: true });
   await fs.mkdir(source, { recursive: true });
   installSettingsStore({
@@ -95,7 +95,7 @@ async function makeProjectWorkspace() {
   };
   const projectDataset = path.join(project.root_path, 'datasets', 'cats');
   const globalDataset = path.join(datasetsRoot, 'cats');
-  const source = path.join(root, 'source');
+  const source = path.join(project.root_path, 'datasets', 'source');
   await fs.mkdir(projectDataset, { recursive: true });
   await fs.mkdir(globalDataset, { recursive: true });
   await fs.mkdir(source, { recursive: true });
@@ -187,6 +187,17 @@ test('watcher creation rejects missing and overlapping source folders', async ()
         sourcePath: datasetsRoot,
       }),
     /overlap/i,
+  );
+
+  const outsideImportRoots = path.join(root, 'outside-import-roots');
+  await fs.mkdir(outsideImportRoots, { recursive: true });
+  await assert.rejects(
+    () =>
+      saveDatasetWatcher({
+        datasetName: 'cats',
+        sourcePath: outsideImportRoots,
+      }),
+    /import roots/i,
   );
 });
 

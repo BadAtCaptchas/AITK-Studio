@@ -15,6 +15,7 @@ import { TOOLKIT_ROOT } from '../paths';
 export const DATASET_WATCHERS_SETTING_KEY = 'DATASET_WATCHERS_V1';
 export const DATASET_WATCHER_STATUS_SETTING_KEY = 'DATASET_WATCHER_STATUS_V1';
 export const DATASET_WATCHER_IMPORT_MANIFEST = '.aitk_dataset_watch_imports.json';
+export const DATASET_WATCHER_IMPORT_ROOTS_SETTING_KEY = 'DATASET_WATCHER_IMPORT_ROOTS';
 export const DATASET_WATCHER_POLL_INTERVAL_MS = 10_000;
 export const DATASET_WATCHER_STABLE_MS = 2_000;
 
@@ -532,6 +533,49 @@ async function resolveAccessibleDirectory(rawPath: string) {
   throw new Error(`Watch folder was not found or is not accessible: ${rawPath}${errors[0] ? ` (${errors[0]})` : ''}`);
 }
 
+function splitImportRoots(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.flatMap(splitImportRoots);
+  }
+  if (typeof value !== 'string') return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed !== value) return splitImportRoots(parsed);
+  } catch {
+    // Fall back to delimited text below.
+  }
+  return trimmed
+    .split(/[;\n]/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+async function configuredWatcherImportRoots(defaultRoot: string) {
+  const roots = [defaultRoot];
+  const setting = await db.settings.get(DATASET_WATCHER_IMPORT_ROOTS_SETTING_KEY).catch(() => null);
+  roots.push(...splitImportRoots(setting?.value));
+  roots.push(...splitImportRoots(process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS));
+
+  const resolved = await Promise.all(
+    roots.map(async root => {
+      try {
+        return await resolveAccessibleDirectory(root);
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return resolved.filter((root): root is string => !!root);
+}
+
+async function assertSourcePathAllowed(sourceRealPath: string, defaultRoot: string) {
+  const roots = await configuredWatcherImportRoots(defaultRoot);
+  if (roots.some(root => isPathInsideOrSame(root, sourceRealPath))) return;
+  throw new Error('Watch folder must be inside the configured dataset watcher import roots');
+}
+
 async function assertNotRootDirectory(directory: string) {
   const resolved = path.resolve(directory);
   if (resolved === path.parse(resolved).root) {
@@ -557,14 +601,18 @@ export async function validateDatasetWatcher(watcher: DatasetWatcherConfig) {
     realpathOrResolve(datasetFolder),
   ]);
   await assertNotRootDirectory(sourceRealPath);
+  await assertSourcePathAllowed(sourceRealPath, scope.datasetsRoot);
   if (isPathInsideOrSame(sourceRealPath, datasetRealPath) || isPathInsideOrSame(datasetRealPath, sourceRealPath)) {
     throw new Error('Watch folder cannot overlap the destination dataset folder');
   }
   return { sourceRealPath, datasetFolder, datasetRealPath, projectID: scope.projectID };
 }
 
-export async function readWatcherSourceRootCaption(sourcePath: string) {
+export async function readWatcherSourceRootCaption(sourcePath: string, projectID: string | null = null) {
+  const scope = await resolveDatasetScope(projectID);
   const sourceRoot = await resolveAccessibleDirectory(sourcePath);
+  await assertNotRootDirectory(sourceRoot);
+  await assertSourcePathAllowed(sourceRoot, scope.datasetsRoot);
   return readDatasetRootCaption(sourceRoot);
 }
 
@@ -997,7 +1045,7 @@ export async function runDatasetWatcherOnce(
 
   try {
     previousStatus = (await readStatusStore()).statuses[watcher.id] || defaultWatcherStatus();
-    const { datasetFolder } = await resolveWatcherDataset(watcher);
+    const { scope, datasetFolder } = await resolveWatcherDataset(watcher);
     releaseLock = await acquireWatcherLock(datasetFolder, watcher.id, now);
     if (!releaseLock) {
       const current = (await readStatusStore()).statuses[watcher.id] || defaultWatcherStatus('scanning');
@@ -1026,6 +1074,7 @@ export async function runDatasetWatcherOnce(
       realpathOrResolve(datasetFolder),
     ]);
     await assertNotRootDirectory(sourceRoot);
+    await assertSourcePathAllowed(sourceRoot, scope.datasetsRoot);
     if (isPathInsideOrSame(sourceRoot, datasetRealPath) || isPathInsideOrSame(datasetRealPath, sourceRoot)) {
       throw new Error('Watch folder cannot overlap the destination dataset folder');
     }

@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     if (params.get('action') === 'root-caption') {
       const sourcePath = params.get('sourcePath') || '';
       if (!sourcePath.trim()) return NextResponse.json({ found: false, systemPrompt: '' });
-      return NextResponse.json(await readWatcherSourceRootCaption(sourcePath));
+      return NextResponse.json(await readWatcherSourceRootCaption(sourcePath, projectID));
     }
 
     const watchers = await listDatasetWatchers({ datasetName, projectID });

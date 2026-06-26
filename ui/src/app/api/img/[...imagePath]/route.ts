@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
+import { isPathWithinRoot } from '@/server/pathContainment';
 import { getAllowedProjectRootIfExists } from '@/server/projects';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteProxyFetch } from '@/server/remoteClient';
@@ -74,11 +75,6 @@ async function resolveExistingDir(dir: string) {
   return fs.promises.realpath(path.resolve(dir)).catch(() => null);
 }
 
-function isPathInsideRoot(root: string, filepath: string) {
-  const relativePath = path.relative(root, filepath);
-  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
-}
-
 export async function GET(request: NextRequest, { params }: { params: Promise<ImageRouteParams> }) {
   const { imagePath } = await params;
   try {
@@ -130,12 +126,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Im
     }
 
     const trainingRelativePath =
-      canonicalTrainingRoot && isPathInsideRoot(canonicalTrainingRoot, canonicalPath)
+      canonicalTrainingRoot && isPathWithinRoot(canonicalTrainingRoot, canonicalPath)
         ? path.relative(canonicalTrainingRoot, canonicalPath)
         : null;
     const isInGeneralAllowedDir =
       trainingRelativePath === null &&
-      generalAllowedDirs.some(allowedDir => isPathInsideRoot(allowedDir, canonicalPath));
+      generalAllowedDirs.some(allowedDir => isPathWithinRoot(allowedDir, canonicalPath));
     const isInTrainingSamplesDir =
       trainingRelativePath !== null && trainingRelativePath.split(path.sep).includes('samples');
 

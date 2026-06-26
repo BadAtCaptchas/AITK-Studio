@@ -37,6 +37,7 @@
         "src/utils/webauthnPrfCrypto.ts",
         "src/utils/trainingPhaseSummary.ts",
         "src/server/pythonPath.ts",
+        "src/server/pathContainment.ts",
         "src/server/scriptRunner.ts",
         "src/server/cloudflared.ts",
         "src/server/secureCaptionCrypto.ts",

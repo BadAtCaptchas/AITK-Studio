@@ -1,6 +1,7 @@
 import { defaultDatasetsFolder, defaultDataRoot, defaultProjectsFolder, defaultTrainFolder } from '../paths';
 import NodeCache from 'node-cache';
 import { db } from './db';
+import { normalizeStoragePathSetting } from './pathContainment';
 
 const myCache = new NodeCache();
 export const PROJECTS_ENABLED_KEY = 'PROJECTS_ENABLED';
@@ -60,8 +61,11 @@ export const getDatasetsRoot = async () => {
   }
   let row = await db.settings.get('DATASETS_FOLDER');
   datasetsPath = defaultDatasetsFolder;
-  if (row?.value && row.value !== '') {
-    datasetsPath = row.value;
+  const normalizedDatasetsPath = await normalizeStoragePathSetting(row?.value, defaultDatasetsFolder, {
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+  });
+  if (normalizedDatasetsPath) {
+    datasetsPath = normalizedDatasetsPath;
   }
   myCache.set(key, datasetsPath);
   return datasetsPath as string;
@@ -75,8 +79,11 @@ export const getTrainingFolder = async () => {
   }
   let row = await db.settings.get(key);
   trainingRoot = defaultTrainFolder;
-  if (row?.value && row.value !== '') {
-    trainingRoot = row.value;
+  const normalizedTrainingRoot = await normalizeStoragePathSetting(row?.value, defaultTrainFolder, {
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+  });
+  if (normalizedTrainingRoot) {
+    trainingRoot = normalizedTrainingRoot;
   }
   myCache.set(key, trainingRoot);
   return trainingRoot as string;
@@ -120,8 +127,11 @@ export const getDataRoot = async () => {
   }
   let row = await db.settings.get(key);
   dataRoot = defaultDataRoot;
-  if (row?.value && row.value !== '') {
-    dataRoot = row.value;
+  const normalizedDataRoot = await normalizeStoragePathSetting(row?.value, defaultDataRoot, {
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+  });
+  if (normalizedDataRoot) {
+    dataRoot = normalizedDataRoot;
   }
   myCache.set(key, dataRoot);
   return dataRoot;
@@ -135,8 +145,11 @@ export const getProjectsRoot = async () => {
   }
   let row = await db.settings.get(key);
   projectsRoot = defaultProjectsFolder;
-  if (row?.value && row.value !== '') {
-    projectsRoot = row.value;
+  const normalizedProjectsRoot = await normalizeStoragePathSetting(row?.value, defaultProjectsFolder, {
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+  });
+  if (normalizedProjectsRoot) {
+    projectsRoot = normalizedProjectsRoot;
   }
   myCache.set(key, projectsRoot);
   return projectsRoot;

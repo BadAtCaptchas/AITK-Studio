@@ -20,7 +20,7 @@
     "test:queue-reorder": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/queueReorder.test.mjs",
     "test:projects": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/projects.test.mjs",
     "test:lifecycle": "node --test scripts/appLifecycle.test.mjs",
-    "test:basic": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs",
+    "test:basic": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs scripts/pathContainment.test.mjs",
     "test:random-prompt": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/randomPromptCaptions.test.mjs",
     "test:dataset-combine": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/datasetCombine.test.mjs",
     "test:dataset-rename": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/datasetRename.test.mjs",

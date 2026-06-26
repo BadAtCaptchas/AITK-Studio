@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder, defaultProjectsFolder } from '@/paths';
 import { flushCache, normalizeBooleanSetting, PROJECTS_ENABLED_KEY } from '@/server/settings';
+import { normalizeStoragePathSetting } from '@/server/pathContainment';
 import { db } from '@/server/db';
 import { isEncryptedDatasetSecretSettingKey } from '@/server/encryptedDatasetSecrets';
 import { isSecureCaptionSystemPromptSettingKey } from '@/server/secureCaptionSettings';
@@ -9,12 +10,17 @@ import { isDatasetWatchersSettingKey } from '@/server/datasetWatchers';
 import { getOfflineModeState, OFFLINE_MODE_SETTING_KEY } from '@/server/networkPolicy';
 import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyLoraDir, normalizeExternalComfyUrl } from '@/server/externalComfy';
 import { IDEOGRAM_WORKFLOW_HISTORY_KEY } from '@/server/ideogramWorkflowHistory';
-import path from 'path';
 
 type SettingsAccess = {
   authenticated: boolean;
   response: NextResponse | null;
 };
+
+const storagePathSettings = [
+  ['TRAINING_FOLDER', defaultTrainFolder],
+  ['DATASETS_FOLDER', defaultDatasetsFolder],
+  ['PROJECTS_FOLDER', defaultProjectsFolder],
+] as const;
 
 function ensureSettingsAccess(request: NextRequest): SettingsAccess {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -51,16 +57,11 @@ export async function GET(request: NextRequest) {
       acc[setting.key] = setting.value;
       return acc;
     }, {});
-    // if TRAINING_FOLDER is not set, use default
-    if (!settingsObject.TRAINING_FOLDER || settingsObject.TRAINING_FOLDER === '') {
-      settingsObject.TRAINING_FOLDER = defaultTrainFolder;
-    }
-    // if DATASETS_FOLDER is not set, use default
-    if (!settingsObject.DATASETS_FOLDER || settingsObject.DATASETS_FOLDER === '') {
-      settingsObject.DATASETS_FOLDER = defaultDatasetsFolder;
-    }
-    if (!settingsObject.PROJECTS_FOLDER || settingsObject.PROJECTS_FOLDER === '') {
-      settingsObject.PROJECTS_FOLDER = defaultProjectsFolder;
+    for (const [key, fallbackRoot] of storagePathSettings) {
+      settingsObject[key] =
+        (await normalizeStoragePathSetting(settingsObject[key], fallbackRoot, {
+          allowExternal: access.authenticated,
+        })) || fallbackRoot;
     }
     settingsObject.PROJECTS_ENABLED = normalizeBooleanSetting(settingsObject.PROJECTS_ENABLED, false);
     const offlineModeState = await getOfflineModeState();
@@ -109,22 +110,34 @@ export async function POST(request: NextRequest) {
       COMFY_EXTERNAL_LORA_DIR,
     } = body;
 
-    let normalizedDatasetsFolder = DATASETS_FOLDER;
-    if (typeof DATASETS_FOLDER === 'string' && DATASETS_FOLDER !== '') {
-      const resolvedDatasetsFolder = path.resolve(DATASETS_FOLDER);
-      if (resolvedDatasetsFolder === path.parse(resolvedDatasetsFolder).root) {
-        return NextResponse.json({ error: 'DATASETS_FOLDER cannot be filesystem root' }, { status: 400 });
-      }
-      normalizedDatasetsFolder = resolvedDatasetsFolder;
+    const normalizedTrainingFolder = await normalizeStoragePathSetting(TRAINING_FOLDER, defaultTrainFolder, {
+      allowExternal: access.authenticated,
+    });
+    if (!normalizedTrainingFolder) {
+      return NextResponse.json(
+        { error: 'TRAINING_FOLDER must stay inside the default training folder unless authentication is enabled' },
+        { status: 400 },
+      );
     }
 
-    let normalizedProjectsFolder = PROJECTS_FOLDER;
-    if (typeof PROJECTS_FOLDER === 'string' && PROJECTS_FOLDER !== '') {
-      const resolvedProjectsFolder = path.resolve(PROJECTS_FOLDER);
-      if (resolvedProjectsFolder === path.parse(resolvedProjectsFolder).root) {
-        return NextResponse.json({ error: 'PROJECTS_FOLDER cannot be filesystem root' }, { status: 400 });
-      }
-      normalizedProjectsFolder = resolvedProjectsFolder;
+    const normalizedDatasetsFolder = await normalizeStoragePathSetting(DATASETS_FOLDER, defaultDatasetsFolder, {
+      allowExternal: access.authenticated,
+    });
+    if (!normalizedDatasetsFolder) {
+      return NextResponse.json(
+        { error: 'DATASETS_FOLDER must stay inside the default datasets folder unless authentication is enabled' },
+        { status: 400 },
+      );
+    }
+
+    const normalizedProjectsFolder = await normalizeStoragePathSetting(PROJECTS_FOLDER, defaultProjectsFolder, {
+      allowExternal: access.authenticated,
+    });
+    if (!normalizedProjectsFolder) {
+      return NextResponse.json(
+        { error: 'PROJECTS_FOLDER must stay inside the default projects folder unless authentication is enabled' },
+        { status: 400 },
+      );
     }
 
     let normalizedExternalComfyUrl = '';
@@ -146,7 +159,7 @@ export async function POST(request: NextRequest) {
       OFFLINE_MODE === undefined ? (await db.settings.get(OFFLINE_MODE_SETTING_KEY))?.value : OFFLINE_MODE;
 
     const settingsToUpdate: Record<string, string> = {
-      TRAINING_FOLDER,
+      TRAINING_FOLDER: normalizedTrainingFolder,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       PROJECTS_FOLDER: normalizedProjectsFolder,
       PROJECTS_ENABLED: normalizeBooleanSetting(existingProjectsEnabled, false),

@@ -553,30 +553,56 @@ async function resolveAccessibleDirectory(rawPath: string) {
   throw new Error(`Watch folder was not found or is not accessible: ${rawPath}${errors[0] ? ` (${errors[0]})` : ''}`);
 }
 
-function splitImportRoots(value: unknown) {
+function isWindowsDriveDelimiter(value: string, index: number, segmentStart: number) {
+  return (
+    index === segmentStart + 1 &&
+    /^[a-zA-Z]$/.test(value[index - 1] || '') &&
+    (value[index + 1] === '\\' || value[index + 1] === '/')
+  );
+}
+
+function splitImportRootText(value: string, pathDelimiter = path.delimiter) {
+  const roots: string[] = [];
+  let segmentStart = 0;
+  const pushSegment = (segmentEnd: number) => {
+    const segment = value.slice(segmentStart, segmentEnd).trim();
+    if (segment) roots.push(segment);
+    segmentStart = segmentEnd + 1;
+  };
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const isDelimiter = char === ';' || char === '\n' || char === pathDelimiter;
+    if (!isDelimiter) continue;
+    if (char === ':' && isWindowsDriveDelimiter(value, index, segmentStart)) continue;
+    pushSegment(index);
+  }
+
+  pushSegment(value.length);
+  return roots;
+}
+
+export function splitDatasetWatcherImportRoots(value: unknown, pathDelimiter = path.delimiter): string[] {
   if (Array.isArray(value)) {
-    return value.flatMap(splitImportRoots);
+    return value.flatMap(item => splitDatasetWatcherImportRoots(item, pathDelimiter));
   }
   if (typeof value !== 'string') return [];
   const trimmed = value.trim();
   if (!trimmed) return [];
   try {
     const parsed = JSON.parse(trimmed);
-    if (parsed !== value) return splitImportRoots(parsed);
+    if (parsed !== value) return splitDatasetWatcherImportRoots(parsed, pathDelimiter);
   } catch {
     // Fall back to delimited text below.
   }
-  return trimmed
-    .split(/[;\n]/)
-    .map(item => item.trim())
-    .filter(Boolean);
+  return splitImportRootText(trimmed, pathDelimiter);
 }
 
 async function configuredWatcherImportRoots(defaultRoot: string) {
   const roots = [defaultRoot];
   const setting = await db.settings.get(DATASET_WATCHER_IMPORT_ROOTS_SETTING_KEY).catch(() => null);
-  roots.push(...splitImportRoots(setting?.value));
-  roots.push(...splitImportRoots(process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS));
+  roots.push(...splitDatasetWatcherImportRoots(setting?.value));
+  roots.push(...splitDatasetWatcherImportRoots(process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS));
 
   const resolved = await Promise.all(
     roots.map(async root => {

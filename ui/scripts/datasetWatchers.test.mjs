@@ -15,11 +15,13 @@ const {
   listDatasetWatchers,
   runDatasetWatcherOnce,
   saveDatasetWatcher,
+  splitDatasetWatcherImportRoots,
 } = require('../dist/src/server/datasetWatchers.js');
 
 const originalSettings = dbModule.db.settings;
 const originalProjects = dbModule.db.projects;
 const originalFetch = globalThis.fetch;
+const originalWatcherImportRootsEnv = process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS;
 const tempRoots = [];
 
 afterEach(async () => {
@@ -28,6 +30,11 @@ afterEach(async () => {
   settingsModule.flushCache();
   globalThis.fetch = originalFetch;
   globalThis.__aitkDatasetWatcherPending = new Map();
+  if (originalWatcherImportRootsEnv === undefined) {
+    delete process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS;
+  } else {
+    process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS = originalWatcherImportRootsEnv;
+  }
   await Promise.all(tempRoots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
@@ -176,6 +183,20 @@ test('watcher path candidates translate common Windows and WSL path forms', () =
   );
 });
 
+test('watcher import roots split POSIX path lists and existing delimiters', () => {
+  assert.deepEqual(splitDatasetWatcherImportRoots('/mnt/camera:/mnt/shared', ':'), ['/mnt/camera', '/mnt/shared']);
+  assert.deepEqual(splitDatasetWatcherImportRoots('/mnt/camera\n/mnt/shared;/mnt/archive', ':'), [
+    '/mnt/camera',
+    '/mnt/shared',
+    '/mnt/archive',
+  ]);
+  assert.deepEqual(splitDatasetWatcherImportRoots('C:\\Camera:D:\\Shared', ':'), ['C:\\Camera', 'D:\\Shared']);
+  assert.deepEqual(splitDatasetWatcherImportRoots(JSON.stringify(['/mnt/camera', '/mnt/shared']), ':'), [
+    '/mnt/camera',
+    '/mnt/shared',
+  ]);
+});
+
 test('watcher creation rejects missing and overlapping source folders', async () => {
   const { root, datasetsRoot } = await makeWorkspace();
 
@@ -207,6 +228,23 @@ test('watcher creation rejects missing and overlapping source folders', async ()
       }),
     /import roots/i,
   );
+});
+
+test('watcher creation accepts env import roots split by platform delimiter', async () => {
+  const { root } = await makeWorkspace();
+  const cameraRoot = path.join(root, 'camera');
+  const sharedRoot = path.join(root, 'shared');
+  const source = path.join(sharedRoot, 'session-1');
+  await fs.mkdir(cameraRoot, { recursive: true });
+  await fs.mkdir(source, { recursive: true });
+  process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS = [cameraRoot, sharedRoot].join(path.delimiter);
+
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    sourcePath: source,
+  });
+
+  assert.equal(watcher.sourcePath, await fs.realpath(source));
 });
 
 test('watcher copies only new media, skips caption sidecars, and preserves relative paths', async () => {

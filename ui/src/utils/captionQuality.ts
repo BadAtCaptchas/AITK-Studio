@@ -41,9 +41,67 @@ const REFUSAL_PATTERNS = [
   /\b(?:image|file|picture|photo)\s+(?:is|was)\s+(?:not\s+)?(?:accessible|available|provided|attached|uploaded)\b/i,
 ];
 
+function isCaptionHorizontalSpace(char: string): boolean {
+  return char === ' ' || char === '\t';
+}
+
+function replaceCaptionSeparators(caption: string): string {
+  const parts: string[] = [];
+  let pendingHorizontalSpace = '';
+  let index = 0;
+
+  while (index < caption.length) {
+    const char = caption[index];
+
+    if (isCaptionHorizontalSpace(char)) {
+      pendingHorizontalSpace += char;
+      index += 1;
+      continue;
+    }
+
+    if (char === '-') {
+      let dashEnd = index + 1;
+      while (dashEnd < caption.length && caption[dashEnd] === '-') {
+        dashEnd += 1;
+      }
+
+      if (dashEnd - index >= 3) {
+        pendingHorizontalSpace = '';
+        while (dashEnd < caption.length && isCaptionHorizontalSpace(caption[dashEnd])) {
+          dashEnd += 1;
+        }
+        parts.push(' ');
+        index = dashEnd;
+        continue;
+      }
+
+      if (pendingHorizontalSpace) {
+        parts.push(pendingHorizontalSpace);
+        pendingHorizontalSpace = '';
+      }
+      parts.push(caption.slice(index, dashEnd));
+      index = dashEnd;
+      continue;
+    }
+
+    if (pendingHorizontalSpace) {
+      parts.push(pendingHorizontalSpace);
+      pendingHorizontalSpace = '';
+    }
+    parts.push(char);
+    index += 1;
+  }
+
+  if (pendingHorizontalSpace) {
+    parts.push(pendingHorizontalSpace);
+  }
+
+  return parts.join('');
+}
+
 export function sanitizeCaptionText(caption: string) {
   if (!caption.includes('---')) return caption;
-  return caption.replace(/[ \t]*-{3,}[ \t]*/g, ' ').replace(/^[ \t]+$/gm, '').trim();
+  return replaceCaptionSeparators(caption).replace(/^[ \t]+$/gm, '').trim();
 }
 
 export function isRefusalCaption(caption: string) {

@@ -1,4 +1,5 @@
 import sys
+import time
 import types
 import unittest
 from unittest import mock
@@ -55,9 +56,20 @@ class BaseCaptionerTest(unittest.TestCase):
         ui_database.UIJobStore = object
         modules["toolkit.ui_database"] = ui_database
 
+        class FakeTqdm:
+            def __init__(self, iterable=None, **_kwargs):
+                self.iterable = [] if iterable is None else iterable
+
+            def __iter__(self):
+                return iter(self.iterable)
+
         tqdm_module = types.ModuleType("tqdm")
-        tqdm_module.tqdm = lambda iterable, **_kwargs: iterable
+        tqdm_module.__path__ = []
+        tqdm_module.tqdm = FakeTqdm
         modules["tqdm"] = tqdm_module
+        tqdm_auto_module = types.ModuleType("tqdm.auto")
+        tqdm_auto_module.tqdm = tqdm_module.tqdm
+        modules["tqdm.auto"] = tqdm_auto_module
 
         sys.modules.pop("extensions_built_in.captioner.BaseCaptioner", None)
         with mock.patch.dict(sys.modules, modules):
@@ -123,6 +135,31 @@ class BaseCaptionerTest(unittest.TestCase):
             sanitize_caption_text("---\nA black cat---on a red chair.\n---"),
             "A black cat on a red chair.",
         )
+
+    def test_caption_separator_preserves_captions_without_triple_dash(self):
+        _BaseCaptioner, _is_failed_caption, _is_refusal_caption, sanitize_caption_text = self.import_base_captioner()
+
+        caption = "A black cat -- not a separator -- on a red chair.\t "
+        self.assertEqual(sanitize_caption_text(caption), caption)
+
+    def test_caption_separator_removes_consecutive_runs_and_padding(self):
+        _BaseCaptioner, _is_failed_caption, _is_refusal_caption, sanitize_caption_text = self.import_base_captioner()
+
+        self.assertEqual(
+            sanitize_caption_text(
+                "A black cat \t---\ton a red chair--- ---near a window."
+            ),
+            "A black cat on a red chair  near a window.",
+        )
+
+    def test_caption_separator_handles_redos_payload_in_bounded_time(self):
+        _BaseCaptioner, _is_failed_caption, _is_refusal_caption, sanitize_caption_text = self.import_base_captioner()
+
+        payload = "---x" + (" \t" * 8000)
+        started_at = time.perf_counter()
+        self.assertEqual(sanitize_caption_text(payload), "x")
+        elapsed = time.perf_counter() - started_at
+        self.assertLess(elapsed, 1.0)
 
     def test_caption_loop_saves_sanitized_caption(self):
         BaseCaptioner, captioner = self.make_captioner("---\nA black cat---on a red chair.\n---")

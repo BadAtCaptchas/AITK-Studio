@@ -207,14 +207,63 @@ def _normalize_caption_extension(value: Optional[str], default: str = "txt") -> 
     return normalized or default
 
 
-CAPTION_SEPARATOR_RE = re.compile(r"[ \t]*-{3,}[ \t]*")
+def _is_caption_horizontal_space(char: str) -> bool:
+    return char == " " or char == "\t"
+
+
+def _replace_caption_separators(caption: str) -> str:
+    parts = []
+    pending_horizontal_space = []
+    index = 0
+    caption_length = len(caption)
+
+    while index < caption_length:
+        char = caption[index]
+
+        if _is_caption_horizontal_space(char):
+            pending_horizontal_space.append(char)
+            index += 1
+            continue
+
+        if char == "-":
+            dash_end = index + 1
+            while dash_end < caption_length and caption[dash_end] == "-":
+                dash_end += 1
+
+            if dash_end - index >= 3:
+                pending_horizontal_space.clear()
+                while dash_end < caption_length and _is_caption_horizontal_space(
+                    caption[dash_end]
+                ):
+                    dash_end += 1
+                parts.append(" ")
+                index = dash_end
+                continue
+
+            if pending_horizontal_space:
+                parts.append("".join(pending_horizontal_space))
+                pending_horizontal_space.clear()
+            parts.append(caption[index:dash_end])
+            index = dash_end
+            continue
+
+        if pending_horizontal_space:
+            parts.append("".join(pending_horizontal_space))
+            pending_horizontal_space.clear()
+        parts.append(char)
+        index += 1
+
+    if pending_horizontal_space:
+        parts.append("".join(pending_horizontal_space))
+
+    return "".join(parts)
 
 
 def sanitize_caption_text(caption: str) -> str:
     text = str(caption or "")
     if "---" not in text:
         return text
-    text = CAPTION_SEPARATOR_RE.sub(" ", text)
+    text = _replace_caption_separators(text)
     text = re.sub(r"^[ \t]+$", "", text, flags=re.MULTILINE)
     return text.strip()
 

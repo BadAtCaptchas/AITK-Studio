@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -13,6 +14,7 @@ const {
   captionFailureReason,
   isFailedCaption,
   isRefusalCaption,
+  sanitizeCaptionText,
 } = require('../dist/src/utils/captionQuality.js');
 
 const ideogramCaption = JSON.stringify({
@@ -77,6 +79,27 @@ test('non-refusal captions with isolated negative wording remain usable', () => 
   const caption = 'A person cannot reach the top shelf in a bright kitchen.';
   assert.equal(isRefusalCaption(caption), false);
   assert.equal(isFailedCaption(caption), false);
+});
+
+test('sanitizeCaptionText removes triple dash separators', () => {
+  assert.equal(sanitizeCaptionText('---\nA black cat---on a red chair.\n---'), 'A black cat on a red chair.');
+});
+
+test('sanitizeCaptionText preserves captions without triple dash separators', () => {
+  const caption = 'A black cat -- not a separator -- on a red chair.\t ';
+  assert.equal(sanitizeCaptionText(caption), caption);
+});
+
+test('sanitizeCaptionText removes consecutive separators and horizontal padding', () => {
+  assert.equal(sanitizeCaptionText('A black cat \t---\ton a red chair--- ---near a window.'), 'A black cat on a red chair  near a window.');
+});
+
+test('sanitizeCaptionText handles crafted separator payloads in bounded time', () => {
+  const payload = `---x${' \t'.repeat(16000)}`;
+  const startedAt = performance.now();
+  assert.equal(sanitizeCaptionText(payload), 'x');
+  const elapsedMs = performance.now() - startedAt;
+  assert.ok(elapsedMs < 750, `sanitizeCaptionText took ${elapsedMs.toFixed(1)}ms`);
 });
 
 test('removeCaptionKeywords removes whole words from plain captions', () => {

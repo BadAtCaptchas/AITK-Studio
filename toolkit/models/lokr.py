@@ -412,8 +412,11 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             self.can_merge_in = False
             return
 
-        orig_dtype = org_sd[weight_key].dtype
-        weight = org_sd[weight_key].float()
+        from toolkit.util.quantize import is_quantized_tensor
+        org_weight = self.org_module[0].weight
+        is_ao_quantized = is_quantized_tensor(org_weight)
+        orig_dtype = org_weight.dtype
+        weight = (org_weight.dequantize() if is_ao_quantized else org_weight).float()
         lokr_weight = self.get_weight(weight).to(weight.device, dtype=weight.dtype)
         lokr_weight = lokr_weight * self.scalar.to(weight.device, dtype=weight.dtype)
 
@@ -425,8 +428,17 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             self.can_merge_in = False
             return
 
-        org_sd[weight_key] = merged_weight.to(orig_dtype)
-        self.org_module[0].load_state_dict(org_sd)
+        if is_ao_quantized:
+            from toolkit.util.quantize import get_torchao_config, requantize_module_weight
+            requantize_module_weight(
+                self.org_module[0],
+                merged_weight,
+                orig_dtype,
+                get_torchao_config(self._get_base_qtype()),
+            )
+        else:
+            org_sd[weight_key] = merged_weight.to(orig_dtype)
+            self.org_module[0].load_state_dict(org_sd)
 
     def get_orig_weight(self, device):
         module = self.org_module[0]

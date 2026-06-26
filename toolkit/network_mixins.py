@@ -384,6 +384,12 @@ class ToolkitModuleMixin:
     def disable_gradient_checkpointing(self: Module):
         self.is_checkpointing = False
 
+    def _get_base_qtype(self: Module):
+        network = self.network_ref()
+        base_ref = getattr(network, 'base_model_ref', None)
+        base = base_ref() if base_ref is not None else None
+        return getattr(getattr(base, 'model_config', None), 'qtype', None)
+
     @torch.no_grad()
     def merge_out(self: Module, merge_out_weight=1.0):
         # make sure it is positive
@@ -412,8 +418,11 @@ class ToolkitModuleMixin:
             self.can_merge_in = False
             return
 
-        orig_dtype = org_sd[weight_key].dtype
-        weight = org_sd[weight_key].float()
+        from toolkit.util.quantize import is_quantized_tensor
+        org_weight = self.org_module[0].weight
+        is_ao_quantized = is_quantized_tensor(org_weight)
+        orig_dtype = org_weight.dtype
+        weight = (org_weight.dequantize() if is_ao_quantized else org_weight).float()
 
         multiplier = merge_weight
         scale = self.scale
@@ -461,9 +470,18 @@ class ToolkitModuleMixin:
                 return
             weight = weight + multiplier * conved * scale
 
-        # set weight to org_module
-        org_sd[weight_key] = weight.to(weight_device, orig_dtype)
-        self.org_module[0].load_state_dict(org_sd)
+        if is_ao_quantized:
+            from toolkit.util.quantize import get_torchao_config, requantize_module_weight
+            config = get_torchao_config(self._get_base_qtype())
+            if config is None:
+                print_once(
+                    f"Warning: merging into quantized layer {getattr(self, 'lora_name', '?')} "
+                    "without a known qtype; it will be left dequantized"
+                )
+            requantize_module_weight(self.org_module[0], weight.to(weight_device), orig_dtype, config)
+        else:
+            org_sd[weight_key] = weight.to(weight_device, orig_dtype)
+            self.org_module[0].load_state_dict(org_sd)
     
     def reset_weights(self: Module):
         # reset the weights to zero
@@ -740,6 +758,10 @@ class ToolkitNetworkMixin:
                 load_key = load_key.replace('.', '$$')
                 load_key = load_key.replace('$$lora_down$$', '.lora_down.')
                 load_key = load_key.replace('$$lora_up$$', '.lora_up.')
+                if load_key.endswith('$$diff'):
+                    load_key = load_key[:-len('$$diff')] + '.diff'
+                elif load_key.endswith('$$diff_b'):
+                    load_key = load_key[:-len('$$diff_b')] + '.diff_b'
                 
                 # patch lokr, not sure why we need to but whatever
                 if self.network_type.lower() == "lokr":
@@ -852,6 +874,9 @@ class ToolkitNetworkMixin:
             dtype = first_module.lokr_w1_a.dtype
             if hasattr(first_module.lokr_w1_a, '_memory_management_device'):
                 device = first_module.lokr_w1_a._memory_management_device
+        elif hasattr(first_module, 'diff'):
+            device = first_module.diff.device
+            dtype = first_module.diff.dtype
         else:
             raise ValueError("Unknown module type")
         with torch.no_grad():

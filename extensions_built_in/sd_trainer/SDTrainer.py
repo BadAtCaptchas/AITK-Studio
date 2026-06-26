@@ -969,6 +969,10 @@ class SDTrainer(BaseSDTrainProcess):
         self._record_tensor_stats('train/noise_pred', noise_pred)
         self._record_tensor_stats('train/target', target)
 
+        scale_loss = getattr(self.sd, "scale_loss", None)
+        if callable(scale_loss):
+            loss = scale_loss(loss)
+
         loss = self.apply_model_loss_weight(
             loss=loss,
             timesteps=timesteps,

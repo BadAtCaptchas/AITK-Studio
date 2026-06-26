@@ -323,6 +323,9 @@ class BaseModel:
     ) -> Optional[torch.Tensor]:
         return None
 
+    def scale_loss(self, loss: torch.Tensor) -> torch.Tensor:
+        return loss
+
     def get_prompt_embeds(self, prompt: str, control_images=None) -> PromptEmbeds:
         raise NotImplementedError(
             "get_prompt_embeds must be implemented in child classes")
@@ -1661,6 +1664,10 @@ class BaseModel:
     
     def get_transformer_block_names(self) -> Optional[List[str]]:
         # override in child classes to get transformer block names for lora targeting
+        return None
+
+    def get_quantization_exclude_modules(self) -> Optional[List[str]]:
+        # override in child classes to keep sensitive modules in full precision
         return None
     
     def get_base_model_version(self) -> str:

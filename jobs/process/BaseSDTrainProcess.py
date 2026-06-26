@@ -772,18 +772,35 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     )
         else:
             if self.network is not None and self.train_config.merge_network_on_save:
-                # merge the network weights into a full model and save that
-                if not self.network.can_merge_in:
+                # merge the network weights into a full model and save that.
+                # torchao quantized weights can be force merged here
+                # (dequantize -> merge -> re-quantize), while quanto and layer
+                # offloading still cannot merge safely.
+                from toolkit.util.quantize import get_torchao_config
+                can_force_quantized_merge = (
+                    self.model_config.quantize
+                    and not self.model_config.layer_offloading
+                    and get_torchao_config(self.model_config.qtype) is not None
+                )
+                if not self.network.can_merge_in and not can_force_quantized_merge:
                     raise ValueError("Network cannot merge in weights. Cannot save full model.")
                 
                 print_acc("Merging network weights into full model for saving...")
+
+                original_can_merge_in = self.network.can_merge_in
+                if can_force_quantized_merge:
+                    self.network.can_merge_in = True
+                try:
+                    self.network.merge_in(merge_weight=self.train_config.merge_network_on_save_strength)
+                    if can_force_quantized_merge and not self.network.is_merged_in:
+                        raise ValueError("Network could not merge into quantized model for saving.")
+                    # reset weights to zero
+                    self.network.reset_weights()
+                    self.network.is_merged_in = False
+                finally:
+                    self.network.can_merge_in = original_can_merge_in
                 
-                self.network.merge_in(merge_weight=self.train_config.merge_network_on_save_strength)
-                # reset weights to zero
-                self.network.reset_weights()
-                self.network.is_merged_in = False
-                
-                print_acc("Done merging network weights.")
+                print_acc("Done merging network weights. Saving model...")
                 
             if self.save_config.save_format == "diffusers":
                 # saving as a folder path
@@ -2211,7 +2228,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     self.train_config.train_unet
                 )
 
-                # we cannot merge in if quantized
+                # We cannot merge in while sampling if quantized or offloaded.
+                # torchao quantized weights may still be force-merged at save
+                # time for merge_network_on_save.
                 if self.model_config.quantize or self.model_config.layer_offloading:
                     # todo find a way around this
                     self.network.can_merge_in = False
@@ -2415,16 +2434,180 @@ class BaseSDTrainProcess(BaseTrainProcess):
         ### HOOK ###
         self.hook_before_train_loop()
 
-        # compile the model if needed (must be after LoRA/adapter injection AND accelerator.prepare)
+        # ============================================================
+        # COMPILE
+        #
+        # compile: true
+        #     -> whole-model torch.compile
+        #
+        # compile: true
+        # block_compile: true
+        #     -> block-level compilation
+        # ============================================================
         if self.model_config.compile:
+            compiled_refs = []  # (block_list, index, original_block) for rollback on failure
             try:
-                # make sure it is on the gpu
-                self.sd.unet.to(self.device_torch)
-                print_acc("Compiling model with torch.compile. The first forward will hang for a while using this. This is normal.")
-                self.sd.unet = torch.compile(self.sd.unet)
+                inner_unet_check = unwrap_model(self.sd.unet)
+                is_unet_offloaded = hasattr(inner_unet_check, '_memory_manager')
+
+                is_unet_quantized = getattr(self.model_config, 'quantize', False)
+
+                if not is_unet_offloaded:
+                    self.sd.unet.to(self.device_torch)
+
+                cache_size_limit = getattr(self.model_config, 'cache_size_limit', None)
+                user_set_cache_limit = cache_size_limit is not None
+                if user_set_cache_limit:
+                    torch._dynamo.config.cache_size_limit = cache_size_limit
+                torch._dynamo.config.suppress_errors = False
+
+                compile_mode = getattr(self.model_config, 'compile_mode', 'default')
+                compile_dynamic = getattr(self.model_config, 'compile_dynamic', True)
+                compile_fullgraph = getattr(self.model_config, 'compile_fullgraph', False)
+                block_compile = getattr(self.model_config, 'block_compile', False)
+
+                if is_unet_quantized and is_unet_offloaded and compile_fullgraph:
+                    print_acc(
+                        "Quantized offloaded Transformer detected: fullgraph=True is incompatible, "
+                        "switching to fullgraph=False."
+                    )
+                    compile_fullgraph = False
+
+                cache_info = ""
+                if block_compile:
+                    block_list_attrs = self.sd.get_transformer_block_names()
+                    if block_list_attrs is None or len(block_list_attrs) == 0:
+                        block_list_attrs = [
+                            'layers',
+                            'transformer_blocks',
+                            'single_transformer_blocks',
+                            'double_stream_blocks',
+                            'single_stream_blocks',
+                            'double_blocks',
+                            'single_blocks',
+                            'blocks',
+                        ]
+
+                    inner_unet = unwrap_model(self.sd.unet)
+                    compiled_block_count = 0
+
+                    for attr_name in block_list_attrs:
+                        block_list = inner_unet
+                        for part in attr_name.split('.'):
+                            block_list = getattr(block_list, part, None)
+                            if block_list is None:
+                                break
+
+                        if block_list is None or not hasattr(block_list, '__len__'):
+                            continue
+
+                        for i, block in enumerate(block_list):
+                            if not isinstance(block, torch.nn.Module):
+                                continue
+                            if hasattr(block, '_hf_hook'):
+                                continue
+
+                            compiled_refs.append((block_list, i, block))
+                            block_list[i] = torch.compile(
+                                block,
+                                mode=compile_mode,
+                                dynamic=compile_dynamic,
+                                fullgraph=compile_fullgraph,
+                            )
+                            compiled_block_count += 1
+
+                    if compiled_block_count > 0:
+                        if user_set_cache_limit:
+                            auto_cache_limit = max(cache_size_limit, compiled_block_count * 2)
+                            if auto_cache_limit != cache_size_limit:
+                                torch._dynamo.config.cache_size_limit = auto_cache_limit
+                                cache_info = f", cache_size_limit={auto_cache_limit} (auto)"
+                            else:
+                                cache_info = f", cache_size_limit={cache_size_limit}"
+                        else:
+                            auto_cache_limit = compiled_block_count * 2
+                            torch._dynamo.config.cache_size_limit = auto_cache_limit
+                            cache_info = f", cache_size_limit={auto_cache_limit} (auto)"
+                        print_acc(
+                            f"Compiled {compiled_block_count} transformer block(s) "
+                            f"with torch.compile (mode='{compile_mode}', fullgraph={compile_fullgraph}, dynamic={compile_dynamic}{cache_info})."
+                        )
+                        print_acc("The first forward pass will be slow during compile. This is normal.")
+                        print_acc("If you are experiencing issues, disable block_compile.")
+                    else:
+                        print_acc(
+                            f"No individual transformer blocks found; falling back to whole-model torch.compile "
+                            f"(mode='{compile_mode}', fullgraph={compile_fullgraph}, dynamic={compile_dynamic}{cache_info})."
+                        )
+                        print_acc("The first forward pass will hang for a while. This is normal.")
+
+                        if is_unet_quantized and not is_unet_offloaded and compile_fullgraph:
+                            print_acc(
+                                "Quantized model detected: fullgraph=True is incompatible "
+                                "for whole-model compile, switching to fullgraph=False."
+                            )
+                            compile_fullgraph = False
+
+                        if compile_mode == 'default':
+                            self.sd.unet = torch.compile(
+                                self.sd.unet,
+                                dynamic=compile_dynamic,
+                                fullgraph=compile_fullgraph,
+                            )
+                        else:
+                            self.sd.unet = torch.compile(
+                                self.sd.unet,
+                                mode=compile_mode,
+                                dynamic=compile_dynamic,
+                                fullgraph=compile_fullgraph,
+                            )
+                else:
+                    print_acc("Compiling model with torch.compile (whole-model compile).")
+                    print_acc("The first forward pass will hang for a while. This is normal.")
+                    print_acc(
+                        f"Using torch.compile settings: "
+                        f"mode={compile_mode}, "
+                        f"dynamic={compile_dynamic}, "
+                        f"fullgraph={compile_fullgraph}{cache_info}"
+                    )
+
+                    if compile_fullgraph:
+                        print_acc(
+                            "fullgraph=True is incompatible with whole-model compile, "
+                            "switching to fullgraph=False."
+                        )
+                        compile_fullgraph = False
+
+                    if compile_mode == 'default':
+                        self.sd.unet = torch.compile(
+                            self.sd.unet,
+                            dynamic=compile_dynamic,
+                            fullgraph=compile_fullgraph,
+                        )
+                    else:
+                        self.sd.unet = torch.compile(
+                            self.sd.unet,
+                            mode=compile_mode,
+                            dynamic=compile_dynamic,
+                            fullgraph=compile_fullgraph,
+                        )
+
+                if not is_unet_offloaded:
+                    unet_module = self.sd.unet
+                    unet_module.to = lambda *args, **kwargs: unet_module
             except Exception as e:
-                print_acc(f"Failed to compile model: {e}")
-                print_acc("Continuing without compilation")
+                if len(compiled_refs) > 0:
+                    for block_list, i, original_block in compiled_refs:
+                        block_list[i] = original_block
+
+                if 'triton' in str(e).lower():
+                    print_acc("WARNING: compile is disabled.")
+                    print_acc("Triton is not available or not working on this system.")
+                    print_acc("Install a working 'triton' package to use compile.")
+                    print_acc("Continuing without compilation.")
+                else:
+                    print_acc(f"Failed to compile model: {e}")
+                    print_acc("Continuing without compilation")
 
         if self.has_first_sample_requested and self.step_num <= 1 and not self.train_config.disable_sampling:
             print_acc("Generating first sample from first sample config")
@@ -2867,6 +3050,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.progress_bar.close()
         if self.train_config.free_u:
             self.sd.pipeline.disable_freeu()
+        if self.accelerator.is_main_process:
+            self.logger.log({'event/checkpoint': 1})
+            self.save()
+            self.logger.commit(step=self.step_num)
         if not self.train_config.disable_sampling:
             self.sample(self.step_num)
             if self.accelerator.is_main_process:
@@ -2874,9 +3061,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.logger.commit(step=self.step_num)
         print_acc("")
         if self.accelerator.is_main_process:
-            self.logger.log({'event/checkpoint': 1})
-            self.save()
-            self.logger.commit(step=self.step_num)
             self.logger.finish()
         self.accelerator.end_training()
 

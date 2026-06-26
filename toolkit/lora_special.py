@@ -150,6 +150,109 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         # del self.org_module
 
 
+def _is_quantized_tensor(t) -> bool:
+    return 'torchao' in type(t).__module__ and hasattr(t, 'dequantize')
+
+
+def _dequantize_if_needed(t):
+    return t.dequantize() if _is_quantized_tensor(t) else t
+
+
+class FullModule(ToolkitModuleMixin, torch.nn.Module):
+    """
+    Full weight diff module for layers without a useful low-rank decomposition.
+    It emits `<name>.diff` and optional `<name>.diff_b` tensors.
+    """
+
+    def __init__(
+            self,
+            lora_name,
+            org_module: torch.nn.Module,
+            multiplier=1.0,
+            network: 'LoRASpecialNetwork' = None,
+            **kwargs
+    ):
+        self.can_merge_in = True
+        ToolkitModuleMixin.__init__(self, network=network)
+        torch.nn.Module.__init__(self)
+        self.lora_name = lora_name
+        self.org_module = [org_module]
+        self.orig_module_ref = weakref.ref(org_module)
+        self.multiplier: Union[float, List[float]] = multiplier
+        self.dropout = None
+        self.rank_dropout = None
+        self.module_dropout = None
+        self.is_checkpointing = False
+
+        self.weight_is_quantized = _is_quantized_tensor(org_module.weight)
+        ref_weight = _dequantize_if_needed(org_module.weight)
+        self.diff = torch.nn.Parameter(torch.zeros_like(ref_weight))
+
+        org_bias = getattr(org_module, 'bias', None)
+        if org_bias is not None:
+            self.diff_b = torch.nn.Parameter(torch.zeros_like(org_bias))
+        else:
+            self.diff_b = None
+
+    def apply_to(self):
+        self.org_forward = self.org_module[0].forward
+        self.org_module[0].forward = self.forward
+
+    def forward(self, x, *args, **kwargs):
+        network: 'LoRASpecialNetwork' = self.network_ref()
+        skip = (not network.is_active) or network.is_merged_in or network._multiplier == 0 or network.is_lorm
+        if skip:
+            return self.org_forward(x, *args, **kwargs)
+
+        om = self.org_module[0]
+        multiplier = network.torch_multiplier
+        mult = multiplier.mean() if isinstance(multiplier, torch.Tensor) else multiplier
+
+        orig_weight = om._parameters['weight']
+        base_weight = _dequantize_if_needed(orig_weight)
+        eff_weight = base_weight + (self.diff.to(base_weight.device) * mult).to(base_weight.dtype)
+
+        has_bias = self.diff_b is not None and om._parameters.get('bias', None) is not None
+        if has_bias:
+            orig_bias = om._parameters['bias']
+            eff_bias = orig_bias + (self.diff_b.to(orig_bias.device) * mult).to(orig_bias.dtype)
+
+        om._parameters['weight'] = eff_weight
+        if has_bias:
+            om._parameters['bias'] = eff_bias
+        try:
+            out = self.org_forward(x, *args, **kwargs)
+        finally:
+            om._parameters['weight'] = orig_weight
+            if has_bias:
+                om._parameters['bias'] = orig_bias
+        return out
+
+    @torch.no_grad()
+    def merge_in(self, merge_weight=1.0):
+        if not self.can_merge_in:
+            return
+        om = self.org_module[0]
+        if 'weight._data' in om.state_dict():
+            return
+        org_weight = om.weight
+        orig_dtype = org_weight.dtype
+        merged_weight = _dequantize_if_needed(org_weight).float() + merge_weight * self.diff.float().to(org_weight.device)
+        if self.weight_is_quantized:
+            from toolkit.util.quantize import get_torchao_config, requantize_module_weight
+            requantize_module_weight(om, merged_weight, orig_dtype, get_torchao_config(self._get_base_qtype()))
+        else:
+            om.weight.data = merged_weight.to(org_weight.device, orig_dtype)
+        if self.diff_b is not None and getattr(om, 'bias', None) is not None:
+            om.bias.data = (om.bias.data.float() + merge_weight * self.diff_b.float().to(om.bias.device)).to(om.bias.dtype)
+
+    def reset_weights(self):
+        with torch.no_grad():
+            self.diff.zero_()
+            if self.diff_b is not None:
+                self.diff_b.zero_()
+
+
 class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
     NUM_OF_BLOCKS = 12  # フルモデル相当でのup,downの層の数
 
@@ -361,6 +464,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
             lora_shape_dict = {}
             is_lokr_network = self.network_type.lower() == "lokr"
             conv_modules = LOKR_CONV_MODULES if is_lokr_network else CONV_MODULES
+            all_layers = self.network_config is not None and getattr(self.network_config, 'all_layers', False)
             for name, module in root_module.named_modules():
                 module_name = module.__class__.__name__
                 is_target_module = module_name in target_replace_modules
@@ -375,6 +479,13 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                         is_linear = child_module.__class__.__name__ in LINEAR_MODULES
                         is_conv = child_module.__class__.__name__ in conv_modules
                         is_conv_1x1 = is_conv and _is_unit_kernel(child_module.kernel_size)
+                        is_full_layer = (
+                            all_layers
+                            and not is_linear
+                            and not is_conv
+                            and len(list(child_module.children())) == 0
+                            and isinstance(getattr(child_module, 'weight', None), torch.nn.Parameter)
+                        )
 
 
                         lora_name = [prefix, name, child_name]
@@ -510,6 +621,24 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                                     lora_shape_dict[lora_name] = [list(lora.lora_down.weight.shape)]
                                 else:
                                     lora_shape_dict[lora_name] = [list(lora.lora_down.weight.shape), list(lora.lora_up.weight.shape)]
+                        elif is_full_layer and not skip:
+                            if id(child_module) in attached_module_ids:
+                                continue
+
+                            if self.only_if_contains is not None:
+                                if not any([word in clean_name for word in self.only_if_contains]) and not any([word in lora_name for word in self.only_if_contains]):
+                                    continue
+
+                            lora = FullModule(
+                                lora_name,
+                                child_module,
+                                self.multiplier,
+                                network=self,
+                                parent=module,
+                            )
+                            loras.append(lora)
+                            attached_module_ids.add(id(child_module))
+                            lora_shape_dict[lora_name] = [list(lora.diff.shape)]
             return loras, skipped
 
         text_encoders = text_encoder if type(text_encoder) == list else [text_encoder]

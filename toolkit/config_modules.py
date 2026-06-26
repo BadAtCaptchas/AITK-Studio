@@ -321,6 +321,9 @@ class NetworkConfig:
             pretrained_lora_path = kwargs.get('network_weights', None)
         self.pretrained_lora_path = pretrained_lora_path
 
+        # Create full-weight diff modules for non-LoRA-compatible leaf layers.
+        self.all_layers = kwargs.get('all_layers', False)
+
 
 AdapterTypes = Literal['t2i', 'ip', 'ip+', 'clip', 'ilora', 'photo_maker', 'control_net', 'control_lora', 'i2v']
 
@@ -879,8 +882,12 @@ class ModelConfig:
         self.compile = kwargs.get("compile", False)
         
         if self.compile and self.quantize:
-            print("Warning: You cannot compile a quantized model. Disabling compile.")
-            self.compile = False
+            print("Quantized model detected - allowing torch.compile (experimental)")
+        self.block_compile = kwargs.get("block_compile", False)
+        self.compile_mode = kwargs.get("compile_mode", "default")
+        self.compile_fullgraph = kwargs.get("compile_fullgraph", False)
+        self.compile_dynamic = kwargs.get("compile_dynamic", True)
+        self.cache_size_limit = kwargs.get("cache_size_limit", None)
         
         # kwargs to pass to the model
         self.model_kwargs = kwargs.get("model_kwargs", {})

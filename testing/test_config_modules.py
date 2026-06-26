@@ -44,11 +44,38 @@ with mock.patch.dict(
     "sys.modules",
     mocked_modules,
 ):
+    import toolkit.config_modules as config_modules
     from toolkit.config_modules import NetworkConfig, ModelConfig, SaveConfig, TrainConfig, validate_configs
     from toolkit.base_lora_metadata import add_base_lora_metadata
+    imported_numeric_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "torch"
+        or name.startswith("torch.")
+        or name == "numpy"
+        or name.startswith("numpy.")
+    }
 
+sys.modules.update(imported_numeric_modules)
 sys.modules["toolkit.memory_management"] = memory_management_module
 sys.modules["toolkit.memory_management.offload"] = memory_offload_module
+
+
+class TrainConfigOptimalNoisePairingTest(unittest.TestCase):
+    def test_optimal_noise_pairing_default_and_upper_bound_are_allowed(self):
+        self.assertEqual(TrainConfig().optimal_noise_pairing_samples, 1)
+        self.assertEqual(
+            TrainConfig(optimal_noise_pairing_samples=16).optimal_noise_pairing_samples,
+            16,
+        )
+
+    def test_optimal_noise_pairing_rejects_invalid_values(self):
+        invalid_values = [0, 17, "2", 1.5, True, None]
+
+        for value in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "train\\.optimal_noise_pairing_samples"):
+                    TrainConfig(optimal_noise_pairing_samples=value)
 
 
 

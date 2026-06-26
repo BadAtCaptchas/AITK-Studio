@@ -1171,11 +1171,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         chunks = torch.chunk(latents, batch_num, dim=0)
         noise_chunks = []
         for chunk in chunks:
-            noise_samples = [torch.randn_like(chunk, device=chunk.device, dtype=dtype) for _ in range(self.train_config.optimal_noise_pairing_samples)]
-            # find the one most similar to the chunk
             lowest_loss = 999999999999
             best_noise = None
-            for noise in noise_samples:
+            for _ in range(self.train_config.optimal_noise_pairing_samples):
+                noise = torch.randn_like(chunk, device=chunk.device, dtype=dtype)
                 loss = torch.nn.functional.mse_loss(chunk, noise)
                 if loss < lowest_loss:
                     lowest_loss = loss

@@ -20,6 +20,23 @@ GenerationBackend = Literal['native', 'comfy']
 ComfyMode = Literal['external', 'managed']
 ComfyOnError = Literal['fail', 'native', 'skip']
 
+MAX_OPTIMAL_NOISE_PAIRING_SAMPLES = 16
+
+
+def _validate_optimal_noise_pairing_samples(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(
+            "train.optimal_noise_pairing_samples must be an integer between 1 "
+            f"and {MAX_OPTIMAL_NOISE_PAIRING_SAMPLES}, got {value!r}"
+        )
+    if value < 1 or value > MAX_OPTIMAL_NOISE_PAIRING_SAMPLES:
+        raise ValueError(
+            "train.optimal_noise_pairing_samples must be between 1 "
+            f"and {MAX_OPTIMAL_NOISE_PAIRING_SAMPLES}, got {value}"
+        )
+    return value
+
+
 if TYPE_CHECKING:
     from toolkit.guidance import GuidanceType
     from toolkit.logging_aitk import EmptyLogger
@@ -674,7 +691,9 @@ class TrainConfig:
         self.diffusion_feature_extractor_weight = kwargs.get('diffusion_feature_extractor_weight', self.latent_feature_loss_weight)
         
         # optimal noise pairing
-        self.optimal_noise_pairing_samples = kwargs.get('optimal_noise_pairing_samples', 1)
+        self.optimal_noise_pairing_samples = _validate_optimal_noise_pairing_samples(
+            kwargs.get('optimal_noise_pairing_samples', 1)
+        )
         
         # forces same noise for the same image at a given size.
         self.force_consistent_noise = kwargs.get('force_consistent_noise', False)

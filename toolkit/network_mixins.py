@@ -554,6 +554,7 @@ class ToolkitNetworkMixin:
             "target_lora_modules": getattr(self, "target_lora_modules", None),
             "transformer_block_names": getattr(self, "transformer_block_names", None),
             "only_if_contains": getattr(self, "only_if_contains", None),
+            "full_if_contains": getattr(self, "full_if_contains", None),
             "ignore_if_contains": getattr(self, "ignore_if_contains", None),
         }
         if self.network_config is not None:

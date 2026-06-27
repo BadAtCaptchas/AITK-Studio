@@ -383,6 +383,7 @@ export interface NetworkConfig {
   network_kwargs: {
     ignore_if_contains: string[];
     only_if_contains?: string[];
+    full_if_contains?: string[];
   };
   transformer_only?: boolean;
 }

@@ -305,6 +305,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
             is_lorm: bool = False,
             ignore_if_contains = None,
             only_if_contains = None,
+            full_if_contains = None,
             parameter_threshold: float = 0.0,
             attn_only: bool = False,
             target_lin_modules=LoRANetwork.UNET_TARGET_REPLACE_MODULE,
@@ -346,6 +347,12 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
             only_if_contains = [word for word in only_if_contains if word]
             if len(only_if_contains) == 0:
                 only_if_contains = None
+        if isinstance(full_if_contains, str):
+            full_if_contains = [full_if_contains]
+        if full_if_contains is not None:
+            full_if_contains = [word for word in full_if_contains if word]
+            if len(full_if_contains) == 0:
+                full_if_contains = None
         self.ignore_if_contains = ignore_if_contains
         self.transformer_only = transformer_only
         self.base_model_ref = None
@@ -353,6 +360,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
             self.base_model_ref = weakref.ref(base_model)
 
         self.only_if_contains: Union[List, None] = only_if_contains
+        self.full_if_contains: Union[List, None] = full_if_contains
         self.transformer_block_names = None
         if base_model is not None:
             self.transformer_block_names = base_model.get_transformer_block_names()
@@ -479,14 +487,10 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                         is_linear = child_module.__class__.__name__ in LINEAR_MODULES
                         is_conv = child_module.__class__.__name__ in conv_modules
                         is_conv_1x1 = is_conv and _is_unit_kernel(child_module.kernel_size)
-                        is_full_layer = (
-                            all_layers
-                            and not is_linear
-                            and not is_conv
-                            and len(list(child_module.children())) == 0
+                        is_leaf_with_weight = (
+                            len(list(child_module.children())) == 0
                             and isinstance(getattr(child_module, 'weight', None), torch.nn.Parameter)
                         )
-
 
                         lora_name = [prefix, name, child_name]
                         # filter out blank
@@ -500,6 +504,17 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                             lora_name = lora_name.replace(".", "$$")
                         else:
                             lora_name = lora_name.replace(".", "_")
+
+                        matches_full_if_contains = (
+                            self.full_if_contains is not None
+                            and (
+                                any([word in clean_name for word in self.full_if_contains])
+                                or any([word in lora_name for word in self.full_if_contains])
+                            )
+                        )
+                        is_full_layer = is_leaf_with_weight and (
+                            matches_full_if_contains or (all_layers and not is_linear and not is_conv)
+                        )
 
                         skip = False
                         if any([word in clean_name for word in self.ignore_if_contains]):
@@ -542,7 +557,7 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                                     if "single_blocks" not in lora_name and "double_blocks" not in lora_name:
                                         skip = True
 
-                        if (is_linear or is_conv) and not skip:
+                        if (is_linear or is_conv) and not skip and not is_full_layer:
                             if id(child_module) in attached_module_ids:
                                 continue
 
@@ -775,11 +790,15 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
 
     def apply_max_norm_regularization(self, max_norm_value, device):
         if self.network_type.lower() != "lokr":
+            if not any("lora_down" in key and "weight" in key for key in self.state_dict().keys()):
+                return 0, 0, 0
             return super().apply_max_norm_regularization(max_norm_value, device)
 
         key_scaled = 0
         norms = []
         for module in self.get_all_modules():
+            if not hasattr(module, "apply_max_norm"):
+                continue
             scaled, norm = module.apply_max_norm(max_norm_value, device)
             if scaled is None:
                 continue

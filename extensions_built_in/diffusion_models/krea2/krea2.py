@@ -31,7 +31,7 @@ from transformers import (
     Qwen2TokenizerFast,
     Qwen3VLForConditionalGeneration,
 )
-from optimum.quanto import freeze, QTensor
+from optimum.quanto import freeze
 
 from toolkit.config_modules import GenerateImageConfig, ModelConfig, NetworkConfig
 from toolkit.lora_special import LoRASpecialNetwork
@@ -43,7 +43,12 @@ from toolkit.samplers.custom_flowmatch_sampler import (
 )
 from toolkit.accelerator import unwrap_model
 from toolkit.metadata import get_meta_for_safetensors
-from toolkit.util.quantize import quantize, get_qtype, quantize_model
+from toolkit.util.quantize import (
+    quantize,
+    get_qtype,
+    quantize_model,
+    dequantize_if_quantized,
+)
 from toolkit.memory_management import MemoryManager
 from toolkit.hf_offline import is_hf_offline_mode
 
@@ -602,9 +607,7 @@ class Krea2Model(BaseModel):
         state_dict = transformer.state_dict()
         save_dict = {}
         for k, v in state_dict.items():
-            if isinstance(v, QTensor):
-                v = v.dequantize()
-            save_dict[k] = v.clone().to("cpu", dtype=save_dtype)
+            save_dict[k] = dequantize_if_quantized(v).clone().to("cpu", dtype=save_dtype)
         meta = get_meta_for_safetensors(meta, name="krea2")
         save_file(save_dict, output_path, metadata=meta)
 

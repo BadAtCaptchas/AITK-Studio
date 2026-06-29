@@ -1106,6 +1106,12 @@ class SDTrainer(BaseSDTrainProcess):
 
 
         loss = loss + additional_loss
+
+        if hasattr(self.sd, "get_additional_loss"):
+            additional_model_loss = self.sd.get_additional_loss(pred, target)
+            if additional_model_loss is not None:
+                loss = loss + additional_model_loss
+                self.additional_logs["additional_model_loss"] = additional_model_loss.item()
         
         if self.train_config.max_loss_debug and self.train_config.max_loss is not None:
             if loss.item() > self.train_config.max_loss:

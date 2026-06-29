@@ -13,8 +13,14 @@ from toolkit.samplers.custom_flowmatch_sampler import (
 )
 from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze
-from toolkit.util.quantize import quantize, get_qtype, quantize_model
+from toolkit.util.quantize import (
+    quantize,
+    get_qtype,
+    quantize_model,
+    dequantize_if_quantized,
+)
 from toolkit.memory_management import attach_layer_offloading
+from toolkit.metadata import get_meta_for_safetensors
 from ..flux2.sega import normalize_sega_config
 from .sega import (
     apply_zimage_sega_rope_scale,
@@ -22,6 +28,7 @@ from .sega import (
     summarize_zimage_rope_scale,
 )
 from .paths import resolve_single_file_model_path
+from safetensors.torch import load_file, save_file
 
 from transformers import AutoTokenizer, Qwen3ForCausalLM
 from diffusers import AutoencoderKL
@@ -40,6 +47,72 @@ scheduler_config = {
     "use_dynamic_shifting": False,
     "shift": 3.0,
 }
+
+SINGLE_FILE_EXTRAS_REPO = "Tongyi-MAI/Z-Image-Turbo"
+
+
+def convert_single_file_to_diffusers(state_dict):
+    """Convert a Comfy/single-file Z-Image checkpoint to diffusers transformer keys."""
+    new_sd = {}
+    for key, value in state_dict.items():
+        new_key = key
+        if new_key.endswith(".attention.qkv.weight"):
+            prefix = new_key[: -len(".attention.qkv.weight")]
+            q, k_proj, v = torch.chunk(value, 3, dim=0)
+            new_sd[prefix + ".attention.to_q.weight"] = q
+            new_sd[prefix + ".attention.to_k.weight"] = k_proj
+            new_sd[prefix + ".attention.to_v.weight"] = v
+            continue
+        new_key = new_key.replace(".attention.out.weight", ".attention.to_out.0.weight")
+        new_key = new_key.replace(".attention.q_norm.weight", ".attention.norm_q.weight")
+        new_key = new_key.replace(".attention.k_norm.weight", ".attention.norm_k.weight")
+        if new_key.startswith("x_embedder."):
+            new_key = "all_x_embedder.2-1." + new_key[len("x_embedder.") :]
+        elif new_key.startswith("final_layer."):
+            new_key = "all_final_layer.2-1." + new_key[len("final_layer.") :]
+        new_sd[new_key] = value
+    return new_sd
+
+
+def convert_diffusers_to_single_file(state_dict):
+    """Convert diffusers Z-Image transformer keys back to Comfy/single-file layout."""
+    new_sd = {}
+    qkv_cache = {}
+    for key, value in state_dict.items():
+        new_key = key
+        matched_qkv = False
+        for suffix in (
+            ".attention.to_q.weight",
+            ".attention.to_k.weight",
+            ".attention.to_v.weight",
+        ):
+            if new_key.endswith(suffix):
+                prefix = new_key[: -len(suffix)]
+                cache = qkv_cache.setdefault(prefix, {})
+                cache[suffix] = value
+                if len(cache) == 3:
+                    new_sd[prefix + ".attention.qkv.weight"] = torch.cat(
+                        [
+                            cache[".attention.to_q.weight"],
+                            cache[".attention.to_k.weight"],
+                            cache[".attention.to_v.weight"],
+                        ],
+                        dim=0,
+                    )
+                    del qkv_cache[prefix]
+                matched_qkv = True
+                break
+        if matched_qkv:
+            continue
+        new_key = new_key.replace(".attention.to_out.0.weight", ".attention.out.weight")
+        new_key = new_key.replace(".attention.norm_q.weight", ".attention.q_norm.weight")
+        new_key = new_key.replace(".attention.norm_k.weight", ".attention.k_norm.weight")
+        if new_key.startswith("all_x_embedder.2-1."):
+            new_key = "x_embedder." + new_key[len("all_x_embedder.2-1.") :]
+        elif new_key.startswith("all_final_layer.2-1."):
+            new_key = "final_layer." + new_key[len("all_final_layer.2-1.") :]
+        new_sd[new_key] = value
+    return new_sd
 
 
 class ZImageModel(BaseModel):
@@ -60,6 +133,8 @@ class ZImageModel(BaseModel):
         self.is_flow_matching = True
         self.is_transformer = True
         self.target_lora_modules = ["ZImageTransformer2DModel"]
+        self.is_single_file = False
+        self.single_file_extras_repo = SINGLE_FILE_EXTRAS_REPO
 
     # static method to get the noise scheduler
     @staticmethod
@@ -100,25 +175,49 @@ class ZImageModel(BaseModel):
         # tell the model to invert assistant on inference since we want remove lora effects
         self.invert_assistant_lora = True
 
-    def load_model(self):
-        dtype = self.torch_dtype
-        self.print_and_status_update("Loading ZImage model")
-        model_path = self.model_config.name_or_path
-        base_model_path = self.model_config.extras_name_or_path
+    @staticmethod
+    def is_comfy_single_file_state_dict(state_dict):
+        return any(
+            key.endswith(".attention.qkv.weight")
+            or key.startswith("x_embedder.")
+            or key.startswith("final_layer.")
+            for key in state_dict
+        )
 
-        self.print_and_status_update("Loading transformer")
-
+    def load_transformer(self, model_path, base_model_path, dtype):
         if model_path.endswith(".safetensors"):
+            self.is_single_file = True
             if base_model_path.endswith(".safetensors"):
-                base_model_path = "Tongyi-MAI/Z-Image"
+                base_model_path = self.single_file_extras_repo
             transformer_path = resolve_single_file_model_path(model_path)
-            transformer = ZImageTransformer2DModel.from_single_file(
-                transformer_path,
-                config=base_model_path,
-                subfolder="transformer",
-                torch_dtype=dtype,
-            )
-            transformer.to(dtype)
+            state_dict = load_file(transformer_path)
+            if self.is_comfy_single_file_state_dict(state_dict):
+                self.print_and_status_update(
+                    "Model is a Comfy single-file checkpoint, loading with safetensors"
+                )
+                state_dict = convert_single_file_to_diffusers(state_dict)
+                state_dict = {
+                    key: value.to(dtype=dtype) if value.is_floating_point() else value
+                    for key, value in state_dict.items()
+                }
+                config = ZImageTransformer2DModel.load_config(
+                    base_model_path, subfolder="transformer"
+                )
+                with torch.device("meta"):
+                    transformer = ZImageTransformer2DModel.from_config(config)
+                transformer.load_state_dict(state_dict, assign=True)
+                transformer.to(dtype)
+                del state_dict
+                flush()
+            else:
+                del state_dict
+                transformer = ZImageTransformer2DModel.from_single_file(
+                    transformer_path,
+                    config=base_model_path,
+                    subfolder="transformer",
+                    torch_dtype=dtype,
+                )
+                transformer.to(dtype)
         else:
             transformer_path = model_path
             transformer_subfolder = "transformer"
@@ -134,6 +233,18 @@ class ZImageModel(BaseModel):
             transformer = ZImageTransformer2DModel.from_pretrained(
                 transformer_path, subfolder=transformer_subfolder, torch_dtype=dtype
             )
+
+        return transformer, base_model_path
+
+    def load_model(self):
+        dtype = self.torch_dtype
+        self.print_and_status_update("Loading ZImage model")
+        model_path = self.model_config.name_or_path
+        base_model_path = self.model_config.extras_name_or_path
+
+        self.print_and_status_update("Loading transformer")
+
+        transformer, base_model_path = self.load_transformer(model_path, base_model_path, dtype)
 
         # load assistant lora if specified
         if self.model_config.base_lora_path is not None:
@@ -365,14 +476,27 @@ class ZImageModel(BaseModel):
 
     def save_model(self, output_path, meta, save_dtype):
         transformer: ZImageTransformer2DModel = unwrap_model(self.model)
-        transformer.save_pretrained(
-            save_directory=os.path.join(output_path, "transformer"),
-            safe_serialization=True,
-        )
+        if self.is_single_file:
+            state_dict = transformer.state_dict()
+            save_dict = {
+                key: dequantize_if_quantized(value).clone().to("cpu", dtype=save_dtype)
+                for key, value in state_dict.items()
+            }
+            save_dict = convert_diffusers_to_single_file(save_dict)
 
-        meta_path = os.path.join(output_path, "aitk_meta.yaml")
-        with open(meta_path, "w") as f:
-            yaml.dump(meta, f)
+            if not output_path.endswith(".safetensors"):
+                output_path += ".safetensors"
+            meta = get_meta_for_safetensors(meta, name=self.arch)
+            save_file(save_dict, output_path, metadata=meta)
+        else:
+            transformer.save_pretrained(
+                save_directory=os.path.join(output_path, "transformer"),
+                safe_serialization=True,
+            )
+
+            meta_path = os.path.join(output_path, "aitk_meta.yaml")
+            with open(meta_path, "w") as f:
+                yaml.dump(meta, f)
 
     def get_loss_target(self, *args, **kwargs):
         noise = kwargs.get("noise")

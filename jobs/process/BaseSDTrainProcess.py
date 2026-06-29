@@ -1019,7 +1019,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         return basename.endswith(".safetensors")
 
-    def get_latest_save_path(self, name=None, post=''):
+    def get_latest_save_path(self, name=None, post='', include_pretrained_lora=True):
         if name == None:
             name = self.job.name
         # get latest saved step
@@ -1051,7 +1051,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if len(paths) > 0:
                     latest_path = max(paths, key=os.path.getctime)
         
-        if latest_path is None and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
+        if include_pretrained_lora and latest_path is None and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
             # set pretrained lora path as load path if we do not have a checkpoint to resume from
             pretrained_path = self.network_config.pretrained_lora_path
             if os.path.splitext(str(pretrained_path))[1] != ".safetensors":
@@ -1969,7 +1969,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.is_fine_tuning or self.train_config.merge_network_on_save:
             # get the latest checkpoint
             # check to see if we have a latest save
-            latest_save_path = self.get_latest_save_path()
+            # Do not treat pretrained_lora_path as a full-model checkpoint. For
+            # merge_network_on_save it is loaded below as the initial LoRA only
+            # when no saved full-model checkpoint exists.
+            latest_save_path = self.get_latest_save_path(include_pretrained_lora=False)
 
             if latest_save_path is not None:
                 print_acc(f"#### IMPORTANT RESUMING FROM {latest_save_path} ####")
@@ -2286,6 +2289,16 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     print_acc(f"Loading from {latest_save_path}")
                     extra_weights = self.load_weights(latest_save_path)
                     self.network.multiplier = 1.0
+                elif self.train_config.merge_network_on_save and self.network_config.pretrained_lora_path is not None:
+                    resume_save_path = self.get_latest_save_path(include_pretrained_lora=False)
+                    pretrained_path = self.network_config.pretrained_lora_path
+                    pretrained_ext = os.path.splitext(str(pretrained_path))[1]
+                    if resume_save_path is None and pretrained_ext == ".safetensors" and os.path.exists(pretrained_path):
+                        print_acc(f"Loading initial lora from pretrained lora path: {pretrained_path}")
+                        extra_weights = self.load_weights(pretrained_path)
+                        self.network.multiplier = 1.0
+                    elif resume_save_path is None and pretrained_ext != ".safetensors":
+                        print_acc(f"Pretrained lora path from config must be a .safetensors file: {pretrained_path}")
                 
                 if self.network_config.layer_offloading:
                     MemoryManager.attach(

@@ -3,7 +3,7 @@ from typing import List, Optional, Union, TYPE_CHECKING
 import torch
 
 from optimum.quanto.quantize import _quantize_submodule
-from optimum.quanto.tensor import Optimizer, qtype, qtypes
+from optimum.quanto.tensor import Optimizer, QTensor, qtype, qtypes
 from torchao.quantization.quant_api import (
     quantize_ as torchao_quantize_,
     Float8WeightOnlyConfig,
@@ -64,12 +64,12 @@ def get_qtype(qtype: Union[str, qtype]) -> qtype:
 
 def is_quantized_tensor(t) -> bool:
     # torchao stores quantized weights as tensor subclasses under torchao.* that
-    # still expose dequantize(). Quanto tensors are handled separately elsewhere.
+    # still expose dequantize(). Quanto QTensor is handled in dequantize_if_quantized.
     return 'torchao' in type(t).__module__ and hasattr(t, 'dequantize')
 
 
 def dequantize_if_quantized(t):
-    return t.dequantize() if is_quantized_tensor(t) else t
+    return t.dequantize() if isinstance(t, QTensor) or is_quantized_tensor(t) else t
 
 
 def get_torchao_config(qtype):

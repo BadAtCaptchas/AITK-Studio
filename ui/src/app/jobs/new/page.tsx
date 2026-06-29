@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobConfig';
-import { jobTypeOptions } from './options';
+import { jobTypeOptions, modelArchs } from './options';
 import type { JobConfig } from '@/types';
 import { objectCopy } from '@/utils/basic';
 import { useNestedState, setNestedValue } from '@/utils/hooks';
@@ -36,6 +36,11 @@ import {
 } from '@/utils/remoteDatasetRefs';
 
 const isDev = process.env.NODE_ENV === 'development';
+const authenloraBuiltinCodecBits: Record<string, number> = {
+  'builtin:authenlora_48bits': 48,
+  'builtin:authenlora_80bits': 80,
+  'builtin:authenlora_100bits': 100,
+};
 
 type ValidationMessage = {
   level: 'error' | 'warning';
@@ -432,6 +437,54 @@ export default function TrainingForm({
     }
     if (trainConfig?.lr == null || trainConfig.lr < 0) {
       messages.push({ level: 'error', message: 'Learning rate must be zero or greater.' });
+    }
+
+    const watermarkConfig = processConfig?.watermark;
+    if (watermarkConfig?.enabled) {
+      const archName = `${modelConfig?.arch ?? ''}`.split(':')[0];
+      const arch = modelArchs.find(option => option.name === archName);
+      const networkType = `${processConfig?.network?.type ?? ''}`.toLowerCase();
+      if (arch?.group === 'audio' || arch?.group === 'video') {
+        messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires an image LoRA job.' });
+      }
+      if (!processConfig?.network) {
+        messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires a LoRA network.' });
+      }
+      if (!['lora', 'locon', 'lycoris', 'lokr'].includes(networkType)) {
+        messages.push({ level: 'error', message: 'AuthenLoRA watermarking supports LoRA, LoCon, LyCORIS, and LoKr networks.' });
+      }
+      if (trainConfig?.loss_type === 'mean_flow' || trainConfig?.do_guidance_loss) {
+        messages.push({ level: 'error', message: 'AuthenLoRA watermarking currently supports the standard image LoRA loss path.' });
+      }
+      if (!watermarkConfig.codec_path?.trim()) {
+        messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires a local codec path.' });
+      }
+      const builtinMsgBits = authenloraBuiltinCodecBits[watermarkConfig.codec_path?.trim() || ''];
+      if (builtinMsgBits && watermarkConfig.msg_bits !== builtinMsgBits) {
+        messages.push({ level: 'error', message: `AuthenLoRA ${builtinMsgBits}-bit built-in codec requires Message bits to be ${builtinMsgBits}.` });
+      }
+      if (!watermarkConfig.msg_bits || watermarkConfig.msg_bits < 1) {
+        messages.push({ level: 'error', message: 'AuthenLoRA message bits must be greater than 0.' });
+      }
+      if (!watermarkConfig.mapper_rank || watermarkConfig.mapper_rank < 1) {
+        messages.push({ level: 'error', message: 'AuthenLoRA mapper rank must be greater than 0.' });
+      }
+      if (watermarkConfig.mapper_lr < 0) {
+        messages.push({ level: 'error', message: 'AuthenLoRA mapper learning rate must be zero or greater.' });
+      }
+      if (watermarkConfig.watermark_loss_weight < 0 || watermarkConfig.style_loss_weight < 0) {
+        messages.push({ level: 'error', message: 'AuthenLoRA loss weights must be zero or greater.' });
+      }
+      if (watermarkConfig.zero_message_probability < 0 || watermarkConfig.zero_message_probability > 1) {
+        messages.push({ level: 'error', message: 'AuthenLoRA zero message chance must be between 0 and 1.' });
+      }
+      if (watermarkConfig.verify_every < 0) {
+        messages.push({ level: 'error', message: 'AuthenLoRA verify every must be zero or greater.' });
+      }
+      const secret = watermarkConfig.secret?.trim();
+      if (secret && (secret.length !== watermarkConfig.msg_bits || /[^01]/.test(secret))) {
+        messages.push({ level: 'error', message: 'AuthenLoRA secret bits must be binary and match Message bits.' });
+      }
     }
 
     const samplingDisabled = trainConfig?.disable_sampling === true;

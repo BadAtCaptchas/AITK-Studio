@@ -11,7 +11,7 @@ import {
   jobTypeOptions,
   SampleTags,
 } from './options';
-import { defaultDatasetConfig } from './jobConfig';
+import { defaultDatasetConfig, defaultWatermarkConfig } from './jobConfig';
 import {
   ComfyMode,
   ComfyOnError,
@@ -125,6 +125,19 @@ const comfyOnErrorOptions: SelectOption[] = [
   { value: 'skip', label: 'Skip' },
 ];
 
+const authenloraCodecOptions: SelectOption[] = [
+  { value: 'builtin:authenlora_48bits', label: 'Built-in 48-bit' },
+  { value: 'builtin:authenlora_80bits', label: 'Built-in 80-bit' },
+  { value: 'builtin:authenlora_100bits', label: 'Built-in 100-bit' },
+  { value: 'custom', label: 'Custom path' },
+];
+
+const authenloraCodecBits: Record<string, number> = {
+  'builtin:authenlora_48bits': 48,
+  'builtin:authenlora_80bits': 80,
+  'builtin:authenlora_100bits': 100,
+};
+
 const guidedStepItems = [
   { id: 'job-basics', title: 'Basics', detail: 'Name your job and choose a model.' },
   { id: 'job-dataset', title: 'Dataset', detail: 'Add the dataset you want to train on.' },
@@ -182,6 +195,7 @@ export default function SimpleJob({
   const isVideoModel = !!(modelArch?.group === 'video');
   const networkConfig = jobConfig.config.process[0].network;
   const networkType = networkConfig?.type ?? 'lora';
+  const normalizedNetworkType = networkType.toLowerCase();
   const supportsNormalNetworkDropout = networkType !== 'lokr';
   const lokrFullMatrix = !!(networkConfig?.lokr_full_matrix || networkConfig?.lokr_full_rank);
   const isAudioModel = !!(modelArch?.group === 'audio');
@@ -193,6 +207,16 @@ export default function SimpleJob({
   const segaDistillEnabled = !!trainConfig.sega_distill;
   const canEnableSegaDistill = supportsSegaDistill && networkType === 'lora';
   const showSegaDistill = supportsSegaDistill || segaDistillEnabled;
+  const watermarkConfig = jobConfig.config.process[0].watermark ?? defaultWatermarkConfig;
+  const watermarkEnabled = !!watermarkConfig.enabled;
+  const selectedAuthenloraCodec = authenloraCodecBits[watermarkConfig.codec_path] ? watermarkConfig.codec_path : 'custom';
+  const canEnableWatermark =
+    !isAudioModel &&
+    !isVideoModel &&
+    !!networkConfig &&
+    ['lora', 'locon', 'lycoris', 'lokr'].includes(normalizedNetworkType) &&
+    trainConfig.loss_type !== 'mean_flow' &&
+    !trainConfig.do_guidance_loss;
 
   const setSegaDefaults = () => {
     if (trainConfig.sega_distill_weight === undefined) setJobConfig(1.0, 'config.process[0].train.sega_distill_weight');
@@ -215,6 +239,30 @@ export default function SimpleJob({
     setJobConfig(undefined, 'config.process[0].train.do_differential_guidance');
     setJobConfig(undefined, 'config.process[0].train.differential_guidance_scale');
     setJobConfig(undefined, 'config.process[0].train.do_guidance_loss');
+  };
+
+  const handleWatermarkToggle = (enabled: boolean) => {
+    if (enabled && !canEnableWatermark) return;
+    if (!jobConfig.config.process[0].watermark) {
+      setJobConfig({ ...defaultWatermarkConfig, enabled, method: 'authenlora' }, 'config.process[0].watermark');
+      return;
+    }
+    setJobConfig(enabled, 'config.process[0].watermark.enabled');
+    setJobConfig('authenlora', 'config.process[0].watermark.method');
+  };
+
+  const handleWatermarkCodecChange = (value: string) => {
+    if (value === 'custom') {
+      if (selectedAuthenloraCodec !== 'custom') {
+        setJobConfig('', 'config.process[0].watermark.codec_path');
+      }
+      return;
+    }
+    setJobConfig(value, 'config.process[0].watermark.codec_path');
+    const msgBits = authenloraCodecBits[value];
+    if (msgBits) {
+      setJobConfig(msgBits, 'config.process[0].watermark.msg_bits');
+    }
   };
 
   const handleTrainingStepsChange = (value: number | null) => {
@@ -1301,6 +1349,99 @@ export default function SimpleJob({
                       </FormGroup>
                     )}
                   </div>
+                  {renderDisclosure(
+                    'job-watermark-settings',
+                    'Watermarking',
+                    'AuthenLoRA mapper, secret bits, and save artifacts',
+                    Target,
+                    <div className="space-y-4">
+                      <FormGroup label="AuthenLoRA">
+                        <Checkbox
+                          label="Enable watermarking"
+                          checked={watermarkEnabled}
+                          disabled={!canEnableWatermark}
+                          onChange={handleWatermarkToggle}
+                        />
+                        <Checkbox
+                          label="Bake on save"
+                          checked={watermarkConfig.bake_on_save || false}
+                          onChange={value => setJobConfig(value, 'config.process[0].watermark.bake_on_save')}
+                        />
+                      </FormGroup>
+                      <div className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2 xl:grid-cols-4">
+                        <SelectInput
+                          label="Codec"
+                          value={selectedAuthenloraCodec}
+                          onChange={handleWatermarkCodecChange}
+                          options={authenloraCodecOptions}
+                        />
+                        {selectedAuthenloraCodec === 'custom' && (
+                          <TextInput
+                            label="Codec path"
+                            value={watermarkConfig.codec_path || ''}
+                            onChange={value => setJobConfig(value, 'config.process[0].watermark.codec_path')}
+                            placeholder="E:\\models\\authenlora_codec.pth"
+                          />
+                        )}
+                        <NumberInput
+                          label="Message bits"
+                          value={watermarkConfig.msg_bits}
+                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.msg_bits, 'config.process[0].watermark.msg_bits')}
+                          min={1}
+                        />
+                        <TextInput
+                          label="Secret bits"
+                          value={watermarkConfig.secret || ''}
+                          onChange={value => setJobConfig(value, 'config.process[0].watermark.secret')}
+                          placeholder="blank for generated"
+                        />
+                        <NumberInput
+                          label="Mapper rank"
+                          value={watermarkConfig.mapper_rank}
+                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.mapper_rank, 'config.process[0].watermark.mapper_rank')}
+                          min={1}
+                        />
+                        <NumberInput
+                          label="Mapper LR"
+                          value={watermarkConfig.mapper_lr}
+                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.mapper_lr, 'config.process[0].watermark.mapper_lr')}
+                          min={0}
+                        />
+                        <NumberInput
+                          label="Watermark loss"
+                          value={watermarkConfig.watermark_loss_weight}
+                          onChange={value =>
+                            setJobConfig(value ?? defaultWatermarkConfig.watermark_loss_weight, 'config.process[0].watermark.watermark_loss_weight')
+                          }
+                          min={0}
+                        />
+                        <NumberInput
+                          label="Style loss"
+                          value={watermarkConfig.style_loss_weight}
+                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.style_loss_weight, 'config.process[0].watermark.style_loss_weight')}
+                          min={0}
+                        />
+                        <NumberInput
+                          label="Zero message chance"
+                          value={watermarkConfig.zero_message_probability}
+                          onChange={value =>
+                            setJobConfig(
+                              value ?? defaultWatermarkConfig.zero_message_probability,
+                              'config.process[0].watermark.zero_message_probability',
+                            )
+                          }
+                          min={0}
+                          max={1}
+                        />
+                        <NumberInput
+                          label="Verify every"
+                          value={watermarkConfig.verify_every}
+                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.verify_every, 'config.process[0].watermark.verify_every')}
+                          min={0}
+                        />
+                      </div>
+                    </div>,
+                  )}
                   <TrainingPhasesEditor
                     train={processConfig.train}
                     network={processConfig.network}

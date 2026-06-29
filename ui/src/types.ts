@@ -669,6 +669,21 @@ export interface SliderConfig {
   anchor_class?: string | null;
 }
 
+export interface WatermarkConfig {
+  enabled: boolean;
+  method: 'authenlora';
+  codec_path: string;
+  msg_bits: number;
+  mapper_rank: number;
+  mapper_lr: number;
+  watermark_loss_weight: number;
+  style_loss_weight: number;
+  zero_message_probability: number;
+  verify_every: number;
+  secret?: string | null;
+  bake_on_save: boolean;
+}
+
 export interface ProcessConfig {
   type: string;
   sqlite_db_path?: string;
@@ -678,6 +693,7 @@ export interface ProcessConfig {
   device: string;
   network?: NetworkConfig;
   slider?: SliderConfig;
+  watermark?: WatermarkConfig;
   save: SaveConfig;
   datasets: DatasetConfig[];
   train: TrainConfig;

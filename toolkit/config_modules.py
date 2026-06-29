@@ -11,6 +11,7 @@ from toolkit.audio.album_artwork import add_album_artwork
 from toolkit.image_io import save_static_image
 from toolkit.prompt_utils import PromptEmbeds
 from torchao.quantization.quant_primitives import _DTYPE_TO_BIT_WIDTH
+from toolkit.watermarking.codecs import get_builtin_codec_msg_bits, resolve_codec_path
 
 ImgExt = Literal['jpg', 'png', 'webp', 'jxl']
 
@@ -54,6 +55,61 @@ class SaveConfig:
         self.push_to_hub: bool = kwargs.get("push_to_hub", False)
         self.hf_repo_id: Optional[str] = kwargs.get("hf_repo_id", None)
         self.hf_private: Optional[str] = kwargs.get("hf_private", False)
+
+
+WatermarkMethod = Literal['authenlora']
+
+
+class WatermarkConfig:
+    def __init__(self, **kwargs):
+        self.enabled: bool = kwargs.get('enabled', False)
+        self.method: WatermarkMethod = kwargs.get('method', 'authenlora')
+        self.codec_path: Optional[str] = kwargs.get('codec_path', None)
+        self.msg_bits: int = int(kwargs.get('msg_bits', 48))
+        self.mapper_rank: int = int(kwargs.get('mapper_rank', 160))
+        self.mapper_lr: float = float(kwargs.get('mapper_lr', 1e-4))
+        self.watermark_loss_weight: float = float(kwargs.get('watermark_loss_weight', 1.0))
+        self.style_loss_weight: float = float(kwargs.get('style_loss_weight', 1.0))
+        self.zero_message_probability: float = float(kwargs.get('zero_message_probability', 0.0))
+        self.verify_every: int = int(kwargs.get('verify_every', 100))
+        self.secret: Optional[str] = kwargs.get('secret', None)
+        self.bake_on_save: bool = kwargs.get('bake_on_save', False)
+
+        if not self.enabled:
+            return
+
+        if self.method != 'authenlora':
+            raise ValueError(f"watermark.method must be 'authenlora', got {self.method}")
+        if self.codec_path is None or str(self.codec_path).strip() == "":
+            raise ValueError("watermark.codec_path is required when watermark.enabled is true")
+        configured_codec_path = str(self.codec_path).strip()
+        builtin_msg_bits = get_builtin_codec_msg_bits(configured_codec_path)
+        if builtin_msg_bits is not None and builtin_msg_bits != self.msg_bits:
+            raise ValueError(
+                f"watermark.msg_bits must be {builtin_msg_bits} for codec {configured_codec_path}"
+            )
+        self.codec_path = resolve_codec_path(configured_codec_path)
+        if not os.path.isfile(self.codec_path):
+            raise ValueError(f"watermark.codec_path must be an existing local file: {self.codec_path}")
+        if self.msg_bits <= 0:
+            raise ValueError("watermark.msg_bits must be greater than 0")
+        if self.mapper_rank <= 0:
+            raise ValueError("watermark.mapper_rank must be greater than 0")
+        if self.mapper_lr < 0:
+            raise ValueError("watermark.mapper_lr must be zero or greater")
+        if self.watermark_loss_weight < 0:
+            raise ValueError("watermark.watermark_loss_weight must be zero or greater")
+        if self.style_loss_weight < 0:
+            raise ValueError("watermark.style_loss_weight must be zero or greater")
+        if self.zero_message_probability < 0 or self.zero_message_probability > 1:
+            raise ValueError("watermark.zero_message_probability must be between 0 and 1")
+        if self.verify_every < 0:
+            raise ValueError("watermark.verify_every must be zero or greater")
+        if self.secret is not None:
+            secret = str(self.secret).strip()
+            if len(secret) != self.msg_bits or any(bit not in {'0', '1'} for bit in secret):
+                raise ValueError("watermark.secret must be a binary string with length watermark.msg_bits")
+            self.secret = secret
 
 class LoggingConfig:
     def __init__(self, **kwargs):

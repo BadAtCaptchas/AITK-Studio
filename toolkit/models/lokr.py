@@ -333,14 +333,35 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
 
     def _w2(self):
         if self.use_w2:
-            return self.lokr_w2
+            w2 = self.lokr_w2
+            rank_scale = self._authenlora_rank_scale(w2.device, w2.dtype)
+            if rank_scale is not None:
+                w2 = w2 * rank_scale.mean()
+            return w2
         if self.tucker:
-            return rebuild_tucker(self.lokr_t2, self.lokr_w2_a, self.lokr_w2_b)
-        w2 = self.lokr_w2_a @ self.lokr_w2_b
+            t2 = self.lokr_t2
+            rank_scale = self._authenlora_rank_scale(t2.device, t2.dtype)
+            if rank_scale is not None:
+                t2 = t2 * rank_scale.view(-1, 1, *[1] * (t2.dim() - 2))
+            return rebuild_tucker(t2, self.lokr_w2_a, self.lokr_w2_b)
+        w2_b = self.lokr_w2_b
+        rank_scale = self._authenlora_rank_scale(w2_b.device, w2_b.dtype)
+        if rank_scale is not None:
+            w2_b = w2_b * rank_scale.view(-1, *[1] * (w2_b.dim() - 1))
+        w2 = self.lokr_w2_a @ w2_b
         if self.module_type.startswith("conv"):
             shape = self.lokr_shape
             return w2.reshape(shape[0][1], shape[1][1], *shape[2:])
         return w2
+
+    def _authenlora_rank_scale(self, device, dtype):
+        network = self.network_ref()
+        if network is None or not hasattr(network, "get_authenlora_rank_scale"):
+            return None
+        rank_scale = network.get_authenlora_rank_scale(self.lora_dim, device, dtype)
+        if rank_scale is None:
+            return None
+        return rank_scale.mean(dim=0)
 
     def get_weight(self, orig_weight=None):
         weight = make_kron(self._w1(), self._w2(), self.scale)
@@ -521,6 +542,24 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         if _is_floating_dtype(base.dtype):
             output = output.to(base.dtype)
         return base + output
+
+    @torch.no_grad()
+    def bake_authenlora_rank_scale(self, rank_scale: torch.Tensor):
+        restore = []
+        scale = rank_scale.to(device=self.lokr_w2.device if self.use_w2 else self.lokr_w2_b.device)
+        scale = scale[:1].squeeze(0)
+        if self.use_w2:
+            restore.append((self.lokr_w2, self.lokr_w2.data.clone()))
+            self.lokr_w2.data = self.lokr_w2.data * scale.mean().to(self.lokr_w2.device, self.lokr_w2.dtype)
+        elif self.tucker:
+            restore.append((self.lokr_t2, self.lokr_t2.data.clone()))
+            scale = scale.to(self.lokr_t2.device, self.lokr_t2.dtype)
+            self.lokr_t2.data = self.lokr_t2.data * scale.view(-1, 1, *[1] * (self.lokr_t2.dim() - 2))
+        else:
+            restore.append((self.lokr_w2_b, self.lokr_w2_b.data.clone()))
+            scale = scale.to(self.lokr_w2_b.device, self.lokr_w2_b.dtype)
+            self.lokr_w2_b.data = self.lokr_w2_b.data * scale.view(-1, *[1] * (self.lokr_w2_b.dim() - 1))
+        return restore
 
     def _bypass_w2(self):
         if self.use_w2:

@@ -2,7 +2,7 @@
 import { isMac } from '@/helpers/basic';
 import { defaultSampleConfig } from '@/helpers/defaultSamples';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
-import { JobConfig, SampleConfig, DatasetConfig, SliderConfig } from '@/types';
+import { JobConfig, SampleConfig, DatasetConfig, SliderConfig, WatermarkConfig } from '@/types';
 
 export const defaultDatasetConfig: DatasetConfig = {
   folder_path: '/path/to/images/folder',
@@ -30,6 +30,21 @@ export const defaultSliderConfig: SliderConfig = {
   negative_prompt: 'person who is sad',
   target_class: 'person',
   anchor_class: '',
+};
+
+export const defaultWatermarkConfig: WatermarkConfig = {
+  enabled: false,
+  method: 'authenlora',
+  codec_path: 'builtin:authenlora_48bits',
+  msg_bits: 48,
+  mapper_rank: 160,
+  mapper_lr: 0.0001,
+  watermark_loss_weight: 1.0,
+  style_loss_weight: 1.0,
+  zero_message_probability: 0.05,
+  verify_every: 100,
+  secret: '',
+  bake_on_save: false,
 };
 
 export const defaultJobConfig: JobConfig = {
@@ -67,6 +82,7 @@ export const defaultJobConfig: JobConfig = {
             ignore_if_contains: [],
           },
         },
+        watermark: defaultWatermarkConfig,
         save: {
           dtype: 'bf16',
           save_every: 250,
@@ -162,6 +178,11 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   if (jobConfig?.config?.process && jobConfig.config.process[0]?.type === 'ui_trainer') {
     jobConfig.config.process[0].type = 'diffusion_trainer';
   }
+
+  jobConfig.config.process[0].watermark = {
+    ...defaultWatermarkConfig,
+    ...(jobConfig.config.process[0].watermark ?? {}),
+  };
 
   if ('auto_memory' in jobConfig.config.process[0].model) {
     jobConfig.config.process[0].model.layer_offloading = (jobConfig.config.process[0].model.auto_memory ||

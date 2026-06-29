@@ -13,6 +13,7 @@
     "update_db": "node scripts/prepare-db.mjs",
     "test:metrics": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/metricsDownsample.test.mjs",
     "test:advisor": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/trainingAdvisor.test.mjs",
+    "test:authenlora": "node --test scripts/authenloraConfig.test.mjs",
     "test:flux-guidance": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/fluxGuidancePolicy.test.mjs",
     "test:tensorboard": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
     "test:ltx-training": "node --test scripts/ltxTrainingOptions.test.mjs",

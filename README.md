@@ -41,6 +41,7 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [Job Import and Export](#job-import-and-export)
 - [Security](#security)
 - [Training](#training)
+- [LoRA Watermarking](#lora-watermarking)
 - [Cloud Training](#cloud-training)
 - [Datasets](#datasets)
 - [Advanced Training](#advanced-training)
@@ -474,6 +475,47 @@ For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.y
 When training starts, AITK Studio creates the configured training folder and writes checkpoints and samples there. You can stop training with `Ctrl+C`; when you resume, it picks up from the latest checkpoint.
 
 IMPORTANT: If you press `Ctrl+C` while a checkpoint is saving, it will likely corrupt that checkpoint. Wait until saving finishes before stopping the run.
+
+### LoRA Watermarking
+
+AITK Studio includes optional AuthenLoRA-style watermarking for image LoRA training. This is useful when you want a LoRA release to carry an ownership or authenticity signal that can be checked later, while keeping the normal LoRA workflow intact. Watermarking is **off by default** and has no effect unless you enable the `watermark` block in a job config or turn on **Watermarking** in the simple-job UI.
+
+AuthenLoRA trains the LoRA behavior and a secret-bit watermark together. A small mapper converts secret bits into rank-wise LoRA modulation, and the trainer adds an auxiliary watermark loss alongside the normal style/content loss. AITK Studio keeps the standard resumable LoRA checkpoint, then saves extra private/public watermark artifacts when watermarking is enabled.
+
+Supported scope:
+
+- Image LoRA jobs only.
+- LoRA, LoCon/LyCORIS, and LoKr networks.
+- Standard image LoRA loss path. Guided-loss and mean-flow jobs are currently rejected for watermarking.
+- Audio/video adapters and non-image training jobs are not supported.
+
+The UI exposes built-in codec choices for the official AuthenLoRA 48-bit, 80-bit, and 100-bit codecs. CLI configs can use those same packaged local defaults with `builtin:` IDs, or point at an explicit local codec checkpoint. AITK Studio does not download codecs automatically at training startup.
+
+Example config:
+
+```yaml
+watermark:
+  enabled: true
+  method: authenlora
+  codec_path: builtin:authenlora_48bits # or a local .pth/.safetensors codec path
+  msg_bits: 48
+  mapper_rank: 160
+  mapper_lr: 0.0001
+  watermark_loss_weight: 1.0
+  style_loss_weight: 1.0
+  zero_message_probability: 0.05
+  verify_every: 100
+  secret: null # optional binary string matching msg_bits
+  bake_on_save: false
+```
+
+Available built-in codec IDs:
+
+- `builtin:authenlora_48bits`
+- `builtin:authenlora_80bits`
+- `builtin:authenlora_100bits`
+
+When enabled, saves include the normal resumable LoRA plus an AuthenLoRA mapper safetensors file and a private local sidecar with the secret, codec fingerprint, thresholds, and verification summary. Public safetensors metadata stores only non-secret watermark metadata such as method, bit count, codec hash, and secret hash. If `bake_on_save` is true, AITK Studio also emits a baked public LoRA with the selected/generated secret applied, which is the most portable export for runtimes that do not understand the dynamic mapper.
 
 ### Multi-step training phases
 

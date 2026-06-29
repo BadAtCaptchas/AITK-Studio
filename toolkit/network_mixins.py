@@ -231,14 +231,16 @@ class ToolkitModuleMixin:
             if torch.rand(1) < self.module_dropout:
                 return 0.0  # added to original forward
 
+        try:
+            lx = self.lora_down(x)
+        except RuntimeError as e:
+            print(f"Error in {self.__class__.__name__} lora_down")
+            raise e
+
+        lx = self._apply_authenlora_rank_scale(lx)
+
         if hasattr(self, 'lora_mid') and self.lora_mid is not None:
-            lx = self.lora_mid(self.lora_down(x))
-        else:
-            try:
-                lx = self.lora_down(x)
-            except RuntimeError as e:
-                print(f"Error in {self.__class__.__name__} lora_down")
-                raise e
+            lx = self.lora_mid(lx)
 
         if isinstance(self.dropout, nn.Dropout) or isinstance(self.dropout, nn.Identity):
             lx = self.dropout(lx)
@@ -268,6 +270,34 @@ class ToolkitModuleMixin:
             scale = scale * self.scalar
 
         return lx * scale
+
+    def _apply_authenlora_rank_scale(self: Module, lx: torch.Tensor) -> torch.Tensor:
+        network: Network = self.network_ref()
+        if not hasattr(network, 'get_authenlora_rank_scale'):
+            return lx
+        rank_scale = network.get_authenlora_rank_scale(
+            getattr(self, 'lora_dim', lx.shape[-1]),
+            lx.device,
+            lx.dtype,
+        )
+        if rank_scale is None:
+            return lx
+
+        if rank_scale.shape[0] != lx.shape[0]:
+            if lx.shape[0] % rank_scale.shape[0] == 0:
+                rank_scale = rank_scale.repeat_interleave(lx.shape[0] // rank_scale.shape[0], dim=0)
+            else:
+                rank_scale = rank_scale[:1].repeat(lx.shape[0], 1)
+
+        if lx.dim() == 2:
+            return lx * rank_scale
+        if lx.dim() == 3:
+            return lx * rank_scale.unsqueeze(1)
+        if lx.dim() == 4:
+            return lx * rank_scale[:, :, None, None]
+        if lx.dim() == 5:
+            return lx * rank_scale[:, :, None, None, None]
+        return lx * rank_scale.mean()
 
     def lorm_forward(self: Network, x, *args, **kwargs):
         network: Network = self.network_ref()
@@ -542,6 +572,7 @@ class ToolkitNetworkMixin:
         self.can_merge_in = not is_lorm
         # will prevent optimizer from loading as it will have double states
         self.did_change_weights = False
+        self.authenlora_rank_scale: Optional[torch.Tensor] = None
 
     def get_empty_network_error_message(self: Network) -> str:
         details = {
@@ -690,6 +721,31 @@ class ToolkitNetworkMixin:
         if self.base_model_ref is not None:
             save_dict = self.base_model_ref().convert_lora_weights_before_save(save_dict)
         return save_dict
+
+    def match_authenlora_rank_scale(self: Network, rank_scale: torch.Tensor, rank: int, device, dtype) -> torch.Tensor:
+        if rank_scale is None:
+            return None
+        scale = rank_scale.to(device=device, dtype=dtype)
+        if scale.dim() == 1:
+            scale = scale.unsqueeze(0)
+        if scale.shape[-1] == rank:
+            return scale
+        if scale.shape[-1] > rank:
+            return scale[..., :rank]
+        pad = torch.ones((*scale.shape[:-1], rank - scale.shape[-1]), device=device, dtype=dtype)
+        return torch.cat([scale, pad], dim=-1)
+
+    def set_authenlora_rank_scale(self: Network, rank_scale: torch.Tensor):
+        self.authenlora_rank_scale = rank_scale
+
+    def clear_authenlora_rank_scale(self: Network):
+        self.authenlora_rank_scale = None
+
+    def get_authenlora_rank_scale(self: Network, rank: int, device, dtype) -> Optional[torch.Tensor]:
+        rank_scale = getattr(self, 'authenlora_rank_scale', None)
+        if rank_scale is None:
+            return None
+        return self.match_authenlora_rank_scale(rank_scale, rank, device, dtype)
 
     def save_weights(
             self: Network,

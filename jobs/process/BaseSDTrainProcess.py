@@ -62,7 +62,7 @@ from tqdm import tqdm
 
 from toolkit.config_modules import SaveConfig, LoggingConfig, SampleConfig, NetworkConfig, TrainConfig, ModelConfig, \
     GenerateImageConfig, EmbeddingConfig, DatasetConfig, preprocess_dataset_raw_config, AdapterConfig, GuidanceConfig, validate_configs, \
-    DecoratorConfig
+    DecoratorConfig, WatermarkConfig
 from toolkit.logging_aitk import create_logger
 from toolkit.training_phases import TrainingPhaseManager
 from diffusers import FluxTransformer2DModel
@@ -158,6 +158,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.model_config = ModelConfig(**model_config)
 
         self.save_config = SaveConfig(**self.get_conf('save', {}))
+        self.watermark_config = WatermarkConfig(**self.get_conf('watermark', {}))
         self.sample_config = SampleConfig(**self.get_conf('sample', {}))
         first_sample_config = self.get_conf('first_sample', None)
         if first_sample_config is not None:
@@ -311,6 +312,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.steps_this_boundary = 0
         self.num_consecutive_oom = 0
         self.additional_logs = OrderedDict()
+        self.authenlora = None
 
     def post_process_generate_image_config_list(self, generate_image_config_list: List[GenerateImageConfig]):
         # override in subclass
@@ -528,6 +530,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # )
         o_dict['ss_output_name'] = self.job.name
 
+        authenlora = getattr(self, "authenlora", None)
+        if authenlora is not None:
+            authenlora = getattr(authenlora, "module", authenlora)
+            o_dict['aitk_watermark'] = authenlora.get_public_metadata()
+
         if self.trigger_word is not None:
             # just so auto1111 will pick it up
             o_dict['ss_tag_frequency'] = {
@@ -642,6 +649,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # always save params as ema
             self.ema.eval()
 
+        primary_save_path = None
         if not os.path.exists(self.save_root):
             os.makedirs(self.save_root, exist_ok=True)
 
@@ -685,6 +693,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     metadata=save_meta,
                     extra_state_dict=embedding_dict
                 )
+                primary_save_path = file_path
                 self.network.multiplier = prev_multiplier
                 # if we have an embedding as well, pair it with the network
 
@@ -713,6 +722,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     dec_file_path,
                     metadata=save_meta,
                 )
+                primary_save_path = dec_file_path
 
             if self.adapter is not None and self.adapter_config.train:
                 adapter_name = self.job.name
@@ -770,6 +780,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         dtype=get_torch_dtype(self.save_config.dtype),
                         direct_save=direct_save
                     )
+                primary_save_path = file_path
         else:
             if self.network is not None and self.train_config.merge_network_on_save:
                 # merge the network weights into a full model and save that.
@@ -824,6 +835,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     save_meta,
                     get_torch_dtype(self.save_config.dtype)
                 )
+                primary_save_path = file_path
 
         # save learnable params as json if we have thim
         if self.snr_gos:
@@ -855,7 +867,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 print_acc("Could not save optimizer")
 
         self.clean_up_saves()
-        self.post_save_hook(file_path)
+        self.post_save_hook(primary_save_path or file_path)
 
         if self.ema is not None:
             self.ema.train()
@@ -906,6 +918,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.sd.network is not None:
             self.sd.network = self.accelerator.prepare(self.sd.network)
             self.modules_being_trained.append(self.sd.network)
+        if getattr(self, "authenlora", None) is not None:
+            self.authenlora = self.accelerator.prepare(self.authenlora)
+            self.modules_being_trained.append(self.authenlora)
         if self.adapter is not None and self.adapter_config.train:
             # todo adapters may not be a module. need to check
             self.adapter = self.accelerator.prepare(self.adapter)

@@ -1,3 +1,4 @@
+import copy
 import os
 import random
 from collections import OrderedDict
@@ -35,7 +36,9 @@ from diffusers import EMAModel
 import math
 from toolkit.train_tools import precondition_model_outputs_flow_match
 from toolkit.models.diffusion_feature_extraction import DiffusionFeatureExtractor, load_dfe
+from toolkit.metadata import get_meta_for_safetensors
 from toolkit.util.losses import wavelet_loss, stepped_loss
+from toolkit.watermarking import AuthenLoRAController
 import torch.nn.functional as F
 from toolkit.unloader import unload_text_encoder
 from PIL import Image
@@ -1516,6 +1519,202 @@ class SDTrainer(BaseSDTrainProcess):
     def end_of_training_loop(self):
         pass
 
+    def _authenlora_controller(self) -> Optional[AuthenLoRAController]:
+        controller = getattr(self, 'authenlora', None)
+        return getattr(controller, 'module', controller)
+
+    def hook_add_extra_train_params(self, params):
+        params = super().hook_add_extra_train_params(params)
+        if not getattr(self.watermark_config, 'enabled', False):
+            return params
+
+        if getattr(self.sd, 'is_audio_model', False):
+            raise ValueError("AuthenLoRA watermarking is only supported for image LoRA jobs")
+        if self.network_config is None or self.network is None:
+            raise ValueError("watermark.enabled requires an image LoRA network")
+        if getattr(self.network, 'is_lorm', False) or self.network_config.type.lower() == 'lorm':
+            raise ValueError("AuthenLoRA watermarking does not support LORM networks")
+        if self.train_config.loss_type == 'mean_flow' or self.train_config.do_guidance_loss:
+            raise ValueError("AuthenLoRA watermarking currently supports the standard image LoRA training loss path")
+        if not hasattr(self.network, 'get_all_modules') or not hasattr(self.network, 'match_authenlora_rank_scale'):
+            raise ValueError("AuthenLoRA watermarking requires a compatible LoRA/LoCon/LoKr network")
+
+        self.authenlora = AuthenLoRAController(
+            config=self.watermark_config,
+            device=self.device_torch,
+            dtype=get_torch_dtype(self.train_config.dtype),
+            save_root=self.save_root,
+            run_name=self.job.name,
+        )
+        params.append({
+            'params': list(self.authenlora.mapper.parameters()),
+            'lr': self.watermark_config.mapper_lr,
+            '_phase_lr_key': 'lr',
+            '_phase_lr_scale': 1.0,
+        })
+        return params
+
+    def _prepare_authenlora_batch(
+            self,
+            network,
+            noisy_latents: torch.Tensor,
+            batch: DataLoaderBatchDTO,
+    ):
+        controller = self._authenlora_controller()
+        if controller is None:
+            return noisy_latents, None, False
+        if noisy_latents.dim() != 4:
+            raise ValueError("AuthenLoRA watermarking supports 4D image latents only")
+
+        force_zero = random.random() < self.watermark_config.zero_message_probability
+        bits, _ = controller.choose_bits(noisy_latents.shape[0], force_zero=force_zero)
+        rank_scale = controller.rank_scale_from_bits(bits)
+        network.set_authenlora_rank_scale(rank_scale)
+
+        source_latents = batch.latents.to(self.device_torch, dtype=noisy_latents.dtype)
+        if source_latents.dim() != 4:
+            raise ValueError("AuthenLoRA watermarking requires image latents")
+        delta = controller.encode_latent_delta(source_latents, bits)
+        if delta.shape[0] != noisy_latents.shape[0]:
+            if noisy_latents.shape[0] % delta.shape[0] == 0:
+                delta = delta.repeat_interleave(noisy_latents.shape[0] // delta.shape[0], dim=0)
+            else:
+                delta = delta[:1].repeat(noisy_latents.shape[0], 1, 1, 1)
+        if delta.shape[-2:] != noisy_latents.shape[-2:]:
+            delta = F.interpolate(delta, size=noisy_latents.shape[-2:], mode='bilinear')
+        return noisy_latents + delta.to(device=noisy_latents.device, dtype=noisy_latents.dtype), bits, force_zero
+
+    def _predict_authenlora_clean_base(
+            self,
+            network,
+            noisy_latents: torch.Tensor,
+            timesteps: torch.Tensor,
+            conditional_embeds: PromptEmbeds,
+            unconditional_embeds: Optional[PromptEmbeds],
+            batch: DataLoaderBatchDTO,
+            pred_kwargs: dict,
+    ) -> torch.Tensor:
+        was_unet_training = self.sd.unet.training
+        was_network_active = getattr(network, 'is_active', True)
+        previous_rank_scale = getattr(network, 'authenlora_rank_scale', None)
+
+        try:
+            network.clear_authenlora_rank_scale()
+            network.is_active = False
+            self.sd.unet.eval()
+            with torch.no_grad():
+                return self.predict_noise(
+                    noisy_latents=noisy_latents,
+                    timesteps=timesteps,
+                    conditional_embeds=conditional_embeds,
+                    unconditional_embeds=unconditional_embeds,
+                    batch=batch,
+                    **pred_kwargs
+                ).detach()
+        finally:
+            network.is_active = was_network_active
+            if previous_rank_scale is None:
+                network.clear_authenlora_rank_scale()
+            else:
+                network.set_authenlora_rank_scale(previous_rank_scale)
+            if was_unet_training:
+                self.sd.unet.train()
+
+    def _verify_authenlora_batch(
+            self,
+            controller: AuthenLoRAController,
+            watermarked_latents: torch.Tensor,
+            bits: torch.Tensor,
+            zero_message: bool,
+    ):
+        verify_every = self.watermark_config.verify_every
+        if verify_every > 0 and self.step_num % verify_every != 0:
+            return
+        vae = getattr(self.sd, 'vae', None)
+        if vae is None:
+            return
+        try:
+            with torch.no_grad():
+                vae_param = next(vae.parameters())
+                vae_device = vae_param.device
+                vae_dtype = vae_param.dtype
+                scaling_factor = self.sd.vae.config['scaling_factor']
+                latents = watermarked_latents.detach().to(vae_device, dtype=vae_dtype) / scaling_factor
+                decoded = vae.decode(latents).sample
+                decoded = (decoded / 2 + 0.5).clamp(0, 1)
+                bit_acc = controller.decode_image_bits(decoded, bits)
+        except Exception:
+            controller.last_verification_pass = False
+            return
+
+        if zero_message:
+            controller.last_zero_bit_accuracy = bit_acc
+        else:
+            controller.last_bit_accuracy = bit_acc
+        controller.last_verification_pass = bit_acc >= 0.5
+
+    def _add_authenlora_aux_loss(
+            self,
+            loss: torch.Tensor,
+            network,
+            clean_latents: torch.Tensor,
+            watermarked_latents: torch.Tensor,
+            noise_pred: torch.Tensor,
+            timesteps: torch.Tensor,
+            conditional_embeds: PromptEmbeds,
+            unconditional_embeds: Optional[PromptEmbeds],
+            batch: DataLoaderBatchDTO,
+            pred_kwargs: dict,
+            bits: Optional[torch.Tensor],
+            zero_message: bool,
+    ) -> torch.Tensor:
+        controller = self._authenlora_controller()
+        if controller is None or bits is None:
+            return loss
+
+        clean_pred = self._predict_authenlora_clean_base(
+            network=network,
+            noisy_latents=clean_latents,
+            timesteps=timesteps,
+            conditional_embeds=conditional_embeds,
+            unconditional_embeds=unconditional_embeds,
+            batch=batch,
+            pred_kwargs=pred_kwargs,
+        )
+        watermark_loss = F.mse_loss(noise_pred.float(), clean_pred.float()) * self.watermark_config.watermark_loss_weight
+        self._verify_authenlora_batch(controller, watermarked_latents, bits, zero_message)
+
+        self.additional_logs['watermark/loss'] = watermark_loss.detach().float().item()
+        self.additional_logs['watermark/bit_acc'] = 0.0 if controller.last_bit_accuracy is None else float(controller.last_bit_accuracy)
+        self.additional_logs['watermark/zero_msg_acc'] = 0.0 if controller.last_zero_bit_accuracy is None else float(controller.last_zero_bit_accuracy)
+        self.additional_logs['watermark/verification_pass'] = 1.0 if controller.last_verification_pass else 0.0
+
+        return loss * self.watermark_config.style_loss_weight + watermark_loss
+
+    def _clear_authenlora_batch(self, network):
+        if self._authenlora_controller() is not None and hasattr(network, 'clear_authenlora_rank_scale'):
+            network.clear_authenlora_rank_scale()
+
+    def post_save_hook(self, save_path):
+        controller = self._authenlora_controller()
+        if controller is None or save_path is None or not str(save_path).endswith('.safetensors'):
+            return
+
+        controller.save_mapper(save_path)
+        controller.save_private_sidecar(save_path)
+
+        if self.watermark_config.bake_on_save and self.network is not None:
+            network = getattr(self.network, 'module', self.network)
+            save_meta = copy.deepcopy(self.meta)
+            save_meta['aitk_watermark'] = controller.get_public_metadata()
+            save_meta = get_meta_for_safetensors(save_meta, self.job.name)
+            controller.save_baked_lora(
+                network=network,
+                checkpoint_path=save_path,
+                metadata=save_meta,
+                dtype=get_torch_dtype(self.save_config.dtype),
+            )
+
     def predict_noise(
         self,
         noisy_latents: torch.Tensor,
@@ -2310,6 +2509,17 @@ class SDTrainer(BaseSDTrainProcess):
                         prior_pred=prior_pred,
                     )
                 else:
+                    authenlora_clean_latents = noisy_latents
+                    authenlora_bits = None
+                    authenlora_zero_message = False
+                    if self._authenlora_controller() is not None:
+                        authenlora_clean_latents = noisy_latents
+                        noisy_latents, authenlora_bits, authenlora_zero_message = self._prepare_authenlora_batch(
+                            network,
+                            noisy_latents,
+                            batch,
+                        )
+
                     with self.timer('predict_unet'):
                         noise_pred = self.predict_noise(
                             noisy_latents=noisy_latents.to(self.device_torch, dtype=dtype),
@@ -2344,6 +2554,21 @@ class SDTrainer(BaseSDTrainProcess):
                         if sega_teacher_pred is not None:
                             loss = self._add_sega_distill_aux_loss(loss, noise_pred, sega_teacher_pred)
                             self._record_monitor_metric('train/loss_final', loss)
+
+                        loss = self._add_authenlora_aux_loss(
+                            loss=loss,
+                            network=network,
+                            clean_latents=authenlora_clean_latents,
+                            watermarked_latents=noisy_latents,
+                            noise_pred=noise_pred,
+                            timesteps=timesteps,
+                            conditional_embeds=conditional_embeds,
+                            unconditional_embeds=unconditional_embeds,
+                            batch=batch,
+                            pred_kwargs=pred_kwargs,
+                            bits=authenlora_bits,
+                            zero_message=authenlora_zero_message,
+                        )
                     
                     if self.train_config.diff_output_preservation or self.train_config.blank_prompt_preservation:
                         with torch.no_grad():
@@ -2388,6 +2613,7 @@ class SDTrainer(BaseSDTrainProcess):
                     # loss.backward()
                     # else:
                     self.accelerator.backward(loss)
+                    self._clear_authenlora_batch(network)
 
         return loss.detach()
         # flush()

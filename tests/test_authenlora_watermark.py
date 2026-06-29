@@ -1,9 +1,12 @@
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 
 import torch
+from PIL import Image
 from safetensors import safe_open
 
 from toolkit.config_modules import WatermarkConfig
@@ -17,6 +20,7 @@ from toolkit.watermarking.authenlora import (
     bit_accuracy,
 )
 from toolkit.watermarking.codecs import resolve_codec_path
+from scripts.check_authenlora_watermark import summarize_detection
 
 
 class FakeNetwork:
@@ -70,6 +74,19 @@ class AuthenLoRATest(unittest.TestCase):
         bits = torch.zeros((1, 4), dtype=torch.long)
 
         self.assertEqual(bit_accuracy(logits, bits), 1.0)
+
+    def test_zero_message_detection_summary(self):
+        self.assertEqual(
+            summarize_detection("0000"),
+            {
+                "zero_message": True,
+                "watermark_detected": False,
+                "watermark_status": "not_detected",
+            },
+        )
+        self.assertEqual(summarize_detection("1000")["watermark_status"], "candidate")
+        self.assertEqual(summarize_detection("1000", match=True, has_expected_secret=True)["watermark_status"], "verified")
+        self.assertEqual(summarize_detection("1000", match=False, has_expected_secret=True)["watermark_status"], "mismatch")
 
     def test_lora_and_locon_rank_modulation(self):
         for module_cls in (LoRAModule, LoConSpecialModule):
@@ -151,6 +168,47 @@ class AuthenLoRATest(unittest.TestCase):
         path = resolve_codec_path("builtin:authenlora_48bits")
         self.assertTrue(os.path.isfile(path))
         self.assertTrue(path.endswith("authenlora_codec_48bits.pth"))
+
+    def test_check_image_cli_outputs_decoded_bits(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            codec_path = os.path.join(temp_dir, "codec.pt")
+            image_path = os.path.join(temp_dir, "image.png")
+            codec = AuthenLoRACodec(msg_bits=4)
+            torch.save(
+                {
+                    "sec_encoder": codec.encoder.state_dict(),
+                    "sec_decoder": codec.decoder.state_dict(),
+                },
+                codec_path,
+            )
+            Image.new("RGB", (32, 32), color=(32, 64, 96)).save(image_path)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    os.path.join("scripts", "check_authenlora_watermark.py"),
+                    "--image",
+                    image_path,
+                    "--codec",
+                    codec_path,
+                    "--msg-bits",
+                    "4",
+                    "--expected-secret",
+                    "0000",
+                ],
+                check=True,
+                cwd=os.getcwd(),
+                capture_output=True,
+                text=True,
+            )
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["msg_bits"], 4)
+            self.assertEqual(len(result["decoded_bits"]), 4)
+            self.assertIn("confidence", result)
+            self.assertIn("bit_accuracy", result)
+            self.assertIn("zero_message", result)
+            self.assertIn("watermark_detected", result)
+            self.assertIn("watermark_status", result)
 
 
 if __name__ == "__main__":

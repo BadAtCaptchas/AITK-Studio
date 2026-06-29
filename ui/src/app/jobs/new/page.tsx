@@ -34,13 +34,9 @@ import {
   remoteDatasetRememberKey,
   shouldImportRemoteDatasetForWorker,
 } from '@/utils/remoteDatasetRefs';
+import { AUTHENLORA_BUILTIN_CODEC_BITS } from '@/utils/authenloraCodecs';
 
 const isDev = process.env.NODE_ENV === 'development';
-const authenloraBuiltinCodecBits: Record<string, number> = {
-  'builtin:authenlora_48bits': 48,
-  'builtin:authenlora_80bits': 80,
-  'builtin:authenlora_100bits': 100,
-};
 
 type ValidationMessage = {
   level: 'error' | 'warning';
@@ -459,7 +455,7 @@ export default function TrainingForm({
       if (!watermarkConfig.codec_path?.trim()) {
         messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires a local codec path.' });
       }
-      const builtinMsgBits = authenloraBuiltinCodecBits[watermarkConfig.codec_path?.trim() || ''];
+      const builtinMsgBits = AUTHENLORA_BUILTIN_CODEC_BITS[watermarkConfig.codec_path?.trim() || ''];
       if (builtinMsgBits && watermarkConfig.msg_bits !== builtinMsgBits) {
         messages.push({ level: 'error', message: `AuthenLoRA ${builtinMsgBits}-bit built-in codec requires Message bits to be ${builtinMsgBits}.` });
       }

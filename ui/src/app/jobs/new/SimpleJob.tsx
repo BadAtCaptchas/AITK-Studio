@@ -72,6 +72,7 @@ import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
 import { setNestedValue } from '@/utils/hooks';
 import { parseRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
+import { AUTHENLORA_BUILTIN_CODEC_BITS, AUTHENLORA_CODEC_OPTIONS, getAuthenloraCodecSelectValue } from '@/utils/authenloraCodecs';
 
 type Props = {
   jobConfig: JobConfig;
@@ -124,19 +125,6 @@ const comfyOnErrorOptions: SelectOption[] = [
   { value: 'native', label: 'Native fallback' },
   { value: 'skip', label: 'Skip' },
 ];
-
-const authenloraCodecOptions: SelectOption[] = [
-  { value: 'builtin:authenlora_48bits', label: 'Built-in 48-bit' },
-  { value: 'builtin:authenlora_80bits', label: 'Built-in 80-bit' },
-  { value: 'builtin:authenlora_100bits', label: 'Built-in 100-bit' },
-  { value: 'custom', label: 'Custom path' },
-];
-
-const authenloraCodecBits: Record<string, number> = {
-  'builtin:authenlora_48bits': 48,
-  'builtin:authenlora_80bits': 80,
-  'builtin:authenlora_100bits': 100,
-};
 
 const guidedStepItems = [
   { id: 'job-basics', title: 'Basics', detail: 'Name your job and choose a model.' },
@@ -209,7 +197,7 @@ export default function SimpleJob({
   const showSegaDistill = supportsSegaDistill || segaDistillEnabled;
   const watermarkConfig = jobConfig.config.process[0].watermark ?? defaultWatermarkConfig;
   const watermarkEnabled = !!watermarkConfig.enabled;
-  const selectedAuthenloraCodec = authenloraCodecBits[watermarkConfig.codec_path] ? watermarkConfig.codec_path : 'custom';
+  const selectedAuthenloraCodec = getAuthenloraCodecSelectValue(watermarkConfig.codec_path);
   const canEnableWatermark =
     !isAudioModel &&
     !isVideoModel &&
@@ -259,7 +247,7 @@ export default function SimpleJob({
       return;
     }
     setJobConfig(value, 'config.process[0].watermark.codec_path');
-    const msgBits = authenloraCodecBits[value];
+    const msgBits = AUTHENLORA_BUILTIN_CODEC_BITS[value];
     if (msgBits) {
       setJobConfig(msgBits, 'config.process[0].watermark.msg_bits');
     }
@@ -1373,7 +1361,7 @@ export default function SimpleJob({
                           label="Codec"
                           value={selectedAuthenloraCodec}
                           onChange={handleWatermarkCodecChange}
-                          options={authenloraCodecOptions}
+                          options={AUTHENLORA_CODEC_OPTIONS}
                         />
                         {selectedAuthenloraCodec === 'custom' && (
                           <TextInput

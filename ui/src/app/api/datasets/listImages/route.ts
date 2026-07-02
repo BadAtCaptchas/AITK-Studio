@@ -1,11 +1,24 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
+import path from 'path';
+import zlib from 'zlib';
+import { promisify } from 'util';
 import { isEncryptedDatasetFolder, readEncryptedManifest, resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAccess';
-import { findDatasetItemsRecursively } from '@/server/datasetImages';
-import { findExistingCaptionSidecar, isTextCaptionFilePath } from '@/server/captionFiles';
+import { findDatasetItemsRecursivelyAsync } from '@/server/datasetImages';
+import { findExistingCaptionSidecarAsync, isTextCaptionFilePath } from '@/server/captionFiles';
 import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+
+const brotliCompress = promisify(zlib.brotliCompress);
+const gzipCompress = promisify(zlib.gzip);
+
+type DatasetImageListEntry = {
+  img_path: string;
+  added_at: string | null;
+  captioned_at: string | null;
+  size_bytes: number;
+};
 
 function dateToIso(date: Date | undefined) {
   if (!date) return null;
@@ -17,25 +30,46 @@ function addedAtForStat(stat: fs.Stats) {
   return dateToIso(stat.birthtime) || dateToIso(stat.ctime) || dateToIso(stat.mtime);
 }
 
-function captionedAtForItem(itemPath: string) {
+async function captionedAtForItem(itemPath: string) {
   try {
-    const captionPath = isTextCaptionFilePath(itemPath) ? itemPath : findExistingCaptionSidecar(itemPath);
+    const captionPath = isTextCaptionFilePath(itemPath) ? itemPath : await findExistingCaptionSidecarAsync(itemPath);
     if (!captionPath) return null;
-    const stat = fs.statSync(captionPath);
+    const stat = await fs.promises.stat(captionPath);
     return stat.isFile() ? dateToIso(stat.mtime) : null;
   } catch {
     return null;
   }
 }
 
-function imageEntry(imgPath: string) {
-  const stat = fs.statSync(imgPath);
+async function imageEntry(imgPath: string, root: string | null): Promise<DatasetImageListEntry> {
+  const stat = await fs.promises.stat(imgPath);
   return {
-    img_path: imgPath,
+    img_path: root && imgPath.startsWith(root) ? imgPath.slice(root.length) : imgPath,
     added_at: addedAtForStat(stat),
-    captioned_at: captionedAtForItem(imgPath),
+    captioned_at: await captionedAtForItem(imgPath),
     size_bytes: stat.size,
   };
+}
+
+async function jsonResponse(request: Request, payload: unknown) {
+  const json = JSON.stringify(payload);
+  const acceptEncoding = request.headers.get('accept-encoding') ?? '';
+
+  if (/\bbr\b/.test(acceptEncoding)) {
+    const body = await brotliCompress(json);
+    return new NextResponse(new Uint8Array(body), {
+      headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'br' },
+    });
+  }
+
+  if (/\bgzip\b/.test(acceptEncoding)) {
+    const body = await gzipCompress(json);
+    return new NextResponse(new Uint8Array(body), {
+      headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+    });
+  }
+
+  return new NextResponse(json, { headers: { 'Content-Type': 'application/json' } });
 }
 
 export async function POST(request: Request) {
@@ -43,6 +77,7 @@ export async function POST(request: Request) {
   const { datasetName } = body;
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
   const projectID = body?.project_id;
+  const compact = body?.compact === true;
 
   try {
     await assertProjectScopeEnabled(projectID);
@@ -57,20 +92,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status || 400 });
     }
     const worker = await getRemoteWorker(workerID);
-    const data: any = await remoteJson(worker, '/api/datasets/listImages', {
+    const data = await remoteJson<Record<string, unknown>>(worker, '/api/datasets/listImages', {
       method: 'POST',
-      body: JSON.stringify({ datasetName }),
+      body: JSON.stringify({ datasetName, compact: true }),
     });
+    const responseData: Record<string, unknown> = { ...data };
+    const remoteRoot = typeof data?.root === 'string' ? data.root : '';
     if (Array.isArray(data?.images)) {
-      data.images = data.images.map((image: any) => ({
-        ...image,
-        img_path:
-          typeof image?.img_path === 'string'
-            ? makeSignedRemoteDatasetAssetRef(workerID, 'img', image.img_path)
-            : image?.img_path,
-      }));
+      responseData.images = data.images.map(image => {
+        const imageRecord = image && typeof image === 'object' ? (image as Record<string, unknown>) : {};
+        const rawPath =
+          typeof imageRecord.img_path === 'string' ? `${remoteRoot}${imageRecord.img_path}` : imageRecord.img_path;
+        return {
+          ...imageRecord,
+          img_path: typeof rawPath === 'string' ? makeSignedRemoteDatasetAssetRef(workerID, 'img', rawPath) : rawPath,
+        };
+      });
     }
-    return NextResponse.json(data);
+    delete responseData.root;
+    return jsonResponse(request, responseData);
   }
 
   let datasetFolder: string;
@@ -87,24 +127,26 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (!fs.existsSync(datasetFolder)) {
+    try {
+      await fs.promises.access(datasetFolder);
+    } catch {
       return NextResponse.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
     }
 
     if (isEncryptedDatasetFolder(datasetFolder)) {
-      return NextResponse.json({
+      return jsonResponse(request, {
         encrypted: true,
         manifest: await readEncryptedManifest(datasetFolder),
         images: [],
       });
     }
 
-    const imageFiles = findDatasetItemsRecursively(datasetFolder);
+    const imageFiles = await findDatasetItemsRecursivelyAsync(datasetFolder);
     imageFiles.sort((a, b) => a.localeCompare(b));
+    const root = datasetFolder + path.sep;
+    const images = await Promise.all(imageFiles.map(imgPath => imageEntry(imgPath, compact ? root : null)));
 
-    return NextResponse.json({
-      images: imageFiles.map(imageEntry),
-    });
+    return jsonResponse(request, compact ? { root, images } : { images });
   } catch (error) {
     console.error('Error finding images:', error);
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });

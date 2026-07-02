@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Ban, ImageOff, Loader2, Pencil, Trash2 } from 'lucide-react';
 import DatasetImageStudio, {
@@ -63,6 +63,20 @@ type DatasetImageListItem = {
   size_bytes?: number | null;
 };
 
+function normalizeDatasetImageListItem(item: unknown, root: string | null): DatasetImageListItem | null {
+  if (!item || typeof item !== 'object') return null;
+  const record = item as Record<string, unknown>;
+  const imagePath = record.img_path;
+  if (typeof imagePath !== 'string') return null;
+
+  return {
+    img_path: root ? root + imagePath : imagePath,
+    added_at: typeof record.added_at === 'string' ? record.added_at : null,
+    captioned_at: typeof record.captioned_at === 'string' ? record.captioned_at : null,
+    size_bytes: typeof record.size_bytes === 'number' ? record.size_bytes : null,
+  };
+}
+
 export default function DatasetEditorPage({
   datasetName,
   projectID = null,
@@ -104,15 +118,25 @@ export default function DatasetEditorPage({
   );
   const canUseDatasetCaptionJob = !isRemoteDataset && (!projectID || !!effectiveDatasetRoot);
   const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
+  const isRefreshingRef = useRef(false);
 
   const refreshImageList = (dbName: string, options: { background?: boolean } = {}) => {
+    if (isRefreshingRef.current) return;
+    isRefreshingRef.current = true;
     if (!options.background) setStatus('loading');
     apiClient
-      .post('/api/datasets/listImages', { datasetName: dbName, worker_id: workerID, ...projectPayload })
-      .then((res: any) => {
+      .post('/api/datasets/listImages', { datasetName: dbName, worker_id: workerID, compact: true, ...projectPayload })
+      .then((res: { data: unknown }) => {
         const data = res.data;
-        if (data.encrypted) {
-          setEncryptedManifest(data.manifest);
+        if (!data || typeof data !== 'object') {
+          setImgList([]);
+          setStatus('success');
+          return;
+        }
+
+        const record = data as Record<string, unknown>;
+        if (record.encrypted) {
+          setEncryptedManifest((record.manifest as EncryptedDatasetManifest) ?? null);
           setImgList([]);
           setStatus('success');
           return;
@@ -122,12 +146,21 @@ export default function DatasetEditorPage({
         setEncryptedCatalog(null);
         setEncryptedKey(null);
         setEncryptedRawKeyB64(null);
-        setImgList(Array.isArray(data.images) ? data.images : []);
+        const root = typeof record.root === 'string' ? record.root : null;
+        const images = Array.isArray(record.images) ? record.images : [];
+        setImgList(
+          images
+            .map(image => normalizeDatasetImageListItem(image, root))
+            .filter((image): image is DatasetImageListItem => image !== null),
+        );
         setStatus('success');
       })
       .catch(error => {
         console.error('Error fetching images:', error);
         if (!options.background) setStatus('error');
+      })
+      .finally(() => {
+        isRefreshingRef.current = false;
       });
   };
 

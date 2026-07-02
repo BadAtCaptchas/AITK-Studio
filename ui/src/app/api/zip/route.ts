@@ -66,9 +66,7 @@ export async function POST(request: NextRequest) {
     }
 
     // delete current one if it exists
-    if (fs.existsSync(outputPath)) {
-      await fsp.unlink(outputPath);
-    }
+    await fsp.rm(outputPath, { force: true });
 
     // Create write stream & archive
     await new Promise<void>((resolve, reject) => {

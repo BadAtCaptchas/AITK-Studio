@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
-import { readCaptionSidecar } from '@/server/captionFiles';
+import { readCaptionSidecarAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { sanitizeCaptionText } from '@/utils/captionQuality';
@@ -39,29 +39,31 @@ export async function POST(request: NextRequest) {
   const captions: Record<string, string> = {};
   const remoteGroups = new Map<string, Array<{ ref: string; path: string }>>();
 
-  for (const imgPath of imgPaths) {
-    if (typeof imgPath !== 'string') continue;
-    const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
-    if (remoteAsset) {
-      const group = remoteGroups.get(remoteAsset.workerID) || [];
-      group.push({ ref: imgPath, path: remoteAsset.path });
-      remoteGroups.set(remoteAsset.workerID, group);
-      continue;
-    }
+  await Promise.all(
+    imgPaths.map(async imgPath => {
+      if (typeof imgPath !== 'string') return;
+      const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
+      if (remoteAsset) {
+        const group = remoteGroups.get(remoteAsset.workerID) || [];
+        group.push({ ref: imgPath, path: remoteAsset.path });
+        remoteGroups.set(remoteAsset.workerID, group);
+        return;
+      }
 
-    const resolvedFilePath = path.resolve(imgPath);
-    const relativeFilePath = path.relative(allowedRoot, resolvedFilePath);
-    const isAllowed =
-      relativeFilePath !== '' && !relativeFilePath.startsWith('..') && !path.isAbsolute(relativeFilePath);
-    if (!isAllowed) continue;
-    if (findEncryptedDatasetRoot(resolvedFilePath, allowedRoot)) continue;
+      const resolvedFilePath = path.resolve(imgPath);
+      const relativeFilePath = path.relative(allowedRoot, resolvedFilePath);
+      const isAllowed =
+        relativeFilePath !== '' && !relativeFilePath.startsWith('..') && !path.isAbsolute(relativeFilePath);
+      if (!isAllowed) return;
+      if (findEncryptedDatasetRoot(resolvedFilePath, allowedRoot)) return;
 
-    try {
-      captions[imgPath] = readCaptionSidecar(resolvedFilePath);
-    } catch {
-      captions[imgPath] = '';
-    }
-  }
+      try {
+        captions[imgPath] = await readCaptionSidecarAsync(resolvedFilePath);
+      } catch {
+        captions[imgPath] = '';
+      }
+    }),
+  );
 
   await Promise.all(
     Array.from(remoteGroups.entries()).map(async ([workerID, entries]) => {

@@ -5,6 +5,14 @@ import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import { getAllowedProjectRootIfExists } from '@/server/projects';
 
+async function realpathIfExists(filePath: string) {
+  try {
+    return await fs.promises.realpath(filePath);
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ filePath: string[] }> }) {
   const { filePath } = await params;
   try {
@@ -17,24 +25,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const projectsRoot = await getAllowedProjectRootIfExists();
     const allowedDirs = [datasetRoot, trainingRoot, projectsRoot].filter((dir): dir is string => !!dir);
 
-    // Check if file exists
-    if (!fs.existsSync(decodedFilePath)) {
+    const resolvedFilePath = await realpathIfExists(decodedFilePath);
+    if (!resolvedFilePath) {
       console.warn(`File not found: ${decodedFilePath}`);
       return new NextResponse('File not found', { status: 404 });
     }
 
-    const resolvedFilePath = fs.realpathSync(decodedFilePath);
-
     // Security check: Ensure canonical path is contained in canonical allowed directories
-    const isAllowed = allowedDirs.some(allowedDir => {
-      if (!allowedDir || !fs.existsSync(allowedDir)) {
-        return false;
-      }
-
-      const resolvedAllowedDir = fs.realpathSync(allowedDir);
-      const relativePath = path.relative(resolvedAllowedDir, resolvedFilePath);
-      return relativePath !== '' && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
-    });
+    const allowedChecks = await Promise.all(
+      allowedDirs.map(async allowedDir => {
+        const resolvedAllowedDir = await realpathIfExists(allowedDir);
+        if (!resolvedAllowedDir) return false;
+        const relativePath = path.relative(resolvedAllowedDir, resolvedFilePath);
+        return relativePath !== '' && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
+      }),
+    );
+    const isAllowed = allowedChecks.some(Boolean);
 
     if (!isAllowed) {
       console.warn(`Access denied: ${decodedFilePath} not in ${allowedDirs.join(', ')}`);
@@ -42,7 +48,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Get file info
-    const stat = fs.statSync(resolvedFilePath);
+    const stat = await fs.promises.stat(resolvedFilePath);
     if (!stat.isFile()) {
       return new NextResponse('Not a file', { status: 400 });
     }

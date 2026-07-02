@@ -59,9 +59,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
   }
 
-  if (fs.existsSync(trainingFolder)) {
-    fs.rmSync(trainingFolder, { recursive: true, force: true });
-  }
+  await fs.promises.rm(trainingFolder, { recursive: true, force: true });
 
   await clearDurableEncryptedDatasetKeys(jobID).catch(error =>
     console.error('Error clearing durable encrypted dataset keys:', error),

@@ -375,6 +375,15 @@ function closeSqliteDb(sqlite: sqlite3.Database) {
   });
 }
 
+async function pathExists(filePath: string) {
+  try {
+    await fs.promises.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function readSqliteLossLog(
   logPath: string,
   key: string,
@@ -382,7 +391,7 @@ async function readSqliteLossLog(
   sinceStep: number | null,
   stride: number,
 ): Promise<LossLogResult> {
-  if (!fs.existsSync(logPath)) {
+  if (!(await pathExists(logPath))) {
     return { keys: [], key, points: [] };
   }
 
@@ -526,7 +535,7 @@ async function readSqliteMetrics(
     sinceSteps?: Record<string, number | null>;
   },
 ): Promise<MetricsResult> {
-  if (!fs.existsSync(logPath)) {
+  if (!(await pathExists(logPath))) {
     return { keys: [], keyInfo: [], series: {} };
   }
 

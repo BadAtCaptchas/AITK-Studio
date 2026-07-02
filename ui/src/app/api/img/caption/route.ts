@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
-import { resolveCaptionWritePath } from '@/server/captionFiles';
+import { resolveCaptionWritePathAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
@@ -37,15 +37,17 @@ export async function POST(request: Request) {
     }
 
     // if img doesnt exist, ignore
-    if (!fs.existsSync(resolvedImagePath)) {
+    try {
+      await fs.promises.access(resolvedImagePath);
+    } catch {
       return NextResponse.json({ error: 'Image does not exist' }, { status: 404 });
     }
 
     const captionText = typeof caption === 'string' ? caption : String(caption ?? '');
-    const captionPath = resolveCaptionWritePath(resolvedImagePath, captionText);
+    const captionPath = await resolveCaptionWritePathAsync(resolvedImagePath, captionText);
     // save caption to file
-    fs.writeFileSync(captionPath, captionText);
-    const captionedAt = fs.statSync(captionPath).mtime.toISOString();
+    await fs.promises.writeFile(captionPath, captionText);
+    const captionedAt = (await fs.promises.stat(captionPath)).mtime.toISOString();
 
     return NextResponse.json({ success: true, captioned_at: captionedAt });
   } catch (error) {

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { db } from '@/server/db';
 import { assertProjectJobEnabled } from '@/server/projects';
 import {
@@ -11,6 +13,7 @@ import {
 } from '@/server/remoteClient';
 
 const isWindows = process.platform === 'win32';
+const execFileAsync = promisify(execFile);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
@@ -61,8 +64,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       if (isWindows) {
         // Windows doesn't support SIGINT for arbitrary processes.
         // Use taskkill with /T (tree) to send a CTRL+C-like termination.
-        const { execFileSync } = require('child_process');
-        execFileSync('taskkill', ['/PID', String(job.pid), '/T', '/F'], { stdio: 'ignore' });
+        await execFileAsync('taskkill', ['/PID', String(job.pid), '/T', '/F'], { windowsHide: true });
       } else {
         process.kill(job.pid, 'SIGINT');
       }

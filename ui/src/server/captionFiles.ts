@@ -29,6 +29,22 @@ export function findExistingCaptionSidecar(mediaPath: string) {
   return null;
 }
 
+async function isFileIfExists(filePath: string) {
+  try {
+    return (await fs.promises.stat(filePath)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export async function findExistingCaptionSidecarAsync(mediaPath: string) {
+  for (const extension of DATASET_CAPTION_SIDECAR_EXTENSIONS) {
+    const candidate = captionSidecarPath(mediaPath, extension);
+    if (await isFileIfExists(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function readCaptionSidecar(mediaPath: string) {
   if (isTextCaptionFilePath(mediaPath) && fs.existsSync(mediaPath) && fs.statSync(mediaPath).isFile()) {
     return sanitizeCaptionText(fs.readFileSync(mediaPath, 'utf-8'));
@@ -39,10 +55,38 @@ export function readCaptionSidecar(mediaPath: string) {
   return sanitizeCaptionText(fs.readFileSync(captionPath, 'utf-8'));
 }
 
+export async function readCaptionSidecarAsync(mediaPath: string) {
+  if (isTextCaptionFilePath(mediaPath) && (await isFileIfExists(mediaPath))) {
+    return sanitizeCaptionText(await fs.promises.readFile(mediaPath, 'utf-8'));
+  }
+
+  const captionPath = await findExistingCaptionSidecarAsync(mediaPath);
+  if (!captionPath) return '';
+  return sanitizeCaptionText(await fs.promises.readFile(captionPath, 'utf-8'));
+}
+
 export function resolveCaptionWritePath(mediaPath: string, caption: string) {
   if (isTextCaptionFilePath(mediaPath)) return mediaPath;
 
   const existingPath = findExistingCaptionSidecar(mediaPath);
+  if (existingPath) return existingPath;
+
+  try {
+    const parsed = JSON.parse(caption);
+    if (parsed && typeof parsed === 'object') {
+      return captionSidecarPath(mediaPath, '.json');
+    }
+  } catch {
+    // Plain text captions still default to .txt.
+  }
+
+  return captionSidecarPath(mediaPath, '.txt');
+}
+
+export async function resolveCaptionWritePathAsync(mediaPath: string, caption: string) {
+  if (isTextCaptionFilePath(mediaPath)) return mediaPath;
+
+  const existingPath = await findExistingCaptionSidecarAsync(mediaPath);
   if (existingPath) return existingPath;
 
   try {
@@ -64,4 +108,13 @@ export function deleteCaptionSidecars(mediaPath: string) {
       fs.unlinkSync(candidate);
     }
   }
+}
+
+export async function deleteCaptionSidecarsAsync(mediaPath: string) {
+  await Promise.all(
+    DATASET_CAPTION_SIDECAR_EXTENSIONS.map(async extension => {
+      const candidate = captionSidecarPath(mediaPath, extension);
+      await fs.promises.rm(candidate, { force: true });
+    }),
+  );
 }

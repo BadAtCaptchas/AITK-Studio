@@ -12,13 +12,16 @@ function decodePath(value: string) {
   }
 }
 
-function realpathIfExists(value: string) {
-  if (!fs.existsSync(value)) return null;
-  return fs.realpathSync(value);
+async function realpathIfExists(value: string) {
+  try {
+    return await fs.promises.realpath(value);
+  } catch {
+    return null;
+  }
 }
 
-function isInsideRoot(root: string, target: string) {
-  const resolvedRoot = realpathIfExists(root);
+async function isInsideRoot(root: string, target: string) {
+  const resolvedRoot = await realpathIfExists(root);
   if (!resolvedRoot) return false;
 
   const relativePath = path.relative(resolvedRoot, target);
@@ -39,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     const decodedFilePath = decodePath(filePath);
-    const resolvedFilePath = realpathIfExists(decodedFilePath);
+    const resolvedFilePath = await realpathIfExists(decodedFilePath);
 
     if (!resolvedFilePath) {
       console.warn(`File not found: ${decodedFilePath}`);
@@ -50,17 +53,20 @@ export async function POST(request: NextRequest) {
     const trainingRoot = await getTrainingFolder();
     const allowedDirs = [datasetRoot, trainingRoot].filter(Boolean);
 
-    if (!allowedDirs.some(allowedDir => isInsideRoot(allowedDir, resolvedFilePath))) {
+    const isAllowed = (
+      await Promise.all(allowedDirs.map(allowedDir => isInsideRoot(allowedDir, resolvedFilePath)))
+    ).some(Boolean);
+    if (!isAllowed) {
       console.warn(`Access denied: ${resolvedFilePath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
     }
 
-    const stat = fs.statSync(resolvedFilePath);
+    const stat = await fs.promises.stat(resolvedFilePath);
     if (!stat.isFile()) {
       return new NextResponse('Not a file', { status: 400 });
     }
 
-    fs.unlinkSync(resolvedFilePath);
+    await fs.promises.unlink(resolvedFilePath);
 
     return NextResponse.json({ success: true });
   } catch (error) {

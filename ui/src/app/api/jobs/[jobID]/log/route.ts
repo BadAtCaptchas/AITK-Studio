@@ -15,11 +15,19 @@ import {
 const MAX_LOG_BYTES = 200 * 1024;
 const LAUNCH_LOG_FILE = 'launch.log';
 
-async function readTail(logPath: string) {
-  const { size } = await fs.promises.stat(logPath);
-  const bytesToRead = Math.min(size, MAX_LOG_BYTES);
+async function pathExists(filePath: string) {
+  try {
+    await fs.promises.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readRange(logPath: string, start: number, end: number) {
+  const bytesToRead = Math.max(0, end - start);
+  if (bytesToRead === 0) return '';
   const buffer = Buffer.alloc(bytesToRead);
-  const start = Math.max(0, size - bytesToRead);
   let fileHandle: fs.promises.FileHandle | undefined;
   let bytesRead = 0;
   try {
@@ -33,8 +41,44 @@ async function readTail(logPath: string) {
   return buffer.subarray(0, bytesRead).toString('utf-8');
 }
 
+async function readTail(logPath: string) {
+  const { size } = await fs.promises.stat(logPath);
+  const bytesToRead = Math.min(size, MAX_LOG_BYTES);
+  const start = Math.max(0, size - bytesToRead);
+  let log = await readRange(logPath, start, size);
+
+  if (start > 0) {
+    const newlineIndex = log.indexOf('\n');
+    if (newlineIndex !== -1) {
+      log = log.slice(newlineIndex + 1);
+    }
+  }
+
+  return log;
+}
+
+async function readLogPayload(logPath: string, offset: number | null) {
+  const { size } = await fs.promises.stat(logPath);
+  const hasValidOffset = offset !== null && Number.isFinite(offset) && offset >= 0 && offset <= size;
+  const bytesSinceOffset = hasValidOffset ? size - offset : 0;
+
+  if (hasValidOffset && bytesSinceOffset <= MAX_LOG_BYTES) {
+    return {
+      log: await readRange(logPath, offset, size),
+      offset: size,
+      reset: false,
+    };
+  }
+
+  return {
+    log: await readTail(logPath),
+    offset: size,
+    reset: true,
+  };
+}
+
 async function launchLogBelongsToJob(launchLogPath: string, jobID: string) {
-  if (!fs.existsSync(launchLogPath)) return false;
+  if (!(await pathExists(launchLogPath))) return false;
   const launchLog = await readTail(launchLogPath).catch(() => '');
   return launchLog.includes(`starting job ${jobID}`);
 }
@@ -45,7 +89,7 @@ async function resolveReadableJobLogPath(
   jobID: string,
   options: { requireLaunchJobMatch?: boolean } = {},
 ) {
-  if (!fs.existsSync(trainingFolder)) return null;
+  if (!(await pathExists(trainingFolder))) return null;
 
   const trainingFolderRealPath = await fs.promises.realpath(trainingFolder);
   const jobFolder = path.resolve(trainingFolderRealPath, jobName);
@@ -62,7 +106,7 @@ async function resolveReadableJobLogPath(
     return null;
   }
 
-  return fs.existsSync(logPath) ? logPath : fs.existsSync(launchLogPath) ? launchLogPath : null;
+  return (await pathExists(logPath)) ? logPath : (await pathExists(launchLogPath)) ? launchLogPath : null;
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
@@ -81,15 +125,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
-      return NextResponse.json({ log: '' });
+      return NextResponse.json({ log: '', offset: 0, reset: true });
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return NextResponse.json(await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/log`));
+      const offsetParam = request.nextUrl.searchParams.get('offset');
+      const remotePath =
+        offsetParam === null
+          ? `/api/jobs/${encodeURIComponent(job.remote_job_id)}/log`
+          : `/api/jobs/${encodeURIComponent(job.remote_job_id)}/log?offset=${encodeURIComponent(offsetParam)}`;
+      return NextResponse.json(await remoteJson(worker, remotePath));
     } catch (error) {
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
-        return NextResponse.json({ log: '' });
+        return NextResponse.json({ log: '', offset: 0, reset: true });
       }
       console.error('Error reading remote log file:', error);
       return NextResponse.json({ error: 'Error reading remote log file' }, { status: 502 });
@@ -108,11 +157,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       }
     }
     if (!readableLogPath) {
-      return NextResponse.json({ log: '' });
+      return NextResponse.json({ log: '', offset: 0, reset: true });
     }
 
-    const log = await readTail(readableLogPath);
-    return NextResponse.json({ log });
+    const offsetParam = request.nextUrl.searchParams.get('offset');
+    const offset = offsetParam === null ? null : Number.parseInt(offsetParam, 10);
+    return NextResponse.json(await readLogPayload(readableLogPath, offset));
   } catch (error) {
     if (error instanceof Error && error.message === 'Invalid job path') {
       return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });

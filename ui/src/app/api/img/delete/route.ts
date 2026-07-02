@@ -4,7 +4,7 @@ import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
-import { deleteCaptionSidecars } from '@/server/captionFiles';
+import { deleteCaptionSidecarsAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
 export async function POST(request: Request) {
@@ -58,14 +58,16 @@ export async function POST(request: Request) {
     }
 
     // if img doesnt exist, ignore
-    if (!fs.existsSync(normalizedImgPath)) {
+    try {
+      await fs.promises.access(normalizedImgPath);
+    } catch {
       return NextResponse.json({ success: true });
     }
 
     // delete it and return success
-    fs.unlinkSync(normalizedImgPath);
+    await fs.promises.unlink(normalizedImgPath);
 
-    deleteCaptionSidecars(normalizedImgPath);
+    await deleteCaptionSidecarsAsync(normalizedImgPath);
 
     return NextResponse.json({ success: true });
   } catch (error) {

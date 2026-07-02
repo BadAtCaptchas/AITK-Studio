@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
-import { readCaptionSidecar } from '@/server/captionFiles';
+import { readCaptionSidecarAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { sanitizeCaptionText } from '@/utils/captionQuality';
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       return new NextResponse('Encrypted captions are not served through this route', { status: 403 });
     }
 
-    return new NextResponse(readCaptionSidecar(resolvedFilePath));
+    return new NextResponse(await readCaptionSidecarAsync(resolvedFilePath));
   } catch (error) {
     console.error('Error getting caption:', error);
     if (error instanceof DatasetScopeError) {

@@ -2,7 +2,7 @@
 
 import { use } from 'react';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
-import TrainingForm from '@/app/jobs/new/page';
+import { TrainingFormContent } from '@/app/jobs/new/TrainingFormContent';
 
 export default function ProjectNewRunPage({ params }: { params: Promise<{ projectID: string }> }) {
   const { projectID: rawProjectID } = use(params);
@@ -10,7 +10,7 @@ export default function ProjectNewRunPage({ params }: { params: Promise<{ projec
 
   return (
     <ProjectWorkspaceShell projectID={projectID} active="runs" showHeader={false}>
-      <TrainingForm projectIDOverride={projectID} />
+      <TrainingFormContent projectIDOverride={projectID} />
     </ProjectWorkspaceShell>
   );
 }

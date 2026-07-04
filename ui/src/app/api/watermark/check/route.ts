@@ -15,11 +15,7 @@ const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl']);
 
-type UploadedFile = {
-  name: string;
-  size: number;
-  arrayBuffer: () => Promise<ArrayBuffer>;
-};
+type UploadedFile = File;
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -36,12 +32,13 @@ function ensureApiAccess(request: NextRequest): NextResponse | null {
 }
 
 function isUploadedFile(value: FormDataEntryValue | null): value is UploadedFile {
+  const file = value as Partial<UploadedFile> | null;
   return (
     typeof value === 'object' &&
     value !== null &&
-    typeof (value as UploadedFile).name === 'string' &&
-    typeof (value as UploadedFile).size === 'number' &&
-    typeof (value as UploadedFile).arrayBuffer === 'function'
+    typeof file?.name === 'string' &&
+    typeof file.size === 'number' &&
+    typeof file.arrayBuffer === 'function'
   );
 }
 

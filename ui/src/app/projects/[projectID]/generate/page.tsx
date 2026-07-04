@@ -1,7 +1,7 @@
 'use client';
 
 import { use } from 'react';
-import GeneratePage from '@/app/generate/page';
+import { GeneratePageContent } from '@/app/generate/GeneratePageContent';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
 
 export default function ProjectGeneratePage({ params }: { params: Promise<{ projectID: string }> }) {
@@ -10,7 +10,7 @@ export default function ProjectGeneratePage({ params }: { params: Promise<{ proj
 
   return (
     <ProjectWorkspaceShell projectID={projectID} active="generate" showHeader={false}>
-      <GeneratePage projectIDOverride={projectID} />
+      <GeneratePageContent projectIDOverride={projectID} />
     </ProjectWorkspaceShell>
   );
 }

@@ -58,6 +58,7 @@ import {
   persistedRecaptionQueueEntry,
   promptForRecaptionOutputFormat,
   providerLabel,
+  purgeLegacyPersistedRecaptionQueues,
   readPersistedRecaptionQueue,
   readRecaptionSettingsPreset,
   recaptionQueueStorageKey,
@@ -206,6 +207,8 @@ export default function DatasetImageStudio({
   const selectedKey = selectedItem ? itemKey(selectedItem) : '';
   const selectedName = selectedItem ? itemName(selectedItem) : '';
   const selectedKind = selectedItem ? itemKind(selectedItem) : 'image';
+  const hasEncryptedItems = useMemo(() => items.some(item => item.kind === 'encrypted'), [items]);
+  const canPersistRecaptionState = !hasEncryptedItems;
   const plainAuditItemPaths = useMemo(() => items.flatMap(item => (item.kind === 'plain' ? [item.path] : [])), [items]);
   const plainAuditKey = useMemo(() => plainAuditItemPaths.join('\n'), [plainAuditItemPaths]);
   const remoteWorkerOptions = useMemo(
@@ -327,10 +330,21 @@ export default function DatasetImageStudio({
 
   useEffect(() => {
     hydratedRecaptionQueueKeyRef.current = '';
-  }, [recaptionQueueStorageKeyValue]);
+  }, [canPersistRecaptionState, recaptionQueueStorageKeyValue]);
+
+  useEffect(() => {
+    purgeLegacyPersistedRecaptionQueues();
+  }, []);
+
+  useEffect(() => {
+    if (!hasEncryptedItems || typeof window === 'undefined') return;
+    if (recaptionQueueStorageKeyValue) window.localStorage.removeItem(recaptionQueueStorageKeyValue);
+    if (recaptionStorageKey) window.localStorage.removeItem(recaptionStorageKey);
+  }, [hasEncryptedItems, recaptionQueueStorageKeyValue, recaptionStorageKey]);
 
   useEffect(() => {
     const storageKey = recaptionQueueStorageKeyValue;
+    if (!canPersistRecaptionState) return;
     if (!storageKey || hydratedRecaptionQueueKeyRef.current === storageKey) return;
     if (isRecaptioning || recaptionQueue.length > 0) return;
 
@@ -355,7 +369,7 @@ export default function DatasetImageStudio({
           item,
           key: persistedEntry.key,
           name: persistedEntry.name || itemName(item),
-          existingCaption: persistedEntry.existingCaption || '',
+          existingCaption: null,
           settings: persistedEntry.settings,
         },
       ];
@@ -369,10 +383,11 @@ export default function DatasetImageStudio({
 
     setRecaptionQueue(restored);
     setRecaptionMessage(`Restored ${restored.length} recaption${restored.length === 1 ? '' : 's'} after refresh.`);
-  }, [isRecaptioning, items, recaptionQueue.length, recaptionQueueStorageKeyValue]);
+  }, [canPersistRecaptionState, isRecaptioning, items, recaptionQueue.length, recaptionQueueStorageKeyValue]);
 
   useEffect(() => {
     const storageKey = recaptionQueueStorageKeyValue;
+    if (!canPersistRecaptionState) return;
     if (!storageKey || hydratedRecaptionQueueKeyRef.current !== storageKey || typeof window === 'undefined') return;
 
     if (!activeRecaptionEntry && recaptionQueue.length === 0) {
@@ -381,13 +396,13 @@ export default function DatasetImageStudio({
     }
 
     const snapshot: PersistedRecaptionQueue = {
-      version: 1,
+      version: 2,
       active: activeRecaptionEntry ? persistedRecaptionQueueEntry(activeRecaptionEntry, 'running') : null,
       queue: recaptionQueue.map(entry => persistedRecaptionQueueEntry(entry, 'queued')),
       updatedAt: new Date().toISOString(),
     };
     window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
-  }, [activeRecaptionEntry, recaptionQueue, recaptionQueueStorageKeyValue]);
+  }, [activeRecaptionEntry, canPersistRecaptionState, recaptionQueue, recaptionQueueStorageKeyValue]);
 
   useEffect(() => {
     savedCaptionRef.current = savedCaption;
@@ -472,6 +487,7 @@ export default function DatasetImageStudio({
 
   useEffect(() => {
     setHasRecaptionSettingsForDataset(false);
+    if (!canPersistRecaptionState) return;
     const preset = readRecaptionSettingsPreset(recaptionStorageKey);
     if (!preset) return;
     setRecaptionProvider(preset.provider);
@@ -484,7 +500,7 @@ export default function DatasetImageStudio({
     setRecaptionRemoteWorkerId(preset.remoteWorkerId);
     setRecaptionMaxNewTokens(preset.maxNewTokens);
     setHasRecaptionSettingsForDataset(true);
-  }, [recaptionStorageKey, rootCaption]);
+  }, [canPersistRecaptionState, recaptionStorageKey, rootCaption]);
 
   const useRecaptionRootPrompt = useCallback(() => {
     recaptionSystemPromptTouchedRef.current = true;
@@ -581,6 +597,10 @@ export default function DatasetImageStudio({
 
   const persistRecaptionSettingsForDataset = useCallback(
     (settings: RecaptionSettingsPreset) => {
+      if (!canPersistRecaptionState) {
+        setHasRecaptionSettingsForDataset(true);
+        return;
+      }
       if (!recaptionStorageKey || typeof window === 'undefined') {
         setHasRecaptionSettingsForDataset(true);
         return;
@@ -592,7 +612,7 @@ export default function DatasetImageStudio({
       }
       setHasRecaptionSettingsForDataset(true);
     },
-    [recaptionStorageKey],
+    [canPersistRecaptionState, recaptionStorageKey],
   );
 
   const readCaptionForItem = useCallback(
@@ -917,6 +937,7 @@ export default function DatasetImageStudio({
         `Recaptioning ${name}${recaptionQueueRef.current.length ? ` (${recaptionQueueRef.current.length} queued)` : ''}.`,
       );
       try {
+        const requestExistingCaption = existingCaption ?? (await readCaptionForItem(item));
         let response;
         if (item.kind === 'plain') {
           response = await apiClient.post(
@@ -928,7 +949,7 @@ export default function DatasetImageStudio({
               outputFormat: settings.outputFormat,
               prompt: settings.prompt,
               systemPrompt: settings.systemPrompt,
-              existingCaption,
+              existingCaption: requestExistingCaption,
               datasetName,
               worker_id: workerID,
               remoteWorkerId: settings.remoteWorkerId,
@@ -955,7 +976,7 @@ export default function DatasetImageStudio({
             encryptedKey: encryptedKey as CryptoKey,
             item: item.item,
           });
-          appendRecaptionFields(formData, settings, existingCaption, datasetName);
+          appendRecaptionFields(formData, settings, requestExistingCaption, datasetName);
           response = await apiClient.post('/api/datasets/recaption-single', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
             timeout: 0,
@@ -991,6 +1012,7 @@ export default function DatasetImageStudio({
       encryptedProviderConfirmations,
       projectID,
       projectPayload,
+      readCaptionForItem,
       saveCaptionForItem,
       workerID,
     ],

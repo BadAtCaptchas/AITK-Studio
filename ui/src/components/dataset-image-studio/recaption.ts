@@ -1,4 +1,4 @@
-import { defaultIdeogramJsonCaptionPrompt, defaultImageCaptionPrompt } from '@/helpers/captionOptions';
+import { defaultIdeogramJsonCaptionPrompt, defaultImageCaptionPrompt } from '../../helpers/captionOptions';
 import {
   AUTO_BOX_PROVIDERS,
   DEFAULT_OLLAMA_VISION_MODEL,
@@ -27,15 +27,15 @@ export type RecaptionQueueEntry = {
   item: DatasetStudioItem;
   key: string;
   name: string;
-  existingCaption: string;
+  existingCaption: string | null;
   settings: RecaptionSettingsPreset;
 };
-export type PersistedRecaptionQueueEntry = Omit<RecaptionQueueEntry, 'item'> & {
+export type PersistedRecaptionQueueEntry = Omit<RecaptionQueueEntry, 'item' | 'existingCaption'> & {
   status: 'queued' | 'running';
   updatedAt: string;
 };
 export type PersistedRecaptionQueue = {
-  version: 1;
+  version: 2;
   active: PersistedRecaptionQueueEntry | null;
   queue: PersistedRecaptionQueueEntry[];
   updatedAt: string;
@@ -49,7 +49,8 @@ type RecaptionStorageScope = {
 };
 
 const RECAPTION_SETTINGS_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionSettings.v1';
-const RECAPTION_QUEUE_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionQueue.v1';
+const LEGACY_RECAPTION_QUEUE_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionQueue.v1';
+const RECAPTION_QUEUE_STORAGE_PREFIX = 'aitk.datasetEditor.recaptionQueue.v2';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -96,7 +97,6 @@ function normalizePersistedRecaptionQueueEntry(value: unknown): PersistedRecapti
     id: stringValue(value.id),
     key,
     name: stringValue(value.name),
-    existingCaption: stringValue(value.existingCaption),
     settings: normalizeRecaptionSettingsPreset(value.settings),
     status,
     updatedAt: stringValue(value.updatedAt) || new Date().toISOString(),
@@ -130,6 +130,19 @@ export function recaptionSettingsStorageKey(scope: RecaptionStorageScope) {
 
 export function recaptionQueueStorageKey(scope: RecaptionStorageScope) {
   return recaptionScopedStorageKey(RECAPTION_QUEUE_STORAGE_PREFIX, scope);
+}
+
+export function purgeLegacyPersistedRecaptionQueues() {
+  if (typeof window === 'undefined') return;
+  const prefix = `${LEGACY_RECAPTION_QUEUE_STORAGE_PREFIX}:`;
+  try {
+    const keys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index)).filter(
+      (key): key is string => Boolean(key?.startsWith(prefix)),
+    );
+    keys.forEach(key => window.localStorage.removeItem(key));
+  } catch (error) {
+    console.warn('Could not clear legacy recaption queues:', error);
+  }
 }
 
 export function normalizeStudioBoxProvider(value: unknown): StudioBoxProvider {
@@ -166,7 +179,6 @@ export function persistedRecaptionQueueEntry(
     id: entry.id,
     key: entry.key,
     name: entry.name,
-    existingCaption: entry.existingCaption,
     settings: entry.settings,
     status,
     updatedAt: new Date().toISOString(),
@@ -179,10 +191,10 @@ export function readPersistedRecaptionQueue(storageKey: string): PersistedRecapt
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed) || parsed.version !== 1) return null;
+    if (!isRecord(parsed) || parsed.version !== 2) return null;
 
     return {
-      version: 1,
+      version: 2,
       active: normalizePersistedRecaptionQueueEntry(parsed.active),
       queue: Array.isArray(parsed.queue)
         ? parsed.queue.flatMap(entry => {

@@ -36,6 +36,7 @@
         "src/utils/encryptedObjectMediaCache.ts",
         "src/utils/webauthnPrfCrypto.ts",
         "src/utils/trainingPhaseSummary.ts",
+        "src/components/dataset-image-studio/recaption.ts",
         "src/server/pythonPath.ts",
         "src/server/pathContainment.ts",
         "src/server/scriptRunner.ts",

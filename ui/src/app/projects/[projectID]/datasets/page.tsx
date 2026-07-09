@@ -20,6 +20,7 @@ import {
 } from '@/utils/encryptedDatasets';
 import type { ProjectSummary } from '@/components/project/types';
 import type { DatasetSummary, Project } from '@/types';
+import { uploadDatasetFile } from '@/utils/streamedUploads';
 
 type ProjectDatasetActionStatus = 'idle' | 'creating' | 'uploading' | 'importing' | 'copying' | 'moving' | 'deleting';
 
@@ -367,17 +368,18 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       return;
     }
 
-    const form = new FormData();
-    form.append('datasetName', datasetName);
-    form.append('project_id', projectID);
-    uploadFiles.forEach(file => form.append('files', file));
-
     setActionStatus('uploading');
     setActionError('');
     setActionNotice(null);
     setUploadError('');
     try {
-      await apiClient.post('/api/datasets/upload', form);
+      for (let index = 0; index < uploadFiles.length; index += 1) {
+        await uploadDatasetFile(uploadFiles[index], {
+          datasetName,
+          projectID,
+          failIfDatasetExists: index === 0,
+        });
+      }
       setUploadModalOpen(false);
       router.push(`${projectPath}/datasets/${encodeURIComponent(datasetName)}`);
     } catch (error: any) {

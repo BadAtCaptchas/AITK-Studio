@@ -1,11 +1,19 @@
-import fs from 'fs';
+import { createReadStream, createWriteStream } from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
-import type { NextRequest } from 'next/server';
+import {
+  cleanupStagedUpload,
+  moveStagedUpload,
+  streamRequestToStagingFile,
+  UploadTooLargeError,
+} from './streamedUpload';
 
 const MAX_UPLOAD_CHUNK_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_ARCHIVE_UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024;
+const MAX_ARCHIVE_UPLOAD_CHUNKS = 8_192;
+
+type ArchiveUploadRequest = Request & { nextUrl: URL };
 
 export type ArchiveUploadMode = 'chunk' | 'complete' | 'status' | null;
 export type ArchiveUploadImportStatus<T = unknown> = {
@@ -20,7 +28,6 @@ export type ArchiveUploadImportStatus<T = unknown> = {
 type ArchiveUploadImportStatusStore = Map<string, ArchiveUploadImportStatus>;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __archiveUploadImportStatusStore: ArchiveUploadImportStatusStore | undefined;
 }
 
@@ -31,17 +38,31 @@ if (!globalThis.__archiveUploadImportStatusStore) {
   globalThis.__archiveUploadImportStatusStore = archiveUploadImportStatusStore;
 }
 
-export function archiveUploadMode(request: NextRequest): ArchiveUploadMode {
+export function archiveUploadMode(request: ArchiveUploadRequest): ArchiveUploadMode {
   const mode = request.nextUrl.searchParams.get('aitk_upload');
   return mode === 'chunk' || mode === 'complete' || mode === 'status' ? mode : null;
 }
 
-export function readArchiveUploadID(request: NextRequest) {
+export function readArchiveUploadID(request: ArchiveUploadRequest) {
   return validateArchiveUploadID(request.nextUrl.searchParams.get('uploadID') || '');
 }
 
-export function readArchiveUploadChunksTotal(request: NextRequest) {
-  return readSafeInteger(request.nextUrl.searchParams.get('chunksTotal') || '', 'chunksTotal', 1);
+export function readArchiveUploadChunksTotal(request: ArchiveUploadRequest) {
+  const total = readSafeInteger(request.nextUrl.searchParams.get('chunksTotal') || '', 'chunksTotal', 1);
+  if (total > MAX_ARCHIVE_UPLOAD_CHUNKS) {
+    throw new Error('Invalid archive upload chunksTotal');
+  }
+  return total;
+}
+
+export function readArchiveUploadFileBytes(request: ArchiveUploadRequest, maxBytes: number) {
+  const rawFileBytes = request.nextUrl.searchParams.get('fileBytes');
+  if (rawFileBytes === null || rawFileBytes === '') return null;
+  const fileBytes = readSafeInteger(rawFileBytes, 'fileBytes', 0);
+  if (fileBytes > maxBytes) {
+    throw new UploadTooLargeError(`Archive upload must be ${Math.floor(maxBytes / (1024 ** 3))} GB or smaller`);
+  }
+  return fileBytes;
 }
 
 export function createArchiveUploadImportStatus(uploadID: string) {
@@ -89,7 +110,7 @@ function cloneArchiveUploadImportStatus<T>(status: ArchiveUploadImportStatus<T>)
   return { ...status };
 }
 
-function readArchiveUploadChunkIndex(request: NextRequest) {
+function readArchiveUploadChunkIndex(request: ArchiveUploadRequest) {
   return readSafeInteger(request.nextUrl.searchParams.get('chunkIndex') || '', 'chunkIndex', 0);
 }
 
@@ -131,10 +152,18 @@ export async function cleanupOldArchiveUploadChunks(uploadRoot: string) {
   );
 }
 
-export async function saveArchiveUploadChunk(request: NextRequest, uploadRoot: string) {
+export async function saveArchiveUploadChunk(
+  request: ArchiveUploadRequest,
+  uploadRoot: string,
+  options: { maxArchiveBytes?: number } = {},
+) {
   const uploadID = readArchiveUploadID(request);
   const chunkIndex = readArchiveUploadChunkIndex(request);
   const chunksTotal = readArchiveUploadChunksTotal(request);
+  const fileBytes =
+    options.maxArchiveBytes === undefined
+      ? null
+      : readArchiveUploadFileBytes(request, options.maxArchiveBytes);
   if (chunkIndex >= chunksTotal) {
     throw new Error('Invalid archive upload chunkIndex');
   }
@@ -143,13 +172,20 @@ export async function saveArchiveUploadChunk(request: NextRequest, uploadRoot: s
   }
 
   const chunkPath = chunkPathForIndex(uploadRoot, uploadID, chunkIndex);
-  await fsp.mkdir(path.dirname(chunkPath), { recursive: true });
-  await pipeline(
-    Readable.fromWeb(request.body as any),
-    fs.createWriteStream(chunkPath),
-  );
+  let stagingPath: string | null = null;
+  try {
+    const staged = await streamRequestToStagingFile(request, path.dirname(chunkPath), {
+      maxBytes: MAX_ARCHIVE_UPLOAD_CHUNK_BYTES,
+      prefix: `archive-chunk-${chunkIndex}`,
+    });
+    stagingPath = staged.stagingPath;
+    await moveStagedUpload(stagingPath, chunkPath);
+    stagingPath = null;
+  } finally {
+    await cleanupStagedUpload(stagingPath);
+  }
 
-  return { uploadID, chunkIndex, chunksTotal };
+  return { uploadID, chunkIndex, chunksTotal, ...(fileBytes === null ? {} : { fileBytes }) };
 }
 
 export async function assembleArchiveUploadChunks(
@@ -157,20 +193,40 @@ export async function assembleArchiveUploadChunks(
   uploadID: string,
   chunksTotal: number,
   outputPath: string,
+  options: { maxBytes?: number; expectedBytes?: number } = {},
 ) {
   validateArchiveUploadID(uploadID);
-  if (!Number.isSafeInteger(chunksTotal) || chunksTotal < 1) {
+  if (!Number.isSafeInteger(chunksTotal) || chunksTotal < 1 || chunksTotal > MAX_ARCHIVE_UPLOAD_CHUNKS) {
     throw new Error('Invalid archive upload chunksTotal');
   }
 
-  await fsp.mkdir(path.dirname(outputPath), { recursive: true });
-  await fsp.writeFile(outputPath, Buffer.alloc(0));
+  const chunks: string[] = [];
+  let totalBytes = 0;
   for (let index = 0; index < chunksTotal; index += 1) {
     const chunkPath = chunkPathForIndex(uploadRoot, uploadID, index);
-    const chunk = await fsp.readFile(chunkPath).catch(() => null);
-    if (!chunk) {
-      throw new Error(`Missing archive upload chunk ${index + 1} of ${chunksTotal}`);
+    const stat = await fsp.stat(chunkPath).catch(() => null);
+    if (!stat?.isFile() || stat.size > MAX_ARCHIVE_UPLOAD_CHUNK_BYTES) {
+      throw new Error(`Invalid archive upload chunk ${index + 1} of ${chunksTotal}`);
     }
-    await fsp.appendFile(outputPath, chunk);
+    totalBytes += stat.size;
+    if (!Number.isSafeInteger(totalBytes)) {
+      throw new UploadTooLargeError('Archive upload is too large');
+    }
+    if (options.maxBytes !== undefined && totalBytes > options.maxBytes) {
+      throw new UploadTooLargeError(`Archive upload must be ${Math.floor(options.maxBytes / (1024 ** 3))} GB or smaller`);
+    }
+    chunks.push(chunkPath);
+  }
+
+  if (options.expectedBytes !== undefined && totalBytes !== options.expectedBytes) {
+    throw new Error('Invalid archive upload fileBytes');
+  }
+
+  await fsp.mkdir(path.dirname(outputPath), { recursive: true });
+  for (let index = 0; index < chunks.length; index += 1) {
+    await pipeline(
+      createReadStream(chunks[index]),
+      createWriteStream(outputPath, { flags: index === 0 ? 'w' : 'a' }),
+    );
   }
 }

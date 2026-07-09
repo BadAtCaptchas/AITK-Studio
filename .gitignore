@@ -167,6 +167,7 @@ cython_debug/
 /custom/*
 !/custom/.gitkeep
 /.tmp
+/ui/.test-tmp/
 /venv.bkp
 /venv.*
 /config/*
@@ -179,7 +180,6 @@ cython_debug/
 /temp
 /wandb
 .vscode/
-.github/
 .aitk_comfy/
 .DS_Store
 ._.DS_Store

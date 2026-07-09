@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { CgSpinner } from 'react-icons/cg';
 import { Search } from 'lucide-react';
@@ -22,6 +22,8 @@ interface JobsTableProps {
   job_type?: string | null;
   projectID?: string | null;
   includeProjectActive?: boolean;
+  onJobsChange?: (jobs: Job[]) => void;
+  onQueuesChange?: (queues: Queue[]) => void;
 }
 
 type JobGroup = {
@@ -61,6 +63,8 @@ export default function JobsTable({
   job_type = null,
   projectID = null,
   includeProjectActive = false,
+  onJobsChange,
+  onQueuesChange,
 }: JobsTableProps) {
   const { jobs, status, refreshJobs } = useJobsList({
     onlyActive,
@@ -73,6 +77,14 @@ export default function JobsTable({
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
   const [filterText, setFilterText] = useState('');
+
+  useEffect(() => {
+    onJobsChange?.(jobs);
+  }, [jobs, onJobsChange]);
+
+  useEffect(() => {
+    onQueuesChange?.(queues);
+  }, [onQueuesChange, queues]);
 
   const refresh = () => {
     refreshJobs();

@@ -285,13 +285,13 @@ async function fileHash(filePath: string) {
   });
 }
 
-export async function findDuplicateUploadedLoraPath(root: string, filename: string, content: Buffer) {
+async function uploadedLoraCandidates(root: string, filename: string) {
   const safeFilename = sanitizeLoraFilename(filename);
   const ext = path.extname(safeFilename);
   const stem = path.basename(safeFilename, ext);
   const candidatePattern = new RegExp(`^${escapeRegExp(stem)}(?:_\\d+)?${escapeRegExp(ext)}$`, 'i');
   const entries = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
-  const candidates = entries
+  return entries
     .filter(entry => entry.isFile() && candidatePattern.test(entry.name))
     .map(entry => path.join(root, entry.name))
     .sort((left, right) => {
@@ -302,6 +302,10 @@ export async function findDuplicateUploadedLoraPath(root: string, filename: stri
       if (rightName === safeName && leftName !== safeName) return 1;
       return leftName.localeCompare(rightName);
     });
+}
+
+export async function findDuplicateUploadedLoraPath(root: string, filename: string, content: Buffer) {
+  const candidates = await uploadedLoraCandidates(root, filename);
   if (candidates.length === 0) return null;
 
   const expectedHash = contentHash(content);
@@ -313,6 +317,22 @@ export async function findDuplicateUploadedLoraPath(root: string, filename: stri
     }
   }
 
+  return null;
+}
+
+export async function findDuplicateUploadedLoraFile(root: string, filename: string, uploadedPath: string) {
+  const [uploadedStat, candidates] = await Promise.all([
+    fs.promises.stat(uploadedPath),
+    uploadedLoraCandidates(root, filename),
+  ]);
+  if (!uploadedStat.isFile() || candidates.length === 0) return null;
+
+  const expectedHash = await fileHash(uploadedPath);
+  for (const candidate of candidates) {
+    const stat = await fs.promises.stat(candidate).catch(() => null);
+    if (!stat?.isFile() || stat.size !== uploadedStat.size) continue;
+    if ((await fileHash(candidate)) === expectedHash) return candidate;
+  }
   return null;
 }
 

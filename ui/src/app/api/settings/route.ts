@@ -10,6 +10,7 @@ import { isDatasetWatchersSettingKey } from '@/server/datasetWatchers';
 import { getOfflineModeState, OFFLINE_MODE_SETTING_KEY } from '@/server/networkPolicy';
 import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyLoraDir, normalizeExternalComfyUrl } from '@/server/externalComfy';
 import { IDEOGRAM_WORKFLOW_HISTORY_KEY } from '@/server/ideogramWorkflowHistory';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 type SettingsAccess = {
   authenticated: boolean;
@@ -22,15 +23,14 @@ const storagePathSettings = [
   ['PROJECTS_FOLDER', defaultProjectsFolder],
 ] as const;
 
-function ensureSettingsAccess(request: NextRequest): SettingsAccess {
+async function ensureSettingsAccess(request: NextRequest): Promise<SettingsAccess> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
-  const token = request.headers.get('authorization')?.split(' ')[1];
 
   if (!tokenToUse) {
     return { authenticated: false, response: null };
   }
 
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return {
       authenticated: false,
       response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
@@ -41,7 +41,7 @@ function ensureSettingsAccess(request: NextRequest): SettingsAccess {
 }
 
 export async function GET(request: NextRequest) {
-  const access = ensureSettingsAccess(request);
+  const access = await ensureSettingsAccess(request);
   if (access.response) {
     return access.response;
   }
@@ -76,12 +76,10 @@ export async function GET(request: NextRequest) {
       settingsObject.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,
     );
     settingsObject.COMFY_EXTERNAL_LORA_DIR = normalizeExternalComfyLoraDir(settingsObject.COMFY_EXTERNAL_LORA_DIR || '');
-    if (!access.authenticated) {
-      settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
-      settingsObject.HF_TOKEN = '';
-      settingsObject.OPENROUTER_API_KEY_SET = Boolean(settingsObject.OPENROUTER_API_KEY);
-      settingsObject.OPENROUTER_API_KEY = '';
-    }
+    settingsObject.HF_TOKEN_SET = Boolean(settingsObject.HF_TOKEN);
+    settingsObject.HF_TOKEN = '';
+    settingsObject.OPENROUTER_API_KEY_SET = Boolean(settingsObject.OPENROUTER_API_KEY);
+    settingsObject.OPENROUTER_API_KEY = '';
     return NextResponse.json(settingsObject);
   } catch (error) {
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
@@ -89,7 +87,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const access = ensureSettingsAccess(request);
+  const access = await ensureSettingsAccess(request);
   if (access.response) {
     return access.response;
   }
@@ -172,10 +170,10 @@ export async function POST(request: NextRequest) {
       COMFY_EXTERNAL_LORA_DIR: normalizedExternalComfyLoraDir,
     };
 
-    if (typeof HF_TOKEN === 'string' && (access.authenticated || HF_TOKEN !== '')) {
+    if (typeof HF_TOKEN === 'string' && HF_TOKEN.trim() !== '') {
       settingsToUpdate.HF_TOKEN = HF_TOKEN;
     }
-    if (typeof OPENROUTER_API_KEY === 'string' && (access.authenticated || OPENROUTER_API_KEY !== '')) {
+    if (typeof OPENROUTER_API_KEY === 'string' && OPENROUTER_API_KEY.trim() !== '') {
       settingsToUpdate.OPENROUTER_API_KEY = OPENROUTER_API_KEY;
     }
 

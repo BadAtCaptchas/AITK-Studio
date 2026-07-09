@@ -8,7 +8,9 @@ export const SETTINGS_UPDATED_EVENT = 'aitk-settings-updated';
 
 export interface Settings {
   HF_TOKEN: string;
+  HF_TOKEN_SET: boolean;
   OPENROUTER_API_KEY: string;
+  OPENROUTER_API_KEY_SET: boolean;
   TRAINING_FOLDER: string;
   DATASETS_FOLDER: string;
   PROJECTS_FOLDER: string;
@@ -23,7 +25,9 @@ export interface Settings {
 
 const defaultSettings: Settings = {
   HF_TOKEN: '',
+  HF_TOKEN_SET: false,
   OPENROUTER_API_KEY: '',
+  OPENROUTER_API_KEY_SET: false,
   TRAINING_FOLDER: '',
   DATASETS_FOLDER: '',
   PROJECTS_FOLDER: '',
@@ -39,7 +43,9 @@ const defaultSettings: Settings = {
 function normalizeSettings(data: Partial<Settings> = {}): Settings {
   return {
     HF_TOKEN: data.HF_TOKEN || '',
+    HF_TOKEN_SET: data.HF_TOKEN_SET === true,
     OPENROUTER_API_KEY: data.OPENROUTER_API_KEY || '',
+    OPENROUTER_API_KEY_SET: data.OPENROUTER_API_KEY_SET === true,
     TRAINING_FOLDER: data.TRAINING_FOLDER || '',
     DATASETS_FOLDER: data.DATASETS_FOLDER || '',
     PROJECTS_FOLDER: data.PROJECTS_FOLDER || '',
@@ -63,7 +69,6 @@ export default function useSettings() {
   const [isSettingsLoaded, setIsLoaded] = useState(false);
   const refreshSettings = useCallback(async () => {
     const res = await apiClient.get('/api/settings');
-    console.log('Settings:', res.data);
     setSettings(normalizeSettings(res.data || {}));
     setIsLoaded(true);
   }, []);

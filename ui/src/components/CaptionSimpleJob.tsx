@@ -307,7 +307,7 @@ const CaptionSimpleJob: React.FC<Props> = ({
             value={jobConfig.config.process[0].caption.fixed_caption || ''}
             onChange={value => {
               if (value?.trim() === '') {
-                //@ts-ignore
+                // @ts-expect-error Clearing the optional value is supported by the config serializer.
                 value = undefined;
               }
               setJobConfig(value, 'config.process[0].caption.fixed_caption');

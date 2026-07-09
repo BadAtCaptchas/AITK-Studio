@@ -189,7 +189,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         headers: {
           'Content-Type': art.mime,
           'Content-Length': String(art.data.length),
-          'Cache-Control': 'public, max-age=604800, immutable',
+          'Cache-Control': 'private, no-cache, must-revalidate',
           'X-Content-Type-Options': 'nosniff',
         },
       });

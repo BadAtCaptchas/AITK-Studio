@@ -43,13 +43,13 @@ export async function GET(request: NextRequest) {
     return new NextResponse('Invalid remote dataset asset type', { status: 400 });
   }
   if (
-    !isRemoteDatasetAssetRequestAuthorized(
+    !(await isRemoteDatasetAssetRequestAuthorized(
       request.headers,
       workerID,
       remotePath,
       request.nextUrl.searchParams.get('expires'),
       request.nextUrl.searchParams.get('sig'),
-    )
+    ))
   ) {
     return new NextResponse('Unauthorized', { status: 401 });
   }

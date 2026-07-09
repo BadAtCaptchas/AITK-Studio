@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { apiClient, isAuthorizedState } from '@/utils/api';
-import { createGlobalState } from 'react-global-hooks';
+import { apiClient, authRequiredState, isAuthorizedState } from '@/utils/api';
+import { LEGACY_AUTH_STORAGE_KEY } from '@/utils/authSession';
 
 interface AuthWrapperProps {
   authRequired: boolean;
@@ -11,23 +11,59 @@ interface AuthWrapperProps {
 
 export default function AuthWrapper({ authRequired, children }: AuthWrapperProps) {
   const [token, setToken] = useState('');
-  // start with true, and deauth if needed
   const [isAuthorizedGlobal, setIsAuthorized] = isAuthorizedState.use();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(authRequired);
   const [error, setError] = useState('');
-  const [isBrowser, setIsBrowser] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isAuthorized = authRequired ? isAuthorizedGlobal : true;
 
-  // Set isBrowser to true when component mounts
   useEffect(() => {
-    setIsBrowser(true);
-    // Get token from localStorage only after component has mounted
-    const storedToken = localStorage.getItem('AI_TOOLKIT_AUTH') || '';
-    setToken(storedToken);
-    checkAuth();
-  }, []);
+    authRequiredState.set(authRequired);
+    let canceled = false;
+
+    const initializeAuth = async () => {
+      if (!authRequired) {
+        window.localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+        setIsAuthorized(true);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const response = await apiClient.get('/api/auth');
+        if (response.data?.isAuthenticated && !canceled) {
+          window.localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+          setIsAuthorized(true);
+          return;
+        }
+      } catch {
+        const legacyToken = window.localStorage.getItem(LEGACY_AUTH_STORAGE_KEY);
+        window.localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+        if (legacyToken) {
+          try {
+            const response = await apiClient.post('/api/auth', { token: legacyToken });
+            if (response.data?.isAuthenticated && !canceled) {
+              setIsAuthorized(true);
+              return;
+            }
+          } catch {
+            // The login form below handles invalid or expired credentials.
+          }
+        }
+      } finally {
+        if (!canceled) setIsLoading(false);
+      }
+
+      if (!canceled) setIsAuthorized(false);
+    };
+
+    void initializeAuth();
+    return () => {
+      canceled = true;
+    };
+  }, [authRequired, setIsAuthorized]);
 
   // auto focus on input when not authorized
   useEffect(() => {
@@ -41,30 +77,6 @@ export default function AuthWrapper({ authRequired, children }: AuthWrapperProps
     }, 100);
   }, [isAuthorized]);
 
-  const checkAuth = async () => {
-    // always get current stored token here to avoid state race conditions
-    const currentToken = localStorage.getItem('AI_TOOLKIT_AUTH') || '';
-    if (!authRequired || isLoading || currentToken === '') {
-      return;
-    }
-    setIsLoading(true);
-    setError('');
-    try {
-      const response = await apiClient.get('/api/auth');
-      if (response.data.isAuthenticated) {
-        setIsAuthorized(true);
-      } else {
-        setIsAuthorized(false);
-        setError('Invalid token. Please try again.');
-      }
-    } catch (err) {
-      setIsAuthorized(false);
-      console.log(err);
-      setError('Invalid token. Please try again.');
-    }
-    setIsLoading(false);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -74,9 +86,21 @@ export default function AuthWrapper({ authRequired, children }: AuthWrapperProps
       return;
     }
 
-    if (isBrowser) {
-      localStorage.setItem('AI_TOOLKIT_AUTH', token);
-      checkAuth();
+    setIsLoading(true);
+    try {
+      const response = await apiClient.post('/api/auth', { token });
+      if (response.data?.isAuthenticated) {
+        window.localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+        setToken('');
+        setIsAuthorized(true);
+        return;
+      }
+      setError('Invalid token. Please try again.');
+    } catch {
+      setIsAuthorized(false);
+      setError('Invalid token. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 

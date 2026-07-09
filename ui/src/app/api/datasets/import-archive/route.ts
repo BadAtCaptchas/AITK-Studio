@@ -2,8 +2,6 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
-import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import {
   extractZipSafely,
@@ -16,61 +14,63 @@ import {
   cleanupOldArchiveUploadChunks,
   createArchiveUploadImportStatus,
   getArchiveUploadImportStatus,
+  readArchiveUploadFileBytes,
   readArchiveUploadChunksTotal,
   readArchiveUploadID,
   saveArchiveUploadChunk,
   updateArchiveUploadImportStatus,
 } from '@/server/archiveUploadChunks';
 import { isEncryptedDatasetFolder, listDatasetSummaries } from '@/server/encryptedDatasets';
+import {
+  cleanupStagedUpload,
+  InvalidUploadError,
+  moveStagedUpload,
+  streamRequestToStagingFile,
+} from '@/server/streamedUpload';
 import { nextAvailablePath, safeNameSegment } from '@/server/trainingJobTransfer';
 import type { DatasetSummary } from '@/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const MAX_DATASET_ARCHIVE_BYTES = 64 * 1024 * 1024 * 1024;
+
 async function copyArchivePath(sourcePath: string, targetPath: string) {
   await fsp.mkdir(path.dirname(targetPath), { recursive: true });
   await fsp.cp(sourcePath, targetPath, { recursive: true, force: false, errorOnExist: true });
 }
 
-function isMultipartRequest(request: NextRequest) {
-  return (request.headers.get('content-type') || '').toLowerCase().includes('multipart/form-data');
-}
-
 async function saveDatasetArchiveUpload(request: NextRequest, uploadPath: string) {
   const url = new URL(request.url);
-  let preferredNameRaw: FormDataEntryValue | string | null =
+  const preferredNameRaw =
     url.searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name');
+  const contentType = (request.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+  if (!['application/octet-stream', 'application/zip', 'application/x-zip-compressed'].includes(contentType)) {
+    const error = new InvalidUploadError('Dataset archives must use a streamed binary request');
+    error.status = 415;
+    throw error;
+  }
 
-  await fsp.mkdir(path.dirname(uploadPath), { recursive: true });
-
-  if (isMultipartRequest(request)) {
-    const formData = await request.formData();
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      throw new Error('file is required');
-    }
-    preferredNameRaw = formData.get('preferredName') || preferredNameRaw;
-    await fsp.writeFile(uploadPath, Buffer.from(await file.arrayBuffer()));
+  let stagingPath: string | null = null;
+  try {
+    const staged = await streamRequestToStagingFile(request, path.dirname(uploadPath), {
+      maxBytes: MAX_DATASET_ARCHIVE_BYTES,
+      prefix: 'dataset-archive',
+    });
+    stagingPath = staged.stagingPath;
+    await moveStagedUpload(stagingPath, uploadPath);
+    stagingPath = null;
     return preferredNameRaw;
+  } finally {
+    await cleanupStagedUpload(stagingPath);
   }
-
-  if (!request.body) {
-    throw new Error('file is required');
-  }
-
-  await pipeline(
-    Readable.fromWeb(request.body as any),
-    fs.createWriteStream(uploadPath),
-  );
-  return preferredNameRaw;
 }
 
 async function importDatasetArchiveFromZip(
   uploadPath: string,
   extractRoot: string,
   datasetsRoot: string,
-  preferredNameRaw: FormDataEntryValue | string | null,
+  preferredNameRaw: string | null,
 ) {
   await extractZipSafely(uploadPath, extractRoot);
 
@@ -146,7 +146,11 @@ export async function POST(request: NextRequest) {
     const uploadMode = archiveUploadMode(request);
     if (uploadMode === 'chunk') {
       await cleanupOldArchiveUploadChunks(chunkUploadRoot);
-      return NextResponse.json(await saveArchiveUploadChunk(request, chunkUploadRoot));
+      return NextResponse.json(
+        await saveArchiveUploadChunk(request, chunkUploadRoot, {
+          maxArchiveBytes: MAX_DATASET_ARCHIVE_BYTES,
+        }),
+      );
     }
 
     const importID = uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -161,6 +165,7 @@ export async function POST(request: NextRequest) {
         ? request.nextUrl.searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name')
         : await saveDatasetArchiveUpload(request, uploadPath);
     if (uploadMode === 'complete') {
+      const expectedBytes = readArchiveUploadFileBytes(request, MAX_DATASET_ARCHIVE_BYTES);
       if (isBackgroundImportRequest(request)) {
         const backgroundWorkRoot = workRoot;
         const chunksTotal = readArchiveUploadChunksTotal(request);
@@ -168,7 +173,10 @@ export async function POST(request: NextRequest) {
         createArchiveUploadImportStatus(importID);
         void (async () => {
           try {
-            await assembleArchiveUploadChunks(chunkUploadRoot, importID, chunksTotal, uploadPath);
+            await assembleArchiveUploadChunks(chunkUploadRoot, importID, chunksTotal, uploadPath, {
+              maxBytes: MAX_DATASET_ARCHIVE_BYTES,
+              expectedBytes: expectedBytes ?? undefined,
+            });
             const result = await importDatasetArchiveFromZip(uploadPath, extractRoot, datasetsRoot, preferredNameRaw);
             updateArchiveUploadImportStatus(importID, { status: 'completed', result });
           } catch (error) {
@@ -182,14 +190,23 @@ export async function POST(request: NextRequest) {
         })();
         return NextResponse.json(getArchiveUploadImportStatus(importID));
       }
-      await assembleArchiveUploadChunks(chunkUploadRoot, importID, readArchiveUploadChunksTotal(request), uploadPath);
+      await assembleArchiveUploadChunks(
+        chunkUploadRoot,
+        importID,
+        readArchiveUploadChunksTotal(request),
+        uploadPath,
+        { maxBytes: MAX_DATASET_ARCHIVE_BYTES, expectedBytes: expectedBytes ?? undefined },
+      );
     }
 
     return NextResponse.json(await importDatasetArchiveFromZip(uploadPath, extractRoot, datasetsRoot, preferredNameRaw));
   } catch (error) {
     console.error('Dataset archive import failed:', error);
     const message = error instanceof Error ? error.message : 'Failed to import dataset archive';
-    let status = 500;
+    let status =
+      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
+        ? error.status
+        : 500;
     if (error instanceof DatasetScopeError) {
       status = error.status;
     } else if (

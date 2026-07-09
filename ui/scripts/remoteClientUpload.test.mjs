@@ -98,7 +98,10 @@ test('dataset archive upload sends a raw zip body to the worker', async () => {
     assert.equal(requests[0].url.searchParams.get('preferredName'), 'locked');
     assert.equal(requests[0].url.searchParams.get('aitk_upload'), 'chunk');
     assert.equal(requests[1].url.searchParams.get('aitk_upload'), 'chunk');
+    assert.equal(requests[0].url.searchParams.get('fileBytes'), String(bytes.length));
+    assert.equal(requests[1].url.searchParams.get('fileBytes'), String(bytes.length));
     assert.equal(requests[2].url.searchParams.get('aitk_upload'), 'complete');
+    assert.equal(requests[2].url.searchParams.get('fileBytes'), String(bytes.length));
     assert.equal(requests[2].url.searchParams.get('background'), '1');
     assert.equal(requests[3].url.searchParams.get('aitk_upload'), 'status');
     assert.equal(requests[0].headers.get('content-type'), 'application/octet-stream');
@@ -149,6 +152,8 @@ test('job bundle upload sends gpu ids in the raw upload request', async () => {
     assert.equal(requests.at(-1).pathname, '/api/jobs/import');
     assert.equal(requests.at(-1).searchParams.get('gpu_ids'), '0,1');
     assert.equal(requests.at(-1).searchParams.get('aitk_upload'), 'complete');
+    assert.equal(requests[0].searchParams.get('fileBytes'), String(fs.statSync(zipPath).size));
+    assert.equal(requests.at(-1).searchParams.get('fileBytes'), String(fs.statSync(zipPath).size));
   } finally {
     globalThis.fetch = originalFetch;
     fs.rmSync(tempRoot, { recursive: true, force: true });

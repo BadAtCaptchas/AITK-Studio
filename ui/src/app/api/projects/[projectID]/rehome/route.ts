@@ -5,7 +5,7 @@ import { ensureProjectApiAccess, readJsonObject } from '../../projectApi';
 export const runtime = 'nodejs';
 
 export async function POST(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
-  const denied = ensureProjectApiAccess(request);
+  const denied = await ensureProjectApiAccess(request);
   if (denied) return denied;
   try {
     const { projectID } = await params;

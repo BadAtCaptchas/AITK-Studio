@@ -84,7 +84,7 @@ async function shallowZoneSummary(folder: string) {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
-  const accessResponse = ensureProjectApiAccess(request);
+  const accessResponse = await ensureProjectApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });

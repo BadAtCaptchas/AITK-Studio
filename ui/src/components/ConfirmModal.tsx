@@ -1,11 +1,9 @@
 'use client';
-import { useRef } from 'react';
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createGlobalState } from 'react-global-hooks';
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
-import { FaExclamationTriangle, FaInfo } from 'react-icons/fa';
+import { FaExclamationTriangle, FaInfo, FaSpinner } from 'react-icons/fa';
 import { TextInput } from './formInputs';
-import React from 'react';
 import { useFromNull } from '@/hooks/useFromNull';
 import classNames from 'classnames';
 
@@ -29,6 +27,8 @@ export default function ConfirmModal() {
   const [confirm, setConfirm] = confirmstate.use();
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useFromNull(() => {
@@ -43,30 +43,48 @@ export default function ConfirmModal() {
     if (confirm) {
       setIsOpen(true);
       setInputValue('');
+      setIsSubmitting(false);
+      setSubmitError(null);
     }
   }, [confirm]);
 
   useEffect(() => {
-    if (!isOpen) {
-      // use timeout to allow the dialog to close before resetting the state
-      setTimeout(() => {
-        setConfirm(null);
-      }, 500);
+    if (isOpen) {
+      return;
     }
-  }, [isOpen]);
+
+    // Allow the leave transition to finish before discarding its content.
+    const resetTimer = setTimeout(() => {
+      setConfirm(null);
+    }, 500);
+    return () => clearTimeout(resetTimer);
+  }, [isOpen, setConfirm]);
 
   const onCancel = () => {
+    if (isSubmitting) {
+      return;
+    }
     if (confirm?.onCancel) {
       confirm.onCancel();
     }
     setIsOpen(false);
   };
 
-  const onConfirm = () => {
-    if (confirm?.onConfirm) {
-      confirm.onConfirm(inputValue);
+  const onConfirm = async () => {
+    if (isSubmitting) {
+      return;
     }
-    setIsOpen(false);
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await confirm?.onConfirm?.(inputValue);
+      setIsOpen(false);
+    } catch (error: unknown) {
+      setSubmitError(error instanceof Error ? error.message : 'The action could not be completed.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   let Icon = FaExclamationTriangle;
@@ -161,8 +179,8 @@ export default function ConfirmModal() {
                     <p className="text-sm text-gray-200">{confirm?.message}</p>
                     <div className={classNames('mt-4 w-full', { hidden: !confirm?.inputTitle })}>
                       <form onSubmit={(e) => {
-                        e.preventDefault()
-                        onConfirm()
+                        e.preventDefault();
+                        void onConfirm();
                       }}>
                         <TextInput
                           value={inputValue}
@@ -172,6 +190,11 @@ export default function ConfirmModal() {
                         />
                       </form>
                     </div>
+                    {submitError ? (
+                      <p role="alert" className="mt-3 text-sm text-red-300">
+                        {submitError}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -179,16 +202,19 @@ export default function ConfirmModal() {
             <div className="bg-gray-700 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
               <button
                 type="button"
-                onClick={onConfirm}
-                className={`inline-flex w-full justify-center rounded-md ${getButtonBgColor()} px-3 py-2 text-sm font-semibold text-white shadow-xs sm:ml-3 sm:w-auto`}
+                onClick={() => void onConfirm()}
+                disabled={isSubmitting}
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-md ${getButtonBgColor()} px-3 py-2 text-sm font-semibold text-white shadow-xs disabled:cursor-wait disabled:opacity-60 sm:ml-3 sm:w-auto`}
               >
-                {confirm?.confirmText || 'Confirm'}
+                {isSubmitting ? <FaSpinner aria-hidden="true" className="animate-spin" /> : null}
+                {isSubmitting ? 'Working…' : confirm?.confirmText || 'Confirm'}
               </button>
               <button
                 type="button"
                 data-autofocus
                 onClick={onCancel}
-                className="mt-3 inline-flex w-full justify-center rounded-md bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-200 hover:bg-gray-800 sm:mt-0 sm:w-auto ring-0"
+                disabled={isSubmitting}
+                className="mt-3 inline-flex w-full justify-center rounded-md bg-gray-800 px-3 py-2 text-sm font-semibold text-gray-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60 sm:mt-0 sm:w-auto ring-0"
               >
                 Cancel
               </button>

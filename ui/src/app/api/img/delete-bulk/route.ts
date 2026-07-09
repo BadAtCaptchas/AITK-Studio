@@ -8,6 +8,7 @@ import {
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 type RemoteGroup = {
   workerID: string;
@@ -15,11 +16,9 @@ type RemoteGroup = {
   refByRemotePath: Record<string, string>;
 };
 
-function requireAuth(request: Request) {
+async function requireAuth(request: Request) {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
-  if (!tokenToUse) return null;
-  const token = request.headers.get('Authorization')?.split(' ')[1];
-  if (!token || token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;
@@ -104,7 +103,7 @@ function splitRemoteAndLocalPaths(imgPaths: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const authError = requireAuth(request);
+    const authError = await requireAuth(request);
     if (authError) return authError;
 
     const body = await request.json();

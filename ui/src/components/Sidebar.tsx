@@ -1,16 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { FolderKanban, GitBranch, Home, Images, ListOrdered, Plus, Settings, ShieldCheck, Wand2 } from 'lucide-react';
+import { FolderKanban, GitBranch, Home, Images, ListOrdered, LogOut, Plus, Settings, ShieldCheck, Wand2 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { FaDiscord } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
 import UpdaterStatus from './UpdaterStatus';
 import useSettings from '@/hooks/useSettings';
+import { authRequiredState, logout } from '@/utils/api';
 
 const Sidebar = () => {
   const pathname = usePathname();
+  const [authRequired] = authRequiredState.use();
   const { settings } = useSettings();
   const projectsEnabled = settings.PROJECTS_ENABLED !== 'false';
   const navigation = [
@@ -45,6 +47,17 @@ const Sidebar = () => {
         <div className="flex items-center gap-1 md:hidden">
           <UpdaterStatus compact minimal />
           <ThemeToggle variant="rail" />
+          {authRequired && (
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className={railButtonClass}
+              title="Log out"
+              aria-label="Log out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -86,6 +99,17 @@ const Sidebar = () => {
           </a>
           <UpdaterStatus compact minimal />
           <ThemeToggle variant="rail" />
+          {authRequired && (
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className={railButtonClass}
+              title="Log out"
+              aria-label="Log out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
         </div>
         <div className="mt-1 text-center text-[10px] text-gray-500">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
       </div>

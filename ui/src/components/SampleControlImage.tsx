@@ -4,8 +4,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import classNames from 'classnames';
 import { useDropzone } from 'react-dropzone';
 import { FaUpload, FaImage, FaTimes } from 'react-icons/fa';
-import { apiClient } from '@/utils/api';
-import type { AxiosProgressEvent } from 'axios';
+import { uploadTemporaryMediaFile } from '@/utils/streamedUploads';
 
 interface Props {
   src: string | null | undefined;
@@ -40,19 +39,12 @@ export default function SampleControlImage({
       const objectUrl = URL.createObjectURL(file);
       setLocalPreview(objectUrl);
 
-      const formData = new FormData();
-      formData.append('files', file);
-
       try {
-        const resp = await apiClient.post(`/api/img/upload`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          onUploadProgress: (evt: AxiosProgressEvent) => {
+        const resp = await uploadTemporaryMediaFile(file, evt => {
             const total = evt.total ?? 100;
             const loaded = evt.loaded ?? 0;
             setUploadProgress(Math.round((loaded * 100) / total));
-          },
-          timeout: 0,
-        });
+          });
 
         const uploaded = resp?.data?.files?.[0] ?? null;
         onNewImageSelected(uploaded);
@@ -79,7 +71,6 @@ export default function SampleControlImage({
 
   const clearImage = useCallback(
     (e?: React.MouseEvent) => {
-      console.log('clearImage');
       if (e) {
         e.stopPropagation();
         e.preventDefault();

@@ -3,6 +3,30 @@ from typing import Union, OrderedDict
 from toolkit.config import get_config
 
 
+def run_job_instance(job):
+    """Run a constructed job and always attempt to release its resources.
+
+    When both the job and cleanup fail, preserve the job failure as the
+    actionable error and attach cleanup context when the Python version
+    supports exception notes.
+    """
+    primary_error = None
+    try:
+        job.run()
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        try:
+            job.cleanup()
+        except BaseException as cleanup_error:
+            if primary_error is None:
+                raise
+            add_note = getattr(primary_error, "add_note", None)
+            if callable(add_note):
+                add_note(f"Job cleanup also failed: {cleanup_error}")
+
+
 def get_job(
         config_path: Union[str, dict, OrderedDict],
         name=None
@@ -40,5 +64,4 @@ def run_job(
         name=None
 ):
     job = get_job(config, name)
-    job.run()
-    job.cleanup()
+    run_job_instance(job)

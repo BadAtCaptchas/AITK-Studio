@@ -2,33 +2,9 @@ import axios from 'axios';
 import { createGlobalState } from 'react-global-hooks';
 
 export const isAuthorizedState = createGlobalState(false);
+export const authRequiredState = createGlobalState(false);
 
-export const apiClient = axios.create();
-
-const AUTH_STORAGE_KEY = 'AI_TOOLKIT_AUTH';
-
-const getAuthToken = () => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  return window.localStorage.getItem(AUTH_STORAGE_KEY);
-};
-
-const clearAuthToken = () => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.localStorage.removeItem(AUTH_STORAGE_KEY);
-};
-
-// Add a request interceptor to add token from localStorage
-apiClient.interceptors.request.use(config => {
-  const token = getAuthToken();
-  if (token) {
-    config.headers['Authorization'] = `Bearer ${token}`;
-  }
-  return config;
-});
+export const apiClient = axios.create({ withCredentials: true });
 
 // Add a response interceptor to handle 401 errors
 apiClient.interceptors.response.use(
@@ -36,8 +12,6 @@ apiClient.interceptors.response.use(
   error => {
     // Check if the error is a 401 Unauthorized
     if (error.response && error.response.status === 401) {
-      // Clear the auth token from localStorage
-      clearAuthToken();
       isAuthorizedState.set(false);
     }
 
@@ -45,3 +19,11 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+export async function logout() {
+  try {
+    await apiClient.delete('/api/auth');
+  } finally {
+    isAuthorizedState.set(false);
+  }
+}

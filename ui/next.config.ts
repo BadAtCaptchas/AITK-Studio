@@ -31,10 +31,6 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-  typescript: {
-    // Remove this. Build fails because of route types
-    ignoreBuildErrors: true,
-  },
   experimental: {
     webpackBuildWorker: true,
     serverActions: {

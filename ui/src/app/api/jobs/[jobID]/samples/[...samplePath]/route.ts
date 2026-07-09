@@ -10,6 +10,27 @@ type SampleRouteParams = {
   samplePath: string[];
 };
 
+function parseRange(value: string | null, size: number) {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return 'invalid' as const;
+  let start: number;
+  let end: number;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return 'invalid' as const;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+    return 'invalid' as const;
+  }
+  return { start, end: Math.min(end, size - 1) };
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<SampleRouteParams> }) {
   const { jobID, samplePath } = await params;
   const sampleSegments = samplePath;
@@ -35,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
 
   const { path: canonicalPath, stat, contentType } = sampleFile;
   const etag = `W/"${stat.ino.toString(36)}-${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
-  const cacheControl = 'public, max-age=86400, immutable';
+  const cacheControl = 'private, no-cache, must-revalidate';
 
   const ifNoneMatch = request.headers.get('if-none-match');
   if (ifNoneMatch && ifNoneMatch === etag) {
@@ -44,6 +65,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
       headers: {
         ETag: etag,
         'Cache-Control': cacheControl,
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   }
@@ -65,21 +87,29 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
     return Readable.toWeb(nodeStream) as unknown as ReadableStream;
   };
 
-  const rangeHeader = request.headers.get('range');
-  if (rangeHeader) {
-    const parts = rangeHeader.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
-    const chunkSize = end - start + 1;
+  const requestedRange = parseRange(request.headers.get('range'), stat.size);
+  if (requestedRange === 'invalid') {
+    return new NextResponse(null, {
+      status: 416,
+      headers: {
+        'Content-Range': `bytes */${stat.size}`,
+        'Cache-Control': cacheControl,
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  }
+  if (requestedRange) {
+    const chunkSize = requestedRange.end - requestedRange.start + 1;
 
-    return new NextResponse(buildBody(start, end) as any, {
+    return new NextResponse(buildBody(requestedRange.start, requestedRange.end) as any, {
       status: 206,
       headers: {
-        'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+        'Content-Range': `bytes ${requestedRange.start}-${requestedRange.end}/${stat.size}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': String(chunkSize),
         'Content-Type': contentType,
         'Cache-Control': cacheControl,
+        'X-Content-Type-Options': 'nosniff',
         ETag: etag,
       },
     });
@@ -90,6 +120,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
       'Content-Type': contentType,
       'Content-Length': String(stat.size),
       'Cache-Control': cacheControl,
+      'X-Content-Type-Options': 'nosniff',
       'Accept-Ranges': 'bytes',
       ETag: etag,
     },

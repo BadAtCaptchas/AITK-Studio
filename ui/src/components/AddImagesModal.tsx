@@ -15,6 +15,7 @@ import {
   readTextFile,
 } from '@/utils/encryptedDatasets';
 import { FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS } from '@/utils/folderImport';
+import { uploadDatasetFile } from '@/utils/streamedUploads';
 
 export interface AddImagesModalState {
   datasetName: string;
@@ -156,20 +157,15 @@ export default function AddImagesModal() {
         prev.map(e => (e.id === id ? { ...e, status: 'uploading' as FileStatus, progress: 0 } : e)),
       );
 
-      const formData = new FormData();
-      formData.append('files', entry.file);
-      formData.append('datasetName', datasetName || '');
-      if (workerID !== 'local') formData.append('worker_id', workerID);
-      if (projectID) formData.append('project_id', projectID);
-
       try {
-        await apiClient.post('/api/datasets/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
+        await uploadDatasetFile(entry.file, {
+          datasetName,
+          workerID,
+          projectID,
           onUploadProgress: pe => {
             const percent = Math.round(((pe.loaded || 0) * 100) / (pe.total || pe.loaded || 1));
             setFileEntries(prev => prev.map(e => (e.id === id ? { ...e, progress: percent } : e)));
           },
-          timeout: 0,
         });
         setFileEntries(prev => prev.filter(e => e.id !== id));
         setDoneCount(prev => prev + 1);
@@ -244,30 +240,21 @@ export default function AddImagesModal() {
         };
         const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encrypted.cryptoKey, encrypted.manifest);
 
-        if (encryptedObjects.length > 0) {
-          const formData = new FormData();
-          formData.append('datasetName', datasetName);
-          if (workerID !== 'local') formData.append('worker_id', workerID);
-          if (projectID) formData.append('project_id', projectID);
-          formData.append('encrypted', '1');
-          formData.append('manifest', JSON.stringify(nextManifest));
-          formData.append('objectPaths', JSON.stringify(encryptedObjects.map(object => object.objectPath)));
-          encryptedObjects.forEach(object => {
-            formData.append('files', object.blob, object.objectPath.replace(/^objects\//, ''));
-          });
-
-          await apiClient.post('/api/datasets/upload', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            timeout: 0,
-          });
-        } else {
-          await apiClient.post('/api/datasets/encrypted/update', {
+        for (const encryptedObject of encryptedObjects) {
+          await uploadDatasetFile(encryptedObject.blob, {
             datasetName,
-            worker_id: workerID,
-            project_id: projectID,
-            manifest: nextManifest,
+            filename: encryptedObject.objectPath.replace(/^objects\//, '') || 'object.bin',
+            workerID,
+            projectID,
+            encryptedObjectPath: encryptedObject.objectPath,
           });
         }
+        await apiClient.post('/api/datasets/encrypted/update', {
+          datasetName,
+          worker_id: workerID,
+          project_id: projectID,
+          manifest: nextManifest,
+        });
 
         encrypted.onUpdate(nextManifest, nextCatalog);
         setDoneCount(entries.length);

@@ -12,8 +12,8 @@
   --gray-900: 215 215 215;
   --gray-800: 195 195 195;
   --gray-700: 175 175 175;
-  --gray-600: 163 163 163;
-  --gray-500: 115 115 115;
+  --gray-600: 100 100 100;
+  --gray-500: 82 82 82;
   --gray-400: 82 82 82;
   --gray-300: 64 64 64;
   --gray-200: 38 38 38;
@@ -29,8 +29,8 @@
   --gray-900: 23 23 23;
   --gray-800: 38 38 38;
   --gray-700: 64 64 64;
-  --gray-600: 82 82 82;
-  --gray-500: 115 115 115;
+  --gray-600: 130 130 130;
+  --gray-500: 148 148 148;
   --gray-400: 163 163 163;
   --gray-300: 212 212 212;
   --gray-200: 229 229 229;
@@ -41,6 +41,22 @@ body {
   color: var(--foreground);
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid rgb(34 211 238);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Prevent iOS Safari from auto-zooming when a form field is focused.

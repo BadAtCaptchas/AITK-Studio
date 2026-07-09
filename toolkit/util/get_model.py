@@ -16,12 +16,26 @@ BUILT_IN_MODELS = [
     CogView4,
 ]
 
+LEGACY_MODEL_ARCHES = {
+    'sd1',
+    'sd2',
+    'sdxl',
+    'sd3',
+    'pixart',
+    'pixart_sigma',
+    'auraflow',
+    'flux',
+    'lumina2',
+    'vega',
+    'ssd',
+}
+
 
 def get_all_models() -> List[BaseModel]:
     extension_folders = ['extensions', 'extensions_built_in']
 
     # This will hold the classes from all extension modules
-    all_model_classes: List[BaseModel] = BUILT_IN_MODELS
+    all_model_classes: List[BaseModel] = list(BUILT_IN_MODELS)
 
     # Iterate over all directories (i.e., packages) in the "extensions" directory
     for sub_dir in extension_folders:
@@ -38,7 +52,9 @@ def get_all_models() -> List[BaseModel]:
                     all_model_classes.extend(models)
             except ImportError as e:
                 print(f"Failed to import the {name} module. Error: {str(e)}")
-    return all_model_classes
+    # Extension packages can re-export the same class. Keep discovery stable
+    # across repeated calls without mutating the built-in registry.
+    return list(dict.fromkeys(all_model_classes))
 
 
 def get_model_class(config: ModelConfig):
@@ -46,5 +62,6 @@ def get_model_class(config: ModelConfig):
     for ModelClass in all_models:
         if ModelClass.arch == config.arch:
             return ModelClass
-    # default to the legacy model
-    return StableDiffusion
+    if config.arch in LEGACY_MODEL_ARCHES:
+        return StableDiffusion
+    raise ValueError(f"Unsupported model architecture: {config.arch}")

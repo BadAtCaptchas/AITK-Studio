@@ -73,6 +73,7 @@ import { setNestedValue } from '@/utils/hooks';
 import { parseRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import { AUTHENLORA_BUILTIN_CODEC_BITS, AUTHENLORA_CODEC_OPTIONS, getAuthenloraCodecSelectValue } from '@/utils/authenloraCodecs';
+import { uploadLoraFile } from '@/utils/streamedUploads';
 
 type Props = {
   jobConfig: JobConfig;
@@ -465,13 +466,10 @@ export default function SimpleJob({
       return;
     }
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     setBaseLoraUploadStatus('uploading');
     setBaseLoraUploadMessage('');
     try {
-      const response = await apiClient.post('/api/generate/loras/upload', formData);
+      const response = await uploadLoraFile(file);
       const uploaded = response.data?.lora;
       if (!uploaded?.path) {
         throw new Error('Upload did not return a LoRA path.');

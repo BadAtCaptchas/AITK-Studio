@@ -5,6 +5,7 @@ import { createRequire } from 'module';
 import path from 'path';
 import { MongoClient } from 'mongodb';
 import sqlite3 from 'sqlite3';
+import { backupExistingSqliteDatabase } from './sqlite-backup.mjs';
 
 const require = createRequire(import.meta.url);
 const provider = (process.env.AITK_DB_PROVIDER || 'sqlite').trim().toLowerCase();
@@ -165,8 +166,11 @@ async function dropLegacySqliteJobNameUniqueIndexes(db) {
 
 async function applySqliteScopedJobNameIndexes(filename) {
   const db = new sqlite3.Database(filename);
+  let transactionOpen = false;
   try {
     await configureSqliteConnection(db);
+    await sqliteRun(db, 'BEGIN IMMEDIATE;');
+    transactionOpen = true;
     await ensureJobProjectIdNullable(db);
     await dropLegacySqliteJobNameUniqueIndexes(db);
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Job_name_idx ON Job(name);');
@@ -176,16 +180,22 @@ async function applySqliteScopedJobNameIndexes(filename) {
       db,
       'CREATE UNIQUE INDEX IF NOT EXISTS Job_project_id_name_key ON Job(project_id, name) WHERE project_id IS NOT NULL;',
     );
+    await sqliteRun(db, 'COMMIT;');
+    transactionOpen = false;
   } finally {
+    if (transactionOpen) await sqliteRun(db, 'ROLLBACK;').catch(() => undefined);
     await new Promise(resolve => db.close(resolve));
   }
 }
 
 async function applySqliteCompatibilitySchema(filename) {
   const db = new sqlite3.Database(filename);
+  let transactionOpen = false;
   try {
     await configureSqliteConnection(db);
 
+    await sqliteRun(db, 'BEGIN IMMEDIATE;');
+    transactionOpen = true;
     await sqliteRun(
       db,
       `
@@ -491,7 +501,10 @@ async function applySqliteCompatibilitySchema(filename) {
         [rootPath, storageRootPath, instanceID, String(project.id)],
       );
     }
+    await sqliteRun(db, 'COMMIT;');
+    transactionOpen = false;
   } finally {
+    if (transactionOpen) await sqliteRun(db, 'ROLLBACK;').catch(() => undefined);
     await new Promise(resolve => db.close(resolve));
   }
 }
@@ -544,6 +557,7 @@ runPrisma(['generate']);
 if (provider === 'sqlite') {
   console.log('Preparing SQLite database...');
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
+  await backupExistingSqliteDatabase(sqlitePath);
   fs.closeSync(fs.openSync(sqlitePath, 'a'));
   await configureSqliteDatabase(sqlitePath);
   if (await hasLegacySqliteTables(sqlitePath)) {

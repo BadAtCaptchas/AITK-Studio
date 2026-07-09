@@ -4,7 +4,7 @@ import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/re
 import { FaUpload } from 'react-icons/fa';
 import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { apiClient } from '@/utils/api';
+import { uploadTemporaryMediaFile } from '@/utils/streamedUploads';
 
 export interface AddSingleImageModalState {
 
@@ -43,23 +43,14 @@ export default function AddSingleImageModal() {
       setIsUploading(true);
       setUploadProgress(0);
 
-      const formData = new FormData();
-      acceptedFiles.forEach(file => {
-        formData.append('files', file);
-      });
-
       try {
-        const resp = await apiClient.post(`/api/img/upload`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-          onUploadProgress: progressEvent => {
+        const resp = await uploadTemporaryMediaFile(
+          acceptedFiles[0],
+          progressEvent => {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 100));
             setUploadProgress(percentCompleted);
           },
-          timeout: 0, // Disable timeout
-        });
-        console.log('Upload successful:', resp.data);
+        );
 
         onDone(resp.data.files[0] || null);
       } catch (error) {

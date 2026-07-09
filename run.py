@@ -45,7 +45,7 @@ if seed is not None:
     torch.cuda.manual_seed_all(seed)
 
 import argparse
-from toolkit.job import get_job
+from toolkit.job import get_job, run_job_instance
 from toolkit.accelerator import get_accelerator
 from toolkit.print import print_acc, setup_log_to_file
 from toolkit.exceptions import JobStopRequested, UserFacingError
@@ -72,13 +72,10 @@ def print_end_message(jobs_completed, jobs_failed, jobs_stopped=0):
     print_acc("========================================")
 
 
-def get_first_process(job):
+def get_active_process(job):
     if job is None:
         return None
-    process_list = getattr(job, "process", None)
-    if not process_list:
-        return None
-    return process_list[0]
+    return getattr(job, "active_process", None)
 
 
 def mark_process_stopping(process, status=None, info=None):
@@ -154,12 +151,11 @@ def main():
         job = None
         try:
             job = get_job(config_file, args.name)
-            job.run()
-            job.cleanup()
+            run_job_instance(job)
             jobs_completed += 1
         except JobStopRequested as e:
             jobs_stopped += 1
-            process = get_first_process(job)
+            process = get_active_process(job)
             mark_process_stopping(process)
             run_process_error_handler(process, e)
             print_end_message(jobs_completed, jobs_failed, jobs_stopped)
@@ -167,20 +163,20 @@ def main():
         except UserFacingError as e:
             print_acc(f"Error running job: {e}")
             jobs_failed += 1
-            run_process_error_handler(get_first_process(job), e)
+            run_process_error_handler(get_active_process(job), e)
             if not args.recover:
                 print_end_message(jobs_completed, jobs_failed, jobs_stopped)
                 raise SystemExit(1)
         except Exception as e:
             print_acc(f"Error running job: {e}")
             jobs_failed += 1
-            run_process_error_handler(get_first_process(job), e)
+            run_process_error_handler(get_active_process(job), e)
             if not args.recover:
                 print_end_message(jobs_completed, jobs_failed, jobs_stopped)
                 raise e
         except KeyboardInterrupt as e:
             jobs_stopped += 1
-            process = get_first_process(job)
+            process = get_active_process(job)
             mark_process_stopping(process, "stopped", "Job stopped")
             run_process_error_handler(process, e)
             print_end_message(jobs_completed, jobs_failed, jobs_stopped)

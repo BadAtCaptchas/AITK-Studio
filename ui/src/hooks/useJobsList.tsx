@@ -37,9 +37,7 @@ export default function useJobsList({
       })
       .then(res => res.data)
       .then(data => {
-        console.log('Jobs:', data);
         if (data.error) {
-          console.log('Error fetching jobs:', data.error);
           setStatus('error');
         } else {
           if (onlyActive) {
@@ -49,8 +47,7 @@ export default function useJobsList({
           setStatus('success');
         }
       })
-      .catch(error => {
-        console.error('Error fetching jobs:', error);
+      .catch(() => {
         setStatus('error');
       });
   };

@@ -206,7 +206,7 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   }
 
   if (!('logging' in jobConfig.config.process[0])) {
-    //@ts-ignore
+    // @ts-expect-error Legacy job shapes do not all declare the optional logging block.
     jobConfig.config.process[0].logging = {
       log_every: 1,
       use_ui_logger: true,

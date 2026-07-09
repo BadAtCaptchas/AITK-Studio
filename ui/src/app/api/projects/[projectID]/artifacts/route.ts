@@ -5,6 +5,7 @@ import { db } from '@/server/db';
 import { createProjectAssetUrl } from '@/server/projectAssetUrls';
 import { getProjectRoots, isPathInside, resolveProject } from '@/server/projects';
 import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 type ArtifactKind = 'image' | 'video' | 'audio' | 'model' | 'file';
 type ArtifactSource = 'generated' | 'training-sample' | 'model' | 'file';
@@ -34,10 +35,10 @@ const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.ogg', '.m4a']);
 const MODEL_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.gguf']);
 const MAX_SCAN_ENTRIES = 6000;
 
-function ensureApiAccess(request: Request): NextResponse | null {
+async function ensureApiAccess(request: Request): Promise<NextResponse | null> {
   const token = process.env.AI_TOOLKIT_AUTH;
   if (!token) return null;
-  if (request.headers.get('authorization')?.split(' ')[1] !== token) {
+  if (!(await isRequestAuthenticated(request, token))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;
@@ -117,7 +118,7 @@ async function scanFiles(
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });

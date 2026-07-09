@@ -11,6 +11,7 @@ class BaseJob:
         if not config:
             raise ValueError('config is required')
         self.process: List[BaseProcess]
+        self.active_process = None
 
         self.config = config['config']
         self.raw_config = config
@@ -65,11 +66,26 @@ class BaseJob:
             else:
                 raise ValueError(f'config file is invalid. Unknown process type: {process["type"]}')
 
+    def run_processes(self):
+        """Run configured processes while retaining the process that failed."""
+        for process in self.process:
+            self.active_process = process
+            process.run()
+            self.active_process = None
+
     def cleanup(self):
         # if you implement this in child clas,
         # be sure to call super().cleanup() LAST
+        first_error = None
         for process in getattr(self, 'process', []):
             cleanup = getattr(process, 'cleanup', None)
             if callable(cleanup):
-                cleanup()
-        del self
+                try:
+                    cleanup()
+                except BaseException as error:
+                    # One broken cleanup must not prevent the other processes
+                    # from releasing their resources.
+                    if first_error is None:
+                        first_error = error
+        if first_error is not None:
+            raise first_error

@@ -253,13 +253,47 @@ class EncryptedDatasetReader:
         data = self.decrypt_object_bytes(item.objectPath)
         import av
 
-        container = av.open(io.BytesIO(data))
+        max_total_frames = 1_000_000
+        max_dataset_fps = 240
+        max_auto_num_frames = 4_097
+        if dataset_fps <= 0:
+            raise EncryptedDatasetError(f"Invalid dataset FPS ({dataset_fps}). FPS must be > 0.")
+        if dataset_fps > max_dataset_fps:
+            raise EncryptedDatasetError(
+                f"Configured FPS is too high ({dataset_fps}). Maximum supported is {max_dataset_fps}."
+            )
+
+        source = io.BytesIO(data)
+        container = av.open(source)
         video_stream = container.streams.video[0]
-        video_fps = float(video_stream.average_rate or video_stream.base_rate or dataset_fps or 24)
-        frames = [frame.to_image().convert("RGB") for frame in container.decode(video=0)]
-        container.close()
-        total_frames = len(frames)
+        video_fps = float(video_stream.average_rate or video_stream.base_rate or dataset_fps)
+        if not video_fps or video_fps <= 0:
+            container.close()
+            raise EncryptedDatasetError(f"Invalid encrypted video FPS ({video_fps}) for {item.name}")
+
+        total_frames = int(video_stream.frames or 0)
+        if total_frames <= 0 and video_stream.duration is not None and video_stream.time_base is not None:
+            duration_seconds = float(video_stream.duration * video_stream.time_base)
+            total_frames = int(round(duration_seconds * video_fps))
         if total_frames <= 0:
+            total_frames = 0
+            for _frame in container.decode(video=0):
+                total_frames += 1
+                if total_frames > max_total_frames:
+                    container.close()
+                    raise EncryptedDatasetError(
+                        f"Encrypted video has too many frames. Maximum supported is {max_total_frames}."
+                    )
+            container.close()
+            source.seek(0)
+            container = av.open(source)
+        if total_frames > max_total_frames:
+            container.close()
+            raise EncryptedDatasetError(
+                f"Encrypted video has too many frames ({total_frames}). Maximum supported is {max_total_frames}."
+            )
+        if total_frames <= 0:
+            container.close()
             raise EncryptedDatasetError(f"Encrypted video has no decodable frames: {item.name}")
         max_frame_index = total_frames - 1
 
@@ -270,7 +304,13 @@ class EncryptedDatasetReader:
             selected_num_frames = selected_num_frames // temporal_compression * temporal_compression
             selected_num_frames += 1
             if selected_num_frames <= 1:
+                container.close()
                 raise EncryptedDatasetError("Computed encrypted video frame count is invalid")
+            if selected_num_frames > max_auto_num_frames:
+                container.close()
+                raise EncryptedDatasetError(
+                    f"Computed frame count ({selected_num_frames}) exceeds maximum supported ({max_auto_num_frames})"
+                )
 
         if shrink_video_to_frames or total_frames < selected_num_frames:
             interval = max_frame_index / (selected_num_frames - 1) if selected_num_frames > 1 else 0
@@ -287,4 +327,24 @@ class EncryptedDatasetReader:
                 start_frame = random.randint(0, max(0, max_start_frame))
                 frame_indices = [start_frame + (i * frame_interval) for i in range(selected_num_frames)]
 
-        return [frames[idx] for idx in frame_indices], video_fps, frame_indices, selected_num_frames
+        requested_indices = set(frame_indices)
+        selected_frames = {}
+        try:
+            for frame_index, frame in enumerate(container.decode(video=0)):
+                if frame_index in requested_indices:
+                    selected_frames[frame_index] = frame.to_image().convert("RGB")
+                    if len(selected_frames) == len(requested_indices):
+                        break
+        finally:
+            container.close()
+
+        missing_indices = sorted(requested_indices.difference(selected_frames))
+        if missing_indices:
+            raise EncryptedDatasetError(
+                f"Encrypted video ended before requested frame {missing_indices[0]} could be decoded: {item.name}"
+            )
+
+        # Duplicate indices can occur when a short clip is stretched. Copy those
+        # images so downstream transforms do not mutate a shared PIL instance.
+        frames = [selected_frames[index].copy() for index in frame_indices]
+        return frames, video_fps, frame_indices, selected_num_frames

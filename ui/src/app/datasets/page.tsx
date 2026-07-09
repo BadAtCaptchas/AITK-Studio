@@ -63,6 +63,7 @@ import { isImage } from '@/utils/basic';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
+import { uploadDatasetFile } from '@/utils/streamedUploads';
 
 type DatasetExplorerView = 'details' | 'icons';
 
@@ -1270,22 +1271,18 @@ export default function Datasets() {
     entries: FolderImportEntry[],
     relativePaths: string[],
   ) => {
-    const formData = new FormData();
-    formData.append('datasetName', datasetName);
-    if (workerID !== 'local') formData.append('worker_id', workerID);
-    if (activeProjectID) formData.append('project_id', activeProjectID);
-    formData.append('failIfDatasetExists', '1');
-    formData.append('preserveRelativePaths', '1');
-    formData.append('relativePaths', JSON.stringify(relativePaths));
     const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
-    if (sourceFolderPath) formData.append('sourceFolderPath', sourceFolderPath);
-    entries.forEach(entry => {
-      formData.append('files', entry.file);
-    });
-    await apiClient.post('/api/datasets/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 0,
-    });
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      await uploadDatasetFile(entry.file, {
+        datasetName,
+        workerID,
+        projectID: activeProjectID,
+        relativePath: relativePaths[index] || entry.relativePath || entry.file.name,
+        sourceFolderPath,
+        failIfDatasetExists: index === 0,
+      });
+    }
   };
 
   const createFolderImportEncryption = async () => {
@@ -1398,24 +1395,22 @@ export default function Datasets() {
       encryption.key,
     );
 
-    const formData = new FormData();
-    formData.append('datasetName', createdName);
-    if (workerID !== 'local') formData.append('worker_id', workerID);
-    if (activeProjectID) formData.append('project_id', activeProjectID);
-    formData.append('encrypted', '1');
-    formData.append('manifest', JSON.stringify(encryptedPayload.manifest));
     const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
-    if (sourceFolderPath) formData.append('sourceFolderPath', sourceFolderPath);
-    formData.append(
-      'objectPaths',
-      JSON.stringify(encryptedPayload.encryptedObjects.map(encryptedObject => encryptedObject.objectPath)),
-    );
-    encryptedPayload.encryptedObjects.forEach(encryptedObject => {
-      formData.append('files', encryptedObject.blob, encryptedObject.objectPath.split('/').pop() || 'object.bin');
-    });
-    await apiClient.post('/api/datasets/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 0,
+    for (const encryptedObject of encryptedPayload.encryptedObjects) {
+      await uploadDatasetFile(encryptedObject.blob, {
+        datasetName: createdName,
+        filename: encryptedObject.objectPath.split('/').pop() || 'object.bin',
+        workerID,
+        projectID: activeProjectID,
+        sourceFolderPath,
+        encryptedObjectPath: encryptedObject.objectPath,
+      });
+    }
+    await apiClient.post('/api/datasets/encrypted/update', {
+      datasetName: createdName,
+      worker_id: workerID,
+      project_id: activeProjectID,
+      manifest: encryptedPayload.manifest,
     });
     rememberFolderImportOutputKey(workerID, createdName, encryption.rawKeyB64);
     return { datasetName: createdName, itemCount: encryptedPayload.itemCount };

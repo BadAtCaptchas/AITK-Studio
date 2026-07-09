@@ -3,7 +3,7 @@ import fs from 'fs';
 import {
   buildUploadedLoraEntry,
   extractTriggerWordsFromMetadata,
-  findDuplicateUploadedLoraPath,
+  findDuplicateUploadedLoraFile,
   getUploadedLoraRoot,
   mergeTriggerWords,
   nextAvailableLoraPath,
@@ -11,55 +11,91 @@ import {
   splitTriggerWords,
   writeUploadedLoraSidecar,
 } from '@/server/loraLibrary';
+import {
+  cleanupStagedUpload,
+  decodedUploadHeader,
+  InvalidUploadError,
+  moveStagedUploadNoReplace,
+  streamRequestToStagingFile,
+} from '@/server/streamedUpload';
 
 export const runtime = 'nodejs';
 
-const MAX_REQUEST_BYTES = 5 * 1024 * 1024 * 1024;
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+
+function isDestinationCollision(error: unknown) {
+  return error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST';
+}
 
 export async function POST(request: NextRequest) {
   let savedPath: string | null = null;
   let createdPath: string | null = null;
+  let stagingPath: string | null = null;
 
   try {
-    const contentLength = Number(request.headers.get('content-length') || 0);
-    if (contentLength > MAX_REQUEST_BYTES) {
-      return NextResponse.json({ error: 'Request body too large' }, { status: 413 });
+    const contentType = (request.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+    if (contentType !== 'application/octet-stream') {
+      return NextResponse.json({ error: 'LoRA uploads must use a streamed binary request' }, { status: 415 });
     }
 
-    const formData = await request.formData();
-    const file = formData.get('file');
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'No LoRA file provided' }, { status: 400 });
+    const originalFilename = decodedUploadHeader(request, 'x-aitk-file-name', 512);
+    if (!originalFilename) {
+      return NextResponse.json({ error: 'LoRA filename is required' }, { status: 400 });
     }
-
-    if (!file.name.toLowerCase().endsWith('.safetensors')) {
+    if (!originalFilename.toLowerCase().endsWith('.safetensors')) {
       return NextResponse.json({ error: 'LoRA upload must be a .safetensors file' }, { status: 400 });
-    }
-
-    if (file.size > MAX_FILE_BYTES) {
-      return NextResponse.json({ error: 'LoRA file too large' }, { status: 413 });
     }
 
     const root = await getUploadedLoraRoot();
     await fs.promises.mkdir(root, { recursive: true });
-    const content = Buffer.from(await file.arrayBuffer());
-    const duplicatePath = await findDuplicateUploadedLoraPath(root, file.name, content);
-    savedPath = duplicatePath || (await nextAvailableLoraPath(root, file.name));
-    const reused = duplicatePath !== null;
-    if (!reused) {
-      createdPath = savedPath;
-      await fs.promises.writeFile(savedPath, content);
+    const staged = await streamRequestToStagingFile(request, root, {
+      maxBytes: MAX_FILE_BYTES,
+      prefix: 'lora-upload',
+    });
+    const pendingUploadPath = staged.stagingPath;
+    stagingPath = pendingUploadPath;
+    const metadata = await readSafetensorsMetadataStrict(pendingUploadPath);
+    let duplicatePath = await findDuplicateUploadedLoraFile(root, originalFilename, pendingUploadPath);
+    let reused = duplicatePath !== null;
+    if (duplicatePath) {
+      savedPath = duplicatePath;
+      await cleanupStagedUpload(stagingPath);
+      stagingPath = null;
+    } else {
+      for (let attempt = 0; attempt < 1_000; attempt += 1) {
+        savedPath = await nextAvailableLoraPath(root, originalFilename);
+        try {
+          await moveStagedUploadNoReplace(pendingUploadPath, savedPath);
+          stagingPath = null;
+          createdPath = savedPath;
+          break;
+        } catch (error) {
+          if (!isDestinationCollision(error)) throw error;
+          duplicatePath = await findDuplicateUploadedLoraFile(root, originalFilename, pendingUploadPath);
+          if (duplicatePath) {
+            savedPath = duplicatePath;
+            reused = true;
+            await cleanupStagedUpload(stagingPath);
+            stagingPath = null;
+            break;
+          }
+        }
+      }
+      if (stagingPath) {
+        throw new InvalidUploadError('Could not reserve a unique LoRA filename');
+      }
+    }
+    if (!savedPath) {
+      throw new InvalidUploadError('LoRA upload did not produce a saved file');
     }
 
-    const metadata = await readSafetensorsMetadataStrict(savedPath);
-    const userTriggerWords = splitTriggerWords(formData.get('trigger_words'));
+    const userTriggerWords = splitTriggerWords(decodedUploadHeader(request, 'x-aitk-trigger-words', 8_192));
     const metadataTriggerWords = extractTriggerWordsFromMetadata(metadata);
     const triggerWords = userTriggerWords.length > 0 ? userTriggerWords : metadataTriggerWords;
 
     if (!reused || userTriggerWords.length > 0) {
       await writeUploadedLoraSidecar(savedPath, {
-        originalFilename: file.name,
+        originalFilename,
         uploadedAt: new Date().toISOString(),
         triggerWords: mergeTriggerWords(triggerWords),
         triggerWordSource: userTriggerWords.length > 0 ? 'user' : metadataTriggerWords.length > 0 ? 'metadata' : 'none',
@@ -69,19 +105,17 @@ export async function POST(request: NextRequest) {
     const lora = await buildUploadedLoraEntry(savedPath);
     return NextResponse.json({ lora, reused });
   } catch (error) {
+    await cleanupStagedUpload(stagingPath);
     if (createdPath) {
       await fs.promises.unlink(createdPath).catch(() => {});
     }
 
     console.error('LoRA upload error:', error);
     const message = error instanceof Error ? error.message : 'Error uploading LoRA';
-    return NextResponse.json({ error: message }, { status: 400 });
+    const status =
+      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
+        ? error.status
+        : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }
-
-export const config = {
-  api: {
-    bodyParser: false,
-    responseLimit: '50mb',
-  },
-};

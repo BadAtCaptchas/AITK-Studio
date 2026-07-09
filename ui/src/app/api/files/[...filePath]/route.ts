@@ -13,6 +13,27 @@ async function realpathIfExists(filePath: string) {
   }
 }
 
+function parseRange(value: string | null, size: number) {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return 'invalid' as const;
+  let start: number;
+  let end: number;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return 'invalid' as const;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : Math.min(start + 10 * 1024 * 1024, size - 1);
+  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+    return 'invalid' as const;
+  }
+  return { start, end: Math.min(end, size - 1) };
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ filePath: string[] }> }) {
   const { filePath } = await params;
   try {
@@ -92,28 +113,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return new NextResponse('File type not allowed', { status: 403 });
     }
 
-    // Get range header for partial content support
-    const range = request.headers.get('range');
-
     // Common headers for better download handling
     const commonHeaders = {
       'Content-Type': contentType,
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'public, max-age=86400',
+      'Cache-Control': 'private, no-cache, must-revalidate',
       'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
       'X-Content-Type-Options': 'nosniff',
     };
 
-    if (range) {
-      // Parse range header
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 10 * 1024 * 1024, stat.size - 1); // 10MB chunks
-      const chunkSize = end - start + 1;
+    const requestedRange = parseRange(request.headers.get('range'), stat.size);
+    if (requestedRange === 'invalid') {
+      return new NextResponse(null, {
+        status: 416,
+        headers: { ...commonHeaders, 'Content-Range': `bytes */${stat.size}` },
+      });
+    }
+    if (requestedRange) {
+      const chunkSize = requestedRange.end - requestedRange.start + 1;
 
       const fileStream = fs.createReadStream(resolvedFilePath, {
-        start,
-        end,
+        start: requestedRange.start,
+        end: requestedRange.end,
         highWaterMark: 64 * 1024, // 64KB buffer
       });
 
@@ -121,7 +142,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         status: 206,
         headers: {
           ...commonHeaders,
-          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Content-Range': `bytes ${requestedRange.start}-${requestedRange.end}/${stat.size}`,
           'Content-Length': String(chunkSize),
         },
       });

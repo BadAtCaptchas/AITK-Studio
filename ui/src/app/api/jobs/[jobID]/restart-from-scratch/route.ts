@@ -5,15 +5,15 @@ import {
   TrainingJobRestartError,
 } from '@/server/trainingJobRestart';
 import type { JobStartRequest } from '@/types';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
-function ensureApiAccess(request: NextRequest): NextResponse | null {
+async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -28,7 +28,7 @@ function handleRestartError(error: unknown) {
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
   }

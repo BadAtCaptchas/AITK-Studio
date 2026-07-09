@@ -1,17 +1,13 @@
 {
   "name": "AI Toolkit Blackwell",
   "category": "NVIDIA",
-  "imageName": "REPLACE_WITH_YOUR_REGISTRY/ai-toolkit:0.9.10-blackwell",
+  "imageName": "REPLACE_WITH_YOUR_REGISTRY/ai-toolkit:1.5.0-blackwell",
   "isPublic": false,
   "isServerless": false,
   "containerDiskInGb": 100,
   "volumeInGb": 250,
   "volumeMountPath": "/workspace",
-  "ports": [
-    "8675/http",
-    "6006/http",
-    "22/tcp"
-  ],
+  "ports": ["8675/http", "6006/http", "22/tcp"],
   "dockerEntrypoint": [],
   "dockerStartCmd": [],
   "env": {

@@ -804,6 +804,7 @@ async function remoteZipFileJson<T>(
         uploadID,
         chunkIndex,
         chunksTotal,
+        fileBytes: fileStat.size,
       }),
       {
         method: 'POST',
@@ -827,6 +828,7 @@ async function remoteZipFileJson<T>(
       aitk_upload: 'complete',
       uploadID,
       chunksTotal,
+      fileBytes: fileStat.size,
       background: options.backgroundComplete ? '1' : null,
     }),
     {

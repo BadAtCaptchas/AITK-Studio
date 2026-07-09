@@ -1,16 +1,28 @@
-import React, { Fragment, useEffect } from 'react';
+'use client';
+
+import { useEffect } from 'react';
+import type { ReactNode } from 'react';
+import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
+import { X } from 'lucide-react';
 
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
-  children: React.ReactNode;
+  children: ReactNode;
   showCloseButton?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   closeOnOverlayClick?: boolean;
 }
 
-export const Modal: React.FC<ModalProps> = ({
+const sizeClasses = {
+  sm: 'max-w-md',
+  md: 'max-w-lg',
+  lg: 'max-w-2xl',
+  xl: 'max-w-4xl',
+} as const;
+
+export function Modal({
   isOpen,
   onClose,
   title,
@@ -18,93 +30,47 @@ export const Modal: React.FC<ModalProps> = ({
   showCloseButton = true,
   size = 'md',
   closeOnOverlayClick = true,
-}) => {
-  // Close on ESC key press
+}: ModalProps) {
   useEffect(() => {
-    const handleEscKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
+    if (!isOpen || closeOnOverlayClick) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
     };
-
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscKey);
-      // Prevent body scrolling when modal is open
-      document.body.style.overflow = 'hidden';
-    }
-
-    return () => {
-      document.removeEventListener('keydown', handleEscKey);
-      document.body.style.overflow = 'auto';
-    };
-  }, [isOpen, onClose]);
-
-  // Handle overlay click
-  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget && closeOnOverlayClick) {
-      onClose();
-    }
-  };
-
-  if (!isOpen) return null;
-
-  // Size mapping
-  const sizeClasses = {
-    sm: 'max-w-md',
-    md: 'max-w-lg',
-    lg: 'max-w-2xl',
-    xl: 'max-w-4xl',
-  };
+    document.addEventListener('keydown', handleEscape, true);
+    return () => document.removeEventListener('keydown', handleEscape, true);
+  }, [closeOnOverlayClick, isOpen, onClose]);
 
   return (
-    <Fragment>
-      {/* Modal backdrop */}
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-gray-900 bg-opacity-75 backdrop-blur-sm transition-opacity"
-        onClick={handleOverlayClick}
-        aria-modal="true"
-        role="dialog"
-        aria-labelledby="modal-title"
-      >
-        {/* Modal panel */}
-        <div
-          className={`relative mx-auto w-full ${sizeClasses[size]} rounded-lg bg-white dark:bg-gray-900 border border-gray-700 shadow-xl transition-all`}
-          onClick={e => e.stopPropagation()}
+    <Dialog
+      open={isOpen}
+      onClose={closeOnOverlayClick ? onClose : () => undefined}
+      className="relative z-50"
+    >
+      <DialogBackdrop className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm transition-opacity" />
+      <div className="fixed inset-0 flex w-screen items-center justify-center overflow-y-auto p-4">
+        <DialogPanel
+          className={`relative mx-auto w-full ${sizeClasses[size]} rounded-lg border border-gray-700 bg-white shadow-xl transition-all dark:bg-gray-900`}
         >
-          {/* Modal header */}
           {(title || showCloseButton) && (
-            <div className="flex items-center justify-between rounded-t-lg border-b border-gray-700 bg-gray-850 px-6 py-4">
-              {title && (
-                <h3 id="modal-title" className="text-xl font-semibold text-gray-100">
-                  {title}
-                </h3>
-              )}
-
-              {showCloseButton && (
+            <div className="flex items-center justify-between rounded-t-lg border-b border-gray-700 bg-gray-900 px-6 py-4">
+              {title ? (
+                <DialogTitle className="text-xl font-semibold text-gray-100">{title}</DialogTitle>
+              ) : null}
+              {showCloseButton ? (
                 <button
                   type="button"
-                  className="ml-auto inline-flex items-center justify-center rounded-md p-2 text-gray-400 hover:bg-gray-700 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="ml-auto inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-gray-700 hover:text-gray-200"
                   onClick={onClose}
                   aria-label="Close modal"
                 >
-                  <svg
-                    className="h-5 w-5"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <X className="h-5 w-5" aria-hidden="true" />
                 </button>
-              )}
+              ) : null}
             </div>
           )}
-
-          {/* Modal content */}
           <div className="px-6 py-4">{children}</div>
-        </div>
+        </DialogPanel>
       </div>
-    </Fragment>
+    </Dialog>
   );
-};
+}

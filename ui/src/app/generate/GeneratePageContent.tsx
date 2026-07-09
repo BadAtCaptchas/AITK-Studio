@@ -26,6 +26,7 @@ import type { ComfyConfig, ComfyMode, ComfyOnError, GenerationBackend, ModelConf
 import { groupedModelOptions, modelArchs, quantizationOptions } from '@/app/jobs/new/options';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { getLayerOffloadingMemoryProfile, type LayerOffloadingBackend } from '@/utils/memoryProfiles';
+import { uploadLoraFile } from '@/utils/streamedUploads';
 
 type GeneratedLora = {
   id: string;
@@ -520,17 +521,12 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       return;
     }
 
-    const formData = new FormData();
-    formData.append('file', file);
-    if (loraUploadTriggerWords.trim()) {
-      formData.append('trigger_words', loraUploadTriggerWords.trim());
-    }
-
     setLoraUploadStatus('uploading');
     setLoraUploadProgress(0);
     setLoraUploadMessage('');
     try {
-      const res = await apiClient.post('/api/generate/loras/upload', formData, {
+      const res = await uploadLoraFile(file, {
+        triggerWords: loraUploadTriggerWords,
         onUploadProgress: progressEvent => {
           if (!progressEvent.total) return;
           setLoraUploadProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));

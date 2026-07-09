@@ -56,9 +56,7 @@ export const callScriptStream = async (
   script: string,
   options: StreamCallScriptOptions = {},
 ): Promise<StreamEvent | null> => {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('AI_TOOLKIT_AUTH') : null;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
 
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -74,6 +72,7 @@ export const callScriptStream = async (
     const response = await fetch('/api/scripts', {
       method: 'POST',
       headers,
+      credentials: 'same-origin',
       body: JSON.stringify({ script, args: options.args, stream: true }),
       signal: controller.signal,
     });

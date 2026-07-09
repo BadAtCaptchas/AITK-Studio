@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 type SyncParams = { projectID: string; operationID: string };
 
 export async function GET(request: Request, { params }: { params: Promise<SyncParams> }) {
-  const denied = ensureProjectApiAccess(request);
+  const denied = await ensureProjectApiAccess(request);
   if (denied) return denied;
   try {
     const { projectID, operationID } = await params;
@@ -27,7 +27,7 @@ export async function GET(request: Request, { params }: { params: Promise<SyncPa
 }
 
 export async function POST(request: Request, { params }: { params: Promise<SyncParams> }) {
-  const denied = ensureProjectApiAccess(request);
+  const denied = await ensureProjectApiAccess(request);
   if (denied) return denied;
   try {
     const { projectID, operationID } = await params;

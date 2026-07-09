@@ -40,5 +40,4 @@ class TrainJob(BaseJob):
         print("")
         print(f"Running  {len(self.process)} process{'' if len(self.process) == 1 else 'es'}")
 
-        for process in self.process:
-            process.run()
+        self.run_processes()

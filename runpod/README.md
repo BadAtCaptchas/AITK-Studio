@@ -7,11 +7,11 @@ This folder contains the private RunPod Pod template for AITK Studio. It is inte
 Build the image from the repository root:
 
 ```bash
-IMAGE_NAME="REPLACE_WITH_YOUR_REGISTRY/ai-toolkit:0.9.10-blackwell"
+IMAGE_NAME="REPLACE_WITH_YOUR_REGISTRY/ai-toolkit:1.5.0-blackwell"
 
 docker build \
   -f docker/Dockerfile.runpod \
-  --build-arg AITK_VERSION=0.9.10 \
+  --build-arg AITK_VERSION=1.5.0 \
   --build-arg GIT_COMMIT="$(git rev-parse HEAD)" \
   -t "${IMAGE_NAME}" \
   .
@@ -23,7 +23,7 @@ Push the image to your registry:
 docker push "${IMAGE_NAME}"
 ```
 
-Before creating the RunPod template, replace `REPLACE_WITH_YOUR_REGISTRY/ai-toolkit:0.9.10-blackwell` in `runpod/template.blackwell.json` with the exact image name you pushed.
+Before creating the RunPod template, replace `REPLACE_WITH_YOUR_REGISTRY/ai-toolkit:1.5.0-blackwell` in `runpod/template.blackwell.json` with the exact image name you pushed.
 
 ## Create The Template
 
@@ -63,6 +63,7 @@ On startup, `docker/start-runpod.sh` creates persistent storage under `/workspac
 - `output`
 - `config`
 - `models`
+- `projects`
 - `data`
 
 The SQLite database lives at `/workspace/ai-toolkit/aitk_db.db`, and Hugging Face files cache under `/workspace/.cache/huggingface`. Example configs are copied to `/workspace/ai-toolkit/config/examples` on first boot.
@@ -134,7 +135,7 @@ test -f /workspace/ai-toolkit/aitk_db.db
 test -d /workspace/.cache/huggingface/hub
 ```
 
-Restart the Pod and confirm that jobs, datasets, outputs, and the SQLite database are still present under `/workspace/ai-toolkit`.
+Restart the Pod and confirm that jobs, projects, datasets, models, outputs, and the SQLite database are still present under `/workspace/ai-toolkit`.
 
 ## Troubleshooting
 

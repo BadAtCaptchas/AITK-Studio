@@ -5,8 +5,7 @@ import JobsTable from '@/components/JobsTable';
 import TensorBoardLink from '@/components/TensorBoardLink';
 import { TopBar, MainContent } from '@/components/layout';
 import useGPUInfo from '@/hooks/useGPUInfo';
-import useJobsList from '@/hooks/useJobsList';
-import useQueueList from '@/hooks/useQueueList';
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   Activity,
@@ -19,6 +18,7 @@ import {
   MemoryStick,
   Plus,
 } from 'lucide-react';
+import type { Job, Queue } from '@/types';
 
 const activeStatuses = new Set(['queued', 'running', 'stopping']);
 
@@ -34,8 +34,8 @@ function clampPercent(value: number) {
 
 export default function Dashboard() {
   const { gpuList, isGPUInfoLoaded, status: gpuStatus } = useGPUInfo();
-  const { jobs } = useJobsList({ onlyActive: true, reloadInterval: 5000, includeProjectActive: true });
-  const { queues } = useQueueList();
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [queues, setQueues] = useState<Queue[]>([]);
 
   const runningJobs = jobs.filter(job => ['running', 'stopping'].includes(job.status)).length;
   const queuedJobs = jobs.filter(job => job.status === 'queued').length;
@@ -261,7 +261,12 @@ export default function Dashboard() {
                 View all
               </Link>
             </div>
-            <JobsTable onlyActive includeProjectActive />
+            <JobsTable
+              onlyActive
+              includeProjectActive
+              onJobsChange={setJobs}
+              onQueuesChange={setQueues}
+            />
           </section>
         </div>
       </MainContent>

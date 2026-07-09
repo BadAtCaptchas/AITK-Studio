@@ -23,6 +23,7 @@ import {
   ProjectSyncProtocolError,
   resolvePortableProjectConfig,
 } from '@/server/projectSyncProtocol';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,14 +42,13 @@ function isInlineGenerationCanceledError(error: unknown) {
   return error instanceof InlineGenerationCanceledError;
 }
 
-function ensureApiAccess(request: NextRequest): NextResponse | null {
+async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -275,7 +275,7 @@ function runInlineGenerate(
 }
 
 export async function POST(request: NextRequest) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
   }

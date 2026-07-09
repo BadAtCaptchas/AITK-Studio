@@ -5,17 +5,17 @@ import { db } from '@/server/db';
 import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import type { JobConfig } from '@/types';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 export const runtime = 'nodejs';
 
 const ADVISOR_METRIC_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
 
-function ensureApiAccess(request: NextRequest): NextResponse | null {
+async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) return null;
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;
@@ -34,7 +34,7 @@ function parseJobConfig(raw: string): JobConfig | null {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
 
   const { jobID } = await params;

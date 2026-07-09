@@ -1,15 +1,25 @@
+# syntax=docker/dockerfile:1
 FROM nvidia/cuda:12.8.1-devel-ubuntu24.04
 
-LABEL authors="jaret"
+ARG AITK_VERSION=1.5.0
+ARG GIT_COMMIT=unknown
 
-# Set noninteractive to avoid timezone prompts
-ENV DEBIAN_FRONTEND=noninteractive
+LABEL authors="jaret" \
+    org.opencontainers.image.title="AITK Studio" \
+    org.opencontainers.image.description="AITK Studio UI and diffusion-model training toolkit." \
+    org.opencontainers.image.source="https://github.com/BadAtCaptchas/AITK-Studio" \
+    org.opencontainers.image.version="${AITK_VERSION}" \
+    org.opencontainers.image.revision="${GIT_COMMIT}"
 
-# Include Blackwell sm_120 for RTX 50-series and DGX Spark class GPUs.
-ENV TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0 10.0 12.0"
+ENV DEBIAN_FRONTEND=noninteractive \
+    TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0 10.0 12.0" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    HF_HUB_ENABLE_HF_TRANSFER=1
 
-# Install dependencies
 RUN apt-get update && apt-get install --no-install-recommends -y \
+    ca-certificates \
     git \
     curl \
     build-essential \
@@ -34,63 +44,57 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install nodejs
 WORKDIR /tmp
-RUN curl -sL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh && \
-    bash nodesource_setup.sh && \
-    apt-get update && \
-    apt-get install -y nodejs && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh \
+    && bash nodesource_setup.sh \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/nodesource_setup.sh
 
-# Install cloudflared for optional managed Cloudflare Tunnel support.
-RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb && \
-    apt-get update && \
-    apt-get install -y /tmp/cloudflared.deb && \
-    rm -f /tmp/cloudflared.deb && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Optional managed Cloudflare Tunnel and local Ollama support.
+RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y /tmp/cloudflared.deb \
+    && rm -f /tmp/cloudflared.deb \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama for optional secure remote caption workers. The startup script
-# keeps it bound to localhost unless explicitly overridden.
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
-WORKDIR /app
-
-# Set aliases for python and pip
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
-# install pytorch before cache bust to avoid redownloading pytorch
-RUN pip install --no-cache-dir torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 torchcodec==0.10.0 --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple --break-system-packages
-
-# Fix cache busting by moving CACHEBUST to right before git clone
-ARG CACHEBUST=1234
-ARG GIT_COMMIT=main
-RUN echo "Cache bust: ${CACHEBUST}" && \
-    git clone https://github.com/BadAtCaptchas/AITK-Studio.git && \
-    cd ai-toolkit && \
-    git checkout ${GIT_COMMIT}
+RUN ln -sf /usr/bin/python3 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip
 
 WORKDIR /app/ai-toolkit
 
-# copy requirements.txt to leverage docker cache
-COPY requirements.txt /app/ai-toolkit/requirements.txt
+# Install large dependencies before copying frequently changing application code.
+RUN python -m pip install --no-cache-dir --break-system-packages \
+      torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 torchcodec==0.10.0 \
+      --index-url https://download.pytorch.org/whl/cu128 \
+      --extra-index-url https://pypi.org/simple
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt && \
-    pip install setuptools==70.0.0 --no-cache-dir --break-system-packages
+COPY requirements_base.txt requirements.txt ./
+RUN python -m pip install --no-cache-dir --break-system-packages -r requirements.txt \
+    && python -m pip install --no-cache-dir --break-system-packages setuptools==70.0.0
 
-# Build UI
+COPY ui/package.json ui/package-lock.json ./ui/
 WORKDIR /app/ai-toolkit/ui
-RUN npm install && \
-    npm run update_db && \
-    npm run build
+RUN npm ci
 
-# Expose UI and optional TensorBoard ports.
+# Build exactly the source supplied as the Docker build context. This avoids a
+# mutable network clone and ensures the OCI revision label describes the code.
+WORKDIR /app/ai-toolkit
+COPY . .
+
+WORKDIR /app/ai-toolkit/ui
+RUN npm run update_db \
+    && npm run build \
+    && rm -f /app/ai-toolkit/aitk_db.db /app/ai-toolkit/aitk_db.db-shm /app/ai-toolkit/aitk_db.db-wal \
+    && npm cache clean --force
+
 EXPOSE 8675 6006
 
 WORKDIR /
-
 COPY docker/start.sh /start.sh
 RUN chmod +x /start.sh
 

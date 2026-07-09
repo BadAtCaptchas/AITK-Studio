@@ -150,6 +150,7 @@ prepare_workspace() {
         "${PERSIST_ROOT}/output" \
         "${PERSIST_ROOT}/config" \
         "${PERSIST_ROOT}/models" \
+        "${PERSIST_ROOT}/projects" \
         "${PERSIST_ROOT}/data" \
         "${HF_HOME}" \
         "${HUGGINGFACE_HUB_CACHE}" \
@@ -164,6 +165,7 @@ prepare_workspace() {
     link_persistent_dir output
     link_persistent_dir config
     link_persistent_dir models
+    link_persistent_dir projects
     link_persistent_dir data
 }
 

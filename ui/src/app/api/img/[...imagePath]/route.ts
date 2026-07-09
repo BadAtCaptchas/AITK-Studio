@@ -18,7 +18,6 @@ const contentTypeMap: { [key: string]: string } = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.jxl': 'image/jxl',
-  '.svg': 'image/svg+xml',
   '.bmp': 'image/bmp',
   '.mp4': 'video/mp4',
   '.avi': 'video/x-msvideo',
@@ -32,6 +31,8 @@ const contentTypeMap: { [key: string]: string } = {
   '.flac': 'audio/flac',
   '.ogg': 'audio/ogg',
 };
+
+const privateMediaCacheControl = 'private, no-cache, must-revalidate';
 
 type ImageRouteParams = {
   imagePath: string[];
@@ -70,6 +71,27 @@ function copyResponseHeaders(source: Response) {
   return headers;
 }
 
+function parseRange(value: string | null, size: number) {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return 'invalid' as const;
+  let start: number;
+  let end: number;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return 'invalid' as const;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+    return 'invalid' as const;
+  }
+  return { start, end: Math.min(end, size - 1) };
+}
+
 async function resolveExistingDir(dir: string) {
   if (!dir) return null;
   return fs.promises.realpath(path.resolve(dir)).catch(() => null);
@@ -82,21 +104,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Im
     const remoteAsset = parseRemoteDatasetAssetRef(requestedValue);
     if (remoteAsset) {
       if (
-        !isRemoteDatasetAssetRequestAuthorized(
+        !(await isRemoteDatasetAssetRequestAuthorized(
           request.headers,
           remoteAsset.workerID,
           remoteAsset.path,
           remoteAsset.expires,
           remoteAsset.signature,
-        )
+        ))
       ) {
         return new NextResponse('Unauthorized', { status: 401 });
       }
       const worker = await getRemoteWorker(remoteAsset.workerID);
       const remoteResponse = await remoteProxyFetch(worker, remoteAssetPath(remoteAsset.path), request.headers);
+      if ((remoteResponse.headers.get('content-type') || '').toLowerCase().includes('image/svg+xml')) {
+        return new NextResponse('Unsupported media type', { status: 415 });
+      }
+      const headers = copyResponseHeaders(remoteResponse);
+      headers.set('Cache-Control', privateMediaCacheControl);
+      headers.set('X-Content-Type-Options', 'nosniff');
       return new NextResponse(remoteResponse.body, {
         status: remoteResponse.status,
-        headers: copyResponseHeaders(remoteResponse),
+        headers,
       });
     }
 
@@ -158,7 +186,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Im
     }
 
     const etag = `W/"${stat.ino.toString(36)}-${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
-    const cacheControl = 'public, max-age=86400, immutable';
+    const cacheControl = privateMediaCacheControl;
 
     const ifNoneMatch = request.headers.get('if-none-match');
     if (ifNoneMatch && ifNoneMatch === etag) {
@@ -167,6 +195,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Im
         headers: {
           ETag: etag,
           'Cache-Control': cacheControl,
+          'X-Content-Type-Options': 'nosniff',
         },
       });
     }
@@ -188,21 +217,29 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Im
       return Readable.toWeb(nodeStream) as unknown as ReadableStream;
     };
 
-    const rangeHeader = request.headers.get('range');
-    if (rangeHeader) {
-      const parts = rangeHeader.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
-      const chunkSize = end - start + 1;
+    const requestedRange = parseRange(request.headers.get('range'), stat.size);
+    if (requestedRange === 'invalid') {
+      return new NextResponse(null, {
+        status: 416,
+        headers: {
+          'Content-Range': `bytes */${stat.size}`,
+          'Cache-Control': cacheControl,
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+    if (requestedRange) {
+      const chunkSize = requestedRange.end - requestedRange.start + 1;
 
-      return new NextResponse(buildBody(start, end) as any, {
+      return new NextResponse(buildBody(requestedRange.start, requestedRange.end) as any, {
         status: 206,
         headers: {
-          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Content-Range': `bytes ${requestedRange.start}-${requestedRange.end}/${stat.size}`,
           'Accept-Ranges': 'bytes',
           'Content-Length': String(chunkSize),
           'Content-Type': contentType,
           'Cache-Control': cacheControl,
+          'X-Content-Type-Options': 'nosniff',
           ETag: etag,
         },
       });
@@ -213,6 +250,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Im
         'Content-Type': contentType,
         'Content-Length': String(stat.size),
         'Cache-Control': cacheControl,
+        'X-Content-Type-Options': 'nosniff',
         'Accept-Ranges': 'bytes',
         ETag: etag,
       },

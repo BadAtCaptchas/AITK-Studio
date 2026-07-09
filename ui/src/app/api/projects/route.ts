@@ -55,7 +55,7 @@ async function buildProjectCard(project: Project) {
 }
 
 export async function GET(request: Request) {
-  const accessResponse = ensureProjectApiAccess(request);
+  const accessResponse = await ensureProjectApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
@@ -77,7 +77,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const accessResponse = ensureProjectApiAccess(request);
+  const accessResponse = await ensureProjectApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });

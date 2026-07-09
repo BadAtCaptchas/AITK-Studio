@@ -2,6 +2,10 @@
 .github
 .vscode
 .idea
+.agents
+.claude
+.codex
+.playwright-mcp
 
 __pycache__/
 *.py[cod]
@@ -31,10 +35,16 @@ temp/
 wandb/
 notes.md
 
+config/*
+!config/examples/
+!config/examples/**
+!config/_PUT_YOUR_CONFIGS_HERE).txt
+
 models/
 datasets/
 output/
 data/
+projects/
 aitk_db.db
 aitk_db.db-*
 

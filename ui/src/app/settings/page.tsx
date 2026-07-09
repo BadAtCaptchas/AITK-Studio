@@ -524,9 +524,18 @@ export default function Settings() {
     apiClient
       .post('/api/settings', settings)
       .then(() => {
-        savedSettingsRef.current = JSON.stringify(settings);
+        const sanitizedSettings = {
+          ...settings,
+          HF_TOKEN: '',
+          HF_TOKEN_SET: settings.HF_TOKEN_SET || settings.HF_TOKEN.trim() !== '',
+          OPENROUTER_API_KEY: '',
+          OPENROUTER_API_KEY_SET:
+            settings.OPENROUTER_API_KEY_SET || settings.OPENROUTER_API_KEY.trim() !== '',
+        };
+        setSettings(sanitizedSettings);
+        savedSettingsRef.current = JSON.stringify(sanitizedSettings);
         setStatus('success');
-        notifySettingsChanged(settings);
+        notifySettingsChanged(sanitizedSettings);
       })
       .catch(error => {
         console.error('Error saving settings:', error);
@@ -820,7 +829,11 @@ export default function Settings() {
                           value={settings.HF_TOKEN}
                           onChange={handleChange}
                           className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
-                          placeholder="Enter your Hugging Face token"
+                          placeholder={
+                            settings.HF_TOKEN_SET
+                              ? 'Saved — enter a new token to replace it'
+                              : 'Enter your Hugging Face token'
+                          }
                         />
                         <button
                           type="button"
@@ -847,7 +860,11 @@ export default function Settings() {
                           value={settings.OPENROUTER_API_KEY}
                           onChange={handleChange}
                           className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
-                          placeholder="Enter your OpenRouter API key"
+                          placeholder={
+                            settings.OPENROUTER_API_KEY_SET
+                              ? 'Saved — enter a new key to replace it'
+                              : 'Enter your OpenRouter API key'
+                          }
                         />
                         <button
                           type="button"

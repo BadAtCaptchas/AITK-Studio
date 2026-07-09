@@ -14,7 +14,7 @@
 - UI commands run from `ui/`: `npm run dev`, `npm run build`, `npm run start`, and the targeted `npm run test:*` scripts in `ui/package.json`.
 - `npm run dev` starts the managed app stack on port `3000`: Next UI, cron worker, and updater.
 - `npm run start` starts the managed app stack on port `8675` after DB prep; TensorBoard may use port `6006` when enabled.
-- `npm run build` compiles the worker with `tsconfig.worker.json` and then runs `next build`. Because `next.config.ts` currently has `typescript.ignoreBuildErrors: true`, do not treat a Next build alone as proof that all UI route/page types are clean.
+- `npm run build` compiles the worker with `tsconfig.worker.json` and then runs `next build`, which enforces UI route/page type errors. Prefer `npm run typecheck` when you need the explicit app-and-worker type gate without producing a build.
 - Prefer the narrowest relevant verification: run the matching `npm run test:<area>` script for touched UI/server utilities, and use `python -m py_compile` or focused Python tests/checks for Python-only changes.
 - After completing any local server-based testing, stop all servers and background helper processes started for the test before handing work back to the user. Verify the relevant localhost ports or processes are closed when practical.
 

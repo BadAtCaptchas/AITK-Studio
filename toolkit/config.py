@@ -9,11 +9,19 @@ from collections import OrderedDict
 from toolkit.paths import TOOLKIT_ROOT
 
 possible_extensions = ['.json', '.jsonc', '.yaml', '.yml']
-BLOCKED_CONFIG_ENV_VARS = {
-    "HF_TOKEN",
-    "HUGGING_FACE_HUB_TOKEN",
-    "HF_TOKEN_PATH",
-}
+
+# Config files can be supplied by less-trusted sources (for example, imported
+# jobs).  Do not let them read arbitrary variables from the parent process:
+# that process may also contain bearer tokens, database credentials, or
+# encrypted-dataset keys.  Keep this list limited to non-secret path settings
+# that are already part of the toolkit's public configuration surface.
+CONFIG_ENV_VAR_ALLOWLIST = frozenset({
+    "AITK_COMFY_ROOT",
+    "COMFY_PATH",
+    "MODELS_PATH",
+})
+CONFIG_ENV_PLACEHOLDER_RE = re.compile(r'\$\{([^{}]+)\}')
+CONFIG_ENV_VAR_NAME_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 
 
 def get_cwd_abs_path(path):
@@ -24,14 +32,21 @@ def get_cwd_abs_path(path):
 
 def replace_env_vars_in_string(s: str) -> str:
     """
-    Replace placeholders like ${VAR_NAME} with the value of the corresponding environment variable.
-    If the environment variable is not set, raise an error.
+    Replace allowlisted, non-secret placeholders such as ``${MODELS_PATH}``.
+
+    Configs are not allowed to read arbitrary process environment variables.
+    This prevents a config from copying credentials into an innocently named
+    field that could later be logged or persisted with the training config.
     """
 
     def replacer(match):
         var_name = match.group(1)
-        if var_name.upper() in BLOCKED_CONFIG_ENV_VARS:
-            raise ValueError(f"Environment variable {var_name} is not allowed in config interpolation.")
+        if CONFIG_ENV_VAR_NAME_RE.fullmatch(var_name) is None:
+            raise ValueError(f"Invalid config environment placeholder: {var_name}")
+        if var_name not in CONFIG_ENV_VAR_ALLOWLIST:
+            raise ValueError(
+                f"Environment variable {var_name} is not allowed in config interpolation."
+            )
 
         value = os.environ.get(var_name)
 
@@ -40,7 +55,20 @@ def replace_env_vars_in_string(s: str) -> str:
 
         return value
 
-    return re.sub(r'\$\{([^}]+)\}', replacer, s)
+    return CONFIG_ENV_PLACEHOLDER_RE.sub(replacer, s)
+
+
+def replace_config_env_vars(value):
+    """Expand placeholders in parsed string values without changing syntax."""
+    if isinstance(value, OrderedDict):
+        return OrderedDict((key, replace_config_env_vars(item)) for key, item in value.items())
+    if isinstance(value, dict):
+        return {key: replace_config_env_vars(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [replace_config_env_vars(item) for item in value]
+    if isinstance(value, str):
+        return replace_env_vars_in_string(value)
+    return value
 
 
 def preprocess_config(config: OrderedDict, name: str = None):
@@ -107,12 +135,13 @@ def get_config(
     # if we found it, check if it is a json or yaml file
     with open(real_config_path, 'r', encoding='utf-8') as f:
         content = f.read()
-        content_with_env_replaced = replace_env_vars_in_string(content)
         if real_config_path.endswith('.json') or real_config_path.endswith('.jsonc'):
-            config = json.loads(content_with_env_replaced, object_pairs_hook=OrderedDict)
+            config = json.loads(content, object_pairs_hook=OrderedDict)
         elif real_config_path.endswith('.yaml') or real_config_path.endswith('.yml'):
-            config = yaml.load(content_with_env_replaced, Loader=fixed_loader)
+            config = yaml.load(content, Loader=fixed_loader)
         else:
             raise ValueError(f"Config file {config_file_path} must be a json or yaml file")
+
+    config = replace_config_env_vars(config)
 
     return preprocess_config(config, name)

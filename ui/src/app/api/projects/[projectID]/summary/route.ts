@@ -6,16 +6,16 @@ import { listDatasetSummaries } from '@/server/encryptedDatasets';
 import { getProjectRoots, isPathInside, resolveProject } from '@/server/projects';
 import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
 import type { Job } from '@/types';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 const ACTIVE_STATUSES = new Set(['queued', 'starting', 'running', 'stopping']);
 const MEDIA_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl', '.mp4', '.mp3', '.wav', '.flac', '.ogg']);
 
-function ensureApiAccess(request: Request): NextResponse | null {
+async function ensureApiAccess(request: Request): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) return null;
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -125,7 +125,7 @@ async function listTree(root: string, maxEntries = 80) {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });

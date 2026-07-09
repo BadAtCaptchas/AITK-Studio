@@ -52,6 +52,9 @@ export type TrainingJobImportResult = {
   warnings: string[];
 };
 
+const MAX_TRAINING_JOB_IMPORT_BYTES = 64 * 1024 * 1024 * 1024;
+const TRAINING_JOB_IMPORT_CHUNK_BYTES = 64 * 1024 * 1024;
+
 export type JobModelPrefetchResult = {
   handledValues: string[];
   downloads: Array<{ value: string; path: string; kind: string; cached?: boolean }>;
@@ -350,26 +353,64 @@ export const importTrainingJob = (
   onUploadProgress?: (progress: TrainingJobImportProgress) => void,
   projectID?: string | null,
 ) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  if (gpuIDs) {
-    formData.append('gpu_ids', gpuIDs);
+  if (file.size > MAX_TRAINING_JOB_IMPORT_BYTES) {
+    return Promise.reject(new Error('Training job archives must be 64 GB or smaller.'));
   }
 
-  const importUrl = projectID ? `/api/jobs/import?project_id=${encodeURIComponent(projectID)}` : '/api/jobs/import';
-  return apiClient
-    .post(importUrl, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (event: AxiosProgressEvent) => {
-        const total = event.total && event.total > 0 ? event.total : file.size || null;
-        onUploadProgress?.({
-          loaded: event.loaded,
-          total,
-          percent: total ? Math.min(100, Math.round((event.loaded / total) * 100)) : null,
-        });
-      },
-    })
-    .then(res => res.data as TrainingJobImportResult);
+  const uploadID = globalThis.crypto.randomUUID();
+  const chunksTotal = Math.max(1, Math.ceil(file.size / TRAINING_JOB_IMPORT_CHUNK_BYTES));
+  const commonParams = {
+    uploadID,
+    chunksTotal: String(chunksTotal),
+    fileBytes: String(file.size),
+  };
+  const reportProgress = (loaded: number) => {
+    const total = file.size || null;
+    onUploadProgress?.({
+      loaded: Math.min(loaded, file.size),
+      total,
+      percent: total ? Math.min(100, Math.round((loaded / total) * 100)) : 100,
+    });
+  };
+
+  return (async () => {
+    reportProgress(0);
+    let uploadedBytes = 0;
+    for (let chunkIndex = 0; chunkIndex < chunksTotal; chunkIndex += 1) {
+      const start = chunkIndex * TRAINING_JOB_IMPORT_CHUNK_BYTES;
+      const chunk = file.slice(start, Math.min(file.size, start + TRAINING_JOB_IMPORT_CHUNK_BYTES));
+      const params = new URLSearchParams({
+        aitk_upload: 'chunk',
+        ...commonParams,
+        chunkIndex: String(chunkIndex),
+      });
+      if (projectID) params.set('project_id', projectID);
+
+      await apiClient.post(`/api/jobs/import?${params.toString()}`, chunk, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-AITK-File-Name': encodeURIComponent(file.name),
+        },
+        onUploadProgress: (event: AxiosProgressEvent) => {
+          reportProgress(uploadedBytes + Math.min(event.loaded, chunk.size));
+        },
+      });
+
+      uploadedBytes += chunk.size;
+      reportProgress(uploadedBytes);
+    }
+
+    const completeParams = new URLSearchParams({
+      aitk_upload: 'complete',
+      ...commonParams,
+    });
+    if (projectID) completeParams.set('project_id', projectID);
+    if (gpuIDs) completeParams.set('gpu_ids', gpuIDs);
+    const response = await apiClient.post(`/api/jobs/import?${completeParams.toString()}`, undefined, {
+      headers: { 'X-AITK-File-Name': encodeURIComponent(file.name) },
+    });
+    return response.data as TrainingJobImportResult;
+  })();
 };
 
 export const getRemoteStartProgress = (jobID: string, startID: string) => {

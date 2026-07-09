@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
 import { ProjectError } from '@/server/projects';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
-export function ensureProjectApiAccess(request: Request): NextResponse | null {
+export async function ensureProjectApiAccess(request: Request): Promise<NextResponse | null> {
   const expectedToken = process.env.AI_TOOLKIT_AUTH;
-  if (!expectedToken) return null;
-  const authorization = request.headers.get('authorization') || '';
-  const [scheme, token] = authorization.split(' ', 2);
-  if (scheme.toLowerCase() !== 'bearer' || token !== expectedToken) {
+  if (!(await isRequestAuthenticated(request, expectedToken))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import { makeRemoteDatasetAssetRef, type RemoteDatasetAssetType } from '@/utils/remoteDatasetRefs';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 const SIGNATURE_TTL_MS = 6 * 60 * 60 * 1000;
 const SIGNATURE_CONTEXT = 'remote-dataset-asset-v1';
@@ -75,7 +76,7 @@ export function hasCentralBearerAuth(headers: Headers) {
   return !!token && safeEqual(token, secret);
 }
 
-export function isRemoteDatasetAssetRequestAuthorized(
+export async function isRemoteDatasetAssetRequestAuthorized(
   headers: Headers,
   workerID: string,
   remotePath: string,
@@ -83,7 +84,7 @@ export function isRemoteDatasetAssetRequestAuthorized(
   signature: string | null | undefined,
 ) {
   return (
-    hasCentralBearerAuth(headers) ||
+    (await isRequestAuthenticated({ headers }, authSecret())) ||
     isRemoteDatasetAssetSignatureValid(workerID, remotePath, expiresValue, signature)
   );
 }

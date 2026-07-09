@@ -20,16 +20,16 @@ import {
   PROJECT_SPACES_DISABLED_MESSAGE,
 } from '@/server/settings';
 import type { Job } from '@/types';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 
-function ensureApiAccess(request: Request): NextResponse | null {
+async function ensureApiAccess(request: Request): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -121,7 +121,7 @@ async function assertProjectJobVisible(job: Job | null) {
 }
 
 export async function GET(request: Request) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
   }
@@ -236,7 +236,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
   }

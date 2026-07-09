@@ -327,6 +327,25 @@ Common per-image keys include `prompt`, `negative_prompt` or `neg`, `width`, `he
 
 ## Monitoring and Storage
 
+### Docker Compose
+
+The Compose deployment builds this checkout by default, so the running image always matches the fork you are working from:
+
+```bash
+AI_TOOLKIT_AUTH="replace-with-a-strong-token" \
+GIT_COMMIT="$(git rev-parse HEAD)" \
+docker compose up --build
+```
+
+Set `AITK_IMAGE` to use a prebuilt image instead, then run `docker compose pull` and `docker compose up --no-build`. Avoid floating tags for production deployments.
+
+Compose persists `data/`, `datasets/`, `output/`, `config/`, `models/`, and `projects/` on the host. SQLite is stored at `data/aitk_db.db`; using a directory mount avoids Docker creating a directory when a database file does not exist yet. If you used an older version of this Compose file, move the existing database once before starting the new deployment:
+
+```bash
+mkdir -p data
+cp aitk_db.db data/aitk_db.db
+```
+
 ### TensorBoard
 
 TensorBoard is installed with the Python requirements. If `AITK_ENABLE_TENSORBOARD` is not set, the UI tries to auto-enable TensorBoard when the package is available in the active Python environment and silently skips it if the probe or startup fails.
@@ -377,6 +396,7 @@ Supported database environment variables:
 
 - `AITK_DB_PROVIDER=sqlite|mongodb` defaults to `sqlite`.
 - `AITK_SQLITE_PATH` defaults to `../aitk_db.db` from the `ui` folder.
+- `AITK_SQLITE_BACKUP_RETENTION` controls how many consistent pre-migration SQLite backups are retained (default `3`; set `0` to disable).
 - `AITK_MONGODB_URI` is required when `AITK_DB_PROVIDER=mongodb`.
 - `AITK_MONGODB_DB` defaults to `ai_toolkit`.
 

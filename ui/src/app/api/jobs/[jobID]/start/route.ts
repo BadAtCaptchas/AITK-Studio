@@ -14,15 +14,15 @@ import {
 import type { JobStartRequest } from '@/types';
 import { parseReplicaExecutionAuthorization, ProjectSyncProtocolError } from '@/server/projectSyncProtocol';
 import type { ReplicaExecutionAuthorization } from '@/server/projectSyncWorker';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
-function ensureApiAccess(request: NextRequest): NextResponse | null {
+async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -66,7 +66,7 @@ async function handleStart(
   { params }: { params: Promise<{ jobID: string }> },
   body: JobStartRequest = {},
 ) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
   }

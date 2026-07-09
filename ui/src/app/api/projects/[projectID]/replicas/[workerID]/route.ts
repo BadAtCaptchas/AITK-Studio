@@ -8,7 +8,7 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ projectID: string; workerID: string }> },
 ) {
-  const denied = ensureProjectApiAccess(request);
+  const denied = await ensureProjectApiAccess(request);
   if (denied) return denied;
   try {
     const { projectID, workerID } = await params;

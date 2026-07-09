@@ -14,17 +14,14 @@ export default function useQueueList() {
       .get('/api/queue')
       .then(res => res.data)
       .then(data => {
-        console.log('Queues:', data);
         if (data.error) {
-          console.log('Error fetching queues:', data.error);
           setStatus('error');
         } else {
           setQueues(data.queues);
           setStatus('success');
         }
       })
-      .catch(error => {
-        console.error('Error fetching queues:', error);
+      .catch(() => {
         setStatus('error');
       });
   };

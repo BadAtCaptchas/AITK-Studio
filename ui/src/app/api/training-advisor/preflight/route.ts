@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analyzeTrainingAdvisor } from '@/server/trainingAdvisor';
 import type { JobConfig } from '@/types';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 export const runtime = 'nodejs';
 
-function ensureApiAccess(request: NextRequest): NextResponse | null {
+async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) return null;
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;
@@ -30,7 +30,7 @@ async function readJsonBody(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
 
   let body: any;

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04
 
-ARG AITK_VERSION=0.9.10
+ARG AITK_VERSION=1.5.0
 ARG GIT_COMMIT=unknown
 
 LABEL authors="jaret" \
@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
-RUN curl -fsSL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh \
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh \
     && bash nodesource_setup.sh \
     && apt-get update \
     && apt-get install --no-install-recommends -y nodejs \

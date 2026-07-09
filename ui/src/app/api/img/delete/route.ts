@@ -6,15 +6,13 @@ import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { deleteCaptionSidecarsAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 export async function POST(request: Request) {
   try {
     const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
-    if (tokenToUse) {
-      const token = request.headers.get('Authorization')?.split(' ')[1];
-      if (!token || token !== tokenToUse) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
+    if (!(await isRequestAuthenticated(request, tokenToUse))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await request.json();

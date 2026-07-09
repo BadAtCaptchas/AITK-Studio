@@ -1,27 +1,13 @@
 // middleware.ts (at the root of your project)
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
-// Direct media/download URLs are loaded by <img>, <audio>, <video>, and links,
-// so they cannot attach the localStorage bearer token used by apiClient.
-const publicReadRoutePrefixes = ['/api/img/', '/api/files/', '/api/remote-assets'];
 const publicReadMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
 const projectAssetRoutePrefix = '/api/project-assets/';
 const projectAssetSignatureContext = 'project-asset-v1';
 const remoteDatasetAssetsRoute = '/api/remote-datasets/assets';
 const remoteDatasetAssetSignatureContext = 'remote-dataset-asset-v1';
-
-function isPublicSampleMediaRoute(pathname: string) {
-  const segments = pathname.split('/').filter(Boolean);
-  return (
-    segments.length === 5 &&
-    segments[0] === 'api' &&
-    segments[1] === 'jobs' &&
-    segments[2].length > 0 &&
-    segments[3] === 'samples' &&
-    segments[4].length > 0
-  );
-}
 
 function isRemoteDatasetAssetType(type: string) {
   return type === 'img' || type === 'file' || type === 'audio-art';
@@ -119,17 +105,18 @@ async function signedProjectAssetRequest(searchParams: URLSearchParams, secret: 
 }
 
 export async function middleware(request: NextRequest) {
-  // check env var for AI_TOOLKIT_AUTH, if not set, approve all requests
-  // if it is set make sure bearer token matches
   const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
   if (!tokenToUse) {
     return NextResponse.next();
   }
 
-  // Get the token from the headers
-  const token = request.headers.get('Authorization')?.split(' ')[1];
-
   const { pathname } = request.nextUrl;
+
+  // The auth endpoint validates login credentials itself and must be reachable
+  // before a session exists. GET and DELETE are also validated in the handler.
+  if (pathname === '/api/auth') {
+    return NextResponse.next();
+  }
 
   if (
     publicReadMethods.has(request.method) &&
@@ -139,13 +126,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // allow public read routes to pass through
-  if (
-    publicReadMethods.has(request.method) &&
-    (publicReadRoutePrefixes.some(route => pathname.startsWith(route)) || isPublicSampleMediaRoute(pathname))
-  ) {
-    return NextResponse.next();
-  }
   if (
     publicReadMethods.has(request.method) &&
     pathname === remoteDatasetAssetsRoute &&
@@ -154,22 +134,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if the route should be protected
-  // This will apply to all API routes that start with /api/
   if (pathname.startsWith('/api/')) {
-    if (!token || token !== tokenToUse) {
-      // Return a JSON response with 401 Unauthorized
+    if (!(await isRequestAuthenticated(request, tokenToUse))) {
       return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // For authorized users, continue
     return NextResponse.next();
   }
 
-  // For non-API routes, just continue
   return NextResponse.next();
 }
 

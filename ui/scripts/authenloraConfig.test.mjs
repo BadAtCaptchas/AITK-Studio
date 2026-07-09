@@ -8,7 +8,7 @@ const read = relativePath => fs.readFileSync(path.join(repoRoot, relativePath), 
 
 const jobConfig = read('src/app/jobs/new/jobConfig.ts');
 const simpleJob = read('src/app/jobs/new/SimpleJob.tsx');
-const page = read('src/app/jobs/new/page.tsx');
+const trainingForm = read('src/app/jobs/new/TrainingFormContent.tsx');
 const checkerPage = read('src/app/watermark/page.tsx');
 const checkerRoute = read('src/app/api/watermark/check/route.ts');
 const sidebar = read('src/components/Sidebar.tsx');
@@ -40,12 +40,12 @@ test('simple job serializes AuthenLoRA controls into process watermark config', 
 });
 
 test('save validation blocks invalid AuthenLoRA configs', () => {
-  assert.match(page, /AuthenLoRA watermarking requires an image LoRA job/);
-  assert.match(page, /AuthenLoRA watermarking requires a local codec path/);
-  assert.match(page, /AuthenLoRA message bits must be greater than 0/);
-  assert.match(page, /AUTHENLORA_BUILTIN_CODEC_BITS/);
-  assert.match(page, /AuthenLoRA secret bits must be binary and match Message bits/);
-  assert.match(page, /\['lora', 'locon', 'lycoris', 'lokr'\]/);
+  assert.match(trainingForm, /AuthenLoRA watermarking requires an image LoRA job/);
+  assert.match(trainingForm, /AuthenLoRA watermarking requires a local codec path/);
+  assert.match(trainingForm, /AuthenLoRA message bits must be greater than 0/);
+  assert.match(trainingForm, /AUTHENLORA_BUILTIN_CODEC_BITS/);
+  assert.match(trainingForm, /AuthenLoRA secret bits must be binary and match Message bits/);
+  assert.match(trainingForm, /\['lora', 'locon', 'lycoris', 'lokr'\]/);
 });
 
 test('watermark checker page and API route are wired', () => {

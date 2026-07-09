@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getToolkitPythonPath } from '@/server/tensorboard';
+import { isRequestAuthenticated } from '@/utils/authSession';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,14 +18,13 @@ const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl']);
 
 type UploadedFile = File;
 
-function ensureApiAccess(request: NextRequest): NextResponse | null {
+async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
+  if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -119,7 +119,7 @@ function runChecker(args: string[]) {
 }
 
 export async function POST(request: NextRequest) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
 
   let tempDir: string | null = null;

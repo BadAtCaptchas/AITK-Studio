@@ -1,22 +1,29 @@
-version: "3.8"
-
 services:
   ai-toolkit:
-    image: ostris/aitoolkit:latest
+    image: ${AITK_IMAGE:-aitk-studio:1.5.0}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        AITK_VERSION: ${AITK_VERSION:-1.5.0}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     restart: unless-stopped
     ports:
       - "127.0.0.1:8675:8675"
       - "127.0.0.1:${AITK_TENSORBOARD_PORT:-6006}:${AITK_TENSORBOARD_PORT:-6006}"
     volumes:
       - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
-      - ./aitk_db.db:/app/ai-toolkit/aitk_db.db
+      - ./data:/app/ai-toolkit/data
       - ./datasets:/app/ai-toolkit/datasets
       - ./output:/app/ai-toolkit/output
       - ./config:/app/ai-toolkit/config
+      - ./models:/app/ai-toolkit/models
+      - ./projects:/app/ai-toolkit/projects
     environment:
       - AI_TOOLKIT_AUTH=${AI_TOOLKIT_AUTH:?Set AI_TOOLKIT_AUTH to a strong bearer token before starting}
       - AITK_DB_PROVIDER=${AITK_DB_PROVIDER:-sqlite}
-      - AITK_SQLITE_PATH=${AITK_SQLITE_PATH:-/app/ai-toolkit/aitk_db.db}
+      - AITK_SQLITE_PATH=${AITK_SQLITE_PATH:-/app/ai-toolkit/data/aitk_db.db}
+      - AITK_SQLITE_BACKUP_RETENTION=${AITK_SQLITE_BACKUP_RETENTION:-3}
       - AITK_MONGODB_URI=${AITK_MONGODB_URI:-}
       - AITK_MONGODB_DB=${AITK_MONGODB_DB:-ai_toolkit}
       - AITK_DURABLE_DATASET_KEY_SECRET=${AITK_DURABLE_DATASET_KEY_SECRET:-}

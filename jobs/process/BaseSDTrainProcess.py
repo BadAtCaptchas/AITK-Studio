@@ -41,6 +41,12 @@ from toolkit.lycoris_special import LycorisSpecialNetwork
 from toolkit.models.decorator import Decorator
 from toolkit.network_mixins import Network
 from toolkit.optimizer import get_optimizer
+from toolkit.optimizer_checkpoint import (
+    OptimizerCheckpointValidationError,
+    atomic_save_optimizer_checkpoint,
+    invalidate_optimizer_checkpoint,
+    load_optimizer_checkpoint,
+)
 from toolkit.paths import CONFIG_ROOT
 from toolkit.progress_bar import ToolkitProgressBar
 from toolkit.reference_adapter import ReferenceAdapter
@@ -80,6 +86,8 @@ from toolkit.basic import flush
 
 class BaseSDTrainProcess(BaseTrainProcess):
 
+    MAX_CONSECUTIVE_TRAINING_OOMS = 3
+
     def __init__(self, process_id: int, job, config: OrderedDict, custom_pipeline=None):
         super().__init__(process_id, job, config)
         self.accelerator: Accelerator = get_accelerator()
@@ -96,6 +104,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.custom_pipeline = custom_pipeline
         self.step_num = 0
         self.start_step = 0
+        self._resume_checkpoint_path = None
+        self._resume_checkpoint_step = None
         self.epoch_num = 0
         self.last_save_step = 0
         # start at 1 so we can do a sample at the start
@@ -641,6 +651,27 @@ class BaseSDTrainProcess(BaseTrainProcess):
     def end_step_hook(self):
         pass
 
+    def _record_training_oom(self, boundary_index, boundary_steps):
+        """Reset uncommitted accumulation state and record an OOM retry."""
+        # The failed attempt may have produced partial gradients.  They are
+        # discarded by the caller, so the legacy cross-step accumulation cycle
+        # must restart rather than pretending that work was committed.
+        self.grad_accumulation_step = 1
+        self.is_grad_accumulation_step = True
+        self.current_boundary_index = boundary_index
+        self.steps_this_boundary = boundary_steps
+        self.num_consecutive_oom += 1
+        return self.num_consecutive_oom >= self.MAX_CONSECUTIVE_TRAINING_OOMS
+
+    @staticmethod
+    def _cleanup_training_batches(batch_list):
+        seen = set()
+        for batch in batch_list:
+            if not isinstance(batch, DataLoaderBatchDTO) or id(batch) in seen:
+                continue
+            seen.add(id(batch))
+            batch.cleanup()
+
     def save(self, step=None):
         if not self.accelerator.is_main_process:
             return
@@ -709,6 +740,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     # replace extension
                     emb_file_path = os.path.splitext(emb_file_path)[0] + ".pt"
                 self.embedding.save(emb_file_path)
+                if primary_save_path is None:
+                    primary_save_path = emb_file_path
             
             if self.decorator is not None:
                 dec_filename = f'{self.job.name}{step_num}.safetensors'
@@ -829,6 +862,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     save_meta,
                     get_torch_dtype(self.save_config.dtype)
                 )
+                if primary_save_path is None:
+                    primary_save_path = file_path
             if self.train_config.train_unet or self.train_config.train_text_encoder:
                 self.sd.save(
                     file_path,
@@ -848,26 +883,38 @@ class BaseSDTrainProcess(BaseTrainProcess):
             path_to_save = file_path = os.path.join(self.save_root, 'learnable_snr.json')
             with open(path_to_save, 'w') as f:
                 json.dump(json_data, f, indent=4)
-        
-        print_acc(f"Saved checkpoint to {file_path}")
+
+        checkpoint_save_path = primary_save_path or file_path
+        print_acc(f"Saved checkpoint to {checkpoint_save_path}")
 
         # save optimizer
         if self.optimizer is not None:
+            optimizer_path = os.path.join(self.save_root, 'optimizer.pt')
             try:
-                filename = f'optimizer.pt'
-                file_path = os.path.join(self.save_root, filename)
                 try:
                     state_dict = unwrap_model(self.optimizer).state_dict()
-                except Exception as e:
+                except Exception:
                     state_dict = self.optimizer.state_dict()
-                torch.save(state_dict, file_path)
-                print_acc(f"Saved optimizer to {file_path}")
-            except Exception as e:
-                print_acc(e)
-                print_acc("Could not save optimizer")
+                atomic_save_optimizer_checkpoint(
+                    optimizer_path,
+                    state_dict,
+                    step=self.step_num,
+                    checkpoint_path=checkpoint_save_path,
+                )
+                print_acc(f"Saved optimizer to {optimizer_path}")
+            except Exception as error:
+                # State extraction can fail before the atomic writer gets a
+                # chance to invalidate the old file. Never leave that stale
+                # optimizer beside a newly written model checkpoint.
+                try:
+                    invalidate_optimizer_checkpoint(optimizer_path)
+                except OSError as invalidation_error:
+                    print_acc(f"Could not invalidate stale optimizer state: {invalidation_error}")
+                print_acc(error)
+                print_acc("Could not save optimizer; stale optimizer state was invalidated")
 
         self.clean_up_saves()
-        self.post_save_hook(primary_save_path or file_path)
+        self.post_save_hook(checkpoint_save_path)
 
         if self.ema is not None:
             self.ema.train()
@@ -1083,8 +1130,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
         return latest_path
 
     def load_training_state_from_metadata(self, path):
-        if not self.accelerator.is_main_process:
-            return
         if path is not None and self.network_config is not None and path == self.network_config.pretrained_lora_path:
             # dont load metadata from pretrained lora
             return
@@ -1098,9 +1143,21 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     meta = yaml.load(f, Loader=yaml.FullLoader)
         else:
             meta = load_metadata_from_safetensors(path)
-        # if 'training_info' in Orderdict keys
-        if meta is not None and 'training_info' in meta and 'step' in meta['training_info'] and self.train_config.start_step is None:
-            self.step_num = meta['training_info']['step']
+        # Keep the model checkpoint's own step even when start_step overrides
+        # the runtime counter. Optimizer state is valid only for the model
+        # weights it was saved alongside.
+        if meta is not None and 'training_info' in meta and 'step' in meta['training_info']:
+            checkpoint_step = meta['training_info']['step']
+            if type(checkpoint_step) is not int or checkpoint_step < 0:
+                print_acc(f"Ignoring invalid checkpoint step metadata in {path}")
+                return
+            self._resume_checkpoint_path = path
+            self._resume_checkpoint_step = checkpoint_step
+
+            if self.train_config.start_step is not None:
+                return
+
+            self.step_num = checkpoint_step
             if 'epoch' in meta['training_info']:
                 self.epoch_num = meta['training_info']['epoch']
             if hasattr(self, 'phase_manager'):
@@ -1142,7 +1199,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
             meta = load_metadata_from_safetensors(latest_save_path)
             # if 'training_info' in Orderdict keys
             if 'training_info' in meta and 'step' in meta['training_info']:
-                self.step_num = meta['training_info']['step']
+                checkpoint_step = meta['training_info']['step']
+                if type(checkpoint_step) is not int or checkpoint_step < 0:
+                    raise ValueError(f"Invalid checkpoint step metadata in {latest_save_path}")
+                self._resume_checkpoint_path = latest_save_path
+                self._resume_checkpoint_step = checkpoint_step
+                self.step_num = checkpoint_step
                 if 'epoch' in meta['training_info']:
                     self.epoch_num = meta['training_info']['epoch']
                 if hasattr(self, 'phase_manager'):
@@ -1923,15 +1985,27 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 load_optimizer = False
 
         if load_optimizer:
-            try:
-                print_acc(f"Loading optimizer state from {optimizer_state_file_path}")
-                optimizer_state_dict = torch.load(optimizer_state_file_path, weights_only=True)
-                self.optimizer.load_state_dict(optimizer_state_dict)
-                del optimizer_state_dict
-                flush()
-            except Exception as e:
-                print_acc(f"Failed to load optimizer state from {optimizer_state_file_path}")
-                print_acc(e)
+            if self._resume_checkpoint_step is None:
+                print_acc(
+                    "Skipping optimizer state because no model checkpoint step "
+                    "was loaded from metadata"
+                )
+            else:
+                try:
+                    print_acc(f"Loading optimizer state from {optimizer_state_file_path}")
+                    optimizer_state_dict = load_optimizer_checkpoint(
+                        optimizer_state_file_path,
+                        expected_step=self._resume_checkpoint_step,
+                    )
+                    self.optimizer.load_state_dict(optimizer_state_dict)
+                    del optimizer_state_dict
+                    flush()
+                except OptimizerCheckpointValidationError as error:
+                    print_acc(f"Skipping incompatible optimizer state from {optimizer_state_file_path}")
+                    print_acc(error)
+                except Exception as error:
+                    print_acc(f"Failed to load optimizer state from {optimizer_state_file_path}")
+                    print_acc(error)
 
         # update the optimizer LR from the params
         print_acc(f"Updating optimizer LR from params")
@@ -2331,6 +2405,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # load last saved weights
                 if latest_save_path is not None:
                     self.embedding.load_embedding_from_file(latest_save_path, self.device_torch)
+                    embedding_step = self.embedding.step
+                    if type(embedding_step) is int and embedding_step >= 0:
+                        self._resume_checkpoint_path = latest_save_path
+                        self._resume_checkpoint_step = embedding_step
                     if self.embedding.step > 1:
                         self.step_num = self.embedding.step
                         self.start_step = self.step_num
@@ -2796,6 +2874,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
             did_oom = False
             loss_dict = None
             self.additional_logs = OrderedDict()
+            boundary_index_before_attempt = self.current_boundary_index
+            boundary_steps_before_attempt = self.steps_this_boundary
             try:
                 with self.accelerator.accumulate(self.modules_being_trained):
                     loss_dict = self.hook_train_loop(batch_list)
@@ -2806,21 +2886,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     did_oom = True
                 else:
                     raise  # not an OOM; surface real errors
-            if did_oom:
-                self.num_consecutive_oom += 1
-                if self.num_consecutive_oom > 3:
-                    raise RuntimeError("OOM during training step 3 times in a row, aborting training")
-                self.optimizer.zero_grad(set_to_none=True)
-                flush()
-                torch.cuda.ipc_collect()
-                # skip this step and keep going
-                print_acc("")
-                print_acc("################################################")
-                print_acc(f"# OOM during training step, skipping batch {self.num_consecutive_oom}/3 #")
-                print_acc("################################################")
-                print_acc("")
-            else:
-                self.num_consecutive_oom = 0
             if self.torch_profiler is not None:
                 torch.cuda.synchronize()  # Make sure all CUDA ops are done
                 self.torch_profiler.stop()
@@ -2837,6 +2902,41 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # setup the networks to gradient checkpointing and everything works
             if self.adapter is not None and isinstance(self.adapter, ReferenceAdapter):
                 self.adapter.clear_memory()
+
+            if did_oom:
+                # Do not let a failed attempt reach metrics, checkpoint/sample
+                # scheduling, phase transitions, or any of the step counters
+                # below. Partial gradients cannot be distinguished from valid
+                # accumulated gradients, so discard them and restart that
+                # accumulation cycle while retrying the same global step.
+                self.optimizer.zero_grad(set_to_none=True)
+                should_abort = self._record_training_oom(
+                    boundary_index_before_attempt,
+                    boundary_steps_before_attempt,
+                )
+                with torch.no_grad():
+                    self._cleanup_training_batches(batch_list)
+                flush()
+                if torch.cuda.is_available():
+                    torch.cuda.ipc_collect()
+
+                if should_abort:
+                    raise RuntimeError(
+                        f"OOM during training step {self.MAX_CONSECUTIVE_TRAINING_OOMS} "
+                        "times in a row, aborting training"
+                    )
+
+                print_acc("")
+                print_acc("################################################")
+                print_acc(
+                    f"# OOM during training step, retrying step "
+                    f"{self.num_consecutive_oom}/{self.MAX_CONSECUTIVE_TRAINING_OOMS} #"
+                )
+                print_acc("################################################")
+                print_acc("")
+                continue
+
+            self.num_consecutive_oom = 0
 
             with torch.no_grad():
                 # torch.cuda.empty_cache()
@@ -2894,10 +2994,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     phase_observed_metrics.update(additional_logs)
                     self.phase_manager.observe_metrics(self.step_num, phase_observed_metrics)
 
-                # if the batch is a DataLoaderBatchDTO, then we need to clean it up
-                if isinstance(batch, DataLoaderBatchDTO):
-                    with self.timer('batch_cleanup'):
-                        batch.cleanup()
+                with self.timer('batch_cleanup'):
+                    self._cleanup_training_batches(batch_list)
 
                 # don't do on first step
                 if self.step_num != self.start_step:

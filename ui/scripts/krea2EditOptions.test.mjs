@@ -17,12 +17,14 @@ function archBlock(source, name) {
 
 function assertKreaEditArch(block) {
   assert.match(block, /edit: true/);
-  assert.match(block, /match_target_res: false/);
+  assert.match(block, /match_target_res: true/);
+  assert.match(block, /kv_cache: true/);
   assert.match(block, /'config\.process\[0\]\.train\.unload_text_encoder': \[false, false\]/);
   assert.match(block, /'train\.unload_text_encoder'/);
   assert.match(block, /'datasets\.multi_control_paths'/);
   assert.match(block, /'sample\.multi_ctrl_imgs'/);
   assert.match(block, /'model\.qie\.match_target_res'/);
+  assert.match(block, /'model\.model_kwargs\.kv_cache'/);
 }
 
 test('Krea2 edit UI presets expose edit controls and keep text encoder loaded', () => {

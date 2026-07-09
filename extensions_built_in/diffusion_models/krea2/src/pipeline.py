@@ -151,6 +151,8 @@ def predict_velocity(
     context: torch.Tensor,  # (B, Lt, n*d) flattened stacked Qwen3-VL features
     text_mask: torch.Tensor,  # (B, Lt) 1 for real text tokens
     ref_latents: Optional[List[List[torch.Tensor]]] = None,  # per-sample (C, h, w) refs
+    isolate_refs: bool = False,
+    ref_kv_cache: Optional[dict] = None,
 ) -> torch.Tensor:
     """Run the MMDiT on the packed [text | image | refs] sequence.
 
@@ -159,12 +161,23 @@ def predict_velocity(
     flattened ``(B, Lt, n*d)`` and is restored to ``(B, Lt, n, d)`` for the MMDiT.
     ``ref_latents`` (optional) are clean reference latents appended after the
     image tokens and conditioned at t=0 ("index_timestep_zero"); the prediction
-    only ever covers the noisy target tokens. Returns the velocity
-    ``noise - clean`` reshaped back to ``(B, C, h, w)``. No time flip / negation:
-    Krea's convention matches toolkit's.
+    only ever covers the noisy target tokens. ``isolate_refs`` restricts ref
+    tokens to attending only among themselves, making their per-layer K/V
+    cacheable across steps. Returns the velocity ``noise - clean`` reshaped
+    back to ``(B, C, h, w)``. No time flip / negation: Krea's convention
+    matches toolkit's.
     """
     patch = model.config.patch
     b, c, h, w = latents.shape
+
+    if ref_kv_cache is not None and not isolate_refs:
+        raise ValueError(
+            "ref_kv_cache requires isolate_refs: cached ref K/V are only "
+            "step-invariant when ref tokens attend solely to each other"
+        )
+    reuse_ref_kv = ref_kv_cache is not None and ref_kv_cache.get("kv") is not None
+    if reuse_ref_kv:
+        ref_latents = None
 
     # Restore the stacked-layer axis flattened in pad_text_features: F -> (n, d).
     n = model.config.txtlayers
@@ -175,6 +188,7 @@ def predict_velocity(
     img_tokens, pos, mask = prepare(latents, context.shape[1], patch, text_mask)
 
     reflen = 0
+    ref_mask = None
     if ref_latents is not None and any(len(r) > 0 for r in ref_latents):
         ref_tokens, ref_pos, ref_mask = pack_ref_latents(
             ref_latents, patch, img_tokens.device, img_tokens.dtype
@@ -184,7 +198,27 @@ def predict_velocity(
         pos = torch.cat((pos, ref_pos), dim=1)
         mask = torch.cat((mask, ref_mask), dim=1)
 
-    out = model(img=img_tokens, context=context, t=t, pos=pos, mask=mask, reflen=reflen)
+    capture = None
+    if ref_kv_cache is not None and not reuse_ref_kv and reflen > 0:
+        capture = []
+
+    out = model(
+        img=img_tokens,
+        context=context,
+        t=t,
+        pos=pos,
+        mask=mask,
+        reflen=reflen,
+        isolate_refs=isolate_refs,
+        ref_kv_capture=capture,
+        ref_kv_cache=(ref_kv_cache["kv"], ref_kv_cache["mask"])
+        if reuse_ref_kv
+        else None,
+    )
+
+    if capture is not None:
+        ref_kv_cache["kv"] = capture
+        ref_kv_cache["mask"] = ref_mask
 
     # (B, imglen, c*p*p) -> (B, c, h, w)
     velocity = rearrange(
@@ -307,6 +341,11 @@ class Krea2Pipeline:
         x2 = (maxres // align) ** 2
         ts = timesteps(gh * gw, num_inference_steps, x1, x2, y1=y1, y2=y2, mu=mu)
 
+        isolate = model.kv_cache
+        ref_cache = None
+        if isolate and ref_latents is not None and any(len(r) > 0 for r in ref_latents):
+            ref_cache = {"kv": None, "mask": None}
+
         # Euler integration of the flow ODE (with optional CFG).
         for tcurr, tprev in zip(ts[:-1], ts[1:]):
             t = torch.full((latents.shape[0],), tcurr, dtype=dtype, device=device)
@@ -317,6 +356,8 @@ class Krea2Pipeline:
                 cond_feats,
                 cond_mask,
                 ref_latents=ref_latents,
+                isolate_refs=isolate,
+                ref_kv_cache=ref_cache,
             )
             if do_cfg:
                 v_uncond = predict_velocity(
@@ -326,6 +367,8 @@ class Krea2Pipeline:
                     uncond_feats,
                     uncond_mask,
                     ref_latents=ref_latents,
+                    isolate_refs=isolate,
+                    ref_kv_cache=ref_cache,
                 )
                 v = v_cond + guidance_scale * (v_cond - v_uncond)
             else:

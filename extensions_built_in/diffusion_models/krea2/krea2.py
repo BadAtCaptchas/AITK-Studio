@@ -233,6 +233,11 @@ class Krea2Model(BaseModel):
         self.has_multiple_control_images = self.is_edit
         # Reference images keep their own aspect/size (not resized to the target).
         self.use_raw_control_images = self.is_edit
+        # model_kwargs.kv_cache = true: train with an asymmetric attention mask
+        # where clean reference tokens attend only to each other. That makes
+        # their per-layer K/V step-invariant and cacheable at inference, but a
+        # LoRA must be trained with this enabled for cached inference to match.
+        self.kv_cache = bool(self.model_config.model_kwargs.get("kv_cache", False))
 
     @staticmethod
     def get_train_scheduler():
@@ -520,13 +525,15 @@ class Krea2Model(BaseModel):
                 self._encode_ref_latents(ctrl_tensors, target_pixels=target_pixels)
             ]
 
+        guidance = max(0.0, gen_config.guidance_scale - 1.0)
+
         img = pipeline(
             conditional_embeds=conditional_embeds,
             unconditional_embeds=unconditional_embeds,
             height=gen_config.height,
             width=gen_config.width,
             num_inference_steps=gen_config.num_inference_steps,
-            guidance_scale=gen_config.guidance_scale,
+            guidance_scale=guidance,
             latents=gen_config.latents,
             generator=generator,
             ref_latents=ref_latents,
@@ -664,6 +671,7 @@ class Krea2Model(BaseModel):
             context,
             text_mask,
             ref_latents=ref_latents,
+            isolate_refs=self.kv_cache,
         )
         return pred
 

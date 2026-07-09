@@ -1120,6 +1120,17 @@ export default function SimpleJob({
                       />
                     </div>
                   )}
+                  {modelArch?.additionalSections?.includes('model.model_kwargs.kv_cache') && (
+                    <div className="space-y-2">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Edit</h3>
+                      <Checkbox
+                        label="KV Cache"
+                        docKey="model.model_kwargs.kv_cache"
+                        checked={!!processConfig.model.model_kwargs?.kv_cache}
+                        onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.kv_cache')}
+                      />
+                    </div>
+                  )}
                   {modelArch?.additionalSections?.includes('model.ideogram_skip_unconditional_transformer') && (
                     <div className="space-y-2">
                       <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Experimental</h3>

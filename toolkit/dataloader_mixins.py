@@ -1178,11 +1178,34 @@ class ControlFileItemDTOMixin:
                 # only do one
                 self.control_path = self.control_path[0]
 
+        if dataset_config.control_from_same_folder:
+            self.full_size_control_images = dataset_config.full_size_control_images
+            self.has_control_image = True
+
+    def get_new_control_paths(self: 'FileItemDTO'):
+        if self.dataset_config.control_from_same_folder:
+            pool_folder = os.path.dirname(self.path)
+            img_files = []
+            for ext in img_ext_list:
+                img_files += glob.glob(os.path.join(pool_folder, f'*{ext}'))
+
+            if len(img_files) > 1:
+                current_path = os.path.normcase(os.path.abspath(self.path))
+                img_files = [
+                    img_path for img_path in img_files
+                    if os.path.normcase(os.path.abspath(img_path)) != current_path
+                ]
+
+            num_controls = min(self.dataset_config.num_controls_from_same_folder, len(img_files))
+            return random.sample(img_files, num_controls)
+
+        return self.control_path
+
     def load_control_image(self: 'FileItemDTO'):
         control_tensors = []
-        control_path_list = self.control_path
-        if not isinstance(self.control_path, list):
-            control_path_list = [self.control_path]
+        control_path_list = self.get_new_control_paths()
+        if not isinstance(control_path_list, list):
+            control_path_list = [control_path_list]
         
         for control_path in control_path_list:
             try:

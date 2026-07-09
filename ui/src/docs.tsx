@@ -282,6 +282,16 @@ const docs: { [key: string]: ConfigDoc } = {
       </>
     ),
   },
+  'model.model_kwargs.kv_cache': {
+    title: 'KV Cache',
+    description: (
+      <>
+        Enables KV cache support for control images on models that support it. LoRAs trained with this on should also
+        be inferenced with it on, and vice versa. Training cost stays about the same, but inference can process the
+        control images once for the whole generation instead of once per step.
+      </>
+    ),
+  },
   'config.process[0].network.lokr_factor': {
     title: 'LoKr Factor',
     tooltip: 'Controls the Kronecker factorization shape; use -1 for automatic factorization.',

@@ -34,6 +34,7 @@ type AdditionalSections =
   | 'model.low_vram'
   | 'model.qie.match_target_res'
   | 'model.assistant_lora_path'
+  | 'model.model_kwargs.kv_cache'
   | 'model.ideogram_skip_unconditional_transformer';
 
 type ModelGroup = 'image' | 'instruction' | 'video' | 'experimental' | 'audio';
@@ -791,7 +792,7 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].network.conv_alpha': [undefined, 16],
       'config.process[0].network.network_kwargs.only_if_contains': [[], []],
       'config.process[0].sample.guidance_scale': [1, 4],
-      'config.process[0].sample.sample_steps': [8, 25],
+      'config.process[0].sample.sample_steps': [9, 25],
     },
     disableSections: ['network.conv'],
     additionalSections: ['model.low_vram', 'model.layer_offloading', 'model.assistant_lora_path'],
@@ -1163,7 +1164,7 @@ export const modelArchs: ModelArch[] = [
         undefined,
       ],
       'config.process[0].sample.guidance_scale': [1, 4],
-      'config.process[0].sample.sample_steps': [8, 25],
+      'config.process[0].sample.sample_steps': [9, 25],
     },
     disableSections: ['network.conv'],
     additionalSections: [
@@ -1188,7 +1189,8 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].model.model_kwargs': [
         {
           edit: true,
-          match_target_res: false,
+          match_target_res: true,
+          kv_cache: true,
         },
         {},
       ],
@@ -1203,6 +1205,7 @@ export const modelArchs: ModelArch[] = [
       'model.low_vram',
       'model.layer_offloading',
       'model.qie.match_target_res',
+      'model.model_kwargs.kv_cache',
     ],
   },
   {
@@ -1222,12 +1225,13 @@ export const modelArchs: ModelArch[] = [
         undefined,
       ],
       'config.process[0].sample.guidance_scale': [1, 4],
-      'config.process[0].sample.sample_steps': [8, 25],
+      'config.process[0].sample.sample_steps': [9, 25],
       'config.process[0].train.unload_text_encoder': [false, false],
       'config.process[0].model.model_kwargs': [
         {
           edit: true,
-          match_target_res: false,
+          match_target_res: true,
+          kv_cache: true,
         },
         {},
       ],
@@ -1243,6 +1247,7 @@ export const modelArchs: ModelArch[] = [
       'model.layer_offloading',
       'model.assistant_lora_path',
       'model.qie.match_target_res',
+      'model.model_kwargs.kv_cache',
     ],
   },
   {

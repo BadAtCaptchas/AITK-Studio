@@ -83,6 +83,8 @@
     "yauzl": "^3.3.0"
   },
   "devDependencies": {
+    "@emnapi/core": "^1.11.2",
+    "@emnapi/runtime": "^1.11.2",
     "@eslint/eslintrc": "^3.3.5",
     "@types/archiver": "^6.0.3",
     "@types/node": "^20",

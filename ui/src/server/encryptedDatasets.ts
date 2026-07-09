@@ -366,8 +366,12 @@ export async function writeEncryptedManifest(datasetFolder: string, manifest: En
   await fsp.writeFile(encryptedManifestPath(datasetFolder), JSON.stringify(manifest, null, 2), 'utf-8');
 }
 
-export async function listDatasetSummaries(datasetsRoot: string): Promise<DatasetSummary[]> {
+export async function listDatasetSummaries(
+  datasetsRoot: string,
+  options: { createIfMissing?: boolean } = {},
+): Promise<DatasetSummary[]> {
   if (!fs.existsSync(datasetsRoot)) {
+    if (options.createIfMissing === false) return [];
     await fsp.mkdir(datasetsRoot, { recursive: true });
   }
   const entries = await fsp.readdir(datasetsRoot, { withFileTypes: true });

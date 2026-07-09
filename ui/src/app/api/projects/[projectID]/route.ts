@@ -1,22 +1,11 @@
 import { NextResponse } from 'next/server';
 import { UniqueConstraintError, db } from '@/server/db';
-import { cleanProjectSlug, ensureProjectFolders, resolveProject, safeProjectName } from '@/server/projects';
+import { archiveProject, cleanProjectSlug, getProjectRoots, resolveProject, safeProjectName } from '@/server/projects';
 import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
-
-function ensureApiAccess(request: Request): NextResponse | null {
-  const tokenToUse = process.env.AI_TOOLKIT_AUTH;
-  if (!tokenToUse) return null;
-
-  const token = request.headers.get('authorization')?.split(' ')[1];
-  if (token !== tokenToUse) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  return null;
-}
+import { ensureProjectApiAccess, projectApiError, readJsonObject } from '../projectApi';
 
 export async function GET(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = ensureProjectApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
@@ -24,15 +13,33 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
 
   try {
     const { projectID } = await params;
-    const project = await resolveProject(decodeURIComponent(projectID));
-    return NextResponse.json({ project, roots: await ensureProjectFolders(project) });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Project not found' }, { status: 404 });
+    const requestedIdentifier = decodeURIComponent(projectID);
+    const project = await resolveProject(requestedIdentifier, { intent: 'read' });
+    const [replicas, syncOperations, workers] = await Promise.all([
+      db.projectReplicas.listByProject(project.id),
+      db.projectSyncOperations.list({ project_id: project.id }),
+      db.workerNodes.list(),
+    ]);
+    const workerNames = new Map(workers.map(worker => [worker.id, worker.name]));
+    return NextResponse.json({
+      project,
+      roots: await getProjectRoots(project),
+      replicas: replicas.map(replica => ({
+        ...replica,
+        worker_name: workerNames.get(replica.worker_id) || replica.worker_id,
+        status: replica.state,
+      })),
+      sync_operations: syncOperations.slice(0, 20),
+      canonical_project_id: project.id,
+      requested_by_slug: requestedIdentifier !== project.id,
+    });
+  } catch (error) {
+    return projectApiError(error, 'Project not found');
   }
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = ensureProjectApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
@@ -40,8 +47,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pr
 
   try {
     const { projectID } = await params;
-    const existing = await resolveProject(decodeURIComponent(projectID));
-    const body = await request.json();
+    const existing = await resolveProject(decodeURIComponent(projectID), { intent: 'write' });
+    const body = await readJsonObject(request);
     const patch: Record<string, string | null> = {};
 
     if ('name' in body) {
@@ -62,17 +69,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pr
     }
 
     const project = await db.projects.update(existing.id, patch);
-    return NextResponse.json({ project, roots: await ensureProjectFolders(project) });
+    return NextResponse.json({ project, roots: await getProjectRoots(project), canonical_project_id: project.id });
   } catch (error: any) {
     if (error instanceof UniqueConstraintError || error?.code === 'P2002') {
       return NextResponse.json({ error: 'Project slug already exists' }, { status: 409 });
     }
-    return NextResponse.json({ error: error?.message || 'Failed to update project' }, { status: 500 });
+    return projectApiError(error, 'Failed to update project');
   }
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ projectID: string }> }) {
-  const accessResponse = ensureApiAccess(request);
+  const accessResponse = ensureProjectApiAccess(request);
   if (accessResponse) return accessResponse;
   if (!(await areProjectsEnabled())) {
     return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
@@ -80,10 +87,16 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ p
 
   try {
     const { projectID } = await params;
-    const project = await resolveProject(decodeURIComponent(projectID));
-    await db.projects.delete(project.id);
-    return NextResponse.json({ success: true, deletedProject: project });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Failed to delete project' }, { status: 500 });
+    const existing = await resolveProject(decodeURIComponent(projectID), { intent: 'lifecycle' });
+    const project = await archiveProject(existing.id, existing.revision);
+    return NextResponse.json({
+      success: true,
+      archived: true,
+      deprecated: 'DELETE archives a project; use POST /archive. Permanent deletion requires /purge.',
+      deletedProject: project,
+      project,
+    });
+  } catch (error) {
+    return projectApiError(error, 'Failed to archive project');
   }
 }

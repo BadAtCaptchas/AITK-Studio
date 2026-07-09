@@ -5,7 +5,7 @@ import path from 'path';
 import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
 import { isPathWithinRoot } from '@/server/pathContainment';
-import { getAllowedProjectRootIfExists } from '@/server/projects';
+import { isRegisteredProjectPath } from '@/server/projectMediaSecurity';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteProxyFetch } from '@/server/remoteClient';
 import { isRemoteDatasetAssetRequestAuthorized } from '@/server/remoteDatasetAssetAccess';
@@ -106,17 +106,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Im
     const trainingRoot = await getTrainingFolder();
     const dataRoot = await getDataRoot();
 
-    const [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot, canonicalProjectsRoot] = await Promise.all([
-      ...[datasetRoot, trainingRoot, dataRoot].map(dir => resolveExistingDir(dir)),
-      getAllowedProjectRootIfExists(),
-    ]);
-    const generalAllowedDirs = [canonicalDatasetRoot, canonicalDataRoot, canonicalProjectsRoot].filter(
+    const [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot] = await Promise.all(
+      [datasetRoot, trainingRoot, dataRoot].map(dir => resolveExistingDir(dir)),
+    );
+    const generalAllowedDirs = [canonicalDatasetRoot, canonicalDataRoot].filter(
       (dir): dir is string => dir !== null,
     );
 
     const canonicalPath = await fs.promises.realpath(filepath).catch(() => null);
     if (!canonicalPath) {
       return new NextResponse('File not found', { status: 404 });
+    }
+
+    if (await isRegisteredProjectPath(canonicalPath)) {
+      return new NextResponse('Project media requires a signed project-relative URL', { status: 403 });
     }
 
     const ext = path.extname(canonicalPath).toLowerCase();

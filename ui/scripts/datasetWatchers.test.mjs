@@ -22,6 +22,7 @@ const originalSettings = dbModule.db.settings;
 const originalProjects = dbModule.db.projects;
 const originalFetch = globalThis.fetch;
 const originalWatcherImportRootsEnv = process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS;
+const originalAuthEnv = process.env.AI_TOOLKIT_AUTH;
 const tempRoots = [];
 
 afterEach(async () => {
@@ -35,10 +36,16 @@ afterEach(async () => {
   } else {
     process.env.AITK_DATASET_WATCHER_IMPORT_ROOTS = originalWatcherImportRootsEnv;
   }
+  if (originalAuthEnv === undefined) {
+    delete process.env.AI_TOOLKIT_AUTH;
+  } else {
+    process.env.AI_TOOLKIT_AUTH = originalAuthEnv;
+  }
   await Promise.all(tempRoots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
 function installSettingsStore(initial = {}) {
+  process.env.AI_TOOLKIT_AUTH = 'dataset-watcher-test-auth';
   const store = new Map(Object.entries(initial));
   dbModule.db.settings = {
     async get(key) {
@@ -97,6 +104,14 @@ async function makeProjectWorkspace() {
     description: '',
     badge_asset: null,
     root_path: path.join(projectsRoot, 'project-one'),
+    storage_root_path: projectsRoot,
+    lifecycle_state: 'active',
+    archived_at: null,
+    revision: 1,
+    operation_started_at: null,
+    operation_error: null,
+    home_worker_id: 'local',
+    home_instance_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -407,6 +422,23 @@ test('project-space watchers resolve project slugs and import into project datas
   assert.equal(result.lastImportedCount, 1);
   assert.equal(await fs.readFile(path.join(projectDataset, 'a.jpg'), 'utf-8'), 'image-bytes');
   await assert.rejects(() => fs.stat(path.join(globalDataset, 'a.jpg')), /ENOENT/);
+});
+
+test('archived project watcher listings require explicit read intent', async () => {
+  const { project, source } = await makeProjectWorkspace();
+  const watcher = await saveDatasetWatcher({
+    datasetName: 'cats',
+    projectID: project.id,
+    sourcePath: source,
+  });
+
+  project.lifecycle_state = 'archived';
+  await assert.rejects(
+    () => listDatasetWatchers({ projectID: project.id }),
+    /Archived projects are read-only/,
+  );
+  const listed = await listDatasetWatchers({ projectID: project.id }, { intent: 'read' });
+  assert.deepEqual(listed.map(item => item.id), [watcher.id]);
 });
 
 test('multiple project-space watchers import source-relative files into the same dataset target', async () => {

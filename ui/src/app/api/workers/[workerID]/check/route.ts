@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { fetchWorkerGpu, fetchWorkerHealth, getRemoteWorker } from '@/server/remoteClient';
+import { fetchProjectSyncCapabilities } from '@/server/projectSync';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ wo
 
   try {
     const worker = await getRemoteWorker(workerID);
-    const [health, gpu] = await Promise.all([fetchWorkerHealth(worker), fetchWorkerGpu(worker).catch(error => ({ error }))]);
+    const [health, gpu, projectSync] = await Promise.all([
+      fetchWorkerHealth(worker),
+      fetchWorkerGpu(worker).catch(error => ({ error })),
+      fetchProjectSyncCapabilities(worker).catch(error => ({ error: error instanceof Error ? error.message : 'Unavailable' })),
+    ]);
     const gpus = 'gpus' in gpu ? gpu.gpus : [];
     const ollama = health.ollama as { ok?: boolean; error?: string | null; modelCount?: number } | undefined;
     const ollamaError = ollama && ollama.ok === false ? `Ollama: ${ollama.error || 'unavailable'}` : null;
@@ -23,10 +28,15 @@ export async function POST(_request: Request, { params }: { params: Promise<{ wo
       last_status: health.ok ? 'online' : 'error',
       last_error: health.ok ? ollamaError : 'Worker health check failed',
       last_checked_at: new Date(),
-      capabilities: JSON.stringify({ health, hasGpuApi: 'gpus' in gpu }),
+      capabilities: JSON.stringify({
+        health,
+        hasGpuApi: 'gpus' in gpu,
+        projectSync: 'protocol' in projectSync ? projectSync : null,
+        projectSyncError: 'error' in projectSync ? projectSync.error : null,
+      }),
       gpus: JSON.stringify(gpus),
     });
-    return NextResponse.json({ worker: toPublicWorker(updated), health, gpu });
+    return NextResponse.json({ worker: toPublicWorker(updated), health, gpu, projectSync });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Worker health check failed';
     const existing = await db.workerNodes.findById(workerID);

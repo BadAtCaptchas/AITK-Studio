@@ -9,6 +9,7 @@ type UseJobsListProps = {
   reloadInterval?: number | null;
   job_type?: string | null;
   projectID?: string | null;
+  scope?: 'global' | 'all' | 'project';
   includeProjectActive?: boolean;
 };
 
@@ -17,6 +18,7 @@ export default function useJobsList({
   reloadInterval = null,
   job_type = null,
   projectID = null,
+  scope,
   includeProjectActive = false,
 }: UseJobsListProps = {}) {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -29,6 +31,7 @@ export default function useJobsList({
         params: {
           ...(job_type ? { job_type } : {}),
           ...(projectID ? { project_id: projectID } : {}),
+          ...(scope ? { scope } : {}),
           ...(includeProjectActive && !projectID ? { include_project_active: '1' } : {}),
         },
       })
@@ -60,7 +63,7 @@ export default function useJobsList({
       }, reloadInterval);
       return () => clearInterval(interval);
     }
-  }, [job_type, projectID, onlyActive, reloadInterval, includeProjectActive]);
+  }, [job_type, projectID, scope, onlyActive, reloadInterval, includeProjectActive]);
 
   return { jobs, setJobs, status, refreshJobs };
 }

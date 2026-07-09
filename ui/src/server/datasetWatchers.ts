@@ -11,6 +11,7 @@ import { isRootCaptionFileName, readDatasetRootCaption, ROOT_CAPTION_FILE_NAME }
 import { getOpenRouterApiKey } from './settings';
 import { generateSingleImageRecaption, type RecaptionProvider, type RecaptionOutputFormat } from './datasetSingleRecaption';
 import { TOOLKIT_ROOT } from '../paths';
+import type { ProjectScopeIntent } from '../types';
 
 export const DATASET_WATCHERS_SETTING_KEY = 'DATASET_WATCHERS_V1';
 export const DATASET_WATCHER_STATUS_SETTING_KEY = 'DATASET_WATCHER_STATUS_V1';
@@ -329,11 +330,16 @@ export function isDatasetWatchersSettingKey(key: string) {
   return key === DATASET_WATCHERS_SETTING_KEY || key === DATASET_WATCHER_STATUS_SETTING_KEY;
 }
 
-export async function listDatasetWatchers(filter: { datasetName?: string; projectID?: string | null } = {}) {
+export async function listDatasetWatchers(
+  filter: { datasetName?: string; projectID?: string | null } = {},
+  options: { intent?: ProjectScopeIntent } = {},
+) {
   const watchers = await readWatcherRows();
   const rawProjectID = 'projectID' in filter ? normalizeProjectID(filter.projectID) : null;
   const canonicalProjectID =
-    'projectID' in filter && rawProjectID ? (await resolveDatasetScope(rawProjectID)).projectID : rawProjectID;
+    'projectID' in filter && rawProjectID
+      ? (await resolveDatasetScope(rawProjectID, { intent: options.intent ?? 'write' })).projectID
+      : rawProjectID;
   const acceptedProjectIDs = new Set([rawProjectID, canonicalProjectID].filter(Boolean) as string[]);
   return watchers.filter(watcher => {
     if (filter.datasetName && watcher.datasetName !== filter.datasetName) return false;
@@ -655,7 +661,7 @@ export async function validateDatasetWatcher(watcher: DatasetWatcherConfig) {
 }
 
 export async function readWatcherSourceRootCaption(sourcePath: string, projectID: string | null = null) {
-  const scope = await resolveDatasetScope(projectID);
+  const scope = await resolveDatasetScope(projectID, { intent: 'read' });
   const sourceRoot = await resolveAccessibleDirectory(sourcePath);
   await assertNotRootDirectory(sourceRoot);
   await assertSourcePathAllowed(sourceRoot, scope.datasetsRoot);

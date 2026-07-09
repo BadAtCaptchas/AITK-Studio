@@ -19,7 +19,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
   try {
-    await assertProjectJobEnabled(job);
+    await assertProjectJobEnabled(job, 'write');
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
   }

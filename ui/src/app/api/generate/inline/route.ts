@@ -13,8 +13,16 @@ import {
 } from '@/server/settings';
 import { prepareHfTokenEnv } from '@/server/hfTokenEnv';
 import { getToolkitPythonPath } from '@/server/tensorboard';
-import { getProjectRoots, resolveOptionalProject } from '@/server/projects';
+import { getProjectRoots, ProjectError, resolveOptionalProject } from '@/server/projects';
 import { isOfflineModeEnabled, offlineChildProcessEnv } from '@/server/networkPolicy';
+import { generateOnProjectReplica, ProjectSyncError } from '@/server/projectSync';
+import { assertExecutionReplica } from '@/server/projectSyncWorker';
+import {
+  makePortableProjectRef,
+  PROJECT_SYNC_PROTOCOL,
+  ProjectSyncProtocolError,
+  resolvePortableProjectConfig,
+} from '@/server/projectSyncProtocol';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,16 +65,43 @@ function sanitizeName(value: unknown) {
   return sanitized || 'inline_generate';
 }
 
-function getGenerateConfig(jobConfig: any) {
-  const processList = jobConfig?.config?.process;
-  if (jobConfig?.job !== 'generate' || !Array.isArray(processList) || processList.length !== 1) {
+type InlineGenerateProcessConfig = Record<string, unknown> & {
+  device?: string;
+  output_folder?: string;
+  sqlite_db_path?: string;
+  training_folder?: string;
+  generate: Record<string, unknown>;
+};
+
+type InlineGenerateJobConfig = {
+  job: 'generate';
+  config: Record<string, unknown> & {
+    name?: unknown;
+    device?: string;
+    process: InlineGenerateProcessConfig[];
+  };
+};
+
+function getGenerateConfig(jobConfig: unknown) {
+  if (!jobConfig || typeof jobConfig !== 'object' || Array.isArray(jobConfig)) return null;
+  const candidate = jobConfig as Record<string, unknown>;
+  const config = candidate.config;
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return null;
+  const processList = (config as Record<string, unknown>).process;
+  if (candidate.job !== 'generate' || !Array.isArray(processList) || processList.length !== 1) {
     return null;
   }
   const processConfig = processList[0];
-  if (!processConfig || typeof processConfig !== 'object' || !processConfig.generate) {
+  if (!processConfig || typeof processConfig !== 'object' || Array.isArray(processConfig)) {
     return null;
   }
-  return { processConfig, generateConfig: processConfig.generate };
+  const processRecord = processConfig as Record<string, unknown>;
+  if (!processRecord.generate || typeof processRecord.generate !== 'object' || Array.isArray(processRecord.generate)) return null;
+  return {
+    jobConfig: jobConfig as InlineGenerateJobConfig,
+    processConfig: processConfig as InlineGenerateProcessConfig,
+    generateConfig: processRecord.generate,
+  };
 }
 
 function normalizePromptItems(generateConfig: any) {
@@ -247,11 +282,41 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const jobConfig = JSON.parse(JSON.stringify(body.job_config || null));
-    const generateContext = getGenerateConfig(jobConfig);
+    const projectSyncRequest = request.headers.get('x-aitk-project-sync') === PROJECT_SYNC_PROTOCOL;
+    const requestedWorkerID = typeof body.worker_id === 'string' ? body.worker_id.trim() : 'local';
+    if (!projectSyncRequest && requestedWorkerID && requestedWorkerID !== 'local') {
+      if (typeof body.project_id !== 'string' || !body.project_id.trim()) {
+        return NextResponse.json(
+          { error: 'Remote generation requires project_id', code: 'PROJECT_SYNC_PROJECT_REQUIRED' },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json(
+        await generateOnProjectReplica({
+          projectIdentifier: body.project_id,
+          workerID: requestedWorkerID,
+          jobConfig: body.job_config,
+          gpuIDs: typeof body.gpu_ids === 'string' && body.gpu_ids.trim() ? body.gpu_ids.trim() : '0',
+          signal: request.signal,
+        }),
+      );
+    }
+    const replicaProject = projectSyncRequest
+      ? await assertExecutionReplica(
+          typeof body.project_id === 'string' ? body.project_id : '',
+          request.headers.get('x-aitk-home-instance'),
+        )
+      : null;
+    const replicaRoots = replicaProject ? await getProjectRoots(replicaProject) : null;
+    const rawJobConfig: unknown = JSON.parse(JSON.stringify(body.job_config || null));
+    const jobConfigValue = replicaProject
+      ? resolvePortableProjectConfig(rawJobConfig, replicaRoots!.root, replicaProject.id)
+      : rawJobConfig;
+    const generateContext = getGenerateConfig(jobConfigValue);
     if (!generateContext) {
       return NextResponse.json({ error: 'Inline generation requires a generate job config.' }, { status: 400 });
     }
+    const jobConfig = generateContext.jobConfig;
 
     const requestedImageCount = getRequestedImageCount(generateContext.generateConfig);
     if (requestedImageCount !== 1) {
@@ -262,7 +327,7 @@ export async function POST(request: NextRequest) {
     }
 
     const gpuIds = typeof body.gpu_ids === 'string' && body.gpu_ids.trim() ? body.gpu_ids.trim() : '0';
-    const project = await resolveOptionalProject(body.project_id);
+    const project = replicaProject || (await resolveOptionalProject(body.project_id, { intent: 'execute' }));
     const projectRoots = project ? await getProjectRoots(project) : null;
     const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
     const hfToken = await getHFToken();
@@ -343,6 +408,14 @@ export async function POST(request: NextRequest) {
       imagePath,
       output_folder: outputFolder,
       log_path: logPath,
+      ...(replicaProject
+        ? {
+            portable_image_ref: makePortableProjectRef(
+              replicaProject.id,
+              path.relative(replicaRoots!.root, imagePath).replace(/\\/g, '/'),
+            ),
+          }
+        : {}),
     });
   } catch (error: any) {
     if (isInlineGenerationCanceledError(error)) {
@@ -350,6 +423,15 @@ export async function POST(request: NextRequest) {
     }
     if (isProjectSpacesDisabledError(error)) {
       return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+    }
+    if (error instanceof ProjectError) {
+      return NextResponse.json({ error: error.message, code: error.code, details: error.details }, { status: error.status });
+    }
+    if (error instanceof ProjectSyncError || error instanceof ProjectSyncProtocolError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code, details: error.details },
+        { status: error.status },
+      );
     }
     console.error('Inline generation failed:', error);
     return NextResponse.json({ error: error?.message || 'Inline generation failed.' }, { status: 500 });

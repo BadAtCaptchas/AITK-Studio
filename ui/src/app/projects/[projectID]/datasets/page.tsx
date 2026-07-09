@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Copy, Database, FolderInput, FolderOutput, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { ArrowLeftRight, Copy, Database, FolderInput, FolderOutput, Loader2, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { openConfirm } from '@/components/ConfirmModal';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
@@ -19,7 +19,7 @@ import {
   rememberEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
 import type { ProjectSummary } from '@/components/project/types';
-import type { DatasetSummary } from '@/types';
+import type { DatasetSummary, Project } from '@/types';
 
 type ProjectDatasetActionStatus = 'idle' | 'creating' | 'uploading' | 'importing' | 'copying' | 'moving' | 'deleting';
 
@@ -36,6 +36,8 @@ type TransferItemResult = {
 
 type TransferResponse = {
   operation: 'copy' | 'move';
+  sourceProjectID: string | null;
+  destinationProjectID: string | null;
   results: TransferItemResult[];
   copiedCount: number;
   movedCount: number;
@@ -85,6 +87,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
   const [actionError, setActionError] = useState('');
   const [actionNotice, setActionNotice] = useState<TransferNotice | null>(null);
   const [filterText, setFilterText] = useState('');
+  const [readinessFilter, setReadinessFilter] = useState<'all' | 'ready' | 'captions' | 'encrypted' | 'watching'>('all');
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newDatasetName, setNewDatasetName] = useState('');
   const [createEncrypted, setCreateEncrypted] = useState(false);
@@ -102,6 +105,13 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
   const [importDatasetName, setImportDatasetName] = useState('');
   const [importStatus, setImportStatus] = useState<'idle' | 'loading'>('idle');
   const [importError, setImportError] = useState('');
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferDatasets, setTransferDatasets] = useState<DatasetSummary[]>([]);
+  const [transferAll, setTransferAll] = useState(false);
+  const [transferOperation, setTransferOperation] = useState<'copy' | 'move'>('copy');
+  const [transferDestination, setTransferDestination] = useState('global');
+  const [transferProjects, setTransferProjects] = useState<Project[]>([]);
+  const [transferProjectsStatus, setTransferProjectsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
 
   const refreshSummary = () => {
     return apiClient
@@ -137,9 +147,17 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
   const filteredDatasets = useMemo(() => {
     const query = filterText.trim().toLowerCase();
     const datasets = summary?.datasets || [];
-    if (!query) return datasets;
-    return datasets.filter(dataset => [dataset.name, dataset.ref || '', dataset.encrypted ? 'encrypted' : 'local'].some(value => value.toLowerCase().includes(query)));
-  }, [filterText, summary?.datasets]);
+    return datasets.filter(dataset => {
+      const matchesQuery = !query || [dataset.name, dataset.ref || '', dataset.encrypted ? 'encrypted' : 'local'].some(value => value.toLowerCase().includes(query));
+      if (!matchesQuery) return false;
+      const watcher = datasetWatcherLive.watchers.some(item => item.datasetName === dataset.name);
+      if (readinessFilter === 'ready') return !dataset.missingCaptionCount;
+      if (readinessFilter === 'captions') return (dataset.missingCaptionCount || 0) > 0;
+      if (readinessFilter === 'encrypted') return dataset.encrypted;
+      if (readinessFilter === 'watching') return watcher;
+      return true;
+    });
+  }, [datasetWatcherLive.watchers, filterText, readinessFilter, summary?.datasets]);
 
   const importableGlobalDatasets = useMemo(
     () => globalDatasets.filter(dataset => dataset.source !== 'remote' && !!dataset.path),
@@ -406,6 +424,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     const failedResults = data.results.filter(result => result.error);
     const completed = data.operation === 'move' ? data.movedCount : data.copiedCount;
     const actionLabel = data.operation === 'move' ? 'moved' : 'copied';
+    const destinationLabel = data.destinationProjectID ? 'to the project' : 'to global';
     const rewriteDetail =
       data.operation === 'move' && data.rewrittenJobCount > 0
         ? ` Rewrote ${data.rewrittenJobCount} job config${data.rewrittenJobCount === 1 ? '' : 's'}.`
@@ -422,7 +441,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       title:
         failedResults.length > 0
           ? `${completed} dataset${completed === 1 ? '' : 's'} ${actionLabel}, ${failedResults.length} failed`
-          : `${completed} dataset${completed === 1 ? '' : 's'} ${actionLabel} to global`,
+          : `${completed} dataset${completed === 1 ? '' : 's'} ${actionLabel} ${destinationLabel}`,
       message: `${data.copiedCount} copied.${rewriteDetail}${failureDetail}`,
     };
   };
@@ -434,7 +453,11 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       const sourceDataset = datasetByName.get(result.sourceName);
       if (!sourceDataset?.encrypted) return;
       const rememberedKey = rememberedProjectDatasetKey(sourceDataset);
-      if (rememberedKey) {
+      if (rememberedKey && data.destinationProjectID) {
+        rememberEncryptedDatasetKey(result.destinationName, rememberedKey);
+        rememberEncryptedDatasetKey(`project:${data.destinationProjectID}:${result.destinationName}`, rememberedKey);
+        if (result.destinationPath) rememberEncryptedDatasetKey(result.destinationPath, rememberedKey);
+      } else if (rememberedKey) {
         rememberGlobalEncryptedKey(result.destinationName, rememberedKey, result.destinationPath);
       }
     });
@@ -444,6 +467,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     operation: 'copy' | 'move',
     datasetsToTransfer: DatasetSummary[],
     all = false,
+    destinationProjectID: string | null = null,
   ) => {
     if (actionStatus !== 'idle') return;
     if (datasetsToTransfer.length === 0) {
@@ -458,6 +482,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
     try {
       const payload: Record<string, unknown> = {
         source_project_id: projectID,
+        destination_project_id: destinationProjectID,
         operation,
         all,
       };
@@ -470,11 +495,50 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
       rememberTransferredEncryptedKeys(datasetsToTransfer, data);
       await refreshSummary();
       setActionNotice(summarizeTransferResult(data));
+      setTransferModalOpen(false);
     } catch (error: any) {
       setActionError(error?.response?.data?.error || error?.message || 'Failed to transfer project datasets.');
     } finally {
       setActionStatus('idle');
     }
+  };
+
+  const openTransferModal = async (datasets: DatasetSummary[], all = false) => {
+    if (actionStatus !== 'idle' || datasets.length === 0) return;
+    setTransferDatasets(datasets);
+    setTransferAll(all);
+    setTransferOperation('copy');
+    setTransferDestination('global');
+    setTransferModalOpen(true);
+    if (transferProjectsStatus === 'idle') {
+      setTransferProjectsStatus('loading');
+      try {
+        const response = await apiClient.get('/api/projects');
+        const projects = Array.isArray(response.data?.projects) ? (response.data.projects as Project[]) : [];
+        setTransferProjects(projects.filter(project => project.id !== projectID && project.slug !== projectID));
+        setTransferProjectsStatus('idle');
+      } catch (error) {
+        console.error('Failed to load transfer projects:', error);
+        setTransferProjectsStatus('error');
+      }
+    }
+  };
+
+  const submitTransfer = () => {
+    const destinationProjectID = transferDestination === 'global' ? null : transferDestination;
+    if (transferOperation === 'move') {
+      openConfirm({
+        title: 'Move project datasets',
+        message: `Move ${transferAll ? 'all project datasets' : transferDatasets.map(dataset => `“${dataset.name}”`).join(', ')} to ${destinationProjectID ? 'the selected project' : 'global datasets'}? Referenced or active datasets will be blocked before the source is changed.`,
+        type: 'warning',
+        confirmText: 'Move',
+        onConfirm: async () => {
+          await transferProjectDatasets('move', transferDatasets, transferAll, destinationProjectID);
+        },
+      });
+      return;
+    }
+    void transferProjectDatasets('copy', transferDatasets, transferAll, destinationProjectID);
   };
 
   const copyDatasetToGlobal = (dataset: DatasetSummary) => {
@@ -553,25 +617,13 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
         <>
           <button
             type="button"
-            onClick={copyAllDatasetsToGlobal}
+            onClick={() => void openTransferModal(summary?.datasets || [], true)}
             disabled={actionStatus !== 'idle' || (summary?.datasets.length || 0) === 0}
             className="operator-button h-9"
-            title="Copy all project datasets to global datasets"
-            aria-label="Copy all project datasets to global datasets"
+            title="Copy or move all datasets to another workspace"
           >
-            {actionStatus === 'copying' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
-            <span className="hidden sm:inline">Copy All</span>
-          </button>
-          <button
-            type="button"
-            onClick={moveAllDatasetsToGlobal}
-            disabled={actionStatus !== 'idle' || (summary?.datasets.length || 0) === 0}
-            className="operator-button h-9"
-            title="Move all project datasets to global datasets"
-            aria-label="Move all project datasets to global datasets"
-          >
-            {actionStatus === 'moving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOutput className="h-4 w-4" />}
-            <span className="hidden sm:inline">Move All</span>
+            {actionStatus === 'copying' || actionStatus === 'moving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />}
+            <span className="hidden sm:inline">Transfer All</span>
           </button>
           <button type="button" onClick={openImportModal} disabled={actionStatus !== 'idle'} className="operator-button h-9">
             {actionStatus === 'importing' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}
@@ -629,6 +681,29 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 />
               </label>
             </div>
+            <div className="operator-scrollbar-none flex gap-1 overflow-x-auto border-b border-gray-800 px-3 py-2" aria-label="Dataset readiness filters">
+              {([
+                ['all', 'All'],
+                ['ready', 'Ready'],
+                ['captions', 'Needs Captions'],
+                ['encrypted', 'Encrypted'],
+                ['watching', 'Watching'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setReadinessFilter(value)}
+                  aria-pressed={readinessFilter === value}
+                  className={`h-8 flex-none border px-3 text-xs transition-colors ${
+                    readinessFilter === value
+                      ? 'border-cyan-800 bg-cyan-950/40 text-cyan-100'
+                      : 'border-transparent text-gray-500 hover:border-gray-800 hover:text-gray-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
             {status === 'loading' && !summary ? (
               <div className="flex h-48 items-center justify-center text-sm text-gray-400">
@@ -640,7 +715,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 {filteredDatasets.map(dataset => (
                   <div
                     key={dataset.name}
-                    className="grid grid-cols-[minmax(0,1fr)_72px_72px_116px] items-center gap-2 px-3 py-3 text-sm hover:bg-gray-900/70 sm:grid-cols-[minmax(0,1fr)_120px_120px_144px] sm:gap-3"
+                    className="grid grid-cols-[minmax(0,1fr)_72px_72px_148px] items-center gap-2 px-3 py-3 text-sm hover:bg-gray-900/70 sm:grid-cols-[minmax(0,1fr)_120px_120px_176px] sm:gap-3"
                   >
                     <Link
                       href={`${projectPath}/datasets/${encodeURIComponent(dataset.name)}`}
@@ -675,6 +750,16 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                           }}
                         />
                       )}
+                      <button
+                        type="button"
+                        onClick={() => void openTransferModal([dataset])}
+                        disabled={actionStatus !== 'idle'}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-violet-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                        title="Transfer to global or another project"
+                        aria-label={`Transfer ${dataset.name}`}
+                      >
+                        <ArrowLeftRight className="h-4 w-4" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => copyDatasetToGlobal(dataset)}
@@ -742,6 +827,53 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
           </section>
         </div>
       </div>
+      <Modal
+        isOpen={transferModalOpen}
+        onClose={() => setTransferModalOpen(false)}
+        title={transferAll ? 'Transfer All Project Datasets' : 'Transfer Project Dataset'}
+        size="md"
+        closeOnOverlayClick={actionStatus === 'idle'}
+      >
+        <div className="space-y-4">
+          <div className="border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+            {transferAll
+              ? `${transferDatasets.length} project datasets selected`
+              : transferDatasets.map(dataset => dataset.name).join(', ')}
+          </div>
+          <fieldset>
+            <legend className="mb-2 text-xs font-medium text-gray-400">Operation</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className={`cursor-pointer border p-3 ${transferOperation === 'copy' ? 'border-cyan-700 bg-cyan-950/20' : 'border-gray-800 bg-gray-950'}`}>
+                <input type="radio" className="sr-only" checked={transferOperation === 'copy'} onChange={() => setTransferOperation('copy')} />
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-100"><Copy className="h-4 w-4 text-cyan-300" /> Copy</span>
+                <span className="mt-1 block text-xs text-gray-500">Keep the source and create a verified destination copy.</span>
+              </label>
+              <label className={`cursor-pointer border p-3 ${transferOperation === 'move' ? 'border-amber-700 bg-amber-950/20' : 'border-gray-800 bg-gray-950'}`}>
+                <input type="radio" className="sr-only" checked={transferOperation === 'move'} onChange={() => setTransferOperation('move')} />
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-100"><FolderOutput className="h-4 w-4 text-amber-300" /> Guarded Move</span>
+                <span className="mt-1 block text-xs text-gray-500">Delete the source only after references and active use are checked.</span>
+              </label>
+            </div>
+          </fieldset>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-400">Destination</span>
+            <select value={transferDestination} onChange={event => setTransferDestination(event.target.value)} className="h-10 w-full border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600">
+              <option value="global">Global datasets</option>
+              {transferProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+          </label>
+          {transferProjectsStatus === 'loading' ? <div className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading project destinations</div> : null}
+          {transferProjectsStatus === 'error' ? <PageNotice tone="warning" title="Project destinations unavailable">Global transfer is still available.</PageNotice> : null}
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setTransferModalOpen(false)} disabled={actionStatus !== 'idle'} className="operator-button h-9">Cancel</button>
+            <button type="button" onClick={submitTransfer} disabled={actionStatus !== 'idle'} className="operator-button h-9 border-emerald-800 bg-emerald-950/70 text-emerald-100 hover:bg-emerald-900">
+              {actionStatus === 'copying' || actionStatus === 'moving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />}
+              {transferOperation === 'copy' ? 'Copy Datasets' : 'Move Datasets'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal isOpen={importModalOpen} onClose={closeImportModal} title="Import Existing Dataset" size="lg" closeOnOverlayClick={actionStatus !== 'importing'}>
         <form
           className="space-y-4 text-gray-200"

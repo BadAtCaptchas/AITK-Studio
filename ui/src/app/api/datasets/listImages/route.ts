@@ -116,7 +116,7 @@ export async function POST(request: Request) {
   let datasetFolder: string;
   let datasetsPath: string;
   try {
-    const scope = await resolveDatasetScope(projectID);
+    const scope = await resolveDatasetScope(projectID, { intent: 'read' });
     datasetsPath = scope.datasetsRoot;
     datasetFolder = resolveDatasetFolder(datasetsPath, datasetName);
   } catch (error: any) {

@@ -10,6 +10,8 @@ import { SelectInput } from '@/components/formInputs';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { downloadJobModelReferences, importTrainingJob } from '@/utils/jobs';
 import type { Job } from '@/types';
+import ResourceScopeFilter from '@/components/ResourceScopeFilter';
+import useResourceScope from '@/hooks/useResourceScope';
 
 type ImportPhase = 'uploading' | 'processing' | 'completed' | 'failed';
 type ModelDownloadPhase = 'downloading' | 'completed' | 'failed';
@@ -102,6 +104,10 @@ function getStageClass(isActive: boolean, isComplete: boolean, isFailed = false)
 
 export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resourceScope = useResourceScope();
+  const activeProjectID = resourceScope.scope === 'project' ? resourceScope.projectID : null;
+  const selectedProjectArchived = resourceScope.selectedProject?.lifecycle_state === 'archived';
+  const scopeRequiresTarget = resourceScope.scope === 'all';
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
@@ -148,7 +154,7 @@ export default function Dashboard() {
             uploadPercent: progress.percent,
           };
         });
-      });
+      }, activeProjectID);
 
       setImportStatus(current => ({
         phase: 'completed',
@@ -253,7 +259,7 @@ export default function Dashboard() {
           <Button
             className="operator-button shrink-0 py-1"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isImporting}
+            disabled={isImporting || Boolean(selectedProjectArchived) || scopeRequiresTarget}
             title={isImporting ? 'Importing training job' : 'Import training job'}
             aria-label={isImporting ? 'Importing training job' : 'Import training job'}
           >
@@ -274,10 +280,19 @@ export default function Dashboard() {
         </div>
         <div>
           <Link
-            href="/jobs/new"
-            className="operator-button shrink-0 border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900"
-            title="New training job"
+            href={activeProjectID ? `/projects/${encodeURIComponent(activeProjectID)}/runs/new` : '/jobs/new'}
+            className={`operator-button shrink-0 border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900 ${
+              selectedProjectArchived || scopeRequiresTarget ? 'pointer-events-none opacity-40' : ''
+            }`}
+            title={
+              selectedProjectArchived
+                ? 'Archived projects are browse-only'
+                : scopeRequiresTarget
+                  ? 'Choose Global or a Project before creating a job'
+                  : 'New training job'
+            }
             aria-label="New training job"
+            aria-disabled={selectedProjectArchived || scopeRequiresTarget ? true : undefined}
           >
             <Plus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">New Job</span>
@@ -292,6 +307,23 @@ export default function Dashboard() {
         onChange={handleFileSelected}
       />
       <MainContent className="bg-gray-950 px-0 pt-12 sm:px-0">
+        <section className="mx-3 mt-3 flex min-w-0 flex-col gap-2 border-b border-gray-900 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <ResourceScopeFilter
+            scope={resourceScope.scope}
+            projectID={resourceScope.projectID}
+            projects={resourceScope.projects}
+            projectsEnabled={resourceScope.projectsEnabled}
+            onScopeChange={resourceScope.setScope}
+            onProjectChange={resourceScope.setProjectID}
+          />
+          <div className="text-xs text-gray-500">
+            {resourceScope.scope === 'all'
+              ? 'Global and project jobs · choose a workspace to create or import'
+              : resourceScope.scope === 'project'
+                ? `${resourceScope.selectedProject?.name || 'Project'}${selectedProjectArchived ? ' · browse only' : ''}`
+                : 'Global jobs'}
+          </div>
+        </section>
         {importStatus && (
           <section
             role="status"
@@ -436,7 +468,11 @@ export default function Dashboard() {
                     )}
                     {importStatus.job && (
                       <Link
-                        href={`/jobs/${importStatus.job.id}`}
+                        href={
+                          importStatus.job.project_id
+                            ? `/projects/${encodeURIComponent(importStatus.job.project_id)}/runs/${encodeURIComponent(importStatus.job.id)}`
+                            : `/jobs/${importStatus.job.id}`
+                        }
                         className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600"
                       >
                         View Job
@@ -493,7 +529,13 @@ export default function Dashboard() {
             />
           </label>
         </div>
-        <QueueWorkbench key={jobsTableKey} filterText={filterText} focusGpuIDs={gpuIDs} includeProjectActive />
+        <QueueWorkbench
+          key={jobsTableKey}
+          filterText={filterText}
+          focusGpuIDs={gpuIDs}
+          scope={resourceScope.scope}
+          projectID={activeProjectID}
+        />
       </MainContent>
     </>
   );

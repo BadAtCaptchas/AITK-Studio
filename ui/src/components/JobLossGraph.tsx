@@ -1109,7 +1109,7 @@ export default function JobLossGraph({ job }: Props) {
       </div>
 
       <div className="p-4 space-y-3 flex-1 min-h-0 overflow-auto">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
           <KpiCard
             icon={<Activity className="h-4 w-4 text-emerald-400" />}
             label="Progress"
@@ -1184,8 +1184,8 @@ export default function JobLossGraph({ job }: Props) {
           />
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-3 min-h-[520px]">
-          <div className="flex min-h-[420px] flex-col overflow-hidden border border-gray-800 bg-gray-950">
+        <div className="grid min-h-[420px] grid-cols-1 gap-3 xl:h-[clamp(300px,36dvh,360px)] xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="flex min-h-[320px] flex-col overflow-hidden border border-gray-800 bg-gray-950 sm:min-h-[360px] xl:min-h-0">
             <div className="px-3 py-2 border-b border-gray-800 flex flex-wrap items-center gap-2 justify-between">
               <div className="inline-flex border border-gray-800 bg-gray-900 p-0.5">
                 <ChartTabButton active={chartTab === 'loss'} onClick={() => setChartTab('loss')} label="Loss" />
@@ -1247,7 +1247,7 @@ export default function JobLossGraph({ job }: Props) {
             </div>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
             <div className="border border-gray-800 bg-gray-950 p-3">
               <div className="text-xs text-gray-400 mb-2">Display</div>
               <div className="flex flex-wrap gap-2">

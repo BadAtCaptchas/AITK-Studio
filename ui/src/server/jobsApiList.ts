@@ -14,7 +14,7 @@ type ListJobsForJobsApiDeps = {
   syncRemoteJobs: (jobs: Job[], alreadySyncedJobIds?: Set<string>) => Promise<Job[]>;
 };
 
-const activeProjectJobStatuses = ['queued', 'running', 'stopping'];
+const activeProjectJobStatuses = ['queued', 'starting', 'running', 'stopping'];
 
 const defaultDeps: ListJobsForJobsApiDeps = {
   listJobs: options => db.jobs.list(options),
@@ -42,14 +42,19 @@ export async function listJobsForJobsApi(
     jobType?: string | null;
     localOnly?: boolean;
     projectID?: string | null;
+    scope?: 'global' | 'all' | 'project';
     includeProjectActive?: boolean;
   },
   deps: ListJobsForJobsApiDeps = defaultDeps,
 ) {
   const projectID = options.projectID ?? null;
-  const listOptions: JobsListOptions = { job_type: options.jobType, project_id: projectID };
+  const scope = options.scope || (projectID ? 'project' : 'global');
+  const listOptions: JobsListOptions =
+    scope === 'all'
+      ? { job_type: options.jobType }
+      : { job_type: options.jobType, project_id: scope === 'project' ? projectID : null };
   const loadJobs = async () => {
-    if (options.includeProjectActive && !projectID) {
+    if (options.includeProjectActive && scope === 'global' && !projectID) {
       const [globalJobs, activeJobs] = await Promise.all([
         deps.listJobs(listOptions),
         deps.listJobs({ job_type: options.jobType, status: activeProjectJobStatuses }),

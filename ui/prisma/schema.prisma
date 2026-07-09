@@ -44,16 +44,93 @@ model WorkerNode {
 }
 
 model Project {
-  id          String   @id @default(uuid())
-  slug        String   @unique
-  name        String
-  description String   @default("")
-  badge_asset String?
-  root_path   String   @default("")
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  slug                 String   @unique
+  name                 String
+  description          String   @default("")
+  badge_asset          String?
+  root_path            String   @default("")
+  storage_root_path    String   @default("")
+  lifecycle_state      String   @default("active")
+  archived_at          DateTime?
+  revision             Int      @default(1)
+  operation_started_at DateTime?
+  operation_error      String?
+  home_worker_id       String   @default("local")
+  home_instance_id     String   @default("")
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
 
   @@index([slug])
+  @@index([lifecycle_state, updated_at])
+  @@index([archived_at])
+}
+
+model ProjectReplica {
+  id                   String   @id @default(uuid())
+  project_id           String
+  worker_id            String
+  remote_project_id    String?
+  remote_instance_id   String?
+  role                 String   @default("execution")
+  state                String   @default("creating")
+  base_manifest_hash   String?
+  local_manifest_hash  String?
+  remote_manifest_hash String?
+  last_synced_at       DateTime?
+  last_error           String?
+  auto_pull_results    Boolean  @default(true)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@unique([project_id, worker_id])
+  @@index([project_id])
+  @@index([worker_id])
+  @@index([state])
+}
+
+model JobReplica {
+  id                String   @id @default(uuid())
+  job_id            String
+  worker_id         String
+  remote_job_id     String
+  remote_project_id String?
+  role              String   @default("execution")
+  last_synced_at    DateTime?
+  last_error        String?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@unique([job_id, worker_id])
+  @@unique([worker_id, remote_job_id])
+  @@index([job_id])
+  @@index([worker_id])
+}
+
+model ProjectSyncOperation {
+  id                   String   @id @default(uuid())
+  project_id           String
+  worker_id            String
+  profile              String
+  status               String   @default("queued")
+  phase                String   @default("queued")
+  files_total          Int      @default(0)
+  files_done           Int      @default(0)
+  bytes_total          Float    @default(0)
+  bytes_done           Float    @default(0)
+  retry_count          Int      @default(0)
+  retry_at             DateTime?
+  base_manifest_hash   String?
+  source_manifest_hash String?
+  target_manifest_hash String?
+  conflicts            String   @default("[]")
+  error                String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@index([project_id, created_at])
+  @@index([worker_id])
+  @@index([status, retry_at])
 }
 
 model Job {

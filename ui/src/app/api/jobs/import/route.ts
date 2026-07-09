@@ -36,7 +36,7 @@ import {
   saveArchiveUploadChunk,
 } from '@/server/archiveUploadChunks';
 import { db } from '@/server/db';
-import { ensureProjectFolders, resolveOptionalProject } from '@/server/projects';
+import { ensureProjectFolders, ProjectError, resolveOptionalProject } from '@/server/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -200,7 +200,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const project = await resolveOptionalProject(
-      request.nextUrl.searchParams.get('project_id') || request.headers.get('x-aitk-project-id'),
+      request.nextUrl.searchParams.get('project_id') ?? request.headers.get('x-aitk-project-id'),
+      { intent: 'write' },
     );
     const projectRoots = project ? await ensureProjectFolders(project) : null;
     const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
@@ -333,6 +334,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (isProjectSpacesDisabledError(error)) {
       return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+    }
+    if (error instanceof ProjectError) {
+      return NextResponse.json({ error: error.message, code: error.code, details: error.details }, { status: error.status });
     }
     console.error('Training job import failed:', error);
     const message = error instanceof Error ? error.message : 'Failed to import training job';

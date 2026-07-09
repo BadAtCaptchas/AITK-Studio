@@ -33,8 +33,10 @@ import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadge';
 import { TopBar, MainContent } from '@/components/layout';
 import { PageNotice } from '@/components/OperatorPrimitives';
+import ResourceScopeFilter, { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
 import { apiClient } from '@/utils/api';
 import { useRouter } from 'next/navigation';
+import useResourceScope from '@/hooks/useResourceScope';
 import { aggregateAutoCaptionProgressByDataset } from '@/utils/datasetWatcherStatus';
 import {
   buildEncryptedDatasetItem,
@@ -74,6 +76,9 @@ type DatasetExplorerRow = {
   captions: string;
   ref: string;
   worker_id: string;
+  project_id: string | null;
+  project_name: string | null;
+  archived: boolean;
 };
 
 const DATASET_VIEW_STORAGE_KEY = 'aitk.datasets.view';
@@ -119,15 +124,27 @@ function writeStoredDatasetView(view: DatasetExplorerView) {
 }
 
 function datasetRowKey(dataset: DatasetSummary) {
-  return dataset.ref || `${dataset.worker_id || 'local'}:${dataset.name}`;
+  const scope = dataset.project_id ? `project:${dataset.project_id}` : 'global';
+  return dataset.ref || `${scope}:${dataset.worker_id || 'local'}:${dataset.name}`;
 }
 
 function datasetWorkerID(dataset: DatasetSummary) {
   return dataset.worker_id || 'local';
 }
 
+function datasetProjectID(dataset: DatasetSummary) {
+  return dataset.project_id || null;
+}
+
 function getRememberedDatasetKey(dataset: DatasetSummary) {
   const workerID = datasetWorkerID(dataset);
+  const projectID = datasetProjectID(dataset);
+  if (projectID) {
+    return (
+      getRememberedEncryptedDatasetKey(datasetRowKey(dataset)) ||
+      getRememberedEncryptedDatasetKey(`project:${projectID}:${dataset.name}`)
+    );
+  }
   return (
     getRememberedEncryptedDatasetKey(datasetRowKey(dataset)) ||
     getRememberedEncryptedDatasetKey(dataset.name) ||
@@ -138,7 +155,12 @@ function getRememberedDatasetKey(dataset: DatasetSummary) {
 
 function rememberDatasetKey(dataset: DatasetSummary, rawKeyB64: string) {
   const workerID = datasetWorkerID(dataset);
+  const projectID = datasetProjectID(dataset);
   rememberEncryptedDatasetKey(datasetRowKey(dataset), rawKeyB64);
+  if (projectID) {
+    rememberEncryptedDatasetKey(`project:${projectID}:${dataset.name}`, rawKeyB64);
+    return;
+  }
   rememberEncryptedDatasetKey(dataset.name, rawKeyB64);
   if (dataset.path) rememberEncryptedDatasetKey(dataset.path, rawKeyB64);
   if (workerID !== 'local') {
@@ -350,6 +372,10 @@ function hfOutputNameFromDataset(datasetID: string, split?: string) {
 
 export default function Datasets() {
   const router = useRouter();
+  const resourceScope = useResourceScope();
+  const activeProjectID = resourceScope.scope === 'project' ? resourceScope.projectID : null;
+  const selectedProjectArchived = resourceScope.selectedProject?.lifecycle_state === 'archived';
+  const aggregateScopeReadOnly = resourceScope.scope === 'all';
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
   const setFolderImportInputRef = useCallback((node: HTMLInputElement | null) => {
     folderImportInputRef.current = node;
@@ -357,7 +383,11 @@ export default function Datasets() {
     node.setAttribute('webkitdirectory', '');
     node.setAttribute('directory', '');
   }, []);
-  const { datasets, errors, status, refreshDatasets } = useDatasetList({ includeRemote: true });
+  const { datasets, errors, status, refreshDatasets } = useDatasetList({
+    includeRemote: resourceScope.scope !== 'project',
+    scope: resourceScope.scope,
+    projectID: activeProjectID,
+  });
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
   const [datasetFilter, setDatasetFilter] = useState('');
@@ -430,7 +460,8 @@ export default function Datasets() {
   const [isImportingHfDataset, setIsImportingHfDataset] = useState(false);
 
   const datasetWatcherLive = useDatasetWatcherLiveRefresh({
-    enabled: status === 'success',
+    enabled: status === 'success' && resourceScope.scope !== 'all',
+    projectID: activeProjectID,
     workerID: 'local',
     onRefresh: () => refreshDatasets({ background: true }),
   });
@@ -485,13 +516,16 @@ export default function Datasets() {
       captions: captionStatusSearchText(dataset, unlocked),
       ref: datasetRowKey(dataset),
       worker_id: datasetWorkerID(dataset),
+      project_id: datasetProjectID(dataset),
+      project_name: dataset.project_name || null,
+      archived: dataset.project_lifecycle_state === 'archived',
     };
   });
   const filteredTableRows = useMemo(() => {
     const query = datasetFilter.trim().toLowerCase();
     if (!query) return tableRows;
     return tableRows.filter(row =>
-      [row.name, row.source, row.worker, row.encrypted ? 'encrypted' : 'plain', row.captions]
+      [row.name, row.source, row.worker, row.project_name, row.project_id ? 'project' : 'global', row.encrypted ? 'encrypted' : 'plain', row.captions]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
@@ -504,7 +538,11 @@ export default function Datasets() {
       .forEach(row => {
         datasetPreviewRequestsRef.current.add(row.ref);
         apiClient
-          .post('/api/datasets/listImages', { datasetName: row.name, worker_id: row.worker_id })
+          .post('/api/datasets/listImages', {
+            datasetName: row.name,
+            worker_id: row.worker_id,
+            ...(row.project_id ? { project_id: row.project_id } : {}),
+          })
           .then(response => {
             const images = Array.isArray(response.data?.images) ? response.data.images : [];
             const firstImagePath = images
@@ -521,6 +559,12 @@ export default function Datasets() {
       });
   }, [filteredTableRows]);
 
+  useEffect(() => {
+    setSelectedDatasetRefs(new Set());
+    setDatasetPreviewUrls({});
+    datasetPreviewRequestsRef.current.clear();
+  }, [activeProjectID, resourceScope.scope]);
+
   const selectedDatasets = useMemo(
     () => tableRows.filter(row => selectedDatasetRefs.has(row.ref)).map(row => row.dataset),
     [selectedDatasetRefs, tableRows],
@@ -534,7 +578,13 @@ export default function Datasets() {
     [selectedDatasets],
   );
   const selectedWorkerID = selectedWorkerIDs.length === 1 ? selectedWorkerIDs[0] : null;
-  const canCombineSelection = selectedDatasets.length >= 2 && selectedWorkerID !== null;
+  const selectedScopeIDs = useMemo(
+    () => Array.from(new Set(selectedDatasets.map(dataset => datasetProjectID(dataset) || 'global'))),
+    [selectedDatasets],
+  );
+  const selectedScopeID = selectedScopeIDs.length === 1 ? selectedScopeIDs[0] : null;
+  const combineProjectID = selectedScopeID && selectedScopeID !== 'global' ? selectedScopeID : null;
+  const canCombineSelection = selectedDatasets.length >= 2 && selectedWorkerID !== null && selectedScopeID !== null;
   const canBulkUnlockSelection = selectedEncryptedDatasets.length > 0;
   const bulkPasswordTargetCount = useMemo(
     () =>
@@ -585,6 +635,7 @@ export default function Datasets() {
   const toggleDatasetSelection = (dataset: DatasetSummary) => {
     const ref = datasetRowKey(dataset);
     const workerID = datasetWorkerID(dataset);
+    const scopeID = datasetProjectID(dataset) || 'global';
     setSelectedDatasetRefs(previous => {
       const next = new Set(previous);
       if (next.has(ref)) {
@@ -593,8 +644,9 @@ export default function Datasets() {
       }
       const selectedRows = tableRows.filter(row => next.has(row.ref));
       const existingWorkerID = selectedRows[0]?.worker_id;
-      if (existingWorkerID && existingWorkerID !== workerID) {
-        alert('Select datasets from one worker at a time.');
+      const existingScopeID = selectedRows[0]?.project_id || 'global';
+      if ((existingWorkerID && existingWorkerID !== workerID) || (selectedRows.length > 0 && existingScopeID !== scopeID)) {
+        alert('Select datasets from one worker and workspace at a time.');
         return previous;
       }
       next.add(ref);
@@ -610,6 +662,7 @@ export default function Datasets() {
       const res = await apiClient.post('/api/datasets/listImages', {
         datasetName: dataset.name,
         worker_id: datasetWorkerID(dataset),
+        ...(datasetProjectID(dataset) ? { project_id: datasetProjectID(dataset) } : {}),
       });
       if (res.data?.encrypted && res.data?.manifest) {
         setBulkUnlockManifests(previous => ({ ...previous, [ref]: res.data.manifest }));
@@ -797,17 +850,21 @@ export default function Datasets() {
         name: renameDataset.name,
         newName: renameDatasetName,
         worker_id: workerID,
+        ...(datasetProjectID(renameDataset) ? { project_id: datasetProjectID(renameDataset) } : {}),
       });
       const renamedName = res.data?.name || normalizedName;
       const rememberedKey = getRememberedDatasetKey(renameDataset);
       if (rememberedKey) {
+        const renameProjectID = datasetProjectID(renameDataset);
         rememberUnlockedDataset(
           {
             ...renameDataset,
             name: renamedName,
             worker_id: workerID,
             ref:
-              workerID === 'local'
+              renameProjectID
+                ? `aitk-dataset://project/${encodeURIComponent(renameProjectID)}/${encodeURIComponent(renamedName)}`
+                : workerID === 'local'
                 ? `aitk-dataset://local/${encodeURIComponent(renamedName)}`
                 : makeRemoteDatasetRef(workerID, renamedName),
           },
@@ -830,7 +887,10 @@ export default function Datasets() {
     }
   };
 
-  const handleDeleteDataset = (datasetName: string, workerID = 'local') => {
+  const handleDeleteDataset = (dataset: DatasetSummary) => {
+    const datasetName = dataset.name;
+    const workerID = datasetWorkerID(dataset);
+    const projectID = datasetProjectID(dataset);
     openConfirm({
       title: 'Delete Dataset',
       message: `Are you sure you want to delete the dataset "${datasetName}"? This action cannot be undone.`,
@@ -838,7 +898,11 @@ export default function Datasets() {
       confirmText: 'Delete',
       onConfirm: () => {
         apiClient
-          .post('/api/datasets/delete', { name: datasetName, worker_id: workerID })
+          .post('/api/datasets/delete', {
+            name: datasetName,
+            worker_id: workerID,
+            ...(projectID ? { project_id: projectID } : {}),
+          })
           .then(() => {
             console.log('Dataset deleted:', datasetName);
             refreshDatasets();
@@ -858,6 +922,7 @@ export default function Datasets() {
       const res = await apiClient.post('/api/datasets/import-remote', {
         worker_id: dataset.worker_id,
         datasetName: dataset.name,
+        ...(activeProjectID ? { project_id: activeProjectID } : {}),
       });
       refreshDatasets();
       const importedName = res.data?.dataset?.name;
@@ -872,13 +937,23 @@ export default function Datasets() {
             name: importedName,
             encrypted: true,
             worker_id: 'local',
-            ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
+            project_id: activeProjectID,
+            project_name: resourceScope.selectedProject?.name || null,
+            ref: activeProjectID
+              ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(importedName)}`
+              : `aitk-dataset://local/${encodeURIComponent(importedName)}`,
             path: importedPath,
           },
           remembered,
         );
       }
-      if (importedName) router.push(`/datasets/${encodeURIComponent(importedName)}`);
+      if (importedName) {
+        router.push(
+          activeProjectID
+            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedName)}`
+            : `/datasets/${encodeURIComponent(importedName)}`,
+        );
+      }
     } catch (error: any) {
       alert(error?.response?.data?.error || 'Failed to import remote dataset.');
     } finally {
@@ -916,6 +991,7 @@ export default function Datasets() {
       captionColumn: hfCaptionMode === 'column' ? hfCaptionColumn || undefined : undefined,
       outputName: action === 'import' ? hfOutputName || undefined : undefined,
       maxRows: Number.isFinite(maxRowsValue) && Number(maxRowsValue) > 0 ? Math.floor(Number(maxRowsValue)) : undefined,
+      project_id: activeProjectID || undefined,
     };
   };
 
@@ -966,8 +1042,10 @@ export default function Datasets() {
       setIsHfImportModalOpen(false);
       if (importedName) {
         router.push(
-          workerID === 'local'
-            ? `/datasets/${encodeURIComponent(importedName)}`
+          activeProjectID
+            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedName)}`
+            : workerID === 'local'
+              ? `/datasets/${encodeURIComponent(importedName)}`
             : `/datasets/${encodeURIComponent(importedName)}?worker_id=${encodeURIComponent(workerID)}`,
         );
       }
@@ -989,6 +1067,7 @@ export default function Datasets() {
         .post('/api/datasets/listImages', {
           datasetName: source.name,
           worker_id: datasetWorkerID(source),
+          ...(datasetProjectID(source) ? { project_id: datasetProjectID(source) } : {}),
         })
         .then(res => {
           if (res.data?.encrypted && res.data?.manifest) {
@@ -1087,6 +1166,7 @@ export default function Datasets() {
 
       const res = await apiClient.post('/api/datasets/combine', {
         worker_id: combineWorkerID,
+        ...(combineProjectID ? { project_id: combineProjectID } : {}),
         sourceDatasets: combineSources.map(source => source.name),
         outputName: combineOutputName,
         outputEncrypted: combineOutputMode === 'encrypted',
@@ -1104,8 +1184,14 @@ export default function Datasets() {
           {
             ...combined,
             worker_id: combineWorkerID,
+            project_id: combineProjectID,
+            project_name: combineProjectID
+              ? combineSources.find(source => datasetProjectID(source) === combineProjectID)?.project_name || null
+              : null,
             ref:
-              combineWorkerID === 'local'
+              combineProjectID
+                ? `aitk-dataset://project/${encodeURIComponent(combineProjectID)}/${encodeURIComponent(combined.name)}`
+                : combineWorkerID === 'local'
                 ? combined.ref || `aitk-dataset://local/${encodeURIComponent(combined.name)}`
                 : makeRemoteDatasetRef(combineWorkerID, combined.name),
           },
@@ -1118,8 +1204,10 @@ export default function Datasets() {
       setIsCombineModalOpen(false);
       if (combined?.name) {
         router.push(
-          combineWorkerID === 'local'
-            ? `/datasets/${encodeURIComponent(combined.name)}`
+          combineProjectID
+            ? `/projects/${encodeURIComponent(combineProjectID)}/datasets/${encodeURIComponent(combined.name)}`
+            : combineWorkerID === 'local'
+              ? `/datasets/${encodeURIComponent(combined.name)}`
             : `/datasets/${encodeURIComponent(combined.name)}?worker_id=${encodeURIComponent(combineWorkerID)}`,
         );
       }
@@ -1185,6 +1273,7 @@ export default function Datasets() {
     const formData = new FormData();
     formData.append('datasetName', datasetName);
     if (workerID !== 'local') formData.append('worker_id', workerID);
+    if (activeProjectID) formData.append('project_id', activeProjectID);
     formData.append('failIfDatasetExists', '1');
     formData.append('preserveRelativePaths', '1');
     formData.append('relativePaths', JSON.stringify(relativePaths));
@@ -1221,8 +1310,12 @@ export default function Datasets() {
         name: datasetName,
         encrypted: true,
         worker_id: workerID,
+        project_id: activeProjectID,
+        project_name: resourceScope.selectedProject?.name || null,
         ref:
-          workerID === 'local'
+          activeProjectID
+            ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(datasetName)}`
+            : workerID === 'local'
             ? `${workerID}:${datasetName}`
             : makeRemoteDatasetRef(workerID, datasetName),
       },
@@ -1291,6 +1384,7 @@ export default function Datasets() {
     const createResult = await apiClient
       .post('/api/datasets/create', {
         worker_id: workerID,
+        ...(activeProjectID ? { project_id: activeProjectID } : {}),
         name: datasetName,
         encrypted: true,
         encryptedManifest: encryption.manifest,
@@ -1307,6 +1401,7 @@ export default function Datasets() {
     const formData = new FormData();
     formData.append('datasetName', createdName);
     if (workerID !== 'local') formData.append('worker_id', workerID);
+    if (activeProjectID) formData.append('project_id', activeProjectID);
     formData.append('encrypted', '1');
     formData.append('manifest', JSON.stringify(encryptedPayload.manifest));
     const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
@@ -1338,7 +1433,11 @@ export default function Datasets() {
       setIsImportingFolders(true);
       const targetDatasetNames = new Set(
         datasets
-          .filter(dataset => datasetWorkerID(dataset) === folderImportWorkerID)
+          .filter(
+            dataset =>
+              datasetWorkerID(dataset) === folderImportWorkerID &&
+              datasetProjectID(dataset) === activeProjectID,
+          )
           .map(dataset => dataset.name.toLowerCase()),
       );
 
@@ -1382,8 +1481,10 @@ export default function Datasets() {
         const importedDatasetName = importResult.datasetName;
         setFolderImportStatus(`Imported ${importedDatasetName}.`);
         router.push(
-          folderImportWorkerID === 'local'
-            ? `/datasets/${encodeURIComponent(importedDatasetName)}`
+          activeProjectID
+            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedDatasetName)}`
+            : folderImportWorkerID === 'local'
+              ? `/datasets/${encodeURIComponent(importedDatasetName)}`
             : `/datasets/${encodeURIComponent(importedDatasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
         );
       }
@@ -1439,6 +1540,7 @@ export default function Datasets() {
       const data = await apiClient
         .post('/api/datasets/create', {
           name: newDatasetName,
+          ...(activeProjectID ? { project_id: activeProjectID } : {}),
           encrypted: newDatasetMode === 'encrypted',
           encryptedManifest,
         })
@@ -1450,7 +1552,11 @@ export default function Datasets() {
             name: data.name,
             encrypted: true,
             worker_id: 'local',
-            ref: `aitk-dataset://local/${encodeURIComponent(data.name)}`,
+            project_id: activeProjectID,
+            project_name: resourceScope.selectedProject?.name || null,
+            ref: activeProjectID
+              ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(data.name)}`
+              : `aitk-dataset://local/${encodeURIComponent(data.name)}`,
           },
           rawKeyB64,
         );
@@ -1461,7 +1567,13 @@ export default function Datasets() {
       setDatasetPasswordConfirm('');
       setDatasetKeyFile(null);
       setIsNewDatasetModalOpen(false);
-      if (data.name) router.push(`/datasets/${data.name}`);
+      if (data.name) {
+        router.push(
+          activeProjectID
+            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(data.name)}`
+            : `/datasets/${encodeURIComponent(data.name)}`,
+        );
+      }
     } catch (error) {
       console.error('Error creating new dataset:', error);
     } finally {
@@ -1474,7 +1586,9 @@ export default function Datasets() {
   };
 
   const datasetHref = (row: DatasetExplorerRow) =>
-    row.source === 'remote'
+    row.project_id
+      ? `/projects/${encodeURIComponent(row.project_id)}/datasets/${encodeURIComponent(row.name)}`
+      : row.source === 'remote'
       ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
       : `/datasets/${encodeURIComponent(row.name)}`;
 
@@ -1497,7 +1611,9 @@ export default function Datasets() {
 
   const isRowSelected = (row: DatasetExplorerRow) => selectedDatasetRefs.has(row.ref);
   const isRowSelectionDisabled = (row: DatasetExplorerRow) =>
-    !isRowSelected(row) && selectedWorkerID !== null && selectedWorkerID !== row.worker_id;
+    !isRowSelected(row) &&
+    ((selectedWorkerID !== null && selectedWorkerID !== row.worker_id) ||
+      (selectedScopeID !== null && selectedScopeID !== (row.project_id || 'global')));
 
   const renderSelectionCheckbox = (row: DatasetExplorerRow) => (
     <input
@@ -1530,9 +1646,10 @@ export default function Datasets() {
           )}
         </button>
       )}
-      {row.source === 'local' && !row.encrypted && (
+      {row.source === 'local' && !row.encrypted && !row.archived && (
         <DatasetWatchFoldersButton
           datasetName={row.name}
+          projectID={row.project_id}
           workerID={row.worker_id}
           defaultSourcePath={row.dataset.importSourcePath}
           label={`Watch folders for ${row.name}`}
@@ -1546,7 +1663,8 @@ export default function Datasets() {
       )}
       <button
         type="button"
-        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-cyan-700 hover:text-white ${
+        disabled={row.archived}
+        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-cyan-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${
           compact ? 'h-7 w-7' : 'h-8 w-8'
         }`}
         onClick={() => openRenameDatasetModal(row.dataset)}
@@ -1557,10 +1675,11 @@ export default function Datasets() {
       </button>
       <button
         type="button"
-        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-red-600 hover:text-white ${
+        disabled={row.archived}
+        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${
           compact ? 'h-7 w-7' : 'h-8 w-8'
         }`}
-        onClick={() => handleDeleteDataset(row.name, row.worker_id)}
+        onClick={() => handleDeleteDataset(row.dataset)}
         title="Delete dataset"
         aria-label={`Delete ${row.name}`}
       >
@@ -1594,6 +1713,13 @@ export default function Datasets() {
     >
       {row.encrypted ? (row.unlocked ? 'Unlocked' : 'Encrypted') : 'Plain'}
     </span>
+  );
+
+  const renderWorkspaceBadge = (row: DatasetExplorerRow) => (
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <ProjectResourceBadge projectID={row.project_id} projectName={row.project_name} />
+      {row.archived ? <span className="text-[10px] font-medium uppercase tracking-wide text-amber-300">Archived</span> : null}
+    </div>
   );
 
   const renderBrowserState = () => {
@@ -1648,13 +1774,14 @@ export default function Datasets() {
     return (
       <div className="overflow-hidden border border-gray-800 bg-gray-950/40">
         <div className="overflow-x-auto">
-          <div className="min-w-[920px]">
-            <div className="grid grid-cols-[2.75rem_minmax(17rem,1.7fr)_8.5rem_minmax(12rem,0.85fr)_10rem_8rem_7.5rem] border-b border-gray-800 bg-gray-900/85 text-xs uppercase text-gray-500">
+          <div className="min-w-[1040px]">
+            <div className="grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_10rem_7rem_7.5rem] border-b border-gray-800 bg-gray-900/85 text-xs uppercase text-gray-500">
               <div className="px-3 py-2" />
               <div className="px-3 py-2 font-medium">Name</div>
               <div className="px-3 py-2 font-medium">Items</div>
               <div className="px-3 py-2 font-medium">Captions</div>
               <div className="px-3 py-2 font-medium">Source</div>
+              <div className="px-3 py-2 font-medium">Workspace</div>
               <div className="px-3 py-2 font-medium">Type</div>
               <div className="px-3 py-2 text-right font-medium">Actions</div>
             </div>
@@ -1668,7 +1795,7 @@ export default function Datasets() {
               return (
                 <div
                   key={row.ref}
-                  className={`grid grid-cols-[2.75rem_minmax(17rem,1.7fr)_8.5rem_minmax(12rem,0.85fr)_10rem_8rem_7.5rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
+                  className={`grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_10rem_7rem_7.5rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
                 >
                   <div className="flex items-center justify-center px-3 py-2">{renderSelectionCheckbox(row)}</div>
                   <div className="min-w-0 px-3 py-2">
@@ -1692,6 +1819,7 @@ export default function Datasets() {
                     </div>
                   </div>
                   <div className="min-w-0 px-3 py-2">{renderSourceBadge(row)}</div>
+                  <div className="min-w-0 px-3 py-2">{renderWorkspaceBadge(row)}</div>
                   <div className="px-3 py-2">{renderTypeBadge(row)}</div>
                   <div className="px-3 py-2">{renderDatasetActions(row)}</div>
                 </div>
@@ -1740,6 +1868,7 @@ export default function Datasets() {
                 {renderSourceBadge(row)}
                 {renderTypeBadge(row)}
               </div>
+              <div className="mt-1 flex justify-center">{renderWorkspaceBadge(row)}</div>
               <div className="mt-2 text-center text-xs text-gray-500">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
               <div className="mt-1 truncate text-center text-xs text-gray-500">
                 {datasetCaptionLabel(row.dataset, row.unlocked)}
@@ -1779,6 +1908,7 @@ export default function Datasets() {
           </Button>
           <Button
             className="operator-button shrink-0 py-1"
+            disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
             onClick={() => setIsHfImportModalOpen(true)}
             title="Import Hugging Face dataset"
             aria-label="Import Hugging Face dataset"
@@ -1788,6 +1918,7 @@ export default function Datasets() {
           </Button>
           <Button
             className="operator-button shrink-0 py-1"
+            disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
             onClick={() => setIsFolderImportModalOpen(true)}
             title="Import folders"
             aria-label="Import folders"
@@ -1797,7 +1928,7 @@ export default function Datasets() {
           </Button>
           <Button
             className="operator-button shrink-0 py-1"
-            disabled={!canCombineSelection}
+            disabled={!canCombineSelection || Boolean(selectedProjectArchived)}
             onClick={() => openCombineModal()}
             title="Combine selected datasets"
             aria-label="Combine selected datasets"
@@ -1807,6 +1938,7 @@ export default function Datasets() {
           </Button>
           <Button
             className="operator-button shrink-0 py-1"
+            disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
             onClick={() => openNewDatasetModal()}
             title="New dataset"
             aria-label="New dataset"
@@ -1818,6 +1950,23 @@ export default function Datasets() {
       </TopBar>
 
       <MainContent>
+        <div className="mb-3 flex min-w-0 flex-col gap-2 border-b border-gray-900 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <ResourceScopeFilter
+            scope={resourceScope.scope}
+            projectID={resourceScope.projectID}
+            projects={resourceScope.projects}
+            projectsEnabled={resourceScope.projectsEnabled}
+            onScopeChange={resourceScope.setScope}
+            onProjectChange={resourceScope.setProjectID}
+          />
+          <div className="text-xs text-gray-500">
+            {resourceScope.scope === 'all'
+              ? 'Showing global and project datasets · choose a workspace to create or import'
+              : resourceScope.scope === 'project'
+                ? `${resourceScope.selectedProject?.name || 'Project'} workspace${selectedProjectArchived ? ' · browse only' : ''}`
+                : 'Global workspace'}
+          </div>
+        </div>
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-gray-500">
             {filteredTableRows.length} of {tableRows.length} datasets shown
@@ -1863,7 +2012,7 @@ export default function Datasets() {
         </div>
         {errors.length > 0 && (
           <div className="mb-3 rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-sm text-yellow-200">
-            Some remote datasets could not be loaded:{' '}
+            Some workspace datasets could not be loaded:{' '}
             {errors.map(error => `${error.worker_name}: ${error.error}`).join('; ')}
           </div>
         )}

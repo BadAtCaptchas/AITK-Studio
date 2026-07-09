@@ -100,7 +100,7 @@ test('jobs API listing can include active project jobs for queue surfaces', asyn
   assert.deepEqual(jobs.map(job => job.id), ['global-stopped', 'global-queued', 'project-running']);
   assert.deepEqual(calls[0], ['discover', 'train']);
   assert.deepEqual(calls[1], ['list', { job_type: 'train', project_id: null }]);
-  assert.deepEqual(calls[2], ['list', { job_type: 'train', status: ['queued', 'running', 'stopping'] }]);
+  assert.deepEqual(calls[2], ['list', { job_type: 'train', status: ['queued', 'starting', 'running', 'stopping'] }]);
   assert.deepEqual(calls[3][0], 'sync');
   assert.deepEqual(calls[3][1], ['global-stopped', 'global-queued', 'project-running']);
   assert.equal(calls[3][2], discoveredJobIds);
@@ -143,7 +143,7 @@ test('local-only active project listing filters merged jobs without remote sync'
 
   assert.deepEqual(calls, [
     ['list', { job_type: 'caption', project_id: null }],
-    ['list', { job_type: 'caption', status: ['queued', 'running', 'stopping'] }],
+    ['list', { job_type: 'caption', status: ['queued', 'starting', 'running', 'stopping'] }],
   ]);
   assert.deepEqual(jobs.map(job => job.id), ['local-global', 'local-project']);
 });
@@ -207,5 +207,36 @@ test('jobs API listing returns cached remote mirrors when remote polling is skip
     ['discover', 'training'],
     ['list', { job_type: 'training', project_id: null }],
     ['sync', ['local-job', 'cached-mirror']],
+  ]);
+});
+
+test('jobs API all scope leaves project_id unfiltered', async () => {
+  const calls = [];
+  const globalJob = makeJob({ id: 'global-job' });
+  const projectJob = makeJob({ id: 'project-job', project_id: 'project-1' });
+
+  const jobs = await listJobsForJobsApi(
+    { jobType: 'train', scope: 'all' },
+    {
+      listJobs: async options => {
+        calls.push(['list', options]);
+        return [globalJob, projectJob];
+      },
+      discoverRemoteJobs: async jobType => {
+        calls.push(['discover', jobType]);
+        return new Set();
+      },
+      syncRemoteJobs: async listedJobs => {
+        calls.push(['sync', listedJobs.map(job => job.id)]);
+        return listedJobs;
+      },
+    },
+  );
+
+  assert.deepEqual(jobs.map(job => job.id), ['global-job', 'project-job']);
+  assert.deepEqual(calls, [
+    ['discover', 'train'],
+    ['list', { job_type: 'train' }],
+    ['sync', ['global-job', 'project-job']],
   ]);
 });

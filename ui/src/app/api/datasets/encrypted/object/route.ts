@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { datasetsRoot } = await resolveDatasetScope(project_id);
+    const { datasetsRoot } = await resolveDatasetScope(project_id, { intent: 'read' });
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     if (!isEncryptedDatasetFolder(datasetFolder)) {
       return NextResponse.json({ error: 'Encrypted dataset not found' }, { status: 404 });

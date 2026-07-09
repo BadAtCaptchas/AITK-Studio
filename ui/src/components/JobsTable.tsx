@@ -14,6 +14,7 @@ import { ComfyInstallProgressInline } from '@/components/ComfyInstallProgress';
 import useWorkers from '@/hooks/useWorkers';
 import { getTotalSteps } from '@/utils/jobs';
 import { PageNotice, ProgressBar, QueueStateBadge, StatusBadge } from '@/components/OperatorPrimitives';
+import { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
 
 interface JobsTableProps {
   autoStartQueue?: boolean;
@@ -94,6 +95,7 @@ export default function JobsTable({
               {prefix}
             </span>
             <span className="truncate">{title}</span>
+            {row.project_id ? <ProjectResourceBadge projectID={row.project_id} projectName={row.project_name} /> : null}
           </Link>
         );
       },
@@ -159,7 +161,7 @@ export default function JobsTable({
     const query = filterText.trim().toLowerCase();
     if (!query) return jobs;
     return jobs.filter(job =>
-      [job.name, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
+      [job.name, job.project_name, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );

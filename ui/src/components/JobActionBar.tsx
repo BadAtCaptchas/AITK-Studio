@@ -508,13 +508,14 @@ export default function JobActionBar({
     !!(activeExportID.current || exportStatus?.progress?.exportID) &&
     exportStatus?.progress?.status !== 'canceling' &&
     exportStatus?.progress?.cancelRequested !== true;
+  const startActionLabel = ['stopped', 'error', 'completed'].includes(job.status) ? 'Resume job' : 'Start job';
 
   return (
     <div className={`inline-flex items-center justify-end gap-1 ${className || ''}`}>
       {canStart && (
         <Button
-          title="Start job"
-          aria-label="Start job"
+          title={startActionLabel}
+          aria-label={startActionLabel}
           disabled={isRemoteStarting}
           onClick={() => void handleStartJob()}
           className={`${actionButtonClass} ${isRemoteStarting ? 'cursor-wait opacity-80' : ''}`}

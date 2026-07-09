@@ -32,7 +32,11 @@ type GeneratedLora = {
   label: string;
   path: string;
   filename: string;
-  source: 'job' | 'uploaded';
+  source: 'job' | 'uploaded' | 'project';
+  scope?: 'global' | 'project';
+  projectId?: string;
+  projectName?: string;
+  portableRef?: string;
   jobId?: string;
   jobName?: string;
   jobStatus?: string;
@@ -305,6 +309,7 @@ function cleanModelConfig(modelConfig: GeneratorModelConfig, useLora: boolean, l
 }
 
 function formatLoraSource(lora: GeneratedLora) {
+  if (lora.projectName) return `${lora.projectName}${lora.jobName ? ` / ${lora.jobName}` : ''}`;
   return lora.source === 'uploaded' ? 'Uploaded' : lora.jobName || 'Training job';
 }
 
@@ -337,6 +342,7 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
   const [useLora, setUseLora] = useState(false);
   const [loraPath, setLoraPath] = useState('');
   const [loras, setLoras] = useState<GeneratedLora[]>([]);
+  const [loraScope, setLoraScope] = useState<'global' | 'project' | 'all'>(projectID ? 'project' : 'global');
   const [loraStatus, setLoraStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [loraUploadStatus, setLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [loraUploadProgress, setLoraUploadProgress] = useState(0);
@@ -370,6 +376,7 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
   const [inlineMessage, setInlineMessage] = useState('');
   const [cancelRequested, setCancelRequested] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const appliedModelRef = useRef('');
 
   useEffect(() => {
     if (isGPUInfoLoaded && gpuIDs === null) {
@@ -380,14 +387,16 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
   const refreshLoras = useCallback(async () => {
     setLoraStatus('loading');
     try {
-      const res = await apiClient.get('/api/generate/loras');
+      const params = new URLSearchParams({ scope: loraScope });
+      if (projectID) params.set('project_id', projectID);
+      const res = await apiClient.get(`/api/generate/loras?${params.toString()}`);
       setLoras(res.data.loras || []);
       setLoraStatus('success');
     } catch (error) {
       console.error('Error fetching LoRAs:', error);
       setLoraStatus('error');
     }
-  }, []);
+  }, [loraScope, projectID]);
 
   useEffect(() => {
     void refreshLoras();
@@ -409,6 +418,20 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
   );
 
   const selectedLora = useMemo(() => loras.find(lora => lora.path === loraPath), [loras, loraPath]);
+
+  useEffect(() => {
+    const modelRef = searchParams.get('model_ref')?.trim() || '';
+    if (!modelRef || appliedModelRef.current === modelRef || loras.length === 0) return;
+    const matching = loras.find(
+      lora => lora.portableRef === modelRef || lora.path === modelRef || lora.id === modelRef,
+    );
+    if (!matching) return;
+    appliedModelRef.current = modelRef;
+    setUseLora(true);
+    setLoraPath(matching.path);
+    applyLoraModelDefaults(matching);
+    setLoraUploadTriggerWords(matching.triggerWords?.join(', ') || '');
+  }, [loras, searchParams]);
 
   const currentPromptItems = useMemo(() => jsonPromptItems ?? promptItemsFromText(prompts), [jsonPromptItems, prompts]);
 
@@ -1086,6 +1109,19 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
                   if (file) void handleLoraUpload(file);
                 }}
               />
+
+              <div className="mb-3">
+                <SelectInput
+                  label="Model library scope"
+                  value={loraScope}
+                  onChange={value => setLoraScope(value as 'global' | 'project' | 'all')}
+                  options={[
+                    ...(projectID ? [{ value: 'project', label: 'This project' }] : []),
+                    { value: 'global', label: 'Global workspace' },
+                    { value: 'all', label: projectID ? 'Project + global' : 'All workspaces' },
+                  ]}
+                />
+              </div>
 
               <div className="mb-4 grid grid-cols-2 gap-2">
                 <button

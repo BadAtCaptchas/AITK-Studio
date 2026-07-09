@@ -21,6 +21,8 @@ import {
   resolveConfigPath,
 } from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
+import { PROJECT_SYNC_PROTOCOL } from './projectSyncProtocol';
+import { queueProjectResultsSync } from './projectSyncHooks';
 
 const REMOTE_BACKGROUND_POLL_TIMEOUT_MS = 5_000;
 const REMOTE_BACKGROUND_COOLDOWN_MS = 30_000;
@@ -556,6 +558,9 @@ async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
     await clearDurableEncryptedDatasetKeys(synced.id).catch(error =>
       console.error('Error clearing durable encrypted dataset keys:', error),
     );
+    await queueProjectResultsSync(synced).catch(error =>
+      console.error('Error queueing project results sync:', error),
+    );
   }
 
   return synced;
@@ -592,6 +597,9 @@ export async function syncRemoteJob(localJob: Job, options: { background?: boole
     if (remoteJob.status === 'completed' && !getJobRemoteCaptionState(synced)) {
       await clearDurableEncryptedDatasetKeys(localJob.id).catch(error =>
         console.error('Error clearing durable encrypted dataset keys:', error),
+      );
+      await queueProjectResultsSync(synced).catch(error =>
+        console.error('Error queueing project results sync:', error),
       );
     }
     return synced;
@@ -850,10 +858,16 @@ export async function uploadBundleToWorker(
   zipPath: string,
   gpuIds: string,
   onProgress?: (progress: FileUploadProgress) => void,
+  projectSync?: { projectID: string; homeInstanceID: string },
 ) {
   return remoteZipFileJson<{ job: Job; warnings: string[] }>(
     worker,
-    appendQueryParam('/api/jobs/import', 'gpu_ids', gpuIds),
+    appendQueryParams('/api/jobs/import', {
+      gpu_ids: gpuIds,
+      project_id: projectSync?.projectID,
+      project_sync: projectSync ? PROJECT_SYNC_PROTOCOL : null,
+      home_instance_id: projectSync?.homeInstanceID,
+    }),
     {
       filePath: zipPath,
       fileName: path.basename(zipPath),

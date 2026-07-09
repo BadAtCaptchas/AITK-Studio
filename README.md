@@ -234,18 +234,23 @@ The AITK Studio UI is the main control surface for creating datasets, starting a
 
 ### Project Workspaces
 
-Projects are isolated workspaces for keeping related training work together. Open **Projects** in the UI to create or switch projects, then enter a project's Mission Control view. Each project gets its own sandbox under `PROJECTS_FOLDER` (default: `projects/`) with separate `datasets/`, `configs/`, `runs/`, `outputs/`, `models/`, `assets/`, `notes/`, and `cache/` folders.
+Projects are opt-in, isolated production workspaces for keeping related training work together. Enable **Project Workspaces** in Settings, open **Projects** to create or switch workspaces, and use the Overview's **Prepare Dataset → Train Model → Review Output** stages to move work forward. Each new project gets its own registered sandbox under `PROJECTS_FOLDER` (default: `projects/`) with separate `datasets/`, `configs/`, `runs/`, `outputs/`, `models/`, `assets/`, `notes/`, and `cache/` folders. Existing projects keep their registered storage root if `PROJECTS_FOLDER` later changes.
 
-Inside a project, the left rail switches between project-local areas:
+Projects use the normal application rail plus a project header and tab bar:
 
-- **Workspace** shows the Inputs, Active Run, and Outputs flow for that project.
-- **Datasets** lists only project datasets. Clicking a dataset opens the full dataset editor, including upload, caption editing, rename, delete, bulk caption tools, encrypted dataset support, and export/copy/combine actions scoped to the project.
-- **Files** browses the project sandbox, previews supported image/text files, copies paths, downloads files, and supports guarded rename/delete actions.
-- **Runs** shows project-scoped jobs and run details.
-- **Generate** wraps the normal Generate workflow with the project locked, so generated jobs and outputs land in the project sandbox.
-- **Settings** manages project identity and shows sandbox folder health.
+- **Overview** reports dataset and caption readiness, the current or latest run, real outputs, model readiness, recent runs, and activity. A stopped or failed run can be resumed in place so checkpoint state and the existing job identity are retained.
+- **Datasets** is the scoped dataset library, including readiness filters, watcher/encryption state, the full dataset editor, and explicit copy-first transfers between Global and project workspaces.
+- **Runs** is project-focused history with status/type filters, queue actions, existing run details, and resume/restart controls.
+- **Outputs** indexes real training samples and generated image, video, and audio files with previews, filters, an inspector, downloads, and guarded deletion.
+- **Models** indexes project checkpoints and model files, exposes metadata and source runs, and can preselect a model in project Generate.
+- **Files** lazily browses the project by managed zone, with search, breadcrumbs, media/text previews, and guarded rename/delete operations. Dataset, run, and model roots remain protected from destructive generic file operations.
+- **Settings** manages identity, archive/restore, relocation, storage details, compatible execution replicas, synchronization conflicts, rehoming, and guarded permanent purge.
+
+Archive is the normal removal action. Archived projects remain browseable and downloadable but cannot be edited, executed, or used for imports until restored. Permanent purge requires an archive first, a current revision, blocker checks, and typed slug confirmation. Project URLs use immutable project IDs; older slug URLs continue to resolve and redirect to the canonical route.
 
 Global Dashboard, Jobs, Datasets, and Generate still work as before when no `project_id` is used. Existing global datasets and outputs are not moved automatically; when a global dataset is used inside a project job, AITK Studio copies it into the project sandbox by default so project configs can use local project paths.
+
+Remote project execution uses the negotiated `project-sync-v1` protocol and one authoritative home instance. Compatible workers can be linked as execution replicas from project Settings. A **full** sync initializes a replica and is required before rehoming; **launch** sends only the inputs, configuration, and checkpoint state required by a run; **results** pulls artifacts, outputs, models, logs, metrics, and samples back to the home. Transfers use portable `aitk-project://` references, SHA-256 manifests, and resumable 8 MiB chunks. Files changed independently on both sides stop in a conflict state until you choose keep-home, keep-worker, or deterministic keep-both. Legacy global remote jobs continue to work without project synchronization.
 
 ### Run the UI
 

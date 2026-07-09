@@ -6,7 +6,11 @@ import test from 'node:test';
 import { cleanProjectSlug, getProjectRoots, isPathInside, PROJECT_FOLDERS } from '../dist/src/server/projects.js';
 import { copyDatasetBetweenRoots } from '../dist/src/server/datasetCopy.js';
 import { deleteDatasetFolder } from '../dist/src/server/datasetDelete.js';
-import { transferProjectDatasetsToGlobal } from '../dist/src/server/datasetTransfer.js';
+import {
+  previewDatasetTransfer,
+  transferDatasetsBetweenScopes,
+  transferProjectDatasetsToGlobal,
+} from '../dist/src/server/datasetTransfer.js';
 import {
   DatasetScopeError,
   isPathInside as isDatasetScopePathInside,
@@ -61,16 +65,33 @@ async function listDatasetSummariesForTest(datasetsRoot) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function createTransferDeps({ projectID = 'project-1', projectDatasetsRoot, globalDatasetsRoot, jobs = [], updateJobConfig }) {
+function createTransferDeps({
+  projectID = 'project-1',
+  projectDatasetsRoot,
+  destinationProjectDatasetsRoot,
+  globalDatasetsRoot,
+  jobs = [],
+  updateJobConfig,
+}) {
   const jobStore = jobs.map(job => ({ ...job }));
   const deps = {
     resolveDatasetScope: async projectIdentifier =>
       projectIdentifier
         ? {
-            project: { id: projectID },
-            projectID,
-            datasetsRoot: projectDatasetsRoot,
-            trainingRoot: path.join(path.dirname(projectDatasetsRoot), 'runs'),
+            project: { id: projectIdentifier === 'project-2' ? 'project-2' : projectID },
+            projectID: projectIdentifier === 'project-2' ? 'project-2' : projectID,
+            datasetsRoot:
+              projectIdentifier === 'project-2' && destinationProjectDatasetsRoot
+                ? destinationProjectDatasetsRoot
+                : projectDatasetsRoot,
+            trainingRoot: path.join(
+              path.dirname(
+                projectIdentifier === 'project-2' && destinationProjectDatasetsRoot
+                  ? destinationProjectDatasetsRoot
+                  : projectDatasetsRoot,
+              ),
+              'runs',
+            ),
           }
         : {
             project: null,
@@ -108,7 +129,7 @@ test('isPathInside accepts children and rejects traversal siblings', () => {
   assert.equal(isPathInside(root, path.join(root, '..', 'other-project')), false);
 });
 
-test('getProjectRoots resolves sandbox folders and rejects roots outside PROJECTS_FOLDER', async () => {
+test('getProjectRoots uses the registered storage boundary instead of the current PROJECTS_FOLDER', async () => {
   const projectsRoot = path.resolve(await getProjectsRoot());
   const project = {
     id: 'test-project',
@@ -117,6 +138,14 @@ test('getProjectRoots resolves sandbox folders and rejects roots outside PROJECT
     description: '',
     badge_asset: null,
     root_path: '',
+    storage_root_path: projectsRoot,
+    lifecycle_state: 'active',
+    archived_at: null,
+    revision: 1,
+    operation_started_at: null,
+    operation_error: null,
+    home_worker_id: 'local',
+    home_instance_id: 'test-instance',
     created_at: new Date(),
     updated_at: new Date(),
   };
@@ -133,8 +162,16 @@ test('getProjectRoots resolves sandbox folders and rejects roots outside PROJECT
         ...project,
         root_path: path.join(path.dirname(projectsRoot), 'outside-project-root'),
       }),
-    /Project root must be inside PROJECTS_FOLDER/,
+    /registered storage boundary/,
   );
+
+  const externalStorageRoot = path.join(path.dirname(projectsRoot), 'registered-project-storage');
+  const registeredExternal = await getProjectRoots({
+    ...project,
+    root_path: path.join(externalStorageRoot, project.slug),
+    storage_root_path: externalStorageRoot,
+  });
+  assert.equal(registeredExternal.root, path.join(externalStorageRoot, project.slug));
 });
 
 test('resolveDatasetScope keeps omitted project_id on global roots', async () => {
@@ -240,6 +277,43 @@ test('copyDatasetBetweenRoots rejects source traversal outside the declared root
       }),
     /inside .*datasets folder/,
   );
+});
+
+test('copyDatasetBetweenRoots rejects nested symlinks and keeps the destination absent', async t => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-dataset-copy-symlink-'));
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const projectDatasetRoot = path.join(tempRoot, 'projects', 'portraits', 'datasets');
+  const sourceDataset = path.join(globalRoot, 'portrait-set');
+  const outsideDataset = path.join(tempRoot, 'outside-dataset');
+
+  await fs.mkdir(sourceDataset, { recursive: true });
+  await fs.mkdir(outsideDataset, { recursive: true });
+  await fs.writeFile(path.join(outsideDataset, 'secret.txt'), 'outside');
+  try {
+    await fs.symlink(
+      outsideDataset,
+      path.join(sourceDataset, 'escape'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+  } catch (error) {
+    if (error?.code === 'EPERM' || error?.code === 'EACCES') {
+      t.skip('This environment does not permit creating a test symlink or junction.');
+      return;
+    }
+    throw error;
+  }
+
+  await assert.rejects(
+    () =>
+      copyDatasetBetweenRoots({
+        datasetPath: sourceDataset,
+        sourceDatasetsRoot: globalRoot,
+        destinationDatasetsRoot: projectDatasetRoot,
+        requestedName: 'portrait-set',
+      }),
+    /symbolic links or junctions/,
+  );
+  await assert.rejects(() => fs.access(path.join(projectDatasetRoot, 'portrait-set')));
 });
 
 test('deleteDatasetFolder removes only the project-scoped dataset', async () => {
@@ -477,7 +551,7 @@ test('transferProjectDatasetsToGlobal keeps source when move rewrite fails', asy
   assert.equal(result.copiedCount, 1);
   assert.equal(result.movedCount, 0);
   assert.equal(result.failedCount, 1);
-  assert.match(result.results[0].error, /kept the project dataset/i);
+  assert.match(result.results[0].error, /kept the .*dataset/i);
   assert.equal(await fs.readFile(path.join(sourceDataset, 'sample.txt'), 'utf8'), 'project');
   assert.equal(await fs.readFile(path.join(globalRoot, 'portrait-set', 'sample.txt'), 'utf8'), 'project');
 });
@@ -518,6 +592,109 @@ test('transferProjectDatasetsToGlobal rejects traversal dataset names', async ()
   await assert.rejects(
     () => transferProjectDatasetsToGlobal({ sourceProjectID: 'project-1', operation: 'copy', datasetNames: ['../bad'] }, deps),
     /path separators/,
+  );
+});
+
+test('transferDatasetsBetweenScopes copies encrypted project bytes to another project and retains the source', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-between-'));
+  const sourceRoot = path.join(tempRoot, 'projects', 'source', 'datasets');
+  const destinationRoot = path.join(tempRoot, 'projects', 'destination', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const encryptedBytes = Buffer.from([0, 255, 24, 17, 0, 91, 203, 44]);
+  await fs.mkdir(path.join(sourceRoot, 'secure-set', 'objects'), { recursive: true });
+  await fs.writeFile(path.join(sourceRoot, 'secure-set', 'manifest.json'), JSON.stringify({ encrypted: true }));
+  await fs.writeFile(path.join(sourceRoot, 'secure-set', 'objects', 'payload.bin'), encryptedBytes);
+
+  const { deps } = createTransferDeps({
+    projectDatasetsRoot: sourceRoot,
+    destinationProjectDatasetsRoot: destinationRoot,
+    globalDatasetsRoot: globalRoot,
+  });
+  const result = await transferDatasetsBetweenScopes(
+    {
+      sourceProjectID: 'project-1',
+      destinationProjectID: 'project-2',
+      operation: 'copy',
+      datasetNames: ['secure-set'],
+    },
+    deps,
+  );
+
+  assert.equal(result.copiedCount, 1);
+  assert.equal(result.movedCount, 0);
+  assert.deepEqual(await fs.readFile(path.join(destinationRoot, 'secure-set', 'objects', 'payload.bin')), encryptedBytes);
+  assert.deepEqual(await fs.readFile(path.join(sourceRoot, 'secure-set', 'objects', 'payload.bin')), encryptedBytes);
+});
+
+test('project-to-project move preview reports references and execution keeps the source', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-preview-'));
+  const sourceRoot = path.join(tempRoot, 'projects', 'source', 'datasets');
+  const destinationRoot = path.join(tempRoot, 'projects', 'destination', 'datasets');
+  const globalRoot = path.join(tempRoot, 'global-datasets');
+  const sourceDataset = path.join(sourceRoot, 'referenced-set');
+  await fs.mkdir(sourceDataset, { recursive: true });
+  await fs.writeFile(path.join(sourceDataset, 'sample.txt'), 'keep me');
+  const { deps } = createTransferDeps({
+    projectDatasetsRoot: sourceRoot,
+    destinationProjectDatasetsRoot: destinationRoot,
+    globalDatasetsRoot: globalRoot,
+    jobs: [
+      {
+        id: 'job-1',
+        name: 'saved-reference',
+        status: 'stopped',
+        job_config: JSON.stringify({ config: { process: [{ datasets: [{ folder_path: sourceDataset }] }] } }),
+      },
+    ],
+  });
+
+  const preview = await previewDatasetTransfer(
+    {
+      sourceProjectID: 'project-1',
+      destinationProjectID: 'project-2',
+      operation: 'move',
+      datasetNames: ['referenced-set'],
+    },
+    deps,
+  );
+  assert.equal(preview.canTransfer, false);
+  assert.match(preview.blockers.map(blocker => blocker.message).join('\n'), /saved-reference/);
+  await assert.rejects(
+    () =>
+      transferDatasetsBetweenScopes(
+        {
+          sourceProjectID: 'project-1',
+          destinationProjectID: 'project-2',
+          operation: 'move',
+          datasetNames: ['referenced-set'],
+        },
+        deps,
+      ),
+    error => error?.status === 409 && /saved-reference/.test(error.message),
+  );
+  assert.equal(await fs.readFile(path.join(sourceDataset, 'sample.txt'), 'utf8'), 'keep me');
+  await assert.rejects(() => fs.access(path.join(destinationRoot, 'referenced-set')));
+});
+
+test('dataset transfer rejects identical source and destination scopes', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-project-transfer-same-scope-'));
+  const projectRoot = path.join(tempRoot, 'projects', 'source', 'datasets');
+  const { deps } = createTransferDeps({
+    projectDatasetsRoot: projectRoot,
+    globalDatasetsRoot: path.join(tempRoot, 'global-datasets'),
+  });
+  await assert.rejects(
+    () =>
+      previewDatasetTransfer(
+        {
+          sourceProjectID: 'project-1',
+          destinationProjectID: 'project-1',
+          operation: 'copy',
+          all: true,
+        },
+        deps,
+      ),
+    error => error?.status === 400 && /different/.test(error.message),
   );
 });
 

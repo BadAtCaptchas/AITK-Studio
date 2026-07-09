@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     const datasetName = typeof body?.datasetName === 'string' ? body.datasetName : '';
     const projectID = body?.project_id;
     await assertProjectScopeEnabled(projectID);
-    const { datasetsRoot } = await resolveDatasetScope(projectID);
+    const { datasetsRoot } = await resolveDatasetScope(projectID, { intent: 'read' });
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     return NextResponse.json(await readDatasetRootCaption(datasetFolder));
   } catch (error) {

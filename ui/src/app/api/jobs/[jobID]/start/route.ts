@@ -12,6 +12,8 @@ import {
   updateRemoteStartProgress,
 } from '@/server/remoteStartProgress';
 import type { JobStartRequest } from '@/types';
+import { parseReplicaExecutionAuthorization, ProjectSyncProtocolError } from '@/server/projectSyncProtocol';
+import type { ReplicaExecutionAuthorization } from '@/server/projectSyncWorker';
 
 function ensureApiAccess(request: NextRequest): NextResponse | null {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
@@ -32,6 +34,17 @@ function handleJobStartError(error: unknown) {
     return NextResponse.json(error.payload, { status: error.status });
   }
   throw error;
+}
+
+function getReplicaExecutionAuthorization(request: NextRequest): ReplicaExecutionAuthorization | null {
+  try {
+    return parseReplicaExecutionAuthorization(request.headers, process.env.AI_TOOLKIT_AUTH);
+  } catch (error) {
+    if (error instanceof ProjectSyncProtocolError) {
+      throw new JobStartError({ error: error.message, code: error.code }, error.status);
+    }
+    throw error;
+  }
 }
 
 function runBackgroundRemoteStart(startID: string, prepared: Awaited<ReturnType<typeof prepareJobStart>>) {
@@ -61,11 +74,13 @@ async function handleStart(
   const { jobID } = await params;
 
   try {
+    const replicaExecutionAuthorization = getReplicaExecutionAuthorization(request);
     if (body.background === true) {
       const prepared = await prepareJobStart(
         jobID,
         body.encryptedDatasetKeys,
         body.durableEncryptedDatasetKeys === true,
+        replicaExecutionAuthorization,
       );
       if (!isLocalWorker(prepared.job.worker_id) && prepared.job.job_type === 'train') {
         if (hasActiveRemoteStartForJob(jobID)) {
@@ -84,7 +99,12 @@ async function handleStart(
     }
 
     return NextResponse.json(
-      await startJobFromRequest(jobID, body.encryptedDatasetKeys, body.durableEncryptedDatasetKeys === true),
+      await startJobFromRequest(
+        jobID,
+        body.encryptedDatasetKeys,
+        body.durableEncryptedDatasetKeys === true,
+        replicaExecutionAuthorization,
+      ),
     );
   } catch (error) {
     return handleJobStartError(error);

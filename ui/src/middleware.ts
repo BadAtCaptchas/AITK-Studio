@@ -6,6 +6,8 @@ import type { NextRequest } from 'next/server';
 // so they cannot attach the localStorage bearer token used by apiClient.
 const publicReadRoutePrefixes = ['/api/img/', '/api/files/', '/api/remote-assets'];
 const publicReadMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
+const projectAssetRoutePrefix = '/api/project-assets/';
+const projectAssetSignatureContext = 'project-asset-v1';
 const remoteDatasetAssetsRoute = '/api/remote-datasets/assets';
 const remoteDatasetAssetSignatureContext = 'remote-dataset-asset-v1';
 
@@ -27,6 +29,15 @@ function isRemoteDatasetAssetType(type: string) {
 
 function remoteDatasetAssetSignaturePayload(workerID: string, remotePath: string, expires: number) {
   return [remoteDatasetAssetSignatureContext, workerID, remotePath, String(expires)].join('\n');
+}
+
+function projectAssetSignaturePayload(
+  projectID: string,
+  relativePath: string,
+  disposition: string,
+  expires: number,
+) {
+  return [projectAssetSignatureContext, projectID, relativePath, disposition, String(expires)].join('\n');
 }
 
 function base64Url(bytes: Uint8Array) {
@@ -76,6 +87,37 @@ async function signedRemoteDatasetAssetRequest(searchParams: URLSearchParams, se
   return constantTimeEqual(signature, base64Url(new Uint8Array(digest)));
 }
 
+async function signedProjectAssetRequest(searchParams: URLSearchParams, secret: string) {
+  const projectID = searchParams.get('project_id') || '';
+  const relativePath = searchParams.get('path') || '';
+  const disposition = searchParams.get('disposition') || '';
+  const expires = Number(searchParams.get('expires') || '');
+  const signature = searchParams.get('sig') || '';
+  if (
+    !projectID ||
+    !relativePath ||
+    (disposition !== 'inline' && disposition !== 'attachment') ||
+    !signature ||
+    !Number.isSafeInteger(expires) ||
+    expires <= Date.now()
+  ) {
+    return false;
+  }
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const digest = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(projectAssetSignaturePayload(projectID, relativePath, disposition, expires)),
+  );
+  return constantTimeEqual(signature, base64Url(new Uint8Array(digest)));
+}
+
 export async function middleware(request: NextRequest) {
   // check env var for AI_TOOLKIT_AUTH, if not set, approve all requests
   // if it is set make sure bearer token matches
@@ -88,6 +130,14 @@ export async function middleware(request: NextRequest) {
   const token = request.headers.get('Authorization')?.split(' ')[1];
 
   const { pathname } = request.nextUrl;
+
+  if (
+    publicReadMethods.has(request.method) &&
+    pathname.startsWith(projectAssetRoutePrefix) &&
+    (await signedProjectAssetRequest(request.nextUrl.searchParams, tokenToUse))
+  ) {
+    return NextResponse.next();
+  }
 
   // allow public read routes to pass through
   if (

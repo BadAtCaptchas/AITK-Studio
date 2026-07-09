@@ -6,7 +6,16 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import { Prisma, PrismaClient } from '../generated/prisma/client';
 import sqlite3 from 'sqlite3';
 import { TOOLKIT_ROOT } from '../paths';
-import type { Job, Project, Queue, WorkerNode } from '../types';
+import type {
+  Job,
+  JobReplica,
+  Project,
+  ProjectLifecycleState,
+  ProjectReplicaState,
+  ProjectSyncOperation,
+  Queue,
+  WorkerNode,
+} from '../types';
 import { buildMetricSeriesResult, normalizeMetricMaxPoints } from './metricsDownsample';
 
 export type DatabaseProvider = 'sqlite' | 'mongodb';
@@ -86,11 +95,74 @@ export type ProjectCreateInput = {
   description?: string;
   badge_asset?: string | null;
   root_path?: string;
+  storage_root_path?: string;
+  lifecycle_state?: ProjectLifecycleState;
+  archived_at?: Date | string | null;
+  revision?: number;
+  operation_started_at?: Date | string | null;
+  operation_error?: string | null;
+  home_worker_id?: string;
+  home_instance_id?: string;
 };
 
 export type ProjectUpdateInput = Partial<Omit<ProjectCreateInput, 'id' | 'slug'>> & {
   slug?: string;
 };
+
+export type ProjectReplicaCreateInput = {
+  id?: string;
+  project_id: string;
+  worker_id: string;
+  remote_project_id?: string | null;
+  remote_instance_id?: string | null;
+  role?: ProjectReplicaState['role'];
+  state?: ProjectReplicaState['state'];
+  base_manifest_hash?: string | null;
+  local_manifest_hash?: string | null;
+  remote_manifest_hash?: string | null;
+  last_synced_at?: Date | string | null;
+  last_error?: string | null;
+  auto_pull_results?: boolean;
+};
+
+export type ProjectReplicaUpdateInput = Partial<Omit<ProjectReplicaCreateInput, 'id' | 'project_id' | 'worker_id'>>;
+
+export type JobReplicaCreateInput = {
+  id?: string;
+  job_id: string;
+  worker_id: string;
+  remote_job_id: string;
+  remote_project_id?: string | null;
+  role?: JobReplica['role'];
+  last_synced_at?: Date | string | null;
+  last_error?: string | null;
+};
+
+export type JobReplicaUpdateInput = Partial<Omit<JobReplicaCreateInput, 'id' | 'job_id' | 'worker_id'>>;
+
+export type ProjectSyncOperationCreateInput = {
+  id?: string;
+  project_id: string;
+  worker_id: string;
+  profile: ProjectSyncOperation['profile'];
+  status?: ProjectSyncOperation['status'];
+  phase?: string;
+  files_total?: number;
+  files_done?: number;
+  bytes_total?: number;
+  bytes_done?: number;
+  retry_count?: number;
+  retry_at?: Date | string | null;
+  base_manifest_hash?: string | null;
+  source_manifest_hash?: string | null;
+  target_manifest_hash?: string | null;
+  conflicts?: string;
+  error?: string | null;
+};
+
+export type ProjectSyncOperationUpdateInput = Partial<
+  Omit<ProjectSyncOperationCreateInput, 'id' | 'project_id' | 'worker_id' | 'profile'>
+>;
 
 export type LossPoint = {
   step: number;
@@ -291,13 +363,113 @@ function normalizeJob(raw: any): Job | null {
 
 function normalizeProject(raw: any): Project | null {
   if (!raw) return null;
+  const rootPath = String(raw.root_path ?? '');
+  const lifecycleStates = new Set<ProjectLifecycleState>(['creating', 'active', 'archived', 'relocating', 'purging']);
+  const rawLifecycleState = String(raw.lifecycle_state ?? 'active') as ProjectLifecycleState;
   return {
     id: String(raw.id),
     slug: String(raw.slug ?? ''),
     name: String(raw.name ?? ''),
     description: String(raw.description ?? ''),
     badge_asset: raw.badge_asset == null ? null : String(raw.badge_asset),
-    root_path: String(raw.root_path ?? ''),
+    root_path: rootPath,
+    storage_root_path: String(raw.storage_root_path || (rootPath ? path.dirname(rootPath) : '')),
+    lifecycle_state: lifecycleStates.has(rawLifecycleState) ? rawLifecycleState : 'active',
+    archived_at: raw.archived_at == null ? null : parseDate(raw.archived_at),
+    revision: Math.max(0, Number(raw.revision ?? 1)),
+    operation_started_at: raw.operation_started_at == null ? null : parseDate(raw.operation_started_at),
+    operation_error: raw.operation_error == null ? null : String(raw.operation_error),
+    home_worker_id: String(raw.home_worker_id ?? 'local'),
+    home_instance_id: String(raw.home_instance_id ?? ''),
+    created_at: parseDate(raw.created_at),
+    updated_at: parseDate(raw.updated_at),
+  };
+}
+
+function normalizeProjectReplica(raw: any): ProjectReplicaState | null {
+  if (!raw) return null;
+  const states = new Set<ProjectReplicaState['state']>([
+    'creating',
+    'syncing',
+    'in_sync',
+    'dirty',
+    'conflict',
+    'waiting_for_job',
+    'waiting_for_worker',
+    'offline',
+    'incompatible',
+    'error',
+    'detached',
+  ]);
+  const rawState = String(raw.state ?? 'creating') as ProjectReplicaState['state'];
+  return {
+    id: String(raw.id),
+    project_id: String(raw.project_id),
+    worker_id: String(raw.worker_id),
+    remote_project_id: raw.remote_project_id == null ? null : String(raw.remote_project_id),
+    remote_instance_id: raw.remote_instance_id == null ? null : String(raw.remote_instance_id),
+    role: raw.role === 'home' ? 'home' : 'execution',
+    state: states.has(rawState) ? rawState : 'error',
+    base_manifest_hash: raw.base_manifest_hash == null ? null : String(raw.base_manifest_hash),
+    local_manifest_hash: raw.local_manifest_hash == null ? null : String(raw.local_manifest_hash),
+    remote_manifest_hash: raw.remote_manifest_hash == null ? null : String(raw.remote_manifest_hash),
+    last_synced_at: raw.last_synced_at == null ? null : parseDate(raw.last_synced_at),
+    last_error: raw.last_error == null ? null : String(raw.last_error),
+    auto_pull_results: raw.auto_pull_results !== false,
+    created_at: parseDate(raw.created_at),
+    updated_at: parseDate(raw.updated_at),
+  };
+}
+
+function normalizeJobReplica(raw: any): JobReplica | null {
+  if (!raw) return null;
+  return {
+    id: String(raw.id),
+    job_id: String(raw.job_id),
+    worker_id: String(raw.worker_id),
+    remote_job_id: String(raw.remote_job_id),
+    remote_project_id: raw.remote_project_id == null ? null : String(raw.remote_project_id),
+    role: raw.role === 'home' ? 'home' : 'execution',
+    last_synced_at: raw.last_synced_at == null ? null : parseDate(raw.last_synced_at),
+    last_error: raw.last_error == null ? null : String(raw.last_error),
+    created_at: parseDate(raw.created_at),
+    updated_at: parseDate(raw.updated_at),
+  };
+}
+
+function normalizeProjectSyncOperation(raw: any): ProjectSyncOperation | null {
+  if (!raw) return null;
+  const profiles = new Set<ProjectSyncOperation['profile']>(['full', 'launch', 'results']);
+  const statuses = new Set<ProjectSyncOperation['status']>([
+    'queued',
+    'running',
+    'waiting_for_job',
+    'waiting_for_worker',
+    'conflict',
+    'completed',
+    'failed',
+    'cancelled',
+  ]);
+  const rawProfile = String(raw.profile) as ProjectSyncOperation['profile'];
+  const rawStatus = String(raw.status ?? 'queued') as ProjectSyncOperation['status'];
+  return {
+    id: String(raw.id),
+    project_id: String(raw.project_id),
+    worker_id: String(raw.worker_id),
+    profile: profiles.has(rawProfile) ? rawProfile : 'full',
+    status: statuses.has(rawStatus) ? rawStatus : 'failed',
+    phase: String(raw.phase ?? 'queued'),
+    files_total: Math.max(0, Number(raw.files_total ?? 0)),
+    files_done: Math.max(0, Number(raw.files_done ?? 0)),
+    bytes_total: Math.max(0, Number(raw.bytes_total ?? 0)),
+    bytes_done: Math.max(0, Number(raw.bytes_done ?? 0)),
+    retry_count: Math.max(0, Number(raw.retry_count ?? 0)),
+    retry_at: raw.retry_at == null ? null : parseDate(raw.retry_at),
+    base_manifest_hash: raw.base_manifest_hash == null ? null : String(raw.base_manifest_hash),
+    source_manifest_hash: raw.source_manifest_hash == null ? null : String(raw.source_manifest_hash),
+    target_manifest_hash: raw.target_manifest_hash == null ? null : String(raw.target_manifest_hash),
+    conflicts: String(raw.conflicts ?? '[]'),
+    error: raw.error == null ? null : String(raw.error),
     created_at: parseDate(raw.created_at),
     updated_at: parseDate(raw.updated_at),
   };
@@ -732,6 +904,44 @@ async function readMongoMetrics(
 async function ensureMongoIndexes() {
   const mongo = await getMongoDb();
   await dropLegacyMongoJobNameUniqueIndex(mongo);
+  const legacyProjects = await mongoCollection(mongo, 'projects')
+    .find(
+      {
+        $or: [
+          { lifecycle_state: { $exists: false } },
+          { storage_root_path: { $exists: false } },
+          { revision: { $exists: false } },
+        ],
+      },
+      { projection: { _id: 0 } },
+    )
+    .toArray();
+  if (legacyProjects.length > 0) {
+    await mongoCollection(mongo, 'projects').bulkWrite(
+      legacyProjects.map(project => {
+        const rootPath = String(project.root_path ?? '');
+        return {
+          updateOne: {
+            filter: { id: String(project.id) },
+            update: {
+              $set: {
+                root_path: rootPath,
+                storage_root_path: String(project.storage_root_path || (rootPath ? path.dirname(rootPath) : '')),
+                lifecycle_state: String(project.lifecycle_state || 'active'),
+                archived_at: project.archived_at ?? null,
+                revision: Number(project.revision ?? 1),
+                operation_started_at: project.operation_started_at ?? null,
+                operation_error: project.operation_error ?? null,
+                home_worker_id: String(project.home_worker_id || 'local'),
+                home_instance_id: String(project.home_instance_id || ''),
+              },
+            },
+          },
+        };
+      }),
+      { ordered: false },
+    );
+  }
   await Promise.all([
     mongoCollection(mongo, 'jobs').createIndexes([
       { key: { id: 1 }, unique: true },
@@ -750,6 +960,28 @@ async function ensureMongoIndexes() {
       { key: { id: 1 }, unique: true },
       { key: { slug: 1 }, unique: true },
       { key: { updated_at: -1 } },
+      { key: { lifecycle_state: 1, updated_at: -1 } },
+      { key: { archived_at: -1 } },
+    ]),
+    mongoCollection(mongo, 'project_replicas').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { project_id: 1, worker_id: 1 }, unique: true },
+      { key: { project_id: 1 } },
+      { key: { worker_id: 1 } },
+      { key: { state: 1 } },
+    ]),
+    mongoCollection(mongo, 'job_replicas').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { job_id: 1, worker_id: 1 }, unique: true },
+      { key: { worker_id: 1, remote_job_id: 1 }, unique: true },
+      { key: { job_id: 1 } },
+      { key: { worker_id: 1 } },
+    ]),
+    mongoCollection(mongo, 'project_sync_operations').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { project_id: 1, created_at: -1 } },
+      { key: { worker_id: 1 } },
+      { key: { status: 1, retry_at: 1 } },
     ]),
     mongoCollection(mongo, 'queues').createIndexes([
       { key: { id: 1 }, unique: true },
@@ -769,6 +1001,35 @@ async function ensureMongoIndexes() {
     ]),
     mongoCollection(mongo, 'metric_keys').createIndexes([{ key: { job_id: 1, key: 1 }, unique: true }]),
   ]);
+
+  const legacyRemoteJobs = await mongoCollection(mongo, 'jobs')
+    .find({ remote_job_id: { $type: 'string', $ne: '' } }, { projection: { _id: 0 } })
+    .toArray();
+  if (legacyRemoteJobs.length > 0) {
+    await mongoCollection(mongo, 'job_replicas').bulkWrite(
+      legacyRemoteJobs.map(job => ({
+        updateOne: {
+          filter: { job_id: String(job.id), worker_id: String(job.worker_id || 'local') },
+          update: {
+            $setOnInsert: {
+              id: `legacy-${String(job.id)}-${String(job.worker_id || 'local')}`,
+              job_id: String(job.id),
+              worker_id: String(job.worker_id || 'local'),
+              remote_job_id: String(job.remote_job_id),
+              remote_project_id: null,
+              role: 'execution',
+              last_synced_at: job.remote_sync_at ?? null,
+              last_error: job.remote_error ?? null,
+              created_at: job.created_at ?? new Date(),
+              updated_at: job.updated_at ?? new Date(),
+            },
+          },
+          upsert: true,
+        },
+      })),
+      { ordered: false },
+    );
+  }
 }
 
 async function nextMongoQueueId(queues: Collection<Document>) {
@@ -836,18 +1097,27 @@ export const db = {
   },
 
   projects: {
-    async list(): Promise<Project[]> {
+    async list(options: { lifecycle_state?: ProjectLifecycleState | ProjectLifecycleState[] } = {}): Promise<Project[]> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
+        const filter: Document = {};
+        if (Array.isArray(options.lifecycle_state)) filter.lifecycle_state = { $in: options.lifecycle_state };
+        else if (options.lifecycle_state) filter.lifecycle_state = options.lifecycle_state;
         const rows = await mongoCollection(mongo, 'projects')
-          .find({}, { projection: { _id: 0 } })
+          .find(filter, { projection: { _id: 0 } })
           .sort({ updated_at: -1, name: 1 })
           .toArray();
         return rows.map(normalizeProject).filter(Boolean) as Project[];
       }
-      return getPrisma().project.findMany({
+      const rows = await getPrisma().project.findMany({
+        where: Array.isArray(options.lifecycle_state)
+          ? { lifecycle_state: { in: options.lifecycle_state } }
+          : options.lifecycle_state
+            ? { lifecycle_state: options.lifecycle_state }
+            : undefined,
         orderBy: [{ updated_at: 'desc' }, { name: 'asc' }],
       });
+      return rows.map(normalizeProject).filter(Boolean) as Project[];
     },
 
     async findById(id: string): Promise<Project | null> {
@@ -856,7 +1126,7 @@ export const db = {
         const row = await mongoCollection(mongo, 'projects').findOne({ id }, { projection: { _id: 0 } });
         return normalizeProject(row);
       }
-      return getPrisma().project.findUnique({ where: { id } });
+      return normalizeProject(await getPrisma().project.findUnique({ where: { id } }));
     },
 
     async findBySlug(slug: string): Promise<Project | null> {
@@ -865,7 +1135,7 @@ export const db = {
         const row = await mongoCollection(mongo, 'projects').findOne({ slug }, { projection: { _id: 0 } });
         return normalizeProject(row);
       }
-      return getPrisma().project.findUnique({ where: { slug } });
+      return normalizeProject(await getPrisma().project.findUnique({ where: { slug } }));
     },
 
     async create(input: ProjectCreateInput): Promise<Project> {
@@ -879,6 +1149,14 @@ export const db = {
           description: input.description ?? '',
           badge_asset: input.badge_asset ?? null,
           root_path: input.root_path ?? '',
+          storage_root_path: input.storage_root_path ?? '',
+          lifecycle_state: input.lifecycle_state ?? 'active',
+          archived_at: input.archived_at ?? null,
+          revision: input.revision ?? 1,
+          operation_started_at: input.operation_started_at ?? null,
+          operation_error: input.operation_error ?? null,
+          home_worker_id: input.home_worker_id ?? 'local',
+          home_instance_id: input.home_instance_id ?? '',
           created_at: now,
           updated_at: now,
         }) as Project;
@@ -890,15 +1168,25 @@ export const db = {
         return project;
       }
 
-      return getPrisma().project.create({
+      const project = await getPrisma().project.create({
         data: {
+          id: input.id,
           slug: input.slug,
           name: input.name,
           description: input.description ?? '',
           badge_asset: input.badge_asset ?? null,
           root_path: input.root_path ?? '',
+          storage_root_path: input.storage_root_path ?? '',
+          lifecycle_state: input.lifecycle_state ?? 'active',
+          archived_at: input.archived_at == null ? null : new Date(input.archived_at),
+          revision: input.revision ?? 1,
+          operation_started_at: input.operation_started_at == null ? null : new Date(input.operation_started_at),
+          operation_error: input.operation_error ?? null,
+          home_worker_id: input.home_worker_id ?? 'local',
+          home_instance_id: input.home_instance_id ?? '',
         },
       });
+      return normalizeProject(project) as Project;
     },
 
     async update(id: string, data: ProjectUpdateInput): Promise<Project> {
@@ -918,7 +1206,42 @@ export const db = {
         }
       }
 
-      return getPrisma().project.update({ where: { id }, data });
+      const project = await getPrisma().project.update({ where: { id }, data });
+      return normalizeProject(project) as Project;
+    },
+
+    async compareAndSet(
+      id: string,
+      expected: { revision: number; lifecycle_state?: ProjectLifecycleState | ProjectLifecycleState[] },
+      data: ProjectUpdateInput,
+    ): Promise<Project | null> {
+      const states = Array.isArray(expected.lifecycle_state)
+        ? expected.lifecycle_state
+        : expected.lifecycle_state
+          ? [expected.lifecycle_state]
+          : null;
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const filter: Document = { id, revision: expected.revision };
+        if (states) filter.lifecycle_state = { $in: states };
+        const result = await mongoCollection(mongo, 'projects').findOneAndUpdate(
+          filter,
+          { $set: { ...data, updated_at: new Date() } },
+          { returnDocument: 'after', projection: { _id: 0 } },
+        );
+        return normalizeProject(result);
+      }
+
+      const result = await getPrisma().project.updateMany({
+        where: {
+          id,
+          revision: expected.revision,
+          ...(states ? { lifecycle_state: { in: states } } : {}),
+        },
+        data,
+      });
+      if (result.count !== 1) return null;
+      return normalizeProject(await getPrisma().project.findUnique({ where: { id } }));
     },
 
     async delete(id: string): Promise<Project | null> {
@@ -928,11 +1251,356 @@ export const db = {
         return normalizeProject(result);
       }
       try {
-        return await getPrisma().project.delete({ where: { id } });
+        return normalizeProject(await getPrisma().project.delete({ where: { id } }));
       } catch (error: any) {
         if (error?.code === 'P2025') return null;
         throw error;
       }
+    },
+  },
+
+  projectReplicas: {
+    async listByProject(projectID: string): Promise<ProjectReplicaState[]> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const rows = await mongoCollection(mongo, 'project_replicas')
+          .find({ project_id: projectID }, { projection: { _id: 0 } })
+          .sort({ role: 1, worker_id: 1 })
+          .toArray();
+        return rows.map(normalizeProjectReplica).filter(Boolean) as ProjectReplicaState[];
+      }
+      const rows = await getPrisma().projectReplica.findMany({
+        where: { project_id: projectID },
+        orderBy: [{ role: 'asc' }, { worker_id: 'asc' }],
+      });
+      return rows.map(normalizeProjectReplica).filter(Boolean) as ProjectReplicaState[];
+    },
+
+    async findByProjectAndWorker(projectID: string, workerID: string): Promise<ProjectReplicaState | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return normalizeProjectReplica(
+          await mongoCollection(mongo, 'project_replicas').findOne(
+            { project_id: projectID, worker_id: workerID },
+            { projection: { _id: 0 } },
+          ),
+        );
+      }
+      return normalizeProjectReplica(
+        await getPrisma().projectReplica.findUnique({
+          where: { project_id_worker_id: { project_id: projectID, worker_id: workerID } },
+        }),
+      );
+    },
+
+    async upsert(input: ProjectReplicaCreateInput): Promise<ProjectReplicaState> {
+      const now = new Date();
+      const create = {
+        id: input.id || randomUUID(),
+        project_id: input.project_id,
+        worker_id: input.worker_id,
+        remote_project_id: input.remote_project_id ?? null,
+        remote_instance_id: input.remote_instance_id ?? null,
+        role: input.role ?? 'execution',
+        state: input.state ?? 'creating',
+        base_manifest_hash: input.base_manifest_hash ?? null,
+        local_manifest_hash: input.local_manifest_hash ?? null,
+        remote_manifest_hash: input.remote_manifest_hash ?? null,
+        last_synced_at: input.last_synced_at == null ? null : parseDate(input.last_synced_at),
+        last_error: input.last_error ?? null,
+        auto_pull_results: input.auto_pull_results ?? true,
+        created_at: now,
+        updated_at: now,
+      };
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const update = { ...create };
+        delete (update as Partial<typeof update>).id;
+        delete (update as Partial<typeof update>).created_at;
+        const row = await mongoCollection(mongo, 'project_replicas').findOneAndUpdate(
+          { project_id: input.project_id, worker_id: input.worker_id },
+          { $set: update, $setOnInsert: { id: create.id, created_at: now } },
+          { upsert: true, returnDocument: 'after', projection: { _id: 0 } },
+        );
+        return normalizeProjectReplica(row) as ProjectReplicaState;
+      }
+      const row = await getPrisma().projectReplica.upsert({
+        where: { project_id_worker_id: { project_id: input.project_id, worker_id: input.worker_id } },
+        create,
+        update: {
+          remote_project_id: create.remote_project_id,
+          remote_instance_id: create.remote_instance_id,
+          role: create.role,
+          state: create.state,
+          base_manifest_hash: create.base_manifest_hash,
+          local_manifest_hash: create.local_manifest_hash,
+          remote_manifest_hash: create.remote_manifest_hash,
+          last_synced_at: create.last_synced_at,
+          last_error: create.last_error,
+          auto_pull_results: create.auto_pull_results,
+        },
+      });
+      return normalizeProjectReplica(row) as ProjectReplicaState;
+    },
+
+    async update(id: string, data: ProjectReplicaUpdateInput): Promise<ProjectReplicaState> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'project_replicas').findOneAndUpdate(
+          { id },
+          { $set: { ...data, updated_at: new Date() } },
+          { returnDocument: 'after', projection: { _id: 0 } },
+        );
+        const replica = normalizeProjectReplica(row);
+        if (!replica) throw new Error(`Project replica not found: ${id}`);
+        return replica;
+      }
+      return normalizeProjectReplica(await getPrisma().projectReplica.update({ where: { id }, data })) as ProjectReplicaState;
+    },
+
+    async delete(id: string): Promise<ProjectReplicaState | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return normalizeProjectReplica(
+          await mongoCollection(mongo, 'project_replicas').findOneAndDelete({ id }, { projection: { _id: 0 } }),
+        );
+      }
+      try {
+        return normalizeProjectReplica(await getPrisma().projectReplica.delete({ where: { id } }));
+      } catch (error: any) {
+        if (error?.code === 'P2025') return null;
+        throw error;
+      }
+    },
+
+    async deleteByProject(projectID: string): Promise<number> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return (await mongoCollection(mongo, 'project_replicas').deleteMany({ project_id: projectID })).deletedCount;
+      }
+      return (await getPrisma().projectReplica.deleteMany({ where: { project_id: projectID } })).count;
+    },
+  },
+
+  jobReplicas: {
+    async listByJob(jobID: string): Promise<JobReplica[]> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const rows = await mongoCollection(mongo, 'job_replicas')
+          .find({ job_id: jobID }, { projection: { _id: 0 } })
+          .sort({ worker_id: 1 })
+          .toArray();
+        return rows.map(normalizeJobReplica).filter(Boolean) as JobReplica[];
+      }
+      const rows = await getPrisma().jobReplica.findMany({ where: { job_id: jobID }, orderBy: { worker_id: 'asc' } });
+      return rows.map(normalizeJobReplica).filter(Boolean) as JobReplica[];
+    },
+
+    async findByJobAndWorker(jobID: string, workerID: string): Promise<JobReplica | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return normalizeJobReplica(
+          await mongoCollection(mongo, 'job_replicas').findOne(
+            { job_id: jobID, worker_id: workerID },
+            { projection: { _id: 0 } },
+          ),
+        );
+      }
+      return normalizeJobReplica(
+        await getPrisma().jobReplica.findUnique({
+          where: { job_id_worker_id: { job_id: jobID, worker_id: workerID } },
+        }),
+      );
+    },
+
+    async findByRemote(workerID: string, remoteJobID: string): Promise<JobReplica | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return normalizeJobReplica(
+          await mongoCollection(mongo, 'job_replicas').findOne(
+            { worker_id: workerID, remote_job_id: remoteJobID },
+            { projection: { _id: 0 } },
+          ),
+        );
+      }
+      return normalizeJobReplica(
+        await getPrisma().jobReplica.findUnique({
+          where: { worker_id_remote_job_id: { worker_id: workerID, remote_job_id: remoteJobID } },
+        }),
+      );
+    },
+
+    async upsert(input: JobReplicaCreateInput): Promise<JobReplica> {
+      const now = new Date();
+      const create = {
+        id: input.id || randomUUID(),
+        job_id: input.job_id,
+        worker_id: input.worker_id,
+        remote_job_id: input.remote_job_id,
+        remote_project_id: input.remote_project_id ?? null,
+        role: input.role ?? 'execution',
+        last_synced_at: input.last_synced_at == null ? null : parseDate(input.last_synced_at),
+        last_error: input.last_error ?? null,
+        created_at: now,
+        updated_at: now,
+      };
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const update = { ...create };
+        delete (update as Partial<typeof update>).id;
+        delete (update as Partial<typeof update>).created_at;
+        const row = await mongoCollection(mongo, 'job_replicas').findOneAndUpdate(
+          { job_id: input.job_id, worker_id: input.worker_id },
+          { $set: update, $setOnInsert: { id: create.id, created_at: now } },
+          { upsert: true, returnDocument: 'after', projection: { _id: 0 } },
+        );
+        return normalizeJobReplica(row) as JobReplica;
+      }
+      const row = await getPrisma().jobReplica.upsert({
+        where: { job_id_worker_id: { job_id: input.job_id, worker_id: input.worker_id } },
+        create,
+        update: {
+          remote_job_id: create.remote_job_id,
+          remote_project_id: create.remote_project_id,
+          role: create.role,
+          last_synced_at: create.last_synced_at,
+          last_error: create.last_error,
+        },
+      });
+      return normalizeJobReplica(row) as JobReplica;
+    },
+
+    async update(id: string, data: JobReplicaUpdateInput): Promise<JobReplica> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'job_replicas').findOneAndUpdate(
+          { id },
+          { $set: { ...data, updated_at: new Date() } },
+          { returnDocument: 'after', projection: { _id: 0 } },
+        );
+        const replica = normalizeJobReplica(row);
+        if (!replica) throw new Error(`Job replica not found: ${id}`);
+        return replica;
+      }
+      return normalizeJobReplica(await getPrisma().jobReplica.update({ where: { id }, data })) as JobReplica;
+    },
+
+    async deleteByJob(jobID: string): Promise<number> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return (await mongoCollection(mongo, 'job_replicas').deleteMany({ job_id: jobID })).deletedCount;
+      }
+      return (await getPrisma().jobReplica.deleteMany({ where: { job_id: jobID } })).count;
+    },
+  },
+
+  projectSyncOperations: {
+    async findById(id: string): Promise<ProjectSyncOperation | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return normalizeProjectSyncOperation(
+          await mongoCollection(mongo, 'project_sync_operations').findOne({ id }, { projection: { _id: 0 } }),
+        );
+      }
+      return normalizeProjectSyncOperation(await getPrisma().projectSyncOperation.findUnique({ where: { id } }));
+    },
+
+    async list(
+      options: { project_id?: string; worker_id?: string; status?: ProjectSyncOperation['status'] | ProjectSyncOperation['status'][] } = {},
+    ): Promise<ProjectSyncOperation[]> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const filter: Document = {};
+        if (options.project_id) filter.project_id = options.project_id;
+        if (options.worker_id) filter.worker_id = options.worker_id;
+        if (Array.isArray(options.status)) filter.status = { $in: options.status };
+        else if (options.status) filter.status = options.status;
+        const rows = await mongoCollection(mongo, 'project_sync_operations')
+          .find(filter, { projection: { _id: 0 } })
+          .sort({ created_at: -1 })
+          .toArray();
+        return rows.map(normalizeProjectSyncOperation).filter(Boolean) as ProjectSyncOperation[];
+      }
+      const rows = await getPrisma().projectSyncOperation.findMany({
+        where: {
+          project_id: options.project_id,
+          worker_id: options.worker_id,
+          status: Array.isArray(options.status) ? { in: options.status } : options.status,
+        },
+        orderBy: { created_at: 'desc' },
+      });
+      return rows.map(normalizeProjectSyncOperation).filter(Boolean) as ProjectSyncOperation[];
+    },
+
+    async create(input: ProjectSyncOperationCreateInput): Promise<ProjectSyncOperation> {
+      const now = new Date();
+      const operation = {
+        id: input.id || randomUUID(),
+        project_id: input.project_id,
+        worker_id: input.worker_id,
+        profile: input.profile,
+        status: input.status ?? 'queued',
+        phase: input.phase ?? 'queued',
+        files_total: input.files_total ?? 0,
+        files_done: input.files_done ?? 0,
+        bytes_total: input.bytes_total ?? 0,
+        bytes_done: input.bytes_done ?? 0,
+        retry_count: input.retry_count ?? 0,
+        retry_at: input.retry_at == null ? null : parseDate(input.retry_at),
+        base_manifest_hash: input.base_manifest_hash ?? null,
+        source_manifest_hash: input.source_manifest_hash ?? null,
+        target_manifest_hash: input.target_manifest_hash ?? null,
+        conflicts: input.conflicts ?? '[]',
+        error: input.error ?? null,
+        created_at: now,
+        updated_at: now,
+      };
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        await mongoCollection(mongo, 'project_sync_operations').insertOne(operation);
+        return normalizeProjectSyncOperation(operation) as ProjectSyncOperation;
+      }
+      return normalizeProjectSyncOperation(await getPrisma().projectSyncOperation.create({ data: operation })) as ProjectSyncOperation;
+    },
+
+    async update(id: string, data: ProjectSyncOperationUpdateInput): Promise<ProjectSyncOperation> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const row = await mongoCollection(mongo, 'project_sync_operations').findOneAndUpdate(
+          { id },
+          { $set: { ...data, updated_at: new Date() } },
+          { returnDocument: 'after', projection: { _id: 0 } },
+        );
+        const operation = normalizeProjectSyncOperation(row);
+        if (!operation) throw new Error(`Project sync operation not found: ${id}`);
+        return operation;
+      }
+      return normalizeProjectSyncOperation(
+        await getPrisma().projectSyncOperation.update({ where: { id }, data }),
+      ) as ProjectSyncOperation;
+    },
+
+    async delete(id: string): Promise<ProjectSyncOperation | null> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return normalizeProjectSyncOperation(
+          await mongoCollection(mongo, 'project_sync_operations').findOneAndDelete({ id }, { projection: { _id: 0 } }),
+        );
+      }
+      try {
+        return normalizeProjectSyncOperation(await getPrisma().projectSyncOperation.delete({ where: { id } }));
+      } catch (error: any) {
+        if (error?.code === 'P2025') return null;
+        throw error;
+      }
+    },
+
+    async deleteByProject(projectID: string): Promise<number> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        return (await mongoCollection(mongo, 'project_sync_operations').deleteMany({ project_id: projectID })).deletedCount;
+      }
+      return (await getPrisma().projectSyncOperation.deleteMany({ where: { project_id: projectID } })).count;
     },
   },
 

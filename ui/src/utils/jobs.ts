@@ -348,6 +348,7 @@ export const importTrainingJob = (
   file: File,
   gpuIDs: string | null,
   onUploadProgress?: (progress: TrainingJobImportProgress) => void,
+  projectID?: string | null,
 ) => {
   const formData = new FormData();
   formData.append('file', file);
@@ -355,8 +356,9 @@ export const importTrainingJob = (
     formData.append('gpu_ids', gpuIDs);
   }
 
+  const importUrl = projectID ? `/api/jobs/import?project_id=${encodeURIComponent(projectID)}` : '/api/jobs/import';
   return apiClient
-    .post('/api/jobs/import', formData, {
+    .post(importUrl, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (event: AxiosProgressEvent) => {
         const total = event.total && event.total > 0 ? event.total : file.size || null;

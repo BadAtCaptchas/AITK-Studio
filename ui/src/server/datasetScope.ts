@@ -6,16 +6,20 @@ import {
   isProjectSpacesDisabledError,
   PROJECT_SPACES_DISABLED_MESSAGE,
 } from './settings';
-import { getProjectRoots, resolveOptionalProject } from './projects';
-import type { Project } from '@/types';
+import { getProjectRoots, ProjectError, resolveOptionalProject } from './projects';
+import type { Project, ProjectScopeIntent } from '@/types';
 
 export class DatasetScopeError extends Error {
   status: number;
+  code?: string;
+  details?: unknown;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, code?: string, details?: unknown) {
     super(message);
     this.name = 'DatasetScopeError';
     this.status = status;
+    this.code = code;
+    this.details = details;
   }
 }
 
@@ -44,13 +48,19 @@ export async function assertProjectScopeEnabled(projectIdentifier: unknown) {
   }
 }
 
-export async function resolveDatasetScope(projectIdentifier: unknown): Promise<DatasetScope> {
+export async function resolveDatasetScope(
+  projectIdentifier: unknown,
+  options: { intent?: ProjectScopeIntent } = {},
+): Promise<DatasetScope> {
   let project: Project | null = null;
   try {
-    project = await resolveOptionalProject(projectIdentifier);
+    project = await resolveOptionalProject(projectIdentifier, { intent: options.intent ?? 'write' });
   } catch (error) {
     if (isProjectSpacesDisabledError(error)) {
       throw new DatasetScopeError(PROJECT_SPACES_DISABLED_MESSAGE, 403);
+    }
+    if (error instanceof ProjectError) {
+      throw new DatasetScopeError(error.message, error.status, error.code, error.details);
     }
     throw error;
   }

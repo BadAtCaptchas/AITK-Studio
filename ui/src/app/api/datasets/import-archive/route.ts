@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const projectID = request.nextUrl.searchParams.get('project_id') || request.headers.get('x-aitk-project-id');
+  const projectID = request.nextUrl.searchParams.get('project_id') ?? request.headers.get('x-aitk-project-id');
   let workRoot: string | null = null;
 
   try {
@@ -200,7 +200,11 @@ export async function POST(request: NextRequest) {
       status = 400;
     }
     return NextResponse.json(
-      { error: message },
+      {
+        error: message,
+        ...(error instanceof DatasetScopeError && error.code ? { code: error.code } : {}),
+        ...(error instanceof DatasetScopeError && error.details !== undefined ? { details: error.details } : {}),
+      },
       { status },
     );
   } finally {

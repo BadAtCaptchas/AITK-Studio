@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import { createRequire } from 'module';
 import path from 'path';
@@ -30,9 +31,9 @@ function sqliteAll(db, sql, params = []) {
   });
 }
 
-function sqliteRun(db, sql) {
+function sqliteRun(db, sql, params = []) {
   return new Promise((resolve, reject) => {
-    db.run(sql, error => {
+    db.run(sql, params, error => {
       if (error) reject(error);
       else resolve();
     });
@@ -268,6 +269,14 @@ async function applySqliteCompatibilitySchema(filename) {
         description TEXT NOT NULL DEFAULT '',
         badge_asset TEXT,
         root_path TEXT NOT NULL DEFAULT '',
+        storage_root_path TEXT NOT NULL DEFAULT '',
+        lifecycle_state TEXT NOT NULL DEFAULT 'active',
+        archived_at DATETIME,
+        revision INTEGER NOT NULL DEFAULT 1,
+        operation_started_at DATETIME,
+        operation_error TEXT,
+        home_worker_id TEXT NOT NULL DEFAULT 'local',
+        home_instance_id TEXT NOT NULL DEFAULT '',
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -276,8 +285,82 @@ async function applySqliteCompatibilitySchema(filename) {
     await ensureColumn(db, 'Project', 'description', "TEXT NOT NULL DEFAULT ''");
     await ensureColumn(db, 'Project', 'badge_asset', 'TEXT');
     await ensureColumn(db, 'Project', 'root_path', "TEXT NOT NULL DEFAULT ''");
+    await ensureColumn(db, 'Project', 'storage_root_path', "TEXT NOT NULL DEFAULT ''");
+    await ensureColumn(db, 'Project', 'lifecycle_state', "TEXT NOT NULL DEFAULT 'active'");
+    await ensureColumn(db, 'Project', 'archived_at', 'DATETIME');
+    await ensureColumn(db, 'Project', 'revision', 'INTEGER NOT NULL DEFAULT 1');
+    await ensureColumn(db, 'Project', 'operation_started_at', 'DATETIME');
+    await ensureColumn(db, 'Project', 'operation_error', 'TEXT');
+    await ensureColumn(db, 'Project', 'home_worker_id', "TEXT NOT NULL DEFAULT 'local'");
+    await ensureColumn(db, 'Project', 'home_instance_id', "TEXT NOT NULL DEFAULT ''");
     await ensureColumn(db, 'Project', 'created_at', "DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'");
     await ensureColumn(db, 'Project', 'updated_at', "DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'");
+
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS ProjectReplica (
+        id TEXT PRIMARY KEY NOT NULL,
+        project_id TEXT NOT NULL,
+        worker_id TEXT NOT NULL,
+        remote_project_id TEXT,
+        remote_instance_id TEXT,
+        role TEXT NOT NULL DEFAULT 'execution',
+        state TEXT NOT NULL DEFAULT 'creating',
+        base_manifest_hash TEXT,
+        local_manifest_hash TEXT,
+        remote_manifest_hash TEXT,
+        last_synced_at DATETIME,
+        last_error TEXT,
+        auto_pull_results BOOLEAN NOT NULL DEFAULT true,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      `,
+    );
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS JobReplica (
+        id TEXT PRIMARY KEY NOT NULL,
+        job_id TEXT NOT NULL,
+        worker_id TEXT NOT NULL,
+        remote_job_id TEXT NOT NULL,
+        remote_project_id TEXT,
+        role TEXT NOT NULL DEFAULT 'execution',
+        last_synced_at DATETIME,
+        last_error TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      `,
+    );
+    await sqliteRun(
+      db,
+      `
+      CREATE TABLE IF NOT EXISTS ProjectSyncOperation (
+        id TEXT PRIMARY KEY NOT NULL,
+        project_id TEXT NOT NULL,
+        worker_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        phase TEXT NOT NULL DEFAULT 'queued',
+        files_total INTEGER NOT NULL DEFAULT 0,
+        files_done INTEGER NOT NULL DEFAULT 0,
+        bytes_total REAL NOT NULL DEFAULT 0,
+        bytes_done REAL NOT NULL DEFAULT 0,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        retry_at DATETIME,
+        base_manifest_hash TEXT,
+        source_manifest_hash TEXT,
+        target_manifest_hash TEXT,
+        conflicts TEXT NOT NULL DEFAULT '[]',
+        error TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      `,
+    );
 
     await sqliteRun(
       db,
@@ -321,14 +404,110 @@ async function applySqliteCompatibilitySchema(filename) {
     );
     await sqliteRun(db, 'CREATE UNIQUE INDEX IF NOT EXISTS Project_slug_key ON Project(slug);');
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Project_slug_idx ON Project(slug);');
+    await sqliteRun(
+      db,
+      'CREATE INDEX IF NOT EXISTS Project_lifecycle_state_updated_at_idx ON Project(lifecycle_state, updated_at);',
+    );
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS Project_archived_at_idx ON Project(archived_at);');
+    await sqliteRun(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS ProjectReplica_project_id_worker_id_key ON ProjectReplica(project_id, worker_id);',
+    );
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS ProjectReplica_project_id_idx ON ProjectReplica(project_id);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS ProjectReplica_worker_id_idx ON ProjectReplica(worker_id);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS ProjectReplica_state_idx ON ProjectReplica(state);');
+    await sqliteRun(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS JobReplica_job_id_worker_id_key ON JobReplica(job_id, worker_id);',
+    );
+    await sqliteRun(
+      db,
+      'CREATE UNIQUE INDEX IF NOT EXISTS JobReplica_worker_id_remote_job_id_key ON JobReplica(worker_id, remote_job_id);',
+    );
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS JobReplica_job_id_idx ON JobReplica(job_id);');
+    await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS JobReplica_worker_id_idx ON JobReplica(worker_id);');
+    await sqliteRun(
+      db,
+      'CREATE INDEX IF NOT EXISTS ProjectSyncOperation_project_id_created_at_idx ON ProjectSyncOperation(project_id, created_at);',
+    );
+    await sqliteRun(
+      db,
+      'CREATE INDEX IF NOT EXISTS ProjectSyncOperation_worker_id_idx ON ProjectSyncOperation(worker_id);',
+    );
+    await sqliteRun(
+      db,
+      'CREATE INDEX IF NOT EXISTS ProjectSyncOperation_status_retry_at_idx ON ProjectSyncOperation(status, retry_at);',
+    );
+    await sqliteRun(
+      db,
+      `INSERT OR IGNORE INTO JobReplica (
+         id, job_id, worker_id, remote_job_id, remote_project_id, role,
+         last_synced_at, last_error, created_at, updated_at
+       )
+       SELECT
+         'legacy-' || id || '-' || COALESCE(NULLIF(worker_id, ''), 'local'),
+         id,
+         COALESCE(NULLIF(worker_id, ''), 'local'),
+         remote_job_id,
+         NULL,
+         'execution',
+         remote_sync_at,
+         remote_error,
+         created_at,
+         updated_at
+       FROM Job
+       WHERE remote_job_id IS NOT NULL AND remote_job_id <> '';`,
+    );
     await sqliteRun(db, 'CREATE INDEX IF NOT EXISTS WorkerNode_enabled_idx ON WorkerNode(enabled);');
+
+    const instanceRows = await sqliteAll(db, "SELECT value FROM Settings WHERE key = 'AITK_INSTANCE_ID' LIMIT 1");
+    const instanceID = String(instanceRows[0]?.value || process.env.AITK_INSTANCE_ID || randomUUID());
+    await sqliteRun(db, 'INSERT OR IGNORE INTO Settings (key, value) VALUES (?, ?)', ['AITK_INSTANCE_ID', instanceID]);
+    const projectRootRows = await sqliteAll(db, "SELECT value FROM Settings WHERE key = 'PROJECTS_FOLDER' LIMIT 1");
+    const configuredProjectsRoot = path.resolve(projectRootRows[0]?.value || path.join(toolkitRoot, 'projects'));
+    const projects = await sqliteAll(
+      db,
+      'SELECT id, slug, root_path, storage_root_path, lifecycle_state, revision, home_instance_id FROM Project',
+    );
+    for (const project of projects) {
+      const rootPath = path.resolve(project.root_path || path.join(configuredProjectsRoot, String(project.slug)));
+      const relative = path.relative(configuredProjectsRoot, rootPath);
+      const insideConfiguredRoot =
+        relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+      let storageRootPath = path.resolve(
+        project.storage_root_path || (insideConfiguredRoot ? configuredProjectsRoot : path.dirname(rootPath)),
+      );
+      if (storageRootPath === path.parse(storageRootPath).root) storageRootPath = configuredProjectsRoot;
+      await sqliteRun(
+        db,
+        `UPDATE Project
+         SET root_path = ?,
+             storage_root_path = ?,
+             lifecycle_state = COALESCE(NULLIF(lifecycle_state, ''), 'active'),
+             revision = CASE WHEN revision IS NULL OR revision < 1 THEN 1 ELSE revision END,
+             home_worker_id = COALESCE(NULLIF(home_worker_id, ''), 'local'),
+             home_instance_id = COALESCE(NULLIF(home_instance_id, ''), ?)
+         WHERE id = ?`,
+        [rootPath, storageRootPath, instanceID, String(project.id)],
+      );
+    }
   } finally {
     await new Promise(resolve => db.close(resolve));
   }
 }
 
 async function hasLegacySqliteTables(filename) {
-  const currentSchemaTables = new Set(['Settings', 'Queue', 'WorkerNode', 'Job', 'Project', 'sqlite_sequence']);
+  const currentSchemaTables = new Set([
+    'Settings',
+    'Queue',
+    'WorkerNode',
+    'Job',
+    'Project',
+    'ProjectReplica',
+    'JobReplica',
+    'ProjectSyncOperation',
+    'sqlite_sequence',
+  ]);
   const db = new sqlite3.Database(filename);
   try {
     const tables = await sqliteAll(db, "SELECT name FROM sqlite_master WHERE type = 'table'");
@@ -369,16 +548,15 @@ if (provider === 'sqlite') {
   await configureSqliteDatabase(sqlitePath);
   if (await hasLegacySqliteTables(sqlitePath)) {
     console.log('Additional SQLite tables detected; preserving them with additive compatibility changes.');
-    await applySqliteCompatibilitySchema(sqlitePath);
   } else {
     try {
       runPrisma(['db', 'push'], { nonInteractive: true });
     } catch (error) {
       console.warn('Prisma db push could not apply the schema without data loss or a reset.');
       console.warn('Applying additive SQLite compatibility changes instead.');
-      await applySqliteCompatibilitySchema(sqlitePath);
     }
   }
+  await applySqliteCompatibilitySchema(sqlitePath);
   await applySqliteScopedJobNameIndexes(sqlitePath);
   await configureSqliteDatabase(sqlitePath);
   process.exit(0);
@@ -393,6 +571,77 @@ const client = new MongoClient(mongoUri);
 try {
   await client.connect();
   const db = client.db(mongoDbName);
+  const configuredInstanceID = process.env.AITK_INSTANCE_ID?.trim();
+  const existingInstance = await db.collection('settings').findOne({ key: 'AITK_INSTANCE_ID' });
+  const instanceID = configuredInstanceID || String(existingInstance?.value || randomUUID());
+  await db
+    .collection('settings')
+    .updateOne({ key: 'AITK_INSTANCE_ID' }, { $set: { key: 'AITK_INSTANCE_ID', value: instanceID } }, { upsert: true });
+  const projectsSetting = await db.collection('settings').findOne({ key: 'PROJECTS_FOLDER' });
+  const configuredProjectsRoot = path.resolve(projectsSetting?.value || path.join(toolkitRoot, 'projects'));
+  const projectRows = await db.collection('projects').find({}).toArray();
+  if (projectRows.length > 0) {
+    await db.collection('projects').bulkWrite(
+      projectRows.map(project => {
+        const rootPath = path.resolve(project.root_path || path.join(configuredProjectsRoot, String(project.slug || project.id)));
+        const relative = path.relative(configuredProjectsRoot, rootPath);
+        const insideConfiguredRoot =
+          relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+        let storageRootPath = path.resolve(
+          project.storage_root_path || (insideConfiguredRoot ? configuredProjectsRoot : path.dirname(rootPath)),
+        );
+        if (storageRootPath === path.parse(storageRootPath).root) storageRootPath = configuredProjectsRoot;
+        return {
+          updateOne: {
+            filter: { id: String(project.id) },
+            update: {
+              $set: {
+                root_path: rootPath,
+                storage_root_path: storageRootPath,
+                lifecycle_state: String(project.lifecycle_state || 'active'),
+                archived_at: project.archived_at ?? null,
+                revision: Math.max(1, Number(project.revision || 1)),
+                operation_started_at: project.operation_started_at ?? null,
+                operation_error: project.operation_error ?? null,
+                home_worker_id: String(project.home_worker_id || 'local'),
+                home_instance_id: String(project.home_instance_id || instanceID),
+              },
+            },
+          },
+        };
+      }),
+      { ordered: false },
+    );
+  }
+  const legacyRemoteJobs = await db
+    .collection('jobs')
+    .find({ remote_job_id: { $type: 'string', $ne: '' } })
+    .toArray();
+  if (legacyRemoteJobs.length > 0) {
+    await db.collection('job_replicas').bulkWrite(
+      legacyRemoteJobs.map(job => ({
+        updateOne: {
+          filter: { job_id: String(job.id), worker_id: String(job.worker_id || 'local') },
+          update: {
+            $setOnInsert: {
+              id: `legacy-${String(job.id)}-${String(job.worker_id || 'local')}`,
+              job_id: String(job.id),
+              worker_id: String(job.worker_id || 'local'),
+              remote_job_id: String(job.remote_job_id),
+              remote_project_id: null,
+              role: 'execution',
+              last_synced_at: job.remote_sync_at ?? null,
+              last_error: job.remote_error ?? null,
+              created_at: job.created_at ?? new Date(),
+              updated_at: job.updated_at ?? new Date(),
+            },
+          },
+          upsert: true,
+        },
+      })),
+      { ordered: false },
+    );
+  }
   await dropLegacyMongoJobNameUniqueIndex(db);
   await Promise.all([
     db.collection('jobs').createIndexes([
@@ -412,6 +661,28 @@ try {
       { key: { id: 1 }, unique: true },
       { key: { slug: 1 }, unique: true },
       { key: { updated_at: -1 } },
+      { key: { lifecycle_state: 1, updated_at: -1 } },
+      { key: { archived_at: -1 } },
+    ]),
+    db.collection('project_replicas').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { project_id: 1, worker_id: 1 }, unique: true },
+      { key: { project_id: 1 } },
+      { key: { worker_id: 1 } },
+      { key: { state: 1 } },
+    ]),
+    db.collection('job_replicas').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { job_id: 1, worker_id: 1 }, unique: true },
+      { key: { worker_id: 1, remote_job_id: 1 }, unique: true },
+      { key: { job_id: 1 } },
+      { key: { worker_id: 1 } },
+    ]),
+    db.collection('project_sync_operations').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { project_id: 1, created_at: -1 } },
+      { key: { worker_id: 1 } },
+      { key: { status: 1, retry_at: 1 } },
     ]),
     db.collection('queues').createIndexes([
       { key: { id: 1 }, unique: true },

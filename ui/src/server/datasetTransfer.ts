@@ -190,6 +190,7 @@ export type DatasetTransferOperation = 'copy' | 'move';
 
 export type DatasetTransferRequest = {
   sourceProjectID: unknown;
+  destinationProjectID?: unknown;
   operation: unknown;
   all?: unknown;
   datasetNames?: unknown;
@@ -208,7 +209,8 @@ export type DatasetTransferItemResult = {
 
 export type DatasetTransferResponse = {
   operation: DatasetTransferOperation;
-  sourceProjectID: string;
+  sourceProjectID: string | null;
+  destinationProjectID: string | null;
   all: boolean;
   results: DatasetTransferItemResult[];
   copiedCount: number;
@@ -240,7 +242,7 @@ export type DatasetTransferDeps = {
   listDatasetSummaries: (datasetsRoot: string) => Promise<DatasetSummary[]>;
   copyDatasetBetweenRoots: typeof copyDatasetBetweenRoots;
   deleteDatasetFolder: typeof deleteDatasetFolder;
-  listProjectJobs: (projectID: string) => Promise<Job[]>;
+  listProjectJobs: (projectID: string | null) => Promise<Job[]>;
   updateJobConfig: (jobID: string, jobConfig: string) => Promise<unknown>;
 };
 
@@ -267,7 +269,7 @@ const DATASET_PATH_FIELDS = [
   'clip_image_path',
 ] as const;
 
-const MOVE_BLOCKING_STATUSES = new Set(['running', 'stopping']);
+const MOVE_BLOCKING_STATUSES = new Set(['queued', 'starting', 'running', 'stopping']);
 
 const defaultDeps: DatasetTransferDeps = {
   resolveDatasetScope,
@@ -291,9 +293,10 @@ function isPathInside(parent: string, child: string) {
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function normalizeSourceProjectID(value: unknown) {
+function normalizeScopeProjectID(value: unknown, field: 'source_project_id' | 'destination_project_id', allowOmitted = false) {
+  if (value === null || (allowOmitted && value === undefined)) return null;
   if (typeof value !== 'string' || !value.trim()) {
-    throw new DatasetTransferError('source_project_id is required');
+    throw new DatasetTransferError(`${field} must be a project identifier or null for global scope`);
   }
   return value.trim();
 }
@@ -478,26 +481,37 @@ function rawJobConfigMentionsSources(rawJobConfig: string, sourcePaths: string[]
   });
 }
 
-async function assertNoActiveJobReferences(projectID: string, sourcePaths: string[], deps: DatasetTransferDeps) {
+async function jobsReferencingSources(projectID: string | null, sourcePaths: string[], deps: DatasetTransferDeps) {
   const jobs = await deps.listProjectJobs(projectID);
-  const blockingJobs: string[] = [];
-
-  jobs.forEach(job => {
-    if (!MOVE_BLOCKING_STATUSES.has(job.status)) return;
+  return jobs.filter(job => {
     try {
-      if (jobConfigReferencesDatasetSources(JSON.parse(job.job_config), sourcePaths)) {
-        blockingJobs.push(job.name || job.id);
-      }
+      return jobConfigReferencesDatasetSources(JSON.parse(job.job_config), sourcePaths);
     } catch {
-      if (rawJobConfigMentionsSources(job.job_config, sourcePaths)) {
-        blockingJobs.push(job.name || job.id);
-      }
+      return rawJobConfigMentionsSources(job.job_config, sourcePaths);
     }
   });
+}
 
-  if (blockingJobs.length > 0) {
+async function assertMoveReferencesAllowed(
+  sourceProjectID: string | null,
+  destinationProjectID: string | null,
+  sourcePaths: string[],
+  deps: DatasetTransferDeps,
+) {
+  const referencingJobs = await jobsReferencingSources(sourceProjectID, sourcePaths, deps);
+  const activeJobs = referencingJobs.filter(job => MOVE_BLOCKING_STATUSES.has(job.status));
+
+  if (activeJobs.length > 0) {
     throw new DatasetTransferError(
-      `Cannot move project datasets while running or stopping jobs reference them: ${blockingJobs.join(', ')}`,
+      `Cannot move datasets while active jobs reference them: ${activeJobs.map(job => job.name || job.id).join(', ')}`,
+      409,
+    );
+  }
+
+  const movingToGlobalFromProject = sourceProjectID !== null && destinationProjectID === null;
+  if (!movingToGlobalFromProject && referencingJobs.length > 0) {
+    throw new DatasetTransferError(
+      `Copy is required because saved jobs reference these datasets: ${referencingJobs.map(job => job.name || job.id).join(', ')}`,
       409,
     );
   }
@@ -535,18 +549,65 @@ export async function rewriteProjectJobDatasetRefs(
   };
 }
 
-export async function transferProjectDatasetsToGlobal(
+export type DatasetTransferPreview = {
+  operation: DatasetTransferOperation;
+  sourceProjectID: string | null;
+  destinationProjectID: string | null;
+  datasetNames: string[];
+  blockers: Array<{ code: string; message: string }>;
+  canTransfer: boolean;
+};
+
+export async function previewDatasetTransfer(
+  request: DatasetTransferRequest,
+  deps: DatasetTransferDeps = defaultDeps,
+): Promise<DatasetTransferPreview> {
+  const sourceProjectID = normalizeScopeProjectID(request.sourceProjectID, 'source_project_id');
+  const destinationProjectID = normalizeScopeProjectID(request.destinationProjectID, 'destination_project_id', true);
+  const operation = normalizeOperation(request.operation);
+  const sourceScope = await deps.resolveDatasetScope(sourceProjectID);
+  const destinationScope = await deps.resolveDatasetScope(destinationProjectID);
+  if (sourceScope.projectID === destinationScope.projectID) {
+    throw new DatasetTransferError('Source and destination scopes must be different');
+  }
+  const targets = await selectTransferTargets(sourceScope.datasetsRoot, request.all === true, request.datasetNames, deps);
+  const resolvedTargets = await Promise.all(targets.map(async target => ({ ...target, sourcePath: await realpathOrResolve(target.sourcePath) })));
+  const blockers: Array<{ code: string; message: string }> = [];
+  if (operation === 'move') {
+    try {
+      await assertMoveReferencesAllowed(
+        sourceScope.projectID,
+        destinationScope.projectID,
+        resolvedTargets.map(target => target.sourcePath),
+        deps,
+      );
+    } catch (error) {
+      blockers.push({ code: 'DATASET_MOVE_REFERENCED', message: error instanceof Error ? error.message : 'Dataset move is blocked' });
+    }
+  }
+  return {
+    operation,
+    sourceProjectID: sourceScope.projectID,
+    destinationProjectID: destinationScope.projectID,
+    datasetNames: resolvedTargets.map(target => target.name),
+    blockers,
+    canTransfer: blockers.length === 0,
+  };
+}
+
+export async function transferDatasetsBetweenScopes(
   request: DatasetTransferRequest,
   deps: DatasetTransferDeps = defaultDeps,
 ): Promise<DatasetTransferResponse> {
-  const sourceProjectID = normalizeSourceProjectID(request.sourceProjectID);
+  const sourceProjectID = normalizeScopeProjectID(request.sourceProjectID, 'source_project_id');
+  const destinationProjectID = normalizeScopeProjectID(request.destinationProjectID, 'destination_project_id', true);
   const operation = normalizeOperation(request.operation);
   const all = request.all === true;
   const sourceScope = await deps.resolveDatasetScope(sourceProjectID);
-  if (!sourceScope.projectID) {
-    throw new DatasetTransferError('source_project_id must resolve to a project');
+  const destinationScope = await deps.resolveDatasetScope(destinationProjectID);
+  if (sourceScope.projectID === destinationScope.projectID) {
+    throw new DatasetTransferError('Source and destination scopes must be different');
   }
-  const destinationScope = await deps.resolveDatasetScope(null);
 
   const targets = await selectTransferTargets(sourceScope.datasetsRoot, all, request.datasetNames, deps);
   const resolvedTargets = await Promise.all(
@@ -557,8 +618,9 @@ export async function transferProjectDatasetsToGlobal(
   );
 
   if (operation === 'move') {
-    await assertNoActiveJobReferences(
+    await assertMoveReferencesAllowed(
       sourceScope.projectID,
+      destinationScope.projectID,
       resolvedTargets.map(target => target.sourcePath),
       deps,
     );
@@ -590,23 +652,25 @@ export async function transferProjectDatasetsToGlobal(
 
       if (operation === 'move') {
         try {
-          const rewriteResult = await rewriteProjectJobDatasetRefs(
-            sourceScope.projectID,
-            [
-              {
-                sourceName: target.name,
-                destinationName: destination.name,
-                sourcePath: target.sourcePath,
-                destinationPath: destination.path,
-              },
-            ],
-            deps,
-          );
-          result.rewrittenJobCount = rewriteResult.rewrittenJobCount;
+          if (sourceScope.projectID && !destinationScope.projectID) {
+            const rewriteResult = await rewriteProjectJobDatasetRefs(
+              sourceScope.projectID,
+              [
+                {
+                  sourceName: target.name,
+                  destinationName: destination.name,
+                  sourcePath: target.sourcePath,
+                  destinationPath: destination.path,
+                },
+              ],
+              deps,
+            );
+            result.rewrittenJobCount = rewriteResult.rewrittenJobCount;
+          }
           const deleteResult = await deps.deleteDatasetFolder(sourceScope.datasetsRoot, target.name);
           result.deleted = deleteResult.deleted;
         } catch (error) {
-          result.error = `Copied to global, but kept the project dataset: ${
+          result.error = `Copied to the destination, but kept the source dataset: ${
             error instanceof Error ? error.message : 'move finalization failed'
           }`;
         }
@@ -621,6 +685,7 @@ export async function transferProjectDatasetsToGlobal(
   return {
     operation,
     sourceProjectID: sourceScope.projectID,
+    destinationProjectID: destinationScope.projectID,
     all,
     results,
     copiedCount: results.filter(result => result.copied).length,
@@ -629,4 +694,11 @@ export async function transferProjectDatasetsToGlobal(
     failedCount: results.filter(result => result.error).length,
     rewrittenJobCount: results.reduce((total, result) => total + result.rewrittenJobCount, 0),
   };
+}
+
+export async function transferProjectDatasetsToGlobal(
+  request: DatasetTransferRequest,
+  deps: DatasetTransferDeps = defaultDeps,
+) {
+  return transferDatasetsBetweenScopes({ ...request, destinationProjectID: null }, deps);
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { use, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Code2, Image as ImageIcon, LayoutDashboard, Loader2 } from 'lucide-react';
+import { BarChart3, Cloud, CloudOff, Code2, Image as ImageIcon, LayoutDashboard, Loader2, RefreshCcw } from 'lucide-react';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
 import JobActionBar from '@/components/JobActionBar';
 import JobConfigViewer from '@/components/JobConfigViewer';
@@ -36,7 +36,7 @@ export default function ProjectRunDetailPage({
   const [reloadInterval, setReloadInterval] = useState<number | null>(5000);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [resolvedProjectID, setResolvedProjectID] = useState<string | null>(null);
-  const { job, status, refreshJob } = useJob(jobID, reloadInterval);
+  const { job, status, refreshJob } = useJob(jobID, reloadInterval, resolvedProjectID);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +73,13 @@ export default function ProjectRunDetailPage({
   }, [activeTab, visibleTabs]);
 
   const title = job ? `${job.job_type === 'generate' ? 'Generate' : job.job_type === 'caption' ? 'Caption' : 'Train'} - ${job.name}` : 'Run';
+  const projectMatches = !!job && !!resolvedProjectID && job.project_id === resolvedProjectID;
+  const remoteSyncAge = job?.remote_sync_at ? Date.now() - new Date(job.remote_sync_at).getTime() : Number.POSITIVE_INFINITY;
+  const remoteSyncTone = job?.remote_error
+    ? 'danger'
+    : shouldPoll(job?.status) && remoteSyncAge > 30_000
+      ? 'warning'
+      : 'info';
 
   return (
     <ProjectWorkspaceShell projectID={projectID} active="runs" title={title} description="Project run detail and outputs.">
@@ -91,13 +98,36 @@ export default function ProjectRunDetailPage({
             </PageNotice>
           )}
 
-          {job && resolvedProjectID && job.project_id !== resolvedProjectID && (
-            <PageNotice tone="warning" title="Run is not attached to this project">
-              This job does not match the current project. Open it from the global Jobs page if needed.
+          {job && resolvedProjectID && !projectMatches && (
+            <PageNotice tone="danger" title="Run access blocked">
+              This job belongs to a different project. Its details and actions are hidden to prevent accidental cross-project changes.
             </PageNotice>
           )}
 
-          {job && (
+          {job && projectMatches && job.worker_id !== 'local' ? (
+            <PageNotice
+              tone={remoteSyncTone}
+              title={
+                job.remote_error
+                  ? 'Remote synchronization failed'
+                  : remoteSyncTone === 'warning'
+                    ? 'Remote updates are delayed'
+                    : 'Remote run synchronized'
+              }
+              action={
+                <button type="button" onClick={refreshJob} className="operator-button h-8 text-xs">
+                  <RefreshCcw className="h-3.5 w-3.5" /> Retry
+                </button>
+              }
+            >
+              <span className="inline-flex items-center gap-1.5">
+                {job.remote_error ? <CloudOff className="h-3.5 w-3.5" /> : <Cloud className="h-3.5 w-3.5" />}
+                {job.remote_error || (job.remote_sync_at ? `Last update ${new Date(job.remote_sync_at).toLocaleString()}` : 'Waiting for the first worker update.')}
+              </span>
+            </PageNotice>
+          ) : null}
+
+          {job && projectMatches && (
             <>
               <section className="border border-gray-800 bg-gray-950">
                 <div className="flex flex-col gap-3 border-b border-gray-800 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">

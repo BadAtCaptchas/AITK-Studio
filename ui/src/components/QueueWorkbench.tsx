@@ -37,10 +37,13 @@ import useWorkers from '@/hooks/useWorkers';
 import type { Job, Queue } from '@/types';
 import { getAvaliableJobActions, getTotalSteps } from '@/utils/jobs';
 import { reorderQueue, startQueue, stopQueue } from '@/utils/queue';
+import { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
 
 type QueueWorkbenchProps = {
   filterText: string;
   focusGpuIDs?: string | null;
+  scope?: 'global' | 'all' | 'project';
+  projectID?: string | null;
   includeProjectActive?: boolean;
 };
 
@@ -401,6 +404,7 @@ function QueueJobCard({
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
             <span>Added {formatRelative(job.created_at)}</span>
             <span>ID {shortID(job.id)}</span>
+            <ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} />
           </div>
         </div>
       </div>
@@ -660,6 +664,8 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
             <div className="truncate text-gray-100">{job.worker_id === 'local' ? 'Local' : job.worker_id}</div>
             <div className="text-gray-500">GPU</div>
             <div className="text-gray-100">{job.gpu_ids || '-'}</div>
+            <div className="text-gray-500">Workspace</div>
+            <div className="min-w-0"><ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} /></div>
             <div className="text-gray-500">Added</div>
             <div className="text-gray-100">{formatDate(job.created_at)}</div>
             <div className="text-gray-500">ID</div>
@@ -758,9 +764,20 @@ function EmptyInspector() {
   );
 }
 
-export default function QueueWorkbench({ filterText, focusGpuIDs, includeProjectActive = false }: QueueWorkbenchProps) {
+export default function QueueWorkbench({
+  filterText,
+  focusGpuIDs,
+  scope = 'global',
+  projectID = null,
+  includeProjectActive = false,
+}: QueueWorkbenchProps) {
   const router = useRouter();
-  const { jobs, status, refreshJobs } = useJobsList({ reloadInterval: 5000, includeProjectActive });
+  const { jobs, status, refreshJobs } = useJobsList({
+    reloadInterval: 5000,
+    scope,
+    projectID,
+    includeProjectActive,
+  });
   const { queues, status: queueStatus, refreshQueues } = useQueueList();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
@@ -800,7 +817,7 @@ export default function QueueWorkbench({ filterText, focusGpuIDs, includeProject
     const query = filterText.trim().toLowerCase();
     if (!query) return jobs;
     return jobs.filter(job =>
-      [job.name, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
+      [job.name, job.project_name, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );

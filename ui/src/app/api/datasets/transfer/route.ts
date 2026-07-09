@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { DatasetScopeError } from '@/server/datasetScope';
-import { DatasetTransferError, transferProjectDatasetsToGlobal } from '@/server/datasetTransfer';
+import { DatasetTransferError, transferDatasetsBetweenScopes } from '@/server/datasetTransfer';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -10,8 +10,9 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => null);
     const payload = isRecord(body) ? body : {};
-    const result = await transferProjectDatasetsToGlobal({
+    const result = await transferDatasetsBetweenScopes({
       sourceProjectID: payload.source_project_id,
+      destinationProjectID: payload.destination_project_id,
       operation: payload.operation,
       all: payload.all,
       datasetNames: payload.dataset_names,
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
           ? (error as { status: number }).status
           : 400;
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to transfer project datasets' },
+      { error: error instanceof Error ? error.message : 'Failed to transfer datasets' },
       { status },
     );
   }

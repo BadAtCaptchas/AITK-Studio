@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import sqlite3 from 'sqlite3';
 import { MongoClient } from 'mongodb';
 
@@ -48,6 +49,7 @@ function normalizeJob(row) {
   return {
     id: String(row.id),
     name: String(row.name || ''),
+    project_id: row.project_id == null ? null : String(row.project_id),
     worker_id: String(row.worker_id || 'local'),
     remote_job_id: row.remote_job_id == null ? null : String(row.remote_job_id),
     remote_sync_at: row.remote_sync_at == null ? null : asDate(row.remote_sync_at, null),
@@ -68,6 +70,57 @@ function normalizeJob(row) {
     job_ref: row.job_ref == null ? null : String(row.job_ref),
     save_now: Boolean(row.save_now),
   };
+}
+
+function normalizeProject(row, projectsRoot, instanceID) {
+  const now = new Date();
+  const rootPath = path.resolve(row.root_path || path.join(projectsRoot, String(row.slug || row.id)));
+  const relative = path.relative(projectsRoot, rootPath);
+  const isConfiguredDescendant =
+    relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+  let storageRootPath = path.resolve(
+    row.storage_root_path || (isConfiguredDescendant ? projectsRoot : path.dirname(rootPath)),
+  );
+  if (storageRootPath === path.parse(storageRootPath).root) storageRootPath = projectsRoot;
+  return {
+    id: String(row.id),
+    slug: String(row.slug || ''),
+    name: String(row.name || ''),
+    description: String(row.description || ''),
+    badge_asset: row.badge_asset == null ? null : String(row.badge_asset),
+    root_path: rootPath,
+    storage_root_path: storageRootPath,
+    lifecycle_state: String(row.lifecycle_state || 'active'),
+    archived_at: row.archived_at == null ? null : asDate(row.archived_at, null),
+    revision: Math.max(1, Number(row.revision || 1)),
+    operation_started_at: row.operation_started_at == null ? null : asDate(row.operation_started_at, null),
+    operation_error: row.operation_error == null ? null : String(row.operation_error),
+    home_worker_id: String(row.home_worker_id || 'local'),
+    home_instance_id: String(row.home_instance_id || instanceID),
+    created_at: asDate(row.created_at, now),
+    updated_at: asDate(row.updated_at, now),
+  };
+}
+
+function normalizeReplicaDates(row) {
+  const now = new Date();
+  return {
+    ...row,
+    id: String(row.id),
+    created_at: asDate(row.created_at, now),
+    updated_at: asDate(row.updated_at, now),
+    ...(row.last_synced_at == null ? { last_synced_at: null } : { last_synced_at: asDate(row.last_synced_at, null) }),
+    ...(row.retry_at == null ? {} : { retry_at: asDate(row.retry_at, null) }),
+  };
+}
+
+async function tableExists(db, tableName) {
+  const rows = await all(db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [tableName]);
+  return rows.length > 0;
+}
+
+async function rowsIfTableExists(db, tableName) {
+  return (await tableExists(db, tableName)) ? all(db, `SELECT * FROM "${tableName}"`) : [];
 }
 
 async function ensureIndexes(db) {
@@ -94,6 +147,33 @@ async function ensureIndexes(db) {
       { key: { job_ref: 1 } },
       { key: { project_id: 1 } },
       { key: { queue_position: 1 } },
+    ]),
+    db.collection('projects').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { slug: 1 }, unique: true },
+      { key: { updated_at: -1 } },
+      { key: { lifecycle_state: 1, updated_at: -1 } },
+      { key: { archived_at: -1 } },
+    ]),
+    db.collection('project_replicas').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { project_id: 1, worker_id: 1 }, unique: true },
+      { key: { project_id: 1 } },
+      { key: { worker_id: 1 } },
+      { key: { state: 1 } },
+    ]),
+    db.collection('job_replicas').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { job_id: 1, worker_id: 1 }, unique: true },
+      { key: { worker_id: 1, remote_job_id: 1 }, unique: true },
+      { key: { job_id: 1 } },
+      { key: { worker_id: 1 } },
+    ]),
+    db.collection('project_sync_operations').createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { project_id: 1, created_at: -1 } },
+      { key: { worker_id: 1 } },
+      { key: { status: 1, retry_at: 1 } },
     ]),
     db.collection('queues').createIndexes([
       { key: { id: 1 }, unique: true },
@@ -191,25 +271,50 @@ const sqlite = openDb(sqlitePath);
 const client = new MongoClient(mongoUri);
 
 try {
-  const [settingsRows, queueRows, jobRows] = await Promise.all([
+  const [settingsRows, queueRows, projectRows, jobRows, projectReplicaRows, jobReplicaRows, syncOperationRows] = await Promise.all([
     all(sqlite, 'SELECT key, value FROM Settings'),
     all(sqlite, 'SELECT * FROM Queue'),
+    rowsIfTableExists(sqlite, 'Project'),
     all(sqlite, 'SELECT * FROM Job'),
+    rowsIfTableExists(sqlite, 'ProjectReplica'),
+    rowsIfTableExists(sqlite, 'JobReplica'),
+    rowsIfTableExists(sqlite, 'ProjectSyncOperation'),
   ]);
 
   const trainingSetting = settingsRows.find(row => row.key === 'TRAINING_FOLDER');
   const trainingRoot = trainingSetting?.value || defaultTrainingRoot;
+  const projectsSetting = settingsRows.find(row => row.key === 'PROJECTS_FOLDER');
+  const projectsRoot = path.resolve(projectsSetting?.value || path.join(toolkitRoot, 'projects'));
+  const instanceSetting = settingsRows.find(row => row.key === 'AITK_INSTANCE_ID');
+  const instanceID = process.env.AITK_INSTANCE_ID?.trim() || String(instanceSetting?.value || randomUUID());
+  const settingsToImport = instanceSetting
+    ? settingsRows
+    : [...settingsRows, { key: 'AITK_INSTANCE_ID', value: instanceID }];
+  const projects = projectRows.map(row => normalizeProject(row, projectsRoot, instanceID));
 
   await client.connect();
   const mongo = client.db(mongoDbName);
   await ensureIndexes(mongo);
 
-  if (settingsRows.length > 0) {
+  if (settingsToImport.length > 0) {
     await mongo.collection('settings').bulkWrite(
-      settingsRows.map(row => ({
+      settingsToImport.map(row => ({
         updateOne: {
           filter: { key: String(row.key) },
           update: { $set: { key: String(row.key), value: String(row.value || '') } },
+          upsert: true,
+        },
+      })),
+      { ordered: false },
+    );
+  }
+
+  if (projects.length > 0) {
+    await mongo.collection('projects').bulkWrite(
+      projects.map(project => ({
+        updateOne: {
+          filter: { id: project.id },
+          update: { $set: project },
           upsert: true,
         },
       })),
@@ -251,17 +356,80 @@ try {
     );
   }
 
+  const projectReplicas = projectReplicaRows.map(normalizeReplicaDates);
+  if (projectReplicas.length > 0) {
+    await mongo.collection('project_replicas').bulkWrite(
+      projectReplicas.map(replica => ({
+        updateOne: { filter: { id: replica.id }, update: { $set: replica }, upsert: true },
+      })),
+      { ordered: false },
+    );
+  }
+
+  const jobReplicas = jobReplicaRows.map(normalizeReplicaDates);
+  if (jobReplicas.length > 0) {
+    await mongo.collection('job_replicas').bulkWrite(
+      jobReplicas.map(replica => ({
+        updateOne: { filter: { id: replica.id }, update: { $set: replica }, upsert: true },
+      })),
+      { ordered: false },
+    );
+  }
+  const migratedReplicaKeys = new Set(jobReplicas.map(replica => `${replica.job_id}\u0000${replica.worker_id}`));
+  const legacyJobReplicas = jobs
+    .filter(job => job.remote_job_id && !migratedReplicaKeys.has(`${job.id}\u0000${job.worker_id}`))
+    .map(job => ({
+      id: `legacy-${job.id}-${job.worker_id}`,
+      job_id: job.id,
+      worker_id: job.worker_id,
+      remote_job_id: job.remote_job_id,
+      remote_project_id: null,
+      role: 'execution',
+      last_synced_at: job.remote_sync_at,
+      last_error: job.remote_error,
+      created_at: job.created_at,
+      updated_at: job.updated_at,
+    }));
+  if (legacyJobReplicas.length > 0) {
+    await mongo.collection('job_replicas').bulkWrite(
+      legacyJobReplicas.map(replica => ({
+        updateOne: {
+          filter: { job_id: replica.job_id, worker_id: replica.worker_id },
+          update: { $setOnInsert: replica },
+          upsert: true,
+        },
+      })),
+      { ordered: false },
+    );
+  }
+
+  const syncOperations = syncOperationRows.map(normalizeReplicaDates);
+  if (syncOperations.length > 0) {
+    await mongo.collection('project_sync_operations').bulkWrite(
+      syncOperations.map(operation => ({
+        updateOne: { filter: { id: operation.id }, update: { $set: operation }, upsert: true },
+      })),
+      { ordered: false },
+    );
+  }
+
   let metricKeyCount = 0;
   let metricCount = 0;
+  const projectsByID = new Map(projects.map(project => [project.id, project]));
   for (const job of jobs) {
-    const imported = await importLossLog(mongo, job, trainingRoot);
+    const project = job.project_id ? projectsByID.get(job.project_id) : null;
+    const imported = await importLossLog(mongo, job, project ? path.join(project.root_path, 'runs') : trainingRoot);
     metricKeyCount += imported.metricKeys;
     metricCount += imported.metrics;
   }
 
-  console.log(`Migrated settings: ${settingsRows.length}`);
+  console.log(`Migrated settings: ${settingsToImport.length}`);
   console.log(`Migrated queues: ${queueRows.length}`);
+  console.log(`Migrated projects: ${projects.length}`);
   console.log(`Migrated jobs: ${jobs.length}`);
+  console.log(`Migrated project replicas: ${projectReplicas.length}`);
+  console.log(`Migrated job replicas: ${jobReplicas.length + legacyJobReplicas.length}`);
+  console.log(`Migrated project sync operations: ${syncOperations.length}`);
   console.log(`Migrated metric keys: ${metricKeyCount}`);
   console.log(`Migrated metric points: ${metricCount}`);
   console.log('SQLite files were left untouched.');

@@ -50,6 +50,69 @@ async function uniqueDatasetPath(datasetsRoot: string, requestedName: string) {
   return { name: candidateName, path: candidatePath };
 }
 
+type DatasetCopyEntry = { relativePath: string; kind: 'directory' | 'file' };
+
+async function collectSafeDatasetCopyTree(sourceRoot: string) {
+  const canonicalRoot = await fsp.realpath(sourceRoot);
+  const collected: DatasetCopyEntry[] = [];
+
+  const walk = async (relativePath = ''): Promise<void> => {
+    const directory = relativePath ? path.join(sourceRoot, relativePath) : sourceRoot;
+    const entries = await fsp.readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const childRelativePath = relativePath ? path.join(relativePath, entry.name) : entry.name;
+      const childPath = path.join(sourceRoot, childRelativePath);
+      const stat = await fsp.lstat(childPath);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Dataset copy cannot include symbolic links or junctions: ${childRelativePath}`);
+      }
+      const canonicalChild = await fsp.realpath(childPath);
+      if (!isPathInside(canonicalRoot, canonicalChild)) {
+        throw new Error(`Dataset copy source escaped its declared root: ${childRelativePath}`);
+      }
+      if (stat.isDirectory()) {
+        collected.push({ relativePath: childRelativePath, kind: 'directory' });
+        await walk(childRelativePath);
+      } else if (stat.isFile()) {
+        collected.push({ relativePath: childRelativePath, kind: 'file' });
+      } else {
+        throw new Error(`Dataset copy cannot include special filesystem entries: ${childRelativePath}`);
+      }
+    }
+  };
+
+  await walk();
+  return { canonicalRoot, entries: collected };
+}
+
+async function copySafeDatasetTree(
+  sourceRoot: string,
+  destinationRoot: string,
+  entries: DatasetCopyEntry[],
+  canonicalSourceRoot: string,
+) {
+  await fsp.mkdir(destinationRoot);
+  for (const entry of entries.filter(item => item.kind === 'directory')) {
+    await fsp.mkdir(path.join(destinationRoot, entry.relativePath), { recursive: true });
+  }
+  for (const entry of entries.filter(item => item.kind === 'file')) {
+    const source = path.join(sourceRoot, entry.relativePath);
+    const sourceStat = await fsp.lstat(source);
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) {
+      throw new Error(`Dataset copy source changed during transfer: ${entry.relativePath}`);
+    }
+    const canonicalSource = await fsp.realpath(source);
+    if (!isPathInside(canonicalSourceRoot, canonicalSource)) {
+      throw new Error(`Dataset copy source escaped its declared root: ${entry.relativePath}`);
+    }
+    const destination = path.join(destinationRoot, entry.relativePath);
+    if (!isPathInside(destinationRoot, destination)) {
+      throw new Error(`Dataset copy destination escaped its declared root: ${entry.relativePath}`);
+    }
+    await fsp.copyFile(source, destination, fs.constants.COPYFILE_EXCL);
+  }
+}
+
 export async function copyDatasetBetweenRoots({
   datasetPath,
   sourceDatasetsRoot,
@@ -73,13 +136,20 @@ export async function copyDatasetBetweenRoots({
     ? normalizeRequestedDatasetName(requestedName)
     : safeDatasetCopyName(sourceName, suffix);
   const destination = await uniqueDatasetPath(destinationDatasetsRoot, destinationName);
-
-  await fsp.cp(sourcePath, destination.path, {
-    recursive: true,
-    force: false,
-    errorOnExist: true,
-    verbatimSymlinks: false,
-  });
+  if (isPathInside(sourcePath, destination.path) || isPathInside(destination.path, sourcePath)) {
+    throw new Error('Dataset copy source and destination cannot contain one another');
+  }
+  const tree = await collectSafeDatasetCopyTree(sourcePath);
+  try {
+    await copySafeDatasetTree(sourcePath, destination.path, tree.entries, tree.canonicalRoot);
+  } catch (error) {
+    const destinationRoot = path.resolve(destinationDatasetsRoot);
+    const safeDestination = path.resolve(destination.path);
+    if (isPathInside(destinationRoot, safeDestination) && safeDestination !== destinationRoot) {
+      await fsp.rm(safeDestination, { recursive: true, force: true }).catch(() => undefined);
+    }
+    throw error;
+  }
 
   return destination;
 }

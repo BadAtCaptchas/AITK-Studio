@@ -3,11 +3,11 @@ import path from 'path';
 import { NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { listDatasetSummaries } from '@/server/encryptedDatasets';
-import { ensureProjectFolders, isPathInside, resolveProject } from '@/server/projects';
+import { getProjectRoots, isPathInside, resolveProject } from '@/server/projects';
 import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from '@/server/settings';
 import type { Job } from '@/types';
 
-const ACTIVE_STATUSES = new Set(['queued', 'running', 'stopping']);
+const ACTIVE_STATUSES = new Set(['queued', 'starting', 'running', 'stopping']);
 const MEDIA_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl', '.mp4', '.mp3', '.wav', '.flac', '.ogg']);
 
 function ensureApiAccess(request: Request): NextResponse | null {
@@ -40,6 +40,9 @@ function summarizeJob(job: Job) {
     name: job.name,
     project_id: job.project_id,
     worker_id: job.worker_id,
+    remote_job_id: job.remote_job_id,
+    remote_sync_at: job.remote_sync_at,
+    remote_error: job.remote_error,
     gpu_ids: job.gpu_ids,
     created_at: job.created_at,
     updated_at: job.updated_at,
@@ -131,9 +134,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
   try {
     const { projectID } = await params;
     const project = await resolveProject(decodeURIComponent(projectID));
-    const roots = await ensureProjectFolders(project);
+    const roots = await getProjectRoots(project);
     const [datasets, jobs, inputSummary, runSummary, outputSummary, modelSummary, fileTree] = await Promise.all([
-      listDatasetSummaries(roots.datasets),
+      listDatasetSummaries(roots.datasets, { createIfMissing: false }),
       db.jobs.list({ project_id: project.id }),
       directorySummary(roots.datasets),
       directorySummary(roots.runs),
@@ -142,10 +145,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
       listTree(roots.root),
     ]);
 
-    const activeJobs = jobs.filter(job => ACTIVE_STATUSES.has(job.status));
+    const jobsByRecentUpdate = [...jobs].sort(
+      (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
+    );
+    const activeJobs = jobsByRecentUpdate.filter(job => ACTIVE_STATUSES.has(job.status));
     const activeJob = activeJobs[0] || null;
     const recentActivity = [
-      ...jobs.slice(0, 8).map(job => ({
+      ...jobsByRecentUpdate.slice(0, 8).map(job => ({
         id: `job:${job.id}`,
         label: `${job.job_type === 'generate' ? 'Generate' : job.job_type === 'caption' ? 'Caption' : 'Train'} ${job.name}`,
         detail: job.info || job.status,
@@ -165,7 +171,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
       project,
       roots,
       datasets,
-      jobs: jobs.map(summarizeJob),
+      jobs: jobsByRecentUpdate.map(summarizeJob),
       activeJob: activeJob
         ? {
             ...summarizeJob(activeJob),
@@ -188,8 +194,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
       recentActivity,
       fileTree,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to load project summary:', error);
-    return NextResponse.json({ error: error?.message || 'Failed to load project summary' }, { status: 500 });
+    const known = error as Error & { status?: number };
+    return NextResponse.json({ error: known?.message || 'Failed to load project summary' }, { status: known?.status || 500 });
   }
 }

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
-import { getAllowedProjectRootIfExists } from '@/server/projects';
+import { isRegisteredProjectPath } from '@/server/projectMediaSecurity';
 
 async function realpathIfExists(filePath: string) {
   try {
@@ -22,13 +22,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Get allowed directories
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();
-    const projectsRoot = await getAllowedProjectRootIfExists();
-    const allowedDirs = [datasetRoot, trainingRoot, projectsRoot].filter((dir): dir is string => !!dir);
+    const allowedDirs = [datasetRoot, trainingRoot].filter((dir): dir is string => !!dir);
 
     const resolvedFilePath = await realpathIfExists(decodedFilePath);
     if (!resolvedFilePath) {
       console.warn(`File not found: ${decodedFilePath}`);
       return new NextResponse('File not found', { status: 404 });
+    }
+
+    if (await isRegisteredProjectPath(resolvedFilePath)) {
+      return new NextResponse('Project files require a signed project-relative URL', { status: 403 });
     }
 
     // Security check: Ensure canonical path is contained in canonical allowed directories

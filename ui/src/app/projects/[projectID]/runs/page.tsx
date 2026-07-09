@@ -3,8 +3,8 @@
 import { use } from 'react';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
-import JobsTable from '@/components/JobsTable';
 import ProjectWorkspaceShell from '@/components/project/ProjectWorkspaceShell';
+import ProjectRunsTable from '@/components/project/ProjectRunsTable';
 
 export default function ProjectRunsPage({ params }: { params: Promise<{ projectID: string }> }) {
   const { projectID: rawProjectID } = use(params);
@@ -25,7 +25,7 @@ export default function ProjectRunsPage({ params }: { params: Promise<{ projectI
     >
       <div className="h-full overflow-auto p-4">
         <div className="mx-auto max-w-[1500px]">
-          <JobsTable projectID={projectID} />
+          <ProjectRunsTable projectID={projectID} />
         </div>
       </div>
     </ProjectWorkspaceShell>

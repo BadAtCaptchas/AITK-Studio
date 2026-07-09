@@ -8,12 +8,15 @@ type DatasetListError = {
   worker_id: string;
   worker_name: string;
   error: string;
+  project_id?: string;
+  project_name?: string;
 };
 
 type UseDatasetListOptions = {
   includeRemote?: boolean;
   workerID?: string;
   projectID?: string | null;
+  scope?: 'global' | 'all' | 'project';
 };
 
 export default function useDatasetList(options: UseDatasetListOptions = {}) {
@@ -23,6 +26,7 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
   const includeRemote = options.includeRemote === true;
   const workerID = options.workerID || 'local';
   const projectID = options.projectID || null;
+  const scope = options.scope || (projectID ? 'project' : 'global');
 
   const refreshDatasets = (refreshOptions: { background?: boolean } = {}) => {
     if (!refreshOptions.background) setStatus('loading');
@@ -30,6 +34,7 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
     if (includeRemote) params.set('include_remote', '1');
     if (workerID !== 'local') params.set('worker_id', workerID);
     if (projectID) params.set('project_id', projectID);
+    params.set('scope', scope);
     const query = params.toString();
     apiClient
       .get(`/api/datasets/list${query ? `?${query}` : ''}`)
@@ -41,6 +46,12 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
           typeof item === 'string' ? { name: item, encrypted: false } : item,
         );
         normalized.sort((a, b) => {
+          const projectCompare = (a.project_name || '').localeCompare(b.project_name || '');
+          if ((a.project_id || null) !== (b.project_id || null)) {
+            if (!a.project_id) return -1;
+            if (!b.project_id) return 1;
+            if (projectCompare) return projectCompare;
+          }
           if ((a.source || 'local') !== (b.source || 'local')) {
             return (a.source || 'local') === 'local' ? -1 : 1;
           }
@@ -59,7 +70,7 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
   };
   useEffect(() => {
     refreshDatasets();
-  }, [includeRemote, workerID, projectID]);
+  }, [includeRemote, workerID, projectID, scope]);
 
   return { datasets, setDatasets, errors, status, refreshDatasets };
 }

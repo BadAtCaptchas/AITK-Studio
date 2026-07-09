@@ -4,14 +4,24 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
-export default function useJob(jobID: string, reloadInterval: null | number = null) {
+export default function useJob(
+  jobID: string,
+  reloadInterval: null | number = null,
+  projectID?: string | null,
+) {
   const [job, setJob] = useState<Job | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
   const refreshJob = useCallback(() => {
+    if (projectID === null) return;
     setStatus('loading');
     apiClient
-      .get(`/api/jobs?id=${jobID}`)
+      .get('/api/jobs', {
+        params: {
+          id: jobID,
+          ...(projectID ? { scope: 'project', project_id: projectID } : {}),
+        },
+      })
       .then(res => res.data)
       .then(data => {
         setJob(data);
@@ -21,9 +31,14 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
         console.error('Error fetching datasets:', error);
         setStatus('error');
       });
-  }, [jobID]);
+  }, [jobID, projectID]);
 
   useEffect(() => {
+    if (projectID === null) {
+      setJob(null);
+      setStatus('idle');
+      return;
+    }
     refreshJob();
 
     if (reloadInterval) {
@@ -33,7 +48,7 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
         clearInterval(interval);
       };
     }
-  }, [refreshJob, reloadInterval]);
+  }, [projectID, refreshJob, reloadInterval]);
 
   return { job, setJob, status, refreshJob };
 }

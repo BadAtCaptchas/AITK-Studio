@@ -13,7 +13,7 @@ import {
 import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
-import { prepareJobConfigForProject, resolveOptionalProject } from '@/server/projects';
+import { prepareJobConfigForProject, ProjectError, resolveOptionalProject, resolveProject } from '@/server/projects';
 import {
   assertProjectsEnabled,
   isProjectSpacesDisabledError,
@@ -131,14 +131,35 @@ export async function GET(request: Request) {
   const job_ref = searchParams.get('job_ref');
   const job_type = searchParams.get('job_type');
   const projectParam = searchParams.get('project_id');
+  const rawScope = searchParams.get('scope');
   const localOnly = searchParams.get('local_only') === '1';
   const includeProjectActive = searchParams.get('include_project_active') === '1';
 
   try {
-    const project = await resolveOptionalProject(projectParam);
+    if (searchParams.has('project_id') && !projectParam?.trim()) {
+      return NextResponse.json(
+        { error: 'project_id cannot be blank', code: 'PROJECT_INVALID_SCOPE' },
+        { status: 400 },
+      );
+    }
+    if (rawScope && !['global', 'all', 'project'].includes(rawScope)) {
+      return NextResponse.json({ error: 'scope must be global, all, or project', code: 'INVALID_SCOPE' }, { status: 400 });
+    }
+    const scope = (rawScope || (projectParam ? 'project' : 'global')) as 'global' | 'all' | 'project';
+    if (scope === 'project' && !projectParam) {
+      return NextResponse.json({ error: 'project_id is required for project scope', code: 'PROJECT_ID_REQUIRED' }, { status: 400 });
+    }
+    if (rawScope && scope !== 'project' && projectParam) {
+      return NextResponse.json({ error: 'project_id is only valid for project scope', code: 'INVALID_SCOPE' }, { status: 400 });
+    }
+    if (scope === 'all') await assertProjectsEnabled();
+    const project = scope === 'project' ? await resolveProject(projectParam as string, { intent: 'read' }) : null;
     if (id) {
       const job = await db.jobs.findById(id);
       await assertProjectJobVisible(job);
+      if (job && ((scope === 'global' && job.project_id) || (scope === 'project' && job.project_id !== project?.id))) {
+        return NextResponse.json({ error: 'Job does not belong to this project', code: 'PROJECT_SCOPE_MISMATCH' }, { status: 404 });
+      }
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
         const captionSynced = await syncRemoteCaptionResultForJob(synced);
@@ -148,7 +169,11 @@ export async function GET(request: Request) {
       return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
     }
     if (job_ref) {
-      const job = await db.jobs.findLatestByRef(job_ref, job_type, project?.id ?? null);
+      const job = await db.jobs.findLatestByRef(
+        job_ref,
+        job_type,
+        scope === 'all' ? undefined : project?.id ?? null,
+      );
       await assertProjectJobVisible(job);
       if (job && !isLocalWorker(job.worker_id)) {
         const synced = await syncRemoteJob(job);
@@ -163,18 +188,47 @@ export async function GET(request: Request) {
       jobType: job_type,
       localOnly,
       projectID: project?.id || null,
+      scope,
       includeProjectActive,
     });
     const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
       (job): job is Job => job !== null,
     );
     const resultSyncedJobs = await Promise.all(reconciledJobs.map(job => syncRemoteCaptionResultForJob(job)));
+    const progressedJobs = await Promise.all(resultSyncedJobs.map(job => withJobProgress(job)));
+    const projectIDs = Array.from(new Set(progressedJobs.map(job => job.project_id).filter((id): id is string => Boolean(id))));
+    const projectNames = new Map<string, { name: string; slug: string; lifecycle_state: Job['project_lifecycle_state'] }>();
+    if (projectIDs.length > 0) {
+      const projects = await db.projects.list();
+      projects.forEach(project => {
+        if (projectIDs.includes(project.id)) {
+          projectNames.set(project.id, {
+            name: project.name,
+            slug: project.slug,
+            lifecycle_state: project.lifecycle_state,
+          });
+        }
+      });
+    }
     return NextResponse.json({
-      jobs: await Promise.all(resultSyncedJobs.map(job => withJobProgress(job))),
+      jobs: progressedJobs.map(job => ({
+        ...job,
+        project_name: job.project_id ? projectNames.get(job.project_id)?.name || null : null,
+        project_slug: job.project_id ? projectNames.get(job.project_id)?.slug || null : null,
+        project_lifecycle_state: job.project_id ? projectNames.get(job.project_id)?.lifecycle_state || null : null,
+      })),
+      scope,
+      project_id: project?.id || null,
     });
   } catch (error) {
     if (isProjectSpacesDisabledError(error)) {
       return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
+    }
+    if (error instanceof ProjectError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code, ...(error.details === undefined ? {} : { details: error.details }) },
+        { status: error.status },
+      );
     }
     console.error(error);
     return NextResponse.json({ error: 'Failed to fetch training data' }, { status: 500 });
@@ -190,8 +244,8 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { id, name, job_config } = body;
-    const project = await resolveOptionalProject(body.project_id);
-    const projectJobConfig = project ? await prepareJobConfigForProject(job_config, project) : job_config;
+    const project = await resolveOptionalProject(body.project_id, { intent: 'write' });
+    let projectJobConfig = project ? await prepareJobConfigForProject(job_config, project) : job_config;
     const worker_id = normalizeWorkerId(body.worker_id);
 
     if (!isValidJobName(name)) {
@@ -242,7 +296,20 @@ export async function POST(request: Request) {
       }
       await assertProjectJobVisible(existing);
 
-      const targetProjectID = project?.id || existing.project_id || null;
+      const existingProject = existing.project_id
+        ? await resolveProject(existing.project_id, { intent: 'write' })
+        : null;
+      if (Object.prototype.hasOwnProperty.call(body, 'project_id') && (project?.id ?? null) !== existing.project_id) {
+        return NextResponse.json(
+          { error: 'Jobs cannot be reassigned across project scopes', code: 'PROJECT_SCOPE_MISMATCH' },
+          { status: 409 },
+        );
+      }
+      if (!project && existingProject) {
+        projectJobConfig = await prepareJobConfigForProject(job_config, existingProject);
+      }
+
+      const targetProjectID = existing.project_id || null;
       const duplicateJob = await db.jobs.findByNameInScope(name, targetProjectID);
       if (duplicateJob && duplicateJob.id !== id) {
         return NextResponse.json({ error: duplicateJobNameError(targetProjectID) }, { status: 409 });
@@ -311,6 +378,12 @@ export async function POST(request: Request) {
     if (error.code === 'P2002') {
       // Handle unique constraint violation, 409=Conflict
       return NextResponse.json({ error: 'Job name already exists in this workspace' }, { status: 409 });
+    }
+    if (error instanceof ProjectError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code, ...(error.details === undefined ? {} : { details: error.details }) },
+        { status: error.status },
+      );
     }
     console.error(error);
     // Handle other errors

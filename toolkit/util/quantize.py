@@ -16,6 +16,12 @@ from safetensors.torch import load_file
 from huggingface_hub import hf_hub_download
 
 from toolkit.print import print_acc
+from toolkit.util.ostris_quant import (
+    OstrisLinear,
+    OstrisQuantizer,
+    convert_linear_to_ostris,
+    get_ostris_quantizer,
+)
 import os
 
 if TYPE_CHECKING:
@@ -31,6 +37,7 @@ Q_MODULES = [
     "QLayerNorm",
     "QConvTranspose2d",
     "QEmbeddingBag",
+    "OstrisLinear",
 ]
 
 torchao_qtypes = {
@@ -53,10 +60,21 @@ class aotype:
         self.config = torchao_qtypes[name]
 
 
+class ostristype:
+    """Resolved custom quantization backend and its serializable qtype name."""
+
+    def __init__(self, name: str, quantizer: OstrisQuantizer):
+        self.name = name
+        self.quantizer = quantizer
+
+
 def get_qtype(qtype: Union[str, qtype]) -> qtype:
     if qtype in torchao_qtypes:
         return aotype(qtype)
     if isinstance(qtype, str):
+        ostris_quantizer = get_ostris_quantizer(qtype)
+        if ostris_quantizer is not None:
+            return ostristype(qtype, ostris_quantizer)
         return qtypes[qtype]
     else:
         return qtype
@@ -65,6 +83,8 @@ def get_qtype(qtype: Union[str, qtype]) -> qtype:
 def is_quantized_tensor(t) -> bool:
     # torchao stores quantized weights as tensor subclasses under torchao.* that
     # still expose dequantize(). Quanto QTensor is handled in dequantize_if_quantized.
+    if getattr(t, '_is_ostris_weight', False):
+        return True
     return 'torchao' in type(t).__module__ and hasattr(t, 'dequantize')
 
 
@@ -79,11 +99,21 @@ def get_torchao_config(qtype):
         q = get_qtype(qtype)
     except Exception:
         return None
-    return q.config if isinstance(q, aotype) else None
+    if isinstance(q, aotype):
+        return q.config
+    if isinstance(q, ostristype):
+        return q
+    return None
 
 
 def requantize_module_weight(module, fp_weight, orig_dtype, config) -> None:
     """Write a full precision weight back into module.weight, re-quantizing when possible."""
+    if isinstance(module, OstrisLinear):
+        module.requantize_(fp_weight)
+        return
+    if isinstance(config, ostristype):
+        # This layer did not satisfy the backend's shape requirements.
+        config = None
     module.weight = torch.nn.Parameter(fp_weight.to(orig_dtype), requires_grad=False)
     if config is not None:
         torchao_quantize_(module, config)
@@ -91,7 +121,7 @@ def requantize_module_weight(module, fp_weight, orig_dtype, config) -> None:
 
 def quantize(
     model: torch.nn.Module,
-    weights: Optional[Union[str, qtype, aotype]] = None,
+    weights: Optional[Union[str, qtype, aotype, ostristype]] = None,
     activations: Optional[Union[str, qtype]] = None,
     optimizer: Optional[Optimizer] = None,
     include: Optional[Union[str, List[str]]] = None,
@@ -139,7 +169,10 @@ def quantize(
             if m.__class__.__name__ in Q_MODULES:
                 continue
             else:
-                if isinstance(weights, aotype):
+                if isinstance(weights, ostristype):
+                    if isinstance(m, torch.nn.Linear):
+                        convert_linear_to_ostris(m, weights.quantizer)
+                elif isinstance(weights, aotype):
                     torchao_quantize_(m, weights.config)
                 else:
                     _quantize_submodule(

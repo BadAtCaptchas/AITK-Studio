@@ -18,6 +18,7 @@ LINEAR_MODULES = [
     'Linear8bitLt',
     'Fp8Linear',
     'Nvfp4Linear',
+    'OstrisLinear',
 ]
 CONV_MODULES = [
     'Conv2d',

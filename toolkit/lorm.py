@@ -27,6 +27,7 @@ LINEAR_MODULES = [
     'Linear8bitLt',
     'Fp8Linear',
     'Nvfp4Linear',
+    'OstrisLinear',
 ]
 CONV_MODULES = [
     # 'Conv2d',
@@ -277,7 +278,11 @@ def replace_module_by_path(network, name, module):
 
 
 def count_parameters(module):
-    return sum(p.numel() for p in module.parameters())
+    count = sum(p.numel() for p in module.parameters())
+    logical_weight_numel = getattr(module, 'logical_weight_numel', None)
+    if logical_weight_numel is not None and 'weight' not in module._parameters:
+        count += int(logical_weight_numel)
+    return count
 
 
 def compute_optimal_bias(original_module, linear_down, linear_up, X):

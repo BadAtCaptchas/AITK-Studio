@@ -18,6 +18,10 @@ CONV_MODULES = [
 ]
 
 UNMANAGED_MODULES = [
+    # Custom quantized buffers move together and stay compressed/resident. The
+    # legacy Linear bouncer expects a concrete weight Parameter and would otherwise
+    # materialize a full CPU weight on every call.
+    "OstrisLinear",
     "LayerNorm",
     "BatchNorm1d",
     "BatchNorm2d",
@@ -147,12 +151,16 @@ class MemoryManager:
                                 )
                             modules_processed.append(ara)
                     modules_processed.append(child_module)
-                elif child_module.__class__.__name__ in UNMANAGED_MODULES or any(
-                    inc in child_module.__class__.__name__
-                    for inc in UNMANAGED_MODULES_INCLUDES
+                elif child_module not in modules_processed and (
+                    child_module.__class__.__name__ in UNMANAGED_MODULES
+                    or any(
+                        inc in child_module.__class__.__name__
+                        for inc in UNMANAGED_MODULES_INCLUDES
+                    )
                 ):
                     # unmanaged
                     module._memory_manager.unmanaged_modules.append(child_module)
+                    modules_processed.append(child_module)
                 else:
                     continue
 

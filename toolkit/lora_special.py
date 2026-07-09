@@ -34,6 +34,7 @@ LINEAR_MODULES = [
     'Linear8bitLt',
     'Fp8Linear',
     'Nvfp4Linear',
+    'OstrisLinear',
     # 'GroupNorm',
 ]
 CONV_MODULES = [
@@ -83,7 +84,10 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         torch.nn.Module.__init__(self)
         self.lora_name = lora_name
         self.orig_module_ref = weakref.ref(org_module)
-        self.scalar = torch.tensor(1.0, device=org_module.weight.device)
+        module_device = getattr(org_module, 'quantized_device', None)
+        if module_device is None:
+            module_device = org_module.weight.device
+        self.scalar = torch.tensor(1.0, device=module_device)
         
         # if is ara lora module, mark it on the layer so memory manager can handle it
         if is_ara:
@@ -151,7 +155,9 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
 
 
 def _is_quantized_tensor(t) -> bool:
-    return 'torchao' in type(t).__module__ and hasattr(t, 'dequantize')
+    from toolkit.util.quantize import is_quantized_tensor
+
+    return is_quantized_tensor(t)
 
 
 def _dequantize_if_needed(t):
@@ -184,8 +190,9 @@ class FullModule(ToolkitModuleMixin, torch.nn.Module):
         self.module_dropout = None
         self.is_checkpointing = False
 
-        self.weight_is_quantized = _is_quantized_tensor(org_module.weight)
-        ref_weight = _dequantize_if_needed(org_module.weight)
+        org_weight = org_module.weight
+        self.weight_is_quantized = _is_quantized_tensor(org_weight)
+        ref_weight = _dequantize_if_needed(org_weight)
         self.diff = torch.nn.Parameter(torch.zeros_like(ref_weight))
 
         org_bias = getattr(org_module, 'bias', None)
@@ -207,6 +214,15 @@ class FullModule(ToolkitModuleMixin, torch.nn.Module):
         om = self.org_module[0]
         multiplier = network.torch_multiplier
         mult = multiplier.mean() if isinstance(multiplier, torch.Tensor) else multiplier
+
+        if getattr(om, 'is_ostris_quantized', False):
+            base_output = self.org_forward(x, *args, **kwargs)
+            delta_weight = (self.diff * mult).to(device=x.device, dtype=x.dtype)
+            delta_bias = None
+            if self.diff_b is not None:
+                delta_bias = (self.diff_b * mult).to(device=x.device, dtype=x.dtype)
+            delta_output = torch.nn.functional.linear(x, delta_weight, delta_bias)
+            return base_output + delta_output.to(base_output.dtype)
 
         orig_weight = om._parameters['weight']
         base_weight = _dequantize_if_needed(orig_weight)
@@ -487,9 +503,9 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
                         is_linear = child_module.__class__.__name__ in LINEAR_MODULES
                         is_conv = child_module.__class__.__name__ in conv_modules
                         is_conv_1x1 = is_conv and _is_unit_kernel(child_module.kernel_size)
-                        is_leaf_with_weight = (
-                            len(list(child_module.children())) == 0
-                            and isinstance(getattr(child_module, 'weight', None), torch.nn.Parameter)
+                        is_leaf_with_weight = len(list(child_module.children())) == 0 and (
+                            getattr(child_module, 'is_ostris_quantized', False)
+                            or isinstance(getattr(child_module, 'weight', None), torch.nn.Parameter)
                         )
 
                         lora_name = [prefix, name, child_name]

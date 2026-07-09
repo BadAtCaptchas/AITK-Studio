@@ -34,6 +34,7 @@ LINEAR_MODULES = [
     'Linear8bitLt',
     'Fp8Linear',
     'Nvfp4Linear',
+    'OstrisLinear',
     # 'GroupNorm',
 ]
 CONV_MODULES = [
@@ -83,6 +84,8 @@ def _expected_weight_shape(module):
 def is_mergeable_lora_target(module) -> bool:
     if module.__class__.__name__ in UNMERGEABLE_MODULES:
         return False
+    if getattr(module, 'is_ostris_quantized', False):
+        return True
 
     try:
         org_sd = module.state_dict()
@@ -503,7 +506,9 @@ class ToolkitModuleMixin:
         if is_ao_quantized:
             from toolkit.util.quantize import get_torchao_config, requantize_module_weight
             config = get_torchao_config(self._get_base_qtype())
-            if config is None:
+            if config is None and not getattr(
+                self.org_module[0], 'is_ostris_quantized', False
+            ):
                 print_once(
                     f"Warning: merging into quantized layer {getattr(self, 'lora_name', '?')} "
                     "without a known qtype; it will be left dequantized"

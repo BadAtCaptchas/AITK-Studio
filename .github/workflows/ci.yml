@@ -15,6 +15,8 @@ jobs:
   ui:
     name: UI typecheck, tests, and build
     runs-on: ubuntu-latest
+    env:
+      AITK_SQLITE_PATH: ${{ github.workspace }}/.tmp/aitk-ci.db
     defaults:
       run:
         working-directory: ui
@@ -31,6 +33,9 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Prepare isolated CI database
+        run: npm run update_db
 
       - name: Run UI quality gates
         run: npm run ci

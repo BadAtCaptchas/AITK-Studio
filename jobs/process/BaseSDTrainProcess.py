@@ -22,6 +22,10 @@ import torch
 import torch.backends.cuda
 from huggingface_hub import HfApi, get_token, interpreter_login
 from toolkit.memory_management import MemoryManager
+from toolkit.memory_management.cuda_telemetry import (
+    CudaPhaseTelemetry,
+    record_cuda_phase,
+)
 
 from toolkit.basic import value_map
 from toolkit.base_lora import fuse_base_lora_into_model
@@ -68,7 +72,7 @@ from tqdm import tqdm
 
 from toolkit.config_modules import SaveConfig, LoggingConfig, SampleConfig, NetworkConfig, TrainConfig, ModelConfig, \
     GenerateImageConfig, EmbeddingConfig, DatasetConfig, preprocess_dataset_raw_config, AdapterConfig, GuidanceConfig, validate_configs, \
-    DecoratorConfig, WatermarkConfig
+    DecoratorConfig, WatermarkConfig, apply_orbit4_low_vram_training_defaults
 from toolkit.logging_aitk import create_logger
 from toolkit.training_phases import TrainingPhaseManager
 from diffusers import FluxTransformer2DModel
@@ -120,7 +124,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
         else:
             self.network_config = None
         raw_train_config = copy.deepcopy(self.get_conf('train', {}))
-        model_config = self.get_conf('model', {})
+        model_config = copy.deepcopy(self.get_conf('model', {}))
+        raw_datasets = copy.deepcopy(self.get_conf('datasets', None))
+        orbit4_low_vram_profile = apply_orbit4_low_vram_training_defaults(
+            model_config,
+            raw_train_config,
+            raw_datasets,
+        )
         if model_config.get('arch') == 'hidream_o1':
             raw_train_config.setdefault('noise_scheduler', 'flowmatch')
             raw_train_config.setdefault('dtype', 'bf16')
@@ -166,6 +176,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # update modelconfig dtype to match train
         model_config['dtype'] = self.train_config.dtype
         self.model_config = ModelConfig(**model_config)
+        self.cuda_phase_telemetry = CudaPhaseTelemetry(
+            self.device_torch,
+            enabled=orbit4_low_vram_profile,
+        )
 
         self.save_config = SaveConfig(**self.get_conf('save', {}))
         self.watermark_config = WatermarkConfig(**self.get_conf('watermark', {}))
@@ -192,7 +206,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         # store is all are cached. Allows us to not load vae if we don't need to
         self.is_latents_cached = True
-        raw_datasets = self.get_conf('datasets', None)
         if model_config.get('arch') == 'i1' and raw_datasets is not None:
             for raw_dataset in raw_datasets:
                 raw_dataset['resolution'] = [1024]
@@ -206,8 +219,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         
         # add dataset text embedding cache to their config
         if self.train_config.cache_text_embeddings:
-            for raw_dataset in raw_datasets:
-                raw_dataset['cache_text_embeddings'] = True
+            for raw_dataset in raw_datasets or []:
+                raw_dataset.setdefault('cache_text_embeddings', True)
         
         if raw_datasets is not None and len(raw_datasets) > 0:
             for raw_dataset in raw_datasets:
@@ -324,6 +337,16 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.additional_logs = OrderedDict()
         self.authenlora = None
 
+    def cuda_memory_phase(self, phase: str):
+        """Public phase scope for model loaders, caches, exporters, and samplers."""
+
+        return self.cuda_phase_telemetry.phase(phase)
+
+    def get_cuda_memory_report(self):
+        """Return allocated/reserved CUDA byte counters grouped by phase."""
+
+        return self.cuda_phase_telemetry.report()
+
     def post_process_generate_image_config_list(self, generate_image_config_list: List[GenerateImageConfig]):
         # override in subclass
         return generate_image_config_list
@@ -415,6 +438,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             for obj, attr, value in reversed(restore_attrs):
                 setattr(obj, attr, value)
 
+    @record_cuda_phase("sampling")
     def sample(self, step=None, is_first=False):
         if not self.accelerator.is_main_process:
             return
@@ -672,6 +696,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             seen.add(id(batch))
             batch.cleanup()
 
+    @record_cuda_phase("saving")
     def save(self, step=None):
         if not self.accelerator.is_main_process:
             return
@@ -1049,13 +1074,20 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if device.type == 'cuda':
                     add('train/gpu_mem_allocated_gb', torch.cuda.memory_allocated(device) / (1024 ** 3))
                     add('train/gpu_mem_reserved_gb', torch.cuda.memory_reserved(device) / (1024 ** 3))
-                    add('train/gpu_mem_max_allocated_gb', torch.cuda.max_memory_allocated(device) / (1024 ** 3))
+                    peak_allocated = max(
+                        torch.cuda.max_memory_allocated(device),
+                        self.cuda_phase_telemetry.overall_peak_allocated_bytes,
+                    )
+                    add('train/gpu_mem_max_allocated_gb', peak_allocated / (1024 ** 3))
                     free_bytes, total_bytes = torch.cuda.mem_get_info(device)
                     add('train/gpu_mem_free_gb', free_bytes / (1024 ** 3))
                     add('train/gpu_mem_total_gb', total_bytes / (1024 ** 3))
                     add('train/gpu_mem_used_pct', (1.0 - (free_bytes / total_bytes)) * 100.0 if total_bytes else 0.0)
             except Exception:
                 pass
+
+            for key, value in self.cuda_phase_telemetry.metrics().items():
+                add(key, value)
 
         return metrics
 
@@ -2107,7 +2139,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         
         self.hook_after_sd_init_before_load()
         # run base sd process run
-        self.sd.load_model()
+        with self.cuda_memory_phase("loading"):
+            self.sd.load_model()
         if (
             getattr(self.sd.model_config, "base_lora_path", None) is not None
             and not getattr(self.sd, "_base_lora_fused", False)
@@ -2526,18 +2559,22 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.setup_lr_scheduler()
 
         ### HOOk ###
-        self.before_dataset_load()
-        # load datasets if passed in the root process
-        if self.datasets is not None:
-            self.data_loader = get_dataloader_from_datasets(self.datasets, self.train_config.batch_size, self.sd)
-        if self.datasets_reg is not None:
-            self.data_loader_reg = get_dataloader_from_datasets(self.datasets_reg, self.train_config.batch_size,
-                                                                self.sd)
+        with self.cuda_memory_phase("caching"):
+            self.before_dataset_load()
+            # load datasets if passed in the root process
+            if self.datasets is not None:
+                self.data_loader = get_dataloader_from_datasets(
+                    self.datasets, self.train_config.batch_size, self.sd
+                )
+            if self.datasets_reg is not None:
+                self.data_loader_reg = get_dataloader_from_datasets(
+                    self.datasets_reg, self.train_config.batch_size, self.sd
+                )
 
-        flush()
-        self.last_save_step = self.step_num
-        ### HOOK ###
-        self.hook_before_train_loop()
+            flush()
+            self.last_save_step = self.step_num
+            ### HOOK ###
+            self.hook_before_train_loop()
 
         # ============================================================
         # COMPILE

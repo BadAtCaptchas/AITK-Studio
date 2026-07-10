@@ -232,10 +232,21 @@ class StaticPinnedCpuAllocator:
         dtype: Optional[torch.dtype] = None,
         non_blocking: bool = True,
     ) -> torch.Tensor:
-        kwargs: dict[str, Any] = {"device": "cpu", "non_blocking": non_blocking}
-        if dtype is not None and tensor.is_floating_point():
-            kwargs["dtype"] = dtype
-        result = tensor.detach().to(**kwargs)
+        target_dtype = dtype if dtype is not None and tensor.is_floating_point() else tensor.dtype
+        if tensor.device.type == "cuda" and torch.cuda.is_available():
+            # CUDA -> pageable CPU followed by ``pin_memory`` synchronizes and
+            # makes the transfer stream ineffective. Copy directly into pinned
+            # storage so packed block eviction can genuinely overlap compute.
+            result = torch.empty_like(
+                tensor,
+                device="cpu",
+                dtype=target_dtype,
+                pin_memory=True,
+            )
+            result.copy_(tensor.detach(), non_blocking=non_blocking)
+            return result
+
+        result = tensor.detach().to(device="cpu", dtype=target_dtype)
         try:
             if torch.cuda.is_available() and not result.is_pinned():
                 result = result.pin_memory()
@@ -264,6 +275,7 @@ class _LayerCandidate:
     module: torch.nn.Module
     params: list[torch.nn.Parameter]
     buffers: list[torch.Tensor]
+    reload_for_backward: bool = False
 
 
 @dataclass
@@ -274,6 +286,7 @@ class _ManagedLayer:
     original_forward: Callable[..., Any]
     params: list[torch.nn.Parameter]
     buffers: list[torch.Tensor]
+    reload_for_backward: bool = False
     hook_handles: list[Any] = field(default_factory=list)
     transfer_event: Optional[torch.cuda.Event] = None
     state: str = "resident"
@@ -339,6 +352,7 @@ class BlockOffloadManager:
                 original_forward=candidate.module.forward,
                 params=params,
                 buffers=buffers,
+                reload_for_backward=candidate.reload_for_backward,
                 state="device" if self.active and self._entry_device(entry_params=params, entry_buffers=buffers) == self.process_device else "cpu",
             )
             self.layers.append(entry)
@@ -358,6 +372,23 @@ class BlockOffloadManager:
                 ignored.update(id(param) for param in item.parameters(recurse=True))
                 ignored.update(id(buffer) for buffer in item.buffers(recurse=True))
         return ignored
+
+    @staticmethod
+    def _can_reload_for_backward(layer: torch.nn.Module) -> bool:
+        """Return whether a frozen quantized block may leave CUDA after forward.
+
+        ``OstrisLinear`` keeps only a module reference for its custom input-gradient
+        calculation. Reloading its registered buffers in a full-backward pre-hook is
+        therefore sufficient. Mixed dense/quantized or trainable blocks stay on the
+        conservative path because their autograd nodes may retain concrete CUDA
+        parameter storage from forward.
+        """
+        linears = [child for child in layer.modules() if isinstance(child, torch.nn.Linear)]
+        if not linears or not all(
+            getattr(child, "is_ostris_quantized", False) for child in linears
+        ):
+            return False
+        return not any(param.requires_grad for param in layer.parameters(recurse=True))
 
     @staticmethod
     def _build_layer_candidates(
@@ -383,6 +414,7 @@ class BlockOffloadManager:
                     module=layer,
                     params=params,
                     buffers=buffers,
+                    reload_for_backward=BlockOffloadManager._can_reload_for_backward(layer),
                 )
             )
 
@@ -442,7 +474,10 @@ class BlockOffloadManager:
         module.to = manager.memory_managed_to
         manager._patch_layers()
         if manager.active:
-            manager.offload_inactive_layers()
+            # Components produced by staged quantization intentionally remain on
+            # CPU. Populate only the deterministic resident set and non-block
+            # tensors; never require a transient whole-component ``to(cuda)``.
+            manager.activate_for_forward(device)
         return manager
 
     def detach(self):
@@ -470,6 +505,12 @@ class BlockOffloadManager:
 
             entry.module.forward = wrapped_forward
             try:
+                if entry.reload_for_backward:
+                    entry.hook_handles.append(
+                        entry.module.register_full_backward_pre_hook(
+                            lambda _module, _grad_output, _entry=entry: self.before_backward(_entry)
+                        )
+                    )
                 entry.hook_handles.append(
                     entry.module.register_full_backward_hook(
                         lambda _module, _grad_input, _grad_output, _entry=entry: self.after_backward(_entry)
@@ -480,8 +521,6 @@ class BlockOffloadManager:
 
     def memory_managed_to(self, *args, **kwargs):
         device, dtype = _extract_device_dtype(args, kwargs)
-        result = self._original_to(*args, **kwargs)
-
         if device is not None:
             self.process_device = device
             self.active = self.process_device.type == "cuda" and torch.cuda.is_available()
@@ -490,15 +529,38 @@ class BlockOffloadManager:
             elif not self.active:
                 self.transfer_stream = None
 
+        if self.active and device is not None and device.type == "cuda":
+            # A normal Module.to(cuda) would first copy every packed block and
+            # then evict the configured fraction, creating a whole-model peak.
+            # Move only the resident/non-managed tensors and keep offloaded
+            # entries on CPU, applying a requested dtype in place on each side.
+            for entry in self.layers:
+                self._wait_for_entry_transfer(entry)
+            self._move_non_offloaded_tensors(self.process_device, dtype=dtype)
+            for entry in self.layers:
+                if self.strategy.is_offloaded(entry.index):
+                    self._move_entry(
+                        entry,
+                        torch.device("cpu"),
+                        dtype=dtype,
+                        async_transfer=False,
+                    )
+                    entry.state = "cpu"
+                else:
+                    entry.state = "resident"
+            return self.module
+
+        result = self._original_to(*args, **kwargs)
         if dtype is not None:
             for entry in self.layers:
-                self._move_entry(entry, self._entry_target_device(entry), dtype=dtype, async_transfer=False)
-
-        if self.active:
-            self.offload_inactive_layers()
-        else:
-            for entry in self.layers:
-                entry.state = "cpu"
+                self._move_entry(
+                    entry,
+                    self._entry_target_device(entry),
+                    dtype=dtype,
+                    async_transfer=False,
+                )
+        for entry in self.layers:
+            entry.state = "cpu"
         return result
 
     def activate_for_forward(self, device: torch.device):
@@ -586,11 +648,23 @@ class BlockOffloadManager:
         self._prefetch_window(self.strategy.forward_forward_window(entry.index))
         result = entry.original_forward(*args, **kwargs)
 
-        if torch.is_grad_enabled() and self._output_requires_grad(result):
+        if (
+            torch.is_grad_enabled()
+            and self._output_requires_grad(result)
+            and not entry.reload_for_backward
+        ):
             entry.state = "device"
         else:
             self._offload_entry(entry, async_transfer=True)
         return result
+
+    def before_backward(self, entry: _ManagedLayer):
+        """Reload a frozen quantized block just before its input-gradient work."""
+        self._ensure_entry_on_device(entry)
+        for next_index in self.strategy.forward_backward_window(entry.index):
+            if next_index != entry.index:
+                self._prefetch_entry(self.layers[next_index])
+        return None
 
     def after_backward(self, entry: _ManagedLayer):
         self._offload_entry(entry, async_transfer=True)

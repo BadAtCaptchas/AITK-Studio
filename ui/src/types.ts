@@ -729,7 +729,10 @@ export interface TrainConfig {
 }
 
 export interface QuantizeKwargsConfig {
-  exclude: string[];
+  kernel?: 'auto' | 'triton' | 'torch';
+  max_workspace_mb?: number;
+  include?: string[];
+  exclude?: string[];
 }
 
 export interface ModelConfig {

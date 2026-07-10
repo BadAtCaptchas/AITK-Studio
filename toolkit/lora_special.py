@@ -110,6 +110,11 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         # else:
         self.lora_dim = lora_dim
         self.full_rank = network.network_type.lower() == "fullrank"
+        if self.full_rank and getattr(org_module, 'is_ostris_quantized', False):
+            raise ValueError(
+                "Full-rank adapters are not supported with Orbit packed weights; "
+                "use LoRA, LoKr, DoRA, or ARA with a bounded rank."
+            )
 
         if org_module.__class__.__name__ in CONV_MODULES:
             kernel_size = org_module.kernel_size
@@ -178,7 +183,7 @@ class FullModule(ToolkitModuleMixin, torch.nn.Module):
             network: 'LoRASpecialNetwork' = None,
             **kwargs
     ):
-        self.can_merge_in = True
+        self.can_merge_in = not getattr(org_module, 'is_ostris_quantized', False)
         ToolkitModuleMixin.__init__(self, network=network)
         torch.nn.Module.__init__(self)
         self.lora_name = lora_name
@@ -209,14 +214,14 @@ class FullModule(ToolkitModuleMixin, torch.nn.Module):
         network: 'LoRASpecialNetwork' = self.network_ref()
         skip = (not network.is_active) or network.is_merged_in or network._multiplier == 0 or network.is_lorm
         if skip:
-            return self.org_forward(x, *args, **kwargs)
+            return self._call_org_forward(x, *args, **kwargs)
 
         om = self.org_module[0]
         multiplier = network.torch_multiplier
         mult = multiplier.mean() if isinstance(multiplier, torch.Tensor) else multiplier
 
         if getattr(om, 'is_ostris_quantized', False):
-            base_output = self.org_forward(x, *args, **kwargs)
+            base_output = self._call_org_forward(x, *args, **kwargs)
             delta_weight = (self.diff * mult).to(device=x.device, dtype=x.dtype)
             delta_bias = None
             if self.diff_b is not None:
@@ -237,7 +242,7 @@ class FullModule(ToolkitModuleMixin, torch.nn.Module):
         if has_bias:
             om._parameters['bias'] = eff_bias
         try:
-            out = self.org_forward(x, *args, **kwargs)
+            out = self._call_org_forward(x, *args, **kwargs)
         finally:
             om._parameters['weight'] = orig_weight
             if has_bias:

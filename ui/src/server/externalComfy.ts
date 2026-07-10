@@ -17,7 +17,7 @@ export const COMFY_EXTERNAL_URL_KEY = 'COMFY_EXTERNAL_URL';
 export const COMFY_EXTERNAL_LORA_DIR_KEY = 'COMFY_EXTERNAL_LORA_DIR';
 export const DEFAULT_EXTERNAL_COMFY_URL = 'http://127.0.0.1:8188';
 
-const LORA_JOB_TYPES = new Set(['lora', 'locon', 'lokr', 'lorm']);
+const LORA_JOB_TYPES = new Set(['lora', 'locon', 'lokr', 'lorm', 'dora']);
 
 export type FetchLike = typeof fetch;
 

@@ -1,5 +1,6 @@
 from fnmatch import fnmatch
-from typing import List, Optional, Union, TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Union, TYPE_CHECKING
 import torch
 
 from optimum.quanto.quantize import _quantize_submodule
@@ -17,9 +18,13 @@ from huggingface_hub import hf_hub_download
 
 from toolkit.print import print_acc
 from toolkit.util.ostris_quant import (
+    OstrisBackendMetadata,
+    OstrisBackendOptions,
+    OstrisKernel,
     OstrisLinear,
     OstrisQuantizer,
     convert_linear_to_ostris,
+    get_ostris_backend_metadata,
     get_ostris_quantizer,
 )
 import os
@@ -54,6 +59,257 @@ torchao_qtypes = {
 }
 
 
+@dataclass
+class QuantizationSkipReason:
+    modules: int = 0
+    bytes: int = 0
+    examples: List[str] = field(default_factory=list)
+
+    def add(self, name: str, byte_count: int) -> None:
+        self.modules += 1
+        self.bytes += byte_count
+        if len(self.examples) < 8:
+            self.examples.append(name or "<root>")
+
+    def merge(self, other: "QuantizationSkipReason") -> None:
+        self.modules += other.modules
+        self.bytes += other.bytes
+        for name in other.examples:
+            if len(self.examples) >= 8:
+                break
+            if name not in self.examples:
+                self.examples.append(name)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "modules": self.modules,
+            "bytes": self.bytes,
+            "examples": list(self.examples),
+        }
+
+
+@dataclass
+class QuantizationReport:
+    """Byte coverage and CUDA observations for one quantization phase."""
+
+    qtype: str
+    backend: str
+    component: Optional[str] = None
+    eligible_bytes: int = 0
+    quantized_original_bytes: int = 0
+    quantized_weight_count: int = 0
+    compressed_bytes: int = 0
+    dense_skipped_bytes: int = 0
+    metadata_bytes: int = 0
+    quantized_modules: int = 0
+    skipped_modules: int = 0
+    skip_reasons: Dict[str, QuantizationSkipReason] = field(default_factory=dict)
+    cuda_device: Optional[str] = None
+    cuda_allocated_before_bytes: Optional[int] = None
+    cuda_reserved_before_bytes: Optional[int] = None
+    cuda_allocated_after_bytes: Optional[int] = None
+    cuda_reserved_after_bytes: Optional[int] = None
+    cuda_peak_allocated_bytes: Optional[int] = None
+    cuda_peak_reserved_bytes: Optional[int] = None
+
+    @property
+    def persistent_bytes(self) -> int:
+        return self.compressed_bytes + self.metadata_bytes
+
+    @property
+    def original_accounted_bytes(self) -> int:
+        return self.quantized_original_bytes + self.dense_skipped_bytes
+
+    @property
+    def coverage(self) -> float:
+        if self.original_accounted_bytes == 0:
+            return 0.0
+        return self.quantized_original_bytes / self.original_accounted_bytes
+
+    @property
+    def storage_bytes_per_weight_byte(self) -> float:
+        if self.quantized_original_bytes == 0:
+            return 0.0
+        return self.persistent_bytes / self.quantized_original_bytes
+
+    @property
+    def persistent_bytes_per_weight(self) -> float:
+        if self.quantized_weight_count == 0:
+            return 0.0
+        return self.persistent_bytes / self.quantized_weight_count
+
+    @property
+    def compressed_bytes_per_weight(self) -> float:
+        if self.quantized_weight_count == 0:
+            return 0.0
+        return self.compressed_bytes / self.quantized_weight_count
+
+    def add_skip(self, reason: str, name: str, byte_count: int) -> None:
+        self.skipped_modules += 1
+        self.dense_skipped_bytes += byte_count
+        self.skip_reasons.setdefault(reason, QuantizationSkipReason()).add(
+            name,
+            byte_count,
+        )
+
+    def merge(self, other: "QuantizationReport") -> "QuantizationReport":
+        if self.qtype != other.qtype or self.backend != other.backend:
+            raise ValueError("cannot merge reports from different quantization backends")
+        self.eligible_bytes += other.eligible_bytes
+        self.quantized_original_bytes += other.quantized_original_bytes
+        self.quantized_weight_count += other.quantized_weight_count
+        self.compressed_bytes += other.compressed_bytes
+        self.dense_skipped_bytes += other.dense_skipped_bytes
+        self.metadata_bytes += other.metadata_bytes
+        self.quantized_modules += other.quantized_modules
+        self.skipped_modules += other.skipped_modules
+        for reason, values in other.skip_reasons.items():
+            self.skip_reasons.setdefault(reason, QuantizationSkipReason()).merge(values)
+        if self.cuda_device is None:
+            self.cuda_device = other.cuda_device
+        if self.cuda_allocated_before_bytes is None:
+            self.cuda_allocated_before_bytes = other.cuda_allocated_before_bytes
+        if self.cuda_reserved_before_bytes is None:
+            self.cuda_reserved_before_bytes = other.cuda_reserved_before_bytes
+        self.cuda_allocated_after_bytes = other.cuda_allocated_after_bytes
+        self.cuda_reserved_after_bytes = other.cuda_reserved_after_bytes
+        for field_name in ("cuda_peak_allocated_bytes", "cuda_peak_reserved_bytes"):
+            current = getattr(self, field_name)
+            candidate = getattr(other, field_name)
+            if candidate is not None:
+                setattr(self, field_name, candidate if current is None else max(current, candidate))
+        return self
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "qtype": self.qtype,
+            "backend": self.backend,
+            "component": self.component,
+            "eligible_bytes": self.eligible_bytes,
+            "quantized_original_bytes": self.quantized_original_bytes,
+            "quantized_weight_count": self.quantized_weight_count,
+            "compressed_bytes": self.compressed_bytes,
+            "dense_skipped_bytes": self.dense_skipped_bytes,
+            "metadata_bytes": self.metadata_bytes,
+            "persistent_bytes": self.persistent_bytes,
+            "coverage": self.coverage,
+            "storage_bytes_per_weight_byte": self.storage_bytes_per_weight_byte,
+            "persistent_bytes_per_weight": self.persistent_bytes_per_weight,
+            "compressed_bytes_per_weight": self.compressed_bytes_per_weight,
+            "quantized_modules": self.quantized_modules,
+            "skipped_modules": self.skipped_modules,
+            "skip_reasons": {
+                key: value.to_dict() for key, value in sorted(self.skip_reasons.items())
+            },
+            "cuda": {
+                "device": self.cuda_device,
+                "allocated_before_bytes": self.cuda_allocated_before_bytes,
+                "reserved_before_bytes": self.cuda_reserved_before_bytes,
+                "allocated_after_bytes": self.cuda_allocated_after_bytes,
+                "reserved_after_bytes": self.cuda_reserved_after_bytes,
+                "peak_allocated_bytes": self.cuda_peak_allocated_bytes,
+                "peak_reserved_bytes": self.cuda_peak_reserved_bytes,
+            },
+        }
+
+    def summary(self) -> str:
+        return (
+            f"{self.component or 'model'} {self.qtype}: "
+            f"{self.quantized_modules} modules, "
+            f"{self.eligible_bytes / (1024 ** 2):.1f} MiB eligible -> "
+            f"{self.persistent_bytes / (1024 ** 2):.1f} MiB packed+metadata; "
+            f"{self.dense_skipped_bytes / (1024 ** 2):.1f} MiB dense skipped "
+            f"({self.coverage:.1%} coverage)"
+        )
+
+
+def enforce_orbit4_low_vram_coverage(
+    report: QuantizationReport,
+    *,
+    minimum_coverage: float = 0.95,
+) -> None:
+    """Fail early when an Orbit4 job leaves too many linear weights dense."""
+    if report.qtype != "orbit4":
+        raise ValueError("the low-VRAM coverage gate requires an orbit4 report")
+    if not 0.0 < minimum_coverage <= 1.0:
+        raise ValueError("minimum_coverage must be in the interval (0, 1]")
+    if report.original_accounted_bytes == 0:
+        raise ValueError("Orbit4 did not find any materialized linear weights to quantize")
+    if report.coverage >= minimum_coverage:
+        return
+    reasons = ", ".join(
+        f"{name}={values.bytes / (1024 ** 2):.1f} MiB/{values.modules} modules"
+        for name, values in sorted(
+            report.skip_reasons.items(),
+            key=lambda item: item[1].bytes,
+            reverse=True,
+        )
+    ) or "no skip reasons were recorded"
+    raise ValueError(
+        f"Orbit4 low-VRAM coverage is {report.coverage:.1%}, below the "
+        f"required {minimum_coverage:.1%}; dense leftovers: {reasons}"
+    )
+
+
+def _cuda_memory_snapshot(device: Optional[torch.device] = None) -> Dict[str, Any]:
+    if not torch.cuda.is_available():
+        return {}
+    try:
+        cuda_device = torch.device(device) if device is not None else torch.device(
+            "cuda", torch.cuda.current_device()
+        )
+        if cuda_device.type != "cuda":
+            cuda_device = torch.device("cuda", torch.cuda.current_device())
+        return {
+            "cuda_device": str(cuda_device),
+            "cuda_allocated": int(torch.cuda.memory_allocated(cuda_device)),
+            "cuda_reserved": int(torch.cuda.memory_reserved(cuda_device)),
+            "cuda_peak_allocated": int(torch.cuda.max_memory_allocated(cuda_device)),
+            "cuda_peak_reserved": int(torch.cuda.max_memory_reserved(cuda_device)),
+        }
+    except Exception:
+        return {}
+
+
+def _start_report(
+    weights: object,
+    component: Optional[str],
+    device: Optional[torch.device] = None,
+) -> QuantizationReport:
+    qtype_name = getattr(weights, "name", None) or str(weights)
+    if isinstance(weights, ostristype):
+        backend = "ostris"
+    elif isinstance(weights, aotype):
+        backend = "torchao"
+    else:
+        backend = "quanto"
+    report = QuantizationReport(qtype=qtype_name, backend=backend, component=component)
+    memory = _cuda_memory_snapshot(device)
+    report.cuda_device = memory.get("cuda_device")
+    report.cuda_allocated_before_bytes = memory.get("cuda_allocated")
+    report.cuda_reserved_before_bytes = memory.get("cuda_reserved")
+    report.cuda_peak_allocated_bytes = memory.get("cuda_peak_allocated")
+    report.cuda_peak_reserved_bytes = memory.get("cuda_peak_reserved")
+    return report
+
+
+def _finish_report(
+    report: QuantizationReport,
+    device: Optional[torch.device] = None,
+) -> None:
+    memory = _cuda_memory_snapshot(device)
+    report.cuda_allocated_after_bytes = memory.get("cuda_allocated")
+    report.cuda_reserved_after_bytes = memory.get("cuda_reserved")
+    for report_name, memory_name in (
+        ("cuda_peak_allocated_bytes", "cuda_peak_allocated"),
+        ("cuda_peak_reserved_bytes", "cuda_peak_reserved"),
+    ):
+        value = memory.get(memory_name)
+        current = getattr(report, report_name)
+        if value is not None:
+            setattr(report, report_name, value if current is None else max(current, value))
+
+
 class aotype:
     def __init__(self, name: str):
         self.name = name
@@ -63,21 +319,107 @@ class aotype:
 class ostristype:
     """Resolved custom quantization backend and its serializable qtype name."""
 
-    def __init__(self, name: str, quantizer: OstrisQuantizer):
+    def __init__(
+        self,
+        name: str,
+        quantizer: OstrisQuantizer,
+        metadata: OstrisBackendMetadata,
+        options: OstrisBackendOptions,
+    ):
         self.name = name
         self.quantizer = quantizer
+        self.metadata = metadata
+        self.options = options
 
 
-def get_qtype(qtype: Union[str, qtype]) -> qtype:
-    if qtype in torchao_qtypes:
+def get_qtype(
+    qtype: Union[str, qtype, aotype, ostristype],
+    *,
+    kernel: OstrisKernel = "auto",
+    max_workspace_mb: int = 64,
+):
+    if isinstance(qtype, (aotype, ostristype)):
+        return qtype
+    if isinstance(qtype, str) and qtype in torchao_qtypes:
         return aotype(qtype)
     if isinstance(qtype, str):
-        ostris_quantizer = get_ostris_quantizer(qtype)
+        options = OstrisBackendOptions(
+            kernel=kernel,
+            max_workspace_mb=max_workspace_mb,
+        )
+        metadata = get_ostris_backend_metadata(qtype)
+        ostris_quantizer = get_ostris_quantizer(
+            qtype,
+            kernel=options.kernel,
+            max_workspace_mb=options.max_workspace_mb,
+        )
         if ostris_quantizer is not None:
-            return ostristype(qtype, ostris_quantizer)
+            if metadata is None:
+                raise RuntimeError(f"backend {qtype!r} has no registry metadata")
+            return ostristype(qtype, ostris_quantizer, metadata, options)
         return qtypes[qtype]
     else:
         return qtype
+
+
+def _normalize_patterns(
+    value: Optional[Union[str, Sequence[str]]],
+    field_name: str,
+) -> Optional[List[str]]:
+    if value is None:
+        return None
+    values = [value] if isinstance(value, str) else list(value)
+    if not all(isinstance(item, str) for item in values):
+        raise TypeError(f"{field_name} must be a string or a sequence of strings")
+    return [item for item in values if item]
+
+
+def _matches_patterns(
+    name: str,
+    include: Optional[Sequence[str]],
+    exclude: Optional[Sequence[str]],
+) -> Optional[str]:
+    if include is not None and not any(fnmatch(name, pattern) for pattern in include):
+        return "not_included"
+    if exclude is not None and any(fnmatch(name, pattern) for pattern in exclude):
+        return "excluded"
+    return None
+
+
+def _qualified_name(prefix: str, name: str) -> str:
+    if not prefix:
+        return name
+    if not name:
+        return prefix
+    return f"{prefix}.{name}"
+
+
+def _tensor_bytes(tensor: torch.Tensor) -> int:
+    return int(tensor.numel()) * int(tensor.element_size())
+
+
+def _linear_weight_bytes(module: torch.nn.Module) -> int:
+    if isinstance(module, OstrisLinear):
+        return int(module.logical_weight_numel) * torch.empty(
+            (), dtype=module.ostris_orig_dtype
+        ).element_size()
+    parameter = module._parameters.get("weight")
+    if isinstance(parameter, torch.Tensor) and parameter.dtype.is_floating_point:
+        return _tensor_bytes(parameter)
+    return 0
+
+
+def _ostris_storage_bytes(module: OstrisLinear) -> tuple[int, int]:
+    compressed = 0
+    metadata = 0
+    for name, buffer in module._buffers.items():
+        if not isinstance(buffer, torch.Tensor):
+            continue
+        if name in ("orbit_packed", "ovq_packed"):
+            compressed += _tensor_bytes(buffer)
+        else:
+            metadata += _tensor_bytes(buffer)
+    return compressed, metadata
 
 
 def is_quantized_tensor(t) -> bool:
@@ -126,7 +468,12 @@ def quantize(
     optimizer: Optional[Optimizer] = None,
     include: Optional[Union[str, List[str]]] = None,
     exclude: Optional[Union[str, List[str]]] = None,
-):
+    kernel: Optional[OstrisKernel] = None,
+    max_workspace_mb: Optional[int] = None,
+    *,
+    component_label: Optional[str] = None,
+    name_prefix: str = "",
+) -> QuantizationReport:
     """Quantize the specified model submodules
 
     Recursively quantize the submodules of the specified parent model.
@@ -153,26 +500,93 @@ def quantize(
             Patterns constituting the denylist. If provided, module names must not match
             any patterns from the denylist.
     """
-    if include is not None:
-        include = [include] if isinstance(include, str) else include
-    if exclude is not None:
-        exclude = [exclude] if isinstance(exclude, str) else exclude
-    for name, m in model.named_modules():
-        if include is not None and not any(
-            fnmatch(name, pattern) for pattern in include
-        ):
+    include = _normalize_patterns(include, "include")
+    exclude = _normalize_patterns(exclude, "exclude")
+
+    inherited_options = weights.options if isinstance(weights, ostristype) else None
+    effective_kernel: OstrisKernel = (
+        kernel
+        if kernel is not None
+        else inherited_options.kernel if inherited_options is not None else "auto"
+    )
+    effective_workspace = (
+        max_workspace_mb
+        if max_workspace_mb is not None
+        else inherited_options.max_workspace_mb if inherited_options is not None else 64
+    )
+    # Validate options even for Quanto/TorchAO so misspelled low-VRAM settings
+    # fail at the public boundary instead of being silently ignored.
+    backend_options = OstrisBackendOptions(
+        kernel=effective_kernel,
+        max_workspace_mb=effective_workspace,
+    )
+    if isinstance(weights, str):
+        weights = get_qtype(
+            weights,
+            kernel=backend_options.kernel,
+            max_workspace_mb=backend_options.max_workspace_mb,
+        )
+    elif isinstance(weights, ostristype) and weights.options != backend_options:
+        weights = get_qtype(
+            weights.name,
+            kernel=backend_options.kernel,
+            max_workspace_mb=backend_options.max_workspace_mb,
+        )
+
+    report = _start_report(weights, component_label)
+    for name, m in list(model.named_modules()):
+        qualified_name = _qualified_name(name_prefix, name)
+        weight_bytes = _linear_weight_bytes(m) if isinstance(m, torch.nn.Linear) else 0
+        pattern_skip = _matches_patterns(qualified_name, include, exclude)
+
+        if isinstance(weights, ostristype) and isinstance(m, torch.nn.Linear):
+            if isinstance(m, OstrisLinear):
+                continue
+            parameter = m._parameters.get("weight")
+            is_candidate = (
+                isinstance(parameter, torch.nn.Parameter)
+                and parameter.dtype.is_floating_point
+                and type(parameter.data) is torch.Tensor
+            )
+            if not is_candidate:
+                if weight_bytes:
+                    report.eligible_bytes += weight_bytes
+                    report.add_skip("unsupported_weight", qualified_name, weight_bytes)
+                continue
+            report.eligible_bytes += weight_bytes
+            if not weights.quantizer.can_quantize(m):
+                report.add_skip("unsupported_shape", qualified_name, weight_bytes)
+                continue
+            if pattern_skip is not None:
+                report.add_skip(pattern_skip, qualified_name, weight_bytes)
+                continue
+            try:
+                if not convert_linear_to_ostris(m, weights.quantizer):
+                    report.add_skip("conversion_rejected", qualified_name, weight_bytes)
+                    continue
+                compressed, metadata = _ostris_storage_bytes(m)
+                report.compressed_bytes += compressed
+                report.metadata_bytes += metadata
+                report.quantized_original_bytes += weight_bytes
+                report.quantized_weight_count += int(m.in_features) * int(m.out_features)
+                report.quantized_modules += 1
+            except Exception as e:
+                print(f"Failed to quantize {qualified_name}: {e}")
+                raise
             continue
-        if exclude is not None and any(fnmatch(name, pattern) for pattern in exclude):
+
+        if pattern_skip is not None:
+            if weight_bytes:
+                report.add_skip(pattern_skip, qualified_name, weight_bytes)
             continue
         try:
             # check if m is QLinear or QConv2d
             if m.__class__.__name__ in Q_MODULES:
                 continue
             else:
-                if isinstance(weights, ostristype):
-                    if isinstance(m, torch.nn.Linear):
-                        convert_linear_to_ostris(m, weights.quantizer)
-                elif isinstance(weights, aotype):
+                if weight_bytes:
+                    report.eligible_bytes += weight_bytes
+                if isinstance(weights, aotype):
                     torchao_quantize_(m, weights.config)
                 else:
                     _quantize_submodule(
@@ -183,9 +597,202 @@ def quantize(
                         activations=activations,
                         optimizer=optimizer,
                     )
+                if weight_bytes:
+                    report.quantized_modules += 1
         except Exception as e:
-            print(f"Failed to quantize {name}: {e}")
+            print(f"Failed to quantize {qualified_name}: {e}")
             raise
+
+    _finish_report(report)
+    model._aitk_quantization_report = report
+    return report
+
+
+def _resolve_staged_blocks(
+    component: torch.nn.Module,
+    block_paths: Optional[Sequence[str]],
+) -> List[tuple[str, torch.nn.Module]]:
+    blocks: List[tuple[str, torch.nn.Module]] = []
+    seen: set[int] = set()
+    for path in block_paths or ():
+        try:
+            target = component.get_submodule(path)
+        except (AttributeError, KeyError):
+            continue
+        if isinstance(target, (torch.nn.ModuleList, torch.nn.Sequential)):
+            candidates = [
+                (f"{path}.{index}", child) for index, child in enumerate(target)
+            ]
+        else:
+            candidates = [(path, target)]
+        for name, block in candidates:
+            if id(block) in seen:
+                continue
+            seen.add(id(block))
+            blocks.append((name, block))
+    return blocks
+
+
+def _move_for_quantization(
+    module: torch.nn.Module,
+    device: torch.device,
+    dtype: Optional[torch.dtype],
+) -> None:
+    kwargs: Dict[str, Any] = {"device": device, "non_blocking": True}
+    if dtype is not None:
+        kwargs["dtype"] = dtype
+    module.to(**kwargs)
+
+
+def quantize_component_in_stages(
+    component: torch.nn.Module,
+    weights: Union[str, qtype, aotype, ostristype],
+    device: Union[str, torch.device],
+    dtype: Optional[torch.dtype] = None,
+    *,
+    block_paths: Optional[Sequence[str]] = None,
+    include: Optional[Union[str, Sequence[str]]] = None,
+    exclude: Optional[Union[str, Sequence[str]]] = None,
+    options: Optional[Mapping[str, Any]] = None,
+    component_label: Optional[str] = None,
+) -> QuantizationReport:
+    """Quantize a CPU component while staging at most one block or linear.
+
+    Include/exclude patterns are evaluated against absolute names within the
+    component, even while an individual block is temporarily treated as the
+    quantization root.
+    """
+    raw_options = dict(options or {})
+    allowed_options = {"kernel", "max_workspace_mb", "include", "exclude"}
+    unknown = sorted(set(raw_options) - allowed_options)
+    if unknown:
+        raise TypeError(f"unknown quantization options: {', '.join(unknown)}")
+
+    option_include = raw_options.pop("include", None)
+    option_exclude = raw_options.pop("exclude", None)
+    include_patterns = _normalize_patterns(
+        include if include is not None else option_include,
+        "include",
+    )
+    explicit_exclude = _normalize_patterns(exclude, "exclude") or []
+    configured_exclude = _normalize_patterns(option_exclude, "exclude") or []
+    exclude_patterns = explicit_exclude + [
+        pattern for pattern in configured_exclude if pattern not in explicit_exclude
+    ]
+    if not exclude_patterns:
+        exclude_patterns = None
+
+    kernel = raw_options.pop("kernel", None)
+    max_workspace_mb = raw_options.pop("max_workspace_mb", None)
+    inherited = weights.options if isinstance(weights, ostristype) else None
+    effective_kernel = kernel if kernel is not None else (
+        inherited.kernel if inherited is not None else "auto"
+    )
+    effective_workspace = max_workspace_mb if max_workspace_mb is not None else (
+        inherited.max_workspace_mb if inherited is not None else 64
+    )
+    backend_options = OstrisBackendOptions(
+        kernel=effective_kernel,
+        max_workspace_mb=effective_workspace,
+    )
+    if isinstance(weights, str) or isinstance(weights, ostristype):
+        weights = get_qtype(
+            weights.name if isinstance(weights, ostristype) else weights,
+            kernel=backend_options.kernel,
+            max_workspace_mb=backend_options.max_workspace_mb,
+        )
+
+    target_device = torch.device(device)
+    meta_parameters = [name for name, value in component.named_parameters() if value.is_meta]
+    if meta_parameters:
+        raise ValueError(
+            "staged quantization requires materialized CPU weights; found meta "
+            f"parameters such as {meta_parameters[0]!r}"
+        )
+    component.to("cpu")
+
+    aggregate = _start_report(weights, component_label, target_device)
+    blocks = _resolve_staged_blocks(component, block_paths)
+    processed_prefixes: List[str] = []
+    for absolute_name, block in blocks:
+        _move_for_quantization(block, target_device, dtype)
+        block_report = quantize(
+            block,
+            weights=weights,
+            include=include_patterns,
+            exclude=exclude_patterns,
+            kernel=backend_options.kernel,
+            max_workspace_mb=backend_options.max_workspace_mb,
+            component_label=component_label,
+            name_prefix=absolute_name,
+        )
+        freeze(block)
+        block.to("cpu", non_blocking=True)
+        aggregate.merge(block_report)
+        processed_prefixes.append(absolute_name)
+
+    if isinstance(weights, ostristype):
+        # Quantize non-block linears individually. This is slower than staging a
+        # block, but guarantees that an embedding or other large dense sibling
+        # never follows it onto the accelerator.
+        for absolute_name, module in list(component.named_modules()):
+            if not isinstance(module, torch.nn.Linear) or isinstance(module, OstrisLinear):
+                continue
+            if any(
+                absolute_name == prefix or absolute_name.startswith(f"{prefix}.")
+                for prefix in processed_prefixes
+            ):
+                continue
+            pattern_skip = _matches_patterns(
+                absolute_name,
+                include_patterns,
+                exclude_patterns,
+            )
+            if pattern_skip is not None:
+                skipped_report = quantize(
+                    module,
+                    weights=weights,
+                    include=include_patterns,
+                    exclude=exclude_patterns,
+                    kernel=backend_options.kernel,
+                    max_workspace_mb=backend_options.max_workspace_mb,
+                    component_label=component_label,
+                    name_prefix=absolute_name,
+                )
+                aggregate.merge(skipped_report)
+                continue
+            _move_for_quantization(module, target_device, dtype)
+            module_report = quantize(
+                module,
+                weights=weights,
+                include=include_patterns,
+                exclude=exclude_patterns,
+                kernel=backend_options.kernel,
+                max_workspace_mb=backend_options.max_workspace_mb,
+                component_label=component_label,
+                name_prefix=absolute_name,
+            )
+            freeze(module)
+            module.to("cpu", non_blocking=True)
+            aggregate.merge(module_report)
+    else:
+        # Quanto/TorchAO retain their established recursive CPU behavior for
+        # extras; importantly, the full component is never moved to CUDA.
+        extras_report = quantize(
+            component,
+            weights=weights,
+            include=include_patterns,
+            exclude=exclude_patterns,
+            kernel=backend_options.kernel,
+            max_workspace_mb=backend_options.max_workspace_mb,
+            component_label=component_label,
+        )
+        freeze(component)
+        aggregate.merge(extras_report)
+
+    _finish_report(aggregate, target_device)
+    component._aitk_quantization_report = aggregate
+    return aggregate
 
 
 def quantize_model(
@@ -204,6 +811,19 @@ def quantize_model(
 
     # sensitive modules to keep in full precision (fnmatch patterns)
     exclude_modules = base_model.get_quantization_exclude_modules() or []
+    quantize_options = dict(base_model.model_config.quantize_kwargs or {})
+    configured_exclude = _normalize_patterns(
+        quantize_options.get("exclude"),
+        "exclude",
+    ) or []
+    combined_exclude = list(exclude_modules)
+    combined_exclude.extend(
+        pattern for pattern in configured_exclude if pattern not in combined_exclude
+    )
+    backend_call_kwargs = {
+        "kernel": quantize_options.get("kernel"),
+        "max_workspace_mb": quantize_options.get("max_workspace_mb"),
+    }
 
     if base_model.model_config.accuracy_recovery_adapter is not None:
         from toolkit.config_modules import NetworkConfig
@@ -345,7 +965,16 @@ def quantize_model(
 
         # quantize it
         lora_exclude_modules = []
-        quantization_type = get_qtype(base_model.model_config.qtype)
+        quantization_type = get_qtype(
+            base_model.model_config.qtype,
+            kernel=backend_call_kwargs["kernel"] or "auto",
+            max_workspace_mb=backend_call_kwargs["max_workspace_mb"] or 64,
+        )
+        ara_report = _start_report(
+            quantization_type,
+            "transformer",
+            base_model.device_torch,
+        )
         for lora_module in tqdm(network.unet_loras, desc="Attaching quantization"):
             # the lora has already hijacked the original module
             orig_module = lora_module.org_module[0]
@@ -353,7 +982,12 @@ def quantize_model(
             # make the params not require gradients
             for param in orig_module.parameters():
                 param.requires_grad = False
-            quantize(orig_module, weights=quantization_type)
+            module_report = quantize(
+                orig_module,
+                weights=quantization_type,
+                **backend_call_kwargs,
+            )
+            ara_report.merge(module_report)
             freeze(orig_module)
             module_name = lora_module.lora_name.replace('$$', '.').replace('transformer.', '')
             lora_exclude_modules.append(module_name)
@@ -363,42 +997,49 @@ def quantize_model(
         pass
         # quantize additional layers
         print_acc(" - quantizing additional layers")
-        quantization_type = get_qtype('uint8')
-        quantize(
-            model_to_quantize,
-            weights=quantization_type,
-            exclude=lora_exclude_modules + exclude_modules
+        additional_quantization_type = (
+            quantization_type
+            if isinstance(quantization_type, ostristype)
+            else get_qtype("uint8")
         )
+        additional_report = quantize(
+            model_to_quantize,
+            weights=additional_quantization_type,
+            include=quantize_options.get("include"),
+            exclude=lora_exclude_modules + combined_exclude,
+            **backend_call_kwargs,
+        )
+        if isinstance(quantization_type, ostristype):
+            ara_report.merge(additional_report)
+            _finish_report(ara_report, base_model.device_torch)
+            model_to_quantize._aitk_quantization_report = ara_report
+            base_model.quantization_report = ara_report
+            if base_model.model_config.low_vram and quantization_type.name == "orbit4":
+                enforce_orbit4_low_vram_coverage(ara_report)
+            base_model.print_and_status_update(f" - {ara_report.summary()}")
+            return ara_report
     else:
-        # quantize model the original way without an accuracy recovery adapter
-        # move and quantize only certain pieces at a time.
-        quantization_type = get_qtype(base_model.model_config.qtype)
-        # all_blocks = list(model_to_quantize.transformer_blocks)
-        all_blocks: List[torch.nn.Module] = []
-        transformer_block_names = base_model.get_transformer_block_names()
-        for name in transformer_block_names:
-            block_list = model_to_quantize
-            for part in name.split('.'):
-                block_list = getattr(block_list, part, None)
-                if block_list is None:
-                    break
-            if block_list is not None:
-                if isinstance(block_list, (list, tuple, torch.nn.ModuleList, torch.nn.Sequential)):
-                    all_blocks += list(block_list)
-                elif isinstance(block_list, torch.nn.Module):
-                    all_blocks.append(block_list)
+        transformer_block_names = base_model.get_transformer_block_names() or []
+        all_blocks = _resolve_staged_blocks(
+            model_to_quantize,
+            transformer_block_names,
+        )
         base_model.print_and_status_update(
             f" - quantizing {len(all_blocks)} transformer blocks"
         )
-        for block in tqdm(all_blocks):
-            block.to(base_model.device_torch, dtype=base_model.torch_dtype, non_blocking=True)
-            quantize(block, weights=quantization_type)
-            freeze(block)
-            block.to("cpu", non_blocking=True)
-
-        # todo, on extras find a universal way to quantize them on device and move them back to their original
-        # device without having to move the transformer blocks to the device first
-        base_model.print_and_status_update(" - quantizing extras")
-        # model_to_quantize.to(base_model.device_torch, dtype=base_model.torch_dtype)
-        quantize(model_to_quantize, weights=quantization_type, exclude=exclude_modules)
+        report = quantize_component_in_stages(
+            model_to_quantize,
+            weights=base_model.model_config.qtype,
+            device=base_model.device_torch,
+            dtype=base_model.torch_dtype,
+            block_paths=transformer_block_names,
+            exclude=exclude_modules,
+            options=quantize_options,
+            component_label="transformer",
+        )
         freeze(model_to_quantize)
+        if base_model.model_config.low_vram and base_model.model_config.qtype == "orbit4":
+            enforce_orbit4_low_vram_coverage(report)
+        base_model.quantization_report = report
+        base_model.print_and_status_update(f" - {report.summary()}")
+        return report

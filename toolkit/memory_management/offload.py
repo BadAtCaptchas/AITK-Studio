@@ -103,6 +103,15 @@ def attach_layer_offloading(
         return None
 
     backend = resolve_layer_offloading_backend(model_config, module, device, block_paths)
+    qtype_attr = "qtype_te" if component == "text_encoder" else "qtype"
+    component_qtype = str(getattr(model_config, qtype_attr, "") or "").lower()
+    orbit_requested = component_qtype.startswith("orbit")
+    if orbit_requested and torch.device(device).type == "cuda" and backend != "block":
+        raise ValueError(
+            f"Orbit quantization for {component or 'model'} requires block layer offloading; "
+            "the legacy per-layer backend keeps packed OstrisLinear buffers resident. "
+            "Choose layer_offloading_backend: block on a supported architecture or disable layer offloading."
+        )
     if backend == "block":
         try:
             manager = BlockOffloadManager.attach(
@@ -113,6 +122,10 @@ def attach_layer_offloading(
                 ignore_modules=ignore_modules,
             )
         except ValueError as exc:
+            if orbit_requested:
+                raise ValueError(
+                    f"Orbit block offloading could not be initialized for {component or 'model'}: {exc}"
+                ) from exc
             label = component or "component"
             print(f"Block layer offloading unavailable for {label}: {exc} Falling back to legacy layer offloading.")
         else:

@@ -67,7 +67,13 @@ from toolkit.models.flux import add_model_gpu_splitter_to_flux, bypass_flux_guid
 from toolkit.memory_management import attach_layer_offloading
 
 from optimum.quanto import freeze, qfloat8, QTensor, qint4
-from toolkit.util.quantize import quantize, get_qtype
+from toolkit.util.quantize import (
+    enforce_orbit4_low_vram_coverage,
+    get_qtype,
+    quantize,
+    quantize_component_in_stages,
+)
+from toolkit.util.ostris_quant import is_ostris_qtype
 from toolkit.accelerator import get_accelerator, unwrap_model
 from typing import TYPE_CHECKING
 from toolkit.print import print_acc
@@ -728,6 +734,10 @@ class StableDiffusion:
                 # low_cpu_mem_usage=False,
                 # device_map=None
             )
+            orbit_transformer_quantization = (
+                self.model_config.quantize
+                and is_ostris_qtype(self.model_config.qtype)
+            )
             # hack in model gpu splitter
             if self.model_config.split_model_over_gpus:
                 add_model_gpu_splitter_to_flux(
@@ -735,7 +745,7 @@ class StableDiffusion:
                     other_module_param_count_scale=self.model_config.split_model_other_module_param_count_scale
                 )
             
-            if not self.low_vram:
+            if not self.low_vram and not orbit_transformer_quantization:
                 # for low v ram, we leave it on the cpu. Quantizes slower, but allows training on primary gpu
                 transformer.to(self.quantize_device, dtype=dtype)
             flush()
@@ -821,11 +831,37 @@ class StableDiffusion:
             if self.model_config.quantize:
                 # patch the state dict method
                 patch_dequantization_on_save(transformer)
-                quantization_type = get_qtype(self.model_config.qtype)
                 self.print_and_status_update("Quantizing transformer")
-                quantize(transformer, weights=quantization_type, **self.model_config.quantize_kwargs)
-                freeze(transformer)
-                transformer.to(self.device_torch)
+                if orbit_transformer_quantization:
+                    report = quantize_component_in_stages(
+                        transformer,
+                        weights=self.model_config.qtype,
+                        device=self.quantize_device,
+                        dtype=dtype,
+                        block_paths=["transformer_blocks", "single_transformer_blocks"],
+                        exclude=self.get_quantization_exclude_modules(),
+                        options=self.model_config.quantize_kwargs,
+                        component_label="transformer",
+                    )
+                    freeze(transformer)
+                    self.quantization_report = report
+                    self.print_and_status_update(f" - {report.summary()}")
+                    if self.low_vram and str(self.model_config.qtype).lower() == "orbit4":
+                        enforce_orbit4_low_vram_coverage(report)
+                    if not self.low_vram and not (
+                        self.model_config.layer_offloading
+                        and self.model_config.layer_offloading_transformer_percent > 0
+                    ):
+                        transformer.to(self.device_torch)
+                else:
+                    quantization_type = get_qtype(self.model_config.qtype)
+                    quantize(
+                        transformer,
+                        weights=quantization_type,
+                        **self.model_config.quantize_kwargs,
+                    )
+                    freeze(transformer)
+                    transformer.to(self.device_torch)
             else:
                 transformer.to(self.device_torch, dtype=dtype)
 
@@ -857,13 +893,42 @@ class StableDiffusion:
             text_encoder_2 = T5EncoderModel.from_pretrained(base_model_path, subfolder="text_encoder_2",
                                                             torch_dtype=dtype, use_safetensors=True)
 
-            text_encoder_2.to(self.device_torch, dtype=dtype)
+            orbit_text_encoder_quantization = (
+                self.model_config.quantize_te
+                and is_ostris_qtype(self.model_config.qtype_te)
+            )
+            if not orbit_text_encoder_quantization:
+                text_encoder_2.to(self.device_torch, dtype=dtype)
             flush()
 
             if self.model_config.quantize_te:
                 self.print_and_status_update("Quantizing T5")
-                quantize(text_encoder_2, weights=get_qtype(self.model_config.qtype))
-                freeze(text_encoder_2)
+                if orbit_text_encoder_quantization:
+                    patch_dequantization_on_save(text_encoder_2)
+                    report = quantize_component_in_stages(
+                        text_encoder_2,
+                        weights=self.model_config.qtype_te,
+                        device=self.quantize_device,
+                        dtype=dtype,
+                        block_paths=["encoder.block"],
+                        options=self.model_config.quantize_kwargs,
+                        component_label="text_encoder",
+                    )
+                    freeze(text_encoder_2)
+                    self.text_encoder_quantization_report = report
+                    self.print_and_status_update(f" - {report.summary()}")
+                    if (
+                        self.low_vram
+                        and str(self.model_config.qtype_te).lower() == "orbit4"
+                    ):
+                        enforce_orbit4_low_vram_coverage(report)
+                else:
+                    quantize(
+                        text_encoder_2,
+                        weights=get_qtype(self.model_config.qtype_te),
+                        **self.model_config.quantize_kwargs,
+                    )
+                    freeze(text_encoder_2)
                 flush()
 
             if (

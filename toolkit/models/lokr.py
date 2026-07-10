@@ -149,6 +149,13 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.legacy_factorization = _as_bool(legacy_factorization)
         self.unbalanced_factorization = _as_bool(unbalanced_factorization)
         self.org_module = [org_module]
+        self.base_is_ostris_quantized = bool(
+            getattr(org_module, "is_ostris_quantized", False)
+        )
+        if self.base_is_ostris_quantized:
+            # The bypass formulation applies compact Kronecker factors directly
+            # to activations and avoids rebuilding a logical-size delta weight.
+            self.bypass_mode = True
         self.can_merge_in = is_mergeable_lora_target(org_module)
 
         self.module_type, self.op, self.extra_args = self._get_module_ops(org_module)
@@ -204,6 +211,12 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.wd = _as_bool(weight_decompose)
         self.wd_on_out = _as_bool(wd_on_out)
         if self.wd:
+            if self.base_is_ostris_quantized:
+                raise ValueError(
+                    "LoKr weight decomposition is not supported with Orbit packed "
+                    "weights because it requires a full dense base weight. Disable "
+                    "lokr_weight_decompose or use a standard LoRA/DoRA adapter."
+                )
             self._init_weight_decompose(org_module)
 
         self._init_weights(_as_bool(use_scalar))
@@ -211,8 +224,16 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         self.multiplier: Union[float, List[float]] = multiplier
         self.register_load_state_dict_post_hook(self.load_weight_hook)
 
-        weight = self.get_weight(self.shape)
-        assert torch.sum(torch.isnan(weight)) == 0, "weight is nan"
+        # Do not create the full Kronecker delta merely to validate an Orbit
+        # adapter. Its compact trainable factors are sufficient for this check.
+        if self.base_is_ostris_quantized:
+            assert all(
+                not torch.isnan(parameter).any()
+                for parameter in self.parameters()
+            ), "weight is nan"
+        else:
+            weight = self.get_weight(self.shape)
+            assert torch.sum(torch.isnan(weight)) == 0, "weight is nan"
 
     @staticmethod
     def _get_module_ops(org_module):
@@ -236,6 +257,8 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
     def _get_weight_shape(org_module, module_type):
         if module_type == "linear":
             logical_shape = (int(org_module.out_features), int(org_module.in_features))
+            if getattr(org_module, "is_ostris_quantized", False):
+                return logical_shape
             storage_shape = tuple(org_module.weight.shape)
             quantized_linear = org_module.__class__.__name__ in {"Fp8Linear", "Nvfp4Linear", "Linear4bit", "Linear8bitLt", "QLinear"}
             if quantized_linear or _prod(logical_shape) == _prod(storage_shape):
@@ -503,7 +526,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
     def _call_forward(self, x, *args, **kwargs):
         if self.module_dropout and self.training:
             if torch.rand(1, device=x.device) < self.module_dropout:
-                return self.org_forward(x, *args, **kwargs)
+                return self._call_org_forward(x, *args, **kwargs)
 
         multiplier = self.network_ref().torch_multiplier
         multiplier = torch.mean(multiplier)
@@ -511,7 +534,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         if self.bypass_mode:
             return self.bypass_forward(x, multiplier, *args, **kwargs)
 
-        base = self.org_forward(x, *args, **kwargs)
+        base = self._call_org_forward(x, *args, **kwargs)
         if isinstance(base, (QTensor, QBytesTensor)):
             base = base.dequantize()
 
@@ -638,7 +661,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         return h * self.scale * scale * scalar
 
     def bypass_forward(self, x, scale=1, *args, **kwargs):
-        base = self.org_forward(x, *args, **kwargs)
+        base = self._call_org_forward(x, *args, **kwargs)
         if isinstance(base, (QTensor, QBytesTensor)):
             base = base.dequantize()
         lora_x = x.dequantize() if isinstance(x, (QTensor, QBytesTensor)) else x
@@ -646,6 +669,19 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         if lora_x.dtype != compute_dtype:
             lora_x = lora_x.to(dtype=compute_dtype)
         diff = self.bypass_forward_diff(lora_x, scale=scale)
+        if self.training and self.rank_dropout:
+            drop = (
+                torch.rand(self.shape[0], device=diff.device) > self.rank_dropout
+            ).to(diff.dtype)
+            if self.rank_dropout_scale:
+                keep = drop.mean()
+                if keep > 0:
+                    drop = drop / keep
+            if self.module_type.startswith("conv"):
+                drop = drop.view(1, -1, *([1] * (diff.dim() - 2)))
+            else:
+                drop = drop.view(*([1] * (diff.dim() - 1)), -1)
+            diff = diff * drop
         if _is_floating_dtype(base.dtype):
             diff = diff.to(base.dtype)
         return base + diff

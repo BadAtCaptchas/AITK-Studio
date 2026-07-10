@@ -111,7 +111,8 @@ def _infer_network_config(state_dict: Dict[str, torch.Tensor]) -> Tuple[NetworkC
         "magnitude" in key or ("dora" in key and "dora_scale" not in key)
         for key in lowered_keys
     )
-    if has_non_lokr_dora:
+    has_dora_scale = any("dora_scale" in key for key in lowered_keys)
+    if has_non_lokr_dora or (has_dora_scale and not is_lokr):
         raise ValueError("model.base_lora_path only supports mergeable LoRA/LoKr adapters. DoRA is not supported.")
 
     network_kwargs: Dict[str, Any] = {}

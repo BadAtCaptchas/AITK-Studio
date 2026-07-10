@@ -45,7 +45,7 @@ with mock.patch.dict(
     mocked_modules,
 ):
     import toolkit.config_modules as config_modules
-    from toolkit.config_modules import NetworkConfig, ModelConfig, SaveConfig, TrainConfig, validate_configs
+    from toolkit.config_modules import NetworkConfig, ModelConfig, SaveConfig, TrainConfig, validate_configs, apply_orbit4_low_vram_training_defaults
     from toolkit.base_lora_metadata import add_base_lora_metadata
     imported_numeric_modules = {
         name: module
@@ -76,6 +76,265 @@ class TrainConfigOptimalNoisePairingTest(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ValueError, "train\\.optimal_noise_pairing_samples"):
                     TrainConfig(optimal_noise_pairing_samples=value)
+
+
+class OrbitModelConfigTest(unittest.TestCase):
+    def test_orbit4_low_vram_training_profile_fills_raw_defaults(self):
+        model = {
+            "low_vram": True,
+            "quantize": True,
+            "qtype": "orbit4",
+        }
+        train = {}
+        datasets = [{"folder_path": "images"}]
+
+        self.assertTrue(
+            apply_orbit4_low_vram_training_defaults(model, train, datasets)
+        )
+
+        self.assertEqual(train["batch_size"], 1)
+        self.assertTrue(train["gradient_checkpointing"])
+        self.assertEqual(train["optimizer"], "adamw8bit")
+        self.assertTrue(train["cache_text_embeddings"])
+        self.assertTrue(train["unload_text_encoder"])
+        self.assertTrue(datasets[0]["cache_latents_to_disk"])
+        self.assertTrue(datasets[0]["cache_text_embeddings"])
+
+    def test_orbit4_low_vram_training_profile_preserves_raw_overrides(self):
+        model = {
+            "low_vram": True,
+            "quantize": True,
+            "qtype": "orbit4",
+        }
+        train = {
+            "batch_size": 2,
+            "gradient_checkpointing": False,
+            "optimizer": "prodigy",
+            "cache_text_embeddings": False,
+            "unload_text_encoder": False,
+        }
+        datasets = [{
+            "cache_latents_to_disk": False,
+            "cache_text_embeddings": False,
+        }]
+
+        apply_orbit4_low_vram_training_defaults(model, train, datasets)
+
+        self.assertEqual(train["batch_size"], 2)
+        self.assertFalse(train["gradient_checkpointing"])
+        self.assertEqual(train["optimizer"], "prodigy")
+        self.assertFalse(train["cache_text_embeddings"])
+        self.assertFalse(train["unload_text_encoder"])
+        self.assertFalse(datasets[0]["cache_latents_to_disk"])
+        self.assertFalse(datasets[0]["cache_text_embeddings"])
+
+    def test_orbit4_low_vram_profile_does_not_cache_trainable_text_encoder(self):
+        train = {"train_text_encoder": True}
+        datasets = [{}]
+
+        apply_orbit4_low_vram_training_defaults(
+            {"low_vram": True, "quantize": True, "qtype": "orbit4"},
+            train,
+            datasets,
+        )
+
+        self.assertNotIn("cache_text_embeddings", train)
+        self.assertNotIn("unload_text_encoder", train)
+        self.assertNotIn("cache_text_embeddings", datasets[0])
+        self.assertTrue(datasets[0]["cache_latents_to_disk"])
+
+    def test_quantize_kwargs_accepts_and_copies_orbit_options(self):
+        source = {
+            "kernel": "auto",
+            "max_workspace_mb": 64,
+            "include": ["transformer_blocks.*"],
+            "exclude": ["*.embed"],
+        }
+
+        config = ModelConfig(name_or_path="base-model", quantize_kwargs=source)
+        source["include"].append("mutated-after-parse")
+
+        self.assertEqual(config.quantize_kwargs["kernel"], "auto")
+        self.assertEqual(config.quantize_kwargs["max_workspace_mb"], 64)
+        self.assertEqual(config.quantize_kwargs["include"], ["transformer_blocks.*"])
+        self.assertEqual(config.quantize_kwargs["exclude"], ["*.embed"])
+
+    def test_quantize_kwargs_rejects_invalid_mapping_and_kernel(self):
+        with self.assertRaisesRegex(ValueError, "quantize_kwargs must be a mapping"):
+            ModelConfig(name_or_path="base-model", quantize_kwargs=[])
+
+        for kernel in ("cuda", 1, []):
+            with self.subTest(kernel=kernel):
+                with self.assertRaisesRegex(ValueError, r"quantize_kwargs\.kernel"):
+                    ModelConfig(
+                        name_or_path="base-model",
+                        quantize_kwargs={"kernel": kernel},
+                    )
+
+    def test_quantize_kwargs_rejects_invalid_workspace(self):
+        for workspace in (0, -1, 4097, True, 1.5, "64"):
+            with self.subTest(workspace=workspace):
+                with self.assertRaisesRegex(ValueError, "max_workspace_mb"):
+                    ModelConfig(
+                        name_or_path="base-model",
+                        quantize_kwargs={"max_workspace_mb": workspace},
+                    )
+
+    def test_quantize_kwargs_rejects_invalid_patterns(self):
+        invalid_values = (
+            {"include": "transformer_blocks.*"},
+            {"include": [""]},
+            {"exclude": [1]},
+            {"exclude": {"*.embed"}},
+        )
+        for quantize_kwargs in invalid_values:
+            with self.subTest(quantize_kwargs=quantize_kwargs):
+                with self.assertRaisesRegex(ValueError, "list of non-empty strings"):
+                    ModelConfig(
+                        name_or_path="base-model",
+                        quantize_kwargs=quantize_kwargs,
+                    )
+
+    def test_orbit_rejects_full_base_training(self):
+        cases = (
+            (
+                TrainConfig(train_unet=True, train_text_encoder=False),
+                ModelConfig(
+                    name_or_path="base-model",
+                    quantize=True,
+                    qtype="orbit4",
+                ),
+            ),
+            (
+                TrainConfig(train_unet=False, train_text_encoder=True),
+                ModelConfig(
+                    name_or_path="base-model",
+                    quantize=False,
+                    quantize_te=True,
+                    qtype_te="orbit4",
+                ),
+            ),
+        )
+
+        for train_config, model_config in cases:
+            with self.subTest(qtype=model_config.qtype, qtype_te=model_config.qtype_te):
+                with self.assertRaisesRegex(ValueError, "frozen-base adapter training only"):
+                    validate_configs(
+                        train_config,
+                        model_config,
+                        SaveConfig(),
+                        [],
+                        None,
+                    )
+
+    def test_orbit_accepts_adapter_training(self):
+        for network_type in ("lora", "lokr", "dora"):
+            with self.subTest(network_type=network_type):
+                validate_configs(
+                    TrainConfig(train_unet=True, train_text_encoder=False),
+                    ModelConfig(name_or_path="base-model", quantize=True, qtype="orbit4"),
+                    SaveConfig(),
+                    [],
+                    NetworkConfig(type=network_type),
+                )
+
+    def test_orbit_rejects_unsupported_adapter_types(self):
+        for network_type in ("locon", "lorm", "fullrank", "ara"):
+            with self.subTest(network_type=network_type):
+                with self.assertRaisesRegex(ValueError, "lora, lokr, or dora only"):
+                    network_kwargs = {"lorm": {}} if network_type == "lorm" else {}
+                    validate_configs(
+                        TrainConfig(),
+                        ModelConfig(
+                            name_or_path="base-model",
+                            quantize=True,
+                            qtype="orbit4",
+                        ),
+                        SaveConfig(),
+                        [],
+                        NetworkConfig(type=network_type, **network_kwargs),
+                    )
+
+    def test_orbit_rejects_full_weight_adapter_modes(self):
+        cases = (
+            (NetworkConfig(type="lora", all_layers=True), "network\\.all_layers"),
+            (NetworkConfig(type="lokr", lokr_full_rank=True), "full-rank LoKr"),
+            (
+                NetworkConfig(type="lokr", lokr_weight_decompose=True),
+                "LoKr weight decomposition",
+            ),
+        )
+
+        for network_config, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_configs(
+                        TrainConfig(),
+                        ModelConfig(
+                            name_or_path="base-model",
+                            quantize=True,
+                            qtype="orbit4",
+                        ),
+                        SaveConfig(),
+                        [],
+                        network_config,
+                    )
+
+    def test_orbit4_low_vram_defaults_block_offloading(self):
+        model_config = ModelConfig(
+            name_or_path="base-model",
+            arch="flux2",
+            quantize=True,
+            qtype="orbit4",
+            low_vram=True,
+        )
+        with mock.patch.object(
+            memory_offload_module,
+            "is_block_offload_arch_supported",
+            return_value=True,
+        ):
+            validate_configs(
+                TrainConfig(),
+                model_config,
+                SaveConfig(),
+                [],
+                NetworkConfig(type="lora"),
+            )
+
+        self.assertTrue(model_config.layer_offloading)
+        self.assertEqual(model_config.layer_offloading_backend, "block")
+        self.assertEqual(model_config.layer_offloading_transformer_percent, 0.70)
+        self.assertEqual(model_config.layer_offloading_text_encoder_percent, 0.50)
+
+    def test_orbit4_low_vram_preserves_explicit_offloading_values(self):
+        model_config = ModelConfig(
+            name_or_path="base-model",
+            arch="flux2",
+            quantize=True,
+            qtype="orbit4",
+            low_vram=True,
+            layer_offloading=False,
+            layer_offloading_backend="legacy",
+            layer_offloading_transformer_percent=0.25,
+            layer_offloading_text_encoder_percent=0.10,
+        )
+        with mock.patch.object(
+            memory_offload_module,
+            "is_block_offload_arch_supported",
+            return_value=True,
+        ):
+            validate_configs(
+                TrainConfig(),
+                model_config,
+                SaveConfig(),
+                [],
+                NetworkConfig(type="lora"),
+            )
+
+        self.assertFalse(model_config.layer_offloading)
+        self.assertEqual(model_config.layer_offloading_backend, "legacy")
+        self.assertEqual(model_config.layer_offloading_transformer_percent, 0.25)
+        self.assertEqual(model_config.layer_offloading_text_encoder_percent, 0.10)
 
 
 

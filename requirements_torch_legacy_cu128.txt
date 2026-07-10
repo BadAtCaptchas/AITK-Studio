@@ -4,3 +4,5 @@ torch==2.8.0
 torchvision==0.23.0
 torchaudio==2.8.0
 torchcodec==0.7.0
+triton==3.4.*; sys_platform == "linux"
+triton-windows>=3.4,<3.5; sys_platform == "win32"

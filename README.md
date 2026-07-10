@@ -186,7 +186,7 @@ The HiDream-O1 model card currently warns against PyTorch 2.9.x. For older GPUs 
 
 ### Quantized model cache
 
-FLUX.2 quantized transformer loads and FLUX.2 Klein quantized Qwen3 text encoder loads cache supported `optimum.quanto` weights by default. The first quantized load still builds the quantized model, then later runs can reuse the cache instead of quantizing the same component again.
+FLUX.2 quantized transformer loads and FLUX.2 Klein quantized Qwen3 text encoder loads cache supported `optimum.quanto` weights and packed Orbit manifests by default. The first quantized load still builds the quantized model, then later runs can reuse the cache instead of quantizing the same component again.
 
 The default cache location is `MODELS_PATH/.aitk_quantized_cache`, which is usually `models/.aitk_quantized_cache` in this repo. The cache is keyed by the source model files, quantization type, dtype, model settings, and package versions so it is rebuilt when the inputs change.
 
@@ -198,9 +198,41 @@ model:
   quantize_cache_dir: /path/to/cache
 ```
 
-The cache is used for `optimum.quanto` qtypes such as `qfloat8`. It is skipped for torchao qtypes and for FLUX.2 transformer loads that use an accuracy recovery adapter.
+The cache is used for `optimum.quanto` qtypes such as `qfloat8` and for Orbit qtypes such as `orbit4`. It is skipped for torchao qtypes and for FLUX.2 transformer loads that use an accuracy recovery adapter.
 
 For offline runs, set `HF_HUB_OFFLINE=1` or `TRANSFORMERS_OFFLINE=1`. FLUX.2 Klein Qwen3 quantized cache entries store the text encoder config with the cached weights, so later cache hits do not need to contact Hugging Face. Older cache entries may need one online rebuild if neither the source model config nor the tokenizer is already cached locally.
+
+### AITK Orbit 4-bit adapter training
+
+`orbit4` is AITK Studio's first-party packed-weight backend for LoRA-family
+training with a frozen base model. It stores eligible linear weights at roughly
+4 bits per parameter, keeps activations and adapter gradients in FP16/BF16, and
+propagates gradients through the base without training or retaining a dense base
+weight. Full base-model fine-tuning is intentionally rejected.
+
+```yaml
+model:
+  quantize: true
+  qtype: orbit4
+  quantize_te: true
+  qtype_te: orbit4
+  quantize_cache: true
+  quantize_kwargs:
+    kernel: auto          # auto, triton, or torch
+    max_workspace_mb: 64
+    include: []
+    exclude: []
+```
+
+`orbit2`, `orbit3`, and the OrbitVQ formats remain experimental and are hidden from the normal UI selectors.
+
+The `auto` kernel selects the fused Triton path when a compatible installation
+is available and otherwise uses the memory-bounded PyTorch path. The fallback is
+slower but does not reconstruct a complete dense layer. For 12 GB workflows,
+combine Orbit with gradient checkpointing, cached latents and text embeddings,
+and the `block` layer-offloading backend. The UI's low-VRAM profile starts with
+70% transformer and 50% text-encoder block offload while preserving manual
+overrides.
 
 ### Layer offloading
 

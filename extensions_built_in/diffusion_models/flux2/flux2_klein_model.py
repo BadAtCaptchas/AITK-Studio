@@ -120,6 +120,7 @@ class Flux2KleinModel(Flux2Model):
                 "class": self.__class__.__name__,
                 "dtype": str(self.torch_dtype),
                 "qtype_te": self.model_config.qtype_te,
+                "quantize_kwargs": self.model_config.quantize_kwargs,
                 "text_encoder_path": source["text_encoder_path"],
                 "text_encoder_subfolder": source["text_encoder_subfolder"],
                 "tokenizer_path": source["tokenizer_path"],
@@ -164,6 +165,8 @@ class Flux2KleinModel(Flux2Model):
                 cache_key,
                 device=torch.device("cpu"),
             )
+            if isinstance(text_encoder, torch.nn.Module):
+                freeze(text_encoder)
             if metadata.get("text_encoder_config") is None:
                 cache.update_metadata(
                     "flux2_text_encoder",
@@ -294,8 +297,18 @@ class Flux2KleinModel(Flux2Model):
                 if self.model_config.quantize_te:
                     if not self._is_loaded_from_qwen_quantized_cache(text_encoder):
                         self.print_and_status_update("Quantizing Qwen3")
-                        quantize(text_encoder, weights=get_qtype(self.model_config.qtype_te))
-                        freeze(text_encoder)
+                        if not self._quantize_orbit_component(
+                            text_encoder,
+                            self.model_config.qtype_te,
+                            block_paths=["model.layers"],
+                            component_label="text_encoder",
+                        ):
+                            quantize(
+                                text_encoder,
+                                weights=get_qtype(self.model_config.qtype_te),
+                                **self.model_config.quantize_kwargs,
+                            )
+                            freeze(text_encoder)
                         self._save_qwen_quantized_cache(text_encoder, source)
                     flush()
                     self._finalize_qwen_text_encoder(

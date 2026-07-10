@@ -131,6 +131,12 @@ class _ExactQuantizer(OstrisQuantizer):
         module.exact_weight = fp_weight.to(module.exact_weight)
 
 
+class _CountingQuantizer(_ExactQuantizer):
+    def forward(self, module, x):
+        module.quantized_forward_calls = getattr(module, "quantized_forward_calls", 0) + 1
+        return super().forward(module, x)
+
+
 class ZImageTransformer2DModel(torch.nn.Module):
     def __init__(self, quantized=False):
         super().__init__()
@@ -216,6 +222,7 @@ class LoRASpecialFilterTest(unittest.TestCase):
         base_model=None,
         full_if_contains=None,
         parameter_threshold=0,
+        is_ara=False,
     ):
         network_config = NetworkConfig(
             type="lora",
@@ -240,6 +247,7 @@ class LoRASpecialFilterTest(unittest.TestCase):
             only_if_contains=only_if_contains,
             full_if_contains=full_if_contains,
             parameter_threshold=parameter_threshold,
+            is_ara=is_ara,
         )
 
     def test_empty_only_if_contains_does_not_filter_everything(self):
@@ -282,7 +290,7 @@ class LoRASpecialFilterTest(unittest.TestCase):
         self.assertEqual(len(included.get_all_modules()), 1)
         self.assertEqual(len(excluded.get_all_modules()), 0)
 
-    def test_ostris_lora_merge_requantizes_without_replacing_module(self):
+    def test_ostris_lora_stays_parallel_without_requantizing_base(self):
         transformer = ZImageTransformer2DModel(quantized=True)
         layer = transformer.layers[0]["proj"]
         network = self._build_network(unet=transformer)
@@ -297,15 +305,28 @@ class LoRASpecialFilterTest(unittest.TestCase):
             @ lora_module.lora_down.weight.float()
         ) * lora_module.scale
 
-        lora_module.merge_in()
-
-        self.assertNotIn("weight", layer._parameters)
-        self.assertTrue(
-            torch.allclose(
-                layer.dequantize_weight(),
-                original + expected_delta,
-            )
+        network.apply_to(
+            None,
+            transformer,
+            apply_text_encoder=False,
+            apply_unet=True,
         )
+        network.is_active = True
+        network._multiplier = 1.0
+        network._update_torch_multiplier()
+        x = torch.randn(2, 4)
+        expected = torch.nn.functional.linear(x, original, layer.bias) + torch.nn.functional.linear(
+            x,
+            expected_delta,
+        )
+
+        network.merge_in()
+
+        self.assertFalse(network.can_merge_in)
+        self.assertFalse(network.is_merged_in)
+        self.assertNotIn("weight", layer._parameters)
+        self.assertTrue(torch.equal(layer.dequantize_weight(), original))
+        self.assertTrue(torch.allclose(layer(x), expected))
 
     def test_ostris_full_if_contains_uses_functional_delta_and_requantizes(self):
         transformer = ZImageTransformer2DModel(quantized=True)
@@ -336,12 +357,71 @@ class LoRASpecialFilterTest(unittest.TestCase):
 
         before_merge = layer.dequantize_weight().clone()
         full_module.merge_in()
+        self.assertFalse(full_module.can_merge_in)
         self.assertNotIn("weight", layer._parameters)
+        self.assertTrue(torch.equal(layer.dequantize_weight(), before_merge))
+
+    def test_adapter_attached_before_conversion_rebinds_quantized_base_forward(self):
+        transformer = ZImageTransformer2DModel(quantized=False)
+        layer = transformer.layers[0]["proj"]
+        source_state = {
+            key: value.detach().clone() for key, value in layer.state_dict().items()
+        }
+        network = self._build_network(unet=transformer, is_ara=True)
+        adapter = network.get_all_modules()[0]
+        with torch.no_grad():
+            adapter.lora_up.weight.fill_(0.2)
+        network.apply_to(
+            None,
+            transformer,
+            apply_text_encoder=False,
+            apply_unet=True,
+        )
+        network.is_active = True
+        network._multiplier = 1.0
+        network._update_torch_multiplier()
+
+        convert_linear_to_ostris(layer, _CountingQuantizer())
+        packed_before = layer.exact_weight.clone()
+        inputs = torch.randn(2, 4, requires_grad=True)
+        output = layer(inputs)
+        output.sum().backward()
+
+        self.assertGreater(layer.quantized_forward_calls, 0)
+        self.assertFalse(adapter.can_merge_in)
+        self.assertTrue(torch.equal(layer.exact_weight, packed_before))
+        self.assertGreater(adapter.lora_up.weight.grad.abs().sum().item(), 0)
+        self.assertGreater(adapter.lora_down.weight.grad.abs().sum().item(), 0)
+        network.merge_in()
+        self.assertFalse(network.is_merged_in)
+        self.assertFalse(network.can_merge_in)
+        self.assertTrue(torch.equal(layer.exact_weight, packed_before))
+
+        saved = {
+            key: value.detach().clone() for key, value in adapter.state_dict().items()
+        }
+        reloaded_transformer = ZImageTransformer2DModel(quantized=False)
+        reloaded_layer = reloaded_transformer.layers[0]["proj"]
+        reloaded_layer.load_state_dict(source_state)
+        reloaded_network = self._build_network(
+            unet=reloaded_transformer,
+            is_ara=True,
+        )
+        reloaded_adapter = reloaded_network.get_all_modules()[0]
+        reloaded_adapter.load_state_dict(saved)
+        reloaded_network.apply_to(
+            None,
+            reloaded_transformer,
+            apply_text_encoder=False,
+            apply_unet=True,
+        )
+        reloaded_network.is_active = True
+        reloaded_network._multiplier = 1.0
+        reloaded_network._update_torch_multiplier()
+        convert_linear_to_ostris(reloaded_layer, _CountingQuantizer())
+
         self.assertTrue(
-            torch.allclose(
-                layer.dequantize_weight(),
-                before_merge + full_module.diff,
-            )
+            torch.allclose(reloaded_layer(inputs.detach()), output.detach(), atol=1e-6)
         )
 
     def test_assistant_lora_wrapped_model_still_creates_training_modules(self):

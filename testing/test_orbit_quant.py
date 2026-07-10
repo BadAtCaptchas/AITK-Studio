@@ -1,7 +1,10 @@
 import concurrent.futures
 import unittest
+from unittest import mock
+import weakref
 
 import torch
+import torch.utils.checkpoint
 
 from toolkit.dequantize import patch_dequantization_on_save
 from toolkit.lorm import count_parameters
@@ -144,6 +147,18 @@ class OstrisLinearTest(unittest.TestCase):
         self.assertIsInstance(layer, OstrisLinear)
         self.assertIs(layer.orbit_packed, packed)
 
+    def test_conversion_disables_weakly_referenced_accuracy_adapter_merging(self):
+        class Adapter:
+            can_merge_in = True
+
+        layer = torch.nn.Linear(64, 16)
+        adapter = Adapter()
+        layer.ara_lora_ref = weakref.ref(adapter)
+
+        self.assertTrue(convert_linear_to_ostris(layer, OrbitQuantizer(4)))
+
+        self.assertFalse(adapter.can_merge_in)
+
     def test_include_exclude_and_unsupported_shapes_remain_dense(self):
         model = torch.nn.ModuleDict(
             {
@@ -216,11 +231,17 @@ class OstrisLinearTest(unittest.TestCase):
 
     def test_state_dict_is_plain_and_loadable_by_linear(self):
         layer = make_quantized_linear("orbit4")
-        state_dict = layer.state_dict()
+        with mock.patch.object(
+            layer.ostris_quantizer,
+            "dequantize_to",
+            wraps=layer.ostris_quantizer.dequantize_to,
+        ) as dequantize_to:
+            state_dict = layer.state_dict()
         restored = torch.nn.Linear(64, 16)
         restored.load_state_dict(state_dict)
         x = torch.randn(2, 64)
 
+        self.assertEqual(torch.device(dequantize_to.call_args.args[1]).type, "cpu")
         self.assertEqual(set(state_dict), {"weight", "bias"})
         self.assertIs(type(state_dict["weight"]), torch.Tensor)
         self.assertTrue(torch.allclose(layer(x), restored(x), atol=1e-6, rtol=1e-6))
@@ -323,6 +344,33 @@ class OrbitOffloadTest(unittest.TestCase):
         output.sum().backward()
         self.assertEqual(output.device.type, "cuda")
         self.assertEqual(layer.orbit_packed.device.type, "cuda")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is not available")
+    def test_checkpoint_recomputation_with_compressed_block_offload(self):
+        layer = make_quantized_linear("orbit4").to("cuda")
+        model = TinyBlockModel(layer)
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cuda"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+        try:
+            x = torch.randn(2, 64, device="cuda", requires_grad=True)
+            output = torch.utils.checkpoint.checkpoint(
+                model.blocks[0],
+                x,
+                use_reentrant=False,
+            )
+            output.square().mean().backward()
+            torch.cuda.synchronize()
+            manager._wait_for_entry_transfer(manager.layers[0])
+
+            self.assertIsNotNone(x.grad)
+            self.assertTrue(torch.isfinite(x.grad).all())
+            self.assertEqual(layer.orbit_packed.device.type, "cpu")
+        finally:
+            manager.detach()
 
 
 if __name__ == "__main__":

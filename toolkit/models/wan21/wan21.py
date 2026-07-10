@@ -30,7 +30,13 @@ import copy
 from toolkit.config_modules import ModelConfig, GenerateImageConfig, ModelArch
 import torch
 from optimum.quanto import freeze, qfloat8, QTensor, qint4
-from toolkit.util.quantize import quantize, get_qtype
+from toolkit.util.quantize import (
+    enforce_orbit4_low_vram_coverage,
+    get_qtype,
+    quantize,
+    quantize_component_in_stages,
+)
+from toolkit.util.ostris_quant import is_ostris_qtype
 from diffusers import FlowMatchEulerDiscreteScheduler, UniPCMultistepScheduler
 from typing import TYPE_CHECKING, List
 from toolkit.accelerator import unwrap_model
@@ -354,13 +360,18 @@ class Wan21(BaseModel):
             subfolder=subfolder,
             torch_dtype=dtype,
         ).to(dtype=dtype)
+        orbit_transformer_quantization = (
+            self.model_config.quantize
+            and is_ostris_qtype(self.model_config.qtype)
+        )
 
         if self.model_config.split_model_over_gpus:
             raise ValueError(
                 "Splitting model over gpus is not supported for Wan2.1 models")
 
-        if self.model_config.low_vram:
-            # quantize on the device
+        if self.model_config.low_vram or orbit_transformer_quantization:
+            # Orbit stages one block at a time from CPU; low-VRAM keeps the
+            # established CPU-loading behavior for the other backends.
             transformer.to('cpu', dtype=dtype)
             flush()
         else:
@@ -379,7 +390,33 @@ class Wan21(BaseModel):
         
         if self.model_config.quantize:
             self.print_and_status_update("Quantizing Transformer")
-            quantize_model(self, transformer)
+            if (
+                orbit_transformer_quantization
+                and getattr(
+                    self.model_config, "accuracy_recovery_adapter", None
+                ) is None
+            ):
+                patch_dequantization_on_save(transformer)
+                report = quantize_component_in_stages(
+                    transformer,
+                    weights=self.model_config.qtype,
+                    device=self.device_torch,
+                    dtype=dtype,
+                    block_paths=self.get_transformer_block_names(),
+                    exclude=self.get_quantization_exclude_modules(),
+                    options=self.model_config.quantize_kwargs,
+                    component_label="transformer",
+                )
+                freeze(transformer)
+                self.quantization_report = report
+                self.print_and_status_update(f" - {report.summary()}")
+                if (
+                    self.model_config.low_vram
+                    and str(self.model_config.qtype).lower() == "orbit4"
+                ):
+                    enforce_orbit4_low_vram_coverage(report)
+            else:
+                quantize_model(self, transformer)
             flush()
         
         if self.model_config.layer_offloading and self.model_config.layer_offloading_transformer_percent > 0:
@@ -434,13 +471,42 @@ class Wan21(BaseModel):
             comfy_files=self._comfy_te_file
         )
 
-        text_encoder.to(self.device_torch, dtype=dtype)
+        orbit_text_encoder_quantization = (
+            self.model_config.quantize_te
+            and is_ostris_qtype(self.model_config.qtype_te)
+        )
+        if not orbit_text_encoder_quantization:
+            text_encoder.to(self.device_torch, dtype=dtype)
         flush()
 
         if self.model_config.quantize_te:
             self.print_and_status_update("Quantizing UMT5EncoderModel")
-            quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
-            freeze(text_encoder)
+            if orbit_text_encoder_quantization:
+                patch_dequantization_on_save(text_encoder)
+                report = quantize_component_in_stages(
+                    text_encoder,
+                    weights=self.model_config.qtype_te,
+                    device=self.device_torch,
+                    dtype=dtype,
+                    block_paths=["encoder.block"],
+                    options=self.model_config.quantize_kwargs,
+                    component_label="text_encoder",
+                )
+                freeze(text_encoder)
+                self.text_encoder_quantization_report = report
+                self.print_and_status_update(f" - {report.summary()}")
+                if (
+                    self.model_config.low_vram
+                    and str(self.model_config.qtype_te).lower() == "orbit4"
+                ):
+                    enforce_orbit4_low_vram_coverage(report)
+            else:
+                quantize(
+                    text_encoder,
+                    weights=get_qtype(self.model_config.qtype_te),
+                    **self.model_config.quantize_kwargs,
+                )
+                freeze(text_encoder)
             flush()
         
         if self.model_config.layer_offloading and self.model_config.layer_offloading_text_encoder_percent > 0:

@@ -18,10 +18,17 @@ from toolkit.samplers.custom_flowmatch_sampler import (
 from toolkit.dequantize import patch_dequantization_on_save
 from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze, QTensor
-from toolkit.util.quantize import quantize, get_qtype, quantize_model
+from toolkit.util.quantize import (
+    enforce_orbit4_low_vram_coverage,
+    get_qtype,
+    quantize,
+    quantize_component_in_stages,
+    quantize_model,
+)
+from toolkit.util.ostris_quant import is_ostris_qtype
 from toolkit.quantized_cache import (
     QuantizedModelCache,
-    is_quanto_qtype,
+    is_quantized_cache_qtype,
     quantized_cache_key,
 )
 
@@ -110,9 +117,9 @@ class Flux2Model(BaseModel):
     def _can_use_quantized_cache(self, qtype: str, component: str) -> bool:
         if not self.model_config.quantize_cache:
             return False
-        if not is_quanto_qtype(qtype):
+        if not is_quantized_cache_qtype(qtype):
             self.print_and_status_update(
-                f"Skipping {component} quantized cache for torchao qtype {qtype}"
+                f"Skipping {component} quantized cache for unsupported qtype {qtype}"
             )
             return False
         if component == "transformer" and self.model_config.accuracy_recovery_adapter is not None:
@@ -120,6 +127,43 @@ class Flux2Model(BaseModel):
                 "Skipping transformer quantized cache with accuracy recovery adapter"
             )
             return False
+        return True
+
+    def _quantize_orbit_component(
+        self,
+        component: torch.nn.Module,
+        qtype: str,
+        *,
+        block_paths: List[str],
+        component_label: str,
+        exclude: Optional[List[str]] = None,
+    ) -> bool:
+        """Stage an Orbit component without a transient whole-model CUDA copy."""
+        if not is_ostris_qtype(qtype):
+            return False
+        patch_dequantization_on_save(component)
+        report = quantize_component_in_stages(
+            component,
+            weights=qtype,
+            device=self.device_torch,
+            dtype=self.torch_dtype,
+            block_paths=block_paths,
+            exclude=exclude,
+            options=getattr(self.model_config, "quantize_kwargs", {}),
+            component_label=component_label,
+        )
+        freeze(component)
+        component._aitk_quantization_report = report
+        if component_label == "transformer":
+            self.quantization_report = report
+        else:
+            self.text_encoder_quantization_report = report
+        self.print_and_status_update(f" - {report.summary()}")
+        if (
+            getattr(self.model_config, "low_vram", False)
+            and str(qtype).lower() == "orbit4"
+        ):
+            enforce_orbit4_low_vram_coverage(report)
         return True
 
     def _get_transformer_cache_key(self, transformer_path: str):
@@ -156,6 +200,8 @@ class Flux2Model(BaseModel):
                 cache_key,
                 device=torch.device("cpu"),
             )
+            if isinstance(transformer, torch.nn.Module):
+                freeze(transformer)
             patch_dequantization_on_save(transformer)
             return True
         except Exception as e:
@@ -281,14 +327,33 @@ class Flux2Model(BaseModel):
                 text_encoder: Mistral3ForConditionalGeneration = (
                     self._load_mistral_text_encoder(source, dtype)
                 )
-                text_encoder.to(self.device_torch, dtype=dtype)
+                orbit_text_encoder_quantization = (
+                    self.model_config.quantize_te
+                    and is_ostris_qtype(self.model_config.qtype_te)
+                )
+                if not orbit_text_encoder_quantization:
+                    text_encoder.to(self.device_torch, dtype=dtype)
 
                 flush()
 
                 if self.model_config.quantize_te:
                     self.print_and_status_update("Quantizing Mistral")
-                    quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
-                    freeze(text_encoder)
+                    if not self._quantize_orbit_component(
+                        text_encoder,
+                        self.model_config.qtype_te,
+                        block_paths=[
+                            "model.language_model.layers",
+                            "model.vision_tower.encoder.layers",
+                            "model.vision_tower.vision_model.encoder.layers",
+                        ],
+                        component_label="text_encoder",
+                    ):
+                        quantize(
+                            text_encoder,
+                            weights=get_qtype(self.model_config.qtype_te),
+                            **self.model_config.quantize_kwargs,
+                        )
+                        freeze(text_encoder)
                     flush()
 
                 if (
@@ -365,7 +430,17 @@ class Flux2Model(BaseModel):
                 # Avoid full-model peak VRAM allocation before quantization.
                 self.print_and_status_update("Keeping transformer on CPU for quantization")
                 self.print_and_status_update("Quantizing Transformer")
-                quantize_model(self, transformer)
+                if (
+                    self.model_config.accuracy_recovery_adapter is not None
+                    or not self._quantize_orbit_component(
+                        transformer,
+                        self.model_config.qtype,
+                        block_paths=self.get_transformer_block_names(),
+                        component_label="transformer",
+                        exclude=self.get_quantization_exclude_modules(),
+                    )
+                ):
+                    quantize_model(self, transformer)
                 self._save_transformer_quantized_cache(transformer, transformer_path)
                 flush()
             else:

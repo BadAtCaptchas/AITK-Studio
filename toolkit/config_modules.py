@@ -282,7 +282,7 @@ class LoRMConfig:
         })
 
 
-NetworkType = Literal['lora', 'locon', 'lorm', 'lokr']
+NetworkType = Literal['lora', 'locon', 'lorm', 'lokr', 'dora']
 
 
 def _config_bool(value: Any) -> bool:
@@ -784,6 +784,110 @@ class TrainConfig:
 
 ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo']
 LayerOffloadingBackend = Literal['block', 'legacy']
+QuantizationKernel = Literal['auto', 'triton', 'torch']
+
+QUANTIZATION_KERNELS = {'auto', 'triton', 'torch'}
+MIN_QUANTIZATION_WORKSPACE_MB = 1
+MAX_QUANTIZATION_WORKSPACE_MB = 4096
+
+
+def _normalize_quantize_kwargs(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"model.quantize_kwargs must be a mapping, got {type(value).__name__}"
+        )
+
+    normalized = dict(value)
+    kernel = normalized.get('kernel')
+    if kernel is not None and (
+        not isinstance(kernel, str) or kernel not in QUANTIZATION_KERNELS
+    ):
+        raise ValueError(
+            "model.quantize_kwargs.kernel must be one of "
+            f"{sorted(QUANTIZATION_KERNELS)}, got {kernel!r}"
+        )
+
+    max_workspace_mb = normalized.get('max_workspace_mb')
+    if max_workspace_mb is not None:
+        if isinstance(max_workspace_mb, bool) or not isinstance(max_workspace_mb, int):
+            raise ValueError(
+                "model.quantize_kwargs.max_workspace_mb must be an integer between "
+                f"{MIN_QUANTIZATION_WORKSPACE_MB} and {MAX_QUANTIZATION_WORKSPACE_MB}, "
+                f"got {max_workspace_mb!r}"
+            )
+        if not MIN_QUANTIZATION_WORKSPACE_MB <= max_workspace_mb <= MAX_QUANTIZATION_WORKSPACE_MB:
+            raise ValueError(
+                "model.quantize_kwargs.max_workspace_mb must be between "
+                f"{MIN_QUANTIZATION_WORKSPACE_MB} and {MAX_QUANTIZATION_WORKSPACE_MB}, "
+                f"got {max_workspace_mb}"
+            )
+
+    for key in ('include', 'exclude'):
+        patterns = normalized.get(key)
+        if patterns is None:
+            continue
+        if not isinstance(patterns, list) or any(
+            not isinstance(pattern, str) or not pattern.strip()
+            for pattern in patterns
+        ):
+            raise ValueError(
+                f"model.quantize_kwargs.{key} must be a list of non-empty strings"
+            )
+        normalized[key] = list(patterns)
+
+    return normalized
+
+
+def _is_orbit_qtype(value: Any) -> bool:
+    return str(value or '').split('|', 1)[0].lower().startswith('orbit')
+
+
+def _is_orbit4_qtype(value: Any) -> bool:
+    return str(value or '').split('|', 1)[0].lower() == 'orbit4'
+
+
+def apply_orbit4_low_vram_training_defaults(
+    model_config: Dict[str, Any],
+    train_config: Dict[str, Any],
+    dataset_configs: Optional[List[Dict[str, Any]]] = None,
+) -> bool:
+    """Fill the Orbit4 low-VRAM training profile without replacing YAML values.
+
+    This works on raw configuration mappings so dataset caching is established
+    before ``DatasetConfig`` and the device-state presets are constructed. Every
+    value uses ``setdefault``: an explicit YAML value, including ``False``, wins.
+    """
+
+    orbit4_enabled = (
+        bool(model_config.get('quantize'))
+        and _is_orbit4_qtype(model_config.get('qtype'))
+    ) or (
+        bool(model_config.get('quantize_te'))
+        and _is_orbit4_qtype(model_config.get('qtype_te'))
+    )
+    if not bool(model_config.get('low_vram')) or not orbit4_enabled:
+        return False
+
+    train_config.setdefault('batch_size', 1)
+    train_config.setdefault('gradient_checkpointing', True)
+    train_config.setdefault('optimizer', 'adamw8bit')
+
+    cache_text_embeddings = False
+    if not bool(train_config.get('train_text_encoder', False)):
+        train_config.setdefault('cache_text_embeddings', True)
+        train_config.setdefault('unload_text_encoder', True)
+        cache_text_embeddings = bool(train_config.get('cache_text_embeddings'))
+
+    for dataset_config in dataset_configs or []:
+        if not isinstance(dataset_config, dict):
+            continue
+        dataset_config.setdefault('cache_latents_to_disk', True)
+        if cache_text_embeddings:
+            dataset_config.setdefault('cache_text_embeddings', True)
+
+    return True
 
 def _normalize_model_ref(value: Optional[str]) -> str:
     return str(value or '').strip().replace('\\', '/').lower()
@@ -901,7 +1005,9 @@ class ModelConfig:
         # for targeting a specific layers
         self.ignore_if_contains: Optional[List[str]] = kwargs.get("ignore_if_contains", None)
         self.only_if_contains: Optional[List[str]] = kwargs.get("only_if_contains", None)
-        self.quantize_kwargs = kwargs.get("quantize_kwargs", {})
+        self.quantize_kwargs: Dict[str, Any] = _normalize_quantize_kwargs(
+            kwargs.get("quantize_kwargs", {})
+        )
         
         # splits the model over the available gpus WIP
         self.split_model_over_gpus = kwargs.get("split_model_over_gpus", False)
@@ -919,6 +1025,7 @@ class ModelConfig:
         # auto memory is deprecated, use layer offloading instead
         if self.auto_memory:
             print("auto_memory is deprecated, use layer_offloading instead")
+        self._layer_offloading_explicit = "layer_offloading" in kwargs
         self.layer_offloading = kwargs.get("layer_offloading", self.auto_memory )
         self._layer_offloading_backend_explicit = "layer_offloading_backend" in kwargs
         self.layer_offloading_backend: LayerOffloadingBackend = kwargs.get("layer_offloading_backend", "block")
@@ -938,6 +1045,12 @@ class ModelConfig:
             self.qtype_te = "int8"
         
         # 0 is off and 1.0 is 100% of the layers/blocks, depending on backend.
+        self._layer_offloading_transformer_percent_explicit = (
+            "layer_offloading_transformer_percent" in kwargs
+        )
+        self._layer_offloading_text_encoder_percent_explicit = (
+            "layer_offloading_text_encoder_percent" in kwargs
+        )
         self.layer_offloading_transformer_percent = kwargs.get("layer_offloading_transformer_percent", 1.0)
         self.layer_offloading_text_encoder_percent = kwargs.get("layer_offloading_text_encoder_percent", 1.0)
 
@@ -1634,6 +1747,57 @@ def validate_configs(
 ):
     from toolkit.memory_management.offload import is_block_offload_arch_supported
 
+    orbit_enabled = (
+        (model_config.quantize and _is_orbit_qtype(model_config.qtype))
+        or (model_config.quantize_te and _is_orbit_qtype(model_config.qtype_te))
+    )
+    if orbit_enabled and network_config is None and (
+        train_config.train_unet or train_config.train_text_encoder
+    ):
+        raise ValueError(
+            "Orbit quantization supports frozen-base adapter training only; full base-model "
+            "fine-tuning is not supported. Configure a LoRA, LoKr, or DoRA network or disable Orbit."
+        )
+    if orbit_enabled and network_config is not None:
+        orbit_network_type = str(network_config.type or '').lower()
+        if orbit_network_type not in {'lora', 'lokr', 'dora'}:
+            raise ValueError(
+                "Orbit quantization currently supports network.type lora, lokr, or dora "
+                f"only; got {network_config.type!r}. Use a supported adapter type or "
+                "disable Orbit."
+            )
+        if network_config.all_layers:
+            raise ValueError(
+                "Orbit quantization does not support network.all_layers because it creates "
+                "full-weight trainable modules. Set network.all_layers to false and target "
+                "LoRA-compatible layers explicitly."
+            )
+        if orbit_network_type == 'lokr':
+            if network_config.lokr_full_rank:
+                raise ValueError(
+                    "Orbit quantization does not support full-rank LoKr adapters. Set "
+                    "network.lokr_full_rank to false and choose a finite network.linear rank."
+                )
+            if network_config.lokr_weight_decompose:
+                raise ValueError(
+                    "Orbit quantization does not yet support LoKr weight decomposition. Set "
+                    "network.lokr_weight_decompose to false (including weight_decompose/dora_wd aliases)."
+                )
+
+    orbit4_low_vram = model_config.low_vram and (
+        (model_config.quantize and _is_orbit4_qtype(model_config.qtype))
+        or (model_config.quantize_te and _is_orbit4_qtype(model_config.qtype_te))
+    )
+    if orbit4_low_vram and is_block_offload_arch_supported(model_config.arch):
+        if not model_config._layer_offloading_explicit:
+            model_config.layer_offloading = True
+        if not model_config._layer_offloading_backend_explicit:
+            model_config.layer_offloading_backend = "block"
+        if not model_config._layer_offloading_transformer_percent_explicit:
+            model_config.layer_offloading_transformer_percent = 0.70
+        if not model_config._layer_offloading_text_encoder_percent_explicit:
+            model_config.layer_offloading_text_encoder_percent = 0.50
+
     if model_config.is_flux:
         if save_config.save_format != 'diffusers':
             # make it diffusers
@@ -1720,7 +1884,7 @@ def validate_configs(
         if model_config.arch == "zimage" and network_type not in {"lora", "lokr"}:
             raise ValueError("Z-Image training currently supports network.type lora or lokr.")
 
-        if network_type in {"lora", "lokr"}:
+        if network_type in {"lora", "lokr", "dora"}:
             linear_rank = network_config.linear if network_config.linear is not None else 0
             conv_rank = network_config.conv if network_config.conv is not None else 0
             if linear_rank <= 0 and conv_rank <= 0:

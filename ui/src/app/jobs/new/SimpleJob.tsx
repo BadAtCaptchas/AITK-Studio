@@ -11,7 +11,12 @@ import {
   jobTypeOptions,
   SampleTags,
 } from './options';
-import { defaultDatasetConfig, defaultWatermarkConfig } from './jobConfig';
+import {
+  applyOrbit4LowVramDefaults,
+  defaultDatasetConfig,
+  defaultWatermarkConfig,
+  isOrbit4LowVramProfile,
+} from './jobConfig';
 import {
   ComfyMode,
   ComfyOnError,
@@ -387,6 +392,33 @@ export default function SimpleJob({
     trainConfig.unload_text_encoder,
   ]);
 
+  const {
+    arch: orbitProfileArch,
+    low_vram: orbitProfileLowVram,
+    qtype: orbitProfileQtype,
+    qtype_te: orbitProfileTextEncoderQtype,
+    quantize: orbitProfileQuantize,
+    quantize_te: orbitProfileQuantizeTextEncoder,
+  } = jobConfig.config.process[0].model;
+  // Existing jobs count as already configured. A profile selected in this
+  // editor receives the full defaults once, after which manual edits win.
+  const orbitProfileAppliedRef = useRef(isOrbit4LowVramProfile(jobConfig));
+
+  useEffect(() => {
+    if (orbitProfileAppliedRef.current || !isOrbit4LowVramProfile(jobConfig)) return;
+    orbitProfileAppliedRef.current = true;
+    setJobConfig((current: JobConfig) => applyOrbit4LowVramDefaults(current, true));
+  }, [
+    jobConfig,
+    orbitProfileArch,
+    orbitProfileLowVram,
+    orbitProfileQtype,
+    orbitProfileTextEncoderQtype,
+    orbitProfileQuantize,
+    orbitProfileQuantizeTextEncoder,
+    setJobConfig,
+  ]);
+
   const setSamplePromptValue = (sampleIndex: number, prompt: string) => {
     if (modelArch?.sampleTags && taggedSampleArr?.[sampleIndex]) {
       const tagKey =
@@ -636,6 +668,7 @@ export default function SimpleJob({
   ];
   const targetTypeOptions = [
     { value: 'lora', label: 'LoRA' },
+    { value: 'dora', label: 'DoRA' },
     { value: 'lokr', label: 'LoKr' },
   ];
 
@@ -1160,7 +1193,7 @@ export default function SimpleJob({
                     }}
                     options={targetTypeOptions}
                   />
-                  {networkType === 'lora' && (
+                  {(networkType === 'lora' || networkType === 'dora') && (
                     <>
                       <NumberInput
                         label="Linear rank"
@@ -1712,7 +1745,9 @@ export default function SimpleJob({
                     <div className="text-gray-500">Architecture</div>
                     <div className="text-gray-200">{modelArch?.label || processConfig.model.arch}</div>
                     <div className="text-gray-500">Target</div>
-                    <div className="text-gray-200">{networkType === 'lokr' ? 'LoKr' : 'LoRA'}</div>
+                    <div className="text-gray-200">
+                      {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}
+                    </div>
                     <div className="text-gray-500">Steps</div>
                     <div className="text-gray-200">{autoTrain ? 'Auto' : formatNumber(processConfig.train.steps)}</div>
                     <div className="text-gray-500">Batch size</div>
@@ -1848,7 +1883,9 @@ export default function SimpleJob({
                     <div className="flex items-center gap-2 text-gray-500"><Zap className="h-3.5 w-3.5" />Architecture</div>
                     <div className="text-gray-200">{modelArch?.label || processConfig.model.arch}</div>
                     <div className="flex items-center gap-2 text-gray-500"><Target className="h-3.5 w-3.5" />Target</div>
-                    <div className="text-gray-200">{networkType === 'lokr' ? 'LoKr' : 'LoRA'}</div>
+                    <div className="text-gray-200">
+                      {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}
+                    </div>
                     <div className="flex items-center gap-2 text-gray-500"><ListChecks className="h-3.5 w-3.5" />Steps</div>
                     <div className="text-gray-200">{autoTrain ? 'Auto' : formatNumber(processConfig.train.steps)}</div>
                     <div className="flex items-center gap-2 text-gray-500"><Gauge className="h-3.5 w-3.5" />Batch size</div>

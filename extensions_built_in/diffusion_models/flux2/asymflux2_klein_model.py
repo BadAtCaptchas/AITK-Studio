@@ -138,6 +138,8 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
                 cache_key,
                 device=torch.device("cpu"),
             )
+            if isinstance(transformer, torch.nn.Module):
+                freeze(transformer)
             return True
         except Exception as e:
             self.print_and_status_update(
@@ -186,8 +188,18 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
         if self.model_config.quantize_te:
             if not getattr(text_encoder, "_aitk_loaded_from_quantized_cache", False):
                 self.print_and_status_update("Quantizing Qwen3")
-                quantize(text_encoder, weights=get_qtype(self.model_config.qtype_te))
-                freeze(text_encoder)
+                if not self._quantize_orbit_component(
+                    text_encoder,
+                    self.model_config.qtype_te,
+                    block_paths=["model.layers"],
+                    component_label="text_encoder",
+                ):
+                    quantize(
+                        text_encoder,
+                        weights=get_qtype(self.model_config.qtype_te),
+                        **self.model_config.quantize_kwargs,
+                    )
+                    freeze(text_encoder)
                 self._save_qwen_quantized_cache(text_encoder, source)
             flush()
         elif not self.model_config.low_vram:
@@ -281,7 +293,17 @@ class AsymFlux2Klein9BModel(Flux2KleinModel):
         if self.model_config.quantize:
             if not loaded_transformer_from_cache:
                 self.print_and_status_update("Quantizing AsymFLUX transformer")
-                quantize_model(self, transformer)
+                if (
+                    self.model_config.accuracy_recovery_adapter is not None
+                    or not self._quantize_orbit_component(
+                        transformer,
+                        self.model_config.qtype,
+                        block_paths=self.get_transformer_block_names(),
+                        component_label="transformer",
+                        exclude=self.get_quantization_exclude_modules(),
+                    )
+                ):
+                    quantize_model(self, transformer)
                 self._save_transformer_quantized_cache(transformer, transformer_cache_source)
             flush()
         elif not self.model_config.low_vram:

@@ -1283,7 +1283,8 @@ class SDTrainer(BaseSDTrainProcess):
         loss = loss.mean()
         if loss.item() > 1e3:
             pass
-        self.accelerator.backward(loss)
+        with self.cuda_memory_phase("backward"):
+            self.accelerator.backward(loss)
         return pure_loss
 
 
@@ -1729,19 +1730,20 @@ class SDTrainer(BaseSDTrainProcess):
         guidance_embedding_scale = self.train_config.cfg_scale
         if self.train_config.do_guidance_loss:
             guidance_embedding_scale = self._guidance_loss_target_batch
-        return self.sd.predict_noise(
-            latents=noisy_latents.to(self.device_torch, dtype=dtype),
-            conditional_embeddings=conditional_embeds.to(self.device_torch, dtype=dtype),
-            unconditional_embeddings=unconditional_embeds,
-            timestep=timesteps,
-            guidance_scale=self.train_config.cfg_scale,
-            guidance_embedding_scale=guidance_embedding_scale,
-            detach_unconditional=False,
-            rescale_cfg=self.train_config.cfg_rescale,
-            bypass_guidance_embedding=self.train_config.bypass_guidance_embedding,
-            batch=batch,
-            **kwargs
-        )
+        with self.cuda_memory_phase("forward"):
+            return self.sd.predict_noise(
+                latents=noisy_latents.to(self.device_torch, dtype=dtype),
+                conditional_embeddings=conditional_embeds.to(self.device_torch, dtype=dtype),
+                unconditional_embeddings=unconditional_embeds,
+                timestep=timesteps,
+                guidance_scale=self.train_config.cfg_scale,
+                guidance_embedding_scale=guidance_embedding_scale,
+                detach_unconditional=False,
+                rescale_cfg=self.train_config.cfg_rescale,
+                bypass_guidance_embedding=self.train_config.bypass_guidance_embedding,
+                batch=batch,
+                **kwargs
+            )
     
 
     def train_single_accumulation(self, batch: DataLoaderBatchDTO):
@@ -2612,7 +2614,8 @@ class SDTrainer(BaseSDTrainProcess):
                     # if self.is_bfloat:
                     # loss.backward()
                     # else:
-                    self.accelerator.backward(loss)
+                    with self.cuda_memory_phase("backward"):
+                        self.accelerator.backward(loss)
                     self._clear_authenlora_batch(network)
 
         return loss.detach()
@@ -2671,11 +2674,12 @@ class SDTrainer(BaseSDTrainProcess):
                     self._record_monitor_metric('train/grad_norm_limit', self.train_config.max_grad_norm)
             # only step if we are not accumulating
             with self.timer('optimizer_step'):
-                self.optimizer.step()
+                with self.cuda_memory_phase("optimizer"):
+                    self.optimizer.step()
 
-                self.optimizer.zero_grad(set_to_none=True)
-                if self.adapter and isinstance(self.adapter, CustomAdapter):
-                    self.adapter.post_weight_update()
+                    self.optimizer.zero_grad(set_to_none=True)
+                    if self.adapter and isinstance(self.adapter, CustomAdapter):
+                        self.adapter.post_weight_update()
             if self.ema is not None:
                 with self.timer('ema_update'):
                     self.ema.update()

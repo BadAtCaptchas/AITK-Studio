@@ -335,6 +335,9 @@ class OrbitVQQuantizer(OstrisQuantizer):
         )
 
     def quantize_(self, module: torch.nn.Linear, weight_fp32: torch.Tensor) -> None:
+        # convert_linear_to_ostris passes the source dtype so bounded backends can
+        # cast row tiles. Preserve the legacy VQ encoder's FP32 numerics here.
+        weight_fp32 = weight_fp32.to(torch.float32)
         dimension = module.in_features
         block_size = hadamard_block_size(dimension)
         group_size = min(self.group_size, block_size)
@@ -345,7 +348,10 @@ class OrbitVQQuantizer(OstrisQuantizer):
             device=device,
             dtype=torch.int32,
         )
-        signs = signs_cpu.to(device)
+        # rpbh_params returns immutable cached CPU templates. Block offload
+        # mutates registered buffer storage in place, so each module needs its
+        # own signs tensor even when quantization itself happens on CPU.
+        signs = signs_cpu.to(device=device, copy=True)
         rotated = rpbh_forward(weight_fp32, permutation, signs, block_size)
         packed, scales = self._encode_rotated(rotated, group_size)
         module.register_buffer("ovq_packed", packed, persistent=False)

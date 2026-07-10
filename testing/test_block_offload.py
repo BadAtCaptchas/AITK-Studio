@@ -26,6 +26,29 @@ class TinyBlockModel(torch.nn.Module):
         return x
 
 
+class FrozenOstrisLinear(torch.nn.Linear):
+    is_ostris_quantized = True
+
+    def __init__(self, in_features=4, out_features=4):
+        super().__init__(in_features, out_features)
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+
+
+class TinyFrozenQuantizedBlockModel(torch.nn.Module):
+    def __init__(self, mixed=False):
+        super().__init__()
+        layers = [FrozenOstrisLinear(), torch.nn.SiLU()]
+        if mixed:
+            dense = torch.nn.Linear(4, 4)
+            dense.requires_grad_(False)
+            layers.append(dense)
+        self.blocks = torch.nn.ModuleList([torch.nn.Sequential(*layers)])
+
+    def forward(self, x):
+        return self.blocks[0](x)
+
+
 class StorageAliasSensitiveTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, value):
@@ -227,6 +250,65 @@ class LayerOffloadStrategyTest(unittest.TestCase):
 
 
 class BlockOffloadManagerTest(unittest.TestCase):
+    def test_frozen_fully_quantized_block_is_backward_reload_safe(self):
+        model = TinyFrozenQuantizedBlockModel()
+
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+
+        self.assertTrue(manager.layers[0].reload_for_backward)
+        self.assertEqual(len(manager.layers[0].hook_handles), 2)
+
+    def test_mixed_dense_block_stays_on_conservative_path(self):
+        model = TinyFrozenQuantizedBlockModel(mixed=True)
+
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+
+        self.assertFalse(manager.layers[0].reload_for_backward)
+        self.assertEqual(len(manager.layers[0].hook_handles), 1)
+
+    def test_reload_safe_block_offloads_after_grad_forward(self):
+        model = TinyFrozenQuantizedBlockModel()
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+        entry = manager.layers[0]
+        manager.active = True
+        entry.state = "device"
+
+        with mock.patch.object(manager, "_offload_entry") as offload_entry:
+            output = manager.layer_forward(entry, torch.randn(2, 4, requires_grad=True))
+
+        self.assertTrue(output.requires_grad)
+        offload_entry.assert_called_once_with(entry, async_transfer=True)
+
+    def test_before_backward_reloads_current_block(self):
+        model = TinyFrozenQuantizedBlockModel()
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=1.0,
+            block_paths=["blocks"],
+        )
+        entry = manager.layers[0]
+
+        with mock.patch.object(manager, "_ensure_entry_on_device") as ensure:
+            manager.before_backward(entry)
+
+        ensure.assert_called_once_with(entry)
+
     def test_attach_is_idempotent_and_forward_still_runs_on_cpu(self):
         model = TinyBlockModel()
         x = torch.randn(2, 4)
@@ -322,6 +404,33 @@ class BlockOffloadManagerTest(unittest.TestCase):
             expected = "cpu" if manager.strategy.is_offloaded(entry.index) else "resident"
             self.assertEqual(entry.state, expected)
 
+    def test_managed_to_cuda_avoids_transient_whole_model_copy(self):
+        model = TinyBlockModel(block_count=3)
+        manager = BlockOffloadManager.attach(
+            model,
+            torch.device("cpu"),
+            offload_fraction=0.5,
+            block_paths=["blocks"],
+        )
+        manager._original_to = mock.Mock(side_effect=AssertionError("full cuda move"))
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.cuda, "Stream", return_value=FakeCudaStream),
+            mock.patch.object(
+                manager,
+                "_move_tensor",
+                side_effect=lambda tensor, device, dtype: tensor,
+            ),
+        ):
+            result = manager.memory_managed_to(torch.device("cuda"), dtype=torch.float16)
+
+        self.assertIs(result, model)
+        manager._original_to.assert_not_called()
+        for entry in manager.layers:
+            expected = "cpu" if manager.strategy.is_offloaded(entry.index) else "resident"
+            self.assertEqual(entry.state, expected)
+
     def test_async_offload_waits_for_compute_stream_before_copy(self):
         model = TinyBlockModel(block_count=1)
         manager = BlockOffloadManager.attach(
@@ -409,6 +518,28 @@ class BlockOffloadManagerTest(unittest.TestCase):
             resolve_layer_offloading_backend(config, model, torch.device("cpu"), ["blocks"]),
             "legacy",
         )
+
+    def test_orbit_rejects_explicit_legacy_cuda_offload(self):
+        from toolkit.memory_management.offload import attach_layer_offloading
+
+        model = TinyFrozenQuantizedBlockModel()
+        config = SimpleNamespace(
+            arch="flux",
+            qtype="orbit4",
+            qtype_te="orbit4",
+            layer_offloading=True,
+            layer_offloading_backend="legacy",
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires block layer offloading"):
+            attach_layer_offloading(
+                config,
+                model,
+                torch.device("cuda"),
+                offload_percent=0.7,
+                component="transformer",
+                block_paths=["blocks"],
+            )
 
     def test_ideogram_is_block_offload_supported(self):
         self.assertTrue(is_block_offload_arch_supported("ideogram4"))

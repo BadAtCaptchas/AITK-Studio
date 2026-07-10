@@ -1,6 +1,4 @@
 #based off https://github.com/catid/dora/blob/main/dora.py
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,6 +7,7 @@ from typing import TYPE_CHECKING, Union, List
 from optimum.quanto import QBytesTensor, QTensor
 
 from toolkit.network_mixins import ToolkitModuleMixin, ExtractableModuleMixin
+from toolkit.util.orbit_quant import rpbh_forward
 
 if TYPE_CHECKING:
     from toolkit.lora_special import LoRASpecialNetwork
@@ -94,11 +93,9 @@ class DoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         # self.lora_down.weight.data = torch.zeros_like(self.lora_down.weight.data)
         self.lora_down.weight.data = torch.randn_like(self.lora_down.weight.data) * std_dev
 
-        # m = Magnitude column-wise across output dimension
-        weight = self.get_orig_weight()
-        weight = weight.to(self.lora_up.weight.device, dtype=self.lora_up.weight.dtype)
-        lora_weight  = self.lora_up.weight @ self.lora_down.weight
-        weight_norm = self._get_weight_norm(weight, lora_weight)
+        # Compute magnitude through a factorized path. Accessing
+        # ``OstrisLinear.weight`` would reconstruct the complete logical weight.
+        weight_norm = self._get_weight_norm_from_factors(1.0)
         self.magnitude = nn.Parameter(weight_norm.detach().clone(), requires_grad=True)
 
     def apply_to(self):
@@ -149,3 +146,105 @@ class DoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         weight_norm = weight_norm.detach()
         dora_weight = transpose(weight + scaled_lora_weight, False)
         return (self.magnitude / weight_norm - 1).view(1, -1) * F.linear(x.to(dora_weight.dtype), dora_weight)
+
+    @staticmethod
+    def _row_norms_from_chunks(weight_chunks, down, up):
+        """Calculate ``||W + U D||`` without constructing ``U D``.
+
+        ``weight_chunks`` yields base rows in the same orthonormal basis as
+        ``down``. The factorized identity keeps every temporary proportional to
+        the adapter rank or one bounded base-weight row tile.
+        """
+        down = down.float()
+        gram = down @ down.transpose(0, 1)
+        norms = up.new_empty(up.shape[0], dtype=torch.float32)
+        for start, end, weight_rows in weight_chunks:
+            weight_rows = weight_rows.float()
+            up_rows = up[start:end].float()
+            cross_projection = weight_rows @ down.transpose(0, 1)
+            base_sq = weight_rows.square().sum(dim=1)
+            cross = (up_rows * cross_projection).sum(dim=1)
+            delta_sq = torch.einsum("ir,rs,is->i", up_rows, gram, up_rows)
+            norms[start:end] = (
+                base_sq + (2.0 * cross) + delta_sq
+            ).clamp_min_(0.0).sqrt_()
+        return norms
+
+    def _dense_weight_chunks(self, device, rows_per_chunk=256):
+        module = self.org_module[0]
+        weight = module.weight
+        if isinstance(weight, (QTensor, QBytesTensor)):
+            weight = weight.dequantize()
+        for start in range(0, module.out_features, rows_per_chunk):
+            end = min(start + rows_per_chunk, module.out_features)
+            yield start, end, weight[start:end].detach().to(device=device)
+
+    def _orbit_weight_chunks(self, device):
+        module = self.org_module[0]
+        quantizer = module.ostris_quantizer
+        decode_rows = getattr(quantizer, "_decode_rotated_rows", None)
+        runtime_rows = getattr(quantizer, "_runtime_rows", None)
+        if not callable(decode_rows) or not callable(runtime_rows):
+            backend = getattr(module, "ostris_backend_name", type(quantizer).__name__)
+            raise ValueError(
+                f"DoRA does not support packed backend {backend!r} without a "
+                "bounded row decoder. Use orbit4 or a standard LoRA adapter."
+            )
+        rows_per_chunk = runtime_rows(
+            module.out_features,
+            module.in_features,
+            torch.float32,
+        )
+        for start in range(0, module.out_features, rows_per_chunk):
+            end = min(start + rows_per_chunk, module.out_features)
+            yield start, end, decode_rows(module, start, end, torch.float32).to(device)
+
+    @torch.no_grad()
+    def _get_weight_norm_from_factors(self, multiplier) -> torch.Tensor:
+        module = self.org_module[0]
+        device = self.lora_down.weight.device
+        down = self.lora_down.weight.detach().float()
+        up = self.lora_up.weight.detach().float()
+        if isinstance(multiplier, torch.Tensor):
+            adapter_scale = multiplier.detach().float().mean() * float(self.scale)
+        else:
+            adapter_scale = float(self.scale) * float(multiplier)
+        up = up * adapter_scale
+
+        if getattr(module, "is_ostris_quantized", False):
+            quantizer = module.ostris_quantizer
+            if not callable(getattr(quantizer, "_decode_rotated_rows", None)):
+                backend = getattr(module, "ostris_backend_name", type(quantizer).__name__)
+                raise ValueError(
+                    f"DoRA with {backend!r} would require reconstructing a full "
+                    "base weight. Use orbit4 or a standard LoRA adapter."
+                )
+            # Orbit stores W R. Rotate D by the same orthonormal R so all
+            # inner products and row norms remain unchanged.
+            down = rpbh_forward(
+                down,
+                module.orbit_perm,
+                module.orbit_signs,
+                module.orbit_block,
+            )
+            chunks = self._orbit_weight_chunks(device)
+        else:
+            chunks = self._dense_weight_chunks(device)
+        return self._row_norms_from_chunks(chunks, down, up)
+
+    def compose_dora_output(self, base_output, lora_output, multiplier):
+        """Compose DoRA without materializing a dense base or delta weight."""
+        # DoRA treats the dynamically recomputed norm as a constant during
+        # backward, while the magnitude vector remains trainable.
+        weight_norm = self._get_weight_norm_from_factors(multiplier).detach()
+        ratio = self.magnitude.to(weight_norm.device, weight_norm.dtype)
+        ratio = ratio / weight_norm.clamp_min(torch.finfo(weight_norm.dtype).eps)
+        ratio = ratio.to(base_output.device, base_output.dtype)
+        ratio = ratio.view(*([1] * (base_output.dim() - 1)), -1)
+
+        bias = self.get_orig_bias()
+        if bias is None:
+            return (base_output + lora_output) * ratio
+        bias = bias.to(base_output.device, base_output.dtype)
+        bias = bias.view(*([1] * (base_output.dim() - 1)), -1)
+        return (base_output - bias + lora_output) * ratio + bias

@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import types
 import unittest
 from importlib.machinery import ModuleSpec
@@ -82,15 +83,18 @@ mocked_modules = {
     "accelerate": accelerate_module,
 }
 
-if importlib.util.find_spec("torchaudio") is None:
+if "torchaudio" not in sys.modules and importlib.util.find_spec("torchaudio") is None:
     torchaudio_module = stub_module("torchaudio")
     mocked_modules["torchaudio"] = torchaudio_module
 
 with mock.patch.dict("sys.modules", mocked_modules):
     from toolkit.base_lora import _infer_network_config
     from toolkit.config_modules import NetworkConfig
-    from toolkit.lora_special import LoRASpecialNetwork
+    from toolkit.lora_special import LoRAModule, LoRASpecialNetwork
+    from toolkit.models.DoRA import DoRAModule
     from toolkit.models.lokr import LokrModule, balanced_factorization, factorization, legacy_factorization
+    from toolkit.util.orbit_quant import OrbitQuantizer
+    from toolkit.util.ostris_quant import convert_linear_to_ostris
 
 
 class NetworkStub:
@@ -133,6 +137,34 @@ def make_lokr(module=None, **kwargs):
     )
     lokr._test_network = network
     return lokr
+
+
+def make_orbit_linear(source=None):
+    if source is None:
+        source = torch.nn.Linear(32, 32, bias=True)
+    module = torch.nn.Linear(source.in_features, source.out_features, bias=source.bias is not None)
+    module.load_state_dict(source.state_dict())
+    convert_linear_to_ostris(
+        module,
+        OrbitQuantizer(4, kernel="torch", max_workspace_mb=1),
+    )
+    return module
+
+
+def make_adapter_network(network_type, multiplier=1.0):
+    network = NetworkStub()
+    network.network_type = network_type
+    network._multiplier = multiplier
+    network.torch_multiplier = torch.tensor([multiplier])
+    return network
+
+
+def forbid_full_dequantization(module):
+    failure = mock.Mock(side_effect=AssertionError("full base dequantization"))
+    module.ostris_quantizer.dequantize = failure
+    if hasattr(module.ostris_quantizer, "dequantize_to"):
+        module.ostris_quantizer.dequantize_to = failure
+    return failure
 
 
 class ByteBackedLinear(torch.nn.Module):
@@ -386,6 +418,202 @@ class LokrModuleTest(unittest.TestCase):
         self.assertTrue(config.lokr_weight_decompose)
         self.assertTrue(config.lokr_legacy_factorization)
         self.assertEqual(network_kwargs["only_if_contains"], ["proj"])
+
+    def test_orbit_lokr_uses_factorized_forward_and_round_trips_state(self):
+        torch.manual_seed(41)
+        source = torch.nn.Linear(32, 32, bias=True)
+        base = make_orbit_linear(source)
+        packed_before = base.orbit_packed.clone()
+        network = make_adapter_network("lokr")
+        adapter = LokrModule(
+            "orbit_lokr",
+            base,
+            lora_dim=4,
+            alpha=4,
+            factor=4,
+            network=network,
+        )
+        with torch.no_grad():
+            for parameter in adapter.parameters():
+                parameter.normal_(std=0.1)
+        adapter.apply_to()
+
+        # A compatibility dequantization on the hot path is a hard failure.
+        forbid_full_dequantization(base)
+        x = torch.randn(3, 32, requires_grad=True)
+        output = base(x)
+        output.square().mean().backward()
+
+        self.assertTrue(adapter.bypass_mode)
+        self.assertFalse(adapter.can_merge_in)
+        self.assertTrue(torch.equal(base.orbit_packed, packed_before))
+        self.assertTrue(any(
+            parameter.grad is not None and parameter.grad.abs().sum() > 0
+            for parameter in adapter.parameters()
+        ))
+
+        saved = {key: value.detach().clone() for key, value in adapter.state_dict().items()}
+        self.assertTrue(all(value.numel() < base.logical_weight_numel for value in saved.values()))
+
+        reloaded_base = make_orbit_linear(source)
+        reloaded_network = make_adapter_network("lokr")
+        reloaded = LokrModule(
+            "orbit_lokr",
+            reloaded_base,
+            lora_dim=4,
+            alpha=4,
+            factor=4,
+            network=reloaded_network,
+        )
+        reloaded._test_network = reloaded_network
+        reloaded.load_state_dict(saved)
+        reloaded.apply_to()
+        self.assertTrue(torch.allclose(reloaded_base(x.detach()), output.detach(), atol=1e-5))
+
+    def test_orbit_lokr_rejects_weight_decomposition(self):
+        base = make_orbit_linear()
+        with self.assertRaisesRegex(ValueError, "full dense base weight"):
+            LokrModule(
+                "orbit_lokr_wd",
+                base,
+                lora_dim=4,
+                alpha=4,
+                factor=4,
+                weight_decompose=True,
+                network=make_adapter_network("lokr"),
+            )
+
+    def test_orbit_lokr_factorized_rank_dropout_drops_delta(self):
+        torch.manual_seed(44)
+        base = make_orbit_linear()
+        inputs = torch.randn(2, 32)
+        expected = base(inputs)
+        network = make_adapter_network("lokr")
+        adapter = LokrModule(
+            "orbit_lokr_dropout",
+            base,
+            lora_dim=4,
+            alpha=4,
+            factor=4,
+            rank_dropout=1.0,
+            network=network,
+        )
+        with torch.no_grad():
+            for parameter in adapter.parameters():
+                parameter.normal_(std=0.1)
+        adapter.train()
+        adapter.apply_to()
+        forbid_full_dequantization(base)
+
+        self.assertTrue(torch.allclose(base(inputs), expected, atol=1e-6))
+
+    def test_orbit_dora_is_factorized_matches_reference_and_round_trips(self):
+        torch.manual_seed(42)
+        source = torch.nn.Linear(32, 32, bias=True)
+        base = make_orbit_linear(source)
+        packed_before = base.orbit_packed.clone()
+        network = make_adapter_network("dora", multiplier=0.7)
+        adapter = DoRAModule(
+            "orbit_dora",
+            base,
+            lora_dim=4,
+            alpha=2,
+            network=network,
+        )
+        with torch.no_grad():
+            adapter.lora_up.weight.normal_(std=0.1)
+            adapter.lora_down.weight.normal_(std=0.1)
+
+        x = torch.randn(3, 32, requires_grad=True)
+        dense_base = base.dequantize_weight()
+        delta = (
+            adapter.lora_up.weight @ adapter.lora_down.weight
+        ) * adapter.scale * network.torch_multiplier.mean()
+        norm = (dense_base.float() + delta.float()).norm(dim=1)
+        ratio = adapter.magnitude.detach().float() / norm
+        expected = base.bias + (
+            torch.nn.functional.linear(x, dense_base, None)
+            + torch.nn.functional.linear(x, delta, None)
+        ) * ratio
+
+        adapter.apply_to()
+        forbid_full_dequantization(base)
+        output = base(x)
+        self.assertTrue(torch.allclose(output, expected, atol=1e-5))
+        output.square().mean().backward()
+
+        self.assertTrue(torch.equal(base.orbit_packed, packed_before))
+        self.assertGreater(adapter.lora_up.weight.grad.abs().sum().item(), 0)
+        self.assertGreater(adapter.lora_down.weight.grad.abs().sum().item(), 0)
+        self.assertGreater(adapter.magnitude.grad.abs().sum().item(), 0)
+
+        saved = {key: value.detach().clone() for key, value in adapter.state_dict().items()}
+        self.assertTrue(all(value.numel() < base.logical_weight_numel for value in saved.values()))
+
+        reloaded_base = make_orbit_linear(source)
+        reloaded_network = make_adapter_network("dora", multiplier=0.7)
+        reloaded = DoRAModule(
+            "orbit_dora",
+            reloaded_base,
+            lora_dim=4,
+            alpha=2,
+            network=reloaded_network,
+        )
+        reloaded._test_network = reloaded_network
+        reloaded.load_state_dict(saved)
+        reloaded.apply_to()
+        self.assertTrue(torch.allclose(reloaded_base(x.detach()), output.detach(), atol=1e-5))
+
+    def test_orbit_lora_stays_parallel_has_gradients_and_round_trips(self):
+        torch.manual_seed(43)
+        source = torch.nn.Linear(32, 32, bias=True)
+        base = make_orbit_linear(source)
+        packed_before = base.orbit_packed.clone()
+        network = make_adapter_network("lora")
+        adapter = LoRAModule(
+            "orbit_lora",
+            base,
+            lora_dim=4,
+            alpha=4,
+            network=network,
+        )
+        with torch.no_grad():
+            adapter.lora_up.weight.normal_(std=0.1)
+        adapter.apply_to()
+        forbid_full_dequantization(base)
+
+        x = torch.randn(3, 32, requires_grad=True)
+        output = base(x)
+        output.square().mean().backward()
+        self.assertFalse(adapter.can_merge_in)
+        self.assertTrue(torch.equal(base.orbit_packed, packed_before))
+        self.assertGreater(adapter.lora_up.weight.grad.abs().sum().item(), 0)
+        self.assertGreater(adapter.lora_down.weight.grad.abs().sum().item(), 0)
+
+        saved = {key: value.detach().clone() for key, value in adapter.state_dict().items()}
+        reloaded_base = make_orbit_linear(source)
+        reloaded_network = make_adapter_network("lora")
+        reloaded = LoRAModule(
+            "orbit_lora",
+            reloaded_base,
+            lora_dim=4,
+            alpha=4,
+            network=reloaded_network,
+        )
+        reloaded._test_network = reloaded_network
+        reloaded.load_state_dict(saved)
+        reloaded.apply_to()
+        self.assertTrue(torch.allclose(reloaded_base(x.detach()), output.detach(), atol=1e-5))
+
+    def test_orbit_rejects_logical_weight_sized_full_rank_adapter(self):
+        with self.assertRaisesRegex(ValueError, "Full-rank adapters"):
+            LoRAModule(
+                "orbit_fullrank",
+                make_orbit_linear(),
+                lora_dim=32,
+                alpha=32,
+                network=make_adapter_network("fullrank"),
+            )
 
 
 if __name__ == "__main__":

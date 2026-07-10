@@ -85,7 +85,10 @@ def is_mergeable_lora_target(module) -> bool:
     if module.__class__.__name__ in UNMERGEABLE_MODULES:
         return False
     if getattr(module, 'is_ostris_quantized', False):
-        return True
+        # Keep adapters parallel to a first-party packed base. Repeatedly
+        # dequantizing, merging, and requantizing is both memory intensive and
+        # lossy; explicit merged export uses a separate streamed path.
+        return False
 
     try:
         org_sd = module.state_dict()
@@ -228,6 +231,28 @@ class ToolkitModuleMixin:
         self.is_checkpointing = False
         self._multiplier: Union[float, list, torch.Tensor] = None
 
+    def _call_org_forward(self: Module, x, *args, **kwargs):
+        """Call the current base implementation behind a monkey-patched adapter.
+
+        Accuracy-recovery adapters may be attached before an ``nn.Linear`` is
+        converted in place to ``OstrisLinear``. In that case ``org_forward`` is a
+        stale bound ``nn.Linear.forward`` and would bypass packed execution. Only
+        stale methods bound to the base module are rebound; stacked adapter
+        forwards, which are bound to another adapter object, remain intact.
+        """
+        org_forward = self.org_forward
+        org_modules = getattr(self, 'org_module', None)
+        org_module = org_modules[0] if org_modules else None
+        if org_module is not None and getattr(org_module, 'is_ostris_quantized', False):
+            bound_self = getattr(org_forward, '__self__', None)
+            bound_func = getattr(org_forward, '__func__', None)
+            current_func = getattr(type(org_module), 'forward', None)
+            if bound_self is org_module and bound_func is not current_func:
+                self.can_merge_in = False
+                org_forward = current_func.__get__(org_module, type(org_module))
+                self.org_forward = org_forward
+        return org_forward(x, *args, **kwargs)
+
     def _call_forward(self: Module, x):
         # module dropout
         if self.module_dropout is not None and self.training:
@@ -305,7 +330,7 @@ class ToolkitModuleMixin:
     def lorm_forward(self: Network, x, *args, **kwargs):
         network: Network = self.network_ref()
         if not network.is_active:
-            return self.org_forward(x, *args, **kwargs)
+            return self._call_org_forward(x, *args, **kwargs)
         
         orig_dtype = x.dtype
         
@@ -317,7 +342,7 @@ class ToolkitModuleMixin:
             inputs = x.detach()
             with torch.no_grad():
                 # get the local prediction
-                target_pred = self.org_forward(inputs, *args, **kwargs).detach()
+                target_pred = self._call_org_forward(inputs, *args, **kwargs).detach()
             with torch.set_grad_enabled(True):
                 # make a prediction with the lorm
                 lorm_pred = self.lora_up(self.lora_down(inputs.requires_grad_(True)))
@@ -356,7 +381,7 @@ class ToolkitModuleMixin:
 
         if skip:
             # network is not active, avoid doing anything
-            return self.org_forward(x, *args, **kwargs)
+            return self._call_org_forward(x, *args, **kwargs)
 
         # if self.__class__.__name__ == "DoRAModule":
         #     # return dora forward
@@ -365,7 +390,7 @@ class ToolkitModuleMixin:
         if self.__class__.__name__ == "LokrModule":
             return self._call_forward(x, *args, **kwargs)
 
-        org_forwarded = self.org_forward(x, *args, **kwargs)
+        org_forwarded = self._call_org_forward(x, *args, **kwargs)
 
         if isinstance(x, QTensor):
             x = x.dequantize()
@@ -385,22 +410,14 @@ class ToolkitModuleMixin:
         scaled_lora_output = scaled_lora_output.to(org_forwarded.dtype)
 
         if self.__class__.__name__ == "DoRAModule":
-            # ref https://github.com/huggingface/peft/blob/1e6d1d73a0850223b0916052fd8d2382a90eae5a/src/peft/tuners/lora/layer.py#L417
-            # x = dropout(x)
-            # todo this wont match the dropout applied to the lora
-            if isinstance(self.dropout, nn.Dropout) or isinstance(self.dropout, nn.Identity):
-                lx = self.dropout(x)
-            # normal dropout
-            elif self.dropout is not None and self.training:
-                lx = torch.nn.functional.dropout(x, p=self.dropout)
-            else:
-                lx = x
-            lora_weight = self.lora_up.weight @ self.lora_down.weight
-            # scale it here
-            # todo handle our batch split scalers for slider training. For now take the mean of them
-            scale = multiplier.mean()
-            scaled_lora_weight = lora_weight * scale
-            scaled_lora_output = scaled_lora_output + self.apply_dora(lx, scaled_lora_weight).to(org_forwarded.dtype)
+            # Keep both the packed base and adapter delta factorized. DoRA's row
+            # normalization is evaluated from bounded base-row tiles by the
+            # module, avoiding a dense base reconstruction and U @ D.
+            return self.compose_dora_output(
+                org_forwarded,
+                scaled_lora_output,
+                multiplier.mean(),
+            )
 
         try:
             x = org_forwarded + scaled_lora_output

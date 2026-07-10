@@ -156,6 +156,89 @@ export const defaultJobConfig: JobConfig = {
   },
 };
 
+const usesOrbit4 = (jobConfig: JobConfig) => {
+  const model = jobConfig.config.process[0].model;
+  const isOrbit4 = (qtype: string) => qtype.split('|', 1)[0].toLowerCase() === 'orbit4';
+  return (
+    (model.quantize && isOrbit4(model.qtype)) ||
+    (model.quantize_te && isOrbit4(model.qtype_te))
+  );
+};
+
+export const isOrbit4LowVramProfile = (jobConfig: JobConfig) => {
+  const model = jobConfig.config.process[0].model;
+  return (
+    model.low_vram &&
+    usesOrbit4(jobConfig) &&
+    getLayerOffloadingMemoryProfile(model.arch).backend === 'block'
+  );
+};
+
+/** Fill additive offload defaults and, on first UI activation, the training profile. */
+export const applyOrbit4LowVramDefaults = (
+  jobConfig: JobConfig,
+  applyTrainingProfile = false,
+): JobConfig => {
+  const process = jobConfig.config.process[0];
+  const model = process.model;
+  if (!isOrbit4LowVramProfile(jobConfig)) {
+    return jobConfig;
+  }
+
+  const nextModel = { ...model };
+  nextModel.layer_offloading ??= true;
+  nextModel.layer_offloading_backend ??= 'block';
+  nextModel.layer_offloading_transformer_percent ??= 0.7;
+  nextModel.layer_offloading_text_encoder_percent ??= 0.5;
+
+  let nextTrain = process.train;
+  let nextDatasets = process.datasets;
+  if (applyTrainingProfile) {
+    nextTrain = {
+      ...process.train,
+      batch_size: 1,
+      gradient_checkpointing: true,
+      optimizer: 'adamw8bit',
+      ...(!process.train.train_text_encoder
+        ? {
+            cache_text_embeddings: true,
+            unload_text_encoder: true,
+          }
+        : {}),
+    };
+    nextDatasets = process.datasets.map(dataset => ({
+      ...dataset,
+      cache_latents_to_disk: true,
+      ...(!process.train.train_text_encoder ? { cache_text_embeddings: true } : {}),
+    }));
+  }
+
+  if (
+    !applyTrainingProfile &&
+    nextModel.layer_offloading === model.layer_offloading &&
+    nextModel.layer_offloading_backend === model.layer_offloading_backend &&
+    nextModel.layer_offloading_transformer_percent === model.layer_offloading_transformer_percent &&
+    nextModel.layer_offloading_text_encoder_percent === model.layer_offloading_text_encoder_percent
+  ) {
+    return jobConfig;
+  }
+
+  const nextProcesses = [...jobConfig.config.process];
+  nextProcesses[0] = {
+    ...process,
+    model: nextModel,
+    train: nextTrain,
+    datasets: nextDatasets,
+  };
+  return {
+    ...jobConfig,
+    config: {
+      ...jobConfig.config,
+      process: nextProcesses,
+    },
+  };
+};
+
 export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   // upgrade prompt strings to samples
   if (
@@ -191,6 +274,7 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   }
 
   jobConfig.config.process[0].model.base_lora_strength ??= 1.0;
+  jobConfig = applyOrbit4LowVramDefaults(jobConfig);
 
   if (jobConfig.config.process[0].model.layer_offloading) {
     const memoryProfile = getLayerOffloadingMemoryProfile(jobConfig.config.process[0].model.arch);

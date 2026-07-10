@@ -112,6 +112,7 @@ test('generateOpenRouterLayerCaption parses text-layer captions and strict schem
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   });
   assert.equal(calls[0].provider.require_parameters, true);
+  assert.deepEqual(calls[0].provider.order, ['xai/zdr']);
   assert.equal(calls[0].response_format.json_schema.strict, true);
   assert.equal(calls[0].response_format.json_schema.name, 'dataset_layer_caption');
   assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['desc', 'text', 'bbox_px', 'color_palette']);

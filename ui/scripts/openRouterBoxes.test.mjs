@@ -121,6 +121,7 @@ test('generateOpenRouterBoxPatches defaults to grok 4.3 and filters malformed bo
   assert.deepEqual(result.boxes, [{ elementIndex: 0, bbox: [100, 190, 640, 820], color_palette: ['#FACC15', '#111111'] }]);
   assert.equal(result.usage.total_tokens, 15);
   assert.equal(calls[0].provider.require_parameters, true);
+  assert.deepEqual(calls[0].provider.order, ['xai/zdr']);
   assert.equal(calls[0].response_format.json_schema.strict, true);
   assert.deepEqual(calls[0].response_format.json_schema.schema.required, ['boxes', 'generatedElements']);
   assert.deepEqual(calls[0].response_format.json_schema.schema.properties.boxes.items.required, [

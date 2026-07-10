@@ -2,6 +2,7 @@ import { assertUsableCaption, sanitizeCaptionText } from '../utils/captionQualit
 import { parseIdeogramCaption } from '../utils/ideogramCaption';
 import { generateOllamaImageCaption } from './ollama';
 import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
+import { DEFAULT_OPENROUTER_GROK_MODEL, openRouterProviderRouting } from './openRouterProviderRouting';
 import { endpointForRemoteOllamaWorker, getRemoteOllamaWorker } from './remoteOllamaWorkers';
 
 export type RecaptionProvider = 'openrouter' | 'ollama' | 'remote_ollama';
@@ -21,7 +22,7 @@ export type SingleRecaptionRequest = {
   fetchImpl?: typeof fetch;
 };
 
-const DEFAULT_OPENROUTER_MODEL = 'x-ai/grok-4.3';
+const DEFAULT_OPENROUTER_MODEL = DEFAULT_OPENROUTER_GROK_MODEL;
 const DEFAULT_OLLAMA_MODEL = 'qwen3.5:35b';
 const DEFAULT_TEXT_RECAPTION_PROMPT =
   'Caption this image as if you were going to generate it with an image model. Be direct, detailed, and do not include preamble.';
@@ -187,8 +188,11 @@ async function generateOpenRouterRecaption({
     max_tokens: maxNewTokens,
     messages,
   };
+  const provider = openRouterProviderRouting(model, {
+    requireParameters: outputFormat === 'ideogram_json',
+  });
+  if (provider) body.provider = provider;
   if (outputFormat === 'ideogram_json') {
-    body.provider = { require_parameters: true };
     body.response_format = {
       type: 'json_schema',
       json_schema: {

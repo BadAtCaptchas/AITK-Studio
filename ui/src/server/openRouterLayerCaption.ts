@@ -12,6 +12,7 @@ import {
   type OpenRouterUsage,
 } from './openRouterBoxes';
 import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
+import { openRouterProviderRouting } from './openRouterProviderRouting';
 
 type ImageSize = {
   width?: number | null;
@@ -183,7 +184,7 @@ async function callOpenRouterLayerCaption({
       stream: false,
       temperature: 0,
       max_tokens: 600,
-      provider: { require_parameters: true },
+      provider: openRouterProviderRouting(model, { requireParameters: true }),
       response_format: {
         type: 'json_schema',
         json_schema: {

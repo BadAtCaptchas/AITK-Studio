@@ -16,6 +16,8 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_ENV_NAMES = ("OPENROUTER_API_KEY", "AITK_OPENROUTER_API_KEY")
 OPENROUTER_JSON_MIN_TOKENS = 2048
 OPENROUTER_JSON_MAX_RETRY_TOKENS = 8192
+OPENROUTER_GROK_MODEL = "x-ai/grok-4.3"
+OPENROUTER_GROK_ZDR_PROVIDER = "xai/zdr"
 
 
 class OpenRouterCaptionConfig(CaptionConfig):
@@ -175,6 +177,8 @@ class OpenRouterCaptioner(BaseCaptioner):
             "stream": False,
             "max_tokens": self._caption_max_tokens(),
         }
+        if payload["model"] == OPENROUTER_GROK_MODEL:
+            payload["provider"] = {"order": [OPENROUTER_GROK_ZDR_PROVIDER]}
         if self.caption_config.temperature is not None:
             payload["temperature"] = float(self.caption_config.temperature)
         if self.is_ideogram_json_output():
@@ -186,7 +190,10 @@ class OpenRouterCaptioner(BaseCaptioner):
                     "schema": IDEOGRAM_JSON_SCHEMA,
                 },
             }
-            payload["provider"] = {"require_parameters": True}
+            payload["provider"] = {
+                **payload.get("provider", {}),
+                "require_parameters": True,
+            }
         return payload, image_size
 
     def get_caption_for_file(self, file_path: str) -> str:

@@ -116,7 +116,10 @@ class OpenRouterCaptionerTest(unittest.TestCase):
 
         self.assertEqual(payload["max_tokens"], 2048)
         self.assertEqual(payload["response_format"]["type"], "json_schema")
-        self.assertEqual(payload["provider"], {"require_parameters": True})
+        self.assertEqual(
+            payload["provider"],
+            {"order": ["xai/zdr"], "require_parameters": True},
+        )
 
     def test_build_payload_preserves_token_budget_for_text_output(self):
         captioner = self.make_captioner("x-ai/grok-4.3", output_format="text")
@@ -127,7 +130,7 @@ class OpenRouterCaptionerTest(unittest.TestCase):
 
         self.assertEqual(payload["max_tokens"], 128)
         self.assertNotIn("response_format", payload)
-        self.assertNotIn("provider", payload)
+        self.assertEqual(payload["provider"], {"order": ["xai/zdr"]})
 
     def test_get_caption_retries_json_parse_failures_with_larger_budget(self):
         captioner = self.make_captioner("x-ai/grok-4.3", output_format="ideogram_json")

@@ -8,9 +8,10 @@ import {
   type GeneratedBoxPatch,
 } from '../utils/ideogramCaption';
 import { assertUrlAllowedByOfflineMode, guardedFetch } from './networkPolicy';
+import { DEFAULT_OPENROUTER_GROK_MODEL, openRouterProviderRouting } from './openRouterProviderRouting';
 
-export const DEFAULT_OPENROUTER_BOX_MODEL = 'x-ai/grok-4.3';
-export const OPENROUTER_BOX_MODELS = ['x-ai/grok-4.3'] as const;
+export const DEFAULT_OPENROUTER_BOX_MODEL = DEFAULT_OPENROUTER_GROK_MODEL;
+export const OPENROUTER_BOX_MODELS = [DEFAULT_OPENROUTER_BOX_MODEL] as const;
 
 type ImageSize = {
   width?: number | null;
@@ -441,7 +442,7 @@ async function callOpenRouterBoxes({
       stream: false,
       temperature: 0,
       max_tokens: 1200,
-      provider: { require_parameters: true },
+      provider: openRouterProviderRouting(model, { requireParameters: true }),
       response_format: {
         type: 'json_schema',
         json_schema: {

@@ -192,3 +192,4 @@ aitk_db.db-wal
 aitk_db.db-shm
 
 /projects
+.aitk-backups

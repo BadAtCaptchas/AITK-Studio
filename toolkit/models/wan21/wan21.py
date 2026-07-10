@@ -12,6 +12,7 @@ from toolkit.prompt_utils import PromptEmbeds
 from transformers import AutoTokenizer, UMT5EncoderModel
 from diffusers import  WanPipeline, WanTransformer3DModel, AutoencoderKL
 from .autoencoder_kl_wan import AutoencoderKLWan
+from toolkit.models.vae_tiling import temporary_vae_tiling
 import os
 import sys
 
@@ -597,6 +598,12 @@ class Wan21(BaseModel):
 
         return pipeline
 
+    @property
+    def use_vae_tiling(self):
+        return self.model_config.low_vram or bool(
+            self.model_config.model_kwargs.get("vae_tiling", False)
+        )
+
     def generate_single_image(
         self,
         pipeline: WanPipeline,
@@ -611,22 +618,23 @@ class Wan21(BaseModel):
         if not self.model_config.low_vram:
             pipeline = pipeline.to(self.device_torch)
         # todo, figure out how to do video
-        output = pipeline(
-            prompt_embeds=conditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype),
-            negative_prompt_embeds=unconditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype),
-            height=gen_config.height,
-            width=gen_config.width,
-            num_inference_steps=gen_config.num_inference_steps,
-            guidance_scale=gen_config.guidance_scale,
-            latents=gen_config.latents,
-            num_frames=gen_config.num_frames,
-            generator=generator,
-            return_dict=False,
-            output_type="pil",
-            **extra
-        )[0]
+        with temporary_vae_tiling(pipeline.vae, self.use_vae_tiling):
+            output = pipeline(
+                prompt_embeds=conditional_embeds.text_embeds.to(
+                    self.device_torch, dtype=self.torch_dtype),
+                negative_prompt_embeds=unconditional_embeds.text_embeds.to(
+                    self.device_torch, dtype=self.torch_dtype),
+                height=gen_config.height,
+                width=gen_config.width,
+                num_inference_steps=gen_config.num_inference_steps,
+                guidance_scale=gen_config.guidance_scale,
+                latents=gen_config.latents,
+                num_frames=gen_config.num_frames,
+                generator=generator,
+                return_dict=False,
+                output_type="pil",
+                **extra
+            )[0]
 
         # shape = [1, frames, channels, height, width]
         batch_item = output[0]  # list of pil images

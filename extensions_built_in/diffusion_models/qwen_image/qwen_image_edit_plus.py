@@ -9,6 +9,7 @@ from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.image_io import open_static_image
 from PIL import Image
 from toolkit.models.base_model import BaseModel
+from toolkit.models.vae_tiling import temporary_vae_tiling
 from toolkit.basic import flush
 from toolkit.prompt_utils import PromptEmbeds
 from toolkit.samplers.custom_flowmatch_sampler import (
@@ -130,26 +131,27 @@ class QwenImageEditPlusModel(QwenImageModel):
 
             return {"latents": latents}
 
-        img = pipeline(
-            image=control_img_list,
-            prompt_embeds=conditional_embeds.text_embeds,
-            prompt_embeds_mask=conditional_embeds.attention_mask.to(
-                self.device_torch, dtype=torch.int64
-            ),
-            negative_prompt_embeds=unconditional_embeds.text_embeds,
-            negative_prompt_embeds_mask=unconditional_embeds.attention_mask.to(
-                self.device_torch, dtype=torch.int64
-            ),
-            height=gen_config.height,
-            width=gen_config.width,
-            num_inference_steps=gen_config.num_inference_steps,
-            true_cfg_scale=gen_config.guidance_scale,
-            latents=gen_config.latents,
-            generator=generator,
-            callback_on_step_end=callback_on_step_end,
-            do_cfg_norm=gen_config.do_cfg_norm,
-            **extra,
-        ).images[0]
+        with temporary_vae_tiling(pipeline.vae, self.model_config.low_vram):
+            img = pipeline(
+                image=control_img_list,
+                prompt_embeds=conditional_embeds.text_embeds,
+                prompt_embeds_mask=conditional_embeds.attention_mask.to(
+                    self.device_torch, dtype=torch.int64
+                ),
+                negative_prompt_embeds=unconditional_embeds.text_embeds,
+                negative_prompt_embeds_mask=unconditional_embeds.attention_mask.to(
+                    self.device_torch, dtype=torch.int64
+                ),
+                height=gen_config.height,
+                width=gen_config.width,
+                num_inference_steps=gen_config.num_inference_steps,
+                true_cfg_scale=gen_config.guidance_scale,
+                latents=gen_config.latents,
+                generator=generator,
+                callback_on_step_end=callback_on_step_end,
+                do_cfg_norm=gen_config.do_cfg_norm,
+                **extra,
+            ).images[0]
         return img
 
     def condition_noisy_latents(

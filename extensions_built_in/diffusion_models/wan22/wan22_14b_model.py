@@ -23,6 +23,7 @@ from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
 from torchvision.transforms import functional as TF
 
 from toolkit.models.wan21.wan21 import Wan21
+from toolkit.models.vae_tiling import temporary_vae_tiling
 from .wan22_5b_model import (
     scheduler_config,
     time_text_monkeypatch,
@@ -210,6 +211,9 @@ class Wan2214bModel(Wan21):
         # if we are only training one or the other, the target LoRA modules will be the wan transformer class
         if not self.train_high_noise or not self.train_low_noise:
             self.target_lora_modules = ["WanTransformer3DModel"]
+
+    def get_quantization_exclude_modules(self):
+        return ["condition_embedder*", "proj_out*"]
 
     @property
     def max_step_saves_to_keep_multiplier(self):
@@ -556,22 +560,23 @@ class Wan2214bModel(Wan21):
         # reactivate progress bar since this is slooooow
         pipeline.set_progress_bar_config(disable=False)
         # todo, figure out how to do video
-        output = pipeline(
-            prompt_embeds=conditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype),
-            negative_prompt_embeds=unconditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype),
-            height=gen_config.height,
-            width=gen_config.width,
-            num_inference_steps=gen_config.num_inference_steps,
-            guidance_scale=gen_config.guidance_scale,
-            latents=gen_config.latents,
-            num_frames=gen_config.num_frames,
-            generator=generator,
-            return_dict=False,
-            output_type="pil",
-            **extra
-        )[0]
+        with temporary_vae_tiling(pipeline.vae, self.use_vae_tiling):
+            output = pipeline(
+                prompt_embeds=conditional_embeds.text_embeds.to(
+                    self.device_torch, dtype=self.torch_dtype),
+                negative_prompt_embeds=unconditional_embeds.text_embeds.to(
+                    self.device_torch, dtype=self.torch_dtype),
+                height=gen_config.height,
+                width=gen_config.width,
+                num_inference_steps=gen_config.num_inference_steps,
+                guidance_scale=gen_config.guidance_scale,
+                latents=gen_config.latents,
+                num_frames=gen_config.num_frames,
+                generator=generator,
+                return_dict=False,
+                output_type="pil",
+                **extra
+            )[0]
 
         # shape = [1, frames, channels, height, width]
         batch_item = output[0]  # list of pil images

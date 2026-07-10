@@ -115,9 +115,11 @@ def add_first_frame_conditioning(
 
 def add_first_frame_conditioning_v22(
     latent_model_input,
-    first_frame,
+    *,
     vae,
-    last_frame=None
+    first_frame=None,
+    last_frame=None,
+    first_frame_latents=None,
 ):
     """
     Overwrites first few time steps in latent_model_input with VAE-encoded first_frame,
@@ -125,35 +127,63 @@ def add_first_frame_conditioning_v22(
 
     Args:
         latent_model_input: torch.Tensor of shape (bs, 48, T, H, W)
-        first_frame: torch.Tensor of shape (bs, 3, H*scale, W*scale)
+        first_frame: optional torch.Tensor of shape (bs, 3, H*scale, W*scale)
         vae: VAE model with .encode() and .config.latents_mean/std
+        first_frame_latents: optional pre-encoded normalized latents (bs, 48, 1, H, W)
 
     Returns:
         latent: (bs, 48, T, H, W) - modified input latent
         mask: (bs, 1, T, H, W) - binary mask
     """
+    if latent_model_input.ndim != 5:
+        raise ValueError("latent_model_input must have shape (batch, channels, frames, height, width)")
+    if (first_frame is None) == (first_frame_latents is None):
+        raise ValueError("Provide exactly one of first_frame or first_frame_latents")
+
     device = latent_model_input.device
     dtype = latent_model_input.dtype
-    bs, _, T, H, W = latent_model_input.shape
+    bs, channels, T, H, W = latent_model_input.shape
     scale = vae.config.scale_factor_spatial
     target_h = H * scale
     target_w = W * scale
-
-    # Ensure shape
-    if first_frame.ndim == 3:
-        first_frame = first_frame.unsqueeze(0)
-    if first_frame.shape[0] != bs:
-        first_frame = first_frame.expand(bs, -1, -1, -1)
-
-    # Resize and encode
-    first_frame_up = F.interpolate(first_frame, size=(target_h, target_w), mode="bilinear", align_corners=False)
-    first_frame_up = first_frame_up.unsqueeze(2)  # (bs, 3, 1, H, W)
-    encoded = vae.encode(first_frame_up).latent_dist.sample().to(dtype).to(device)
-
-    # Normalize
     mean = torch.tensor(vae.config.latents_mean).view(1, -1, 1, 1, 1).to(device, dtype)
     std = 1.0 / torch.tensor(vae.config.latents_std).view(1, -1, 1, 1, 1).to(device, dtype)
-    encoded = (encoded - mean) * std
+
+    if first_frame_latents is not None:
+        encoded = first_frame_latents
+        if encoded.ndim == 4:
+            encoded = encoded.unsqueeze(0)
+        if encoded.ndim != 5:
+            raise ValueError("first_frame_latents must have 4 or 5 dimensions")
+        if encoded.shape[0] not in (1, bs):
+            raise ValueError(f"Cached first-frame batch {encoded.shape[0]} does not match latent batch {bs}")
+        if encoded.shape[0] == 1 and bs > 1:
+            encoded = encoded.expand(bs, -1, -1, -1, -1)
+        if encoded.shape[1] != channels or encoded.shape[3:] != (H, W):
+            raise ValueError(
+                "Cached first-frame latent channels and spatial dimensions must match latent_model_input"
+            )
+        if encoded.shape[2] <= 0 or encoded.shape[2] > T:
+            raise ValueError("Cached first-frame latent has an invalid temporal length")
+        encoded = encoded.to(device=device, dtype=dtype)
+    else:
+        if first_frame.ndim == 3:
+            first_frame = first_frame.unsqueeze(0)
+        if first_frame.ndim != 4:
+            raise ValueError("first_frame must have 3 or 4 dimensions")
+        if first_frame.shape[0] not in (1, bs):
+            raise ValueError(f"First-frame batch {first_frame.shape[0]} does not match latent batch {bs}")
+        if first_frame.shape[0] == 1 and bs > 1:
+            first_frame = first_frame.expand(bs, -1, -1, -1)
+
+        first_frame_up = F.interpolate(
+            first_frame,
+            size=(target_h, target_w),
+            mode="bilinear",
+            align_corners=False,
+        ).unsqueeze(2)
+        encoded = vae.encode(first_frame_up).latent_dist.sample().to(device=device, dtype=dtype)
+        encoded = (encoded - mean) * std
 
     # Replace in latent
     latent = latent_model_input.clone()

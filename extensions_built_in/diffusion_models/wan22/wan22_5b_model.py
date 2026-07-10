@@ -15,6 +15,7 @@ from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
 from torchvision.transforms import functional as TF
 
 from toolkit.models.wan21.wan21 import Wan21, AggressiveWanUnloadPipeline
+from toolkit.models.vae_tiling import temporary_vae_tiling
 from toolkit.models.wan21.wan_utils import add_first_frame_conditioning_v22
 
 
@@ -117,6 +118,9 @@ class Wan225bModel(Wan21):
         # 16x compression  and 2x2 patch size
         return 32
 
+    def get_quantization_exclude_modules(self):
+        return ["condition_embedder*", "proj_out*"]
+
     def get_generation_pipeline(self):
         # todo unipc got broken in a diffusers update. Use euler for now.
         # scheduler = UniPCMultistepScheduler(**self._wan_generation_scheduler_config)
@@ -204,25 +208,26 @@ class Wan225bModel(Wan21):
                 latent_model_input=latents, first_frame=first_frame_n1p1, vae=self.vae
             )
 
-        output = pipeline(
-            prompt_embeds=conditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype
-            ),
-            negative_prompt_embeds=unconditional_embeds.text_embeds.to(
-                self.device_torch, dtype=self.torch_dtype
-            ),
-            height=height,
-            width=width,
-            num_inference_steps=gen_config.num_inference_steps,
-            guidance_scale=gen_config.guidance_scale,
-            latents=gen_config.latents,
-            num_frames=gen_config.num_frames,
-            generator=generator,
-            return_dict=False,
-            output_type="pil",
-            noise_mask=noise_mask,
-            **extra,
-        )[0]
+        with temporary_vae_tiling(pipeline.vae, self.use_vae_tiling):
+            output = pipeline(
+                prompt_embeds=conditional_embeds.text_embeds.to(
+                    self.device_torch, dtype=self.torch_dtype
+                ),
+                negative_prompt_embeds=unconditional_embeds.text_embeds.to(
+                    self.device_torch, dtype=self.torch_dtype
+                ),
+                height=height,
+                width=width,
+                num_inference_steps=gen_config.num_inference_steps,
+                guidance_scale=gen_config.guidance_scale,
+                latents=gen_config.latents,
+                num_frames=gen_config.num_frames,
+                generator=generator,
+                return_dict=False,
+                output_type="pil",
+                noise_mask=noise_mask,
+                **extra,
+            )[0]
 
         # shape = [1, frames, channels, height, width]
         batch_item = output[0]  # list of pil images
@@ -251,12 +256,25 @@ class Wan225bModel(Wan21):
         
         if batch.dataset_config.do_i2v:
             with torch.no_grad():
-                frames = batch.tensor
-                if len(frames.shape) == 4:
-                    first_frames = frames
-                elif len(frames.shape) == 5:
-                    first_frames = frames[:, 0]
-                    # Add conditioning using the standalone function
+                if batch.first_frame_latents is not None:
+                    conditioned_latent, noise_mask = add_first_frame_conditioning_v22(
+                        latent_model_input=latent_model_input.to(
+                            self.device_torch, self.torch_dtype
+                        ),
+                        first_frame_latents=batch.first_frame_latents,
+                        vae=self.vae,
+                    )
+                    self._i2v_loss_mask = noise_mask
+                else:
+                    frames = batch.tensor
+                    if frames is None:
+                        raise ValueError("WAN 2.2 I2V requires cached first-frame latents or source frames")
+                    if len(frames.shape) == 4:
+                        first_frames = frames
+                    elif len(frames.shape) == 5:
+                        first_frames = frames[:, 0]
+                    else:
+                        raise ValueError(f"Unknown frame shape {frames.shape}")
                     conditioned_latent, noise_mask = add_first_frame_conditioning_v22(
                         latent_model_input=latent_model_input.to(
                             self.device_torch, self.torch_dtype
@@ -265,8 +283,6 @@ class Wan225bModel(Wan21):
                         vae=self.vae,
                     )
                     self._i2v_loss_mask = noise_mask
-                else:
-                    raise ValueError(f"Unknown frame shape {frames.shape}")
 
                 # make the noise mask
                 if noise_mask is None:

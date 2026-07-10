@@ -848,6 +848,10 @@ def _is_orbit4_qtype(value: Any) -> bool:
     return str(value or '').split('|', 1)[0].lower() == 'orbit4'
 
 
+def _is_convrot_qtype(value: Any) -> bool:
+    return str(value or '').split('|', 1)[0].lower() in {'convrot4', 'convrot8'}
+
+
 def apply_orbit4_low_vram_training_defaults(
     model_config: Dict[str, Any],
     train_config: Dict[str, Any],
@@ -1751,36 +1755,42 @@ def validate_configs(
         (model_config.quantize and _is_orbit_qtype(model_config.qtype))
         or (model_config.quantize_te and _is_orbit_qtype(model_config.qtype_te))
     )
-    if orbit_enabled and network_config is None and (
+    convrot_enabled = (
+        (model_config.quantize and _is_convrot_qtype(model_config.qtype))
+        or (model_config.quantize_te and _is_convrot_qtype(model_config.qtype_te))
+    )
+    packed_backend_enabled = orbit_enabled or convrot_enabled
+    if packed_backend_enabled and network_config is None and (
         train_config.train_unet or train_config.train_text_encoder
     ):
         raise ValueError(
-            "Orbit quantization supports frozen-base adapter training only; full base-model "
-            "fine-tuning is not supported. Configure a LoRA, LoKr, or DoRA network or disable Orbit."
+            "Packed custom quantization supports frozen-base adapter training only; full base-model "
+            "fine-tuning is not supported. Configure a supported adapter network or disable quantization."
         )
-    if orbit_enabled and network_config is not None:
-        orbit_network_type = str(network_config.type or '').lower()
-        if orbit_network_type not in {'lora', 'lokr', 'dora'}:
+    if packed_backend_enabled and network_config is not None:
+        packed_network_type = str(network_config.type or '').lower()
+        supported_network_types = {'lora', 'lokr'} if convrot_enabled else {'lora', 'lokr', 'dora'}
+        if packed_network_type not in supported_network_types:
+            supported_label = "lora or lokr" if convrot_enabled else "lora, lokr, or dora"
             raise ValueError(
-                "Orbit quantization currently supports network.type lora, lokr, or dora "
-                f"only; got {network_config.type!r}. Use a supported adapter type or "
-                "disable Orbit."
+                f"The selected packed quantization backend supports network.type {supported_label} "
+                f"only; got {network_config.type!r}. Use a supported adapter type or disable quantization."
             )
         if network_config.all_layers:
             raise ValueError(
-                "Orbit quantization does not support network.all_layers because it creates "
+                "Packed custom quantization does not support network.all_layers because it creates "
                 "full-weight trainable modules. Set network.all_layers to false and target "
                 "LoRA-compatible layers explicitly."
             )
-        if orbit_network_type == 'lokr':
+        if packed_network_type == 'lokr':
             if network_config.lokr_full_rank:
                 raise ValueError(
-                    "Orbit quantization does not support full-rank LoKr adapters. Set "
+                    "Packed custom quantization does not support full-rank LoKr adapters. Set "
                     "network.lokr_full_rank to false and choose a finite network.linear rank."
                 )
             if network_config.lokr_weight_decompose:
                 raise ValueError(
-                    "Orbit quantization does not yet support LoKr weight decomposition. Set "
+                    "Packed custom quantization does not yet support LoKr weight decomposition. Set "
                     "network.lokr_weight_decompose to false (including weight_decompose/dora_wd aliases)."
                 )
 

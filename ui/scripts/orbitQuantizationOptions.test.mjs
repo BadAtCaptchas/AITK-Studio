@@ -15,12 +15,14 @@ function exportedArrayBlock(source, exportName, nextExportName) {
   return source.slice(start, end);
 }
 
-test('Orbit4 is the only Orbit backend exposed by the new-job quantization selector', () => {
+test('stable Orbit and experimental ConvRot backends are exposed by the new-job selector', () => {
   const options = readSource('src/app/jobs/new/options.ts');
   const quantizationOptions = exportedArrayBlock(options, 'quantizationOptions', 'defaultQtype');
 
   assert.match(quantizationOptions, /\{ value: 'orbit4', label: 'AITK Orbit 4-bit' \}/);
   assert.doesNotMatch(quantizationOptions, /orbit(?:2|3|vq|_vq)/i);
+  assert.match(quantizationOptions, /\{ value: 'convrot4', label: 'ConvRot 4-bit \(experimental, Blackwell\)' \}/);
+  assert.match(quantizationOptions, /\{ value: 'convrot8', label: 'ConvRot 8-bit \(experimental, Ampere\+\)' \}/);
   assert.match(quantizationOptions, /\{ value: 'qfloat8', label: 'float8 \(default\)' \}/);
 });
 

@@ -1519,6 +1519,8 @@ export const quantizationOptions: SelectOption[] = [
   { value: '', label: '- NONE -' },
   { value: 'qfloat8', label: 'float8 (default)' },
   { value: 'orbit4', label: 'AITK Orbit 4-bit' },
+  { value: 'convrot4', label: 'ConvRot 4-bit (experimental, Blackwell)' },
+  { value: 'convrot8', label: 'ConvRot 8-bit (experimental, Ampere+)' },
   { value: 'uint7', label: '7 bit' },
   { value: 'uint6', label: '6 bit' },
   { value: 'uint5', label: '5 bit' },

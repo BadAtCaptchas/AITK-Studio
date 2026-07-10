@@ -238,6 +238,50 @@ class OrbitModelConfigTest(unittest.TestCase):
                     NetworkConfig(type=network_type),
                 )
 
+    def test_convrot_accepts_lora_and_constrained_lokr(self):
+        for qtype in ("convrot4", "convrot8"):
+            for network_type in ("lora", "lokr"):
+                with self.subTest(qtype=qtype, network_type=network_type):
+                    validate_configs(
+                        TrainConfig(train_unet=True, train_text_encoder=False),
+                        ModelConfig(name_or_path="base-model", quantize=True, qtype=qtype),
+                        SaveConfig(),
+                        [],
+                        NetworkConfig(type=network_type),
+                    )
+
+    def test_convrot_rejects_full_training_dora_and_full_weight_lokr(self):
+        with self.assertRaisesRegex(ValueError, "frozen-base adapter training only"):
+            validate_configs(
+                TrainConfig(train_unet=True),
+                ModelConfig(name_or_path="base-model", quantize=True, qtype="convrot4"),
+                SaveConfig(),
+                [],
+                None,
+            )
+        with self.assertRaisesRegex(ValueError, "lora or lokr only"):
+            validate_configs(
+                TrainConfig(),
+                ModelConfig(name_or_path="base-model", quantize=True, qtype="convrot8"),
+                SaveConfig(),
+                [],
+                NetworkConfig(type="dora"),
+            )
+        for network_config, message in (
+            (NetworkConfig(type="lora", all_layers=True), "network\\.all_layers"),
+            (NetworkConfig(type="lokr", lokr_full_rank=True), "full-rank LoKr"),
+            (NetworkConfig(type="lokr", lokr_weight_decompose=True), "LoKr weight decomposition"),
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_configs(
+                        TrainConfig(),
+                        ModelConfig(name_or_path="base-model", quantize=True, qtype="convrot4"),
+                        SaveConfig(),
+                        [],
+                        network_config,
+                    )
+
     def test_orbit_rejects_unsupported_adapter_types(self):
         for network_type in ("locon", "lorm", "fullrank", "ara"):
             with self.subTest(network_type=network_type):

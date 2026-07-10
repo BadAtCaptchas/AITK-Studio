@@ -108,6 +108,7 @@ def _register_builtin_backends() -> None:
         # is still being initialized.
         from toolkit.util.orbit_quant import ORBIT_QTYPES, OrbitQuantizer
         from toolkit.util.orbit_vq_quant import ORBIT_VQ_QTYPES, OrbitVQQuantizer
+        from toolkit.util.convrot_quant import CONVROT_QTYPES, get_convrot_quantizer
 
         common_capabilities = (
             "frozen_weight",
@@ -120,7 +121,7 @@ def _register_builtin_backends() -> None:
             register_ostris_backend(
                 OstrisBackendMetadata(
                     name=name,
-                    format_version=1,
+                    format_version=2,
                     bits=bits,
                     status="stable" if name == "orbit4" else "experimental",
                     capabilities=common_capabilities
@@ -160,6 +161,35 @@ def _register_builtin_backends() -> None:
                     ),
                 ),
                 lambda options, config=config: OrbitVQQuantizer(**config),
+            )
+
+        for name in CONVROT_QTYPES:
+            bits = 4 if name == "convrot4" else 8
+            register_ostris_backend(
+                OstrisBackendMetadata(
+                    name=name,
+                    format_version=1,
+                    bits=bits,
+                    status="experimental",
+                    capabilities=common_capabilities
+                    + ("torch_fallback", "triton_optional"),
+                    supported_devices=("cpu", "cuda"),
+                    shape_notes=(
+                        "nn.Linear only; convrot4 requires in/out divisible by 16; "
+                        "convrot8 requires in divisible by 16 and out divisible by 8; "
+                        "both require a power-of-four rotation block of at least 16"
+                    ),
+                    device_notes=(
+                        "convrot4 accelerates with FP4 on Blackwell; convrot8 uses "
+                        "runtime-probed INT8 matmul; unsupported devices use bounded "
+                        "dequantized fallbacks"
+                    ),
+                ),
+                lambda options, name=name: get_convrot_quantizer(
+                    name,
+                    kernel=options.kernel,
+                    max_workspace_mb=options.max_workspace_mb,
+                ),
             )
 
         _builtin_backends_registered = True

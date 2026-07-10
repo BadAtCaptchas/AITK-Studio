@@ -371,7 +371,9 @@ class OrbitQuantizer(OstrisQuantizer):
         )
         module.register_buffer("orbit_packed", packed, persistent=False)
         module.register_buffer("orbit_row_norms", row_norms, persistent=False)
-        module.register_buffer("orbit_codebook", codebook, persistent=False)
+        # Floating buffers are dtype-cast by nn.Module.to(dtype=...). Keep the
+        # canonical fp32 codebook as bytes so model dtype moves cannot corrupt it.
+        module.register_buffer("orbit_codebook", codebook.view(torch.uint8), persistent=False)
         module.register_buffer("orbit_perm", permutation, persistent=False)
         module.register_buffer("orbit_inv_perm", inverse_permutation, persistent=False)
         module.register_buffer("orbit_signs", signs, persistent=False)
@@ -382,6 +384,10 @@ class OrbitQuantizer(OstrisQuantizer):
         module.orbit_packed_layout = (
             "nibbles_v1" if self.bits == 4 else "bitstream_msb_v1"
         )
+
+    @staticmethod
+    def _codebook(module) -> torch.Tensor:
+        return module.orbit_codebook.view(torch.float32)
 
     def _decode_rotated_rows(
         self,
@@ -401,7 +407,7 @@ class OrbitQuantizer(OstrisQuantizer):
             (end - start) * dimension,
         )
         weight = torch.index_select(
-            module.orbit_codebook.to(dtype),
+            self._codebook(module).to(dtype),
             0,
             codes.to(torch.int32),
         )
@@ -483,7 +489,7 @@ class OrbitQuantizer(OstrisQuantizer):
             module.orbit_perm,
             module.orbit_signs,
             module.orbit_block,
-            module.orbit_codebook,
+            self._codebook(module),
             module.ostris_orig_dtype,
         )
         module.orbit_packed = packed
@@ -524,7 +530,7 @@ class OrbitQuantizer(OstrisQuantizer):
             rotated,
             module.orbit_packed,
             module.orbit_row_norms,
-            module.orbit_codebook,
+            self._codebook(module),
             module.bias,
             module.out_features,
             module.in_features,
@@ -576,7 +582,7 @@ class OrbitQuantizer(OstrisQuantizer):
             grad_output,
             module.orbit_packed,
             module.orbit_row_norms,
-            module.orbit_codebook,
+            self._codebook(module),
             module.out_features,
             module.in_features,
         )

@@ -261,6 +261,8 @@ class OstrisLinearTest(unittest.TestCase):
         output = layer(torch.randn(2, 64, dtype=torch.float64))
 
         self.assertEqual(output.dtype, torch.float64)
+        self.assertEqual(layer.orbit_codebook.dtype, torch.uint8)
+        self.assertEqual(layer.ostris_quantizer._codebook(layer).dtype, torch.float32)
         self.assertEqual(count_parameters(layer), 64 * 16 + 16)
 
     def test_requantize_preserves_custom_module(self):

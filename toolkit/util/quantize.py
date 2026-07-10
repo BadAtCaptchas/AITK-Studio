@@ -415,7 +415,7 @@ def _ostris_storage_bytes(module: OstrisLinear) -> tuple[int, int]:
     for name, buffer in module._buffers.items():
         if not isinstance(buffer, torch.Tensor):
             continue
-        if name in ("orbit_packed", "ovq_packed"):
+        if name in ("orbit_packed", "ovq_packed", "cr_qdata", "cr8_qdata"):
             compressed += _tensor_bytes(buffer)
         else:
             metadata += _tensor_bytes(buffer)

@@ -19,7 +19,12 @@ import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import useSettings from '@/hooks/useSettings';
 import { isImage, pathJoin } from '@/utils/basic';
-import { getDisplayPath, getMediaUrl } from '@/utils/media';
+import { getDisplayPath } from '@/utils/media';
+import {
+  getDatasetImageMediaUrl,
+  normalizeDatasetImageListItem,
+  type DatasetImageListItem,
+} from '@/utils/datasetMedia';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadge';
@@ -55,27 +60,6 @@ type DatasetEditorPageProps = {
   returnHref?: string | null;
   projectName?: string | null;
 };
-
-type DatasetImageListItem = {
-  img_path: string;
-  added_at?: string | null;
-  captioned_at?: string | null;
-  size_bytes?: number | null;
-};
-
-function normalizeDatasetImageListItem(item: unknown, root: string | null): DatasetImageListItem | null {
-  if (!item || typeof item !== 'object') return null;
-  const record = item as Record<string, unknown>;
-  const imagePath = record.img_path;
-  if (typeof imagePath !== 'string') return null;
-
-  return {
-    img_path: root ? root + imagePath : imagePath,
-    added_at: typeof record.added_at === 'string' ? record.added_at : null,
-    captioned_at: typeof record.captioned_at === 'string' ? record.captioned_at : null,
-    size_bytes: typeof record.size_bytes === 'number' ? record.size_bytes : null,
-  };
-}
 
 export default function DatasetEditorPage({
   datasetName,
@@ -120,7 +104,7 @@ export default function DatasetEditorPage({
   const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
   const isRefreshingRef = useRef(false);
 
-  const refreshImageList = (dbName: string, options: { background?: boolean } = {}) => {
+  const refreshImageList = useCallback((dbName: string, options: { background?: boolean } = {}) => {
     if (isRefreshingRef.current) return;
     isRefreshingRef.current = true;
     if (!options.background) setStatus('loading');
@@ -162,7 +146,7 @@ export default function DatasetEditorPage({
       .finally(() => {
         isRefreshingRef.current = false;
       });
-  };
+  }, [projectPayload, workerID]);
 
   const datasetWatcherLive = useDatasetWatcherLiveRefresh({
     enabled: status === 'success' && canUseWatchFolders,
@@ -248,8 +232,8 @@ export default function DatasetEditorPage({
   };
 
   const datasetHeaderPreviewUrl = useMemo(() => {
-    const firstImagePath = imgList.map(image => image.img_path).find(path => isPreviewableImagePath(path));
-    return firstImagePath ? getMediaUrl(firstImagePath) : null;
+    const firstImage = imgList.find(image => isPreviewableImagePath(image.img_path));
+    return firstImage ? getDatasetImageMediaUrl(firstImage) : null;
   }, [imgList]);
 
   const plainStudioItems = useMemo<DatasetStudioItem[]>(
@@ -257,6 +241,7 @@ export default function DatasetEditorPage({
       imgList.map(img => ({
         kind: 'plain' as const,
         path: img.img_path,
+        mediaUrl: img.media_url ?? null,
         addedAt: img.added_at ?? null,
         captionedAt: img.captioned_at ?? null,
         sizeBytes: typeof img.size_bytes === 'number' ? img.size_bytes : null,
@@ -284,13 +269,22 @@ export default function DatasetEditorPage({
       rootCaption: encryptedCatalog ? encryptedCatalog.rootCaption ?? null : undefined,
       preset: 'ideogram_json',
     });
-  }, [datasetName, datasetPath, encryptedCatalog, encryptedRawKeyB64, isRemoteDataset, projectID]);
+  }, [datasetName, datasetPath, encryptedCatalog, encryptedRawKeyB64, isRemoteDataset, projectID, refreshImageList]);
 
   useEffect(() => {
     if (datasetName) {
       refreshImageList(datasetName);
     }
-  }, [datasetName, projectPayload, workerID]);
+  }, [datasetName, refreshImageList]);
+
+  useEffect(() => {
+    if (!projectID || !datasetName) return;
+    const refreshTimer = window.setInterval(
+      () => refreshImageList(datasetName, { background: true }),
+      10 * 60 * 1000,
+    );
+    return () => window.clearInterval(refreshTimer);
+  }, [datasetName, projectID, refreshImageList]);
 
   useEffect(() => {
     if (!datasetName || isRemoteDataset) {

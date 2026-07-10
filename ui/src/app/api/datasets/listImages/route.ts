@@ -9,15 +9,23 @@ import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAcce
 import { findDatasetItemsRecursivelyAsync } from '@/server/datasetImages';
 import { findExistingCaptionSidecarAsync, isTextCaptionFilePath } from '@/server/captionFiles';
 import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { createProjectAssetUrl } from '@/server/projectAssetUrls';
+import { getProjectRoots, isPathInside } from '@/server/projects';
 
 const brotliCompress = promisify(zlib.brotliCompress);
 const gzipCompress = promisify(zlib.gzip);
 
 type DatasetImageListEntry = {
   img_path: string;
+  media_url?: string;
   added_at: string | null;
   captioned_at: string | null;
   size_bytes: number;
+};
+
+type ProjectAssetContext = {
+  projectID: string;
+  projectRoot: string;
 };
 
 function dateToIso(date: Date | undefined) {
@@ -41,10 +49,26 @@ async function captionedAtForItem(itemPath: string) {
   }
 }
 
-async function imageEntry(imgPath: string, root: string | null): Promise<DatasetImageListEntry> {
+async function imageEntry(
+  imgPath: string,
+  root: string | null,
+  projectAsset: ProjectAssetContext | null,
+): Promise<DatasetImageListEntry> {
   const stat = await fs.promises.stat(imgPath);
+  let mediaUrl: string | undefined;
+  if (projectAsset) {
+    if (!isPathInside(projectAsset.projectRoot, imgPath) || path.resolve(projectAsset.projectRoot) === path.resolve(imgPath)) {
+      throw new DatasetScopeError('Project dataset item escapes the project root', 403);
+    }
+    mediaUrl = createProjectAssetUrl(
+      projectAsset.projectID,
+      path.relative(projectAsset.projectRoot, imgPath),
+      'inline',
+    );
+  }
   return {
     img_path: root && imgPath.startsWith(root) ? imgPath.slice(root.length) : imgPath,
+    ...(mediaUrl ? { media_url: mediaUrl } : {}),
     added_at: addedAtForStat(stat),
     captioned_at: await captionedAtForItem(imgPath),
     size_bytes: stat.size,
@@ -115,10 +139,15 @@ export async function POST(request: Request) {
 
   let datasetFolder: string;
   let datasetsPath: string;
+  let projectAsset: ProjectAssetContext | null = null;
   try {
     const scope = await resolveDatasetScope(projectID, { intent: 'read' });
     datasetsPath = scope.datasetsRoot;
     datasetFolder = resolveDatasetFolder(datasetsPath, datasetName);
+    if (scope.project) {
+      const roots = await getProjectRoots(scope.project);
+      projectAsset = { projectID: scope.project.id, projectRoot: roots.root };
+    }
   } catch (error: any) {
     if (error instanceof DatasetScopeError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -144,7 +173,9 @@ export async function POST(request: Request) {
     const imageFiles = await findDatasetItemsRecursivelyAsync(datasetFolder);
     imageFiles.sort((a, b) => a.localeCompare(b));
     const root = datasetFolder + path.sep;
-    const images = await Promise.all(imageFiles.map(imgPath => imageEntry(imgPath, compact ? root : null)));
+    const images = await Promise.all(
+      imageFiles.map(imgPath => imageEntry(imgPath, compact ? root : null, projectAsset)),
+    );
 
     return jsonResponse(request, compact ? { root, images } : { images });
   } catch (error) {

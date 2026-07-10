@@ -4,6 +4,7 @@ export type DatasetStudioItem =
   | {
       kind: 'plain';
       path: string;
+      mediaUrl?: string | null;
       addedAt?: string | null;
       captionedAt?: string | null;
       sizeBytes?: number | null;

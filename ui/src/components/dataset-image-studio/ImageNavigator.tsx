@@ -193,7 +193,7 @@ function ThumbnailTile({
           style={!compact && tileSize ? { height: `${tileSize.imageHeight}px` } : undefined}
         >
           {item.kind === 'plain' ? (
-            <PlainThumb path={item.path} alt={name} />
+            <PlainThumb path={item.path} mediaUrl={item.mediaUrl} alt={name} />
           ) : (
             <EncryptedThumb
               datasetName={datasetName}

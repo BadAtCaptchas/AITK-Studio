@@ -30,6 +30,8 @@
         "src/utils/captionKeywordSearch.ts",
         "src/utils/captionQuality.ts",
         "src/utils/datasetImageNavigator.ts",
+        "src/utils/datasetMedia.ts",
+        "src/utils/media.ts",
         "src/utils/ideogramCaption.ts",
         "src/utils/ideogramWorkflow.ts",
         "src/utils/folderImport.ts",

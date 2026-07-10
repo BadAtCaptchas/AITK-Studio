@@ -65,7 +65,7 @@ export function ThumbnailStrip({
             >
               <div className="relative h-10 overflow-hidden bg-gray-900 sm:h-12 xl:h-[70px]">
                 {item.kind === 'plain' ? (
-                  <PlainThumb path={item.path} alt={itemName(item)} />
+                  <PlainThumb path={item.path} mediaUrl={item.mediaUrl} alt={itemName(item)} />
                 ) : (
                   <EncryptedThumb
                     datasetName={datasetName}

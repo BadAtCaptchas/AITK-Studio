@@ -112,7 +112,7 @@ function useElementSize<T extends HTMLElement>() {
   return { ref, size };
 }
 
-export function PlainThumb({ path, alt }: { path: string; alt: string }) {
+export function PlainThumb({ path, mediaUrl, alt }: { path: string; mediaUrl?: string | null; alt: string }) {
   if (isTextCaption(path)) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gray-900 text-[10px] text-gray-400">
@@ -125,9 +125,9 @@ export function PlainThumb({ path, alt }: { path: string; alt: string }) {
     return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>;
   }
   if (isVideo(path)) {
-    return <video src={getMediaUrl(path)} className="h-full w-full object-cover" muted preload="metadata" />;
+    return <video src={getMediaUrl(mediaUrl || path)} className="h-full w-full object-cover" muted preload="metadata" />;
   }
-  return <img src={getMediaUrl(path)} alt={alt} loading="lazy" className="h-full w-full object-cover" />;
+  return <img src={getMediaUrl(mediaUrl || path)} alt={alt} loading="lazy" className="h-full w-full object-cover" />;
 }
 
 export function EncryptedThumb({
@@ -192,7 +192,7 @@ export function StudioMedia({
   const encryptedItem = item.kind === 'encrypted' ? item.item : null;
   const { url, status } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, encryptedItem);
   const kind = itemKind(item);
-  const src = item.kind === 'plain' ? getMediaUrl(item.path) : url;
+  const src = item.kind === 'plain' ? getMediaUrl(item.mediaUrl || item.path) : url;
   const name = itemName(item);
   const { ref: frameRef, size: frameSize } = useElementSize<HTMLDivElement>();
   const imageRef = useRef<HTMLImageElement | null>(null);

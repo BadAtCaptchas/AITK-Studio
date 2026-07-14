@@ -21,9 +21,26 @@ test('stable Orbit and experimental ConvRot backends are exposed by the new-job 
 
   assert.match(quantizationOptions, /\{ value: 'orbit4', label: 'AITK Orbit 4-bit' \}/);
   assert.doesNotMatch(quantizationOptions, /orbit(?:2|3|vq|_vq)/i);
-  assert.match(quantizationOptions, /\{ value: 'convrot4', label: 'ConvRot 4-bit \(experimental, Blackwell\)' \}/);
-  assert.match(quantizationOptions, /\{ value: 'convrot8', label: 'ConvRot 8-bit \(experimental, Ampere\+\)' \}/);
+  assert.match(quantizationOptions, /\{ value: 'convrot4', label: 'ConvRot NVFP4 W4A4 \(experimental, Blackwell\)' \}/);
+  assert.match(quantizationOptions, /\{ value: 'convrot8', label: 'ConvRot W8A8 \(experimental, Ampere\+\)' \}/);
+  for (const bits of [2, 3, 4, 5, 6, 7]) {
+    assert.match(quantizationOptions, new RegExp(`value: 'convrotint${bits}'`));
+  }
+  assert.match(quantizationOptions, /value: 'convrotbitnet'/);
+  assert.doesNotMatch(quantizationOptions, /convrotcomfyw4a4/);
   assert.match(quantizationOptions, /\{ value: 'qfloat8', label: 'float8 \(default\)' \}/);
+});
+
+test('captioner exposes general ConvRot choices but not the specialized Comfy export backend', () => {
+  const options = readSource('src/helpers/captionOptions.ts');
+  const quantizationOptions = exportedArrayBlock(options, 'quantizationOptions', 'maxResOptions');
+
+  assert.match(quantizationOptions, /value: 'convrot4'/);
+  assert.match(quantizationOptions, /value: 'convrot8'/);
+  assert.match(quantizationOptions, /value: 'convrotint2'/);
+  assert.match(quantizationOptions, /value: 'convrotbitnet'/);
+  assert.doesNotMatch(quantizationOptions, /convrotcomfyw4a4/);
+  assert.match(quantizationOptions, /value: 'float8', label: 'float8 \(default\)'/);
 });
 
 test('Orbit quantization kwargs and low-VRAM defaults are typed and additive', () => {

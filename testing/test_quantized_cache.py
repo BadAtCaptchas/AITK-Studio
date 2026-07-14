@@ -52,6 +52,12 @@ class ConvRotTinyModel(torch.nn.Module):
         self.unsupported = torch.nn.Linear(40, 8)
 
 
+class ConvRotComfyTinyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(256, 16)
+
+
 class StagedOrbitModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -87,6 +93,8 @@ class QuantizedCacheTest(unittest.TestCase):
         self.assertTrue(is_quantized_cache_qtype("orbit4"))
         self.assertTrue(is_quantized_cache_qtype("convrot4"))
         self.assertTrue(is_quantized_cache_qtype("convrot8"))
+        self.assertTrue(is_quantized_cache_qtype("convrotint2"))
+        self.assertTrue(is_quantized_cache_qtype("convrotbitnet"))
         self.assertFalse(is_quantized_cache_qtype("uint4"))
 
     def test_orbit_registry_marks_only_q4_stable_and_passes_options(self):
@@ -99,7 +107,20 @@ class QuantizedCacheTest(unittest.TestCase):
         resolved = get_qtype("orbit4", kernel="torch", max_workspace_mb=7)
         self.assertEqual(resolved.quantizer.kernel, "torch")
         self.assertEqual(resolved.quantizer.max_workspace_mb, 7)
-        for qtype, bits in (("convrot4", 4), ("convrot8", 8)):
+        convrot_bits = {
+            "convrot4": 4,
+            "convrot8": 8,
+            "convrotint8": 8,
+            "convrotint7": 7,
+            "convrotint6": 6,
+            "convrotint5": 5,
+            "convrotint4": 4,
+            "convrotint3": 3,
+            "convrotint2": 2,
+            "convrotbitnet": 2,
+            "convrotcomfyw4a4": 4,
+        }
+        for qtype, bits in convrot_bits.items():
             with self.subTest(qtype=qtype):
                 self.assertEqual(registry[qtype].status, "experimental")
                 self.assertEqual(registry[qtype].bits, bits)
@@ -237,12 +258,24 @@ class QuantizedCacheTest(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_convrot_cache_round_trip_from_meta_without_dense_weight(self):
-        for qtype, packed_name in (("convrot4", "cr_qdata"), ("convrot8", "cr8_qdata")):
+        cases = [
+            ("convrot4", "cr_qdata"),
+            ("convrot8", "cr8_qdata"),
+            *((f"convrotint{bits}", "crn_qdata") for bits in range(2, 9)),
+            ("convrotbitnet", "crn_qdata"),
+            ("convrotcomfyw4a4", "crn_qdata"),
+        ]
+        for qtype, packed_name in cases:
             with self.subTest(qtype=qtype):
                 temp_dir = _make_test_dir(f"test_{qtype}_cache_round_trip")
                 try:
                     torch.manual_seed(31)
-                    model = ConvRotTinyModel()
+                    model_type = (
+                        ConvRotComfyTinyModel
+                        if qtype == "convrotcomfyw4a4"
+                        else ConvRotTinyModel
+                    )
+                    model = model_type()
                     report = quantize(
                         model,
                         weights=qtype,
@@ -250,7 +283,7 @@ class QuantizedCacheTest(unittest.TestCase):
                         max_workspace_mb=1,
                         component_label="tiny",
                     )
-                    activation = torch.randn(2, 64)
+                    activation = torch.randn(2, model.linear.in_features)
                     expected = model.linear(activation)
                     self.assertEqual(report.quantized_modules, 1)
                     self.assertGreater(report.compressed_bytes, 0)
@@ -271,7 +304,7 @@ class QuantizedCacheTest(unittest.TestCase):
                     self.assertNotIn("linear.weight", packed_state)
 
                     with torch.device("meta"):
-                        restored = ConvRotTinyModel()
+                        restored = model_type()
                     cache.load(restored, f"{qtype}_tiny", cache_key, device=torch.device("cpu"))
                     self.assertIsInstance(restored.linear, OstrisLinear)
                     self.assertTrue(

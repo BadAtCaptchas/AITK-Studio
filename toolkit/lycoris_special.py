@@ -84,7 +84,13 @@ class LoConSpecialModule(ToolkitModuleMixin, LoConModule, ExtractableModuleMixin
             self.lora_up = nn.Linear(lora_dim, out_dim, bias=use_bias)
         else:
             raise NotImplementedError
-        self.shape = org_module.weight.shape
+        # Packed linears expose a compatibility weight property that dequantizes.
+        # Shape discovery must stay metadata-only so adapter setup never creates
+        # a logical-size dense base weight.
+        if getattr(org_module, "is_ostris_quantized", False):
+            self.shape = torch.Size((org_module.out_features, org_module.in_features))
+        else:
+            self.shape = org_module.weight.shape
 
         if dropout:
             self.dropout = nn.Dropout(dropout)

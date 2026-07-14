@@ -159,6 +159,13 @@ def _module_backend_name(module: OstrisLinear) -> str:
         return "convrot4"
     if hasattr(module, "cr8_qdata"):
         return "convrot8"
+    if hasattr(module, "crn_qdata"):
+        layout = getattr(module, "convrot_packed_layout", "")
+        if layout == "ternary_base3_v1":
+            return "convrotbitnet"
+        if layout == "comfy_w4a4_int4_v1":
+            return "convrotcomfyw4a4"
+        return f"convrotint{int(getattr(module, 'crn_bits', 0))}"
     bits = int(getattr(quantizer, "bits", 0))
     inferred = f"orbitvq{bits}" if hasattr(module, "ovq_packed") else f"orbit{bits}"
     if not is_ostris_qtype(inferred):
@@ -171,6 +178,12 @@ def _expected_packed_layout(qtype_name: str) -> str:
         return "nvfp4_e2m1_e4m3_v1"
     if qtype_name == "convrot8":
         return "int8_per_row_v1"
+    if qtype_name == "convrotbitnet":
+        return "ternary_base3_v1"
+    if qtype_name == "convrotcomfyw4a4":
+        return "comfy_w4a4_int4_v1"
+    if qtype_name.startswith("convrotint"):
+        return f"int{int(qtype_name.removeprefix('convrotint'))}_bitpacked_v1"
     if qtype_name.startswith("orbitvq"):
         return "vq_bitstream_msb_v1"
     if qtype_name == "orbit4":
@@ -185,6 +198,13 @@ def _expected_buffer_names(qtype_name: str) -> set[str]:
         return {"cr_qdata", "cr_scales", "cr_scales_blocked", "cr_pts"}
     if qtype_name == "convrot8":
         return {"cr8_qdata", "cr8_scales"}
+    if qtype_name in {"convrotbitnet"} or (
+        qtype_name.startswith("convrotint")
+        and int(qtype_name.removeprefix("convrotint")) <= 7
+    ):
+        return {"crn_qdata", "crn_scales", "crn_gratio"}
+    if qtype_name == "convrotcomfyw4a4" or qtype_name == "convrotint8":
+        return {"crn_qdata", "crn_scales"}
     if qtype_name.startswith("orbitvq"):
         return {
             "ovq_packed",
@@ -227,8 +247,16 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
         options_payload = options.to_dict()
     else:
         options_payload = {
-            "kernel": getattr(module, "orbit_kernel", "auto"),
-            "max_workspace_mb": int(getattr(module, "orbit_max_workspace_mb", 64)),
+            "kernel": getattr(
+                module, "convrot_kernel", getattr(module, "orbit_kernel", "auto")
+            ),
+            "max_workspace_mb": int(
+                getattr(
+                    module,
+                    "convrot_max_workspace_mb",
+                    getattr(module, "orbit_max_workspace_mb", 64),
+                )
+            ),
         }
     attributes: Dict[str, Any] = {}
     for attribute in (
@@ -241,6 +269,8 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
         "ovq_group",
         "cr_rot_size",
         "cr8_rot_size",
+        "crn_bits",
+        "crn_rot_size",
         "convrot_kernel",
         "convrot_max_workspace_mb",
         "convrot_packed_layout",
@@ -276,7 +306,12 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
                     "cr_rot_size",
                     attributes.get(
                         "cr8_rot_size",
-                        attributes.get("orbit_block", attributes.get("ovq_block", 0)),
+                        attributes.get(
+                            "crn_rot_size",
+                            attributes.get(
+                                "orbit_block", attributes.get("ovq_block", 0)
+                            ),
+                        ),
                     ),
                 )
             ),

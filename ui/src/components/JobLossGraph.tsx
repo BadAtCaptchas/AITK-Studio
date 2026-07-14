@@ -265,8 +265,9 @@ function paddedRange(dataMin: number, dataMax: number, chartTab: ChartTab, useLo
   if (useLogScale) {
     const safeMin = dataMin > 0 ? dataMin : 1e-12;
     const safeMax = dataMax > 0 ? dataMax : safeMin * 10;
-    if (safeMin === safeMax) return [safeMin / 1.5, safeMax * 1.5] as [number, number];
-    return [safeMin, safeMax] as [number, number];
+    const min = safeMin === safeMax ? safeMin / 1.5 : safeMin;
+    const max = safeMin === safeMax ? safeMax * 1.5 : safeMax;
+    return uPlot.rangeLog(min, max, 10, false) as [number, number];
   }
 
   const span = dataMax - dataMin;
@@ -451,6 +452,7 @@ function buildChartData({
 }) {
   const data: (number[] | (number | null)[])[] = [];
   const seriesConfigs: uPlot.Series[] = [{}];
+  const sparseFlags: boolean[] = [];
   const t = clamp(smoothing / 100, 0, 1);
   const alpha = 1 - t * 0.98;
   const trendAlpha = 0.015;
@@ -477,6 +479,8 @@ function buildChartData({
         values.set(point.step, point.value as number);
       }
       const raw = xs.map(step => values.get(step) ?? null);
+      const sparse = values.size < xs.length;
+      sparseFlags.push(sparse);
       const smooth = emaWithNulls(raw, alpha);
       const trend = emaWithNulls(raw, trendAlpha);
 
@@ -486,8 +490,8 @@ function buildChartData({
           label: `${cleanLabel(key)} raw`,
           stroke: colorWithAlpha(color, 0.24),
           width: 1,
-          spanGaps: false,
-          points: { show: false },
+          spanGaps: sparse,
+          points: sparse && !showSmoothed ? { size: 6 } : { show: false },
         });
       }
       if (showSmoothed) {
@@ -496,8 +500,8 @@ function buildChartData({
           label: cleanLabel(key),
           stroke: color,
           width: 2,
-          spanGaps: false,
-          points: { show: false },
+          spanGaps: sparse,
+          points: sparse ? { size: 6 } : { show: false },
         });
       }
       if (showTrend) {
@@ -506,7 +510,7 @@ function buildChartData({
           label: `${cleanLabel(key)} trend`,
           stroke: key === lossKeys[0] ? LOSS_TREND_COLOR : colorWithAlpha(color, 0.7),
           width: 2.75,
-          spanGaps: false,
+          spanGaps: sparse,
           points: { show: false },
         });
       }
@@ -625,6 +629,7 @@ function buildChartData({
     yClip,
     hasData: xs.length > 1 && data.length > 1,
     totalPoints: xs.length,
+    sparseFlags,
   };
 }
 
@@ -900,9 +905,20 @@ export default function JobLossGraph({ job }: Props) {
         `trend=${showTrend}`,
         `log=${useLogScale}`,
         `has=${built.hasData}`,
+        `sparse=${built.sparseFlags.map(value => (value ? 1 : 0)).join('')}`,
         `series=${built.seriesConfigs.map(config => config.label).join('|')}`,
       ].join(';'),
-    [activeLossKeys, built.hasData, built.seriesConfigs, chartTab, showRaw, showSmoothed, showTrend, useLogScale],
+    [
+      activeLossKeys,
+      built.hasData,
+      built.seriesConfigs,
+      built.sparseFlags,
+      chartTab,
+      showRaw,
+      showSmoothed,
+      showTrend,
+      useLogScale,
+    ],
   );
 
   useEffect(() => {

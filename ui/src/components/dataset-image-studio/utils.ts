@@ -137,7 +137,9 @@ export function resolveBoxColor(box: IdeogramBox, index: number, selected: boole
 
 export function layerLabelForElement(element: any, index: number) {
   const type = element?.type === 'text' ? 'text' : 'obj';
-  const value = type === 'text' ? element?.text || element?.desc : element?.desc;
+  const value = type === 'text'
+    ? element?.text || element?.label || element?.desc
+    : element?.label || element?.desc;
   const label = value == null ? '' : String(value).trim();
   return label || (type === 'text' ? `Text ${index + 1}` : `Object ${index + 1}`);
 }
@@ -195,4 +197,19 @@ export function reindexLayerIndexSetAfterInsert(indexes: Set<number>, insertedIn
     next.add(index >= insertedIndex ? index + 1 : index);
   });
   return next;
+}
+
+export function remapLayerIndexForMove(index: number, fromIndex: number, toIndex: number) {
+  if (index === fromIndex) return toIndex;
+  if (fromIndex < toIndex && index > fromIndex && index <= toIndex) return index - 1;
+  if (fromIndex > toIndex && index >= toIndex && index < fromIndex) return index + 1;
+  return index;
+}
+
+export function remapLayerIndexSetForMove(indexes: Set<number>, fromIndex: number, toIndex: number) {
+  return new Set(Array.from(indexes, index => remapLayerIndexForMove(index, fromIndex, toIndex)));
+}
+
+export function remapLayerIndexArrayForMove(indexes: number[], fromIndex: number, toIndex: number) {
+  return Array.from(new Set(indexes.map(index => remapLayerIndexForMove(index, fromIndex, toIndex))));
 }

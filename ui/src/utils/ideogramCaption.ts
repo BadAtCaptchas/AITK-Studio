@@ -159,6 +159,14 @@ function normalizeElement(value: unknown) {
         : 'bboxPx';
     next.bbox = boxToArray(arrayToBox(rawBoxTuple, undefined, source) || { y1: 0, x1: 0, y2: 0, x2: 0 });
   }
+  if (typeof next.label === 'string') {
+    if (next.type === 'text') {
+      if (typeof next.text !== 'string' || !next.text.trim()) next.text = next.label;
+    } else if (typeof next.desc !== 'string' || !next.desc.trim()) {
+      next.desc = next.label;
+    }
+    delete next.label;
+  }
   if (next.type === 'text' && !Object.prototype.hasOwnProperty.call(next, 'text')) {
     next.text = '';
   }
@@ -410,7 +418,9 @@ export function extractIdeogramBoxes(data: unknown, imageSize?: ImageSize): Ideo
       arrayToBox(rawElement.bboxPx, imageSize, 'bboxPx');
     if (!box) return;
     const type: IdeogramElementType = rawElement.type === 'text' ? 'text' : 'obj';
-    const labelSource = type === 'text' ? rawElement.text || rawElement.desc : rawElement.desc;
+    const labelSource = type === 'text'
+      ? rawElement.text || rawElement.label || rawElement.desc
+      : rawElement.label || rawElement.desc;
     const palette = normalizeIdeogramColorPalette(rawElement.color_palette);
     boxes.push({
       ...box,
@@ -452,6 +462,13 @@ export function addIdeogramElement(data: Record<string, any>, type: IdeogramElem
   return elements.length - 1;
 }
 
+export function addIdeogramLayer(data: Record<string, any>, type: IdeogramElementType) {
+  const elements = getIdeogramElements(data);
+  const element = type === 'text' ? { type: 'text', text: '', desc: '' } : { type: 'obj', desc: '' };
+  elements.push(element);
+  return elements.length - 1;
+}
+
 export function deleteIdeogramElement(data: Record<string, any>, elementIndex: number) {
   const elements = getIdeogramElements(data);
   if (!elements[elementIndex]) return;
@@ -467,6 +484,25 @@ export function duplicateIdeogramElement(data: Record<string, any>, sourceIndex:
   const duplicateIndex = sourceIndex + 1;
   elements.splice(duplicateIndex, 0, duplicate);
   return duplicateIndex;
+}
+
+export function moveIdeogramElement(data: Record<string, any>, fromIndex: number, toIndex: number) {
+  const elements = getIdeogramElements(data);
+  if (
+    !Number.isInteger(fromIndex) ||
+    !Number.isInteger(toIndex) ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= elements.length ||
+    toIndex >= elements.length ||
+    fromIndex === toIndex
+  ) {
+    return false;
+  }
+
+  const [element] = elements.splice(fromIndex, 1);
+  elements.splice(toIndex, 0, element);
+  return true;
 }
 
 export function updateIdeogramElementBox(data: Record<string, any>, elementIndex: number, box: NormalizedBox) {
@@ -523,6 +559,12 @@ export function updateIdeogramElementField(
   const element = getIdeogramElements(data)[elementIndex];
   if (!isRecord(element)) return;
   element[field] = value;
+  if (
+    Object.prototype.hasOwnProperty.call(element, 'label') &&
+    ((element.type === 'text' && field === 'text') || (element.type !== 'text' && field === 'desc'))
+  ) {
+    delete element.label;
+  }
 }
 
 export function updateIdeogramElementType(data: Record<string, any>, elementIndex: number, type: IdeogramElementType) {
@@ -534,7 +576,12 @@ export function updateIdeogramElementType(data: Record<string, any>, elementInde
       ? {
           type: 'text',
           ...(Array.isArray(current.bbox) ? { bbox: current.bbox } : {}),
-          text: typeof current.text === 'string' ? current.text : '',
+          text:
+            typeof current.text === 'string'
+              ? current.text
+              : typeof current.label === 'string'
+                ? current.label
+                : '',
           desc: typeof current.desc === 'string' ? current.desc : '',
           ...(Array.isArray(current.color_palette) ? { color_palette: current.color_palette } : {}),
         }
@@ -556,6 +603,50 @@ export function updateIdeogramElementPalette(data: Record<string, any>, elementI
   } else {
     element.color_palette = cleanColors;
   }
+}
+
+export function updateIdeogramImagePalette(data: Record<string, unknown>, colors: string[]) {
+  const cleanColors = normalizeIdeogramColorPalette(colors, 16);
+  const currentStyle = isRecord(data.style_description) ? data.style_description : {};
+
+  if (cleanColors.length === 0) {
+    if (!Object.prototype.hasOwnProperty.call(currentStyle, 'color_palette')) return;
+    const nextStyle = { ...currentStyle };
+    delete nextStyle.color_palette;
+    data.style_description = nextStyle;
+    return;
+  }
+
+  data.style_description = {
+    ...currentStyle,
+    color_palette: cleanColors,
+  };
+}
+
+export function mergeIdeogramPaletteColors(data: Record<string, unknown>, keepColor: string, removeColor: string) {
+  const keep = normalizeIdeogramColorPalette([keepColor], 1)[0];
+  const remove = normalizeIdeogramColorPalette([removeColor], 1)[0];
+  if (!keep || !remove || keep === remove) return;
+
+  const style = isRecord(data.style_description) ? data.style_description : null;
+  if (style) {
+    const imagePalette = normalizeIdeogramColorPalette(style.color_palette, 16).map(color =>
+      color === remove ? keep : color,
+    );
+    updateIdeogramImagePalette(data, imagePalette);
+  }
+
+  const composition = isRecord(data.compositional_deconstruction) ? data.compositional_deconstruction : null;
+  const elements = composition && Array.isArray(composition.elements) ? composition.elements : [];
+  elements.forEach(element => {
+    if (!isRecord(element)) return;
+    const palette = normalizeIdeogramColorPalette(element.color_palette).map(color =>
+      color === remove ? keep : color,
+    );
+    const cleanPalette = normalizeIdeogramColorPalette(palette);
+    if (cleanPalette.length > 0) element.color_palette = cleanPalette;
+    else delete element.color_palette;
+  });
 }
 
 export function updateIdeogramHighLevelDescription(data: Record<string, any>, value: string) {

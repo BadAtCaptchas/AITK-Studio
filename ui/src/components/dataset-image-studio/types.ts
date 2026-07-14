@@ -1,4 +1,5 @@
 import type { EncryptedDatasetItem } from '@/types';
+import type { ReactNode } from 'react';
 
 export type DatasetStudioItem =
   | {
@@ -71,6 +72,10 @@ export type DatasetImageStudioProps = {
   encryptedKey?: CryptoKey | null;
   encryptedRawKeyB64?: string | null;
   rootCaption?: string | null;
+  captionAction?: ReactNode;
+  watcherAction?: ReactNode;
+  presentation?: 'studio' | 'legacy';
+  onUnsavedChange?: (hasUnsavedChanges: boolean) => void;
   onRefresh?: () => void;
   onAddImages: () => void;
   onConvertDatasetToJson?: () => void;

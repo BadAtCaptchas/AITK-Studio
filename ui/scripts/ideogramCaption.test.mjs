@@ -5,12 +5,15 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const {
+  addIdeogramLayer,
   addIdeogramElement,
   appendGeneratedIdeogramElements,
   applyGeneratedBoxPatches,
   boxToArray,
   deleteIdeogramElement,
   duplicateIdeogramElement,
+  moveIdeogramElement,
+  mergeIdeogramPaletteColors,
   normalizeGeneratedElementBoxes,
   normalizeGeneratedBoxPatches,
   normalizeIdeogramColorPalette,
@@ -21,6 +24,7 @@ const {
   updateIdeogramElementField,
   updateIdeogramElementPalette,
   updateIdeogramElementType,
+  updateIdeogramImagePalette,
 } = require('../dist/src/utils/ideogramCaption.js');
 
 function sampleCaption() {
@@ -228,6 +232,8 @@ test('caption mutation helpers add, edit, delete, and serialize in schema order'
   updateIdeogramElementField(caption, textIndex, 'text', 'W 34 ST');
   updateIdeogramElementField(caption, textIndex, 'desc', 'Street sign text.');
   updateIdeogramElementPalette(caption, textIndex, ['#00ffcc', 'invalid']);
+  caption.compositional_deconstruction.elements[0].label = 'Legacy taxi name';
+  updateIdeogramElementField(caption, 0, 'desc', 'Updated taxi description.');
   updateIdeogramElementType(caption, 0, 'text');
   updateIdeogramElementBox(caption, 0, { y1: 10, x1: 20, y2: 300, x2: 400 });
   deleteIdeogramElement(caption, textIndex);
@@ -246,6 +252,8 @@ test('caption mutation helpers add, edit, delete, and serialize in schema order'
     'color_palette',
   ]);
   assert.deepEqual(parsed.compositional_deconstruction.elements[0].bbox, [10, 20, 300, 400]);
+  assert.equal(parsed.compositional_deconstruction.elements[0].desc, 'Updated taxi description.');
+  assert.equal('label' in parsed.compositional_deconstruction.elements[0], false);
 });
 
 test('serializeIdeogramCaption migrates old style branch and cleans palettes', () => {
@@ -264,14 +272,21 @@ test('serializeIdeogramCaption migrates old style branch and cleans palettes', (
         {
           type: 'obj',
           bbox: [10, 20, 300, 400],
+          label: 'Legacy robot name',
           color_palette: ['#0f0', '#00FF00', 'bad', '#112233'],
           desc: 'Green robot.',
         },
         {
           type: 'text',
           bbox: [500, 120, 650, 900],
+          label: 'TITLE',
           desc: 'White title text.',
           color_palette: ['#fff'],
+        },
+        {
+          type: 'obj',
+          bbox: [20, 40, 160, 220],
+          label: 'Legacy object name',
         },
       ],
     },
@@ -296,6 +311,7 @@ test('serializeIdeogramCaption migrates old style branch and cleans palettes', (
     'color_palette',
   ]);
   assert.deepEqual(parsed.compositional_deconstruction.elements[0].color_palette, ['#00FF00', '#112233']);
+  assert.equal('label' in parsed.compositional_deconstruction.elements[0], false);
   assert.deepEqual(Object.keys(parsed.compositional_deconstruction.elements[1]), [
     'type',
     'bbox',
@@ -303,9 +319,55 @@ test('serializeIdeogramCaption migrates old style branch and cleans palettes', (
     'desc',
     'color_palette',
   ]);
-  assert.equal(parsed.compositional_deconstruction.elements[1].text, '');
+  assert.equal(parsed.compositional_deconstruction.elements[1].text, 'TITLE');
+  assert.equal('label' in parsed.compositional_deconstruction.elements[1], false);
   assert.deepEqual(parsed.compositional_deconstruction.elements[1].color_palette, ['#FFFFFF']);
+  assert.equal(parsed.compositional_deconstruction.elements[2].desc, 'Legacy object name');
+  assert.equal('label' in parsed.compositional_deconstruction.elements[2], false);
   assert.deepEqual(normalizeIdeogramColorPalette(['#123', '#112233', '#badbad'], 2), ['#112233', '#BADBAD']);
+});
+
+test('image palette mutations preserve style fields and allow sixteen canonical colors', () => {
+  const caption = sampleCaption();
+  const colors = Array.from({ length: 18 }, (_, index) => `#${index.toString(16).padStart(6, '0')}`);
+
+  updateIdeogramImagePalette(caption, [...colors, '#000000', 'invalid']);
+  const updated = JSON.parse(serializeIdeogramCaption(caption));
+
+  assert.equal(updated.style_description.aesthetics, 'realistic');
+  assert.equal(updated.style_description.lighting, 'daylight');
+  assert.equal(updated.style_description.medium, 'photograph');
+  assert.equal(updated.style_description.photo, 'street photo');
+  assert.equal(updated.style_description.color_palette.length, 16);
+  assert.deepEqual(updated.style_description.color_palette.slice(0, 3), ['#000000', '#000001', '#000002']);
+
+  updateIdeogramImagePalette(caption, []);
+  const cleared = JSON.parse(serializeIdeogramCaption(caption));
+  assert.equal('color_palette' in cleared.style_description, false);
+});
+
+test('palette merge updates image and element palettes in one canonical document mutation', () => {
+  const caption = sampleCaption();
+  caption.style_description.color_palette = ['#E8E2D6', '#C8BDAF', '#D4AF37'];
+  caption.compositional_deconstruction.elements[0].color_palette = ['#C8BDAF', '#D4AF37'];
+  caption.compositional_deconstruction.elements.push({
+    type: 'text',
+    bbox: [20, 30, 90, 220],
+    text: 'TITLE',
+    desc: 'Poster title.',
+    color_palette: ['#E8E2D6', '#C8BDAF'],
+    custom_metadata: { source: 'fixture' },
+  });
+
+  mergeIdeogramPaletteColors(caption, '#E8E2D6', '#C8BDAF');
+  const merged = JSON.parse(serializeIdeogramCaption(caption));
+
+  assert.deepEqual(merged.style_description.color_palette, ['#E8E2D6', '#D4AF37']);
+  assert.deepEqual(merged.compositional_deconstruction.elements[0].color_palette, ['#E8E2D6', '#D4AF37']);
+  assert.deepEqual(merged.compositional_deconstruction.elements[1].color_palette, ['#E8E2D6']);
+  assert.deepEqual(merged.compositional_deconstruction.elements[1].custom_metadata, { source: 'fixture' });
+  assert.equal(merged.compositional_deconstruction.elements[1].text, 'TITLE');
+  assert.deepEqual(merged.compositional_deconstruction.elements[1].bbox, [20, 30, 90, 220]);
 });
 
 test('duplicateIdeogramElement inserts a deep-cloned layer above the source', () => {
@@ -341,6 +403,31 @@ test('duplicateIdeogramElement inserts a deep-cloned layer above the source', ()
     'color_palette',
   ]);
   assert.equal(parsed.compositional_deconstruction.elements[1].desc, 'Copied taxi.');
+});
+
+test('layer structure helpers append boxless layers and preserve element data while reordering', () => {
+  const caption = sampleCaption();
+  caption.compositional_deconstruction.elements.push(
+    { type: 'obj', desc: 'Wall', bbox: [0, 0, 1000, 1000], color_palette: ['#FF0000'], custom: { keep: true } },
+    { type: 'text', text: 'SALE', desc: 'Poster', bbox: [20, 30, 90, 220], color_palette: ['#00FF00'] },
+    { type: 'obj', desc: 'Window light', bbox: [100, 500, 700, 900], color_palette: ['#AA00FF'] },
+  );
+  const originalMovedElement = structuredClone(caption.compositional_deconstruction.elements[1]);
+
+  const addedIndex = addIdeogramLayer(caption, 'text');
+  assert.equal(addedIndex, 4);
+  assert.deepEqual(caption.compositional_deconstruction.elements[4], { type: 'text', text: '', desc: '' });
+
+  assert.equal(moveIdeogramElement(caption, 1, 3), true);
+  assert.deepEqual(caption.compositional_deconstruction.elements[3], originalMovedElement);
+  assert.equal(caption.compositional_deconstruction.elements[1].text, 'SALE');
+  assert.equal(caption.compositional_deconstruction.elements[2].desc, 'Window light');
+
+  assert.equal(moveIdeogramElement(caption, 3, 1), true);
+  assert.deepEqual(caption.compositional_deconstruction.elements[1], originalMovedElement);
+  assert.equal(moveIdeogramElement(caption, -1, 2), false);
+  assert.equal(moveIdeogramElement(caption, 2, 99), false);
+  assert.equal(moveIdeogramElement(caption, 2, 2), false);
 });
 
 test('generated box patches clamp, filter, dedupe, and preserve bbox-only edits', () => {

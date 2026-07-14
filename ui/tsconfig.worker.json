@@ -33,6 +33,8 @@
         "src/utils/datasetMedia.ts",
         "src/utils/media.ts",
         "src/utils/ideogramCaption.ts",
+        "src/utils/imagePalette.ts",
+        "src/utils/captionJsonWorkspace.ts",
         "src/utils/ideogramWorkflow.ts",
         "src/utils/folderImport.ts",
         "src/utils/encryptedDatasets.ts",

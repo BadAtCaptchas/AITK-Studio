@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@headlessui/react';
-import { CaptionDatasetModal, openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
+import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import useJobByRef from '@/hooks/useJobByRef';
 import Link from 'next/link';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Sparkles } from 'lucide-react';
+import classNames from 'classnames';
 
 const ACTIVE_CAPTION_STATUSES = new Set(['running', 'queued', 'stopping']);
 const EDIT_LOCK_CAPTION_STATUSES = new Set(['running']);
@@ -15,6 +16,8 @@ type AutoCaptionButtonProps = {
   setIsAutoCaptioning?: (isAutoCaptioning: boolean) => void;
   encryptedDatasetKeyB64?: string;
   rootCaption?: string | null;
+  className?: string;
+  idleLabel?: string;
 };
 
 export default function AutoCaptionButton({
@@ -24,6 +27,8 @@ export default function AutoCaptionButton({
   setIsAutoCaptioning,
   encryptedDatasetKeyB64,
   rootCaption,
+  className,
+  idleLabel = 'Auto Caption',
 }: AutoCaptionButtonProps) {
   const [reloadInterval, setReloadInterval] = useState<number | null>(null);
   const { job, refreshJob } = useJobByRef(datasetPath, reloadInterval, 'caption', projectID);
@@ -39,11 +44,17 @@ export default function AutoCaptionButton({
       setIsAutoCaptioning(isCaptionEditLocked);
     }
   }, [isCaptionEditLocked, setIsAutoCaptioning]);
-  
+
   if (isActiveCaptionJob && job) {
     const label = job.status === 'queued' ? 'Auto Caption Queued...' : 'Auto Captioning...';
     return (
-      <Link href={`/jobs/${job.id}`} className="text-white bg-gray-400 px-3 py-1 rounded-md mr-2 inline-flex items-center gap-1.5">
+      <Link
+        href={`/jobs/${job.id}`}
+        className={classNames(
+          'inline-flex items-center gap-1.5 rounded-md bg-gray-500 px-3 py-1 text-white',
+          className,
+        )}
+      >
         {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin" />}
         {label}
       </Link>
@@ -51,7 +62,7 @@ export default function AutoCaptionButton({
   }
   return (
     <Button
-      className="text-white bg-blue-600 px-3 py-1 rounded-md mr-2"
+      className={classNames('inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1 text-white', className)}
       onClick={() =>
         openCaptionDatasetModal(
           datasetPath,
@@ -62,7 +73,8 @@ export default function AutoCaptionButton({
         )
       }
     >
-      Auto Caption
+      <Sparkles className="h-4 w-4" />
+      {idleLabel}
     </Button>
   );
 }

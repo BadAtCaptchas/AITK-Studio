@@ -12,12 +12,16 @@ import {
   Eraser,
   FolderInput,
   Grid2X2,
+  Grid3X3,
+  Images,
   Loader2,
   Maximize2,
   Minimize2,
   Search,
+  SlidersHorizontal,
   Square,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -52,9 +56,18 @@ import type {
   DeleteImagesResult,
 } from './types';
 import { EncryptedThumb, PlainThumb } from './StudioMedia';
-import { captionResponseToText, clampIndex, isPlainTextCaptionItem, itemKey, itemKind, itemName, statusForCaption } from './utils';
+import {
+  captionResponseToText,
+  clampIndex,
+  isPlainTextCaptionItem,
+  itemKey,
+  itemKind,
+  itemName,
+  statusForCaption,
+} from './utils';
 
 type ThumbSize = 'sm' | 'md' | 'lg';
+type CaptionStudioFilter = DatasetNavigatorFilter | 'needs-review' | 'approved';
 type ScanState = {
   status: 'idle' | 'scanning' | 'done' | 'error';
   scanned: number;
@@ -64,10 +77,13 @@ type ScanState = {
 
 const SCAN_CHUNK_SIZE = 160;
 const ENCRYPTED_SCAN_CONCURRENCY = 6;
-const THUMB_SIZE_CONFIG: Record<ThumbSize, { label: string; tileWidth: number; imageHeight: number; tileHeight: number }> = {
-  sm: { label: 'S', tileWidth: 92, imageHeight: 58, tileHeight: 84 },
-  md: { label: 'M', tileWidth: 120, imageHeight: 76, tileHeight: 104 },
-  lg: { label: 'L', tileWidth: 152, imageHeight: 96, tileHeight: 128 },
+const THUMB_SIZE_CONFIG: Record<
+  ThumbSize,
+  { label: string; tileWidth: number; imageHeight: number; tileHeight: number }
+> = {
+  sm: { label: 'S', tileWidth: 132, imageHeight: 86, tileHeight: 116 },
+  md: { label: 'M', tileWidth: 168, imageHeight: 112, tileHeight: 142 },
+  lg: { label: 'L', tileWidth: 220, imageHeight: 150, tileHeight: 180 },
 };
 
 function useElementSize<T extends HTMLElement>() {
@@ -101,16 +117,18 @@ function previewBoxesForCaption(cached?: CaptionCacheEntry) {
   return parsed.kind === 'ideogram' ? extractIdeogramBoxes(parsed.data).slice(0, 3) : [];
 }
 
-function StatusDot({ status }: { status: ReturnType<typeof statusForCaption> }) {
-  return <span className={classNames('h-2 w-2 flex-shrink-0 rounded-full', status.dot)} />;
-}
-
 function itemExtension(item: DatasetStudioItem) {
   const rawName = item.kind === 'encrypted' ? item.item.extension || item.item.name : item.path;
   const cleanName = rawName.split(/[?#]/, 1)[0];
   const fileName = cleanName.split(/[\\/]/).pop() || cleanName;
   const dotIndex = fileName.lastIndexOf('.');
-  const extension = dotIndex >= 0 ? fileName.slice(dotIndex + 1).trim().toLowerCase() : '';
+  const extension =
+    dotIndex >= 0
+      ? fileName
+          .slice(dotIndex + 1)
+          .trim()
+          .toLowerCase()
+      : '';
   return extension || null;
 }
 
@@ -143,6 +161,7 @@ function ThumbnailTile({
   projectID,
   encryptedKey,
   captionCache,
+  approvedKeys,
   onSelect,
   onToggleBulkSelect,
   mode,
@@ -157,6 +176,7 @@ function ThumbnailTile({
   projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   captionCache: Map<string, CaptionCacheEntry>;
+  approvedKeys: Set<string>;
   onSelect: (index: number) => void;
   onToggleBulkSelect?: (index: number) => void;
   mode: 'compact' | 'drawer';
@@ -166,18 +186,32 @@ function ThumbnailTile({
   const name = itemName(item);
   const cached = captionCache.get(key);
   const status = statusForCaption(cached?.caption || '', Boolean(cached?.loaded));
+  const approved = approvedKeys.has(key);
+  const reviewState = !cached?.loaded
+    ? 'unknown'
+    : !cached.caption.trim()
+      ? 'missing'
+      : approved
+        ? 'approved'
+        : 'needs-review';
   const previewBoxes = previewBoxesForCaption(cached);
   const compact = mode === 'compact';
 
   return (
     <div
       className={classNames(
-        'relative flex-shrink-0 overflow-hidden rounded-md border bg-gray-950 text-left transition-colors',
+        'group relative flex-shrink-0 overflow-hidden rounded-[3px] border border-b-2 bg-gray-950 text-left transition-[border-color,box-shadow,transform]',
         compact ? 'h-[70px] w-24 sm:h-[82px] sm:w-28 xl:h-[92px] xl:w-36' : 'w-full',
         {
-          'border-blue-500 shadow-[0_0_0_1px_rgba(59,130,246,0.9)]': selected,
+          'border-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.95),0_8px_22px_rgba(0,0,0,0.24)]': selected,
           'border-cyan-500 shadow-[0_0_0_1px_rgba(6,182,212,0.8)]': !selected && bulkSelected,
-          'border-gray-800 hover:border-gray-700': !selected && !bulkSelected,
+          'border-x-gray-800 border-t-gray-800 border-b-emerald-500 hover:border-x-gray-700 hover:border-t-gray-700':
+            !selected && !bulkSelected && reviewState === 'approved',
+          'border-x-gray-800 border-t-gray-800 border-b-amber-400 hover:border-x-gray-700 hover:border-t-gray-700':
+            !selected && !bulkSelected && reviewState === 'needs-review',
+          'border-x-gray-800 border-t-gray-800 border-b-rose-500 hover:border-x-gray-700 hover:border-t-gray-700':
+            !selected && !bulkSelected && reviewState === 'missing',
+          'border-gray-800 hover:border-gray-700': !selected && !bulkSelected && reviewState === 'unknown',
         },
       )}
       style={!compact && tileSize ? { height: `${tileSize.tileHeight}px` } : undefined}
@@ -222,15 +256,26 @@ function ThumbnailTile({
         </div>
         <div
           className={classNames(
-            'flex items-center gap-2 overflow-hidden px-2 leading-none text-gray-300',
+            'flex items-center gap-2 overflow-hidden border-t border-gray-900 bg-[#080d12] px-2 leading-none text-gray-300',
             compact ? 'h-6 text-[11px] sm:h-7 sm:text-xs' : 'h-7 text-[11px]',
           )}
         >
-          <span className="font-medium text-gray-100">{index + 1}</span>
-          <StatusDot status={status} />
-          <span className="truncate">{status.label}</span>
+          <span
+            className={classNames('h-1.5 w-1.5 flex-shrink-0 rounded-full', {
+              'bg-gray-600': reviewState === 'unknown',
+              'bg-rose-400': reviewState === 'missing',
+              'bg-amber-300': reviewState === 'needs-review',
+              'bg-emerald-400': reviewState === 'approved',
+            })}
+          />
+          <span className="min-w-0 flex-1 truncate font-medium text-gray-200">{name}</span>
         </div>
       </button>
+      {selected && (
+        <span className="pointer-events-none absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-[#021014] shadow-lg">
+          <Check className="h-4 w-4" strokeWidth={3} />
+        </span>
+      )}
       {!compact && onToggleBulkSelect && (
         <button
           type="button"
@@ -242,9 +287,9 @@ function ThumbnailTile({
             onToggleBulkSelect(index);
           }}
           className={classNames(
-            'absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-md border backdrop-blur',
+            'absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-[3px] border opacity-0 backdrop-blur transition-opacity group-hover:opacity-100',
             bulkSelected
-              ? 'border-cyan-400 bg-cyan-500 text-gray-950'
+              ? 'border-cyan-400 bg-cyan-500 text-gray-950 opacity-100'
               : 'border-gray-700 bg-gray-950/80 text-gray-300 hover:border-gray-500',
           )}
         >
@@ -296,6 +341,11 @@ export function ImageNavigator({
   liveCaptionRefresh,
   captionCache,
   captionCacheVersion,
+  approvedKeys,
+  captionAction,
+  watcherAction,
+  onAddImages,
+  presentation = 'studio',
   onCaptionCacheChange,
   onSelectIndex,
   onBulkCaptionAction,
@@ -311,6 +361,11 @@ export function ImageNavigator({
   liveCaptionRefresh?: boolean;
   captionCache: Map<string, CaptionCacheEntry>;
   captionCacheVersion: number;
+  approvedKeys: Set<string>;
+  captionAction?: ReactNode;
+  watcherAction?: ReactNode;
+  onAddImages: () => void;
+  presentation?: 'studio' | 'legacy';
   onCaptionCacheChange: () => void;
   onSelectIndex: (index: number) => void;
   onBulkCaptionAction?: (request: {
@@ -323,7 +378,8 @@ export function ImageNavigator({
   onDeleteImages?: (items: DatasetStudioItem[], label?: string) => Promise<DeleteImagesResult>;
 }) {
   const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [batchPanelOpen, setBatchPanelOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [captionKeywordQuery, setCaptionKeywordQuery] = useState('');
   const [captionKeywordMode, setCaptionKeywordMode] = useState<CaptionKeywordMatchMode>('whole-word');
@@ -333,7 +389,7 @@ export function ImageNavigator({
   const [selectedBulkKeys, setSelectedBulkKeys] = useState<Set<string>>(() => new Set());
   const [isBulkDeletingImages, setIsBulkDeletingImages] = useState(false);
   const [deleteSelectionMessage, setDeleteSelectionMessage] = useState('');
-  const [filter, setFilter] = useState<DatasetNavigatorFilter>('all');
+  const [filter, setFilter] = useState<CaptionStudioFilter>('all');
   const [sortMode, setSortMode] = useState<DatasetNavigatorSortMode>('original');
   const [sortDirection, setSortDirection] = useState<DatasetNavigatorSortDirection>('desc');
   const [thumbSize, setThumbSize] = useState<ThumbSize>('md');
@@ -403,19 +459,39 @@ export function ImageNavigator({
           status: navigatorStatusForCaption(cached?.caption || '', Boolean(cached?.loaded)),
           extension: itemExtension(item),
           mediaType: itemKind(item),
-          sizeBytes: item.kind === 'plain' ? item.sizeBytes ?? null : item.item.size,
-          addedAt: item.kind === 'plain' ? item.addedAt ?? null : item.item.createdAt,
-          captionedAt: item.kind === 'plain' ? item.captionedAt ?? null : item.item.captionObjectPath ? item.item.updatedAt : null,
+          sizeBytes: item.kind === 'plain' ? (item.sizeBytes ?? null) : item.item.size,
+          addedAt: item.kind === 'plain' ? (item.addedAt ?? null) : item.item.createdAt,
+          captionedAt:
+            item.kind === 'plain'
+              ? (item.captionedAt ?? null)
+              : item.item.captionObjectPath
+                ? item.item.updatedAt
+                : null,
           captionLength: cached?.loaded ? cached.caption.trim().length : null,
         };
       }),
     [captionCache, captionCacheVersion, items, localCacheVersion],
   );
 
-  const filteredEntries = useMemo(
-    () => filterNavigatorEntries(entries, searchQuery, filter),
-    [entries, filter, searchQuery],
-  );
+  const filteredEntries = useMemo(() => {
+    const baseFilter: DatasetNavigatorFilter = filter === 'needs-caption' || filter === 'has-boxes' ? filter : 'all';
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return filterNavigatorEntries(entries, '', baseFilter).filter(entry => {
+      const item = items[entry.index];
+      if (!item) return false;
+      const key = itemKey(item);
+      const cached = captionCache.get(key);
+      const approved = approvedKeys.has(key);
+      const hasCaption = Boolean(cached?.loaded && cached.caption.trim());
+      const matchesReviewFilter =
+        filter === 'approved' ? approved : filter === 'needs-review' ? hasCaption && !approved : true;
+      if (!matchesReviewFilter) return false;
+      if (!normalizedQuery) return true;
+      return (
+        entry.name.toLowerCase().includes(normalizedQuery) || cached?.caption.toLowerCase().includes(normalizedQuery)
+      );
+    });
+  }, [approvedKeys, captionCache, entries, filter, items, searchQuery]);
   const sortedEntries = useMemo(
     () => sortNavigatorEntries(filteredEntries, sortMode, sortDirection),
     [filteredEntries, sortDirection, sortMode],
@@ -472,10 +548,26 @@ export function ImageNavigator({
       return Boolean(item && selectedBulkKeys.has(itemKey(item)));
     });
   const statusCounts = useMemo(() => navigatorStatusCounts(entries), [entries]);
+  const reviewCounts = useMemo(() => {
+    let needsReview = 0;
+    let approved = 0;
+    entries.forEach(entry => {
+      const item = items[entry.index];
+      if (!item) return;
+      const key = itemKey(item);
+      const cached = captionCache.get(key);
+      if (approvedKeys.has(key)) {
+        approved += 1;
+      } else if (cached?.loaded && cached.caption.trim()) {
+        needsReview += 1;
+      }
+    });
+    return { needsReview, approved };
+  }, [approvedKeys, captionCache, entries, items]);
   const captionPendingCount = useMemo(() => entries.filter(entry => entry.status === 'unknown').length, [entries]);
   const thumbConfig = THUMB_SIZE_CONFIG[thumbSize];
   const gridColumns = useMemo(
-    () => navigatorColumnCount(gridSize.width, thumbConfig.tileWidth, 8),
+    () => navigatorColumnCount(gridSize.width, thumbConfig.tileWidth, 4),
     [gridSize.width, thumbConfig.tileWidth],
   );
   const gridRows = useMemo(() => groupNavigatorRows(filteredIndexes, gridColumns), [filteredIndexes, gridColumns]);
@@ -584,10 +676,10 @@ export function ImageNavigator({
         result.deleted === 0 && failed === 0 && skipped === 0
           ? 'No images deleted.'
           : failed > 0
-          ? `${result.deleted.toLocaleString()} of ${result.requested.toLocaleString()} deleted, ${failed.toLocaleString()} failed.`
-          : skipped > 0
-            ? `${result.deleted.toLocaleString()} deleted, ${skipped.toLocaleString()} already missing.`
-            : `${result.deleted.toLocaleString()} deleted.`,
+            ? `${result.deleted.toLocaleString()} of ${result.requested.toLocaleString()} deleted, ${failed.toLocaleString()} failed.`
+            : skipped > 0
+              ? `${result.deleted.toLocaleString()} deleted, ${skipped.toLocaleString()} already missing.`
+              : `${result.deleted.toLocaleString()} deleted.`,
       );
     } catch (error: any) {
       setDeleteSelectionMessage(error?.response?.data?.error || error?.message || 'Delete failed.');
@@ -618,7 +710,9 @@ export function ImageNavigator({
         return;
       }
       if (action === 'delete') {
-        const confirmed = window.confirm(`Delete ${shownCaptionKeywordMatches.length.toLocaleString()} matching item(s)?`);
+        const confirmed = window.confirm(
+          `Delete ${shownCaptionKeywordMatches.length.toLocaleString()} matching item(s)?`,
+        );
         if (!confirmed) return;
       }
       if (action === 'move') {
@@ -665,14 +759,20 @@ export function ImageNavigator({
 
   const scanPlainChunk = useCallback(
     async (chunk: DatasetStudioItem[], signal: AbortSignal) => {
-      const plainItems = chunk.filter((item): item is Extract<DatasetStudioItem, { kind: 'plain' }> => item.kind === 'plain');
+      const plainItems = chunk.filter(
+        (item): item is Extract<DatasetStudioItem, { kind: 'plain' }> => item.kind === 'plain',
+      );
       if (plainItems.length === 0) return 0;
       const directItems = plainItems.filter(isPlainTextCaptionItem);
       const sidecarItems = plainItems.filter(item => !isPlainTextCaptionItem(item));
       await Promise.all(
         directItems.map(async item => {
           try {
-            const response = await apiClient.post('/api/caption/get', { imgPath: item.path, direct: true, ...projectPayload }, { signal });
+            const response = await apiClient.post(
+              '/api/caption/get',
+              { imgPath: item.path, direct: true, ...projectPayload },
+              { signal },
+            );
             setCacheEntry(item, captionResponseToText(response.data));
           } catch {
             setCacheEntry(item, '');
@@ -749,7 +849,11 @@ export function ImageNavigator({
     const runScan = async () => {
       const missingItems = items.filter(item => !captionCache.get(itemKey(item))?.loaded);
       const cachedCount = items.length - missingItems.length;
-      setScanState({ status: missingItems.length > 0 ? 'scanning' : 'done', scanned: cachedCount, total: items.length });
+      setScanState({
+        status: missingItems.length > 0 ? 'scanning' : 'done',
+        scanned: cachedCount,
+        total: items.length,
+      });
       if (missingItems.length === 0) {
         scanControllerRef.current = null;
         return;
@@ -877,19 +981,323 @@ export function ImageNavigator({
   ]);
 
   useEffect(() => {
-    if (!drawerOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setDrawerOpen(false);
+      if (event.key === 'Escape') setBatchPanelOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [drawerOpen]);
+  }, []);
 
   const scrubberMarkers = useMemo(() => {
     const marked = entries.filter(entry => entry.status === 'missing' || entry.status === 'has-boxes');
     const step = Math.max(1, Math.ceil(marked.length / 140));
     return marked.filter((_, index) => index % step === 0);
   }, [entries]);
+
+  if (presentation === 'studio') {
+    const studioFilters: Array<{ value: CaptionStudioFilter; label: string; count: number }> = [
+      { value: 'all', label: 'All', count: items.length },
+      { value: 'needs-caption', label: 'Missing', count: statusCounts.missing },
+      { value: 'needs-review', label: 'Needs review', count: reviewCounts.needsReview },
+      { value: 'approved', label: 'Approved', count: reviewCounts.approved },
+    ];
+
+    return (
+      <section
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#050a0f]"
+        aria-label="Dataset gallery"
+      >
+        <div className="flex h-[61px] flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-[#202429] px-4">
+          <div className="relative w-[230px] flex-shrink-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <input
+              value={searchQuery}
+              onChange={event => setSearchQuery(event.target.value)}
+              placeholder="Search photos & captions"
+              className="h-[34px] w-full rounded-[4px] border border-[#273039] bg-[#080d12] pl-9 pr-8 text-[13px] text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-400"
+              aria-label="Search photos and captions"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                title="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
+                onClick={() => setSearchQuery('')}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex h-[34px] flex-shrink-0 gap-2 text-[12px]">
+            {studioFilters.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setFilter(option.value)}
+                className={classNames(
+                  'rounded-[4px] border border-[#273039] bg-[#080d12] px-3 transition-colors hover:bg-gray-900',
+                  {
+                    'border-cyan-500/70 bg-cyan-950/40 text-cyan-300':
+                      filter === option.value && option.value === 'all',
+                    'border-rose-800/70 bg-rose-950/30 text-rose-400':
+                      filter === option.value && option.value === 'needs-caption',
+                    'border-amber-800/70 bg-amber-950/30 text-amber-300':
+                      filter === option.value && option.value === 'needs-review',
+                    'border-emerald-800/70 bg-emerald-950/30 text-emerald-400':
+                      filter === option.value && option.value === 'approved',
+                    'text-cyan-300': filter !== option.value && option.value === 'all',
+                    'text-rose-400': filter !== option.value && option.value === 'needs-caption',
+                    'text-amber-300': filter !== option.value && option.value === 'needs-review',
+                    'text-emerald-400': filter !== option.value && option.value === 'approved',
+                  },
+                )}
+              >
+                {option.label}
+                <span
+                  className={classNames(
+                    'ml-1.5 tabular-nums',
+                    filter === option.value ? 'opacity-90' : 'text-gray-500',
+                  )}
+                >
+                  {option.count.toLocaleString()}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex h-[34px] flex-shrink-0 overflow-hidden rounded-[4px] border border-[#273039] bg-[#080d12]">
+            <span className="flex items-center pl-2 text-[11px] text-gray-500">Sort:</span>
+            <select
+              value={sortMode}
+              onChange={event => {
+                const nextMode = event.target.value as DatasetNavigatorSortMode;
+                setSortMode(nextMode);
+                if (nextMode !== sortMode) setSortDirection(defaultSortDirection(nextMode));
+              }}
+              className="h-full w-[96px] bg-[#080d12] px-1.5 text-[12px] text-gray-200 outline-none"
+              aria-label="Sort gallery"
+            >
+              {sortOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.value === 'original' ? 'Default order' : option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              title={directionTitle}
+              disabled={sortMode === 'original'}
+              onClick={() => setSortDirection(direction => (direction === 'desc' ? 'asc' : 'desc'))}
+              className="border-l border-[#273039] px-2 text-[10px] font-semibold text-gray-500 hover:bg-gray-900 disabled:opacity-35"
+            >
+              {directionLabel}
+            </button>
+          </div>
+
+          <div
+            className="flex h-[34px] w-[132px] flex-shrink-0 items-center gap-2 px-1 text-[11px] text-gray-500"
+            aria-label="Gallery density"
+          >
+            <span>Density</span>
+            <Grid2X2 className="h-3.5 w-3.5 flex-shrink-0" />
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={1}
+              value={thumbSize === 'sm' ? 0 : thumbSize === 'md' ? 1 : 2}
+              onChange={event => setThumbSize((['sm', 'md', 'lg'] as ThumbSize[])[Number(event.target.value)] || 'md')}
+              className="h-4 min-w-0 flex-1 cursor-pointer accent-cyan-400"
+              aria-label="Gallery density"
+            />
+            <Grid3X3 className="h-4 w-4 flex-shrink-0" />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setBatchPanelOpen(open => !open)}
+            title="Batch actions"
+            aria-label="Batch actions"
+            className={classNames(
+              'relative inline-flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[4px] border text-[12px] font-medium',
+              batchPanelOpen || selectedBulkCount > 0
+                ? 'border-cyan-500/60 bg-cyan-950/40 text-cyan-100'
+                : 'border-[#273039] bg-[#080d12] text-gray-300 hover:bg-gray-900',
+            )}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span className="sr-only">Batch actions</span>
+            {selectedBulkCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-400 px-1 text-[9px] font-bold text-gray-950">
+                {selectedBulkCount}
+              </span>
+            )}
+          </button>
+
+          <div className="min-w-2 flex-1" />
+          {watcherAction}
+          <button
+            type="button"
+            onClick={onAddImages}
+            className="inline-flex h-[34px] flex-shrink-0 items-center gap-2 rounded-[4px] border border-[#273039] bg-[#0b1219] px-3 text-[12px] font-semibold text-gray-100 hover:border-gray-600 hover:bg-gray-900"
+          >
+            <Upload className="h-4 w-4" />
+            Add images
+          </button>
+          {captionAction}
+        </div>
+
+        {batchPanelOpen && (
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[#202429] bg-[#080d12] px-4 py-2">
+            <span className="inline-flex h-8 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
+              <span className="h-2 w-2 rounded-full bg-cyan-400" />
+              {selectedBulkCount.toLocaleString()} selected
+            </span>
+            <button
+              type="button"
+              disabled={filteredIndexes.length === 0 || allShownSelected}
+              onClick={selectShownBulkItems}
+              className="h-8 rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-xs text-gray-200 hover:bg-gray-900 disabled:opacity-40"
+            >
+              Select shown
+            </button>
+            <button
+              type="button"
+              disabled={selectedBulkCount === 0}
+              onClick={clearBulkSelection}
+              className="h-8 rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-xs text-gray-200 hover:bg-gray-900 disabled:opacity-40"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              disabled={!onDeleteImages || selectedBulkCount === 0 || isBulkDeletingImages}
+              onClick={() => void runSelectedImageDelete()}
+              className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-rose-900/70 bg-rose-950/40 px-3 text-xs text-rose-100 hover:bg-rose-900/50 disabled:opacity-40"
+            >
+              {isBulkDeletingImages ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              Delete selected
+            </button>
+            <div className="relative min-w-[220px] flex-1 xl:max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-600" />
+              <input
+                value={captionKeywordQuery}
+                onChange={event => {
+                  setCaptionKeywordQuery(event.target.value);
+                  setBulkMessage('');
+                }}
+                placeholder="Find caption keywords"
+                className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 pl-8 pr-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
+              />
+            </div>
+            <label className="inline-flex h-8 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-400">
+              <input
+                type="checkbox"
+                checked={captionKeywordMode === 'partial'}
+                onChange={event => setCaptionKeywordMode(event.target.checked ? 'partial' : 'whole-word')}
+              />
+              Partial
+            </label>
+            <input
+              value={bulkDestinationName}
+              onChange={event => setBulkDestinationName(event.target.value)}
+              className="h-8 w-40 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
+              aria-label="Destination dataset"
+            />
+            <button
+              type="button"
+              disabled={!canRunBulkAction || bulkBusyAction === 'remove_words'}
+              onClick={() => void runBulkAction('remove_words')}
+              className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-200 hover:bg-gray-900 disabled:opacity-40"
+            >
+              <Eraser className="h-3.5 w-3.5" /> Remove words
+            </button>
+            <button
+              type="button"
+              disabled={!canRunBulkAction || bulkBusyAction === 'move'}
+              onClick={() => void runBulkAction('move')}
+              className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-200 hover:bg-gray-900 disabled:opacity-40"
+            >
+              <FolderInput className="h-3.5 w-3.5" /> Move
+            </button>
+            <span className="text-xs text-gray-500">
+              {scanState.status === 'scanning'
+                ? `Scanning captions ${scanProgress}%`
+                : `${shownCaptionKeywordMatches.length.toLocaleString()} matches`}
+            </span>
+            {(bulkMessage || deleteSelectionMessage) && (
+              <span className="w-full text-xs text-gray-400">{bulkMessage || deleteSelectionMessage}</span>
+            )}
+          </div>
+        )}
+
+        <div ref={gridMeasureRef} className="relative min-h-0 flex-1 bg-[#05090d]">
+          <div
+            ref={setGridScroller}
+            className="operator-scrollbar-none absolute inset-0 overflow-y-auto px-4 pb-3 pt-2"
+          >
+            {gridScroller && gridRows.length > 0 ? (
+              <Virtuoso
+                ref={virtuosoRef}
+                customScrollParent={gridScroller}
+                totalCount={gridRows.length}
+                increaseViewportBy={600}
+                computeItemKey={index => gridRows[index]?.[0] ?? index}
+                itemContent={rowIndex => {
+                  const row = gridRows[rowIndex] || [];
+                  return (
+                    <div
+                      className="grid gap-1 pb-1"
+                      style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}
+                    >
+                      {row.map(index => {
+                        const item = items[index];
+                        if (!item) return null;
+                        return (
+                          <ThumbnailTile
+                            key={itemKey(item)}
+                            item={item}
+                            index={index}
+                            selected={index === selectedIndex}
+                            bulkSelected={selectedBulkKeys.has(itemKey(item))}
+                            datasetName={datasetName}
+                            workerID={workerID}
+                            projectID={projectID}
+                            encryptedKey={encryptedKey}
+                            captionCache={captionCache}
+                            approvedKeys={approvedKeys}
+                            onSelect={commitIndex}
+                            onToggleBulkSelect={toggleBulkSelectedIndex}
+                            mode="drawer"
+                            tileSize={thumbConfig}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                }}
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-gray-500">
+                <Images className="h-7 w-7 text-gray-700" />
+                {shownEntries.length === 0 ? 'No matching photos' : 'Preparing gallery'}
+              </div>
+            )}
+          </div>
+          <div className="pointer-events-none absolute bottom-3 right-5 rounded-[3px] bg-gray-950/80 px-2 py-1 text-[11px] text-gray-500 backdrop-blur">
+            {scanState.status === 'scanning'
+              ? `Indexing ${scanProgress}%`
+              : `${shownEntries.length.toLocaleString()} photos`}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="flex min-w-0 max-w-full flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-[#080d12]">
@@ -1039,7 +1447,9 @@ export function ImageNavigator({
               {isBulkDeletingImages ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               Delete Selected
             </button>
-            {deleteSelectionMessage && <div className="min-w-[180px] flex-1 text-xs text-gray-400">{deleteSelectionMessage}</div>}
+            {deleteSelectionMessage && (
+              <div className="min-w-[180px] flex-1 text-xs text-gray-400">{deleteSelectionMessage}</div>
+            )}
           </div>
 
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-900 px-2 py-2 xl:px-3">
@@ -1090,7 +1500,9 @@ export function ImageNavigator({
             <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
               {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />}
               <span>{shownCaptionKeywordMatches.length.toLocaleString()} found</span>
-              {captionPendingCount > 0 && <span className="text-gray-500">{captionPendingCount.toLocaleString()} pending</span>}
+              {captionPendingCount > 0 && (
+                <span className="text-gray-500">{captionPendingCount.toLocaleString()} pending</span>
+              )}
             </div>
 
             <button
@@ -1101,7 +1513,11 @@ export function ImageNavigator({
               onClick={() => void runBulkAction('remove_words')}
               className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
             >
-              {bulkBusyAction === 'remove_words' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eraser className="h-4 w-4" />}
+              {bulkBusyAction === 'remove_words' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Eraser className="h-4 w-4" />
+              )}
               Remove Words
             </button>
             <button
@@ -1112,7 +1528,11 @@ export function ImageNavigator({
               onClick={() => void runBulkAction('move')}
               className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-200 hover:bg-gray-900 disabled:cursor-not-allowed disabled:opacity-45"
             >
-              {bulkBusyAction === 'move' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}
+              {bulkBusyAction === 'move' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FolderInput className="h-4 w-4" />
+              )}
               Move
             </button>
             <button
@@ -1123,7 +1543,11 @@ export function ImageNavigator({
               onClick={() => void runBulkAction('delete')}
               className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-900/70 bg-rose-950/40 px-3 text-sm text-rose-100 hover:bg-rose-900/50 disabled:cursor-not-allowed disabled:opacity-45"
             >
-              {bulkBusyAction === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {bulkBusyAction === 'delete' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
               Delete
             </button>
 
@@ -1142,7 +1566,10 @@ export function ImageNavigator({
                   itemContent={rowIndex => {
                     const row = gridRows[rowIndex] || [];
                     return (
-                      <div className="grid gap-2 pb-2" style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>
+                      <div
+                        className="grid gap-2 pb-2"
+                        style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}
+                      >
                         {row.map(index => {
                           const item = items[index];
                           if (!item) return null;
@@ -1158,6 +1585,7 @@ export function ImageNavigator({
                               projectID={projectID}
                               encryptedKey={encryptedKey}
                               captionCache={captionCache}
+                              approvedKeys={approvedKeys}
                               onSelect={commitIndex}
                               onToggleBulkSelect={toggleBulkSelectedIndex}
                               mode="drawer"
@@ -1251,7 +1679,11 @@ export function ImageNavigator({
           <IconButton title="Last image" disabled={!canGoNext} onClick={() => commitIndex(items.length - 1)}>
             <ChevronsRight className="h-4 w-4" />
           </IconButton>
-          <IconButton title={drawerOpen ? 'Hide grid' : 'Show grid'} onClick={() => setDrawerOpen(open => !open)} className="hidden sm:flex">
+          <IconButton
+            title={drawerOpen ? 'Hide grid' : 'Show grid'}
+            onClick={() => setDrawerOpen(open => !open)}
+            className="hidden sm:flex"
+          >
             {drawerOpen ? <Minimize2 className="h-4 w-4" /> : <Grid2X2 className="h-4 w-4" />}
           </IconButton>
         </div>
@@ -1280,6 +1712,7 @@ export function ImageNavigator({
                   projectID={projectID}
                   encryptedKey={encryptedKey}
                   captionCache={captionCache}
+                  approvedKeys={approvedKeys}
                   onSelect={commitIndex}
                   mode="compact"
                 />
@@ -1295,7 +1728,11 @@ export function ImageNavigator({
           >
             <ArrowRight className="h-6 w-6" />
           </button>
-          <IconButton title={drawerOpen ? 'Hide grid' : 'Show grid'} onClick={() => setDrawerOpen(open => !open)} className="sm:hidden">
+          <IconButton
+            title={drawerOpen ? 'Hide grid' : 'Show grid'}
+            onClick={() => setDrawerOpen(open => !open)}
+            className="sm:hidden"
+          >
             {drawerOpen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </IconButton>
         </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, Ban, ImageOff, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Ban, ChevronRight, ImageOff, Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import DatasetImageStudio, {
   type BulkCaptionActionRequest,
   type BulkCaptionActionResult,
@@ -11,20 +11,14 @@ import DatasetImageStudio, {
 } from '@/components/DatasetImageStudio';
 import { Button } from '@headlessui/react';
 import AddImagesModal, { openImagesModal, useOpenImagesModalOnDrag } from '@/components/AddImagesModal';
-import DatasetFolderIcon from '@/components/DatasetFolderIcon';
 import { Modal } from '@/components/Modal';
 import { openConfirm } from '@/components/ConfirmModal';
 import { TextInput } from '@/components/formInputs';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import useSettings from '@/hooks/useSettings';
-import { isImage, pathJoin } from '@/utils/basic';
-import { getDisplayPath } from '@/utils/media';
-import {
-  getDatasetImageMediaUrl,
-  normalizeDatasetImageListItem,
-  type DatasetImageListItem,
-} from '@/utils/datasetMedia';
+import { pathJoin } from '@/utils/basic';
+import { normalizeDatasetImageListItem, type DatasetImageListItem } from '@/utils/datasetMedia';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
 import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadge';
@@ -48,10 +42,7 @@ import {
 import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
-
-function isPreviewableImagePath(value: string) {
-  return isImage(value) || isImage(getDisplayPath(value));
-}
+import ThemeLogo from '@/components/ThemeLogo';
 
 type DatasetEditorPageProps = {
   datasetName: string;
@@ -70,6 +61,8 @@ export default function DatasetEditorPage({
 }: DatasetEditorPageProps) {
   const [imgList, setImgList] = useState<DatasetImageListItem[]>([]);
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
+  const [hasStudioUnsavedChanges, setHasStudioUnsavedChanges] = useState(false);
+  const hasStudioUnsavedChangesRef = useRef(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const workerID = projectID ? 'local' : searchParams.get('worker_id') || 'local';
@@ -93,7 +86,20 @@ export default function DatasetEditorPage({
   const [renameDatasetError, setRenameDatasetError] = useState('');
   const [isDeletingDataset, setIsDeletingDataset] = useState(false);
   const [datasetActionError, setDatasetActionError] = useState('');
+  const [datasetMenuOpen, setDatasetMenuOpen] = useState(false);
   const [defaultWatchSourcePath, setDefaultWatchSourcePath] = useState('');
+
+  const handleStudioUnsavedChange = useCallback((hasUnsavedChanges: boolean) => {
+    hasStudioUnsavedChangesRef.current = hasUnsavedChanges;
+    setHasStudioUnsavedChanges(hasUnsavedChanges);
+  }, []);
+
+  const confirmDiscardStudioChanges = useCallback(
+    () =>
+      !hasStudioUnsavedChanges ||
+      window.confirm('You have unapplied or unsaved caption changes. Leave Caption Studio and discard them?'),
+    [hasStudioUnsavedChanges],
+  );
   const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
   const effectiveDatasetRoot = projectID ? datasetRoot || '' : datasetRoot || settings?.DATASETS_FOLDER || '';
   const datasetPath = useMemo(
@@ -104,49 +110,58 @@ export default function DatasetEditorPage({
   const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
   const isRefreshingRef = useRef(false);
 
-  const refreshImageList = useCallback((dbName: string, options: { background?: boolean } = {}) => {
-    if (isRefreshingRef.current) return;
-    isRefreshingRef.current = true;
-    if (!options.background) setStatus('loading');
-    apiClient
-      .post('/api/datasets/listImages', { datasetName: dbName, worker_id: workerID, compact: true, ...projectPayload })
-      .then((res: { data: unknown }) => {
-        const data = res.data;
-        if (!data || typeof data !== 'object') {
-          setImgList([]);
-          setStatus('success');
-          return;
-        }
+  const refreshImageList = useCallback(
+    (dbName: string, options: { background?: boolean } = {}) => {
+      if (isRefreshingRef.current) return;
+      isRefreshingRef.current = true;
+      const preserveDirtyStudio = hasStudioUnsavedChangesRef.current && !options.background;
+      if (!options.background && !preserveDirtyStudio) setStatus('loading');
+      apiClient
+        .post('/api/datasets/listImages', {
+          datasetName: dbName,
+          worker_id: workerID,
+          compact: true,
+          ...projectPayload,
+        })
+        .then((res: { data: unknown }) => {
+          const data = res.data;
+          if (!data || typeof data !== 'object') {
+            setImgList([]);
+            setStatus('success');
+            return;
+          }
 
-        const record = data as Record<string, unknown>;
-        if (record.encrypted) {
-          setEncryptedManifest((record.manifest as EncryptedDatasetManifest) ?? null);
-          setImgList([]);
-          setStatus('success');
-          return;
-        }
+          const record = data as Record<string, unknown>;
+          if (record.encrypted) {
+            setEncryptedManifest((record.manifest as EncryptedDatasetManifest) ?? null);
+            setImgList([]);
+            setStatus('success');
+            return;
+          }
 
-        setEncryptedManifest(null);
-        setEncryptedCatalog(null);
-        setEncryptedKey(null);
-        setEncryptedRawKeyB64(null);
-        const root = typeof record.root === 'string' ? record.root : null;
-        const images = Array.isArray(record.images) ? record.images : [];
-        setImgList(
-          images
-            .map(image => normalizeDatasetImageListItem(image, root))
-            .filter((image): image is DatasetImageListItem => image !== null),
-        );
-        setStatus('success');
-      })
-      .catch(error => {
-        console.error('Error fetching images:', error);
-        if (!options.background) setStatus('error');
-      })
-      .finally(() => {
-        isRefreshingRef.current = false;
-      });
-  }, [projectPayload, workerID]);
+          setEncryptedManifest(null);
+          setEncryptedCatalog(null);
+          setEncryptedKey(null);
+          setEncryptedRawKeyB64(null);
+          const root = typeof record.root === 'string' ? record.root : null;
+          const images = Array.isArray(record.images) ? record.images : [];
+          setImgList(
+            images
+              .map(image => normalizeDatasetImageListItem(image, root))
+              .filter((image): image is DatasetImageListItem => image !== null),
+          );
+          setStatus('success');
+        })
+        .catch(error => {
+          console.error('Error fetching images:', error);
+          if (!options.background && !preserveDirtyStudio) setStatus('error');
+        })
+        .finally(() => {
+          isRefreshingRef.current = false;
+        });
+    },
+    [projectPayload, workerID],
+  );
 
   const datasetWatcherLive = useDatasetWatcherLiveRefresh({
     enabled: status === 'success' && canUseWatchFolders,
@@ -207,15 +222,19 @@ export default function DatasetEditorPage({
     try {
       const key =
         encryptedManifest.crypto.kdf.type === 'PBKDF2-SHA256'
-          ? (await unlockEncryptedDatasetKey(encryptedManifest, {
-              provider: 'password',
-              password: unlockPassword,
-            })).key
+          ? (
+              await unlockEncryptedDatasetKey(encryptedManifest, {
+                provider: 'password',
+                password: unlockPassword,
+              })
+            ).key
           : encryptedManifest.crypto.kdf.type === 'KEYFILE-SHA256' && unlockKeyFile
-            ? (await unlockEncryptedDatasetKey(encryptedManifest, {
-                provider: 'keyFile',
-                file: unlockKeyFile,
-              })).key
+            ? (
+                await unlockEncryptedDatasetKey(encryptedManifest, {
+                  provider: 'keyFile',
+                  file: unlockKeyFile,
+                })
+              ).key
             : encryptedManifest.crypto.kdf.type === 'WEBAUTHN-PRF'
               ? (await unlockEncryptedDatasetKey(encryptedManifest, { provider: 'webauthnPrf' })).key
               : null;
@@ -230,11 +249,6 @@ export default function DatasetEditorPage({
       setUnlockError('Could not decrypt this dataset with the provided secret.');
     }
   };
-
-  const datasetHeaderPreviewUrl = useMemo(() => {
-    const firstImage = imgList.find(image => isPreviewableImagePath(image.img_path));
-    return firstImage ? getDatasetImageMediaUrl(firstImage) : null;
-  }, [imgList]);
 
   const plainStudioItems = useMemo<DatasetStudioItem[]>(
     () =>
@@ -266,7 +280,7 @@ export default function DatasetEditorPage({
       encryptedDatasetKeyB64: encryptedRawKeyB64 || undefined,
       projectID,
       datasetName,
-      rootCaption: encryptedCatalog ? encryptedCatalog.rootCaption ?? null : undefined,
+      rootCaption: encryptedCatalog ? (encryptedCatalog.rootCaption ?? null) : undefined,
       preset: 'ideogram_json',
     });
   }, [datasetName, datasetPath, encryptedCatalog, encryptedRawKeyB64, isRemoteDataset, projectID, refreshImageList]);
@@ -279,10 +293,7 @@ export default function DatasetEditorPage({
 
   useEffect(() => {
     if (!projectID || !datasetName) return;
-    const refreshTimer = window.setInterval(
-      () => refreshImageList(datasetName, { background: true }),
-      10 * 60 * 1000,
-    );
+    const refreshTimer = window.setInterval(() => refreshImageList(datasetName, { background: true }), 10 * 60 * 1000);
     return () => window.clearInterval(refreshTimer);
   }, [datasetName, projectID, refreshImageList]);
 
@@ -326,14 +337,21 @@ export default function DatasetEditorPage({
       (projectID ? getRememberedEncryptedDatasetKey(`project:${projectID}:${datasetName}`) : null) ||
       getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(workerID, datasetName)) ||
       getRememberedEncryptedDatasetKey(datasetName) ||
-      (effectiveDatasetRoot
-        ? getRememberedEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, datasetName))
-        : null);
+      (effectiveDatasetRoot ? getRememberedEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, datasetName)) : null);
     if (!remembered) return;
     importRawAesKey(remembered)
       .then(key => unlockEncryptedDataset(key, encryptedManifest))
       .catch(() => undefined);
-  }, [datasetName, datasetRef, effectiveDatasetRoot, encryptedCatalog, encryptedKey, encryptedManifest, projectID, workerID]);
+  }, [
+    datasetName,
+    datasetRef,
+    effectiveDatasetRoot,
+    encryptedCatalog,
+    encryptedKey,
+    encryptedManifest,
+    projectID,
+    workerID,
+  ]);
 
   useEffect(() => {
     if (!encryptedManifest || !encryptedKey) return;
@@ -386,6 +404,7 @@ export default function DatasetEditorPage({
   const handleRenameDataset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isRenamingDataset) return;
+    if (!confirmDiscardStudioChanges()) return;
 
     try {
       setIsRenamingDataset(true);
@@ -550,9 +569,7 @@ export default function DatasetEditorPage({
 
   const handleDeleteImages = async (targetItems: DatasetStudioItem[]): Promise<DeleteImagesResult> => {
     const uniqueItems = Array.from(
-      new Map(
-        targetItems.map(item => [item.kind === 'plain' ? item.path : item.item.id, item] as const),
-      ).values(),
+      new Map(targetItems.map(item => [item.kind === 'plain' ? item.path : item.item.id, item] as const)).values(),
     );
     const plainPaths = uniqueItems.flatMap(item => (item.kind === 'plain' ? [item.path] : []));
     const encryptedItems = uniqueItems.flatMap(item => (item.kind === 'encrypted' ? [item.item] : []));
@@ -667,7 +684,11 @@ export default function DatasetEditorPage({
       const destinationName = request.destinationName?.trim();
       if (!destinationName) throw new Error('Destination dataset name is required.');
 
-      const { manifest: emptyManifest } = await encryptCatalog({ version: 1, items: [] }, encryptedKey, encryptedManifest);
+      const { manifest: emptyManifest } = await encryptCatalog(
+        { version: 1, items: [] },
+        encryptedKey,
+        encryptedManifest,
+      );
       const createResponse = await apiClient.post('/api/datasets/create', {
         name: destinationName,
         worker_id: workerID,
@@ -784,105 +805,132 @@ export default function DatasetEditorPage({
     };
   };
 
+  const captionToolbarAction = canUseDatasetCaptionJob ? (
+    <AutoCaptionButton
+      datasetPath={datasetPath}
+      datasetName={datasetName}
+      projectID={projectID}
+      setIsAutoCaptioning={setIsAutoCaptioning}
+      encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
+      rootCaption={encryptedCatalog ? (encryptedCatalog.rootCaption ?? null) : undefined}
+      idleLabel="Generate captions"
+      className="h-[34px] flex-shrink-0 !rounded-[4px] !bg-cyan-400 !px-3 !py-0 !text-[12px] !font-semibold !text-[#021014] hover:!bg-cyan-300"
+    />
+  ) : null;
+
   return (
     <>
-      <TopBar className="h-14 bg-[#070b10]">
-        <div className="flex-shrink-0">
-          <Button
-            className="operator-icon-button"
-            onClick={() => {
-              if (returnHref) {
-                router.push(returnHref);
-              } else {
-                history.back();
-              }
-            }}
-            title="Back"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+      <TopBar className="h-[69px] gap-3 border-[#202429] bg-[#060b10] px-4">
+        <div className="flex flex-shrink-0 items-center gap-3">
+          <div className="h-7 w-[70px] overflow-hidden" aria-label="AITK Studio">
+            <ThemeLogo className="!h-7 !w-[116px] max-w-none" />
+          </div>
+          <span className="h-5 w-px bg-gray-800" />
+          <span className="whitespace-nowrap text-[15px] font-semibold text-gray-100">Caption Studio</span>
         </div>
-        <DatasetFolderIcon
-          size="sm"
-          encrypted={!!encryptedManifest}
-          unlocked={!!encryptedCatalog}
-          remote={isRemoteDataset}
-          previewSrc={datasetHeaderPreviewUrl}
-          className="hidden sm:block"
-        />
-        <div className="min-w-0 flex-shrink text-sm">
-          <h1 className="truncate font-semibold text-gray-100">
-            <span className="hidden text-gray-400 sm:inline">
-              {projectName ? `${projectName} / Datasets / ` : 'AI Toolkit / Datasets / '}
-            </span>
-            <span>{datasetName}</span>
-            <span className="hidden text-gray-500 sm:inline"> / Edit Dataset</span>
-            {projectID ? <span className="ml-2 text-xs text-cyan-300">Project</span> : null}
-            {isRemoteDataset ? <span className="ml-2 text-xs text-blue-300">Remote</span> : null}
-          </h1>
-        </div>
-        <div className="flex-1"></div>
-        <div className="flex-shrink-0 flex items-center gap-1 sm:gap-2">
-          <Button
-            className="operator-button whitespace-nowrap py-1 text-sm"
-            onClick={openRenameModal}
-            disabled={isDeletingDataset}
-            title="Rename dataset"
-            aria-label="Rename dataset"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Rename</span>
-          </Button>
-          {!isRemoteDataset && !encryptedManifest && (
-            <>
-              <DatasetWatchFoldersButton
-                datasetName={datasetName}
-                projectID={projectID}
-                workerID={workerID}
-                defaultSourcePath={defaultWatchSourcePath}
-                label="Watch Folders"
-                onRefresh={() => refreshImageList(datasetName, { background: true })}
-              />
-              <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden sm:inline-flex" />
-            </>
-          )}
-          {canUseDatasetCaptionJob && (
-            <AutoCaptionButton
-              datasetPath={datasetPath}
-              datasetName={datasetName}
-              projectID={projectID}
-              setIsAutoCaptioning={setIsAutoCaptioning}
-              encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
-              rootCaption={encryptedCatalog ? encryptedCatalog.rootCaption ?? null : undefined}
-            />
-          )}
-          <Button
-            className="operator-button whitespace-nowrap py-1 text-sm"
-            disabled={isDeletingDataset || (!!encryptedManifest && !encryptedCatalog)}
-            onClick={() =>
-              openImagesModal(datasetName, () => refreshImageList(datasetName), {
-                ...encryptedUploadOptions,
-                workerID,
-                projectID,
-              })
+
+        <button
+          type="button"
+          onClick={() => {
+            if (!confirmDiscardStudioChanges()) return;
+            if (returnHref) {
+              router.push(returnHref);
+            } else {
+              history.back();
             }
+          }}
+          className="ml-3 inline-flex h-8 flex-shrink-0 items-center gap-2 rounded-[4px] border border-[#273039] bg-[#080d12] px-2.5 text-[12px] text-gray-400 hover:border-gray-600 hover:text-gray-100"
+          title="Back to AITK Studio"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span className="hidden lg:inline">Back to AITK Studio</span>
+        </button>
+
+        <div className="ml-2 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[12px]">
+          <span className="max-w-[180px] truncate text-gray-600">{projectName || 'Global datasets'}</span>
+          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-800" />
+          <span className="text-gray-500">Datasets</span>
+          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-800" />
+          <span className="truncate font-medium text-gray-200">{datasetName}</span>
+          {projectID && (
+            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-cyan-900/80 bg-cyan-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-300">
+              Project
+            </span>
+          )}
+          {isRemoteDataset && (
+            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-blue-900/80 bg-blue-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-300">
+              Remote
+            </span>
+          )}
+          {encryptedManifest && (
+            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-violet-900/80 bg-violet-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300">
+              {encryptedCatalog ? 'Encrypted · unlocked' : 'Encrypted'}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-shrink-0 items-center gap-2">
+          {isAutoCaptioning && (
+            <span className="hidden items-center gap-1.5 text-[11px] text-cyan-300 sm:inline-flex">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing queue
+            </span>
+          )}
+          {!isRemoteDataset && !encryptedManifest && (
+            <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden md:inline-flex" />
+          )}
+          <button
+            type="button"
+            onClick={() => setDatasetMenuOpen(open => !open)}
+            className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-[#273039] bg-[#080d12] text-gray-400 hover:text-white"
+            title="Dataset settings"
+            aria-label="Dataset settings"
           >
-            <span className="sm:hidden">+ Add</span>
-            <span className="hidden sm:inline">Add Images</span>
-          </Button>
-          <Button
-            className="operator-button whitespace-nowrap border-red-900/70 bg-red-950/60 py-1 text-sm text-red-100 hover:bg-red-900"
-            onClick={handleDeleteDataset}
-            disabled={isDeletingDataset}
-            title="Delete dataset"
-            aria-label="Delete dataset"
-          >
-            {isDeletingDataset ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-            <span className="hidden sm:inline">Delete</span>
-          </Button>
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
         </div>
       </TopBar>
-      <MainContent className="!top-14 !h-[calc(100%-3.5rem)] overflow-hidden !px-0 !pt-0 sm:!px-0">
+
+      {datasetMenuOpen && (
+        <div className="absolute right-4 top-[60px] z-50 w-56 rounded-[4px] border border-[#273039] bg-[#0a1118] p-1.5 shadow-2xl">
+          <button
+            type="button"
+            onClick={() => {
+              setDatasetMenuOpen(false);
+              openRenameModal();
+            }}
+            disabled={isDeletingDataset}
+            className="flex h-9 w-full items-center gap-2 rounded-[3px] px-2 text-left text-xs text-gray-300 hover:bg-gray-900"
+          >
+            <Pencil className="h-3.5 w-3.5" /> Rename dataset
+          </button>
+          {canUseWatchFolders && (
+            <DatasetWatchFoldersButton
+              datasetName={datasetName}
+              projectID={projectID}
+              workerID={workerID}
+              defaultSourcePath={defaultWatchSourcePath}
+              label="Watch folders"
+              className="flex h-9 w-full items-center justify-start gap-2 rounded-[3px] border-0 bg-transparent px-2 text-left text-xs text-gray-300 hover:bg-gray-900"
+              onRefresh={() => refreshImageList(datasetName, { background: true })}
+            />
+          )}
+          <div className="my-1 h-px bg-gray-800" />
+          <button
+            type="button"
+            onClick={() => {
+              setDatasetMenuOpen(false);
+              void handleDeleteDataset();
+            }}
+            disabled={isDeletingDataset}
+            className="flex h-9 w-full items-center gap-2 rounded-[3px] px-2 text-left text-xs text-rose-300 hover:bg-rose-950/40"
+          >
+            {isDeletingDataset ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Delete dataset
+          </button>
+        </div>
+      )}
+
+      <MainContent className="!top-[69px] !h-[calc(100%-69px)] overflow-hidden !px-0 !pt-0 sm:!px-0">
         {datasetActionError && (
           <PageNotice tone="danger" title="Dataset action failed" className="mx-auto mt-4 max-w-xl">
             {datasetActionError}
@@ -915,7 +963,10 @@ export default function DatasetEditorPage({
                 </div>
               )}
               {unlockError && <div className="text-sm text-red-400">{unlockError}</div>}
-              <Button className="operator-button w-full border-cyan-800 bg-cyan-950/60 text-cyan-100" onClick={handleUnlock}>
+              <Button
+                className="operator-button w-full border-cyan-800 bg-cyan-950/60 text-cyan-100"
+                onClick={handleUnlock}
+              >
                 Unlock
               </Button>
             </div>
@@ -936,6 +987,8 @@ export default function DatasetEditorPage({
             items={plainStudioItems}
             isAutoCaptioning={isAutoCaptioning}
             liveCaptionRefresh={hasActiveDatasetWatchers}
+            captionAction={captionToolbarAction}
+            onUnsavedChange={handleStudioUnsavedChange}
             onRefresh={() => refreshImageList(datasetName)}
             onAddImages={() =>
               openImagesModal(datasetName, () => refreshImageList(datasetName), {
@@ -957,6 +1010,8 @@ export default function DatasetEditorPage({
             datasetPath={!isRemoteDataset ? datasetPath : null}
             items={encryptedStudioItems}
             isAutoCaptioning={isAutoCaptioning}
+            captionAction={captionToolbarAction}
+            onUnsavedChange={handleStudioUnsavedChange}
             encryptedKey={encryptedKey}
             encryptedRawKeyB64={encryptedRawKeyB64}
             rootCaption={encryptedCatalog.rootCaption ?? null}

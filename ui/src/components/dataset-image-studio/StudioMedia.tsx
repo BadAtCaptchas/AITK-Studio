@@ -112,7 +112,17 @@ function useElementSize<T extends HTMLElement>() {
   return { ref, size };
 }
 
-export function PlainThumb({ path, mediaUrl, alt }: { path: string; mediaUrl?: string | null; alt: string }) {
+export function PlainThumb({
+  path,
+  mediaUrl,
+  alt,
+  onNaturalSizeChange,
+}: {
+  path: string;
+  mediaUrl?: string | null;
+  alt: string;
+  onNaturalSizeChange?: (size: ImageSize) => void;
+}) {
   if (isTextCaption(path)) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gray-900 text-[10px] text-gray-400">
@@ -122,12 +132,26 @@ export function PlainThumb({ path, mediaUrl, alt }: { path: string; mediaUrl?: s
     );
   }
   if (isAudio(path)) {
-    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>;
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>
+    );
   }
   if (isVideo(path)) {
-    return <video src={getMediaUrl(mediaUrl || path)} className="h-full w-full object-cover" muted preload="metadata" />;
+    return (
+      <video src={getMediaUrl(mediaUrl || path)} className="h-full w-full object-cover" muted preload="metadata" />
+    );
   }
-  return <img src={getMediaUrl(mediaUrl || path)} alt={alt} loading="lazy" className="h-full w-full object-cover" />;
+  return (
+    <img
+      src={getMediaUrl(mediaUrl || path)}
+      alt={alt}
+      loading="lazy"
+      className="h-full w-full object-cover"
+      onLoad={event =>
+        onNaturalSizeChange?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+      }
+    />
+  );
 }
 
 export function EncryptedThumb({
@@ -136,32 +160,56 @@ export function EncryptedThumb({
   projectID,
   cryptoKey,
   item,
+  onNaturalSizeChange,
 }: {
   datasetName: string;
   workerID: string;
   projectID?: string | null;
   cryptoKey: CryptoKey | null | undefined;
   item: EncryptedDatasetItem;
+  onNaturalSizeChange?: (size: ImageSize) => void;
 }) {
   const shouldLoadMedia = item.mediaKind !== 'audio';
   const { url, status } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, item, shouldLoadMedia);
 
   if (item.mediaKind === 'audio') {
-    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>;
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>
+    );
   }
   if (status === 'locked') {
-    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">Locked</div>;
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">Locked</div>
+    );
   }
   if (status === 'error') {
-    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-red-300">Load failed</div>;
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-red-300">
+        Load failed
+      </div>
+    );
   }
   if (status === 'loading' || !url) {
-    return <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">Decrypting</div>;
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">
+        Decrypting
+      </div>
+    );
   }
   if (item.mediaKind === 'video') {
     return <video src={url} className="h-full w-full object-cover" muted preload="metadata" />;
   }
-  return <img src={url} alt={item.name} loading="lazy" className="h-full w-full object-cover" />;
+  return (
+    <img
+      src={url}
+      alt={item.name}
+      loading="lazy"
+      className="h-full w-full object-cover"
+      onLoad={event =>
+        onNaturalSizeChange?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+      }
+    />
+  );
 }
 
 export function StudioMedia({
@@ -176,6 +224,7 @@ export function StudioMedia({
   isSamplingColor,
   onSampleColor,
   onCancelColorSample,
+  onImageElementChange,
 }: {
   item: DatasetStudioItem;
   datasetName: string;
@@ -188,6 +237,7 @@ export function StudioMedia({
   isSamplingColor?: boolean;
   onSampleColor?: (color: string) => void;
   onCancelColorSample?: () => void;
+  onImageElementChange?: (image: HTMLImageElement | null) => void;
 }) {
   const encryptedItem = item.kind === 'encrypted' ? item.item : null;
   const { url, status } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, encryptedItem);
@@ -201,7 +251,10 @@ export function StudioMedia({
   useEffect(() => {
     setNaturalSize(null);
     onNaturalSizeChange?.(null);
-  }, [onNaturalSizeChange, src]);
+    onImageElementChange?.(null);
+  }, [onImageElementChange, onNaturalSizeChange, src]);
+
+  useEffect(() => () => onImageElementChange?.(null), [onImageElementChange]);
 
   const fittedSize = useMemo(() => {
     if (!naturalSize || frameSize.width <= 0 || frameSize.height <= 0) return null;
@@ -215,6 +268,18 @@ export function StudioMedia({
       height: Math.round(scaledHeight),
     };
   }, [frameSize.height, frameSize.width, naturalSize, zoom]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !fittedSize) return;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      frame.scrollLeft = Math.max(0, (frame.scrollWidth - frame.clientWidth) / 2);
+      frame.scrollTop = Math.max(0, (frame.scrollHeight - frame.clientHeight) / 2);
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [fittedSize, frameRef]);
 
   if (item.kind === 'encrypted' && status === 'locked') {
     return (
@@ -264,16 +329,22 @@ export function StudioMedia({
           <FileText className="mx-auto mb-3 h-10 w-10 text-blue-300" />
           <div className="text-sm font-semibold text-gray-100">Text Caption File</div>
           <div className="mt-2 break-all text-xs text-gray-500">{name}</div>
-          <p className="mt-3 text-xs text-gray-400">Edit the file contents in the caption panel. JSON-only box and layer tools are disabled.</p>
+          <p className="mt-3 text-xs text-gray-400">
+            Edit the file contents in the caption panel. JSON-only box and layer tools are disabled.
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div ref={frameRef} className="relative flex h-full w-full min-w-0 min-h-0 items-center justify-center overflow-auto p-3">
+    <div
+      ref={frameRef}
+      data-studio-media-frame="true"
+      className="relative flex h-full w-full min-w-0 min-h-0 overflow-auto p-3"
+    >
       <div
-        className={classNames('relative shrink-0 leading-[0]', {
+        className={classNames('relative m-auto shrink-0 leading-[0]', {
           'max-h-full max-w-full': !fittedSize || zoom <= 1,
         })}
         style={
@@ -299,6 +370,7 @@ export function StudioMedia({
                 const nextSize = { width: naturalWidth, height: naturalHeight };
                 setNaturalSize(nextSize);
                 onNaturalSizeChange?.(nextSize);
+                onImageElementChange?.(event.currentTarget);
               }
             }}
             className={classNames('block select-none object-contain', {

@@ -50,6 +50,14 @@ function navItemIsActive(pathname: string, basePath: string, suffix: string) {
   return pathname === `${basePath}${suffix}` || pathname.startsWith(`${basePath}${suffix}/`);
 }
 
+function isProjectDatasetDetailPath(pathname: string, basePath: string) {
+  const datasetPrefix = `${basePath}/datasets/`;
+  if (!pathname.startsWith(datasetPrefix)) return false;
+
+  const datasetPath = pathname.slice(datasetPrefix.length).replace(/\/$/, '');
+  return datasetPath.length > 0 && !datasetPath.includes('/');
+}
+
 export default function ProjectFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { identity, status, error, archived, projectID } = useProjectWorkspace();
@@ -61,6 +69,50 @@ export default function ProjectFrame({ children }: { children: ReactNode }) {
   const unhealthyReplicas = replicas.filter(replica => !['ready', 'syncing'].includes(replica.status));
   const homeLabel =
     project?.home_instance_name || replicas.find(replica => replica.role === 'home')?.instanceName || 'Local home';
+
+  const workspaceContent =
+    status === 'disabled' ? (
+      <div className="h-full overflow-auto p-4 sm:p-6">
+        <div className="mx-auto max-w-2xl">
+          <PageNotice
+            tone="warning"
+            title="Project spaces are disabled"
+            action={
+              <Link href="/settings" className="operator-button h-8 text-xs">
+                Open Settings
+              </Link>
+            }
+          >
+            Existing project data is preserved. Re-enable Projects to open this workspace.
+          </PageNotice>
+        </div>
+      </div>
+    ) : status === 'error' ? (
+      <div className="h-full overflow-auto p-4 sm:p-6">
+        <div className="mx-auto max-w-2xl">
+          <PageNotice tone="danger" title="Project could not be loaded">
+            {error || 'The project may no longer exist, or its storage is unavailable.'}
+          </PageNotice>
+          <Link href="/projects" className="operator-button mt-3 h-9">
+            Back to Projects
+          </Link>
+        </div>
+      </div>
+    ) : status === 'loading' && !identity ? (
+      <div className="flex h-full items-center justify-center text-sm text-gray-500">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading project workspace
+      </div>
+    ) : (
+      children
+    );
+
+  if (isProjectDatasetDetailPath(pathname, basePath)) {
+    return (
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-gray-950 text-gray-100">
+        <div className="relative min-h-0 flex-1 overflow-hidden">{workspaceContent}</div>
+      </section>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-gray-950 md:flex-row">
@@ -160,43 +212,7 @@ export default function ProjectFrame({ children }: { children: ReactNode }) {
             })}
           </nav>
         </header>
-
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          {status === 'disabled' ? (
-            <div className="h-full overflow-auto p-4 sm:p-6">
-              <div className="mx-auto max-w-2xl">
-                <PageNotice
-                  tone="warning"
-                  title="Project spaces are disabled"
-                  action={
-                    <Link href="/settings" className="operator-button h-8 text-xs">
-                      Open Settings
-                    </Link>
-                  }
-                >
-                  Existing project data is preserved. Re-enable Projects to open this workspace.
-                </PageNotice>
-              </div>
-            </div>
-          ) : status === 'error' ? (
-            <div className="h-full overflow-auto p-4 sm:p-6">
-              <div className="mx-auto max-w-2xl">
-                <PageNotice tone="danger" title="Project could not be loaded">
-                  {error || 'The project may no longer exist, or its storage is unavailable.'}
-                </PageNotice>
-                <Link href="/projects" className="operator-button mt-3 h-9">
-                  Back to Projects
-                </Link>
-              </div>
-            </div>
-          ) : status === 'loading' && !identity ? (
-            <div className="flex h-full items-center justify-center text-sm text-gray-500">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading project workspace
-            </div>
-          ) : (
-            children
-          )}
-        </div>
+        <div className="relative min-h-0 flex-1 overflow-hidden">{workspaceContent}</div>
       </section>
     </div>
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import classNames from 'classnames';
 import { Lock } from 'lucide-react';
 import {
@@ -56,6 +56,7 @@ export function AnnotationLayer({
   hiddenElementIndexes,
   lockedElementIndexes,
   imageSize,
+  presentation = 'default',
   onSelect,
   onCreate,
   onChangeBox,
@@ -67,6 +68,7 @@ export function AnnotationLayer({
   hiddenElementIndexes: Set<number>;
   lockedElementIndexes: Set<number>;
   imageSize?: ImageSize | null;
+  presentation?: 'default' | 'standalone';
   onSelect: (elementIndex: number | null) => void;
   onCreate: (type: IdeogramElementType, box: NormalizedBox) => void;
   onChangeBox: (elementIndex: number, box: NormalizedBox) => void;
@@ -77,6 +79,7 @@ export function AnnotationLayer({
   const [dragPreview, setDragPreview] = useState<{ elementIndex: number; box: NormalizedBox } | null>(null);
   const [newBoxPreview, setNewBoxPreview] = useState<NormalizedBox | null>(null);
   const [cursor, setCursor] = useState('default');
+  const [isPanning, setIsPanning] = useState(false);
   const [cycleToast, setCycleToast] = useState<{ x: number; y: number; count: number; index: number } | null>(null);
   const drawingType: IdeogramElementType | null = activeTool === 'box' ? 'obj' : activeTool === 'text' ? 'text' : null;
 
@@ -135,6 +138,11 @@ export function AnnotationLayer({
     };
   }, []);
 
+  const getPanFrame = useCallback(
+    () => layerRef.current?.closest<HTMLElement>('[data-studio-media-frame="true"]') ?? null,
+    [],
+  );
+
   const showCycleToast = useCallback(
     (clientX: number, clientY: number, hits: IdeogramBox[], selected: number | null) => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -153,6 +161,10 @@ export function AnnotationLayer({
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (activeTool === 'pan') {
+        setCursor(isPanning ? 'grabbing' : 'grab');
+        return;
+      }
       if (drawingType) {
         setCursor('crosshair');
         return;
@@ -174,7 +186,87 @@ export function AnnotationLayer({
       const target = chooseDragTarget(hits, selectedElementIndex, lockedElementIndexes);
       setCursor(target ? 'move' : hits.length > 0 ? 'pointer' : 'default');
     },
-    [drawingType, handleTolerance, hiddenElementIndexes, lockedElementIndexes, pointToNorm, selectedBox, selectedElementIndex, visibleBoxes],
+    [
+      activeTool,
+      drawingType,
+      handleTolerance,
+      hiddenElementIndexes,
+      isPanning,
+      lockedElementIndexes,
+      pointToNorm,
+      selectedBox,
+      selectedElementIndex,
+      visibleBoxes,
+    ],
+  );
+
+  const beginPan = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const frame = getPanFrame();
+      if (!frame) return;
+
+      event.currentTarget.focus({ preventScroll: true });
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startScrollLeft = frame.scrollLeft;
+      const startScrollTop = frame.scrollTop;
+      setIsPanning(true);
+
+      const onMove = (moveEvent: PointerEvent) => {
+        moveEvent.preventDefault();
+        frame.scrollLeft = startScrollLeft - (moveEvent.clientX - startX);
+        frame.scrollTop = startScrollTop - (moveEvent.clientY - startY);
+      };
+
+      const cleanup = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('keydown', onCancelKey, true);
+        setIsPanning(false);
+      };
+
+      const onUp = () => cleanup();
+
+      const onCancelKey = (keyEvent: KeyboardEvent) => {
+        if (keyEvent.key !== 'Escape') return;
+        keyEvent.preventDefault();
+        keyEvent.stopImmediatePropagation();
+        frame.scrollLeft = startScrollLeft;
+        frame.scrollTop = startScrollTop;
+        cleanup();
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('keydown', onCancelKey, true);
+    },
+    [getPanFrame],
+  );
+
+  const handlePanKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (activeTool !== 'pan') return;
+      const frame = getPanFrame();
+      if (!frame) return;
+
+      const distance = event.shiftKey ? 120 : 40;
+      let deltaX = 0;
+      let deltaY = 0;
+      if (event.key === 'ArrowLeft') deltaX = -distance;
+      else if (event.key === 'ArrowRight') deltaX = distance;
+      else if (event.key === 'ArrowUp') deltaY = -distance;
+      else if (event.key === 'ArrowDown') deltaY = distance;
+      else return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      frame.scrollLeft += deltaX;
+      frame.scrollTop += deltaY;
+    },
+    [activeTool, getPanFrame],
   );
 
   const beginDraw = useCallback(
@@ -230,6 +322,10 @@ export function AnnotationLayer({
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
+      if (activeTool === 'pan') {
+        beginPan(event);
+        return;
+      }
       if (drawingType) {
         beginDraw(event, drawingType);
         return;
@@ -315,6 +411,8 @@ export function AnnotationLayer({
     },
     [
       beginDraw,
+      beginPan,
+      activeTool,
       drawingType,
       handleTolerance,
       hiddenElementIndexes,
@@ -335,8 +433,13 @@ export function AnnotationLayer({
       ref={layerRef}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
+      onKeyDown={handlePanKeyDown}
+      tabIndex={activeTool === 'pan' ? 0 : undefined}
+      aria-label={activeTool === 'pan' ? 'Pan media canvas' : undefined}
+      aria-keyshortcuts={activeTool === 'pan' ? 'ArrowUp ArrowDown ArrowLeft ArrowRight' : undefined}
+      title={activeTool === 'pan' ? 'Drag or use arrow keys to pan the media' : undefined}
       className="absolute inset-0 touch-none"
-      style={{ cursor: drawingType ? 'crosshair' : cursor }}
+      style={{ cursor: activeTool === 'pan' ? (isPanning ? 'grabbing' : 'grab') : drawingType ? 'crosshair' : cursor }}
     >
       {orderedBoxes.map(box => {
         const sourceIndex = boxes.findIndex(candidate => candidate.elementIndex === box.elementIndex);
@@ -363,7 +466,10 @@ export function AnnotationLayer({
           >
             <span
               title={box.label}
-              className="absolute left-0 top-0 flex max-w-[12rem] items-center gap-1 truncate px-1 py-0.5 text-[10px] font-semibold leading-none text-gray-950"
+              className={classNames(
+                'absolute left-0 top-0 max-w-[12rem] items-center gap-1 truncate px-1 py-0.5 text-[10px] font-semibold leading-none text-gray-950',
+                presentation === 'standalone' ? 'hidden' : 'flex',
+              )}
               style={{ backgroundColor: color }}
             >
               {locked && <Lock className="h-2.5 w-2.5" />}

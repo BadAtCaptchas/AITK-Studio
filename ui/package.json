@@ -42,6 +42,8 @@
     "test:hf-dataset-import": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/hfDatasetImport.test.mjs",
     "test:annotation-geometry": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/annotationGeometry.test.mjs",
     "test:ideogram-caption": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/ideogramCaption.test.mjs",
+    "test:image-palette": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/imagePalette.test.mjs",
+    "test:caption-json-workspace": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/captionJsonWorkspace.test.mjs",
     "test:recaption": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/recaptionPersistence.test.mjs",
     "test:ideogram-workflow": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/ideogramWorkflow.test.mjs",
     "test:job-datasets": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/jobDatasetDefaults.test.mjs scripts/remoteDatasetRefs.test.mjs scripts/remoteDatasetSync.test.mjs scripts/remoteStartProgress.test.mjs scripts/remoteClientUpload.test.mjs scripts/remoteJobMissing.test.mjs",

@@ -400,6 +400,16 @@ class Krea2Model(BaseModel):
         # tell the model to invert assistant on inference since we want remove lora effects
         self.invert_assistant_lora = True
 
+    def get_quantization_exclude_modules(self):
+        return [
+            "first",
+            "tmlp*",
+            "tproj*",
+            "txtmlp*",
+            "txtfusion.projector",
+            "last*",
+        ]
+
     def load_model(self):
         dtype = self.torch_dtype
         self.print_and_status_update("Loading Krea 2 model")

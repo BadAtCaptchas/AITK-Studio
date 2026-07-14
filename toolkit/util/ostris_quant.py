@@ -164,7 +164,20 @@ def _register_builtin_backends() -> None:
             )
 
         for name in CONVROT_QTYPES:
-            bits = 4 if name == "convrot4" else 8
+            if name in {"convrot4", "convrotcomfyw4a4"}:
+                bits = 4
+            elif name == "convrotbitnet":
+                bits = 2
+            elif name.startswith("convrotint"):
+                bits = int(name.removeprefix("convrotint"))
+            else:
+                bits = 8
+            extra_capabilities = (
+                "quantization_aware_training",
+                "packed_save_load",
+            )
+            if name == "convrotcomfyw4a4":
+                extra_capabilities += ("comfyui_export",)
             register_ostris_backend(
                 OstrisBackendMetadata(
                     name=name,
@@ -172,17 +185,18 @@ def _register_builtin_backends() -> None:
                     bits=bits,
                     status="experimental",
                     capabilities=common_capabilities
-                    + ("torch_fallback", "triton_optional"),
+                    + ("torch_fallback", "triton_optional")
+                    + extra_capabilities,
                     supported_devices=("cpu", "cuda"),
                     shape_notes=(
-                        "nn.Linear only; convrot4 requires in/out divisible by 16; "
-                        "convrot8 requires in divisible by 16 and out divisible by 8; "
-                        "both require a power-of-four rotation block of at least 16"
+                        "nn.Linear only; FP4 requires in/out divisible by 16; "
+                        "integer backends require in divisible by 16 and out by 8; "
+                        "Comfy W4A4 additionally requires in divisible by 256"
                     ),
                     device_notes=(
-                        "convrot4 accelerates with FP4 on Blackwell; convrot8 uses "
-                        "runtime-probed INT8 matmul; unsupported devices use bounded "
-                        "dequantized fallbacks"
+                        "convrot4 accelerates with FP4 on Blackwell; integer backends "
+                        "use runtime-probed INT8 matmul; unsupported devices use "
+                        "bounded dequantized fallbacks"
                     ),
                 ),
                 lambda options, name=name: get_convrot_quantizer(
@@ -319,7 +333,11 @@ class OstrisLinear(torch.nn.Linear):
         return weight
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if torch.is_grad_enabled() and x.requires_grad:
+        if (
+            torch.is_grad_enabled()
+            and x.requires_grad
+            and not getattr(self.ostris_quantizer, "handles_autograd", False)
+        ):
             return _FrozenOstrisLinearFunction.apply(x, self)
         return self.ostris_quantizer.forward(self, x)
 
@@ -355,8 +373,171 @@ def get_ostris_quantizer(
     )
     quantizer = factory(options)
     quantizer.backend_name = qtype
+    # Upstream's packed-layer helpers historically called this field qtype.
+    # Keep both names so old packed saves and the local registry interoperate.
+    quantizer.qtype = qtype
     quantizer.backend_options = options
     return quantizer
+
+
+QUANT_LAYERS_METADATA_KEY = "aitk_quantization"
+_PACKED_LAYER_ATTRIBUTES = (
+    "orbit_bits",
+    "orbit_block",
+    "orbit_kernel",
+    "orbit_max_workspace_mb",
+    "orbit_packed_layout",
+    "ovq_block",
+    "ovq_group",
+    "cr_rot_size",
+    "cr8_rot_size",
+    "crn_bits",
+    "crn_rot_size",
+    "convrot_kernel",
+    "convrot_max_workspace_mb",
+    "convrot_packed_layout",
+)
+
+
+@torch.no_grad()
+def save_quantized_layers(
+    modules: Dict[str, "OstrisLinear"],
+    file_path: str,
+    metadata: Optional[Dict[str, str]] = None,
+    extra_tensors: Optional[Dict[str, torch.Tensor]] = None,
+) -> None:
+    """Save packed backend buffers for a set of named linear layers."""
+    import json
+
+    from safetensors.torch import save_file
+
+    quant_map: Dict[str, object] = {}
+    state_dict: Dict[str, torch.Tensor] = {}
+    for name, module in modules.items():
+        if not isinstance(module, OstrisLinear):
+            raise TypeError(f"{name!r} is not an OstrisLinear")
+        qtype = getattr(module, "ostris_backend_name", None) or getattr(
+            module.ostris_quantizer, "backend_name", None
+        )
+        if not isinstance(qtype, str) or not is_ostris_qtype(qtype):
+            raise ValueError(f"Cannot identify the packed backend for module {name!r}")
+        entry = {
+            "qtype": qtype,
+            "dtype": str(module.ostris_orig_dtype).removeprefix("torch."),
+            "buffers": [],
+            "attrs": {},
+        }
+        if module.bias is not None:
+            state_dict[f"{name}.bias"] = module.bias
+        for buffer_name, buffer in module._buffers.items():
+            if buffer is None:
+                continue
+            state_dict[f"{name}.{buffer_name}"] = buffer
+            entry["buffers"].append(buffer_name)
+        for attribute in _PACKED_LAYER_ATTRIBUTES:
+            value = getattr(module, attribute, None)
+            if isinstance(value, (bool, int, float, str)):
+                entry["attrs"][attribute] = value
+        quant_map[name] = entry
+
+    if extra_tensors:
+        state_dict.update(extra_tensors)
+    cpu_state = {
+        key: value.detach().to("cpu", copy=True).contiguous()
+        for key, value in state_dict.items()
+    }
+    file_metadata = dict(metadata or {})
+    file_metadata[QUANT_LAYERS_METADATA_KEY] = json.dumps(
+        {"modules": quant_map, "layers_only": True}, separators=(",", ":")
+    )
+    save_file(cpu_state, file_path, metadata=file_metadata)
+
+
+@torch.no_grad()
+def load_quantized_layers(root: torch.nn.Module, file_path: str) -> int:
+    """Restore a packed-layer file without materializing dense weights."""
+    import json
+
+    from safetensors import safe_open
+    from safetensors.torch import load_file
+
+    with safe_open(file_path, framework="pt", device="cpu") as handle:
+        metadata = handle.metadata() or {}
+    payload = metadata.get(QUANT_LAYERS_METADATA_KEY)
+    if payload is None:
+        raise ValueError(f"{file_path} has no quantized-layer metadata")
+    manifest = json.loads(payload)
+    quant_map = manifest.get("modules")
+    if not isinstance(quant_map, dict):
+        raise ValueError(f"{file_path} has invalid quantized-layer metadata")
+    state_dict = load_file(file_path, device="cpu")
+
+    restored = 0
+    for name, raw_entry in quant_map.items():
+        if not isinstance(name, str) or not isinstance(raw_entry, dict):
+            raise ValueError(f"{file_path} has an invalid module entry")
+        module = root.get_submodule(name)
+        if not isinstance(module, torch.nn.Linear):
+            raise TypeError(f"target module {name!r} is not an nn.Linear")
+        qtype = raw_entry.get("qtype")
+        attrs = raw_entry.get("attrs", {})
+        if not isinstance(qtype, str) or not isinstance(attrs, dict):
+            raise ValueError(f"{file_path} has invalid metadata for {name!r}")
+        kernel = attrs.get("convrot_kernel", attrs.get("orbit_kernel", "auto"))
+        workspace = attrs.get(
+            "convrot_max_workspace_mb",
+            attrs.get("orbit_max_workspace_mb", 64),
+        )
+        quantizer = get_ostris_quantizer(
+            qtype, kernel=kernel, max_workspace_mb=workspace
+        )
+        if quantizer is None:
+            raise ValueError(f"Unknown qtype {qtype!r} in {file_path}")
+
+        if isinstance(module, OstrisLinear):
+            device = module.quantized_device
+            module._buffers.clear()
+        else:
+            weight = module._parameters.get("weight")
+            device = weight.device if weight is not None else torch.device("cpu")
+            module._parameters.pop("weight", None)
+            module.__class__ = OstrisLinear
+        dtype_name = raw_entry.get("dtype")
+        original_dtype = getattr(torch, dtype_name, None)
+        if not isinstance(original_dtype, torch.dtype) or not original_dtype.is_floating_point:
+            raise ValueError(f"unsupported original dtype {dtype_name!r} for {name!r}")
+        module.ostris_orig_dtype = original_dtype
+
+        buffer_names = raw_entry.get("buffers")
+        if not isinstance(buffer_names, list) or not all(
+            isinstance(value, str) for value in buffer_names
+        ):
+            raise ValueError(f"invalid buffer list for {name!r}")
+        for buffer_name in buffer_names:
+            key = f"{name}.{buffer_name}"
+            if key not in state_dict:
+                raise ValueError(f"missing packed buffer {key!r}")
+            module.register_buffer(
+                buffer_name,
+                state_dict[key].to(device=device),
+                persistent=False,
+            )
+        for attribute, value in attrs.items():
+            if attribute in _PACKED_LAYER_ATTRIBUTES and isinstance(
+                value, (bool, int, float, str)
+            ):
+                setattr(module, attribute, value)
+        module.ostris_quantizer = quantizer
+        module.ostris_backend_name = qtype
+        bias_key = f"{name}.bias"
+        if bias_key in state_dict:
+            if module.bias is None:
+                raise ValueError(f"packed layer {name!r} has a bias but the target does not")
+            module.bias.data.copy_(state_dict[bias_key].to(device, module.bias.dtype))
+        if module.bias is not None:
+            module.bias.requires_grad_(False)
+        restored += 1
+    return restored
 
 
 def prepare_linear_for_ostris_cache(

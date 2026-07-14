@@ -136,6 +136,15 @@ class ZImageModel(BaseModel):
         self.is_single_file = False
         self.single_file_extras_repo = SINGLE_FILE_EXTRAS_REPO
 
+    def get_quantization_exclude_modules(self):
+        return [
+            "t_embedder*",
+            "cap_embedder*",
+            "all_x_embedder*",
+            "all_final_layer*",
+            "siglip_embedder*",
+        ]
+
     # static method to get the noise scheduler
     @staticmethod
     def get_train_scheduler():

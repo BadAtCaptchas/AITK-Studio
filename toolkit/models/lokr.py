@@ -661,7 +661,17 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         return h * self.scale * scale * scalar
 
     def bypass_forward(self, x, scale=1, *args, **kwargs):
-        base = self._call_org_forward(x, *args, **kwargs)
+        if self.base_is_ostris_quantized or getattr(
+            self.org_module[0], "is_ostris_quantized", False
+        ):
+            # Keep the packed base call opaque to Dynamo. ConvRot owns its custom
+            # compile-safe kernels; the compact factorized LoKr delta remains in
+            # the surrounding graph.
+            base = torch._dynamo.disable(self._call_org_forward)(
+                x, *args, **kwargs
+            )
+        else:
+            base = self._call_org_forward(x, *args, **kwargs)
         if isinstance(base, (QTensor, QBytesTensor)):
             base = base.dequantize()
         lora_x = x.dequantize() if isinstance(x, (QTensor, QBytesTensor)) else x

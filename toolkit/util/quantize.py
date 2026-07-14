@@ -415,7 +415,13 @@ def _ostris_storage_bytes(module: OstrisLinear) -> tuple[int, int]:
     for name, buffer in module._buffers.items():
         if not isinstance(buffer, torch.Tensor):
             continue
-        if name in ("orbit_packed", "ovq_packed", "cr_qdata", "cr8_qdata"):
+        if name in (
+            "orbit_packed",
+            "ovq_packed",
+            "cr_qdata",
+            "cr8_qdata",
+            "crn_qdata",
+        ):
             compressed += _tensor_bytes(buffer)
         else:
             metadata += _tensor_bytes(buffer)
@@ -727,7 +733,9 @@ def quantize_component_in_stages(
             name_prefix=absolute_name,
         )
         freeze(block)
-        block.to("cpu", non_blocking=True)
+        # Blocking is intentional: asynchronous device-to-host copies can leave
+        # pinned allocations retained across every staged block.
+        block.to("cpu", non_blocking=False)
         aggregate.merge(block_report)
         processed_prefixes.append(absolute_name)
 
@@ -773,7 +781,7 @@ def quantize_component_in_stages(
                 name_prefix=absolute_name,
             )
             freeze(module)
-            module.to("cpu", non_blocking=True)
+            module.to("cpu", non_blocking=False)
             aggregate.merge(module_report)
     else:
         # Quanto/TorchAO retain their established recursive CPU behavior for

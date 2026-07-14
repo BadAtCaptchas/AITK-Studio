@@ -32,6 +32,15 @@ class TrainingMonitorMetricsTest(unittest.TestCase):
         self.assertIn("train/gpu_mem_reserved_gb", source)
         self.assertIn("train/loss_unclipped", source)
 
+    def test_sparse_loss_series_and_log_ranges_are_guarded(self):
+        source = JOB_LOSS_GRAPH_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("const sparse = values.size < xs.length", source)
+        self.assertIn("spanGaps: sparse", source)
+        self.assertIn("points: sparse ? { size: 6 }", source)
+        self.assertIn("built.sparseFlags", source)
+        self.assertIn("uPlot.rangeLog(min, max, 10, false)", source)
+
 
 if __name__ == "__main__":
     unittest.main()

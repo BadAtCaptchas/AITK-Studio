@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 load_dotenv()
 default_hf_transfer = "0" if os.name == "nt" else "1"
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = os.getenv("HF_HUB_ENABLE_HF_TRANSFER", default_hf_transfer)
+# Xet can hang indefinitely mid-download; retain an explicit user override.
+os.environ["HF_HUB_DISABLE_XET"] = os.getenv("HF_HUB_DISABLE_XET", "1")
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 seed = None
 if "SEED" in os.environ:

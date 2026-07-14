@@ -14,6 +14,7 @@ from toolkit.util.quantize import quantize, get_qtype
 from .BaseCaptioner import BaseCaptioner
 import transformers
 import logging
+import traceback
 import warnings
 
 transformers.logging.set_verbosity_error()
@@ -115,4 +116,5 @@ class Qwen3VLCaptioner(BaseCaptioner):
             return self.normalize_caption_output(file_path, output_text[0], image_size=img.size)
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
+            traceback.print_exc()
             return None

@@ -2602,6 +2602,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if user_set_cache_limit:
                     torch._dynamo.config.cache_size_limit = cache_size_limit
                 torch._dynamo.config.suppress_errors = False
+                # Torch 2.9's coalescing analysis can assert on dynamic symbolic
+                # shapes before it reaches the ConvRot custom-op boundary.
+                if hasattr(
+                    torch._inductor.config.triton, "coalesce_tiling_analysis"
+                ):
+                    torch._inductor.config.triton.coalesce_tiling_analysis = False
 
                 compile_mode = getattr(self.model_config, 'compile_mode', 'default')
                 compile_dynamic = getattr(self.model_config, 'compile_dynamic', True)

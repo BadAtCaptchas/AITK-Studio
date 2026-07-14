@@ -849,7 +849,13 @@ def _is_orbit4_qtype(value: Any) -> bool:
 
 
 def _is_convrot_qtype(value: Any) -> bool:
-    return str(value or '').split('|', 1)[0].lower() in {'convrot4', 'convrot8'}
+    qtype = str(value or '').split('|', 1)[0].lower()
+    return qtype in {
+        'convrot4',
+        'convrot8',
+        'convrotbitnet',
+        'convrotcomfyw4a4',
+    } or qtype.startswith('convrotint')
 
 
 def apply_orbit4_low_vram_training_defaults(

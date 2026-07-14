@@ -239,7 +239,19 @@ class OrbitModelConfigTest(unittest.TestCase):
                 )
 
     def test_convrot_accepts_lora_and_constrained_lokr(self):
-        for qtype in ("convrot4", "convrot8"):
+        for qtype in (
+            "convrot4",
+            "convrot8",
+            "convrotint8",
+            "convrotint7",
+            "convrotint6",
+            "convrotint5",
+            "convrotint4",
+            "convrotint3",
+            "convrotint2",
+            "convrotbitnet",
+            "convrotcomfyw4a4",
+        ):
             for network_type in ("lora", "lokr"):
                 with self.subTest(qtype=qtype, network_type=network_type):
                     validate_configs(

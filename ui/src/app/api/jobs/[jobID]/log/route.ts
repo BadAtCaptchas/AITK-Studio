@@ -12,7 +12,7 @@ import {
   remoteJson,
 } from '@/server/remoteClient';
 
-const MAX_LOG_BYTES = 200 * 1024;
+const MAX_LOG_BYTES = 5 * 1024 * 1024;
 const LAUNCH_LOG_FILE = 'launch.log';
 
 async function pathExists(filePath: string) {

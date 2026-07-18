@@ -138,6 +138,7 @@ export type PortableProjectJob = {
   job_type: string;
   job_ref: string | null;
   save_now: boolean;
+  sample_now: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -524,6 +525,10 @@ export function parsePortableProjectJob(value: unknown): PortableProjectJob {
     job_type: asBoundedString(job.job_type, 'job type', 64, false),
     job_ref: asNullableBoundedString(job.job_ref, 'job ref', 4_096),
     save_now: asBoolean(job.save_now, 'job save-now flag'),
+    sample_now:
+      job.sample_now === undefined
+        ? false
+        : asBoolean(job.sample_now, 'job sample-now flag'),
     created_at: asIsoDate(job.created_at, 'created date'),
     updated_at: asIsoDate(job.updated_at, 'updated date'),
   };

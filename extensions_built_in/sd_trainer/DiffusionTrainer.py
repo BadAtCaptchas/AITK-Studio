@@ -151,6 +151,31 @@ class DiffusionTrainer(SDTrainer):
         if self.progress_bar is not None:
             self.progress_bar.unpause()
 
+    def maybe_sample(self):
+        if not self.is_ui_trainer:
+            return
+        if not self.ui_job_store.consume_sample_request():
+            return
+
+        if self.progress_bar is not None:
+            self.progress_bar.pause()
+        try:
+            print_acc(f"\nSampling at step {self.step_num}")
+            if self.optimizer is not None:
+                self.optimizer.zero_grad()
+            if self.train_config.free_u:
+                self.sd.pipeline.disable_freeu()
+            self.sample(self.step_num)
+        finally:
+            try:
+                if self.train_config.unload_text_encoder:
+                    self.sd.text_encoder_to('cpu')
+                self.ensure_params_requires_grad()
+                flush()
+            finally:
+                if self.progress_bar is not None:
+                    self.progress_bar.unpause()
+
     async def _update_key(self, key, value):
         if not self.accelerator.is_main_process:
             return
@@ -239,6 +264,7 @@ class DiffusionTrainer(SDTrainer):
             self.update_step()
             self.maybe_stop()
             self.maybe_save()
+            self.maybe_sample()
 
     def hook_before_model_load(self):
         super().hook_before_model_load()

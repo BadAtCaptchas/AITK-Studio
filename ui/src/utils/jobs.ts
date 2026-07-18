@@ -413,6 +413,11 @@ export const importTrainingJob = (
   })();
 };
 
+export const sampleJobNow = async (jobID: string): Promise<void> => {
+  const response = await apiClient.post(`/api/jobs/${jobID}/sample_now`);
+  console.log('Job set to sample on next step:', response.data);
+};
+
 export const getRemoteStartProgress = (jobID: string, startID: string) => {
   return apiClient
     .get(`/api/jobs/${jobID}/start-progress/${startID}`)

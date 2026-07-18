@@ -56,7 +56,15 @@ def attention(
     scale: float | None = None,
     gqa: bool = False,
 ) -> Tensor:
-    with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+    with sdpa_kernel(
+        [
+            SDPBackend.CUDNN_ATTENTION,
+            SDPBackend.FLASH_ATTENTION,
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.MATH,
+        ],
+        set_priority=True,
+    ):
         x = F.scaled_dot_product_attention(
             q, k, v, attn_mask=mask, scale=scale, enable_gqa=gqa
         )

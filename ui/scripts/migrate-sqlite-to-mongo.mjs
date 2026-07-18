@@ -69,6 +69,7 @@ function normalizeJob(row) {
     job_type: String(row.job_type || 'train'),
     job_ref: row.job_ref == null ? null : String(row.job_ref),
     save_now: Boolean(row.save_now),
+    sample_now: Boolean(row.sample_now),
   };
 }
 

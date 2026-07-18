@@ -57,6 +57,7 @@ function summarizeJob(job: Job) {
     job_type: job.job_type,
     job_ref: job.job_ref,
     save_now: job.save_now,
+    sample_now: job.sample_now,
   };
 }
 

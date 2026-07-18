@@ -182,6 +182,7 @@ test('restart from scratch resets progress fields before starting', async () => 
     stop: false,
     return_to_queue: false,
     save_now: false,
+    sample_now: false,
     status: 'queued',
     info: 'Restarting job from scratch...',
   });

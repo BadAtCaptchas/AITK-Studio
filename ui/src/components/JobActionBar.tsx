@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save, RefreshCcw } from 'lucide-react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save, RefreshCcw, Image } from 'lucide-react';
 import {
   Button,
   Dialog,
@@ -28,6 +28,7 @@ import {
   downloadServerFile,
   downloadJobModelReferences,
   saveJobNow,
+  sampleJobNow,
   retryRemoteCaptionResult,
   type TrainingJobCheckpointExportMode,
   type TrainingJobExportProgress,
@@ -458,6 +459,16 @@ export default function JobActionBar({
     }
   };
 
+  const handleSampleNextStep = async () => {
+    try {
+      await sampleJobNow(job.id);
+      onRefresh?.();
+    } catch (error) {
+      console.error('Error requesting sample:', error);
+      alert(getApiErrorMessage(error, 'Failed to request a sample.'));
+    }
+  };
+
   const handleRestartFromScratch = () => {
     if (!canRestartFromScratch) return;
 
@@ -658,6 +669,17 @@ export default function JobActionBar({
               >
                 <Save className="w-4 h-4" />
                 Save Next Step
+              </div>
+            </MenuItem>
+          )}
+          {job.job_type === 'train' && canStop && (
+            <MenuItem>
+              <div
+                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
+                onClick={() => void handleSampleNextStep()}
+              >
+                <Image className="w-4 h-4" />
+                Sample Next Step
               </div>
             </MenuItem>
           )}

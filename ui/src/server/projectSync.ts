@@ -380,6 +380,7 @@ async function buildPortableProjectJobSnapshot(
         job_type: job.job_type,
         job_ref: job.job_ref,
         save_now: job.save_now,
+        sample_now: job.sample_now,
         created_at: portableDate(job.created_at),
         updated_at: portableDate(job.updated_at),
       } satisfies PortableProjectJob;

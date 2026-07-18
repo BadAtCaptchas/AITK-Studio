@@ -6,6 +6,7 @@ type AdditionalSections =
     | 'caption.caption_prompt'
     | 'caption.max_res'
     | 'caption.max_new_tokens'
+    | 'caption.thinking'
     | 'caption.fixed_caption'
     | 'caption.system_prompt'
     | 'caption.remote_ollama_worker_id';
@@ -97,12 +98,16 @@ export const captionerTypes: CaptionOption[] = [
             { value: 'Qwen/Qwen3-VL-2B-Instruct', label: 'Qwen/Qwen3-VL-2B-Instruct' },
             { value: 'Qwen/Qwen3-VL-4B-Instruct', label: 'Qwen/Qwen3-VL-4B-Instruct' },
             { value: 'Qwen/Qwen3-VL-8B-Instruct', label: 'Qwen/Qwen3-VL-8B-Instruct' },
+            { value: 'huihui-ai/Huihui-Qwen3-VL-8B-Instruct-abliterated', label: 'huihui-ai/Huihui-Qwen3-VL-8B-Instruct-abliterated' },
             { value: 'Qwen/Qwen3-VL-30B-A3B-Instruct', label: 'Qwen/Qwen3-VL-30B-A3B-Instruct' },
+            { value: 'Qwen/Qwen3.6-27B', label: 'Qwen/Qwen3.6-27B' },
+            { value: 'huihui-ai/Huihui-Qwen3.6-27B-abliterated', label: 'huihui-ai/Huihui-Qwen3.6-27B-abliterated' },
         ],
         additionalSections: [
             'caption.caption_prompt',
             'caption.max_res',
             'caption.max_new_tokens',
+            'caption.thinking',
         ],
     },
     {

@@ -55,6 +55,7 @@ export type JobCreateInput = {
   job_type?: string;
   job_ref?: string | null;
   save_now?: boolean;
+  sample_now?: boolean;
 };
 
 export type JobUpdateInput = Partial<Omit<JobCreateInput, 'id'>>;
@@ -358,6 +359,7 @@ function normalizeJob(raw: any): Job | null {
     job_type: String(raw.job_type ?? 'train'),
     job_ref: raw.job_ref == null ? null : String(raw.job_ref),
     save_now: Boolean(raw.save_now),
+    sample_now: Boolean(raw.sample_now),
   };
 }
 
@@ -1761,6 +1763,7 @@ export const db = {
           job_type: input.job_type ?? 'train',
           job_ref: input.job_ref ?? null,
           save_now: input.save_now ?? false,
+          sample_now: input.sample_now ?? false,
         }) as Job;
 
         try {

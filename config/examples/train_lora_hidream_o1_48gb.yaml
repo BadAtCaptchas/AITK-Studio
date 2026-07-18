@@ -78,6 +78,7 @@ config:
       sample:
         sampler: "flowmatch"
         sample_every: 500
+        sample_start_step: 0
         width: 1024
         height: 1024
         prompts:

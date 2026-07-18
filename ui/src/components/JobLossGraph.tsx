@@ -4,6 +4,7 @@ import type { Job, GpuInfo } from '@/types';
 import useJobMetrics, { type MetricPoint } from '@/hooks/useJobMetrics';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { getTotalSteps } from '@/utils/jobs';
+import { assignSeriesColors } from '@/utils/seriesColors';
 import {
   Activity,
   Clock,
@@ -150,20 +151,6 @@ function cleanLabel(key: string) {
 function settingsStorageKey(): string | null {
   if (typeof window === 'undefined') return null;
   return `jobLossGraph:${window.location.pathname}${window.location.search}`;
-}
-
-function hashToIndex(str: string, mod: number) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h) % mod;
-}
-
-function lossColorForKey(key: string) {
-  if (key === 'loss' || key === 'loss/loss') return LOSS_COLOR;
-  return LOSS_PALETTE[hashToIndex(key, LOSS_PALETTE.length)];
 }
 
 function colorWithAlpha(rgba: string, alpha: number) {
@@ -431,6 +418,7 @@ function buildChartData({
   chartTab,
   series,
   lossKeys,
+  colorByLossKey,
   learningRateKeys,
   useLogScale,
   showRaw,
@@ -442,6 +430,7 @@ function buildChartData({
   chartTab: ChartTab;
   series: Record<string, MetricPoint[]>;
   lossKeys: string[];
+  colorByLossKey: Record<string, string>;
   learningRateKeys: string[];
   useLogScale: boolean;
   showRaw: boolean;
@@ -471,7 +460,7 @@ function buildChartData({
     data.push(xs);
 
     for (const key of lossKeys) {
-      const color = lossColorForKey(key);
+      const color = colorByLossKey[key] ?? LOSS_COLOR;
       const values = new Map<number, number>();
       for (const point of sortedNumericPoints(series[key])) {
         if (!xsSet.has(point.step)) continue;
@@ -528,10 +517,10 @@ function buildChartData({
     const xsSet = new Set(xs);
     data.push(xs);
 
-    for (const key of learningRateKeys) {
+    for (const [index, key] of learningRateKeys.entries()) {
       const points = sortedNumericPoints(series[key]).filter(point => xsSet.has(point.step));
       const values = new Map(points.map(point => [point.step, point.value as number]));
-      const color = key === learningRateKeys[0] ? LR_COLOR : lossColorForKey(key);
+      const color = index === 0 ? LR_COLOR : LOSS_PALETTE[index % LOSS_PALETTE.length];
       data.push(xs.map(step => values.get(step) ?? null));
       seriesConfigs.push({
         label: cleanLabel(key),
@@ -753,6 +742,10 @@ export default function JobLossGraph({ job }: Props) {
     () => lossKeys.filter(key => enabledLoss[key] !== false && (series[key]?.length ?? 0) > 0),
     [enabledLoss, lossKeys, series],
   );
+  const colorByLossKey = useMemo(
+    () => assignSeriesColors(lossKeys, LOSS_PALETTE),
+    [lossKeys],
+  );
   const learningRateKeys = useMemo(
     () => Object.keys(series).filter(key => isLearningRateKey(key) && (series[key]?.length ?? 0) > 0).sort(),
     [series],
@@ -833,6 +826,7 @@ export default function JobLossGraph({ job }: Props) {
         chartTab,
         series,
         lossKeys: activeLossKeys,
+        colorByLossKey,
         learningRateKeys,
         useLogScale,
         showRaw,
@@ -844,6 +838,7 @@ export default function JobLossGraph({ job }: Props) {
     [
       activeLossKeys,
       chartTab,
+      colorByLossKey,
       clipOutliers,
       deferredSmoothing,
       learningRateKeys,
@@ -1316,7 +1311,7 @@ export default function JobLossGraph({ job }: Props) {
                     >
                       <span
                         className="inline-block h-2 w-2 rounded-full mr-1.5"
-                        style={{ background: lossColorForKey(key) }}
+                        style={{ background: colorByLossKey[key] ?? LOSS_COLOR }}
                       />
                       {cleanLabel(key)}
                     </button>

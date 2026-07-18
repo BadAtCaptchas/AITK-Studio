@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { apiClient } from '@/utils/api';
-
-const clean = (text: string): string => {
-  // remove \x1B[A\x1B[A
-  text = text.replace(/\x1B\[A/g, '');
-  return text;
-};
+import { TerminalEmulator } from '@/utils/terminalEmulator';
 
 type JobLogResponse = {
   log: string;
@@ -31,6 +26,10 @@ function parseJobLogResponse(data: unknown): JobLogResponse {
 
 export default function useJobLog(jobID: string, reloadInterval: null | number = null) {
   const [log, setLog] = useState<string>('');
+  const terminalRef = useRef<TerminalEmulator | null>(null);
+  if (terminalRef.current === null) {
+    terminalRef.current = new TerminalEmulator();
+  }
   const didInitialLoadRef = useRef(false);
   const offsetRef = useRef<number | null>(null);
   const isRefreshingRef = useRef(false);
@@ -54,12 +53,13 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
         if (activeJobIDRef.current !== requestJobID) return;
         const payload = parseJobLogResponse(data);
         offsetRef.current = payload.offset;
-        const cleanLog = clean(payload.log);
+        const terminal = terminalRef.current;
+        if (!terminal) return;
         if (payload.reset) {
-          setLog(cleanLog);
-        } else if (cleanLog) {
-          setLog(previous => previous + cleanLog);
+          terminal.reset();
         }
+        terminal.write(payload.log);
+        setLog(terminal.toString());
         setStatus('success');
         didInitialLoadRef.current = true;
       })
@@ -80,6 +80,7 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
     isRefreshingRef.current = false;
     offsetRef.current = null;
     didInitialLoadRef.current = false;
+    terminalRef.current?.reset();
     setLog('');
     refresh();
 
@@ -92,5 +93,5 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
     }
   }, [jobID, reloadInterval, refresh]);
 
-  return { log, setLog, status, refresh };
+  return { log, status, refresh };
 }

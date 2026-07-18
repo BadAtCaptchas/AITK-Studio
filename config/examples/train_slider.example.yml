@@ -90,6 +90,7 @@ config:
         sampler: "ddpm"
         # sample every this many steps
         sample_every: 20
+        sample_start_step: 0
         # image size
         width: 512
         height: 512

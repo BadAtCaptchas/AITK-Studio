@@ -1260,6 +1260,9 @@ class ConvRotInt8Quantizer(OstrisQuantizer):
     def _scales_u8(self, module) -> torch.Tensor:
         return module.cr8_scales
 
+    def _gemv_args(self, module):
+        return module.cr8_qdata, None, 8
+
     def _scales(self, module) -> torch.Tensor:
         return self._scales_u8(module).view(torch.float32)
 
@@ -1406,6 +1409,39 @@ class ConvRotInt8Quantizer(OstrisQuantizer):
             x_ste = x2d + (x_dq - x2d).detach()
             out = self._fallback_forward(module, x_ste)
             return out.reshape(*x.shape[:-1], out_f)
+
+        if (
+            self.kernel != "torch"
+            and m <= FUSED_GEMV_MAX_M
+            and x.is_cuda
+            and _triton_available()
+        ):
+            args = self._gemv_args(module)
+            if args is not None:
+                qdata, gratio, bits = args
+                try:
+                    out = _int_gemv_op(
+                        rotate(x, rot).reshape(-1, in_f),
+                        qdata,
+                        gratio,
+                        self._scales_u8(module),
+                        module.bias,
+                        bits,
+                        self.act_qmax,
+                        out_f,
+                        str(x.dtype).split(".")[-1],
+                    )
+                    return out.reshape(*x.shape[:-1], out_f)
+                except (AttributeError, RuntimeError, TypeError) as error:
+                    key = ("convrot-fused-gemv", type(error).__name__)
+                    if key not in _runtime_fast_warned:
+                        _runtime_fast_warned.add(key)
+                        warnings.warn(
+                            f"ConvRot fused GEMV failed ({type(error).__name__}); "
+                            "using the regular inference path",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
 
         if self.kernel != "torch" and _int8_gemm_supported(x.device):
             # row padding for _int_mm happens inside the act-quant op (compile
@@ -1767,6 +1803,247 @@ def _intn_unpack_grouped_fake(packed, gratio, bits, rows, cols):
     return torch.empty(rows, cols, device=packed.device, dtype=torch.int8)
 
 
+# ---------------- fused decode GEMV (small m) ---------------------------------
+
+FUSED_GEMV_MAX_M = 16
+
+_int_gemv_kernel = None
+
+
+def _get_int_gemv_kernel():
+    global _int_gemv_kernel
+    if _int_gemv_kernel is not None:
+        return _int_gemv_kernel
+    import triton
+    import triton.language as tl
+    from triton.language.extra import libdevice
+
+    @triton.jit
+    def _unpack_lane(
+        word,
+        ratio,
+        J: tl.constexpr,
+        BITS: tl.constexpr,
+        QMAX_W: tl.constexpr,
+        GROUPED: tl.constexpr,
+    ):
+        code = ((word >> (BITS * J)) & ((1 << BITS) - 1)) - QMAX_W
+        if GROUPED:
+            code_float = libdevice.rint(code.to(tl.float32) * ratio)
+            code_float = tl.minimum(tl.maximum(code_float, -127.0), 127.0)
+            return code_float.to(tl.int8)
+        return code.to(tl.int8)
+
+    @triton.jit
+    def int_gemv_kernel(
+        x_ptr,
+        w_ptr,
+        r_ptr,
+        ws_ptr,
+        b_ptr,
+        o_ptr,
+        M,
+        K,
+        N,
+        w_row_stride,
+        ngprow,
+        gdiv,
+        QMAX_A: tl.constexpr,
+        BITS: tl.constexpr,
+        PACKED: tl.constexpr,
+        GROUPED: tl.constexpr,
+        HAS_BIAS: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        BLOCK_K: tl.constexpr,
+    ):
+        pid = tl.program_id(0)
+        offs_n = pid * BLOCK_N + tl.arange(0, BLOCK_N)
+        mask_n = offs_n < N
+        offs_m = tl.arange(0, 16)
+        mask_m = offs_m < M
+        qmax_w: tl.constexpr = (1 << (BITS - 1)) - 1
+
+        amax = tl.zeros((16,), tl.float32)
+        for k0 in range(0, K, BLOCK_K):
+            offs_k = k0 + tl.arange(0, BLOCK_K)
+            values = tl.load(
+                x_ptr + offs_m[:, None] * K + offs_k[None, :],
+                mask=mask_m[:, None] & (offs_k[None, :] < K),
+                other=0.0,
+            ).to(tl.float32)
+            amax = tl.maximum(amax, tl.max(tl.abs(values), axis=1))
+        scale = tl.where(amax > 0, amax / QMAX_A, 1.0)
+
+        accumulator = tl.zeros((16, BLOCK_N), tl.int32)
+        if PACKED:
+            groups_per_tile: tl.constexpr = BLOCK_K // 8
+            for k0 in range(0, K, BLOCK_K):
+                offs_g = k0 // 8 + tl.arange(0, groups_per_tile)
+                mask_g = offs_g * 8 < K
+                mask_w = mask_n[:, None] & mask_g[None, :]
+                if BITS * 8 <= 32:
+                    word = tl.zeros((BLOCK_N, groups_per_tile), tl.int32)
+                else:
+                    word = tl.zeros((BLOCK_N, groups_per_tile), tl.int64)
+                for byte_index in tl.static_range(BITS):
+                    byte = tl.load(
+                        w_ptr
+                        + offs_n[:, None] * w_row_stride
+                        + offs_g[None, :] * BITS
+                        + byte_index,
+                        mask=mask_w,
+                        other=0,
+                    ).to(word.dtype)
+                    word += byte << (8 * byte_index)
+                if GROUPED:
+                    ratio = tl.load(
+                        r_ptr
+                        + offs_n[:, None] * ngprow
+                        + (offs_g * 8 // gdiv)[None, :],
+                        mask=mask_w,
+                        other=1.0,
+                    )
+                else:
+                    ratio = word
+                code0 = _unpack_lane(word, ratio, 0, BITS, qmax_w, GROUPED)
+                code1 = _unpack_lane(word, ratio, 1, BITS, qmax_w, GROUPED)
+                code2 = _unpack_lane(word, ratio, 2, BITS, qmax_w, GROUPED)
+                code3 = _unpack_lane(word, ratio, 3, BITS, qmax_w, GROUPED)
+                code4 = _unpack_lane(word, ratio, 4, BITS, qmax_w, GROUPED)
+                code5 = _unpack_lane(word, ratio, 5, BITS, qmax_w, GROUPED)
+                code6 = _unpack_lane(word, ratio, 6, BITS, qmax_w, GROUPED)
+                code7 = _unpack_lane(word, ratio, 7, BITS, qmax_w, GROUPED)
+                even = tl.interleave(
+                    tl.interleave(code0, code4), tl.interleave(code2, code6)
+                )
+                odd = tl.interleave(
+                    tl.interleave(code1, code5), tl.interleave(code3, code7)
+                )
+                weight_q_transposed = tl.interleave(even, odd)
+                offs_k = k0 + tl.arange(0, BLOCK_K)
+                values = tl.load(
+                    x_ptr + offs_m[:, None] * K + offs_k[None, :],
+                    mask=mask_m[:, None] & (offs_k[None, :] < K),
+                    other=0.0,
+                ).to(tl.float32)
+                activation_q = libdevice.rint(values / scale[:, None])
+                activation_q = tl.minimum(
+                    tl.maximum(activation_q, -1.0 * QMAX_A), 1.0 * QMAX_A
+                )
+                accumulator = tl.dot(
+                    activation_q.to(tl.int8),
+                    tl.trans(weight_q_transposed),
+                    accumulator,
+                    out_dtype=tl.int32,
+                )
+        else:
+            for k0 in range(0, K, BLOCK_K):
+                offs_k = k0 + tl.arange(0, BLOCK_K)
+                mask_k = offs_k < K
+                values = tl.load(
+                    x_ptr + offs_m[:, None] * K + offs_k[None, :],
+                    mask=mask_m[:, None] & mask_k[None, :],
+                    other=0.0,
+                ).to(tl.float32)
+                activation_q = libdevice.rint(values / scale[:, None])
+                activation_q = tl.minimum(
+                    tl.maximum(activation_q, -1.0 * QMAX_A), 1.0 * QMAX_A
+                )
+                weight_q = tl.load(
+                    w_ptr + offs_n[None, :] * w_row_stride + offs_k[:, None],
+                    mask=mask_k[:, None] & mask_n[None, :],
+                    other=0,
+                )
+                accumulator = tl.dot(
+                    activation_q.to(tl.int8),
+                    weight_q,
+                    accumulator,
+                    out_dtype=tl.int32,
+                )
+
+        weight_scale = tl.load(ws_ptr + offs_n, mask=mask_n, other=0.0)
+        output = accumulator.to(tl.float32) * (
+            scale[:, None] * weight_scale[None, :]
+        )
+        if HAS_BIAS:
+            output += tl.load(
+                b_ptr + offs_n, mask=mask_n, other=0.0
+            ).to(tl.float32)[None, :]
+        tl.store(
+            o_ptr + offs_m[:, None] * N + offs_n[None, :],
+            output.to(o_ptr.dtype.element_ty),
+            mask=mask_m[:, None] & mask_n[None, :],
+        )
+
+    _int_gemv_kernel = int_gemv_kernel
+    return _int_gemv_kernel
+
+
+@torch.library.custom_op("ostris::convrot_int_gemv", mutates_args=())
+def _int_gemv_op(
+    x2d: torch.Tensor,
+    qdata: torch.Tensor,
+    gratio: Optional[torch.Tensor],
+    scales_u8: torch.Tensor,
+    bias: Optional[torch.Tensor],
+    bits: int,
+    act_qmax: int,
+    out_features: int,
+    out_dtype: str,
+) -> torch.Tensor:
+    rows, columns = x2d.shape
+    output = torch.empty(
+        rows,
+        out_features,
+        device=x2d.device,
+        dtype=getattr(torch, out_dtype),
+    )
+    weight_scales = scales_u8.view(torch.float32)
+    packed = qdata.dtype == torch.uint8
+    grouped = gratio is not None
+    groups_per_row = gratio.shape[1] if grouped else 1
+    group_size = columns // groups_per_row
+    kernel = _get_int_gemv_kernel()
+    block_n = 16 if packed else 32
+    block_k = 256
+    kernel[(-(-out_features // block_n),)](
+        x2d.contiguous(),
+        qdata,
+        gratio if grouped else weight_scales,
+        weight_scales,
+        bias if bias is not None else weight_scales,
+        output,
+        rows,
+        columns,
+        out_features,
+        qdata.shape[1],
+        groups_per_row,
+        group_size,
+        QMAX_A=act_qmax,
+        BITS=bits,
+        PACKED=packed,
+        GROUPED=grouped,
+        HAS_BIAS=bias is not None,
+        BLOCK_N=block_n,
+        BLOCK_K=block_k,
+        num_warps=4,
+        num_stages=2,
+    )
+    return output
+
+
+@_int_gemv_op.register_fake
+def _int_gemv_fake(
+    x2d, qdata, gratio, scales_u8, bias, bits, act_qmax, out_features, out_dtype
+):
+    return torch.empty(
+        x2d.shape[0],
+        out_features,
+        device=x2d.device,
+        dtype=getattr(torch, out_dtype),
+    )
+
+
 # training-path linear for the grouped widths: same STE scheme as
 # _int8_linear_ste_op, but autograd saves the PACKED codes and unpacks again in
 # the backward — otherwise every layer holds a full int8-size unpacked weight
@@ -1993,6 +2270,14 @@ class ConvRotIntNQuantizer(ConvRotInt8Quantizer):
             module.crn_qdata, module.crn_bits, module.out_features, module.in_features
         )
 
+    def _gemv_args(self, module):
+        gratio = getattr(module, "crn_gratio", None)
+        return (
+            module.crn_qdata,
+            gratio.view(torch.float32) if gratio is not None else None,
+            module.crn_bits,
+        )
+
     def _qdata_rows(self, module, start: int, end: int) -> torch.Tensor:
         gratio = getattr(module, "crn_gratio", None)
         if gratio is not None:
@@ -2142,6 +2427,10 @@ class ConvRotBitNetQuantizer(ConvRotIntNQuantizer):
 
     def _pack(self, q: torch.Tensor) -> torch.Tensor:
         return pack_ternary_rows(q)
+
+    def _gemv_args(self, module):
+        # Base-3 storage does not use the fused bitfield layout.
+        return None
 
     def _qdata(self, module) -> torch.Tensor:
         return _bitnet_unpack_op(

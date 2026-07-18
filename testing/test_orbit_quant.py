@@ -27,7 +27,11 @@ from toolkit.util.orbit_vq_quant import (
     pack_indices,
     unpack_indices,
 )
-from toolkit.util.ostris_quant import OstrisLinear, convert_linear_to_ostris
+from toolkit.util.ostris_quant import (
+    OstrisLazyWeight,
+    OstrisLinear,
+    convert_linear_to_ostris,
+)
 from toolkit.util.quantize import (
     get_qtype,
     get_torchao_config,
@@ -231,19 +235,23 @@ class OstrisLinearTest(unittest.TestCase):
 
     def test_state_dict_is_plain_and_loadable_by_linear(self):
         layer = make_quantized_linear("orbit4")
+        restored = torch.nn.Linear(64, 16)
         with mock.patch.object(
             layer.ostris_quantizer,
             "dequantize_to",
             wraps=layer.ostris_quantizer.dequantize_to,
         ) as dequantize_to:
             state_dict = layer.state_dict()
-        restored = torch.nn.Linear(64, 16)
-        restored.load_state_dict(state_dict)
+            self.assertIsNone(dequantize_to.call_args)
+            restored.load_state_dict(state_dict)
+            self.assertEqual(
+                torch.device(dequantize_to.call_args.args[1]).type,
+                "cpu",
+            )
         x = torch.randn(2, 64)
 
-        self.assertEqual(torch.device(dequantize_to.call_args.args[1]).type, "cpu")
         self.assertEqual(set(state_dict), {"weight", "bias"})
-        self.assertIs(type(state_dict["weight"]), torch.Tensor)
+        self.assertIsInstance(state_dict["weight"], OstrisLazyWeight)
         self.assertTrue(torch.allclose(layer(x), restored(x), atol=1e-6, rtol=1e-6))
 
     def test_model_save_patch_keeps_only_plain_linear_weights(self):

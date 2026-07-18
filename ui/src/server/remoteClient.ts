@@ -482,6 +482,7 @@ function remoteJobPatch(
     job_type: remoteJob.job_type,
     job_ref: remoteJob.job_ref,
     save_now: remoteJob.save_now ?? false,
+    sample_now: remoteJob.sample_now ?? false,
     remote_sync_at: new Date(),
     remote_error: null,
   };
@@ -550,6 +551,7 @@ async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
         job_type: patch.job_type,
         job_ref: patch.job_ref,
         save_now: patch.save_now,
+        sample_now: patch.sample_now,
         remote_sync_at: patch.remote_sync_at,
         remote_error: patch.remote_error,
       });

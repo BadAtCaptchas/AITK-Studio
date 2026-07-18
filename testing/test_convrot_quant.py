@@ -8,6 +8,7 @@ import torch.nn.functional as F
 
 from toolkit.util import convrot_quant
 from toolkit.util.ostris_quant import (
+    OstrisLazyWeight,
     OstrisLinear,
     convert_linear_to_ostris,
     get_ostris_quantizer,
@@ -94,6 +95,10 @@ class ConvRotLinearTest(unittest.TestCase):
             with self.subTest(qtype=qtype):
                 layer = make_layer(qtype)
                 state = layer.state_dict()
+                self.assertIsInstance(state["weight"], OstrisLazyWeight)
+                self.assertTrue(
+                    torch.allclose(state["weight"].dequantize(), layer.weight)
+                )
                 restored = torch.nn.Linear(64, 64)
                 restored.load_state_dict(state)
                 self.assertEqual(set(state), {"weight", "bias"})

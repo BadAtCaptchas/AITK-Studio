@@ -404,6 +404,8 @@ class CaptionConfig:
         self.recaption = kwargs.get("recaption", False)
         self.max_res = kwargs.get("max_res", 512)
         self.max_new_tokens = kwargs.get("max_new_tokens", 128)
+        self.thinking = kwargs.get("thinking", False)
+        self.compile = kwargs.get("compile", False)
         self.output_format = kwargs.get("output_format", "text")
         self.source_caption_extension = _normalize_caption_extension(
             kwargs.get("source_caption_extension", "txt")
@@ -462,6 +464,7 @@ class BaseCaptioner(BaseExtensionProcess):
             self.start_stop_watcher()
             self.update_status("running", "Loading Model")
             self.load_model()
+            self.maybe_compile_models()
             self.update_status("running", "Looking for files")
             self.find_files()
             self.update_status("running", f"Captioning {len(self.file_paths)} files")
@@ -1055,6 +1058,57 @@ class BaseCaptioner(BaseExtensionProcess):
 
     def load_model(self):
         raise NotImplementedError("Model loading not implemented for this captioner")
+
+    def maybe_compile_models(self):
+        if not self.caption_config.compile:
+            return
+        import importlib.util
+
+        if importlib.util.find_spec("triton") is None:
+            print(
+                "[AITK] compile requested but triton is not installed, skipping compilation."
+            )
+            return
+        try:
+            torch._dynamo.config.suppress_errors = True
+            for model in [self.model, self.model2]:
+                if model is not None and isinstance(model, torch.nn.Module):
+                    compiled_blocks = self._compile_blocks(model)
+                    if compiled_blocks == 0:
+                        model.compile(dynamic=True)
+            print(
+                "[AITK] Model compilation enabled. The first few items will be slow while the model compiles."
+            )
+        except Exception as e:
+            print(f"[AITK] Failed to compile model, continuing without compile: {e}")
+
+    def _compile_blocks(self, model) -> int:
+        """Compile repeated transformer blocks while leaving one-off modules eager."""
+        candidates = []
+        for name, module in model.named_modules():
+            if not isinstance(module, torch.nn.ModuleList) or len(module) < 2:
+                continue
+            if len({type(block) for block in module}) != 1:
+                continue
+            if next(module[0].children(), None) is None:
+                continue
+            candidates.append(name)
+
+        candidates = [
+            name
+            for name in candidates
+            if not any(
+                name != other and name.startswith(other + ".")
+                for other in candidates
+            )
+        ]
+        count = 0
+        for name in candidates:
+            block_list = model.get_submodule(name)
+            for index, block in enumerate(block_list):
+                block_list[index] = torch.compile(block, dynamic=True)
+                count += 1
+        return count
 
     def load_audio_tensor_for_caption(self, file_path: str):
         if self.encrypted_reader is not None:

@@ -65,6 +65,7 @@ export type ProjectSummaryJob = Pick<
   | 'job_type'
   | 'job_ref'
   | 'save_now'
+  | 'sample_now'
 > & {
   total_steps?: number | null;
 };

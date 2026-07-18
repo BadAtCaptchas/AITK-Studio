@@ -20,6 +20,7 @@ JOB_UPDATE_FIELDS = {
     "speed_string",
     "pid",
     "save_now",
+    "sample_now",
 }
 
 
@@ -174,6 +175,45 @@ class UIJobStore:
                 return False if save_now is None else save_now[0] == 1
 
         return bool(self._retry_sqlite_operation(_check_save))
+
+    def consume_sample_request(self) -> bool:
+        """Atomically clear and consume one pending sample request."""
+        if not self.available:
+            return False
+
+        if self.provider == "mongodb":
+            assert self._jobs is not None
+            row = self._jobs.find_one_and_update(
+                {"id": self.job_id, "sample_now": True},
+                {
+                    "$set": {"sample_now": False},
+                    "$currentDate": {"updated_at": True},
+                },
+                projection={"_id": 0, "id": 1},
+            )
+            return row is not None
+
+        def _consume_sample():
+            conn = self._db_connect()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN IMMEDIATE")
+                try:
+                    cursor.execute(
+                        "UPDATE Job SET sample_now = 0, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE id = ? AND sample_now = 1",
+                        (self.job_id,),
+                    )
+                    consumed = cursor.rowcount == 1
+                    cursor.execute("COMMIT")
+                    return consumed
+                except Exception:
+                    cursor.execute("ROLLBACK")
+                    raise
+            finally:
+                conn.close()
+
+        return bool(self._retry_sqlite_operation(_consume_sample))
 
     def update_key(self, key: str, value: Any):
         if not self.available:

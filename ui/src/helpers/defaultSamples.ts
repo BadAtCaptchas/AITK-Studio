@@ -4,6 +4,7 @@ export const defaultSampleConfig: SampleConfig = {
   backend: 'native',
   sampler: 'flowmatch',
   sample_every: 250,
+  sample_start_step: 0,
   width: 1024,
   height: 1024,
   samples: [
@@ -55,6 +56,7 @@ export const defaultAudioSampleConfig: SampleConfig = {
   backend: 'native',
   sampler: 'flowmatch',
   sample_every: 250,
+  sample_start_step: 0,
   width: 1024,
   height: 1024,
   samples: [

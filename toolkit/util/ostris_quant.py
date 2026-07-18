@@ -346,14 +346,56 @@ class OstrisLinear(torch.nn.Linear):
         self.ostris_quantizer.requantize_(self, fp_weight)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        # Portable checkpoints intentionally contain an ordinary floating-point
-        # weight. Reconstruct it directly onto CPU so saving a CUDA model never
-        # retains dense compatibility weights in scarce device memory.
-        weight = self.dequantize_weight(device=torch.device("cpu"))
-        destination[prefix + "weight"] = weight if keep_vars else weight.detach()
+        # Avoid retaining every dequantized layer at once when a large model's
+        # state dict is collected. Save paths materialize this view one key at a time.
+        destination[prefix + "weight"] = OstrisLazyWeight(self)
         if self.bias is not None:
-            bias = self.bias.to("cpu")
-            destination[prefix + "bias"] = bias if keep_vars else bias.detach()
+            destination[prefix + "bias"] = (
+                self.bias if keep_vars else self.bias.detach()
+            )
+
+
+class OstrisLazyWeight(torch.Tensor):
+    """A no-storage state-dict view that materializes its packed layer on demand."""
+
+    @staticmethod
+    def __new__(cls, module: "OstrisLinear"):
+        buffer = next(
+            value for value in module._buffers.values() if value is not None
+        )
+        result = torch.Tensor._make_wrapper_subclass(
+            cls,
+            (module.out_features, module.in_features),
+            dtype=module.ostris_orig_dtype,
+            device=buffer.device,
+            requires_grad=False,
+        )
+        result._ostris_module = module
+        result._is_ostris_weight = True
+        return result
+
+    def dequantize(self) -> torch.Tensor:
+        return self._ostris_module.dequantize_weight()
+
+    def __repr__(self):
+        return (
+            f"OstrisLazyWeight(shape={tuple(self.shape)}, dtype={self.dtype}, "
+            f"device={self.device})"
+        )
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        from torch.utils._pytree import tree_map
+
+        def unwrap(value):
+            if isinstance(value, cls):
+                return value._ostris_module.dequantize_weight()
+            return value
+
+        return func(
+            *tree_map(unwrap, args),
+            **tree_map(unwrap, kwargs or {}),
+        )
 
 
 def get_ostris_quantizer(

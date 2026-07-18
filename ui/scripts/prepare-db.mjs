@@ -243,7 +243,8 @@ async function applySqliteCompatibilitySchema(filename) {
         pid INTEGER,
         job_type TEXT NOT NULL DEFAULT 'train',
         job_ref TEXT,
-        save_now BOOLEAN NOT NULL DEFAULT false
+        save_now BOOLEAN NOT NULL DEFAULT false,
+        sample_now BOOLEAN NOT NULL DEFAULT false
       );
       `,
     );
@@ -267,6 +268,7 @@ async function applySqliteCompatibilitySchema(filename) {
     await ensureColumn(db, 'Job', 'job_type', "TEXT NOT NULL DEFAULT 'train'");
     await ensureColumn(db, 'Job', 'job_ref', 'TEXT');
     await ensureColumn(db, 'Job', 'save_now', 'BOOLEAN NOT NULL DEFAULT false');
+    await ensureColumn(db, 'Job', 'sample_now', 'BOOLEAN NOT NULL DEFAULT false');
     await ensureJobProjectIdNullable(db);
 
     await sqliteRun(
@@ -585,6 +587,10 @@ const client = new MongoClient(mongoUri);
 try {
   await client.connect();
   const db = client.db(mongoDbName);
+  await db.collection('jobs').updateMany(
+    { sample_now: { $exists: false } },
+    { $set: { sample_now: false } },
+  );
   const configuredInstanceID = process.env.AITK_INSTANCE_ID?.trim();
   const existingInstance = await db.collection('settings').findOne({ key: 'AITK_INSTANCE_ID' });
   const instanceID = configuredInstanceID || String(existingInstance?.value || randomUUID());

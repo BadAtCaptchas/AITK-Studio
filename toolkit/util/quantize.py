@@ -431,6 +431,8 @@ def _ostris_storage_bytes(module: OstrisLinear) -> tuple[int, int]:
 def is_quantized_tensor(t) -> bool:
     # torchao stores quantized weights as tensor subclasses under torchao.* that
     # still expose dequantize(). Quanto QTensor is handled in dequantize_if_quantized.
+    # Ostris weights may be eager compatibility views or lazy state-dict views;
+    # both expose dequantize() and carry the same marker.
     if getattr(t, '_is_ostris_weight', False):
         return True
     return 'torchao' in type(t).__module__ and hasattr(t, 'dequantize')
@@ -474,6 +476,7 @@ def quantize(
     optimizer: Optional[Optimizer] = None,
     include: Optional[Union[str, List[str]]] = None,
     exclude: Optional[Union[str, List[str]]] = None,
+    quantize_device: Optional[torch.device] = None,
     kernel: Optional[OstrisKernel] = None,
     max_workspace_mb: Optional[int] = None,
     *,
@@ -505,6 +508,9 @@ def quantize(
         exclude (`Optional[Union[str, List[str]]]`):
             Patterns constituting the denylist. If provided, module names must not match
             any patterns from the denylist.
+        quantize_device (`Optional[torch.device]`):
+            Move leaf modules to this device for quantization, then return them to
+            their original device. This enables fast layer-wise low-VRAM quantization.
     """
     include = _normalize_patterns(include, "include")
     exclude = _normalize_patterns(exclude, "exclude")
@@ -566,6 +572,10 @@ def quantize(
             if pattern_skip is not None:
                 report.add_skip(pattern_skip, qualified_name, weight_bytes)
                 continue
+            original_device = None
+            if quantize_device is not None:
+                original_device = parameter.device
+                m.to(quantize_device)
             try:
                 if not convert_linear_to_ostris(m, weights.quantizer):
                     report.add_skip("conversion_rejected", qualified_name, weight_bytes)
@@ -579,6 +589,9 @@ def quantize(
             except Exception as e:
                 print(f"Failed to quantize {qualified_name}: {e}")
                 raise
+            finally:
+                if original_device is not None:
+                    m.to(original_device)
             continue
 
         if pattern_skip is not None:
@@ -589,7 +602,27 @@ def quantize(
             # check if m is QLinear or QConv2d
             if m.__class__.__name__ in Q_MODULES:
                 continue
-            else:
+            if (
+                isinstance(weights, aotype)
+                and not isinstance(m, torch.nn.Linear)
+                and (
+                    quantize_device is not None
+                    or include is not None
+                    or exclude is not None
+                )
+            ):
+                # TorchAO quantizes Linear children recursively. When filtering or
+                # staging by device, visit each Linear directly so excluded children
+                # stay eager and only one layer is resident on the target device.
+                continue
+
+            original_device = None
+            if quantize_device is not None and next(m.children(), None) is None:
+                parameter = next(m.parameters(recurse=False), None)
+                if parameter is not None:
+                    original_device = parameter.device
+                    m.to(quantize_device)
+            try:
                 if weight_bytes:
                     report.eligible_bytes += weight_bytes
                 if isinstance(weights, aotype):
@@ -605,6 +638,10 @@ def quantize(
                     )
                 if weight_bytes:
                     report.quantized_modules += 1
+            finally:
+                if original_device is not None:
+                    # Quanto may replace the module in its parent, so re-fetch it.
+                    model.get_submodule(name).to(original_device)
         except Exception as e:
             print(f"Failed to quantize {qualified_name}: {e}")
             raise

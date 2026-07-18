@@ -270,6 +270,7 @@ test('portable project job snapshots preserve immutable IDs, metadata, dates, an
       job_type: 'train',
       job_ref: null,
       save_now: false,
+      sample_now: false,
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-02T00:00:00.000Z',
     },

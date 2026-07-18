@@ -106,6 +106,10 @@ def make_layer(k: int, n: int, device) -> torch.nn.Linear:
     lin = torch.nn.Linear(k, n, bias=True, dtype=torch.bfloat16, device=device)
     with torch.no_grad():
         lin.weight.mul_(0.02)
+    # The training benchmark models LoRA-style training: the base is frozen and
+    # gradients flow only to the input. Otherwise bf16/Quanto accumulate weight
+    # gradients and inflate every later latency and VRAM measurement.
+    lin.requires_grad_(False)
     return lin
 
 
@@ -120,6 +124,7 @@ def make_stack(device) -> torch.nn.ModuleList:
             torch.nn.Linear(k, n, bias=True, dtype=torch.bfloat16, device=device)
             for k, n in VRAM_BLOCK_SHAPES
         ]))
+    blocks.requires_grad_(False)
     return blocks
 
 

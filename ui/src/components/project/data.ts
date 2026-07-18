@@ -302,6 +302,7 @@ function jobFromUnknown(value: unknown): ProjectSummaryJob | null {
     job_type: stringValue(raw.job_type ?? raw.jobType, 'train'),
     job_ref: nullableString(raw.job_ref ?? raw.jobRef),
     save_now: boolValue(raw.save_now ?? raw.saveNow),
+    sample_now: boolValue(raw.sample_now ?? raw.sampleNow),
     total_steps:
       raw.total_steps === null || raw.totalSteps === null
         ? null

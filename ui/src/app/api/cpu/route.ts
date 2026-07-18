@@ -4,6 +4,7 @@ import { createRequire } from 'module';
 import os from 'os';
 import { CpuInfo } from '@/types';
 import { fetchWorkerCpu, getRemoteWorker, isLocalWorker, runRemoteBackgroundPoll } from '@/server/remoteClient';
+import { cached } from '@/server/apiCache';
 
 const isMac = os.platform() === 'darwin';
 
@@ -19,27 +20,40 @@ export async function GET(request: Request) {
       return NextResponse.json(poll.value);
     }
 
-    const cpuInfoRaw = await si.cpu();
-    let cpuInfo: CpuInfo;
+    const localCpuInfo = await cached('cpu-info:local', async () => {
+      const cpuInfoRaw = await si.cpu();
+      let cpuInfo: CpuInfo;
 
-    if (isMac) {
-      try {
-        const nativeRequire = createRequire(import.meta.url);
-        const ms = nativeRequire('macstats') as any;
-        const ramData = ms.getRAMUsageSync();
-        const cpuData = ms.getCpuDataSync();
+      if (isMac) {
+        try {
+          const nativeRequire = createRequire(import.meta.url);
+          const ms = nativeRequire('macstats') as any;
+          const ramData = ms.getRAMUsageSync();
+          const cpuData = ms.getCpuDataSync();
 
-        cpuInfo = {
-          name: `${cpuInfoRaw.manufacturer} ${cpuInfoRaw.brand}`,
-          cores: cpuInfoRaw.cores,
-          temperature: cpuData.temperature || 0,
-          totalMemory: ramData.total / (1024 * 1024),
-          availableMemory: ramData.free / (1024 * 1024),
-          freeMemory: ramData.free / (1024 * 1024),
-          currentLoad: (await si.currentLoad()).currentLoad || 0,
-        };
-      } catch {
-        // Fallback to systeminformation if macstats fails
+          cpuInfo = {
+            name: `${cpuInfoRaw.manufacturer} ${cpuInfoRaw.brand}`,
+            cores: cpuInfoRaw.cores,
+            temperature: cpuData.temperature || 0,
+            totalMemory: ramData.total / (1024 * 1024),
+            availableMemory: ramData.free / (1024 * 1024),
+            freeMemory: ramData.free / (1024 * 1024),
+            currentLoad: (await si.currentLoad()).currentLoad || 0,
+          };
+        } catch {
+          // Fallback to systeminformation if macstats fails
+          const memoryData = await si.mem();
+          cpuInfo = {
+            name: `${cpuInfoRaw.manufacturer} ${cpuInfoRaw.brand}`,
+            cores: cpuInfoRaw.cores,
+            temperature: (await si.cpuTemperature()).main || 0,
+            totalMemory: memoryData.total / (1024 * 1024),
+            availableMemory: memoryData.available / (1024 * 1024),
+            freeMemory: memoryData.free / (1024 * 1024),
+            currentLoad: (await si.currentLoad()).currentLoad || 0,
+          };
+        }
+      } else {
         const memoryData = await si.mem();
         cpuInfo = {
           name: `${cpuInfoRaw.manufacturer} ${cpuInfoRaw.brand}`,
@@ -51,20 +65,11 @@ export async function GET(request: Request) {
           currentLoad: (await si.currentLoad()).currentLoad || 0,
         };
       }
-    } else {
-      const memoryData = await si.mem();
-      cpuInfo = {
-        name: `${cpuInfoRaw.manufacturer} ${cpuInfoRaw.brand}`,
-        cores: cpuInfoRaw.cores,
-        temperature: (await si.cpuTemperature()).main || 0,
-        totalMemory: memoryData.total / (1024 * 1024),
-        availableMemory: memoryData.available / (1024 * 1024),
-        freeMemory: memoryData.free / (1024 * 1024),
-        currentLoad: (await si.currentLoad()).currentLoad || 0,
-      };
-    }
 
-    return NextResponse.json(cpuInfo);
+      return cpuInfo;
+    });
+
+    return NextResponse.json(localCpuInfo);
   } catch (error) {
     console.error('Error fetching CPU stats:', error);
     return NextResponse.json(

@@ -69,8 +69,9 @@ class UpstreamJulyBehaviorTest(unittest.TestCase):
 
         self.assertIn("import traceback", captioner)
         self.assertIn("traceback.print_exc()", captioner)
+        self.assertIn('default_disable_xet = "1" if os.name == "nt" else "0"', run_source)
         self.assertIn(
-            'os.environ["HF_HUB_DISABLE_XET"] = os.getenv("HF_HUB_DISABLE_XET", "1")',
+            'os.environ["HF_HUB_DISABLE_XET"] = os.getenv(',
             run_source,
         )
         self.assertIn('default_hf_transfer = "0" if os.name == "nt" else "1"', run_source)

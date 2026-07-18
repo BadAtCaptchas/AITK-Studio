@@ -348,6 +348,8 @@ export async function startJobNow(jobID: string, options: StartJobOptions = {}) 
   await db.jobs.update(jobID, {
     status: 'running',
     stop: false,
+    return_to_queue: false,
+    sample_now: false,
     info: 'Starting job...',
   });
 

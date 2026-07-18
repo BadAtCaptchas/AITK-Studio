@@ -9,9 +9,15 @@ def print_acc(*args, **kwargs):
 
 
 class Logger:
-    def __init__(self, filename):
-        self.terminal = sys.stdout
-        self.log = open(filename, 'a', encoding='utf-8', errors='replace')
+    def __init__(self, terminal, log_file=None):
+        # The optional one-argument form is retained for small integrations and
+        # tests; setup_log_to_file uses the shared-handle form below.
+        if log_file is None:
+            self.terminal = sys.stdout
+            self.log = open(terminal, 'a', encoding='utf-8', errors='replace')
+        else:
+            self.terminal = terminal
+            self.log = log_file
 
     def _safe_terminal_write(self, message):
         try:
@@ -38,7 +44,14 @@ class Logger:
 
 def setup_log_to_file(filename):
     if get_accelerator().is_local_main_process:
-        if not os.path.exists(os.path.dirname(filename)):
-            os.makedirs(os.path.dirname(filename))
-    sys.stdout = Logger(filename)
-    sys.stderr = Logger(filename)
+        directory = os.path.dirname(filename)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory)
+    # Capture both real streams before replacing either one. Sharing the file
+    # handle prevents stderr from being routed through the stdout logger and
+    # written twice.
+    log_file = open(filename, 'a', encoding='utf-8', errors='replace')
+    stdout = sys.stdout
+    stderr = sys.stderr
+    sys.stdout = Logger(stdout, log_file)
+    sys.stderr = Logger(stderr, log_file)

@@ -8,7 +8,9 @@ from typing import List
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASE_SD_TRAIN_PROCESS_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
 CONFIG_MODULES_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
-GENERATE_PAGE_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "generate" / "page.tsx"
+GENERATE_PAGE_PATH = (
+    PROJECT_ROOT / "ui" / "src" / "app" / "generate" / "GeneratePageContent.tsx"
+)
 SIMPLE_JOB_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "SimpleJob.tsx"
 JOB_UTILS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "utils.ts"
 JOB_CONFIG_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "jobConfig.ts"

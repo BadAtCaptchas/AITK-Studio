@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { createRequire } from 'module';
 import os from 'os';
 import { getRemoteWorker, isLocalWorker, fetchWorkerGpu, runRemoteBackgroundPoll } from '@/server/remoteClient';
+import { cached } from '@/server/apiCache';
 
 const execAsync = promisify(exec);
 
@@ -111,66 +112,70 @@ export async function GET(request: Request) {
       return NextResponse.json(poll.value);
     }
 
-    // Get platform
-    const platform = os.platform();
-    const isWindows = platform === 'win32';
-    const isMac = platform === 'darwin';
+    const localGpuInfo = await cached('gpu-info:local', async () => {
+      // Get platform
+      const platform = os.platform();
+      const isWindows = platform === 'win32';
+      const isMac = platform === 'darwin';
 
-    if (isMac) {
-      const macGpu = await getMacGpuInfo();
-      if (macGpu) {
-        return NextResponse.json({
+      if (isMac) {
+        const macGpu = await getMacGpuInfo();
+        if (macGpu) {
+          return {
+            hasNvidiaSmi: false,
+            isMac: true,
+            gpus: [
+              {
+                index: 0,
+                name: macGpu.name,
+                driverVersion: 'macOS',
+                temperature: Math.round(macGpu.temperature),
+                utilization: {
+                  gpu: macGpu.gpuLoad,
+                  memory: macGpu.memTotal > 0 ? Math.round((macGpu.memUsed / macGpu.memTotal) * 100) : 0,
+                },
+                memory: {
+                  total: Math.round(macGpu.memTotal),
+                  free: Math.round(macGpu.memTotal - macGpu.memUsed),
+                  used: Math.round(macGpu.memUsed),
+                },
+                power: { draw: macGpu.powerDraw, limit: 0 },
+                clocks: { graphics: 0, memory: 0 },
+                fan: { speed: macGpu.fanSpeed },
+              },
+            ],
+          };
+        }
+        return {
           hasNvidiaSmi: false,
           isMac: true,
-          gpus: [
-            {
-              index: 0,
-              name: macGpu.name,
-              driverVersion: 'macOS',
-              temperature: Math.round(macGpu.temperature),
-              utilization: {
-                gpu: macGpu.gpuLoad,
-                memory: macGpu.memTotal > 0 ? Math.round((macGpu.memUsed / macGpu.memTotal) * 100) : 0,
-              },
-              memory: {
-                total: Math.round(macGpu.memTotal),
-                free: Math.round(macGpu.memTotal - macGpu.memUsed),
-                used: Math.round(macGpu.memUsed),
-              },
-              power: { draw: macGpu.powerDraw, limit: 0 },
-              clocks: { graphics: 0, memory: 0 },
-              fan: { speed: macGpu.fanSpeed },
-            },
-          ],
-        });
+          gpus: [],
+          error: 'Could not read Mac GPU stats',
+        };
       }
-      return NextResponse.json({
-        hasNvidiaSmi: false,
-        isMac: true,
-        gpus: [],
-        error: 'Could not read Mac GPU stats',
-      });
-    }
 
-    // Check if nvidia-smi is available
-    const hasNvidiaSmi = await checkNvidiaSmi(isWindows);
+      // Check if nvidia-smi is available
+      const hasNvidiaSmi = await checkNvidiaSmi(isWindows);
 
-    if (!hasNvidiaSmi) {
-      return NextResponse.json({
-        hasNvidiaSmi: false,
-        isMac: false,
-        gpus: [],
-        error: 'nvidia-smi not found or not accessible',
-      });
-    }
+      if (!hasNvidiaSmi) {
+        return {
+          hasNvidiaSmi: false,
+          isMac: false,
+          gpus: [],
+          error: 'nvidia-smi not found or not accessible',
+        };
+      }
 
-    // Get GPU stats
-    const gpuStats = await getGpuStats(isWindows);
+      // Get GPU stats
+      const gpuStats = await getGpuStats(isWindows);
 
-    return NextResponse.json({
-      hasNvidiaSmi: true,
-      gpus: gpuStats,
+      return {
+        hasNvidiaSmi: true,
+        gpus: gpuStats,
+      };
     });
+
+    return NextResponse.json(localGpuInfo);
   } catch (error) {
     console.error('Error fetching NVIDIA GPU stats:', error);
     return NextResponse.json(
@@ -264,4 +269,3 @@ async function getGpuStats(isWindows: boolean) {
 
   return gpus;
 }
-

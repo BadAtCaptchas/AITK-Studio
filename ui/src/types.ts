@@ -363,6 +363,7 @@ export interface Job {
   job_type: string;
   job_ref: string | null;
   save_now: boolean;
+  sample_now: boolean;
   project_name?: string | null;
   project_slug?: string | null;
   project_lifecycle_state?: ProjectLifecycleState | null;
@@ -805,6 +806,7 @@ export interface SampleConfig {
   comfy?: ComfyConfig;
   sampler: string;
   sample_every: number;
+  sample_start_step: number;
   width: number;
   height: number;
   prompts?: string[];
@@ -900,6 +902,8 @@ export interface CaptionProcessConfig {
     extensions: string[];
     path_to_caption: string;
     recaption: boolean;
+    compile?: boolean;
+    thinking?: boolean;
     caption_prompt?: string;
     max_res?: number;
     max_new_tokens?: number;

@@ -1,5 +1,6 @@
 import gc
 import unittest
+from unittest import mock
 
 import torch
 
@@ -117,6 +118,21 @@ class ConvRotCudaTest(unittest.TestCase):
                 output.float().mean().backward()
                 self.assertTrue(torch.isfinite(output).all())
                 self.assertTrue(torch.isfinite(value.grad).all())
+
+    @unittest.skipUnless(
+        convrot_quant._triton_available(),
+        "Triton is required for the fused small-batch GEMV",
+    )
+    def test_fused_small_batch_gemv_matches_regular_path(self):
+        layer = quantized_linear("convrotint4")
+        value = torch.randn(7, 256, device="cuda", dtype=torch.bfloat16)
+        with torch.no_grad():
+            fused = layer(value)
+            with mock.patch.object(
+                convrot_quant, "_triton_available", return_value=False
+            ):
+                regular = layer(value)
+        self.assertTrue(torch.allclose(fused, regular, atol=0.12, rtol=0.12))
 
     def test_factorized_lokr_training_on_packed_base(self):
         base = quantized_linear("convrotint4")

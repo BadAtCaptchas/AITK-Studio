@@ -1,4 +1,5 @@
 import tempfile
+import io
 import unittest
 from pathlib import Path
 
@@ -37,6 +38,20 @@ class LoggerEncodingTest(unittest.TestCase):
                 self.assertEqual(log_path.read_text(encoding="utf-8"), "✅ No prompt tuning\n")
             finally:
                 logger.log.close()
+
+    def test_stdout_and_stderr_loggers_share_one_handle_without_double_writes(self):
+        log = io.StringIO()
+        stdout_terminal = io.StringIO()
+        stderr_terminal = io.StringIO()
+        stdout = Logger(stdout_terminal, log)
+        stderr = Logger(stderr_terminal, log)
+
+        stdout.write("out\n")
+        stderr.write("error\n")
+
+        self.assertEqual(log.getvalue(), "out\nerror\n")
+        self.assertEqual(stdout_terminal.getvalue(), "out\n")
+        self.assertEqual(stderr_terminal.getvalue(), "error\n")
 
 
 if __name__ == "__main__":

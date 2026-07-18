@@ -84,11 +84,6 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         torch.nn.Module.__init__(self)
         self.lora_name = lora_name
         self.orig_module_ref = weakref.ref(org_module)
-        module_device = getattr(org_module, 'quantized_device', None)
-        if module_device is None:
-            module_device = org_module.weight.device
-        self.scalar = torch.tensor(1.0, device=module_device)
-        
         # if is ara lora module, mark it on the layer so memory manager can handle it
         if is_ara:
             org_module.ara_lora_ref = weakref.ref(self)
@@ -135,9 +130,9 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
                 self.lora_up = torch.nn.Linear(self.lora_dim, out_dim, bias=use_bias)
 
         if type(alpha) == torch.Tensor:
-            alpha = alpha.detach().float().numpy()  # without casting, bf16 causes error
+            alpha = float(alpha.detach().float().item())
         alpha = self.lora_dim if alpha is None or alpha == 0 else alpha
-        self.scale = alpha / self.lora_dim
+        self.scale = float(alpha) / self.lora_dim
         self.register_buffer("alpha", torch.tensor(alpha))  # 定数として扱える
 
         # same as microsoft's

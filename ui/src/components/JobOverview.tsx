@@ -153,12 +153,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
   );
 
   const logLines: string[] = useMemo(() => {
-    // split at line breaks on \n or \r\n but not \r
-    let splits: string[] = log.split(/\n|\r\n/);
-
-    splits = splits.map(line => {
-      return line.split(/\r/).pop();
-    }) as string[];
+    let splits: string[] = log.split('\n');
 
     // only return last 100 lines max
     const maxLines = 1000;

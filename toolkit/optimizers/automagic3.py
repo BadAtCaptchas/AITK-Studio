@@ -45,9 +45,12 @@ class Automagic3(torch.optim.Optimizer):
         lr_smoothing_steps: int = 3,
         fused: bool = True,
     ):
-        # Accepted for backwards compatibility with earlier local Automagic3
-        # configs. Final v3 uses mean reversion instead of hard lr rails.
-        _ = (min_lr, max_lr)
+        min_lr = 1e-8 if min_lr is None else float(min_lr)
+        max_lr = 1e3 if max_lr is None else float(max_lr)
+        if min_lr <= 0 or max_lr <= 0:
+            raise ValueError("min_lr and max_lr must both be greater than zero")
+        if min_lr > max_lr:
+            raise ValueError(f"min_lr ({min_lr}) must be <= max_lr ({max_lr})")
         if lr > 1e-3:
             print(f"Warning! Start lr {lr} is very high; forcing to 1e-6.")
             lr = 1e-6
@@ -55,6 +58,8 @@ class Automagic3(torch.optim.Optimizer):
         lr_smoothing_steps = max(1, int(lr_smoothing_steps))
         defaults = dict(
             lr=lr,
+            min_lr=min_lr,
+            max_lr=max_lr,
             lr_bump_rate=lr_bump_rate,
             lr_pull=max(0.0, float(lr_pull)),
             beta2=beta2,
@@ -138,7 +143,9 @@ class Automagic3(torch.optim.Optimizer):
         state = self.state[p]
         state["step"] = 0
         state["lr"] = torch.tensor(
-            float(group["lr"]), dtype=torch.float32, device=p.device
+            min(max(float(group["lr"]), group["min_lr"]), group["max_lr"]),
+            dtype=torch.float32,
+            device=p.device,
         )
         state["prev_sign"] = None
         state["dir_ema"] = torch.zeros((), dtype=torch.float32, device=p.device)
@@ -226,6 +233,8 @@ class Automagic3(torch.optim.Optimizer):
             if pull > 0.0 and self._avg_lr > 0.0:
                 lr_t.mul_(lr_t.reciprocal().mul_(self._avg_lr).pow_(pull))
 
+            lr_t.clamp_(min=group["min_lr"], max=group["max_lr"])
+
         state["prev_sign"] = cur_sign
         state["step"] += 1
 
@@ -306,6 +315,9 @@ class Automagic3(torch.optim.Optimizer):
                     continue
                 if isinstance(st.get("lr"), torch.Tensor):
                     st["lr"] = st["lr"].to(torch.float32)
+                    st["lr"].clamp_(
+                        min=group["min_lr"], max=group["max_lr"]
+                    )
                 if "prev_sign" in st:
                     st["prev_sign"] = None
                 if isinstance(st.get("dir_ema"), torch.Tensor):

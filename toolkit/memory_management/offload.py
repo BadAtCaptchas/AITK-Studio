@@ -41,6 +41,7 @@ SUPPORTED_BLOCK_ARCHES = {
     "zimage_l2p",
     "ideogram4",
     "prx_pixel",
+    "anima",
 }
 
 

@@ -783,7 +783,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima']
 LayerOffloadingBackend = Literal['block', 'legacy']
 QuantizationKernel = Literal['auto', 'triton', 'torch']
 

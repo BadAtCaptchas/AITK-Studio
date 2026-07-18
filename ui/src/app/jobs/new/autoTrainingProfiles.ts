@@ -63,6 +63,7 @@ const flowImageArchs = [
   'prx_pixel',
   'ernie_image',
   'i1',
+  'anima',
 ];
 
 const qwenImageArchs = ['qwen_image', 'qwen_image:2512'];

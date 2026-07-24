@@ -66,7 +66,7 @@ class DoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         if type(alpha) == torch.Tensor:
             alpha = float(alpha.detach().float().item())
         alpha = self.lora_dim if alpha is None or alpha == 0 else alpha
-        self.scale = float(alpha) / self.lora_dim
+        scale = float(alpha) / self.lora_dim
         # self.register_buffer("alpha", torch.tensor(alpha))  # 定数として扱える eng: treat as constant
 
         self.multiplier: Union[float, List[float]] = multiplier
@@ -91,6 +91,8 @@ class DoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         self.lora_down = nn.Linear(d_in, self.lora_dim, bias=False)  # lora_A
         # self.lora_down.weight.data = torch.zeros_like(self.lora_down.weight.data)
         self.lora_down.weight.data = torch.randn_like(self.lora_down.weight.data) * std_dev
+
+        self._set_runtime_scale(scale)
 
         # Compute magnitude through a factorized path. Accessing
         # ``OstrisLinear.weight`` would reconstruct the complete logical weight.
@@ -204,10 +206,20 @@ class DoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         device = self.lora_down.weight.device
         down = self.lora_down.weight.detach().float()
         up = self.lora_up.weight.detach().float()
+        # Layer offloading can move the adapter factors independently of the
+        # parent module buffer. Keep the compiled-forward buffer in place, but
+        # perform this out-of-graph norm calculation beside the factors.
+        adapter_scale = self._runtime_scale.detach().to(
+            device=up.device,
+            dtype=torch.float32,
+        )
         if isinstance(multiplier, torch.Tensor):
-            adapter_scale = multiplier.detach().float().mean() * float(self.scale)
+            adapter_scale = adapter_scale * multiplier.detach().to(
+                device=adapter_scale.device,
+                dtype=torch.float32,
+            ).mean()
         else:
-            adapter_scale = float(self.scale) * float(multiplier)
+            adapter_scale = adapter_scale * float(multiplier)
         up = up * adapter_scale
 
         if getattr(module, "is_ostris_quantized", False):

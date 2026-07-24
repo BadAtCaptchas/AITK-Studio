@@ -40,6 +40,8 @@ const DATASET_PATH_FIELDS = [
   'clip_image_path',
 ];
 
+const VALIDATION_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jxl', '.bmp']);
+
 export class ProjectError extends Error {
   status: number;
   code: ProjectErrorCode | 'PROJECT_NOT_FOUND' | 'PROJECTS_DISABLED' | 'PROJECT_INVALID_INPUT';
@@ -1470,6 +1472,108 @@ async function getSafeProjectDatasetRoot(roots: ProjectRoots) {
   return canonicalDatasetsRoot;
 }
 
+async function getSafeProjectValidationRoot(roots: ProjectRoots) {
+  const [projectStat, assetsStat] = await Promise.all([
+    lstatIfExists(roots.root),
+    lstatIfExists(roots.assets),
+  ]);
+  if (
+    !projectStat?.isDirectory() ||
+    projectStat.isSymbolicLink() ||
+    !assetsStat?.isDirectory() ||
+    assetsStat.isSymbolicLink()
+  ) {
+    throw new ProjectError('The project validation boundary is invalid', {
+      status: 409,
+      code: 'PROJECT_ROOT_INVALID',
+    });
+  }
+
+  const [canonicalProjectRoot, canonicalAssetsRoot] = await Promise.all([
+    fsp.realpath(roots.root),
+    fsp.realpath(roots.assets),
+  ]);
+  if (
+    !pathsAreEqual(roots.root, canonicalProjectRoot) ||
+    !pathsAreEqual(roots.assets, canonicalAssetsRoot) ||
+    !isPathStrictlyInside(canonicalProjectRoot, canonicalAssetsRoot)
+  ) {
+    throw new ProjectError('The project validation boundary redirects outside its project', {
+      status: 409,
+      code: 'PROJECT_ROOT_INVALID',
+    });
+  }
+
+  const validationRoot = path.join(canonicalAssetsRoot, 'validation');
+  let validationStat = await lstatIfExists(validationRoot);
+  if (!validationStat) {
+    try {
+      await fsp.mkdir(validationRoot, { recursive: false });
+    } catch (error: unknown) {
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw error;
+    }
+    validationStat = await lstatIfExists(validationRoot);
+  }
+  if (!validationStat?.isDirectory() || validationStat.isSymbolicLink()) {
+    throw new ProjectError('The project validation folder must be a real directory', {
+      status: 409,
+      code: 'PROJECT_ROOT_INVALID',
+    });
+  }
+
+  const canonicalValidationRoot = await fsp.realpath(validationRoot);
+  if (
+    !pathsAreEqual(validationRoot, canonicalValidationRoot) ||
+    !isPathStrictlyInside(canonicalAssetsRoot, canonicalValidationRoot)
+  ) {
+    throw new ProjectError('The project validation folder redirects outside its project', {
+      status: 409,
+      code: 'PROJECT_ROOT_INVALID',
+    });
+  }
+  return canonicalValidationRoot;
+}
+
+export async function getProjectValidationRoot(project: Project) {
+  await assertProjectsEnabled();
+  await assertProjectIntent(project, 'write');
+  const roots = await ensureProjectFolders(project);
+  return getSafeProjectValidationRoot(roots);
+}
+
+async function resolveProjectValidationImage(
+  value: unknown,
+  roots: ProjectRoots,
+  validationRoot: string,
+  itemIndex: number,
+) {
+  const invalid = () =>
+    new ProjectError(`Validation image ${itemIndex + 1} must be an existing image in this project's validation assets`, {
+      status: 400,
+      code: 'PROJECT_INVALID_INPUT',
+    });
+  if (typeof value !== 'string' || !value.trim()) throw invalid();
+
+  const candidate = path.isAbsolute(value) ? path.resolve(value) : path.resolve(roots.root, value);
+  if (
+    !isPathStrictlyInside(validationRoot, candidate) ||
+    !VALIDATION_IMAGE_EXTENSIONS.has(path.extname(candidate).toLowerCase())
+  ) {
+    throw invalid();
+  }
+  const candidateStat = await lstatIfExists(candidate);
+  if (!candidateStat?.isFile() || candidateStat.isSymbolicLink()) throw invalid();
+
+  const canonicalCandidate = await fsp.realpath(candidate);
+  if (
+    !pathsAreEqual(candidate, canonicalCandidate) ||
+    !isPathStrictlyInside(validationRoot, canonicalCandidate)
+  ) {
+    throw invalid();
+  }
+  return canonicalCandidate;
+}
+
 async function copyScopedSourceIntoProject(
   source: string,
   target: string,
@@ -1634,6 +1738,32 @@ export async function prepareJobConfigForProject(rawJobConfig: any, project: Pro
     const captionPath = processConfig.caption?.path_to_caption;
     if (typeof captionPath === 'string') {
       processConfig.caption.path_to_caption = await copyPathIntoProject(captionPath, roots, globalDatasetsRoot);
+    }
+
+    const validationConfig = processConfig.train?.validation_config;
+    if (validationConfig != null) {
+      if (
+        typeof validationConfig !== 'object' ||
+        Array.isArray(validationConfig) ||
+        !Array.isArray(validationConfig.validation_items) ||
+        validationConfig.validation_items.length === 0
+      ) {
+        throw new ProjectError('Validation settings require at least one held-out image', {
+          status: 400,
+          code: 'PROJECT_INVALID_INPUT',
+        });
+      }
+      const validationRoot = await getSafeProjectValidationRoot(roots);
+      for (let index = 0; index < validationConfig.validation_items.length; index += 1) {
+        const item = validationConfig.validation_items[index];
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          throw new ProjectError(`Validation image ${index + 1} is invalid`, {
+            status: 400,
+            code: 'PROJECT_INVALID_INPUT',
+          });
+        }
+        item.image_path = await resolveProjectValidationImage(item.image_path, roots, validationRoot, index);
+      }
     }
   }
 

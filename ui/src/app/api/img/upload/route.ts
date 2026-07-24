@@ -2,6 +2,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDataRoot } from '@/server/settings';
+import { getProjectValidationRoot, resolveOptionalProject } from '@/server/projects';
 import {
   cleanupStagedUpload,
   decodedUploadHeader,
@@ -33,6 +34,7 @@ const ALLOWED_EXTENSIONS = new Set([
   '.flac',
   '.ogg',
 ]);
+const VALIDATION_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jxl', '.bmp']);
 
 function isDestinationCollision(error: unknown) {
   return error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST';
@@ -55,8 +57,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unsupported media type' }, { status: 415 });
     }
 
-    const dataRoot = await getDataRoot();
-    const imageRoot = path.join(dataRoot, 'images');
+    const projectID = decodedUploadHeader(request, 'x-aitk-project-id', 256);
+    const project = await resolveOptionalProject(projectID || null, { intent: 'write' });
+    if (project && !VALIDATION_IMAGE_EXTENSIONS.has(extension)) {
+      return NextResponse.json({ error: 'Project validation uploads must be images' }, { status: 415 });
+    }
+    const imageRoot = project
+      ? await getProjectValidationRoot(project)
+      : path.join(await getDataRoot(), 'images');
     const staged = await streamRequestToStagingFile(request, imageRoot, {
       maxBytes: MAX_FILE_BYTES,
       prefix: 'media-upload',

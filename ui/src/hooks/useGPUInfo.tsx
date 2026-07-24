@@ -1,8 +1,10 @@
 'use client';
 
 import { GPUApiResponse, GpuInfo } from '@/types';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
+import { SharedAbortableRequestPool } from '@/utils/sharedAbortableRequest';
+import usePollLoop from './usePollLoop';
 
 const DEFAULT_GPU_CACHE_TTL_MS = 5000;
 
@@ -13,12 +15,21 @@ type UseGPUInfoOptions = {
 
 type FetchGpuInfoOptions = {
   force?: boolean;
+  signal?: AbortSignal;
 };
 
 const gpuCache = new Map<string, { data: GPUApiResponse; fetchedAt: number }>();
-const gpuRequests = new Map<string, Promise<GPUApiResponse>>();
+const gpuRequestPool = new SharedAbortableRequestPool<string, GPUApiResponse>(
+  async (workerID, signal) => {
+    const data = await apiClient
+      .get('/api/gpu', { params: { worker_id: workerID }, signal })
+      .then(res => res.data as GPUApiResponse);
+    gpuCache.set(workerID, { data, fetchedAt: Date.now() });
+    return data;
+  },
+);
 
-async function loadGpuInfo(workerID: string, cacheTtlMs: number) {
+async function loadGpuInfo(workerID: string, cacheTtlMs: number, signal?: AbortSignal) {
   const cacheKey = workerID || 'local';
   const cached = gpuCache.get(cacheKey);
   const now = Date.now();
@@ -26,24 +37,7 @@ async function loadGpuInfo(workerID: string, cacheTtlMs: number) {
     return cached.data;
   }
 
-  const existingRequest = gpuRequests.get(cacheKey);
-  if (existingRequest) {
-    return existingRequest;
-  }
-
-  const request = apiClient
-    .get('/api/gpu', { params: { worker_id: workerID } })
-    .then(res => res.data as GPUApiResponse)
-    .then(data => {
-      gpuCache.set(cacheKey, { data, fetchedAt: Date.now() });
-      return data;
-    })
-    .finally(() => {
-      gpuRequests.delete(cacheKey);
-    });
-
-  gpuRequests.set(cacheKey, request);
-  return request;
+  return gpuRequestPool.subscribe(cacheKey, signal);
 }
 
 export default function useGPUInfo(
@@ -58,15 +52,25 @@ export default function useGPUInfo(
   const [gpuList, setGpuList] = useState<GpuInfo[]>([]);
   const [isGPUInfoLoaded, setIsLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const gpuIDsKey = gpuIds?.join(',') ?? '';
+  const activeScopeRef = useRef('');
+  activeScopeRef.current = `${enabled}:${workerID}:${gpuIDsKey}`;
 
   const fetchGpuInfo = useCallback(async (fetchOptions?: FetchGpuInfoOptions) => {
     if (!enabled) {
       setStatus('idle');
       return;
     }
+    const requestScope = `${enabled}:${workerID}:${gpuIDsKey}`;
     setStatus('loading');
     try {
-      const data = await loadGpuInfo(workerID, fetchOptions?.force ? 0 : cacheTtlMs);
+      const data = await loadGpuInfo(
+        workerID,
+        fetchOptions?.force ? 0 : cacheTtlMs,
+        fetchOptions?.signal,
+      );
+      if (fetchOptions?.signal?.aborted) return;
+      if (activeScopeRef.current !== requestScope) return;
       setGpuData(data);
       let gpus = [...data.gpus].sort((a, b) => a.index - b.index);
       if (gpuIds) {
@@ -75,37 +79,29 @@ export default function useGPUInfo(
       setGpuList(gpus);
       setStatus('success');
     } catch (err) {
+      if (fetchOptions?.signal?.aborted) return;
+      if (activeScopeRef.current !== requestScope) return;
       console.error(`Failed to fetch GPU data: ${err instanceof Error ? err.message : String(err)}`);
       setStatus('error');
     } finally {
-      setIsLoaded(true);
+      if (!fetchOptions?.signal?.aborted && activeScopeRef.current === requestScope) {
+        setIsLoaded(true);
+      }
     }
-  }, [cacheTtlMs, enabled, gpuIds, workerID]);
+  }, [cacheTtlMs, enabled, gpuIDsKey, gpuIds, workerID]);
 
   useEffect(() => {
-    if (!enabled) {
-      setGpuList([]);
-      setGpuData(null);
-      setIsLoaded(false);
-      setStatus('idle');
-      return;
-    }
+    setGpuList([]);
+    setGpuData(null);
+    setIsLoaded(false);
+    setStatus('idle');
+  }, [enabled, gpuIDsKey, workerID]);
 
-    // Fetch immediately on component mount
-    fetchGpuInfo();
-
-    // Set up interval if specified
-    if (reloadInterval) {
-      const interval = setInterval(() => {
-        fetchGpuInfo();
-      }, reloadInterval);
-
-      // Cleanup interval on unmount
-      return () => {
-        clearInterval(interval);
-      };
-    }
-  }, [enabled, fetchGpuInfo, reloadInterval]);
+  usePollLoop(
+    signal => fetchGpuInfo({ signal }),
+    enabled ? reloadInterval : null,
+    [enabled, workerID, cacheTtlMs, gpuIDsKey],
+  );
 
   return {
     gpuData,

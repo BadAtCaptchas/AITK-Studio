@@ -166,6 +166,10 @@ test('profile exclusions omit cache, transient files, credentials, and secret ke
   assert.equal(isProjectSyncPathExcluded('configs/.env', 'full'), true);
   assert.equal(isProjectSyncPathExcluded('configs/credentials.json', 'full'), true);
   assert.equal(isProjectSyncPathExcluded('datasets/encrypted/objects/0001.bin', 'full'), false);
+  assert.equal(isProjectSyncPathExcluded('assets/validation/held-out.png', 'launch'), false);
+  assert.equal(isProjectSyncPathExcluded('assets/validation/nested/held-out.webp', 'launch'), false);
+  assert.equal(isProjectSyncPathExcluded('assets/validation/notes.txt', 'launch'), true);
+  assert.equal(isProjectSyncPathExcluded('assets/private/reference.png', 'launch'), true);
   assert.equal(isProjectSyncPathExcluded('outputs/sample.png', 'results'), false);
   assert.equal(isProjectSyncPathExcluded('datasets/sample.png', 'results'), true);
   assert.deepEqual(
@@ -185,6 +189,25 @@ test('manifests are SHA-256 addressed, profile aware, and do not create folders'
     const full = await buildProjectSyncManifest(root, 'project-1', 'full');
     assert.deepEqual(full.files.map(file => file.path), ['datasets/photo.png', 'outputs/sample.png']);
     assert.match(full.hash, /^[a-f0-9]{64}$/);
+  });
+});
+
+test('launch manifests transfer only held-out validation images from project assets', async () => {
+  await withProject(async root => {
+    await fs.mkdir(path.join(root, 'assets', 'validation', 'nested'), { recursive: true });
+    await fs.writeFile(path.join(root, 'assets', 'validation', 'held-out.png'), 'validation image');
+    await fs.writeFile(path.join(root, 'assets', 'validation', 'nested', 'portrait.webp'), 'nested validation image');
+    await fs.writeFile(path.join(root, 'assets', 'validation', 'notes.txt'), 'not a validation image');
+    await fs.writeFile(path.join(root, 'assets', 'private-reference.png'), 'unrelated private asset');
+
+    const launch = await buildProjectSyncManifest(root, 'project-1', 'launch');
+    assert.deepEqual(
+      launch.files.map(file => file.path),
+      [
+        'assets/validation/held-out.png',
+        'assets/validation/nested/portrait.webp',
+      ],
+    );
   });
 });
 

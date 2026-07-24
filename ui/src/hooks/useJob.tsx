@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
+import usePollLoop from './usePollLoop';
 
 export default function useJob(
   jobID: string,
@@ -11,44 +12,42 @@ export default function useJob(
 ) {
   const [job, setJob] = useState<Job | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const requestScope = `${jobID}\0${projectID ?? ''}`;
+  const activeScopeRef = useRef(requestScope);
+  activeScopeRef.current = requestScope;
 
-  const refreshJob = useCallback(() => {
+  const refreshJob = useCallback((signal?: AbortSignal) => {
     if (projectID === null) return;
+    const currentRequestScope = requestScope;
+    if (activeScopeRef.current !== currentRequestScope) return;
     setStatus('loading');
-    apiClient
+    return apiClient
       .get('/api/jobs', {
         params: {
           id: jobID,
           ...(projectID ? { scope: 'project', project_id: projectID } : {}),
         },
+        signal,
       })
       .then(res => res.data)
       .then(data => {
+        if (signal?.aborted || activeScopeRef.current !== currentRequestScope) return;
         setJob(data);
         setStatus('success');
       })
       .catch(error => {
+        if (signal?.aborted || activeScopeRef.current !== currentRequestScope) return;
         console.error('Error fetching datasets:', error);
         setStatus('error');
       });
-  }, [jobID, projectID]);
+  }, [jobID, projectID, requestScope]);
 
   useEffect(() => {
-    if (projectID === null) {
-      setJob(null);
-      setStatus('idle');
-      return;
-    }
-    refreshJob();
+    setJob(null);
+    setStatus('idle');
+  }, [jobID, projectID]);
 
-    if (reloadInterval) {
-      const interval = setInterval(refreshJob, reloadInterval);
+  usePollLoop(signal => refreshJob(signal), reloadInterval, [jobID, projectID]);
 
-      return () => {
-        clearInterval(interval);
-      };
-    }
-  }, [projectID, refreshJob, reloadInterval]);
-
-  return { job, setJob, status, refreshJob };
+  return { job, setJob, status, refreshJob: () => refreshJob() };
 }

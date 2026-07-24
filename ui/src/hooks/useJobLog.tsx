@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import { TerminalEmulator } from '@/utils/terminalEmulator';
+import usePollLoop from './usePollLoop';
 
 type JobLogResponse = {
   log: string;
@@ -36,7 +37,7 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
   const activeJobIDRef = useRef(jobID);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>('idle');
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((signal?: AbortSignal) => {
     if (isRefreshingRef.current) return;
     isRefreshingRef.current = true;
     const requestJobID = jobID;
@@ -46,8 +47,11 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
     }
     setStatus(loadStatus);
     const offset = offsetRef.current;
-    apiClient
-      .get(`/api/jobs/${jobID}/log`, offset !== null ? { params: { offset } } : undefined)
+    return apiClient
+      .get(`/api/jobs/${jobID}/log`, {
+        ...(offset !== null ? { params: { offset } } : {}),
+        signal,
+      })
       .then(res => res.data)
       .then(data => {
         if (activeJobIDRef.current !== requestJobID) return;
@@ -64,6 +68,7 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
         didInitialLoadRef.current = true;
       })
       .catch(error => {
+        if (signal?.aborted) return;
         if (activeJobIDRef.current !== requestJobID) return;
         console.error('Error fetching log:', error);
         setStatus('error');
@@ -82,16 +87,9 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
     didInitialLoadRef.current = false;
     terminalRef.current?.reset();
     setLog('');
-    refresh();
+  }, [jobID]);
 
-    if (reloadInterval) {
-      const interval = setInterval(refresh, reloadInterval);
+  usePollLoop(signal => refresh(signal), reloadInterval, [jobID]);
 
-      return () => {
-        clearInterval(interval);
-      };
-    }
-  }, [jobID, reloadInterval, refresh]);
-
-  return { log, status, refresh };
+  return { log, status, refresh: () => refresh() };
 }

@@ -27,14 +27,23 @@ export async function uploadLoraFile(
 
 export async function uploadTemporaryMediaFile(
   file: File,
-  onUploadProgress?: (event: AxiosProgressEvent) => void,
+  options:
+    | {
+        projectID?: string | null;
+        onUploadProgress?: (event: AxiosProgressEvent) => void;
+      }
+    | ((event: AxiosProgressEvent) => void) = {},
 ) {
+  const normalizedOptions = typeof options === 'function' ? { onUploadProgress: options } : options;
   return apiClient.post('/api/img/upload', file, {
     headers: {
       'Content-Type': 'application/octet-stream',
       'X-AITK-File-Name': encodedHeaderValue(file.name),
+      ...(normalizedOptions.projectID
+        ? { 'X-AITK-Project-ID': encodedHeaderValue(normalizedOptions.projectID) }
+        : {}),
     },
-    onUploadProgress,
+    onUploadProgress: normalizedOptions.onUploadProgress,
     timeout: 0,
   });
 }

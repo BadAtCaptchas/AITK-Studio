@@ -95,9 +95,9 @@ def make_kron(w1, w2, scale):
         w1 = w1.unsqueeze(-1)
     w2 = w2.contiguous()
     rebuild = torch.kron(w1, w2)
-    if scale != 1:
-        rebuild = rebuild * scale
-    return rebuild
+    if isinstance(scale, torch.Tensor):
+        return rebuild * scale
+    return rebuild if scale == 1 else rebuild * scale
 
 
 class LokrModule(ToolkitModuleMixin, nn.Module):
@@ -200,7 +200,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             alpha = self.lora_dim
 
         r_factor = math.sqrt(self.lora_dim) if self.rs_lora else self.lora_dim
-        self.scale = alpha / r_factor
+        self._set_runtime_scale(alpha / r_factor)
         self.register_buffer("alpha", torch.tensor(alpha * (self.lora_dim / r_factor)))
 
         if _as_bool(use_scalar):
@@ -387,7 +387,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         return rank_scale.mean(dim=0)
 
     def get_weight(self, orig_weight=None):
-        weight = make_kron(self._w1(), self._w2(), self.scale)
+        weight = make_kron(self._w1(), self._w2(), self._runtime_scale)
         if orig_weight is not None:
             shape = tuple(orig_weight.shape) if hasattr(orig_weight, "shape") else tuple(orig_weight)
             weight = weight.reshape(shape)
@@ -658,7 +658,7 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
             h = hc.reshape(*hc.shape[:-2], -1)
 
         scalar = self.scalar.to(h.device, dtype=h.dtype)
-        return h * self.scale * scale * scalar
+        return h * self._runtime_scale * scale * scalar
 
     def bypass_forward(self, x, scale=1, *args, **kwargs):
         if self.base_is_ostris_quantized or getattr(

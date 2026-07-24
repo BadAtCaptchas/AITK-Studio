@@ -1,44 +1,43 @@
 'use client';
 
 import { CpuInfo } from '@/types';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
+import usePollLoop from './usePollLoop';
 
 export default function useCPUInfo(reloadInterval: null | number = null, workerID = 'local') {
   const [cpuInfo, setCpuInfo] = useState<CpuInfo | null>(null);
   const [isCPUInfoLoaded, setIsLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const activeWorkerRef = useRef(workerID);
+  activeWorkerRef.current = workerID;
 
-  const fetchCpuInfo = async () => {
+  const fetchCpuInfo = useCallback(async (signal?: AbortSignal) => {
+    const requestWorkerID = workerID;
     setStatus('loading');
     try {
-      const data: CpuInfo = await apiClient.get('/api/cpu', { params: { worker_id: workerID } }).then(res => res.data);
+      const data: CpuInfo = await apiClient
+        .get('/api/cpu', { params: { worker_id: workerID }, signal })
+        .then(res => res.data);
+      if (signal?.aborted || activeWorkerRef.current !== requestWorkerID) return;
       setCpuInfo(data);
       setStatus('success');
     } catch (err) {
+      if (signal?.aborted || activeWorkerRef.current !== requestWorkerID) return;
       console.error(`Failed to fetch CPU data: ${err instanceof Error ? err.message : String(err)}`);
       setStatus('error');
     } finally {
-      setIsLoaded(true);
+      if (!signal?.aborted && activeWorkerRef.current === requestWorkerID) setIsLoaded(true);
     }
-  };
+  }, [workerID]);
 
   useEffect(() => {
-    // Fetch immediately on component mount
-    fetchCpuInfo();
+    setCpuInfo(null);
+    setIsLoaded(false);
+    setStatus('idle');
+  }, [workerID]);
 
-    // Set up interval if specified
-    if (reloadInterval) {
-      const interval = setInterval(() => {
-        fetchCpuInfo();
-      }, reloadInterval);
+  usePollLoop(signal => fetchCpuInfo(signal), reloadInterval, [workerID]);
 
-      // Cleanup interval on unmount
-      return () => {
-        clearInterval(interval);
-      };
-    }
-  }, [reloadInterval, workerID]); // Added dependencies
-
-  return { cpuInfo, isCPUInfoLoaded, status, refreshCpuInfo: fetchCpuInfo };
+  return { cpuInfo, isCPUInfoLoaded, status, refreshCpuInfo: () => fetchCpuInfo() };
 }

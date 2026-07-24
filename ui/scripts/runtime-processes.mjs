@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
+const require = createRequire(import.meta.url);
 
 export const UI_ROOT = path.resolve(path.dirname(__filename), '..');
 export const TOOLKIT_ROOT = path.resolve(UI_ROOT, '..');
@@ -19,6 +21,8 @@ export const DEFAULT_DEV_PORT = 3000;
 
 const RUNTIME_MARKERS = [
   'scripts/run-app.mjs',
+  'dist/cron/fileserver.js',
+  'cron/fileserver.ts',
   'node_modules/next/dist/bin/next',
   'next start',
   'next dev',
@@ -249,6 +253,7 @@ export function collectRuntimePids(processes, runtime = {}, extraPids = []) {
     runtime?.launcherPid,
     runtime?.supervisorPid,
     runtime?.uiPid,
+    runtime?.fileServerPid,
     runtime?.workerPid,
     runtime?.updaterPid,
     ...(Array.isArray(runtime?.managedPids) ? runtime.managedPids : []),
@@ -501,8 +506,14 @@ export function getUiPort(mode) {
 }
 
 export function buildAppCommands(mode, port = getUiPort(mode)) {
-  const nextBin = path.join(UI_ROOT, 'node_modules', 'next', 'dist', 'bin', 'next');
   const tsNodeDevBin = path.join(UI_ROOT, 'node_modules', 'ts-node-dev', 'lib', 'bin.js');
+  const tsNodeBin = (() => {
+    try {
+      return require.resolve('ts-node/dist/bin.js');
+    } catch {
+      return require.resolve('ts-node-dev/node_modules/ts-node/dist/bin.js');
+    }
+  })();
   const updaterScript = path.join(UI_ROOT, 'scripts', 'repo-updater.mjs');
 
   if (mode === 'dev') {
@@ -526,8 +537,18 @@ export function buildAppCommands(mode, port = getUiPort(mode)) {
       {
         label: 'UI',
         critical: true,
+        ipc: true,
         command: process.execPath,
-        args: [nextBin, 'dev', '--turbopack'],
+        args: [
+          tsNodeBin,
+          '--project',
+          'tsconfig.worker.json',
+          '--transpile-only',
+          'cron/fileServer.ts',
+          'dev',
+          '--port',
+          String(port),
+        ],
       },
       {
         label: 'UPDATER',
@@ -548,8 +569,14 @@ export function buildAppCommands(mode, port = getUiPort(mode)) {
     {
       label: 'UI',
       critical: true,
+      ipc: true,
       command: process.execPath,
-      args: [nextBin, 'start', '--port', String(port)],
+      args: [
+        path.join(UI_ROOT, 'dist', 'cron', 'fileServer.js'),
+        'start',
+        '--port',
+        String(port),
+      ],
     },
     {
       label: 'UPDATER',

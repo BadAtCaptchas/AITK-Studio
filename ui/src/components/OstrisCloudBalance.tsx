@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Wallet } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import usePollLoop from '@/hooks/usePollLoop';
 
 interface BalanceResponse {
   enabled: boolean;
@@ -17,26 +18,15 @@ interface BalanceResponse {
 export default function OstrisCloudBalance() {
   const [data, setData] = useState<BalanceResponse | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchBalance = async () => {
-      try {
-        const res = await apiClient.get<BalanceResponse>('/api/ostris_cloud');
-        if (!cancelled) setData(res.data);
-      } catch {
-        // ignore — keep last known value
-      }
-    };
-
-    fetchBalance();
-    const interval = setInterval(fetchBalance, 60_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+  usePollLoop(async signal => {
+    try {
+      const res = await apiClient.get<BalanceResponse>('/api/ostris_cloud', { signal });
+      if (signal.aborted) return;
+      setData(res.data);
+    } catch {
+      // Ignore transient failures and keep the last known value.
+    }
+  }, 60_000);
 
   if (!data || !data.enabled || !data.appUrl) return null;
 

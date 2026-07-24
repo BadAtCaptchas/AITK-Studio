@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComfyInstallProgress } from '@/types';
 import { apiClient } from '@/utils/api';
+import usePollLoop from './usePollLoop';
 
 const MAX_EMPTY_POLLS = 10;
 
@@ -20,13 +21,17 @@ export default function useJobComfyInstallProgress(
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const emptyPollsRef = useRef(0);
   const hasSeenProgressRef = useRef(Boolean(initialProgress));
+  const activeJobIDRef = useRef(jobID);
+  activeJobIDRef.current = jobID;
 
-  const refreshProgress = useCallback(() => {
+  const refreshProgress = useCallback((signal?: AbortSignal) => {
+    const requestJobID = jobID;
     setStatus(current => (current === 'idle' ? 'loading' : current));
-    apiClient
-      .get(`/api/jobs/${jobID}/comfy-install-progress`)
+    return apiClient
+      .get(`/api/jobs/${jobID}/comfy-install-progress`, { signal })
       .then(res => res.data)
       .then(data => {
+        if (signal?.aborted || activeJobIDRef.current !== requestJobID) return;
         const nextProgress = data.progress || null;
         setProgress(nextProgress);
         if (nextProgress) {
@@ -44,6 +49,7 @@ export default function useJobComfyInstallProgress(
         setStatus('success');
       })
       .catch(error => {
+        if (signal?.aborted || activeJobIDRef.current !== requestJobID) return;
         console.error('Error fetching ComfyUI install progress:', error);
         setStatus('error');
       });
@@ -70,15 +76,11 @@ export default function useJobComfyInstallProgress(
     setIsPolling(true);
   }, [jobID, reloadInterval, initialProgress?.status]);
 
-  useEffect(() => {
-    refreshProgress();
-  }, [refreshProgress]);
+  usePollLoop(
+    signal => refreshProgress(signal),
+    reloadInterval && isPolling ? reloadInterval : null,
+    [jobID, isPolling],
+  );
 
-  useEffect(() => {
-    if (!reloadInterval || !isPolling) return;
-    const interval = setInterval(refreshProgress, reloadInterval);
-    return () => clearInterval(interval);
-  }, [isPolling, refreshProgress, reloadInterval]);
-
-  return { progress, status, refreshProgress };
+  return { progress, status, refreshProgress: () => refreshProgress() };
 }

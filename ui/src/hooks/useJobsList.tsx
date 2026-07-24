@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
+import usePollLoop from './usePollLoop';
 
 type UseJobsListProps = {
   onlyActive?: boolean;
@@ -23,10 +24,15 @@ export default function useJobsList({
 }: UseJobsListProps = {}) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const requestScope = JSON.stringify([job_type, projectID, scope, onlyActive, includeProjectActive]);
+  const activeScopeRef = useRef(requestScope);
+  activeScopeRef.current = requestScope;
 
-  const refreshJobs = () => {
+  const refreshJobs = useCallback((signal?: AbortSignal) => {
+    const currentRequestScope = requestScope;
+    if (activeScopeRef.current !== currentRequestScope) return;
     setStatus('loading');
-    apiClient
+    return apiClient
       .get('/api/jobs', {
         params: {
           ...(job_type ? { job_type } : {}),
@@ -34,9 +40,11 @@ export default function useJobsList({
           ...(scope ? { scope } : {}),
           ...(includeProjectActive && !projectID ? { include_project_active: '1' } : {}),
         },
+        signal,
       })
       .then(res => res.data)
       .then(data => {
+        if (signal?.aborted || activeScopeRef.current !== currentRequestScope) return;
         if (data.error) {
           setStatus('error');
         } else {
@@ -48,19 +56,23 @@ export default function useJobsList({
         }
       })
       .catch(() => {
+        if (signal?.aborted || activeScopeRef.current !== currentRequestScope) return;
         setStatus('error');
       });
-  };
+  }, [includeProjectActive, job_type, onlyActive, projectID, requestScope, scope]);
+
   useEffect(() => {
-    refreshJobs();
+    setJobs([]);
+    setStatus('idle');
+  }, [includeProjectActive, job_type, onlyActive, projectID, scope]);
 
-    if (reloadInterval) {
-      const interval = setInterval(() => {
-        refreshJobs();
-      }, reloadInterval);
-      return () => clearInterval(interval);
-    }
-  }, [job_type, projectID, scope, onlyActive, reloadInterval, includeProjectActive]);
+  usePollLoop(signal => refreshJobs(signal), reloadInterval, [
+    job_type,
+    projectID,
+    scope,
+    onlyActive,
+    includeProjectActive,
+  ]);
 
-  return { jobs, setJobs, status, refreshJobs };
+  return { jobs, setJobs, status, refreshJobs: () => refreshJobs() };
 }

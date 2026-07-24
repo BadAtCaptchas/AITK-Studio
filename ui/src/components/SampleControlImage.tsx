@@ -1,15 +1,17 @@
 'use client';
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import classNames from 'classnames';
 import { useDropzone } from 'react-dropzone';
 import { FaUpload, FaImage, FaTimes } from 'react-icons/fa';
 import { uploadTemporaryMediaFile } from '@/utils/streamedUploads';
+import { apiClient } from '@/utils/api';
 
 interface Props {
   src: string | null | undefined;
   className?: string;
   instruction?: string;
+  projectID?: string | null;
   onNewImageSelected: (imagePath: string | null) => void;
 }
 
@@ -17,18 +19,48 @@ export default function SampleControlImage({
   src,
   className,
   instruction = 'Add Control Image',
+  projectID = null,
   onNewImageSelected,
 }: Props) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [projectPreview, setProjectPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setProjectPreview(null);
+    if (!projectID || !src) return;
+
+    const controller = new AbortController();
+    apiClient
+      .get(`/api/projects/${encodeURIComponent(projectID)}/files`, {
+        params: { path: src },
+        signal: controller.signal,
+      })
+      .then(response => {
+        const data: unknown = response.data;
+        if (!data || typeof data !== 'object') return;
+        const mediaUrl = (data as Record<string, unknown>).mediaUrl;
+        if (typeof mediaUrl === 'string' && mediaUrl) {
+          setProjectPreview(mediaUrl);
+        }
+      })
+      .catch(error => {
+        if (!controller.signal.aborted) {
+          console.error('Could not load project validation preview:', error);
+        }
+      });
+
+    return () => controller.abort();
+  }, [projectID, src]);
 
   const backgroundUrl = useMemo(() => {
     if (localPreview) return localPreview;
+    if (projectID) return projectPreview;
     if (src) return `/api/img/${encodeURIComponent(src)}`;
     return null;
-  }, [src, localPreview]);
+  }, [localPreview, projectID, projectPreview, src]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -40,14 +72,23 @@ export default function SampleControlImage({
       setLocalPreview(objectUrl);
 
       try {
-        const resp = await uploadTemporaryMediaFile(file, evt => {
+        const resp = await uploadTemporaryMediaFile(file, {
+          projectID,
+          onUploadProgress: evt => {
             const total = evt.total ?? 100;
             const loaded = evt.loaded ?? 0;
             setUploadProgress(Math.round((loaded * 100) / total));
-          });
+          },
+        });
 
-        const uploaded = resp?.data?.files?.[0] ?? null;
+        const data: unknown = resp?.data;
+        const files =
+          data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).files)
+            ? (data as { files: unknown[] }).files
+            : [];
+        const uploaded = typeof files[0] === 'string' ? files[0] : null;
         onNewImageSelected(uploaded);
+        setLocalPreview(null);
       } catch (err) {
         console.error('Upload failed:', err);
         setLocalPreview(null);
@@ -58,7 +99,7 @@ export default function SampleControlImage({
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     },
-    [onNewImageSelected],
+    [onNewImageSelected, projectID],
   );
 
   const onDrop = useCallback(

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HFDownloadProgress } from '@/types';
 import { apiClient } from '@/utils/api';
+import usePollLoop from './usePollLoop';
 
 const MAX_EMPTY_POLLS = 10;
 
@@ -34,13 +35,17 @@ export default function useJobDownloadProgress(
   const emptyPollsRef = useRef(0);
   const hasSeenProgressRef = useRef(Boolean(initialProgress));
   const latestProgressUpdatedAtRef = useRef(initialProgress?.updatedAt || null);
+  const activeJobIDRef = useRef(jobID);
+  activeJobIDRef.current = jobID;
 
-  const refreshProgress = useCallback(() => {
+  const refreshProgress = useCallback((signal?: AbortSignal) => {
+    const requestJobID = jobID;
     setStatus(current => (current === 'idle' ? 'loading' : current));
-    apiClient
-      .get(`/api/jobs/${jobID}/hf-download-progress`)
+    return apiClient
+      .get(`/api/jobs/${jobID}/hf-download-progress`, { signal })
       .then(res => res.data)
       .then(data => {
+        if (signal?.aborted || activeJobIDRef.current !== requestJobID) return;
         const nextProgress = data.progress || null;
         setProgress(nextProgress);
         if (nextProgress) {
@@ -56,6 +61,7 @@ export default function useJobDownloadProgress(
         setStatus('success');
       })
       .catch(error => {
+        if (signal?.aborted || activeJobIDRef.current !== requestJobID) return;
         console.error('Error fetching Hugging Face download progress:', error);
         setStatus('error');
       });
@@ -91,15 +97,11 @@ export default function useJobDownloadProgress(
     }
   }, [initialProgress, reloadInterval]);
 
-  useEffect(() => {
-    refreshProgress();
-  }, [refreshProgress]);
+  usePollLoop(
+    signal => refreshProgress(signal),
+    reloadInterval && isPolling ? reloadInterval : null,
+    [jobID, isPolling],
+  );
 
-  useEffect(() => {
-    if (!reloadInterval || !isPolling) return;
-    const interval = setInterval(refreshProgress, reloadInterval);
-    return () => clearInterval(interval);
-  }, [isPolling, refreshProgress, reloadInterval]);
-
-  return { progress, status, refreshProgress };
+  return { progress, status, refreshProgress: () => refreshProgress() };
 }

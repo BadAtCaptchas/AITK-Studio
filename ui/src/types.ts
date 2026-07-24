@@ -674,6 +674,18 @@ export interface TrainingPhaseConfig {
   auto_advance?: PhaseAutoAdvanceConfig;
 }
 
+export interface ValidationItem {
+  image_path: string;
+  prompt: string;
+}
+
+export interface ValidationConfig {
+  validation_items: ValidationItem[];
+  resolution: number;
+  validate_every_n_steps: number;
+  validation_sigmas?: number[];
+}
+
 export interface TrainConfig {
   batch_size: number;
   bypass_guidance_embedding?: boolean;
@@ -727,6 +739,7 @@ export interface TrainConfig {
   audio_loss_multiplier?: number;
   ltx_strategy?: LTXStrategyConfig;
   max_loss?: number | null;
+  validation_config?: ValidationConfig;
 }
 
 export interface QuantizeKwargsConfig {

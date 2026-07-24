@@ -20,9 +20,21 @@ export const PROJECT_SYNC_LIFECYCLE_BLOCKING_JOB_STATUSES = [
 
 const PROFILE_ZONES = {
   full: ['datasets', 'configs', 'runs', 'outputs', 'models', 'assets', 'notes'],
-  launch: ['datasets', 'configs', 'runs', 'models'],
+  // Launch replicas only need held-out validation images from the assets
+  // zone. Other project assets may be private or unrelated to execution.
+  launch: ['datasets', 'configs', 'runs', 'models', 'assets/validation'],
   results: ['runs', 'outputs', 'models'],
 } as const satisfies Record<ProjectSyncProfileName, readonly string[]>;
+
+const LAUNCH_VALIDATION_IMAGE_EXTENSIONS = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.webp',
+  '.jxl',
+  '.bmp',
+]);
 
 const BLOCKED_SEGMENTS = new Set([
   '.git',
@@ -345,11 +357,18 @@ async function assertFileHasNoCredentialMaterial(filePath: string, relativePath:
 
 export function profileIncludesPath(profile: ProjectSyncProfileName, relativePath: string) {
   const normalized = normalizePortableRelativePath(relativePath);
-  const [zone] = normalized.split('/');
-  return (PROFILE_ZONES[profile] as readonly string[]).includes(zone);
+  return (PROFILE_ZONES[profile] as readonly string[]).some(
+    includedPath =>
+      normalized === includedPath ||
+      normalized.startsWith(`${includedPath}/`),
+  );
 }
 
-export function isProjectSyncPathExcluded(relativePath: string, profile: ProjectSyncProfileName) {
+export function isProjectSyncPathExcluded(
+  relativePath: string,
+  profile: ProjectSyncProfileName,
+  options: { directory?: boolean } = {},
+) {
   let normalized: string;
   try {
     normalized = normalizePortableRelativePath(relativePath);
@@ -360,6 +379,14 @@ export function isProjectSyncPathExcluded(relativePath: string, profile: Project
   const segments = normalized.toLowerCase().split('/');
   if (segments.some(segment => BLOCKED_SEGMENTS.has(segment))) return true;
   const fileName = segments.at(-1) || '';
+  if (
+    !options.directory &&
+    profile === 'launch' &&
+    normalized.toLowerCase().startsWith('assets/validation/') &&
+    !LAUNCH_VALIDATION_IMAGE_EXTENSIONS.has(path.posix.extname(fileName))
+  ) {
+    return true;
+  }
   if (BLOCKED_FILE_NAMES.has(fileName)) return true;
   if (BLOCKED_FILE_SUFFIXES.some(suffix => fileName.endsWith(suffix))) return true;
   if (BLOCKED_FILE_FRAGMENTS.some(fragment => fileName.includes(fragment))) return true;
@@ -691,9 +718,9 @@ async function collectManifestFiles(
   for (const child of children) {
     const absolutePath = path.join(absoluteDirectory, child.name);
     const relativePath = posixPath(path.relative(projectRoot, absolutePath));
-    if (isProjectSyncPathExcluded(relativePath, profile)) continue;
     const stat = await fs.lstat(absolutePath);
     if (stat.isSymbolicLink()) continue;
+    if (isProjectSyncPathExcluded(relativePath, profile, { directory: stat.isDirectory() })) continue;
     if (stat.isDirectory()) {
       await collectManifestFiles(projectRoot, absolutePath, profile, files);
       continue;
@@ -728,8 +755,13 @@ export async function buildProjectSyncManifest(
   }
   const root = path.resolve(projectRoot);
   const files: ProjectManifestEntry[] = [];
-  for (const zone of PROFILE_ZONES[profile]) {
-    await collectManifestFiles(root, path.join(root, zone), profile, files);
+  for (const includedPath of PROFILE_ZONES[profile]) {
+    await collectManifestFiles(
+      root,
+      path.join(root, ...includedPath.split('/')),
+      profile,
+      files,
+    );
   }
   files.sort((left, right) => left.path.localeCompare(right.path));
   assertProjectSyncQuota(files);

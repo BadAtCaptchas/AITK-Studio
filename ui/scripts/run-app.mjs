@@ -10,6 +10,10 @@ import {
   stopStaleRuntime,
   writeJsonAtomic,
 } from './runtime-processes.mjs';
+import {
+  runStartupWithCleanup,
+  stopManagedChildren,
+} from './app-supervisor-lifecycle.mjs';
 
 const SHUTDOWN_GRACE_MS = 8000;
 const FORCE_GRACE_MS = 2000;
@@ -74,18 +78,45 @@ async function stopChild(child, label, signal) {
     return;
   }
 
-  try {
-    child.kill(signal);
-  } catch (error) {
-    if (error?.code === 'EPERM') {
-      console.error(`[APP] Permission denied while stopping ${label} process ${child.pid}.`);
-      return;
+  let requestedViaIpc = false;
+  if (child.connected && typeof child.send === 'function') {
+    try {
+      child.send({ type: 'aitk-shutdown', signal });
+      requestedViaIpc = true;
+    } catch {
+      requestedViaIpc = false;
+    }
+  }
+
+  if (!requestedViaIpc) {
+    try {
+      child.kill(signal);
+    } catch (error) {
+      if (error?.code === 'EPERM') {
+        console.error(`[APP] Permission denied while stopping ${label} process ${child.pid}.`);
+        return;
+      }
     }
   }
 
   const stopped = await waitForChildExit(child, SHUTDOWN_GRACE_MS);
   if (stopped || !isChildRunning(child)) {
     return;
+  }
+
+  if (requestedViaIpc) {
+    try {
+      child.kill(signal);
+    } catch (error) {
+      if (error?.code === 'EPERM') {
+        console.error(`[APP] Permission denied while stopping ${label} process ${child.pid}.`);
+        return;
+      }
+    }
+    const stoppedAfterSignal = await waitForChildExit(child, FORCE_GRACE_MS);
+    if (stoppedAfterSignal || !isChildRunning(child)) {
+      return;
+    }
   }
 
   try {
@@ -109,6 +140,7 @@ async function writeRuntime(children, mode) {
     launcherPid: process.pid,
     supervisorPid: process.pid,
     uiPid: byLabel.get('UI') || null,
+    fileServerPid: byLabel.get('UI') || null,
     workerPid: byLabel.get('WORKER') || null,
     updaterPid: byLabel.get('UPDATER') || null,
     managedPids,
@@ -140,7 +172,7 @@ function spawnManaged(spec) {
       ...process.env,
       AITK_APP_SUPERVISOR_PID: String(process.pid),
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: spec.ipc ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
 
@@ -156,16 +188,6 @@ async function main() {
   let shuttingDown = false;
   let exitCode = 0;
 
-  await ensureTmpRoot();
-  await stopStaleRuntime({
-    port,
-    logger: {
-      log: message => console.log(`[APP] ${message}`),
-    },
-  });
-
-  const specs = buildAppCommands(mode, port);
-
   async function shutdown(reason, signal = 'SIGTERM') {
     if (shuttingDown) {
       return;
@@ -173,52 +195,76 @@ async function main() {
     shuttingDown = true;
     console.log(`[APP] Shutting down (${reason})...`);
 
-    for (const entry of children) {
-      await stopChild(entry.child, entry.spec.label, signal);
-    }
+    await stopManagedChildren(
+      children,
+      entry => stopChild(entry.child, entry.spec.label, signal),
+      (error, entry) => {
+        console.error(
+          `[APP] Failed while stopping ${entry.spec.label}: ${error instanceof Error ? error.message : error}`,
+        );
+      },
+    );
 
     await markRuntimeStopped(mode, reason);
     await sleep(50);
     process.exit(exitCode);
   }
 
-  for (const spec of specs) {
-    const child = spawnManaged(spec);
-    children.push({ spec, child });
-    console.log(`[APP] ${spec.label} started with pid ${child.pid}.`);
-
-    child.once('error', error => {
-      console.error(`[APP] ${spec.label} failed to start: ${error.message}`);
-      if (spec.critical && !shuttingDown) {
-        exitCode = 1;
-        void shutdown(`${spec.label} failed to start`);
-      }
-    });
-
-    child.once('exit', (code, signal) => {
-      if (shuttingDown) {
-        return;
-      }
-
-      const reason = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
-      console.log(`[APP] ${spec.label} exited with ${reason}.`);
-      if (spec.critical) {
-        exitCode = code && code !== 0 ? code : 1;
-        void shutdown(`${spec.label} exited`);
-      }
-    });
-  }
-
-  await writeRuntime(children, mode);
-
-  process.on('SIGINT', () => {
+  process.once('SIGINT', () => {
     exitCode = 0;
     void shutdown('SIGINT', 'SIGINT');
   });
-  process.on('SIGTERM', () => {
+  process.once('SIGTERM', () => {
     exitCode = 0;
     void shutdown('SIGTERM', 'SIGTERM');
   });
+
+  await runStartupWithCleanup(
+    async () => {
+      await ensureTmpRoot();
+      await stopStaleRuntime({
+        port,
+        logger: {
+          log: message => console.log(`[APP] ${message}`),
+        },
+      });
+
+      const specs = buildAppCommands(mode, port);
+      for (const spec of specs) {
+        const child = spawnManaged(spec);
+        children.push({ spec, child });
+        console.log(`[APP] ${spec.label} started with pid ${child.pid}.`);
+
+        child.once('error', error => {
+          console.error(`[APP] ${spec.label} failed to start: ${error.message}`);
+          if (spec.critical && !shuttingDown) {
+            exitCode = 1;
+            void shutdown(`${spec.label} failed to start`);
+          }
+        });
+
+        child.once('exit', (code, signal) => {
+          if (shuttingDown) {
+            return;
+          }
+
+          const reason = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
+          console.log(`[APP] ${spec.label} exited with ${reason}.`);
+          if (spec.critical) {
+            exitCode = code && code !== 0 ? code : 1;
+            void shutdown(`${spec.label} exited`);
+          }
+        });
+      }
+
+      await writeRuntime(children, mode);
+    },
+    async error => {
+      console.error(`[APP] ${error instanceof Error ? error.message : error}`);
+      exitCode = 1;
+      await shutdown('startup failed');
+    },
+  );
 }
 
 main().catch(error => {

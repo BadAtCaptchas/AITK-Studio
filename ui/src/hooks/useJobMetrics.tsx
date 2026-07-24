@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
+import usePollLoop from './usePollLoop';
 
 export interface MetricPoint {
   step: number;
@@ -77,6 +78,12 @@ function isChartMetricKey(key: string) {
   return !key.startsWith('event/') && !key.startsWith('phase/');
 }
 
+function isCanceledRequestError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  return record.name === 'CanceledError' || record.code === 'ERR_CANCELED';
+}
+
 export default function useJobMetrics(
   jobID: string,
   jobStatus?: string,
@@ -97,10 +104,22 @@ export default function useJobMetrics(
   const needsFullRefreshRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const lastStepByKeyRef = useRef<Record<string, number | null>>({});
+  const requestScope = JSON.stringify([enabled, jobID, maxPoints, metricKeys]);
+  const activeScopeRef = useRef(requestScope);
+  activeScopeRef.current = requestScope;
 
   const refreshMetrics = useCallback(
-    async (options: { full?: boolean } = {}) => {
-      if (!enabled || !jobID || inFlightRef.current) return;
+    async (options: { full?: boolean; signal?: AbortSignal } = {}) => {
+      const currentRequestScope = requestScope;
+      if (
+        !enabled ||
+        !jobID ||
+        options.signal?.aborted ||
+        activeScopeRef.current !== currentRequestScope ||
+        inFlightRef.current
+      ) {
+        return;
+      }
 
       const full = options.full || !didInitialLoadRef.current || needsFullRefreshRef.current;
       needsFullRefreshRef.current = false;
@@ -108,6 +127,14 @@ export default function useJobMetrics(
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      const abortForPollingScope = () => {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          inFlightRef.current = false;
+        }
+        controller.abort();
+      };
+      options.signal?.addEventListener('abort', abortForPollingScope, { once: true });
 
       setStatus(didInitialLoadRef.current ? 'refreshing' : 'loading');
 
@@ -124,6 +151,13 @@ export default function useJobMetrics(
           .get(`/api/jobs/${jobID}/metrics`, { params, signal: controller.signal })
           .then(res => res.data as MetricsResponse);
 
+        if (
+          controller.signal.aborted ||
+          abortRef.current !== controller ||
+          activeScopeRef.current !== currentRequestScope
+        ) {
+          return;
+        }
         setKeys(response.keys ?? []);
         setLatest(prev => {
           const next = full ? {} : { ...prev };
@@ -165,20 +199,32 @@ export default function useJobMetrics(
         setVersion(v => v + 1);
         setStatus('success');
         didInitialLoadRef.current = true;
-      } catch (error: any) {
-        if (error?.name !== 'CanceledError' && error?.code !== 'ERR_CANCELED') {
+      } catch (error: unknown) {
+        if (
+          abortRef.current === controller &&
+          activeScopeRef.current === currentRequestScope &&
+          !controller.signal.aborted &&
+          !isCanceledRequestError(error)
+        ) {
           console.error('Error fetching job metrics:', error);
           setStatus('error');
         }
       } finally {
-        inFlightRef.current = false;
+        options.signal?.removeEventListener('abort', abortForPollingScope);
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          inFlightRef.current = false;
+        }
       }
     },
-    [enabled, jobID, maxPoints, metricKeys],
+    [enabled, jobID, maxPoints, metricKeys, requestScope],
   );
 
   useEffect(() => {
-    abortRef.current?.abort();
+    const activeController = abortRef.current;
+    abortRef.current = null;
+    inFlightRef.current = false;
+    activeController?.abort();
     didInitialLoadRef.current = false;
     needsFullRefreshRef.current = false;
     lastStepByKeyRef.current = {};
@@ -187,12 +233,13 @@ export default function useJobMetrics(
     setKeys([]);
     setVersion(0);
     setStatus('idle');
-    if (enabled) {
-      refreshMetrics({ full: true });
-    }
-
-    return () => abortRef.current?.abort();
-  }, [enabled, jobID, refreshMetrics]);
+    return () => {
+      const controller = abortRef.current;
+      abortRef.current = null;
+      inFlightRef.current = false;
+      controller?.abort();
+    };
+  }, [enabled, jobID, maxPoints, metricKeys]);
 
   const pollInterval = useMemo(() => {
     if (!enabled) return null;
@@ -201,13 +248,11 @@ export default function useJobMetrics(
     return 2_000;
   }, [enabled, jobStatus]);
 
-  useEffect(() => {
-    if (!pollInterval) return;
-    const interval = setInterval(() => {
-      refreshMetrics({ full: needsFullRefreshRef.current });
-    }, pollInterval);
-    return () => clearInterval(interval);
-  }, [pollInterval, refreshMetrics]);
+  usePollLoop(
+    signal => refreshMetrics({ full: needsFullRefreshRef.current, signal }),
+    pollInterval,
+    [enabled, jobID, maxPoints, metricKeys],
+  );
 
   const lossKeys = useMemo(() => keys.filter(isChartMetricKey).sort(), [keys]);
   const eventKeys = useMemo(() => keys.filter(key => key.startsWith('event/')).sort(), [keys]);

@@ -509,6 +509,27 @@ class AdapterConfig:
         self.i2v_do_start_frame: bool = kwargs.get('i2v_do_start_frame', False)
 
 
+class ValidationItem:
+    def __init__(self, **kwargs):
+        self.image_path: str = kwargs.get('image_path', '')
+        self.prompt: str = kwargs.get('prompt', '')
+
+
+class ValidationConfig:
+    def __init__(self, **kwargs):
+        self.validation_items: List[ValidationItem] = [
+            item if isinstance(item, ValidationItem) else ValidationItem(**item)
+            for item in kwargs.get('validation_items', [])
+        ]
+        self.resolution: int = kwargs.get('resolution', 512)
+        self.validate_every_n_steps: int = kwargs.get(
+            'validate_every_n_steps', 10
+        )
+        self.validation_sigmas: List[float] = kwargs.get(
+            'validation_sigmas', [1.0, 0.75, 0.5, 0.25]
+        )
+
+
 class EmbeddingConfig:
     def __init__(self, **kwargs):
         self.trigger = kwargs.get('trigger', 'custom_embedding')
@@ -779,6 +800,13 @@ class TrainConfig:
         self.max_loss_debug: bool = kwargs.get("max_loss_debug", False)
         # will clip the loss to this amount to prevent wild outliers
         self.max_loss: Optional[float] = kwargs.get("max_loss", None)
+        self.validation_config: Optional[ValidationConfig] = None
+        validation_config = kwargs.get('validation_config', None)
+        if validation_config is not None:
+            if isinstance(validation_config, ValidationConfig):
+                self.validation_config = validation_config
+            else:
+                self.validation_config = ValidationConfig(**validation_config)
         # HiDream-I1/E1 MoE router load-balancing loss. Other model families ignore it.
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 

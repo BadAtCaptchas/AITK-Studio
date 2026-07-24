@@ -408,11 +408,16 @@ export function withoutRemoteRedirects(init: RequestInit): RequestInit {
   return { ...init, redirect: 'manual' };
 }
 
-export async function remoteProxyFetch(worker: WorkerNodeRecord, routePath: string, headersToForward: Headers) {
+export async function remoteProxyFetch(
+  worker: WorkerNodeRecord,
+  routePath: string,
+  headersToForward: Headers,
+  method: 'GET' | 'HEAD' = 'GET',
+) {
   const headers = new Headers();
   const range = headersToForward.get('range');
   if (range) headers.set('range', range);
-  return remoteRequest(worker, routePath, { headers });
+  return remoteRequest(worker, routePath, { headers, method });
 }
 
 export async function fetchRemoteJob(workerId: string, remoteJobId: string) {

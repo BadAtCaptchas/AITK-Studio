@@ -17,6 +17,8 @@ const STOP_GRACE_MS = 4000;
 const RESPONSE_GRACE_MS = 1500;
 const PROJECT_MARKERS = [
   'scripts/run-app.mjs',
+  'dist/cron/fileserver.js',
+  'cron/fileserver.ts',
   'node_modules/next/dist/bin/next',
   'next start',
   'next dev',

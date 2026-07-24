@@ -35,6 +35,7 @@ import {
   shouldImportRemoteDatasetForWorker,
 } from '@/utils/remoteDatasetRefs';
 import { AUTHENLORA_BUILTIN_CODEC_BITS } from '@/utils/authenloraCodecs';
+import { getValidationConfigErrors } from '@/utils/validationConfig';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -433,6 +434,9 @@ export function TrainingFormContent({
     }
     if (trainConfig?.lr == null || trainConfig.lr < 0) {
       messages.push({ level: 'error', message: 'Learning rate must be zero or greater.' });
+    }
+    for (const message of getValidationConfigErrors(trainConfig?.validation_config)) {
+      messages.push({ level: 'error', message });
     }
 
     const watermarkConfig = processConfig?.watermark;

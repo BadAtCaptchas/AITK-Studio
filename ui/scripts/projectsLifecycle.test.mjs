@@ -93,6 +93,7 @@ test('project lifecycle migration and operations preserve registered workspaces'
       ...process.env,
       AITK_DB_PROVIDER: 'sqlite',
       AITK_SQLITE_PATH: sqlitePath,
+      AITK_SKIP_PRISMA_GENERATE: '1',
       DATABASE_URL: `file:${sqlitePath.replace(/\\/g, '/')}`,
     },
   });
@@ -357,6 +358,59 @@ test('project lifecycle migration and operations preserve registered workspaces'
     assert.equal(copiedDataset, path.join(copySafetyRoots.datasets, 'linked-source'));
     assert.equal(await fs.readFile(path.join(copiedDataset, 'inside.txt'), 'utf8'), 'inside');
     await assert.rejects(() => fs.access(path.join(copiedDataset, 'redirect', 'outside.txt')));
+
+    const validationRoot = await projects.getProjectValidationRoot(copySafetyProject);
+    const validationImage = path.join(validationRoot, 'held-out.png');
+    await fs.writeFile(validationImage, 'validation image fixture');
+    const validationConfigFor = imagePath => ({
+      config: {
+        name: 'validation-scope',
+        process: [
+          {
+            train: {
+              validation_config: {
+                validation_items: [{ image_path: imagePath, prompt: '' }],
+                resolution: 1024,
+                validate_every_n_steps: 1,
+                validation_sigmas: [0.5],
+              },
+            },
+          },
+        ],
+      },
+    });
+    const preparedValidation = await projects.prepareJobConfigForProject(
+      validationConfigFor(path.join('assets', 'validation', 'held-out.png')),
+      copySafetyProject,
+    );
+    assert.equal(
+      preparedValidation.config.process[0].train.validation_config.validation_items[0].image_path,
+      validationImage,
+    );
+
+    const otherValidationProject = await projects.createProject({ name: 'Other Validation Project' });
+    const otherValidationRoot = await projects.getProjectValidationRoot(otherValidationProject);
+    const otherValidationImage = path.join(otherValidationRoot, 'other.png');
+    await fs.writeFile(otherValidationImage, 'other project image');
+    await assert.rejects(
+      () => projects.prepareJobConfigForProject(validationConfigFor(otherValidationImage), copySafetyProject),
+      error => error?.code === 'PROJECT_INVALID_INPUT' && error.status === 400,
+    );
+
+    const redirectedValidationSource = path.join(tempRoot, 'redirected-validation-source');
+    await fs.mkdir(redirectedValidationSource, { recursive: true });
+    await fs.writeFile(path.join(redirectedValidationSource, 'redirected.png'), 'outside validation image');
+    const validationLink = path.join(validationRoot, 'redirect');
+    await createDirectoryLink(redirectedValidationSource, validationLink);
+    await assert.rejects(
+      () =>
+        projects.prepareJobConfigForProject(
+          validationConfigFor(path.join('assets', 'validation', 'redirect', 'redirected.png')),
+          copySafetyProject,
+        ),
+      error => error?.code === 'PROJECT_INVALID_INPUT' && error.status === 400,
+    );
+    await fs.unlink(validationLink);
   } finally {
     await disconnectDb();
     if (oldProvider === undefined) delete process.env.AITK_DB_PROVIDER;

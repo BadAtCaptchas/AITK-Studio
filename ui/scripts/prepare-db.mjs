@@ -6,6 +6,7 @@ import path from 'path';
 import { MongoClient } from 'mongodb';
 import sqlite3 from 'sqlite3';
 import { backupExistingSqliteDatabase } from './sqlite-backup.mjs';
+import { resolveSqliteJournalMode } from './sqlite-journal-mode.mjs';
 
 const require = createRequire(import.meta.url);
 const provider = (process.env.AITK_DB_PROVIDER || 'sqlite').trim().toLowerCase();
@@ -68,8 +69,9 @@ function sqliteColumnDefinition(column, overrides = {}) {
 }
 
 async function configureSqliteConnection(db) {
+  const journalMode = resolveSqliteJournalMode(process.env.AI_TOOLKIT_DB_JOURNAL_MODE);
   await sqliteRun(db, `PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
-  await sqliteRun(db, 'PRAGMA journal_mode=WAL;');
+  await sqliteRun(db, `PRAGMA journal_mode=${journalMode};`);
   await sqliteRun(db, 'PRAGMA synchronous=NORMAL;');
 }
 
@@ -553,8 +555,16 @@ if (!['sqlite', 'mongodb'].includes(provider)) {
 
 process.env.DATABASE_URL = `file:${sqlitePath.replace(/\\/g, '/')}`;
 
-console.log(`Generating Prisma client for SQLite fallback (${process.env.DATABASE_URL})...`);
-runPrisma(['generate']);
+const generatedPrismaClient = path.resolve(process.cwd(), 'src', 'generated', 'prisma', 'client.ts');
+const skipPrismaGenerate =
+  process.env.AITK_SKIP_PRISMA_GENERATE === '1' && fs.existsSync(generatedPrismaClient);
+
+if (skipPrismaGenerate) {
+  console.log('Using the existing generated Prisma client.');
+} else {
+  console.log(`Generating Prisma client for SQLite fallback (${process.env.DATABASE_URL})...`);
+  runPrisma(['generate']);
+}
 
 if (provider === 'sqlite') {
   console.log('Preparing SQLite database...');

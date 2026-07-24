@@ -708,7 +708,9 @@ export default function JobLossGraph({ job }: Props) {
         lossKeys.find(key => /loss/i.test(key)) ||
         lossKeys[0];
       for (const key of lossKeys) {
-        if (next[key] === undefined) next[key] = persistedEnabledRef.current?.[key] ?? key === defaultKey;
+        if (next[key] === undefined) {
+          next[key] = persistedEnabledRef.current?.[key] ?? (key === defaultKey || key === 'val/loss');
+        }
       }
       for (const key of Object.keys(next)) {
         if (!lossKeys.includes(key)) delete next[key];

@@ -14,6 +14,7 @@ import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 import { prepareJobConfigForProject, ProjectError, resolveOptionalProject, resolveProject } from '@/server/projects';
+import { prepareProjectJobReplica } from '@/server/projectSync';
 import {
   assertProjectsEnabled,
   isProjectSpacesDisabledError,
@@ -21,6 +22,7 @@ import {
 } from '@/server/settings';
 import type { Job } from '@/types';
 import { isRequestAuthenticated } from '@/utils/authSession';
+import { getJobValidationConfigErrors } from '@/utils/validationConfig';
 
 
 async function ensureApiAccess(request: Request): Promise<NextResponse | null> {
@@ -274,6 +276,13 @@ export async function POST(request: Request) {
     if (!isSafeJobConfig(projectJobConfig)) {
       return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
     }
+    const validationConfigErrors = getJobValidationConfigErrors(projectJobConfig);
+    if (validationConfigErrors.length > 0) {
+      return NextResponse.json(
+        { error: validationConfigErrors[0], validation_errors: validationConfigErrors },
+        { status: 400 },
+      );
+    }
 
     const extra: any = {};
     if ("job_ref" in body) {
@@ -318,24 +327,41 @@ export async function POST(request: Request) {
       const workerChanged = existing.worker_id !== worker_id;
       let remotePatch: any = {};
       if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
-        const worker = await getRemoteWorker(worker_id);
-        const remoteJobConfig = await rewriteSameWorkerRemoteDatasetRefsForWorker(projectJobConfig, worker);
-        const remoteJob = await remoteJson<any>(worker, '/api/jobs', {
-          method: 'POST',
-          body: JSON.stringify({
-            id: existing.remote_job_id,
+        if (existing.project_id) {
+          const linked = await prepareProjectJobReplica({
+            ...existing,
             name,
             gpu_ids,
-            job_config: remoteJobConfig,
+            job_config: JSON.stringify(projectJobConfig),
             ...extra,
-          }),
-        });
-        remotePatch = {
-          name: remoteJob.name,
-          gpu_ids: remoteJob.gpu_ids,
-          remote_sync_at: new Date(),
-          remote_error: null,
-        };
+          });
+          remotePatch = {
+            remote_job_id: linked.remoteJob.id,
+            name: linked.remoteJob.name,
+            gpu_ids: linked.remoteJob.gpu_ids,
+            remote_sync_at: new Date(),
+            remote_error: null,
+          };
+        } else {
+          const worker = await getRemoteWorker(worker_id);
+          const remoteJobConfig = await rewriteSameWorkerRemoteDatasetRefsForWorker(projectJobConfig, worker);
+          const remoteJob = await remoteJson<any>(worker, '/api/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+              id: existing.remote_job_id,
+              name,
+              gpu_ids,
+              job_config: remoteJobConfig,
+              ...extra,
+            }),
+          });
+          remotePatch = {
+            name: remoteJob.name,
+            gpu_ids: remoteJob.gpu_ids,
+            remote_sync_at: new Date(),
+            remote_error: null,
+          };
+        }
       }
 
       const training = await db.jobs.update(id, {

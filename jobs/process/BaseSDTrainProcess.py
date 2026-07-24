@@ -13,6 +13,8 @@ from typing import Union, List, Optional
 
 import numpy as np
 import yaml
+from PIL import Image, ImageOps
+from torchvision import transforms
 from diffusers import T2IAdapter, ControlNetModel
 from diffusers.training_utils import compute_density_for_timestep_sampling
 from safetensors.torch import save_file, load_file
@@ -30,6 +32,7 @@ from toolkit.memory_management.cuda_telemetry import (
 from toolkit.basic import value_map
 from toolkit.base_lora import fuse_base_lora_into_model
 from toolkit.base_lora_metadata import add_base_lora_metadata
+from toolkit.buckets import get_bucket_for_image_size
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.data_loader import get_dataloader_from_datasets, trigger_dataloader_setup_epoch
@@ -53,6 +56,7 @@ from toolkit.optimizer_checkpoint import (
 )
 from toolkit.paths import CONFIG_ROOT
 from toolkit.progress_bar import ToolkitProgressBar
+from toolkit.prompt_utils import concat_prompt_embeds
 from toolkit.reference_adapter import ReferenceAdapter
 from toolkit.sampler import get_sampler
 from toolkit.saving import save_t2i_from_diffusers, load_t2i_model, save_ip_adapter_from_diffusers, \
@@ -60,7 +64,7 @@ from toolkit.saving import save_t2i_from_diffusers, load_t2i_model, save_ip_adap
 
 from toolkit.scheduler import get_lr_scheduler
 from toolkit.sd_device_states_presets import get_train_sd_device_state_preset
-from toolkit.stable_diffusion_model import StableDiffusion
+from toolkit.stable_diffusion_model import StableDiffusion, BlankNetwork
 
 from jobs.process import BaseTrainProcess
 from toolkit.metadata import get_meta_for_safetensors, load_metadata_from_safetensors, add_base_model_info_to_meta, \
@@ -335,6 +339,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.steps_this_boundary = 0
         self.num_consecutive_oom = 0
         self.additional_logs = OrderedDict()
+        # Cached latents, prompt embeddings, and fixed noise used by validation.
+        # This is populated before the VAE or text encoder can be unloaded.
+        self._validation_cache = None
         self.authenlora = None
 
     def cuda_memory_phase(self, phase: str):
@@ -2066,6 +2073,290 @@ class BaseSDTrainProcess(BaseTrainProcess):
         )
         self.lr_scheduler = lr_scheduler
 
+    @staticmethod
+    def _get_validation_module_device(module):
+        module_device = getattr(module, 'device', None)
+        if module_device is not None:
+            return torch.device(module_device)
+        try:
+            return next(module.parameters()).device
+        except (AttributeError, StopIteration):
+            return torch.device('cpu')
+
+    def setup_validation(self):
+        """Cache deterministic validation inputs before VAE/TE unloading."""
+        self._validation_cache = None
+        val_config = self.train_config.validation_config
+        if val_config is None:
+            return
+
+        validation_items = []
+        for item in val_config.validation_items:
+            if not item.image_path:
+                print_acc("Skipping validation item with no image")
+                continue
+            if not os.path.isfile(item.image_path):
+                print_acc(
+                    f"Skipping validation item, image not found: {item.image_path}"
+                )
+                continue
+            validation_items.append(item)
+
+        if not validation_items:
+            print_acc(
+                "Validation config has no valid validation_items, "
+                "skipping validation"
+            )
+            return
+        if not val_config.validation_sigmas:
+            print_acc(
+                "Validation config has no validation_sigmas, skipping validation"
+            )
+            return
+
+        print_acc(
+            f"Caching validation latents and embeddings for "
+            f"{len(validation_items)} images"
+        )
+        device = self.device_torch
+        dtype = get_torch_dtype(self.train_config.dtype)
+        resolution = val_config.resolution
+        divisibility = self.sd.get_bucket_divisibility()
+
+        image_list = []
+        prompt_list = []
+        bicubic_resampling = getattr(Image, 'Resampling', Image).BICUBIC
+        for item in validation_items:
+            with Image.open(item.image_path) as source_image:
+                image = ImageOps.exif_transpose(source_image).convert('RGB')
+            bucket = get_bucket_for_image_size(
+                image.width,
+                image.height,
+                resolution=resolution,
+                divisibility=divisibility,
+            )
+            image = image.resize(
+                (bucket['width'], bucket['height']),
+                bicubic_resampling,
+            )
+            image_list.append(transforms.ToTensor()(image) * 2.0 - 1.0)
+
+            prompt = item.prompt
+            if self.trigger_word is not None:
+                prompt = self.sd.inject_trigger_into_prompt(
+                    prompt,
+                    trigger=self.trigger_word,
+                    add_if_not_present=False,
+                )
+            prompt_list.append(prompt)
+
+        text_encoder = self.sd.text_encoder
+        if isinstance(text_encoder, list):
+            text_encoders = [encoder for encoder in text_encoder if encoder is not None]
+        elif text_encoder is None:
+            text_encoders = []
+        else:
+            text_encoders = [text_encoder]
+        original_te_devices = [
+            self._get_validation_module_device(encoder)
+            for encoder in text_encoders
+        ]
+
+        vae = self.sd.vae
+        original_vae_device = self._get_validation_module_device(vae)
+        fork_devices = [device] if device.type == 'cuda' else []
+        latent_list = []
+        embeds_list = []
+        with torch.no_grad(), torch.random.fork_rng(devices=fork_devices):
+            try:
+                if text_encoders:
+                    self.sd.text_encoder_to(device)
+                embeds_list = [
+                    self.sd.encode_prompt([prompt])
+                    .to('cpu', dtype=torch.float32)
+                    .detach()
+                    for prompt in prompt_list
+                ]
+            finally:
+                for encoder, original_device in zip(
+                    text_encoders, original_te_devices
+                ):
+                    encoder.to(original_device)
+
+            # Keep VAE sampling deterministic without changing the caller's
+            # RNG state. Different buckets are encoded independently.
+            torch.manual_seed(42)
+            try:
+                latent_list = [
+                    self.sd.encode_images(
+                        [image],
+                        device=device,
+                        dtype=dtype,
+                    ).to('cpu', dtype=torch.float32)
+                    for image in image_list
+                ]
+            finally:
+                vae.to(original_vae_device)
+
+        noise_list = []
+        for index, latent in enumerate(latent_list):
+            generator = torch.Generator(device='cpu').manual_seed(42 + index)
+            noise_list.append(
+                torch.randn(
+                    latent.shape,
+                    generator=generator,
+                    dtype=torch.float32,
+                )
+            )
+
+        self._validation_cache = {
+            'latents': latent_list,
+            'noise': noise_list,
+            'embeds': embeds_list,
+        }
+        flush()
+
+    def _should_validate_step(self):
+        val_config = self.train_config.validation_config
+        if val_config is None or self._validation_cache is None:
+            return False
+        if self.step_num == self.start_step:
+            return True
+        cadence = val_config.validate_every_n_steps
+        return bool(cadence and self.step_num % cadence == 0)
+
+    def _publish_validation_logs(self, additional_logs):
+        """Publish validation metrics independently of periodic train logs."""
+        validation_logs = OrderedDict(
+            (key, value)
+            for key, value in additional_logs.items()
+            if key == 'val/loss'
+        )
+        if validation_logs and self.accelerator.is_main_process:
+            self.logger.log(validation_logs)
+        return OrderedDict(
+            (key, value)
+            for key, value in additional_logs.items()
+            if key not in validation_logs
+        )
+
+    def validate(self):
+        val_config = self.train_config.validation_config
+        if (
+            val_config is None
+            or self._validation_cache is None
+        ):
+            return
+
+        sigmas = val_config.validation_sigmas
+        if not sigmas:
+            return
+
+        device = self.device_torch
+        dtype = get_torch_dtype(self.train_config.dtype)
+        cache = self._validation_cache
+        model = self.sd.get_model_to_train()
+        was_model_training = model.training
+
+        network = self.network if self.network is not None else BlankNetwork()
+        original_multiplier = network.multiplier
+        original_network_active = getattr(network, 'is_active', None)
+        was_network_training = getattr(network, 'training', None)
+
+        try:
+            model.eval()
+            if was_network_training is not None:
+                network.eval()
+            network.multiplier = 1.0
+            with torch.no_grad(), network:
+                if self.sd.is_flow_matching:
+                    timestep_values = [
+                        sigma * 1000.0 for sigma in sigmas
+                    ]
+                else:
+                    num_train_timesteps = (
+                        self.sd.noise_scheduler.config.num_train_timesteps
+                    )
+                    timestep_values = [
+                        min(
+                            int(round(sigma * num_train_timesteps)),
+                            num_train_timesteps - 1,
+                        )
+                        for sigma in sigmas
+                    ]
+                timesteps = torch.tensor(timestep_values, device=device)
+
+                losses = []
+                for latents_cpu, noise_cpu, embeds_cpu in zip(
+                    cache['latents'],
+                    cache['noise'],
+                    cache['embeds'],
+                ):
+                    latents = latents_cpu.to(device, dtype=dtype)
+                    noise = noise_cpu.to(device, dtype=dtype)
+                    batch_latents = torch.cat(
+                        [latents] * len(sigmas), dim=0
+                    )
+                    batch_noise = torch.cat(
+                        [noise] * len(sigmas), dim=0
+                    )
+                    batch_embeds = concat_prompt_embeds(
+                        [
+                            embeds_cpu.clone().to(device, dtype=dtype)
+                            for _ in sigmas
+                        ]
+                    )
+
+                    noisy_latents = self.sd.add_noise(
+                        batch_latents,
+                        batch_noise,
+                        timesteps,
+                    ).detach()
+                    noise_pred = self.sd.predict_noise(
+                        latents=noisy_latents.to(device, dtype=dtype),
+                        conditional_embeddings=batch_embeds,
+                        timestep=timesteps,
+                        guidance_scale=1.0,
+                        guidance_embedding_scale=self.train_config.cfg_scale,
+                        bypass_guidance_embedding=(
+                            self.train_config.bypass_guidance_embedding
+                        ),
+                    )
+
+                    if self.sd.is_flow_matching:
+                        target = batch_noise - batch_latents
+                    elif self.sd.prediction_type == 'v_prediction':
+                        target = self.sd.noise_scheduler.get_velocity(
+                            batch_latents,
+                            batch_noise,
+                            timesteps,
+                        )
+                    else:
+                        target = batch_noise
+
+                    losses.append(
+                        torch.nn.functional.mse_loss(
+                            noise_pred.float(),
+                            target.float(),
+                        )
+                    )
+
+                # Keep the metric available on every rank so phase automation
+                # observes identical inputs. _publish_validation_logs limits
+                # external logger writes to the main process.
+                self.additional_logs['val/loss'] = (
+                    torch.stack(losses).mean().item()
+                )
+        finally:
+            try:
+                network.multiplier = original_multiplier
+                if original_network_active is not None:
+                    network.is_active = original_network_active
+                if was_network_training is not None:
+                    network.train(was_network_training)
+            finally:
+                model.train(was_model_training)
+
     def apply_active_training_phase(self):
         self.phase_manager.apply(self.train_config, self.step_num)
 
@@ -2561,6 +2852,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         ### HOOk ###
         with self.cuda_memory_phase("caching"):
+            # Cache validation inputs while the VAE and text encoder are still
+            # available; before_dataset_load may unload either one.
+            self.setup_validation()
             self.before_dataset_load()
             # load datasets if passed in the root process
             if self.datasets is not None:
@@ -2943,6 +3237,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.timer.stop('train_loop')
             train_loop_timings = self.timer.timers.get('train_loop')
             step_seconds = train_loop_timings[-1] if train_loop_timings else None
+
+            # Validate only after a successful training attempt so OOM retries
+            # cannot emit metrics for a step that never completed.
+            if not did_oom and self._should_validate_step():
+                with self.timer('validate'):
+                    self.validate()
+
             if not did_first_flush:
                 flush()
                 did_first_flush = True
@@ -2992,10 +3293,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 learning_rate = 0.0
                 extra_step_metrics = OrderedDict()
                 additional_logs = OrderedDict()
-                if not did_oom and loss_dict is not None:
-                    if self.additional_logs:
-                        additional_logs = OrderedDict(self.additional_logs)
+                if not did_oom and self.additional_logs:
+                    additional_logs = OrderedDict(self.additional_logs)
                     self.additional_logs = OrderedDict()
+                if not did_oom and loss_dict is not None:
                     if hasattr(self.optimizer, 'get_avg_learning_rate'):
                         learning_rate = self.optimizer.get_avg_learning_rate()
                     elif hasattr(self.optimizer, 'get_learning_rates'):
@@ -3041,6 +3342,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     phase_observed_metrics.update(extra_step_metrics)
                     phase_observed_metrics.update(additional_logs)
                     self.phase_manager.observe_metrics(self.step_num, phase_observed_metrics)
+
+                # Validation cadence is independent of the regular logging
+                # cadence, and the mandatory baseline runs at start_step.
+                periodic_additional_logs = self._publish_validation_logs(
+                    additional_logs
+                )
 
                 with self.timer('batch_cleanup'):
                     self._cleanup_training_batches(batch_list)
@@ -3122,8 +3429,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.logger.log({
                                         f'loss/{key}': value,
                                     })
-                            if additional_logs:
-                                self.logger.log(additional_logs)
+                            if periodic_additional_logs:
+                                self.logger.log(periodic_additional_logs)
                     elif self.logging_config.log_every is None:
                         if self.accelerator.is_main_process:
                             # log every step
@@ -3140,8 +3447,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.logger.log({
                                         f'loss/{key}': value,
                                     })
-                            if additional_logs:
-                                self.logger.log(additional_logs)
+                            if periodic_additional_logs:
+                                self.logger.log(periodic_additional_logs)
 
 
                     if self.performance_log_every > 0 and self.step_num % self.performance_log_every == 0:

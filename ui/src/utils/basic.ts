@@ -4,6 +4,44 @@ export const objectCopy = <T>(obj: T): T => {
 
 export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+export function startSettledPollLoop(
+  callback: (signal: AbortSignal) => void | Promise<unknown>,
+  intervalMs: number | null | undefined,
+  onError: (error: unknown) => void = error => console.error('Polling request failed:', error),
+) {
+  let stopped = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let activeController: AbortController | null = null;
+
+  const tick = async () => {
+    const controller = new AbortController();
+    activeController = controller;
+    try {
+      await callback(controller.signal);
+    } catch (error) {
+      if (!controller.signal.aborted) onError(error);
+    } finally {
+      if (activeController === controller) {
+        activeController = null;
+      }
+    }
+
+    if (!stopped && intervalMs) {
+      timeout = setTimeout(() => {
+        void tick();
+      }, intervalMs);
+    }
+  };
+
+  void tick();
+
+  return () => {
+    stopped = true;
+    activeController?.abort();
+    if (timeout) clearTimeout(timeout);
+  };
+}
+
 export const imgExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.jxl', '.svg', '.bmp'];
 export const videoExtensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv'];
 export const audioExtensions = ['.mp3', '.wav', '.flac', '.ogg'];

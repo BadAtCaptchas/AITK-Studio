@@ -14,6 +14,7 @@ import {
 import {
   applyOrbit4LowVramDefaults,
   defaultDatasetConfig,
+  defaultValidationConfig,
   defaultWatermarkConfig,
   isOrbit4LowVramProfile,
 } from './jobConfig';
@@ -137,6 +138,7 @@ const guidedStepItems = [
   { id: 'job-dataset', title: 'Dataset', detail: 'Add the dataset you want to train on.' },
   { id: 'job-training', title: 'Training', detail: 'Set training length and core parameters.' },
   { id: 'job-samples', title: 'Samples', detail: 'Add prompts to generate previews.' },
+  { id: 'job-validation', title: 'Validation', detail: 'Track deterministic loss on held-out images.' },
   { id: 'job-review', title: 'Review', detail: 'Review settings before starting.' },
   { id: 'job-advanced', title: 'Advanced', detail: 'Unlock full control over every option.' },
 ];
@@ -617,15 +619,32 @@ export default function SimpleJob({
   const processConfig = jobConfig.config.process[0];
   const datasetsConfig = processConfig.datasets || [];
   const sampleConfig = processConfig.sample;
+  const validationConfig = processConfig.train.validation_config;
+  const validationItems = Array.isArray(validationConfig?.validation_items)
+    ? validationConfig.validation_items
+    : [];
   const firstDataset = datasetsConfig[0] || defaultDatasetConfig;
   const firstSample = sampleConfig.samples?.[0] || { prompt: '' };
   const selectedDatasetOption = datasetOptions.find(option => option.value === firstDataset.folder_path);
   const selectedGpu = Array.isArray(gpuList) ? gpuList.find((gpu: any) => `${gpu.index}` === `${gpuIDs}`) : null;
   const samplePromptBlank = !processConfig.train.disable_sampling && !firstSample.prompt?.trim();
+  const incompleteValidationItems =
+    validationItems.filter(item => typeof item.image_path !== 'string' || !item.image_path.trim()).length;
   const unresolvedDataset = !datasetsConfig.length || !firstDataset.folder_path || firstDataset.folder_path === defaultDatasetConfig.folder_path;
   const localReadinessMessages = [
     ...(unresolvedDataset ? [{ level: 'error' as const, message: 'Select a target dataset before creating this job.' }] : []),
     ...(samplePromptBlank ? [{ level: 'warning' as const, message: 'No sample prompt is configured. Add one in Basics or Samples.' }] : []),
+    ...(validationConfig && validationItems.length === 0
+      ? [{ level: 'error' as const, message: 'Add at least one held-out image before enabling validation loss.' }]
+      : []),
+    ...(incompleteValidationItems > 0
+      ? [
+          {
+            level: 'error' as const,
+            message: `${incompleteValidationItems} validation item${incompleteValidationItems === 1 ? '' : 's'} still need an image.`,
+          },
+        ]
+      : []),
   ];
   const readinessMessages = validationMessages.length > 0 ? validationMessages : localReadinessMessages;
   const readinessErrors = readinessMessages.filter(message => message.level === 'error');
@@ -1743,6 +1762,152 @@ export default function SimpleJob({
                   Add Prompt
                 </button>
               </div>
+            </section>
+
+            <section id="job-validation" className="mt-3 scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-3xl">
+                  {renderSectionIntro(
+                    'Validation',
+                    'Measure deterministic loss against images that are held out from the training dataset.',
+                  )}
+                  <p className="text-xs leading-5 text-gray-500">
+                    Validation images are encoded once and evaluated with fixed noise, making the resulting{' '}
+                    <span className="font-mono text-gray-300">val/loss</span> series comparable throughout the run.
+                    Do not include these images in a training dataset.
+                  </p>
+                </div>
+                <Checkbox
+                  label="Enable validation loss"
+                  checked={!!validationConfig}
+                  onChange={enabled =>
+                    setJobConfig(
+                      enabled ? objectCopy(defaultValidationConfig) : undefined,
+                      'config.process[0].train.validation_config',
+                    )
+                  }
+                />
+              </div>
+
+              {validationConfig ? (
+                <div className="mt-4 space-y-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <NumberInput
+                      label="Validate every"
+                      value={validationConfig.validate_every_n_steps}
+                      onChange={value =>
+                        setJobConfig(
+                          value ?? defaultValidationConfig.validate_every_n_steps,
+                          'config.process[0].train.validation_config.validate_every_n_steps',
+                        )
+                      }
+                      placeholder="1"
+                      min={1}
+                      required
+                    />
+                    <NumberInput
+                      label="Validation resolution"
+                      value={validationConfig.resolution}
+                      onChange={value =>
+                        setJobConfig(
+                          value ?? defaultValidationConfig.resolution,
+                          'config.process[0].train.validation_config.resolution',
+                        )
+                      }
+                      placeholder="1024"
+                      min={64}
+                      required
+                    />
+                    <SelectInput
+                      label="Validation sigmas"
+                      value={(validationConfig.validation_sigmas ?? defaultValidationConfig.validation_sigmas ?? [0.5]).join(',')}
+                      onChange={value =>
+                        setJobConfig(
+                          value
+                            .split(',')
+                            .map(sigma => Number.parseFloat(sigma.trim()))
+                            .filter(Number.isFinite),
+                          'config.process[0].train.validation_config.validation_sigmas',
+                        )
+                      }
+                      options={[
+                        { value: '0.5', label: '0.5' },
+                        { value: '1,0.5', label: '1.0, 0.5' },
+                        { value: '1,0.66,0.33', label: '1.0, 0.66, 0.33' },
+                        { value: '1,0.75,0.5,0.25', label: '1.0, 0.75, 0.5, 0.25' },
+                      ]}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Held-out images ({validationItems.length})
+                    </div>
+                    <div className="space-y-2">
+                      {validationItems.map((item, index) => (
+                        <div
+                          key={index}
+                          className="flex flex-col gap-3 border border-gray-900 bg-gray-950/35 p-3 sm:flex-row sm:items-center"
+                        >
+                          <SampleControlImage
+                            instruction="Add image"
+                            src={typeof item.image_path === 'string' ? item.image_path || null : null}
+                            projectID={projectID}
+                            onNewImageSelected={imagePath =>
+                              setJobConfig(
+                                imagePath ?? '',
+                                `config.process[0].train.validation_config.validation_items[${index}].image_path`,
+                              )
+                            }
+                          />
+                          <TextInput
+                            className="min-w-0 flex-1"
+                            label={`Validation prompt ${index + 1}`}
+                            value={typeof item.prompt === 'string' ? item.prompt : ''}
+                            onChange={value =>
+                              setJobConfig(
+                                value,
+                                `config.process[0].train.validation_config.validation_items[${index}].prompt`,
+                              )
+                            }
+                            placeholder="A photo of [trigger]..."
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setJobConfig(
+                                validationItems.filter((_, itemIndex) => itemIndex !== index),
+                                'config.process[0].train.validation_config.validation_items',
+                              )
+                            }
+                            className="operator-icon-button h-8 w-8 flex-none self-end hover:border-rose-800 hover:bg-rose-950/60 hover:text-rose-100 sm:self-center"
+                            title="Remove validation image"
+                            aria-label={`Remove validation image ${index + 1}`}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setJobConfig(
+                          [...validationItems, { image_path: '', prompt: '' }],
+                          'config.process[0].train.validation_config.validation_items',
+                        )
+                      }
+                      className="operator-button mt-3 w-full"
+                    >
+                      Add Validation Image
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 border border-dashed border-gray-800 bg-gray-950/30 px-3 py-4 text-xs text-gray-600">
+                  Validation is optional. Enable it to configure held-out images and cadence.
+                </div>
+              )}
             </section>
 
             <section id="job-review" className="mt-3 scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">

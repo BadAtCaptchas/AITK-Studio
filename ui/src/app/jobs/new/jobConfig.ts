@@ -2,7 +2,14 @@
 import { isMac } from '@/helpers/basic';
 import { defaultSampleConfig } from '@/helpers/defaultSamples';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
-import { JobConfig, SampleConfig, DatasetConfig, SliderConfig, WatermarkConfig } from '@/types';
+import {
+  JobConfig,
+  SampleConfig,
+  DatasetConfig,
+  SliderConfig,
+  ValidationConfig,
+  WatermarkConfig,
+} from '@/types';
 
 export const defaultDatasetConfig: DatasetConfig = {
   folder_path: '/path/to/images/folder',
@@ -45,6 +52,13 @@ export const defaultWatermarkConfig: WatermarkConfig = {
   verify_every: 100,
   secret: '',
   bake_on_save: false,
+};
+
+export const defaultValidationConfig: ValidationConfig = {
+  validation_items: [{ image_path: '', prompt: '' }],
+  resolution: 1024,
+  validate_every_n_steps: 1,
+  validation_sigmas: [0.5],
 };
 
 export const defaultJobConfig: JobConfig = {

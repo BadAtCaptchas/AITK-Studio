@@ -537,7 +537,15 @@ class DiffusionFeatureExtractor4(nn.Module):
         if model is not None and hasattr(model, 'get_stepped_pred'):
             stepped_latents = model.get_stepped_pred(noise_pred, noise)
         else:
-            stepped_latents = self.step_latents(noise, noise_pred, noisy_latents, timesteps, scheduler)
+            with torch.no_grad():
+                tv = timesteps.to(
+                    noise_pred.device, dtype=noise_pred.dtype
+                ) / 1000.0
+                while len(tv.shape) < len(noise_pred.shape):
+                    tv = tv.unsqueeze(-1)
+                tv = torch.clamp(tv, min=0.001)
+
+            stepped_latents = noisy_latents - tv * noise_pred
             
         latents = stepped_latents.to(self.vae.device, dtype=self.vae.dtype)
 
@@ -595,7 +603,7 @@ class DiffusionFeatureExtractor4(nn.Module):
                 self.losses[key] /= self.log_every
                 # print in 2.000e-01 format
                 print(f" - {key}: {self.losses[key]:.3e}")
-            self.losses[key] = 0.0
+                self.losses[key] = 0.0
         
         # total_loss += mse_loss
         self.step += 1
@@ -683,6 +691,10 @@ class DiffusionFeatureExtractor6(nn.Module):
         x = tensor_0_1
         if not torch.is_floating_point(x):
             x = x.float()
+
+        # VAE decoders can overshoot [0, 1] slightly. Clamp before deciding
+        # whether this is normalized data or an accidental 0..255 tensor.
+        x = torch.clamp(x, 0.0, 1.0)
 
         # Resize
         # if not divisible by 16 or total pixels > max_res*max_res, resize to fit within 16 patches
@@ -802,7 +814,7 @@ class DiffusionFeatureExtractor6(nn.Module):
                     self.losses[key] /= self.log_every
                     # print in 2.000e-01 format
                     print(f" - {key}: {self.losses[key]:.3e}")
-                self.losses[key] = 0.0
+                    self.losses[key] = 0.0
             
             # total_loss += mse_loss
             self.step += 1

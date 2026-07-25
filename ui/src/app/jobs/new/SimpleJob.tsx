@@ -80,6 +80,7 @@ import { parseRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import { AUTHENLORA_BUILTIN_CODEC_BITS, AUTHENLORA_CODEC_OPTIONS, getAuthenloraCodecSelectValue } from '@/utils/authenloraCodecs';
 import { uploadLoraFile } from '@/utils/streamedUploads';
+import { openDoc } from '@/components/DocModal';
 
 type Props = {
   jobConfig: JobConfig;
@@ -967,6 +968,57 @@ export default function SimpleJob({
                     options={targetTypeOptions}
                   />
                 </div>
+
+                {modelArch?.gateUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const gateUrl = modelArch.gateUrl;
+                      openDoc({
+                        title: 'Gated model',
+                        description: (
+                          <div className="space-y-3">
+                            <p>
+                              This model is gated on Hugging Face. Accept its terms on the model page before using it:
+                            </p>
+                            <p>
+                              <a
+                                href={gateUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-cyan-300 underline hover:text-cyan-200"
+                              >
+                                {gateUrl}
+                              </a>
+                            </p>
+                            <p>
+                              Create a Hugging Face{' '}
+                              <a
+                                href="https://huggingface.co/settings/tokens"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-cyan-300 underline hover:text-cyan-200"
+                              >
+                                read token
+                              </a>{' '}
+                              and add it on the{' '}
+                              <Link href="/settings" className="text-cyan-300 underline hover:text-cyan-200">
+                                settings page
+                              </Link>
+                              .
+                            </p>
+                          </div>
+                        ),
+                      });
+                    }}
+                    className="flex w-full items-center gap-2 border border-cyan-900 bg-cyan-950/35 px-3 py-2 text-left text-sm text-cyan-100 transition-colors hover:border-cyan-800 hover:bg-cyan-950/55"
+                  >
+                    <Info className="h-4 w-4 shrink-0 text-cyan-300" />
+                    <span>
+                      Gated model. <span className="underline">Learn more.</span>
+                    </span>
+                  </button>
+                )}
 
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
                   {disableSections.includes('trigger_word') ? null : (

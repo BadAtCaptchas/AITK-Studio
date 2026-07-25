@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
+  devIndicators: false,
   experimental: {
     webpackBuildWorker: true,
     serverActions: {

@@ -721,30 +721,54 @@ class ImageProcessingDTOMixin:
             if hasattr(self.dataset_config, 'debug') and self.dataset_config.debug:
                 print_acc(f"  Frames to extract: {frames_to_extract}")
             
-            # Extract frames
-            frames = []
-            for frame_idx in frames_to_extract:
-                # Safety check - ensure frame_idx is within bounds (silently fix)
-                if frame_idx > max_frame_index:
-                    frame_idx = max_frame_index
-                
-                # Set frame position
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                
-                # Silently verify position was set correctly (no warnings unless debug mode)
+            # Decode selected frames in one forward pass. Seeking for every
+            # frame forces a keyframe seek and GOP re-decode, which is
+            # especially expensive for long videos. Stretched clips may
+            # repeat indexes, so decode each unique frame once and reassemble
+            # the requested order afterward.
+            unique_frame_idxs = sorted(set(frames_to_extract))
+            if len(unique_frame_idxs) == 0:
+                raise Exception(f"No frames selected for video: {self.path}")
+            processed_frames = {}
+            next_frame_pos = unique_frame_idxs[0]
+            if next_frame_pos > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, next_frame_pos)
                 if hasattr(self.dataset_config, 'debug') and self.dataset_config.debug:
                     actual_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-                    if actual_pos != frame_idx:
-                        print_acc(f"Warning: Failed to set exact frame position. Requested: {frame_idx}, Actual: {actual_pos}")
-                
-                ret, frame = cap.read()
+                    if actual_pos != next_frame_pos:
+                        print_acc(
+                            f"Warning: Failed to set exact frame position. "
+                            f"Requested: {next_frame_pos}, Actual: {actual_pos}"
+                        )
+
+            for frame_idx in unique_frame_idxs:
+                # A positive fallback can move past the next requested frame.
+                # Reseek in that case so the fallback never shifts later
+                # samples.
+                if next_frame_pos > frame_idx:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    next_frame_pos = frame_idx
+
+                grab_succeeded = True
+                while next_frame_pos < frame_idx:
+                    if not cap.grab():
+                        grab_succeeded = False
+                        break
+                    next_frame_pos += 1
+
+                if grab_succeeded:
+                    ret, frame = cap.read()
+                    if ret:
+                        next_frame_pos += 1
+                else:
+                    ret, frame = False, None
+
                 if not ret:
                     # Try to provide more detailed error information
                     actual_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
                     frame_pos_info = f"Requested frame: {frame_idx}, Actual frame position: {actual_frame}"
                     
                     # Try to read the next available frame as a fallback
-                    fallback_success = False
                     for fallback_offset in [1, -1, 5, -5, 10, -10]:
                         fallback_pos = max(0, min(frame_idx + fallback_offset, max_frame_index))
                         cap.set(cv2.CAP_PROP_POS_FRAMES, fallback_pos)
@@ -754,7 +778,7 @@ class ImageProcessingDTOMixin:
                             if hasattr(self.dataset_config, 'debug') and self.dataset_config.debug:
                                 print_acc(f"Falling back to nearby frame {fallback_pos} instead of {frame_idx}")
                             frame = fallback_frame
-                            fallback_success = True
+                            next_frame_pos = fallback_pos + 1
                             break
                     else:
                         # No fallback worked, raise a more detailed exception
@@ -787,8 +811,10 @@ class ImageProcessingDTOMixin:
                 # Apply transform if provided
                 if transform:
                     img = transform(img)
-                
-                frames.append(img)
+
+                processed_frames[frame_idx] = img
+
+            frames = [processed_frames[frame_idx] for frame_idx in frames_to_extract]
             
             # Release the video capture
             cap.release()
@@ -1950,6 +1976,16 @@ class ArgBreakMixin:
         pass
 
 
+def _latent_to_uint8(latent: torch.Tensor) -> torch.Tensor:
+    # Pixel-space latents in [-1, 1] -> compact uint8 storage.
+    return ((latent.float().clamp(-1, 1) + 1.0) * 127.5).round().to(torch.uint8)
+
+
+def _latent_from_uint8(latent: torch.Tensor, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+    # Compact pixel-space cache -> normalized pixel tensor in [-1, 1].
+    return (latent.to(torch.float32) / 127.5 - 1.0).to(dtype)
+
+
 class LatentCachingFileItemDTOMixin:
     def __init__(self, *args, **kwargs):
         # if we have super, call it
@@ -2050,8 +2086,12 @@ class LatentCachingFileItemDTOMixin:
                 device='cpu'
             )
             self._encoded_latent = state_dict['latent']
+            if self._encoded_latent.dtype == torch.uint8:
+                self._encoded_latent = _latent_from_uint8(self._encoded_latent)
             if 'first_frame_latent' in state_dict:
                 self._cached_first_frame_latent = state_dict['first_frame_latent']
+                if self._cached_first_frame_latent.dtype == torch.uint8:
+                    self._cached_first_frame_latent = _latent_from_uint8(self._cached_first_frame_latent)
             if 'audio_latent' in state_dict:
                 self._cached_audio_latent = state_dict['audio_latent']
             if 'num_frames' in state_dict:
@@ -2071,12 +2111,18 @@ class LatentCachingMixin:
             file_items: List['FileItemDTO'],
             state_dict: OrderedDict,
     ):
-        latent = state_dict['latent'].to('cpu', dtype=self.sd.torch_dtype)
+        latent = state_dict['latent']
+        if latent.dtype == torch.uint8:
+            latent = _latent_from_uint8(latent)
+        latent = latent.to('cpu', dtype=self.sd.torch_dtype)
         first_frame_latent = None
         audio_latent = None
         num_frames = None
         if 'first_frame_latent' in state_dict:
-            first_frame_latent = state_dict['first_frame_latent'].to('cpu', dtype=self.sd.torch_dtype)
+            first_frame_latent = state_dict['first_frame_latent']
+            if first_frame_latent.dtype == torch.uint8:
+                first_frame_latent = _latent_from_uint8(first_frame_latent)
+            first_frame_latent = first_frame_latent.to('cpu', dtype=self.sd.torch_dtype)
         if 'audio_latent' in state_dict:
             audio_latent = state_dict['audio_latent'].to('cpu', dtype=self.sd.torch_dtype)
         if 'num_frames' in state_dict:
@@ -2137,7 +2183,15 @@ class LatentCachingMixin:
         if to_disk:
             meta = get_meta_for_safetensors(file_item.get_latent_info_dict())
             os.makedirs(os.path.dirname(latent_path), exist_ok=True)
-            save_file(state_dict, latent_path, metadata=meta)
+            disk_state_dict = OrderedDict(state_dict)
+            if getattr(self.sd, 'cache_latents_as_uint8', False):
+                disk_state_dict['latent'] = _latent_to_uint8(state_dict['latent'])
+                if 'first_frame_latent' in state_dict:
+                    disk_state_dict['first_frame_latent'] = _latent_to_uint8(
+                        state_dict['first_frame_latent']
+                    )
+            save_file(disk_state_dict, latent_path, metadata=meta)
+            del disk_state_dict
 
         del imgs
         del latent

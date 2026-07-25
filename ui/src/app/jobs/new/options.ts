@@ -53,6 +53,7 @@ export interface ModelArch {
   name: string;
   label: string;
   group: ModelGroup;
+  gateUrl?: string;
   controls?: Control[];
   isVideoModel?: boolean;
   hasMultiLinePrompts?: boolean;
@@ -93,6 +94,7 @@ export const modelArchs: ModelArch[] = [
     name: 'flux',
     label: 'FLUX.1',
     group: 'image',
+    gateUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-dev',
     defaults: {
       // default updates when [selected, unselected] in the UI
       'config.process[0].model.name_or_path': ['black-forest-labs/FLUX.1-dev', defaultNameOrPath],
@@ -108,6 +110,7 @@ export const modelArchs: ModelArch[] = [
     name: 'flux_kontext',
     label: 'FLUX.1-Kontext-dev',
     group: 'instruction',
+    gateUrl: 'https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev',
     defaults: {
       // default updates when [selected, unselected] in the UI
       'config.process[0].model.name_or_path': ['black-forest-labs/FLUX.1-Kontext-dev', defaultNameOrPath],
@@ -760,6 +763,7 @@ export const modelArchs: ModelArch[] = [
     name: 'flux2',
     label: 'FLUX.2',
     group: 'image',
+    gateUrl: 'https://huggingface.co/black-forest-labs/FLUX.2-dev',
     defaults: {
       // default updates when [selected, unselected] in the UI
       'config.process[0].model.name_or_path': ['black-forest-labs/FLUX.2-dev', defaultNameOrPath],
@@ -1080,6 +1084,7 @@ export const modelArchs: ModelArch[] = [
     name: 'ideogram4:fp8',
     label: 'Ideogram 4 FP8',
     group: 'image',
+    gateUrl: 'https://huggingface.co/ideogram-ai/ideogram-4-fp8',
     defaultAutoTrainingProfileId: 'ideogram4-balanced-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['ideogram-ai/ideogram-4-fp8', defaultNameOrPath],
@@ -1153,6 +1158,7 @@ export const modelArchs: ModelArch[] = [
     name: 'krea2',
     label: 'Krea 2 (raw)',
     group: 'image',
+    gateUrl: 'https://huggingface.co/krea/Krea-2-Raw',
     defaults: {
       'config.process[0].model.name_or_path': ['krea/Krea-2-Raw', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -1172,6 +1178,7 @@ export const modelArchs: ModelArch[] = [
     name: 'krea2:turbo',
     label: 'Krea 2 Turbo (w/ Training Adapter)',
     group: 'image',
+    gateUrl: 'https://huggingface.co/krea/Krea-2-Turbo',
     defaults: {
       'config.process[0].model.name_or_path': ['krea/Krea-2-Turbo', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -1198,6 +1205,7 @@ export const modelArchs: ModelArch[] = [
     name: 'krea2:o_edit',
     label: 'Krea 2 (raw) [Edit Training]',
     group: 'experimental',
+    gateUrl: 'https://huggingface.co/krea/Krea-2-Raw',
     defaults: {
       'config.process[0].model.name_or_path': ['krea/Krea-2-Raw', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -1233,6 +1241,7 @@ export const modelArchs: ModelArch[] = [
     name: 'krea2:o_edit_turbo',
     label: 'Krea 2 Turbo (w/ Training Adapter) [Edit Training]',
     group: 'experimental',
+    gateUrl: 'https://huggingface.co/krea/Krea-2-Turbo',
     defaults: {
       'config.process[0].model.name_or_path': ['krea/Krea-2-Turbo', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -1275,6 +1284,7 @@ export const modelArchs: ModelArch[] = [
     name: 'flux2_klein_9b',
     label: 'FLUX.2-klein-base-9B',
     group: 'image',
+    gateUrl: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B',
     defaults: {
       // default updates when [selected, unselected] in the UI
       'config.process[0].model.name_or_path': ['black-forest-labs/FLUX.2-klein-base-9B', defaultNameOrPath],

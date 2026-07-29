@@ -120,6 +120,13 @@ PRXPixelT2IModel, = _optional_models(
 )
 Krea2Model, = _optional_models(".krea2", (("Krea2Model", "krea2"),))
 AnimaModel, = _optional_models(".anima", (("AnimaModel", "anima"),))
+MageFlowModel, MageFlowEditModel = _optional_models(
+    ".mageflow",
+    (
+        ("MageFlowModel", "mageflow"),
+        ("MageFlowEditModel", "mageflow_edit"),
+    ),
+)
 
 
 AI_TOOLKIT_MODELS = [
@@ -158,4 +165,6 @@ AI_TOOLKIT_MODELS = [
     PRXPixelT2IModel,
     Krea2Model,
     AnimaModel,
+    MageFlowModel,
+    MageFlowEditModel,
 ]

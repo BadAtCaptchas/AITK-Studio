@@ -44,7 +44,7 @@ from toolkit.train_tools import get_torch_dtype, apply_noise_offset
 from einops import rearrange, repeat
 import torch
 from toolkit.pipelines import CustomStableDiffusionXLPipeline, CustomStableDiffusionPipeline, \
-    StableDiffusionKDiffusionXLPipeline, StableDiffusionXLRefinerPipeline, FluxWithCFGPipeline, \
+    StableDiffusionXLRefinerPipeline, FluxWithCFGPipeline, \
     FluxAdvancedControlPipeline
 from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, T2IAdapter, DDPMScheduler, \
     StableDiffusionXLAdapterPipeline, StableDiffusionAdapterPipeline, DiffusionPipeline, PixArtTransformer2DModel, \
@@ -398,7 +398,6 @@ class StableDiffusion:
                 pipln = self.custom_pipeline
             else:
                 pipln = StableDiffusionXLPipeline
-                # pipln = StableDiffusionKDiffusionXLPipeline
 
             # see if path exists
             model_path = resolve_hub_single_file_path(model_path, "base model")
@@ -1307,6 +1306,13 @@ class StableDiffusion:
             sampler=None,
             pipeline: Union[None, StableDiffusionPipeline, StableDiffusionXLPipeline] = None,
     ):
+        if isinstance(sampler, str) and sampler.startswith("sample_"):
+            raise ValueError(
+                f"Legacy k-diffusion sampler {sampler!r} is no longer supported; "
+                "use a Diffusers-backed sampler such as 'k_euler', 'k_lms', "
+                "'heun', or 'dpmsolver++'."
+            )
+
         network = unwrap_model(self.network)
         merge_multiplier = 1.0
         flush()
@@ -1350,37 +1356,27 @@ class StableDiffusion:
         if pipeline is None:
             noise_scheduler = self.noise_scheduler
             if sampler is not None:
-                if sampler.startswith("sample_"):  # sample_dpmpp_2m
-                    # using ksampler
-                    noise_scheduler = get_sampler(
-                        'lms', {
-                            "prediction_type": self.prediction_type,
-                        })
-                else:
-                    arch = 'sd'
-                    if self.is_pixart:
-                        arch = 'pixart'
-                    if self.is_flux:
-                        arch = 'flux'
-                    if self.is_lumina2:
-                        arch = 'lumina2'
-                    noise_scheduler = get_sampler(
-                        sampler,
-                        {
-                            "prediction_type": self.prediction_type,
-                        },
-                        arch=arch
-                    )
+                arch = 'sd'
+                if self.is_pixart:
+                    arch = 'pixart'
+                if self.is_flux:
+                    arch = 'flux'
+                if self.is_lumina2:
+                    arch = 'lumina2'
+                noise_scheduler = get_sampler(
+                    sampler,
+                    {
+                        "prediction_type": self.prediction_type,
+                    },
+                    arch=arch,
+                )
 
                 try:
                     noise_scheduler = noise_scheduler.to(self.device_torch, self.torch_dtype)
                 except:
                     pass
 
-            if sampler.startswith("sample_") and self.is_xl:
-                # using kdiffusion
-                Pipe = StableDiffusionKDiffusionXLPipeline
-            elif self.is_xl:
+            if self.is_xl:
                 Pipe = StableDiffusionXLPipeline
             elif self.is_v3:
                 Pipe = StableDiffusion3Pipeline
@@ -1512,9 +1508,6 @@ class StableDiffusion:
             flush()
             # disable progress bar
             pipeline.set_progress_bar_config(disable=True)
-
-            if sampler.startswith("sample_"):
-                pipeline.set_scheduler(sampler)
 
         refiner_pipeline = None
         if self.refiner_unet:
@@ -1707,13 +1700,6 @@ class StableDiffusion:
                         # if grs is None or grs < 0.00001:
                         #     grs = 0.7
                         # grs = 0.0
-
-                        if sampler.startswith("sample_"):
-                            extra['use_karras_sigmas'] = True
-                            extra = {
-                                **extra,
-                                **gen_config.extra_kwargs,
-                            }
 
                         img = pipeline(
                             # prompt=gen_config.prompt,

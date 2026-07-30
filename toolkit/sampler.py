@@ -20,12 +20,6 @@ from toolkit.samplers.mean_flow_scheduler import MeanFlowScheduler
 
 from toolkit.samplers.custom_flowmatch_sampler import CustomFlowMatchEulerDiscreteScheduler
 
-from toolkit.import_compat import ensure_pkg_resources_packaging
-
-ensure_pkg_resources_packaging()
-
-from k_diffusion.external import CompVisDenoiser
-
 from toolkit.samplers.custom_lcm_scheduler import CustomLCMScheduler
 
 # scheduler:
@@ -128,6 +122,13 @@ def get_sampler(
         kwargs: dict = None,
         arch: str = "sd"
 ):
+    if sampler.startswith("sample_"):
+        raise ValueError(
+            f"Legacy k-diffusion sampler {sampler!r} is no longer supported; "
+            "use a Diffusers-backed sampler such as 'k_euler', 'k_lms', "
+            "'heun', or 'dpmsolver++'."
+        )
+
     sched_init_args = {}
     if kwargs is not None:
         sched_init_args.update(kwargs)
@@ -189,29 +190,3 @@ def get_sampler(
     scheduler = scheduler_cls.from_config(config)
 
     return scheduler
-
-
-# testing
-if __name__ == "__main__":
-    from diffusers import DiffusionPipeline
-
-    from diffusers import StableDiffusionKDiffusionPipeline
-    import torch
-    import os
-
-    inference_steps = 25
-
-    pipe = StableDiffusionKDiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2-1-base")
-    pipe = pipe.to("cuda")
-
-    k_diffusion_model = CompVisDenoiser(model)
-
-    pipe = DiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4", custom_pipeline="sd_text2img_k_diffusion")
-    pipe = pipe.to("cuda")
-
-    prompt = "an astronaut riding a horse on mars"
-    pipe.set_scheduler("sample_heun")
-    generator = torch.Generator(device="cuda").manual_seed(seed)
-    image = pipe(prompt, generator=generator, num_inference_steps=20).images[0]
-
-    image.save("./astronaut_heun_k_diffusion.png")

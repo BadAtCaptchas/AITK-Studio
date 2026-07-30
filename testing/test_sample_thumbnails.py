@@ -100,7 +100,7 @@ class SampleAtomicWriteTests(unittest.TestCase):
             self.assertTrue(all(not worker.is_alive() for worker in workers))
             self.assertEqual(Path(root, "sample-1.png").read_bytes(), b"1")
             self.assertEqual(Path(root, "sample-2.png").read_bytes(), b"2")
-            self.assertFalse(any(name.startswith(".aitk-sample-") for name in os.listdir(root)))
+            self.assertFalse(os.path.exists(os.path.join(root, ".tmp")))
 
     def test_failed_save_restores_output_folder_and_removes_staging(self):
         with tempfile.TemporaryDirectory() as root:
@@ -113,7 +113,7 @@ class SampleAtomicWriteTests(unittest.TestCase):
                 harness.save_image_atomic(object())
 
             self.assertEqual(harness.output_folder, root)
-            self.assertFalse(any(name.startswith(".aitk-sample-") for name in os.listdir(root)))
+            self.assertFalse(os.path.exists(os.path.join(root, ".tmp")))
 
 
 class ThumbnailGenerationTests(unittest.TestCase):

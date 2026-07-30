@@ -814,7 +814,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit']
 LayerOffloadingBackend = Literal['block', 'legacy']
 QuantizationKernel = Literal['auto', 'triton', 'torch']
 
@@ -1621,7 +1621,9 @@ class GenerateImageConfig:
         with self._sample_write_lock:
             real_folder = self.output_folder
             os.makedirs(real_folder, exist_ok=True)
-            tmp_folder = tempfile.mkdtemp(prefix='.aitk-sample-', dir=real_folder)
+            tmp_root = os.path.join(real_folder, '.tmp')
+            os.makedirs(tmp_root, exist_ok=True)
+            tmp_folder = tempfile.mkdtemp(prefix='sample-', dir=tmp_root)
             try:
                 self.output_folder = tmp_folder
                 try:
@@ -1664,6 +1666,12 @@ class GenerateImageConfig:
             finally:
                 self.output_folder = real_folder
                 shutil.rmtree(tmp_folder, ignore_errors=True)
+                try:
+                    os.rmdir(tmp_root)
+                except OSError:
+                    # Another concurrent save may still be using the shared
+                    # hidden root, or the process may have left diagnostics.
+                    pass
 
     def _generate_thumbnail(self, media_path, thumb_path):
         # 300x300 center-cropped 90% jpg. Returns True if one was written.

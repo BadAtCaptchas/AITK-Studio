@@ -13,6 +13,7 @@ UI_OPTIONS_PATH = (
     PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
 )
 README_PATH = PROJECT_ROOT / "README.md"
+CONFIG_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
 
 
 class MageFlowStaticSupportTest(unittest.TestCase):
@@ -30,6 +31,9 @@ class MageFlowStaticSupportTest(unittest.TestCase):
         self.assertIn('("MageFlowEditModel", "mageflow_edit")', registry)
         self.assertIn("MageFlowModel,", registry)
         self.assertIn("MageFlowEditModel,", registry)
+        config = CONFIG_PATH.read_text(encoding="utf-8")
+        self.assertIn("'mageflow'", config)
+        self.assertIn("'mageflow_edit'", config)
 
     def test_model_contract_and_scheduler_match_upstream(self):
         model = (MAGEFLOW_ROOT / "mageflow.py").read_text(encoding="utf-8")

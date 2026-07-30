@@ -115,7 +115,7 @@ def unpack_uintx_range(
             slots = torch.div(indices, nbytes, rounding_mode="floor")
             vals = torch.bitwise_right_shift(
                 packed[pos + byte_indices],
-                slots * k,
+                (slots * k).to(torch.uint8),
             )
             vals.bitwise_and_((1 << k) - 1)
             out |= vals.bitwise_left_shift(offset)

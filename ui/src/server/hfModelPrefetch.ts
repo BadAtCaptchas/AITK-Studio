@@ -8,6 +8,8 @@ import { prepareHfTokenEnv } from './hfTokenEnv';
 import { getToolkitPythonPath } from './pythonPath';
 import type { ModelReference } from './trainingJobTransfer';
 import { isOfflineModeEnabled } from './networkPolicy';
+import { isTelemetryEnabled } from './telemetry';
+import { telemetryChildProcessEnv } from '../utils/telemetry';
 
 type HfModelPrefetchResult = {
   handledValues: string[];
@@ -44,6 +46,7 @@ async function runModelPrefetchScript(inputPath: string): Promise<HfModelPrefetc
   const pythonPath = getToolkitPythonPath();
   const scriptPath = path.join(TOOLKIT_ROOT, 'scripts', 'prefetch_hf_models.py');
   const token = await getHFToken();
+  const telemetryEnabled = await isTelemetryEnabled();
   const timeoutMs = getPrefetchTimeoutMs();
   const preparedHfEnv = await prepareHfTokenEnv({
     token,
@@ -57,6 +60,7 @@ async function runModelPrefetchScript(inputPath: string): Promise<HfModelPrefetc
         env: {
           ...preparedHfEnv.env,
           HF_HUB_ENABLE_HF_TRANSFER: process.platform === 'win32' ? '0' : '1',
+          ...telemetryChildProcessEnv(telemetryEnabled),
         },
         windowsHide: true,
       });

@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Save,
   ServerCog,
+  ShieldCheck,
   TerminalSquare,
   UsersRound,
 } from 'lucide-react';
@@ -1001,6 +1002,20 @@ export default function Settings() {
                       <SettingSwitch
                         checked={settings.TRAINING_ADVISOR_ENABLED === 'true'}
                         onChange={checked => setSettings(prev => ({ ...prev, TRAINING_ADVISOR_ENABLED: checked ? 'true' : 'false' }))}
+                      />
+                    </div>
+                    <div className="flex items-center gap-3 border-b border-gray-900 px-3 py-3">
+                      <ShieldCheck className="h-5 w-5 flex-none text-gray-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-gray-100">Library telemetry</div>
+                        <div className="mt-0.5 text-xs text-gray-500">
+                          Allow Hugging Face and Diffusers to send anonymous usage telemetry from newly started
+                          training, generation, and import processes. Disabled by default.
+                        </div>
+                      </div>
+                      <SettingSwitch
+                        checked={settings.TELEMETRY_ENABLED === 'true'}
+                        onChange={checked => setSettings(prev => ({ ...prev, TELEMETRY_ENABLED: checked ? 'true' : 'false' }))}
                       />
                     </div>
                     <div className="flex items-center gap-3 px-3 py-3">

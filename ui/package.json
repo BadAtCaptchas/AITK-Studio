@@ -22,6 +22,7 @@
     "test:authenlora": "node --test scripts/authenloraConfig.test.mjs",
     "test:flux-guidance": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/fluxGuidancePolicy.test.mjs",
     "test:tensorboard": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/tensorboardConfig.test.mjs",
+    "test:telemetry": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/telemetryConfig.test.mjs",
     "test:ltx-training": "node --test scripts/ltxTrainingOptions.test.mjs",
     "test:krea2-edit": "node --test scripts/krea2EditOptions.test.mjs",
     "test:remote": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs scripts/remoteClient.test.mjs scripts/jobsApiList.test.mjs scripts/queueSync.test.mjs scripts/openRouterPricing.test.mjs",

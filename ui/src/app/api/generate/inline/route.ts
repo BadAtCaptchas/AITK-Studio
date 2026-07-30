@@ -15,6 +15,7 @@ import { prepareHfTokenEnv } from '@/server/hfTokenEnv';
 import { getToolkitPythonPath } from '@/server/tensorboard';
 import { getProjectRoots, ProjectError, resolveOptionalProject } from '@/server/projects';
 import { isOfflineModeEnabled, offlineChildProcessEnv } from '@/server/networkPolicy';
+import { isTelemetryEnabled } from '@/server/telemetry';
 import { generateOnProjectReplica, ProjectSyncError } from '@/server/projectSync';
 import { assertExecutionReplica } from '@/server/projectSyncWorker';
 import {
@@ -24,6 +25,7 @@ import {
   resolvePortableProjectConfig,
 } from '@/server/projectSyncProtocol';
 import { isRequestAuthenticated } from '@/utils/authSession';
+import { telemetryChildProcessEnv } from '@/utils/telemetry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -331,6 +333,7 @@ export async function POST(request: NextRequest) {
     const projectRoots = project ? await getProjectRoots(project) : null;
     const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
     const hfToken = await getHFToken();
+    const telemetryEnabled = await isTelemetryEnabled();
     const dbConfig = getDatabaseConfig();
     const baseName = sanitizeName(jobConfig.config?.name);
     const runName = `${baseName}_${Date.now()}`;
@@ -376,6 +379,7 @@ export async function POST(request: NextRequest) {
       AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
       PYTHONUNBUFFERED: '1',
       HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
+      ...telemetryChildProcessEnv(telemetryEnabled),
       ...offlineChildProcessEnv(await isOfflineModeEnabled()),
     };
 

@@ -22,14 +22,15 @@ sys.path.insert(0, os.getcwd())
 # must come before ANY torch or fastai imports
 # import toolkit.cuda_malloc
 
+from aitk_telemetry import configure_telemetry_environment
+
+configure_telemetry_environment()
+
 from toolkit.network_policy import install_offline_network_guard
 from toolkit.hf_download_progress import install_hf_download_progress
 
 install_offline_network_guard()
 install_hf_download_progress()
-
-# turn off diffusers telemetry until I can figure out how to make it opt-in
-os.environ['DISABLE_TELEMETRY'] = 'YES'
 
 # set torch to trace mode
 import torch

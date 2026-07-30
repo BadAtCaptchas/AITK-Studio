@@ -42,6 +42,7 @@
         "src/utils/encryptedObjectMediaCache.ts",
         "src/utils/webauthnPrfCrypto.ts",
         "src/utils/trainingPhaseSummary.ts",
+        "src/utils/telemetry.ts",
         "src/utils/validationConfig.ts",
         "src/utils/terminalEmulator.ts",
         "src/utils/seriesColors.ts",
@@ -96,6 +97,7 @@
         "src/server/trainingJobRestart.ts",
         "src/server/remoteAssets.ts",
         "src/server/sampleThumbnails.ts",
+        "src/server/telemetry.ts",
         "src/server/externalComfy.ts"
     ]
 }

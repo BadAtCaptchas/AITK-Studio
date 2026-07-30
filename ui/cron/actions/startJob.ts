@@ -24,6 +24,8 @@ import {
 } from '../../src/server/secureRemoteCaptionJobs';
 import { getRemoteOllamaWorker } from '../../src/server/remoteOllamaWorkers';
 import { hostnamesFromUrls, isOfflineModeEnabled, offlineChildProcessEnv } from '../../src/server/networkPolicy';
+import { isTelemetryEnabled } from '../../src/server/telemetry';
+import { telemetryChildProcessEnv } from '../../src/utils/telemetry';
 import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
@@ -104,6 +106,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const trainingRoot = await getJobTrainingRoot(job);
       const hfToken = await getHFToken();
       const openRouterApiKey = await getOpenRouterApiKey();
+      const telemetryEnabled = await isTelemetryEnabled();
       const tensorBoardEnabled = isTensorBoardEnabled();
       const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
@@ -210,6 +213,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
         PYTHONUNBUFFERED: '1',
         HF_HUB_ENABLE_HF_TRANSFER: isWindows ? '0' : process.env.HF_HUB_ENABLE_HF_TRANSFER || '1',
+        ...telemetryChildProcessEnv(telemetryEnabled),
         ...offlineChildProcessEnv(await isOfflineModeEnabled(), offlineAllowedHosts),
         ...secureRemoteOllamaEnv,
       };

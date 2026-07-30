@@ -10,6 +10,8 @@ import { listDatasetSummaries } from './encryptedDatasets';
 import { prepareHfTokenEnv } from './hfTokenEnv';
 import { getToolkitPythonPath } from './pythonPath';
 import { getHFToken } from './settings';
+import { isTelemetryEnabled } from './telemetry';
+import { telemetryChildProcessEnv } from '../utils/telemetry';
 import { isOfflineModeEnabled } from './networkPolicy';
 import { nextAvailablePath, safeNameSegment } from './trainingJobTransfer';
 
@@ -162,6 +164,7 @@ async function runHfDatasetScript<T>(payload: Record<string, unknown>, timeoutMs
   const inputPath = path.join(tempDir, 'input.json');
   const scriptPath = path.join(TOOLKIT_ROOT, 'scripts', 'import_hf_dataset.py');
   const token = await getHFToken();
+  const telemetryEnabled = await isTelemetryEnabled();
   const preparedHfEnv = await prepareHfTokenEnv({
     token,
     tokenFilePrefix: 'import-hf-dataset',
@@ -175,6 +178,7 @@ async function runHfDatasetScript<T>(payload: Record<string, unknown>, timeoutMs
         env: {
           ...preparedHfEnv.env,
           HF_HUB_ENABLE_HF_TRANSFER: process.platform === 'win32' ? '0' : '1',
+          ...telemetryChildProcessEnv(telemetryEnabled),
         },
         windowsHide: true,
       });

@@ -11,6 +11,7 @@ import { getOfflineModeState, OFFLINE_MODE_SETTING_KEY } from '@/server/networkP
 import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyLoraDir, normalizeExternalComfyUrl } from '@/server/externalComfy';
 import { IDEOGRAM_WORKFLOW_HISTORY_KEY } from '@/server/ideogramWorkflowHistory';
 import { isRequestAuthenticated } from '@/utils/authSession';
+import { TELEMETRY_ENABLED_SETTING_KEY } from '@/utils/telemetry';
 
 type SettingsAccess = {
   authenticated: boolean;
@@ -71,6 +72,10 @@ export async function GET(request: NextRequest) {
       settingsObject.TRAINING_ADVISOR_ENABLED,
       false,
     );
+    settingsObject[TELEMETRY_ENABLED_SETTING_KEY] = normalizeBooleanSetting(
+      settingsObject[TELEMETRY_ENABLED_SETTING_KEY],
+      false,
+    );
     settingsObject.COMFY_AUTO_INSTALL = normalizeBooleanSetting(settingsObject.COMFY_AUTO_INSTALL, false);
     settingsObject.COMFY_EXTERNAL_URL = normalizeExternalComfyUrl(
       settingsObject.COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL,
@@ -103,6 +108,7 @@ export async function POST(request: NextRequest) {
       PROJECTS_ENABLED,
       OFFLINE_MODE,
       TRAINING_ADVISOR_ENABLED,
+      TELEMETRY_ENABLED,
       COMFY_AUTO_INSTALL,
       COMFY_EXTERNAL_URL,
       COMFY_EXTERNAL_LORA_DIR,
@@ -165,6 +171,7 @@ export async function POST(request: NextRequest) {
         ? 'true'
         : normalizeBooleanSetting(existingOfflineMode, false),
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
+      [TELEMETRY_ENABLED_SETTING_KEY]: normalizeBooleanSetting(TELEMETRY_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
       COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,
       COMFY_EXTERNAL_LORA_DIR: normalizedExternalComfyLoraDir,

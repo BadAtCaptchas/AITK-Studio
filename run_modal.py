@@ -18,8 +18,9 @@ sys.path.insert(0, "/root/ai-toolkit")
 # must come before ANY torch or fastai imports
 # import toolkit.cuda_malloc
 
-# turn off diffusers telemetry until I can figure out how to make it opt-in
-os.environ['DISABLE_TELEMETRY'] = 'YES'
+from aitk_telemetry import configure_telemetry_environment
+
+configure_telemetry_environment()
 
 # define the volume for storing model outputs, using "creating volumes lazily": https://modal.com/docs/guide/volumes
 # you will find your model, samples and optimizer stored in: https://modal.com/storage/your-username/main/flux-lora-models

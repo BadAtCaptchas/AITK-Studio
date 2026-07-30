@@ -271,6 +271,8 @@ Block offloading is currently CUDA-first and is intended for LoRA/network traini
 
 The AITK Studio UI is the main control surface for creating datasets, starting and stopping jobs, monitoring training, running generation, and exporting work. It can also require a bearer token so the UI is safer to run on a remote machine.
 
+Hugging Face and Diffusers usage telemetry is disabled by default. Opt in for new UI-launched training, generation, and import processes with **Settings → Library telemetry**. Direct CLI and Modal runs can opt in with `AITK_TELEMETRY_ENABLED=1`.
+
 ### Project Workspaces
 
 Projects are opt-in, isolated production workspaces for keeping related training work together. Enable **Project Workspaces** in Settings, open **Projects** to create or switch workspaces, and use the Overview's **Prepare Dataset → Train Model → Review Output** stages to move work forward. Each new project gets its own registered sandbox under `PROJECTS_FOLDER` (default: `projects/`) with separate `datasets/`, `configs/`, `runs/`, `outputs/`, `models/`, `assets/`, `notes/`, and `cache/` folders. Existing projects keep their registered storage root if `PROJECTS_FOLDER` later changes.

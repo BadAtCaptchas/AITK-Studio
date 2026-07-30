@@ -1,4 +1,7 @@
 import os
+import shutil
+import tempfile
+import threading
 import time
 import math
 from typing import Any, List, Optional, Literal, Union, TYPE_CHECKING, Dict
@@ -1524,6 +1527,7 @@ class GenerateImageConfig:
         self.add_prompt_file: bool = add_prompt_file
         self.output_tail: str = output_tail
         self.gen_time: int = int(time.time() * 1000)
+        self._sample_write_lock = threading.Lock()
         self.adapter_image_path: str = adapter_image_path
         self.adapter_conditioning_scale: float = adapter_conditioning_scale
         self.extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
@@ -1608,6 +1612,88 @@ class GenerateImageConfig:
         filename += '.txt'
         # join with folder
         return os.path.join(self.output_folder, filename)
+
+    def save_image_atomic(self, image, count: int = 0, max_count=0):
+        # Stage each save in a unique directory on the destination filesystem,
+        # then publish the thumbnail and sidecars before the media file. The lock
+        # also protects model integrations that temporarily inspect output_folder
+        # from concurrent use of the same GenerateImageConfig instance.
+        with self._sample_write_lock:
+            real_folder = self.output_folder
+            os.makedirs(real_folder, exist_ok=True)
+            tmp_folder = tempfile.mkdtemp(prefix='.aitk-sample-', dir=real_folder)
+            try:
+                self.output_folder = tmp_folder
+                try:
+                    self.save_image(image, count, max_count)
+                    media_filename = os.path.basename(self.get_image_path(count, max_count))
+                finally:
+                    self.output_folder = real_folder
+
+                generated_files = sorted(
+                    entry.name
+                    for entry in os.scandir(tmp_folder)
+                    if entry.is_file(follow_symlinks=False)
+                )
+                if media_filename not in generated_files:
+                    raise RuntimeError(f"Sample save did not create expected media file: {media_filename}")
+
+                tmp_media_path = os.path.join(tmp_folder, media_filename)
+                tmp_thumb_path = os.path.join(tmp_folder, media_filename + '.thumb')
+                try:
+                    if self._generate_thumbnail(tmp_media_path, tmp_thumb_path):
+                        thumbs_folder = os.path.join(real_folder, '.thumbs')
+                        os.makedirs(thumbs_folder, exist_ok=True)
+                        os.replace(
+                            tmp_thumb_path,
+                            os.path.join(thumbs_folder, media_filename + '.jpg'),
+                        )
+                except Exception as e:
+                    print(f"Failed to generate thumbnail for {media_filename}: {e}")
+
+                # Publish the media last so sample watchers never observe a
+                # partially written file or a media file before its thumbnail.
+                for filename in generated_files:
+                    if filename == media_filename:
+                        continue
+                    os.replace(
+                        os.path.join(tmp_folder, filename),
+                        os.path.join(real_folder, filename),
+                    )
+                os.replace(tmp_media_path, os.path.join(real_folder, media_filename))
+            finally:
+                self.output_folder = real_folder
+                shutil.rmtree(tmp_folder, ignore_errors=True)
+
+    def _generate_thumbnail(self, media_path, thumb_path):
+        # 300x300 center-cropped 90% jpg. Returns True if one was written.
+        from PIL import Image as PILImage
+        ext = os.path.splitext(media_path)[1].lower()
+        img = None
+        if ext in ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']:
+            with PILImage.open(media_path) as source_img:
+                # Animated formats open on their first frame.
+                img = source_img.convert('RGB')
+        elif ext == '.mp4':
+            import cv2
+            cap = cv2.VideoCapture(media_path)
+            try:
+                ok, frame = cap.read()
+            finally:
+                cap.release()
+            if ok:
+                img = PILImage.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        if img is None:
+            return False
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        w, h = img.size
+        side = min(w, h)
+        left = (w - side) // 2
+        top = (h - side) // 2
+        img = img.crop((left, top, left + side, top + side)).resize((300, 300), PILImage.LANCZOS)
+        img.save(thumb_path, format='JPEG', quality=90)
+        return True
 
     def save_image(self, image, count: int = 0, max_count=0):
         # make parent dirs

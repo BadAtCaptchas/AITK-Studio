@@ -95,6 +95,7 @@
         "src/server/projectSyncHooks.ts",
         "src/server/trainingJobRestart.ts",
         "src/server/remoteAssets.ts",
+        "src/server/sampleThumbnails.ts",
         "src/server/externalComfy.ts"
     ]
 }

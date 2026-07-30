@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { db } from './db';
 import { getJobTrainingRoot, getProjectRoots } from './projects';
+import { resolveSampleThumbnail } from './sampleThumbnails';
 import type { Job } from '@/types';
 
 export const sampleContentTypeMap: Record<string, string> = {
@@ -123,7 +124,7 @@ export async function listJobSampleUrls(job: Job) {
   return samples.sort();
 }
 
-export async function resolveJobSampleFile(job: Job, filename: string) {
+export async function resolveJobSampleFile(job: Job, filename: string, options?: { thumbnail?: boolean }) {
   if (!isSafeSampleName(filename)) return null;
   const ext = path.extname(filename).toLowerCase();
   const contentType = sampleContentTypeMap[ext];
@@ -137,6 +138,11 @@ export async function resolveJobSampleFile(job: Job, filename: string) {
 
     const stat = await fs.promises.stat(canonicalPath).catch(() => null);
     if (!stat || !stat.isFile()) continue;
+
+    if (options?.thumbnail && (contentType.startsWith('image/') || contentType.startsWith('video/'))) {
+      const thumbnail = await resolveSampleThumbnail(root, filename);
+      if (thumbnail) return thumbnail;
+    }
 
     return { path: canonicalPath, stat, contentType };
   }

@@ -32,3 +32,18 @@ test('remote asset proxy paths do not pass through traversals or protected worke
     '/api/img/%2Fapi%2Fjobs%2Fremote-1%2Fsamples%2F%252E%252E%252Fsettings',
   );
 });
+
+test('remote sample thumbnail requests are propagated only after path validation', () => {
+  assert.equal(
+    remoteAssetProxyPath('img', '/api/jobs/remote-1/samples/sample.mp4', 'remote-1', { thumbnail: true }),
+    '/api/jobs/remote-1/samples/sample.mp4?thumb=1',
+  );
+  assert.equal(
+    remoteAssetProxyPath('file', '/api/jobs/remote-1/samples/sample.mp4', 'remote-1', { thumbnail: true }),
+    '/api/jobs/remote-1/samples/sample.mp4',
+  );
+  assert.equal(
+    remoteAssetProxyPath('img', '/api/jobs/remote-1/samples/..', 'remote-1', { thumbnail: true }),
+    '/api/img/%2Fapi%2Fjobs%2Fremote-1%2Fsamples%2F..?thumb=1',
+  );
+});

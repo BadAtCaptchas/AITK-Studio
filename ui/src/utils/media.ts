@@ -63,6 +63,11 @@ export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audi
   return `/api/img/${encodeURIComponent(value)}`;
 }
 
+export function getSampleThumbnailUrl(value: string) {
+  const mediaUrl = getMediaUrl(value);
+  return `${mediaUrl}${mediaUrl.includes('?') ? '&' : '?'}thumb=1`;
+}
+
 export function getDownloadUrl(value: string) {
   if (value.startsWith('/api/') || /^https?:\/\//i.test(value)) return value;
   const remoteDataset = parseRemoteDatasetAssetRef(value);

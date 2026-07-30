@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
   const jobID = request.nextUrl.searchParams.get('job_id') || '';
   const remotePath = request.nextUrl.searchParams.get('path') || '';
   const type = (request.nextUrl.searchParams.get('type') || 'img') as RemoteAssetType;
+  const thumbnail = request.nextUrl.searchParams.get('thumb') === '1';
 
   if (!jobID || !remotePath) {
     return new NextResponse('Missing remote asset parameters', { status: 400 });
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest) {
     const worker = await getRemoteWorker(job.worker_id);
     const remoteResponse = await remoteProxyFetch(
       worker,
-      remoteAssetProxyPath(type, remotePath, job.remote_job_id),
+      remoteAssetProxyPath(type, remotePath, job.remote_job_id, { thumbnail }),
       request.headers,
     );
     return new NextResponse(remoteResponse.body, {

@@ -49,7 +49,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
     return new NextResponse(error?.message || 'Project spaces are disabled', { status: error?.status || 403 });
   }
 
-  const sampleFile = await resolveJobSampleFile(job, sampleSegments[0]);
+  const sampleFile = await resolveJobSampleFile(job, sampleSegments[0], {
+    thumbnail: request.nextUrl.searchParams.get('thumb') === '1',
+  });
   if (!sampleFile) {
     return new NextResponse('File not found', { status: 404 });
   }

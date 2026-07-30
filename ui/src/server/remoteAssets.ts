@@ -2,6 +2,10 @@ import path from 'path';
 
 export type RemoteAssetType = 'img' | 'file' | 'audio-art';
 
+type RemoteAssetProxyOptions = {
+  thumbnail?: boolean;
+};
+
 export function makeRemoteAssetRef(jobID: string, type: RemoteAssetType, remotePath: string) {
   const filename = path.basename(remotePath.replace(/\\/g, '/')) || 'remote-file';
   return `remote://${jobID}/${type}/${encodeURIComponent(remotePath)}/${encodeURIComponent(filename)}`;
@@ -45,12 +49,19 @@ export function remoteSampleAssetPath(remotePath: string, remoteJobID: string | 
   return `/api/jobs/${encodeURIComponent(remoteJobID)}/samples/${encodeURIComponent(decodedFilename)}`;
 }
 
-export function remoteAssetProxyPath(type: RemoteAssetType, remotePath: string, remoteJobID?: string | null) {
+export function remoteAssetProxyPath(
+  type: RemoteAssetType,
+  remotePath: string,
+  remoteJobID?: string | null,
+  options?: RemoteAssetProxyOptions,
+) {
   const remoteSamplePath = remoteSampleAssetPath(remotePath, remoteJobID);
-  if (remoteSamplePath) return remoteSamplePath;
+  if (remoteSamplePath) {
+    return options?.thumbnail && type === 'img' ? `${remoteSamplePath}?thumb=1` : remoteSamplePath;
+  }
 
   const encoded = encodeURIComponent(remotePath);
   if (type === 'file') return `/api/files/${encoded}`;
   if (type === 'audio-art') return `/api/audio/art/${encoded}`;
-  return `/api/img/${encoded}`;
+  return options?.thumbnail ? `/api/img/${encoded}?thumb=1` : `/api/img/${encoded}`;
 }

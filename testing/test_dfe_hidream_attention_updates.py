@@ -61,6 +61,11 @@ def load_dfe7_forward_class():
         for node in class_node.body
         if isinstance(node, ast.FunctionDef) and node.name == "forward"
     )
+    fold_frames_node = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_fold_frames_to_batch"
+    )
     test_class = ast.ClassDef(
         name="DiffusionFeatureExtractor7ForwardForTest",
         bases=[],
@@ -68,7 +73,7 @@ def load_dfe7_forward_class():
         body=[forward_node],
         decorator_list=[],
     )
-    test_module = ast.Module(body=[test_class], type_ignores=[])
+    test_module = ast.Module(body=[fold_frames_node, test_class], type_ignores=[])
     ast.fix_missing_locations(test_module)
 
     namespace = {
@@ -90,14 +95,15 @@ def fake_tips_prediction(tensor):
 
 
 class FakeSD:
-    def __init__(self):
+    def __init__(self, x0_pred=False):
         self.vae = SimpleNamespace(device=torch.device("cpu"), dtype=torch.float32)
+        self.x0_pred = x0_pred
 
     def decode_latents(self, latents):
         return latents
 
 
-def build_dfe_for_test(do_partial_step=False):
+def build_dfe_for_test(do_partial_step=False, x0_pred=False):
     dfe_cls = load_dfe7_forward_class()
     dfe = dfe_cls()
     dfe.do_partial_step = do_partial_step
@@ -105,7 +111,8 @@ def build_dfe_for_test(do_partial_step=False):
     dfe.log_every = 100
     dfe.step = 0
     dfe.model = SimpleNamespace(device=torch.device("cpu"), dtype=torch.float32)
-    dfe.sd_ref = lambda: FakeSD()
+    fake_sd = FakeSD(x0_pred=x0_pred)
+    dfe.sd_ref = lambda: fake_sd
     dfe.get_pred = fake_tips_prediction
     return dfe
 
@@ -244,6 +251,75 @@ class DFE7VelocityWeightingTest(unittest.TestCase):
 
         target = fake_tips_prediction((target_latents + 1) / 2)
         pred = fake_tips_prediction((stepped_latents + 1) / 2)
+        expected = dfe_loss_from_predictions(pred, target, tv, weighted=False) * 10.0
+
+        self.assertTrue(torch.allclose(actual, expected, rtol=1e-5, atol=1e-6))
+
+    def test_video_frames_keep_sample_order_repeat_timesteps_and_use_direct_x0(self):
+        dfe = build_dfe_for_test(do_partial_step=False, x0_pred=True)
+        noise = torch.linspace(-0.5, 0.5, 48).view(2, 3, 2, 2, 2)
+        noise_pred = torch.linspace(-0.8, 0.8, 48).view(2, 3, 2, 2, 2)
+        noisy_latents = torch.full_like(noise_pred, 10.0)
+        tensors = torch.linspace(-0.6, 0.6, 48).view(2, 2, 3, 2, 2)
+        timesteps = torch.tensor([100.0, 700.0])
+
+        actual = dfe.forward(
+            noise=noise,
+            noise_pred=noise_pred,
+            noisy_latents=noisy_latents,
+            timesteps=timesteps,
+            batch=SimpleNamespace(tensor=tensors, latents=noise.clone()),
+            scheduler=None,
+        )
+
+        folded_pred = noise_pred.permute(0, 2, 1, 3, 4).reshape(4, 3, 2, 2)
+        folded_target = tensors.reshape(4, 3, 2, 2)
+        repeated_tv = timesteps.repeat_interleave(2).view(4, 1, 1, 1) / 1000.0
+        pred = fake_tips_prediction((folded_pred + 1) / 2)
+        target = fake_tips_prediction((folded_target.to(torch.bfloat16) + 1) / 2)
+        expected = dfe_loss_from_predictions(
+            pred,
+            target,
+            repeated_tv.clamp(min=0.001),
+            weighted=True,
+        )
+
+        self.assertTrue(torch.allclose(actual, expected, rtol=1e-5, atol=1e-6))
+
+    def test_video_partial_step_folds_target_latents_in_matching_order(self):
+        dfe = build_dfe_for_test(do_partial_step=True)
+        noise = torch.linspace(-0.5, 0.5, 48).view(2, 3, 2, 2, 2)
+        noise_pred = torch.linspace(-0.4, 0.4, 48).view(2, 3, 2, 2, 2)
+        noisy_latents = torch.linspace(-0.9, 0.9, 48).view(2, 3, 2, 2, 2)
+        target_latents = torch.linspace(-0.7, 0.7, 48).view(2, 3, 2, 2, 2)
+        tensors = torch.zeros(2, 2, 3, 2, 2)
+        timesteps = torch.tensor([400.0, 800.0])
+        original_rand_like = torch.rand_like
+        torch.rand_like = lambda tensor: torch.full_like(tensor, 0.5)
+        try:
+            actual = dfe.forward(
+                noise=noise,
+                noise_pred=noise_pred,
+                noisy_latents=noisy_latents,
+                timesteps=timesteps,
+                batch=SimpleNamespace(tensor=tensors, latents=target_latents),
+                scheduler=None,
+            )
+        finally:
+            torch.rand_like = original_rand_like
+
+        fold = lambda value: value.permute(0, 2, 1, 3, 4).reshape(4, 3, 2, 2)
+        folded_noise = fold(noise)
+        folded_pred = fold(noise_pred)
+        folded_noisy = fold(noisy_latents)
+        folded_target_latents = fold(target_latents)
+        tv = timesteps.repeat_interleave(2).view(4, 1, 1, 1) / 1000.0
+        step = torch.full_like(tv, 0.5) * 0.03 + 0.02
+        next_step = torch.clamp(tv - step, min=0.0)
+        stepped_latents = folded_noisy + (next_step - tv) * folded_pred
+        next_target = (1.0 - next_step) * folded_target_latents + next_step * folded_noise
+        pred = fake_tips_prediction((stepped_latents + 1) / 2)
+        target = fake_tips_prediction((next_target + 1) / 2)
         expected = dfe_loss_from_predictions(pred, target, tv, weighted=False) * 10.0
 
         self.assertTrue(torch.allclose(actual, expected, rtol=1e-5, atol=1e-6))

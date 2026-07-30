@@ -248,6 +248,9 @@ class StableDiffusion:
         # those masks to the loss.
         self.do_masked_loss = True
 
+        # if the model outputs an x0 prediction (clean latent)
+        self.x0_pred = False
+
     # properties for old arch for backwards compatibility
     @property
     def is_xl(self):

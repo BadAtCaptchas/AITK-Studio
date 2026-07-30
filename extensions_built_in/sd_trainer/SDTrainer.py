@@ -793,7 +793,8 @@ class SDTrainer(BaseSDTrainProcess):
                     noisy_latents=noisy_latents,
                     timesteps=timesteps,
                     batch=batch,
-                    scheduler=self.sd.noise_scheduler
+                    scheduler=self.sd.noise_scheduler,
+                    model=self.sd,
                 )
                 additional_loss += dfe_loss * self.train_config.diffusion_feature_extractor_weight 
             else:
@@ -901,7 +902,10 @@ class SDTrainer(BaseSDTrainProcess):
                         tv = torch.clamp(tv, min=0.001)
 
                 # step latent, use here or with do_fft_loss
-                t0 = noisy_latents - tv * noise_pred
+                if self.sd.x0_pred:
+                    t0 = noise_pred
+                else:
+                    t0 = noisy_latents - tv * noise_pred
 
                 if self.train_config.t0_loss_target:
                     # replace the loss targets and pred

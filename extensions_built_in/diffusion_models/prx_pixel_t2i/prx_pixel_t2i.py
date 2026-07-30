@@ -95,6 +95,7 @@ class PRXPixelT2IModel(BaseModel):
         )
         self.is_flow_matching = True
         self.is_transformer = True
+        self.x0_pred = True
         # Matched against type(module).__name__ to place LoRA layers.
         self.target_lora_modules = ["PRXTransformer2DModel"]
 

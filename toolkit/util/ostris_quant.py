@@ -109,6 +109,7 @@ def _register_builtin_backends() -> None:
         from toolkit.util.orbit_quant import ORBIT_QTYPES, OrbitQuantizer
         from toolkit.util.orbit_vq_quant import ORBIT_VQ_QTYPES, OrbitVQQuantizer
         from toolkit.util.convrot_quant import CONVROT_QTYPES, get_convrot_quantizer
+        from toolkit.util.uintx_quant import UINTX_QTYPES, UIntXQuantizer
 
         common_capabilities = (
             "frozen_weight",
@@ -202,6 +203,34 @@ def _register_builtin_backends() -> None:
                 lambda options, name=name: get_convrot_quantizer(
                     name,
                     kernel=options.kernel,
+                    max_workspace_mb=options.max_workspace_mb,
+                ),
+            )
+
+        for name, bits in UINTX_QTYPES.items():
+            register_ostris_backend(
+                OstrisBackendMetadata(
+                    name=name,
+                    format_version=1,
+                    bits=bits,
+                    status="stable",
+                    capabilities=common_capabilities
+                    + (
+                        "torch_fallback",
+                        "packed_save_load",
+                        "torchao_0_10_bit_exact",
+                    ),
+                    supported_devices=("cpu", "cuda"),
+                    shape_notes=(
+                        "nn.Linear only; in_features must be divisible by 64; "
+                        "uint8 remains intentionally unsupported"
+                    ),
+                    device_notes=(
+                        "Bounded row-wise torch implementation on CPU and CUDA"
+                    ),
+                ),
+                lambda options, bits=bits: UIntXQuantizer(
+                    bits,
                     max_workspace_mb=options.max_workspace_mb,
                 ),
             )
@@ -438,6 +467,10 @@ _PACKED_LAYER_ATTRIBUTES = (
     "convrot_kernel",
     "convrot_max_workspace_mb",
     "convrot_packed_layout",
+    "uintx_bits",
+    "uintx_group_size",
+    "uintx_max_workspace_mb",
+    "uintx_packed_layout",
 )
 
 
@@ -528,7 +561,10 @@ def load_quantized_layers(root: torch.nn.Module, file_path: str) -> int:
         kernel = attrs.get("convrot_kernel", attrs.get("orbit_kernel", "auto"))
         workspace = attrs.get(
             "convrot_max_workspace_mb",
-            attrs.get("orbit_max_workspace_mb", 64),
+            attrs.get(
+                "orbit_max_workspace_mb",
+                attrs.get("uintx_max_workspace_mb", 64),
+            ),
         )
         quantizer = get_ostris_quantizer(
             qtype, kernel=kernel, max_workspace_mb=workspace

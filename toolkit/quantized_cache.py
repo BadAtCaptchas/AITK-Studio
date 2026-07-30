@@ -166,6 +166,8 @@ def _module_backend_name(module: OstrisLinear) -> str:
         if layout == "comfy_w4a4_int4_v1":
             return "convrotcomfyw4a4"
         return f"convrotint{int(getattr(module, 'crn_bits', 0))}"
+    if hasattr(module, "uintx_packed"):
+        return f"uint{int(getattr(module, 'uintx_bits', 0))}"
     bits = int(getattr(quantizer, "bits", 0))
     inferred = f"orbitvq{bits}" if hasattr(module, "ovq_packed") else f"orbit{bits}"
     if not is_ostris_qtype(inferred):
@@ -186,6 +188,8 @@ def _expected_packed_layout(qtype_name: str) -> str:
         return f"int{int(qtype_name.removeprefix('convrotint'))}_bitpacked_v1"
     if qtype_name.startswith("orbitvq"):
         return "vq_bitstream_msb_v1"
+    if qtype_name.startswith("uint"):
+        return "power2_shards_v1"
     if qtype_name == "orbit4":
         return "nibbles_v1"
     if qtype_name in ("orbit2", "orbit3"):
@@ -212,6 +216,12 @@ def _expected_buffer_names(qtype_name: str) -> set[str]:
             "ovq_perm",
             "ovq_inv_perm",
             "ovq_signs",
+        }
+    if qtype_name.startswith("uint"):
+        return {
+            "uintx_packed",
+            "uintx_scale",
+            "uintx_zero_point",
         }
     if qtype_name in ("orbit2", "orbit3", "orbit4"):
         return {
@@ -274,6 +284,10 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
         "convrot_kernel",
         "convrot_max_workspace_mb",
         "convrot_packed_layout",
+        "uintx_bits",
+        "uintx_group_size",
+        "uintx_max_workspace_mb",
+        "uintx_packed_layout",
     ):
         if hasattr(module, attribute):
             attributes[attribute] = _normalize(getattr(module, attribute))
@@ -296,10 +310,22 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
         "options": options_payload,
         "packed_layout": attributes.get(
             "convrot_packed_layout",
-            attributes.get("orbit_packed_layout", _expected_packed_layout(qtype_name)),
+            attributes.get(
+                "orbit_packed_layout",
+                attributes.get(
+                    "uintx_packed_layout",
+                    _expected_packed_layout(qtype_name),
+                ),
+            ),
         ),
         "rotation": {
-            "scheme": "regular_hadamard_v1" if qtype_name.startswith("convrot") else "deterministic_rpbh_v1",
+            "scheme": (
+                "regular_hadamard_v1"
+                if qtype_name.startswith("convrot")
+                else "none"
+                if qtype_name.startswith("uint")
+                else "deterministic_rpbh_v1"
+            ),
             "dimension": int(module.in_features),
             "block": int(
                 attributes.get(
@@ -309,7 +335,11 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
                         attributes.get(
                             "crn_rot_size",
                             attributes.get(
-                                "orbit_block", attributes.get("ovq_block", 0)
+                                "orbit_block",
+                                attributes.get(
+                                    "ovq_block",
+                                    attributes.get("uintx_group_size", 0),
+                                ),
                             ),
                         ),
                     ),

@@ -95,7 +95,7 @@ class QuantizedCacheTest(unittest.TestCase):
         self.assertTrue(is_quantized_cache_qtype("convrot8"))
         self.assertTrue(is_quantized_cache_qtype("convrotint2"))
         self.assertTrue(is_quantized_cache_qtype("convrotbitnet"))
-        self.assertFalse(is_quantized_cache_qtype("uint4"))
+        self.assertTrue(is_quantized_cache_qtype("uint4"))
 
     def test_orbit_registry_marks_only_q4_stable_and_passes_options(self):
         registry = get_ostris_backend_registry()

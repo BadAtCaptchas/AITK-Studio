@@ -110,6 +110,9 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [ACE-Step/acestep-v15-xl-base](https://huggingface.co/ACE-Step/acestep-v15-xl-base) (Ace Step 1.5 XL)
 
 ### Experimental
+- [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) (MiniMax H3, joint video/audio and single-image training)
+  - MiniMax H3 currently supports LoRA training with the released ConvRot8 DiT and NVFP4 text encoder checkpoints. Full-base and text-encoder training, packed-weight merging/re-quantization, and layer offloading are rejected; use the low-VRAM component movement instead.
+  - The shared base download is approximately 43 GB and is stored in the global Models Folder. `fl2va` supports I2V training; `ref2va` partitions support T2V and sampling, while `ref2va` I2V training remains disabled until reference-frame text-embedding caches can be coupled safely.
 - [lodestones/Zeta-Chroma](https://huggingface.co/lodestones/Zeta-Chroma) (Zeta Chroma)
 
 </details>

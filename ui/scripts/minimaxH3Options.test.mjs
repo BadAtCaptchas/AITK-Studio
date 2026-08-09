@@ -52,3 +52,11 @@ test('H3 notes and mixed-media control use typed plain option data', () => {
   assert.match(types, /include_images_in_video_dataset: boolean/);
   assert.match(types, /guidance_loss_schedule: 'constant' \| 'sigma'/);
 });
+
+test('README lists MiniMax H3 with its experimental support boundaries', () => {
+  const readme = readSource('../README.md');
+  assert.match(readme, /Comfy-Org\/MiniMax-H3/);
+  assert.match(readme, /ConvRot8 DiT and NVFP4 text encoder/);
+  assert.match(readme, /approximately 43 GB/);
+  assert.match(readme, /`ref2va` I2V training remains disabled/);
+});

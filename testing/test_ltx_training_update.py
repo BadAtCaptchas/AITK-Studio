@@ -231,8 +231,20 @@ class LTXTrainingUpdateTests(unittest.TestCase):
             audio_tensor=None,
             audio_target=None,
             audio_pred=None,
+            audio_noise=None,
+            audio_pred_uncond=None,
+            audio_pred_prior=None,
+            audio_pred_preservation=None,
+            audio_pred_slot=None,
+            audio_noisy=None,
+            audio_sigma=None,
             audio_loss_mask=None,
             video_loss_mask=None,
+        )
+        batch.set_secondary_audio_pred = lambda pred: (
+            setattr(batch, batch.audio_pred_slot, pred)
+            if batch.audio_pred_slot is not None
+            else None
         )
         text_embeddings = types.SimpleNamespace(
             text_embeds=torch.zeros((1, 1, 2)),
@@ -303,6 +315,59 @@ class LTXTrainingUpdateTests(unittest.TestCase):
         self.assertEqual(batch.audio_loss_mask.tolist(), [[0.0, 0.0, 1.0]])
         self.assertEqual(transformer.last_call["audio_timestep"].flatten().tolist(), [0.0, 0.0, 500.0])
         self.assertTrue(torch.equal(transformer.last_call["audio_hidden_states"][:, :2], audio_latents[:, :2]))
+
+    def test_ltx_reuses_audio_noise_and_keeps_secondary_prediction_isolated(self):
+        audio_latents = torch.tensor([[[10.0], [20.0], [30.0]]])
+        batch, transformer = self._run_fake_ltx_prediction(
+            do_audio=True,
+            audio_latents=audio_latents,
+        )
+        primary_pred = batch.audio_pred
+        original_noise = batch.audio_noise.clone()
+        original_target = batch.audio_target.clone()
+
+        batch.audio_pred_slot = "audio_pred_uncond"
+        with torch.no_grad():
+            text_embeddings = types.SimpleNamespace(
+                text_embeds=torch.zeros((1, 1, 2)),
+                attention_mask=torch.ones((1, 1)),
+            )
+            model = self._fake_ltx_model()[0]
+            model.get_noise_prediction(
+                latent_model_input=torch.zeros((1, 1, 3, 1, 1)),
+                timestep=torch.tensor([500.0]),
+                text_embeddings=text_embeddings,
+                batch=batch,
+            )
+
+        self.assertTrue(torch.equal(batch.audio_noise, original_noise))
+        self.assertTrue(torch.equal(batch.audio_target, original_target))
+        self.assertIs(batch.audio_pred, primary_pred)
+        self.assertIsNotNone(batch.audio_pred_uncond)
+
+    def test_ltx_ignores_stale_audio_for_disabled_and_image_batches(self):
+        stale_audio = torch.ones((1, 3, 1))
+        for do_audio, num_frames in ((False, 17), (True, 1)):
+            with self.subTest(do_audio=do_audio, num_frames=num_frames):
+                batch, _ = self._run_fake_ltx_prediction(
+                    do_audio=do_audio,
+                    audio_latents=stale_audio,
+                )
+                batch.num_frames = num_frames
+                # Re-run after setting the per-item frame count used by mixed
+                # media batches.
+                model, _ = self._fake_ltx_model()
+                model.get_noise_prediction(
+                    latent_model_input=torch.zeros((1, 1, 3, 1, 1)),
+                    timestep=torch.tensor([500.0]),
+                    text_embeddings=types.SimpleNamespace(
+                        text_embeds=torch.zeros((1, 1, 2)),
+                        attention_mask=torch.ones((1, 1)),
+                    ),
+                    batch=batch,
+                )
+                self.assertIsNone(batch.audio_target)
+                self.assertIsNone(batch.audio_pred)
 
     def test_ltx_frozen_audio_a2v_uses_clean_audio_without_audio_loss(self):
         audio_latents = torch.tensor([[[10.0], [20.0], [30.0]]])

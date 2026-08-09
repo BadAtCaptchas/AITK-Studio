@@ -85,6 +85,29 @@ class FakeVideoCapture:
         self.release_calls += 1
 
 
+class FakeAvFrame:
+    def __init__(self, value):
+        self.value = value
+
+    def to_ndarray(self, format="rgb24"):
+        assert format == "rgb24"
+        return np.full((2, 2, 3), self.value, dtype=np.uint8)
+
+
+class FakeAvContainer:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def decode(self, video=0):
+        assert video == 0
+        yield FakeAvFrame(11)
+        yield FakeAvFrame(22)
+        yield FakeAvFrame(33)
+
+
 def _video_dto(num_frames, dataset_fps):
     return SimpleNamespace(
         augments=None,
@@ -173,6 +196,22 @@ class SequentialVideoLoadingTest(unittest.TestCase):
                     _tensor_transform,
                 )
 
+        self.assertEqual(capture.release_calls, 1)
+
+    def test_pyav_recovers_when_opencv_and_nearby_reads_fail(self):
+        dto = _video_dto(num_frames=2, dataset_fps=3)
+        capture = FakeVideoCapture(
+            frame_count=3,
+            fps=3,
+            # Main frame zero plus every nearby fallback for the first
+            # requested frame must fail before the PyAV path is selected.
+            fail_reads={0: 4, 1: 1, 2: 2},
+        )
+
+        with mock.patch("av.open", return_value=FakeAvContainer()):
+            self._load(dto, capture)
+
+        self.assertEqual(dto.tensor[:, 0, 0, 0].tolist(), [11, 22])
         self.assertEqual(capture.release_calls, 1)
 
 

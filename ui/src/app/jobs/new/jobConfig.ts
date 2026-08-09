@@ -28,6 +28,7 @@ export const defaultDatasetConfig: DatasetConfig = {
   flip_x: false,
   flip_y: false,
   num_repeats: 1,
+  include_images_in_video_dataset: false,
 };
 
 export const defaultSliderConfig: SliderConfig = {
@@ -144,6 +145,7 @@ export const defaultJobConfig: JobConfig = {
           sega_distill_on_reg: false,
           switch_boundary_every: 1,
           loss_type: 'mse',
+          guidance_loss_schedule: 'constant',
         },
         logging: {
           log_every: 1,
@@ -316,6 +318,7 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
     train.auto_train = false;
   }
   if (train) {
+    if (train.guidance_loss_schedule === undefined) train.guidance_loss_schedule = 'constant';
     if (train.sega_distill === undefined) train.sega_distill = false;
     if (train.sega_distill_weight === undefined) train.sega_distill_weight = 1.0;
     if (train.sega_distill_base_resolution === undefined) train.sega_distill_base_resolution = 1024;
@@ -323,6 +326,9 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
     if (train.sega_distill_min_scale === undefined) train.sega_distill_min_scale = 0.5;
     if (train.sega_distill_max_scale === undefined) train.sega_distill_max_scale = 2.0;
     if (train.sega_distill_on_reg === undefined) train.sega_distill_on_reg = false;
+  }
+  for (const dataset of jobConfig.config.process[0].datasets) {
+    dataset.include_images_in_video_dataset ??= false;
   }
   if (train && Array.isArray(train.phases)) {
     if (train.phases.length === 0) {

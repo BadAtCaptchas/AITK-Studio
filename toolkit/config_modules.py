@@ -784,6 +784,13 @@ class TrainConfig:
         self.do_guidance_loss = kwargs.get('do_guidance_loss', False)
         self.guidance_loss_target: Union[int, List[int, int]] = kwargs.get('guidance_loss_target', 3.0)
         self.do_guidance_loss_cfg_zero: bool = kwargs.get('do_guidance_loss_cfg_zero', False)
+        self.guidance_loss_schedule: Literal['constant', 'sigma'] = kwargs.get(
+            'guidance_loss_schedule', 'constant'
+        )
+        if self.guidance_loss_schedule not in {'constant', 'sigma'}:
+            raise ValueError(
+                "guidance_loss_schedule must be either 'constant' or 'sigma'"
+            )
         self.unconditional_prompt: str = kwargs.get('unconditional_prompt', '')
         if isinstance(self.guidance_loss_target, tuple):
             self.guidance_loss_target = list(self.guidance_loss_target)
@@ -814,7 +821,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit', 'minimax_h3']
 LayerOffloadingBackend = Literal['block', 'legacy']
 QuantizationKernel = Literal['auto', 'triton', 'torch']
 
@@ -1428,6 +1435,11 @@ class DatasetConfig:
         # Important, make sure fps for dataset is set correctly.
         # this wont work with bucketing for now until I can handle this before bucketing.
         self.auto_frame_count: bool = kwargs.get('auto_frame_count', False)
+        # Preserve existing video-folder behavior unless a model/profile
+        # explicitly opts into mixed image/video discovery.
+        self.include_images_in_video_dataset: bool = kwargs.get(
+            'include_images_in_video_dataset', False
+        )
         
         # debug the frame count and frame selection. You dont need this. It is for debugging.
         self.debug: bool = kwargs.get('debug', False)
@@ -1889,6 +1901,14 @@ def validate_configs(
         or (model_config.quantize_te and _is_convrot_qtype(model_config.qtype_te))
     )
     packed_backend_enabled = orbit_enabled or convrot_enabled
+    nvfp4_enabled = (
+        model_config.quantize
+        and str(model_config.qtype or '').split('|', 1)[0].lower() == 'nvfp4'
+    ) or (
+        model_config.quantize_te
+        and str(model_config.qtype_te or '').split('|', 1)[0].lower() == 'nvfp4'
+    )
+    packed_backend_enabled = packed_backend_enabled or nvfp4_enabled
     if packed_backend_enabled and network_config is None and (
         train_config.train_unet or train_config.train_text_encoder
     ):
@@ -1944,6 +1964,50 @@ def validate_configs(
         if model_config.use_flux_cfg:
             # bypass the embedding
             train_config.bypass_guidance_embedding = True
+
+    if model_config.arch == 'minimax_h3':
+        if model_config.layer_offloading:
+            raise ValueError(
+                "MiniMax H3 layer offloading is not supported by Studio's packed-weight "
+                "offload backends yet. Disable model.layer_offloading and use low_vram."
+            )
+        if not model_config.quantize or str(model_config.qtype).lower() != 'convrot8':
+            raise ValueError(
+                "MiniMax H3 currently requires the checkpoint-matching convrot8 transformer."
+            )
+        if not model_config.quantize_te or str(model_config.qtype_te).lower() != 'nvfp4':
+            raise ValueError(
+                "MiniMax H3 currently requires the checkpoint-matching nvfp4 text encoder."
+            )
+        if train_config.train_text_encoder:
+            raise ValueError("MiniMax H3 text-encoder training is not supported; keep it frozen.")
+        if network_config is None or str(network_config.type or '').lower() != 'lora':
+            raise ValueError("MiniMax H3 experimental training currently requires network.type lora.")
+        if model_config.base_lora_path is not None:
+            raise ValueError(
+                "MiniMax H3 does not support model.base_lora_path because its packed "
+                "base weights cannot be merged or requantized."
+            )
+        if model_config.inference_lora_path is not None:
+            raise ValueError(
+                "MiniMax H3 does not support model.inference_lora_path; use the "
+                "fixed live assistant adapter and the training LoRA instead."
+            )
+        partition = str(
+            model_config.model_kwargs.get('partition', 'fl2va_pruned')
+        ).lower()
+        has_i2v_video_dataset = any(
+            dataset.do_i2v
+            and (dataset.num_frames > 1 or dataset.auto_frame_count)
+            for dataset in dataset_configs
+        )
+        if partition.startswith('ref2va') and has_i2v_video_dataset:
+            raise ValueError(
+                "MiniMax H3 ref2va I2V training is not supported yet because "
+                "the exact selected video reference frame cannot safely be "
+                "coupled to cached text embeddings. Use fl2va for I2V training "
+                "or disable dataset.do_i2v."
+            )
     flux_guidance_bypass_policy = get_flux_guidance_bypass_policy(model_config)
     if flux_guidance_bypass_policy == 'forbidden' and train_config.bypass_guidance_embedding:
         raise ValueError(

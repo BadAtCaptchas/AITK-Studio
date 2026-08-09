@@ -11,6 +11,9 @@ os.environ["HF_HUB_DISABLE_XET"] = os.getenv(
     "HF_HUB_DISABLE_XET", default_disable_xet
 )
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+# Keep OpenCV's bundled FFmpeg quiet by default while preserving an explicit
+# user override for decoder diagnostics.
+os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "-8")
 seed = None
 if "SEED" in os.environ:
     try:

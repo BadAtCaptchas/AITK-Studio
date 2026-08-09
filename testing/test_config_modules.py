@@ -610,6 +610,30 @@ class FluxGuidanceBypassConfigTest(unittest.TestCase):
 
         self.assertTrue(train_config.bypass_guidance_embedding)
 
+    def test_minimax_h3_ref_partition_rejects_uncoupled_i2v_training(self):
+        with self.assertRaisesRegex(ValueError, "ref2va I2V training is not supported"):
+            validate_configs(
+                TrainConfig(train_text_encoder=False),
+                ModelConfig(
+                    arch="minimax_h3",
+                    name_or_path="Comfy-Org/MiniMax-H3",
+                    quantize=True,
+                    qtype="convrot8",
+                    quantize_te=True,
+                    qtype_te="nvfp4",
+                    model_kwargs={"partition": "ref2va_pruned"},
+                ),
+                SaveConfig(save_format="diffusers"),
+                [
+                    config_modules.DatasetConfig(
+                        num_frames=39,
+                        do_i2v=True,
+                        cache_text_embeddings=True,
+                    )
+                ],
+                NetworkConfig(type="lora"),
+            )
+
 
 class SegaDistillConfigTest(unittest.TestCase):
     def test_sega_distill_defaults_disabled(self):

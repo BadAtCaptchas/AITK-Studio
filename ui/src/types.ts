@@ -591,6 +591,7 @@ export interface DatasetConfig {
   control_path_2?: string | null;
   control_path_3?: string | null;
   auto_frame_count?: boolean;
+  include_images_in_video_dataset: boolean;
 }
 
 export interface EMAConfig {
@@ -732,6 +733,7 @@ export interface TrainConfig {
   loss_type: TrainLossType;
   t0_loss_target?: boolean;
   do_guidance_loss?: boolean;
+  guidance_loss_schedule: 'constant' | 'sigma';
   do_prior_divergence?: boolean;
   inverted_mask_prior?: boolean;
   do_differential_guidance?: boolean;

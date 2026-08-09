@@ -41,6 +41,7 @@ from toolkit.util.losses import wavelet_loss, stepped_loss
 from toolkit.watermarking import AuthenLoRAController
 import torch.nn.functional as F
 from toolkit.unloader import unload_text_encoder
+from toolkit.memory_management import sync_grad_transfers
 from PIL import Image
 from torchvision.transforms import functional as TF
 from toolkit.basic import flush
@@ -806,13 +807,17 @@ class SDTrainer(BaseSDTrainProcess):
                 unconditional_embeds = concat_prompt_embeds(
                     [self.unconditional_embeds] * noisy_latents.shape[0],
                 )
-                unconditional_target = self.predict_noise(
-                    noisy_latents=noisy_latents,
-                    timesteps=timesteps,
-                    conditional_embeds=unconditional_embeds,
-                    unconditional_embeds=None,
-                    batch=batch,
-                )
+                batch.audio_pred_slot = "audio_pred_uncond"
+                try:
+                    unconditional_target = self.predict_noise(
+                        noisy_latents=noisy_latents,
+                        timesteps=timesteps,
+                        conditional_embeds=unconditional_embeds,
+                        unconditional_embeds=None,
+                        batch=batch,
+                    )
+                finally:
+                    batch.audio_pred_slot = None
                 is_video = len(target.shape) == 5
                 
                 if self.train_config.do_guidance_loss_cfg_zero:
@@ -838,9 +843,67 @@ class SDTrainer(BaseSDTrainProcess):
                 if isinstance(guidance_scale, list):
                     guidance_scale = torch.tensor(guidance_scale).to(target.device, dtype=target.dtype)
                     guidance_scale = guidance_scale.view(-1, 1, 1, 1) if not is_video else guidance_scale.view(-1, 1, 1, 1, 1)
+
+                if self.train_config.guidance_loss_schedule == "sigma":
+                    # At low sigma the conditional/unconditional difference
+                    # contains little predictable signal. Decay only jobs that
+                    # explicitly opt into sigma scheduling; legacy jobs retain
+                    # their constant guidance behavior.
+                    sigma = (timesteps.to(target.device) / 1000.0).to(target.dtype)
+                    sigma = sigma.view(-1, 1, 1, 1) if not is_video else sigma.view(-1, 1, 1, 1, 1)
+                    guidance_scale = 1.0 + (guidance_scale - 1.0) * sigma
                 
                 unconditional_target = unconditional_target * alpha
                 target = unconditional_target + guidance_scale * (target - unconditional_target)
+
+                audio_uncond = batch.audio_pred_uncond
+                if batch.audio_target is not None and audio_uncond is not None:
+                    audio_target = batch.audio_target.float()
+                    audio_uncond = audio_uncond.float()
+                    audio_dims = [1] * (audio_target.dim() - 1)
+
+                    if self.train_config.do_guidance_loss_cfg_zero:
+                        batch_size = audio_target.shape[0]
+                        audio_positive = audio_target.reshape(batch_size, -1)
+                        audio_negative = audio_uncond.reshape(batch_size, -1)
+                        audio_dot = torch.sum(
+                            audio_positive * audio_negative, dim=1, keepdim=True
+                        )
+                        audio_norm = torch.sum(
+                            audio_negative ** 2, dim=1, keepdim=True
+                        ) + 1e-8
+                        audio_alpha = (audio_dot / audio_norm).view(
+                            -1, *audio_dims
+                        )
+                        audio_uncond = audio_uncond * audio_alpha
+
+                    audio_guidance_scale = self._guidance_loss_target_batch
+                    if isinstance(audio_guidance_scale, list):
+                        audio_guidance_scale = torch.tensor(
+                            audio_guidance_scale,
+                            device=audio_target.device,
+                            dtype=audio_target.dtype,
+                        )
+                        while audio_guidance_scale.dim() < audio_target.dim():
+                            audio_guidance_scale = audio_guidance_scale.unsqueeze(-1)
+
+                    if self.train_config.guidance_loss_schedule == "sigma":
+                        audio_sigma = batch.audio_sigma
+                        if audio_sigma is None:
+                            audio_sigma = timesteps / 1000.0
+                        audio_sigma = audio_sigma.to(
+                            audio_target.device, dtype=audio_target.dtype
+                        )
+                        while audio_sigma.dim() < audio_target.dim():
+                            audio_sigma = audio_sigma.unsqueeze(-1)
+                        audio_guidance_scale = 1.0 + (
+                            audio_guidance_scale - 1.0
+                        ) * audio_sigma
+
+                    batch.audio_target = (
+                        audio_uncond
+                        + audio_guidance_scale * (audio_target - audio_uncond)
+                    ).to(batch.audio_target.dtype).detach()
 
             if self.train_config.do_differential_guidance:
                 with torch.no_grad():
@@ -1037,8 +1100,8 @@ class SDTrainer(BaseSDTrainProcess):
                 batch=batch,
                 loss_target=loss_target,
             )
-            if torch.isnan(prior_loss).any():
-                print_acc("Prior loss is nan")
+            if not torch.isfinite(prior_loss).all():
+                print_acc("Prior loss is non-finite")
                 prior_loss = None
             else:
                 if len(noise_pred.shape) == 5:
@@ -2349,18 +2412,22 @@ class SDTrainer(BaseSDTrainProcess):
                                 [blank_embeds] * noisy_latents.shape[0]
                             )
                         
-                        prior_pred = self.get_prior_prediction(
-                            noisy_latents=noisy_latents,
-                            conditional_embeds=prior_embeds_to_use,
-                            match_adapter_assist=match_adapter_assist,
-                            network_weight_list=network_weight_list,
-                            timesteps=timesteps,
-                            pred_kwargs=pred_kwargs,
-                            noise=noise,
-                            batch=batch,
-                            unconditional_embeds=unconditional_embeds,
-                            conditioned_prompts=conditioned_prompts
-                        )
+                        batch.audio_pred_slot = "audio_pred_prior"
+                        try:
+                            prior_pred = self.get_prior_prediction(
+                                noisy_latents=noisy_latents,
+                                conditional_embeds=prior_embeds_to_use,
+                                match_adapter_assist=match_adapter_assist,
+                                network_weight_list=network_weight_list,
+                                timesteps=timesteps,
+                                pred_kwargs=pred_kwargs,
+                                noise=noise,
+                                batch=batch,
+                                unconditional_embeds=unconditional_embeds,
+                                conditioned_prompts=conditioned_prompts
+                            )
+                        finally:
+                            batch.audio_pred_slot = None
                         if prior_pred is not None:
                             prior_pred = prior_pred.detach()
 
@@ -2594,23 +2661,46 @@ class SDTrainer(BaseSDTrainProcess):
                                 preservation_embeds = concat_prompt_embeds(
                                     [blank_embeds] * noisy_latents.shape[0]
                                 )
-                        preservation_pred = self.predict_noise(
-                            noisy_latents=noisy_latents.to(self.device_torch, dtype=dtype),
-                            timesteps=timesteps,
-                            conditional_embeds=preservation_embeds.to(self.device_torch, dtype=dtype),
-                            unconditional_embeds=unconditional_embeds,
-                            batch=batch,
-                            **pred_kwargs
-                        )
+                        batch.audio_pred_slot = "audio_pred_preservation"
+                        try:
+                            preservation_pred = self.predict_noise(
+                                noisy_latents=noisy_latents.to(self.device_torch, dtype=dtype),
+                                timesteps=timesteps,
+                                conditional_embeds=preservation_embeds.to(self.device_torch, dtype=dtype),
+                                unconditional_embeds=unconditional_embeds,
+                                batch=batch,
+                                **pred_kwargs
+                            )
+                        finally:
+                            batch.audio_pred_slot = None
                         multiplier = self.train_config.diff_output_preservation_multiplier if self.train_config.diff_output_preservation else self.train_config.blank_prompt_preservation_multiplier
                         preservation_loss = torch.nn.functional.mse_loss(preservation_pred, prior_pred) * multiplier
                         self.additional_logs['loss/normal'] = loss.item()
                         self.additional_logs['loss/preservation'] = preservation_loss.item()
+                        if (
+                            batch.audio_pred_preservation is not None
+                            and batch.audio_pred_prior is not None
+                        ):
+                            audio_preservation_loss = torch.nn.functional.mse_loss(
+                                batch.audio_pred_preservation.float(),
+                                batch.audio_pred_prior.float(),
+                            )
+                            audio_preservation_loss = (
+                                audio_preservation_loss
+                                * multiplier
+                                * self.train_config.audio_loss_multiplier
+                            )
+                            self.additional_logs[
+                                'loss/preservation_audio'
+                            ] = audio_preservation_loss.item()
+                            preservation_loss = (
+                                preservation_loss + audio_preservation_loss
+                            )
                         loss = loss + preservation_loss
                         
-                # check if nan
-                if torch.isnan(loss):
-                    print_acc("loss is nan")
+                # A positive or negative infinity is just as unusable as NaN.
+                if not torch.isfinite(loss).all():
+                    print_acc("loss is non-finite")
                     loss = torch.zeros_like(loss).requires_grad_(True)
 
                 with self.timer('backward'):
@@ -2666,6 +2756,9 @@ class SDTrainer(BaseSDTrainProcess):
 
 
         if not self.is_grad_accumulation_step:
+            # CPU gradient clipping and optimizers must not read host gradients
+            # while the asynchronous D2H staging stream is still writing them.
+            sync_grad_transfers()
             # fix this for multi params
             if self.train_config.optimizer != 'adafactor':
                 grad_norm_values = []

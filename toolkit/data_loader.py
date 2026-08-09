@@ -460,7 +460,10 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             if self.is_audio_model:
                 file_list = self.encrypted_reader.list_items(media_kinds=["audio"])
             elif self.is_video:
-                file_list = self.encrypted_reader.list_items(media_kinds=["video"])
+                media_kinds = ["video"]
+                if self.dataset_config.include_images_in_video_dataset:
+                    media_kinds.append("image")
+                file_list = self.encrypted_reader.list_items(media_kinds=media_kinds)
             else:
                 file_list = self.encrypted_reader.list_items(media_kinds=["image"])
         elif os.path.isdir(self.dataset_path):
@@ -469,8 +472,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 # only look for audio files
                 extensions = audio_extensions
             elif self.is_video:
-                # only look for videos
                 extensions = video_extensions
+                if self.dataset_config.include_images_in_video_dataset:
+                    extensions = video_extensions + image_extensions
             file_list = [os.path.join(root, file) for root, _, files in os.walk(self.dataset_path) for file in files if file.lower().endswith(tuple(extensions)) and not file.startswith('.')]
         else:
             # assume json
@@ -602,8 +606,14 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 json.dump(self.size_database, f)
         
         if self.is_video:
-            print_acc(f"  -  Found {len(self.file_list)} videos")
-            assert len(self.file_list) > 0, f"no videos found in {self.dataset_path}"
+            video_count = sum(1 for item in self.file_list if item.is_video)
+            image_count = len(self.file_list) - video_count
+            if self.dataset_config.include_images_in_video_dataset:
+                print_acc(f"  -  Found {video_count} videos and {image_count} images")
+                assert len(self.file_list) > 0, f"no media found in {self.dataset_path}"
+            else:
+                print_acc(f"  -  Found {video_count} videos")
+                assert video_count > 0, f"no videos found in {self.dataset_path}"
         else:
             print_acc(f"  -  Found {len(self.file_list)} images")
             assert len(self.file_list) > 0, f"no images found in {self.dataset_path}"

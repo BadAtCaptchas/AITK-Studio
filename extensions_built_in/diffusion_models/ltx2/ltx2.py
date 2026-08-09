@@ -1004,6 +1004,13 @@ class LTX2Model(BaseModel):
         batch: "DataLoaderBatchDTO" = None,
         **kwargs,
     ):
+        # A grad-enabled call is the primary, loss-carrying prediction unless
+        # the trainer explicitly routed this pass to a secondary slot.
+        is_primary_pred = (
+            torch.is_grad_enabled()
+            and batch is not None
+            and batch.audio_pred_slot is None
+        )
         with torch.no_grad():
             if self.model.device == torch.device("cpu"):
                 self.model.to(self.device_torch)
@@ -1074,11 +1081,28 @@ class LTX2Model(BaseModel):
             audio_conditions = audio_config.get("conditions", [])
             audio_timestep = timestep
             audio_sigma = timestep
-            batch.audio_target = None
-            batch.audio_pred = None
-            batch.audio_loss_mask = None
+            do_audio = (
+                batch.dataset_config is not None
+                and batch.dataset_config.do_audio
+                and getattr(batch, "num_frames", 1) > 1
+            )
+            if not do_audio:
+                # Cached batches may still contain an audio latent after audio
+                # training was disabled. Images in a mixed dataset must also
+                # remain strictly one-frame/no-audio examples.
+                batch.audio_target = None
+                batch.audio_pred = None
+                batch.audio_noise = None
+                batch.audio_pred_uncond = None
+                batch.audio_pred_prior = None
+                batch.audio_pred_preservation = None
+                batch.audio_loss_mask = None
+                batch.audio_noisy = None
+                batch.audio_sigma = None
 
-            has_audio_data = batch.audio_latents is not None or batch.audio_tensor is not None
+            has_audio_data = do_audio and (
+                batch.audio_latents is not None or batch.audio_tensor is not None
+            )
             if has_audio_data:
                 if batch.audio_latents is not None:
                     # we have audio latents cached
@@ -1092,9 +1116,24 @@ class LTX2Model(BaseModel):
 
                 audio_num_frames = raw_audio_latents.shape[1]
                 if audio_is_generated:
-                    # add the audio targets to the batch for loss calculation later
-                    audio_noise = torch.randn_like(raw_audio_latents)
-                    batch.audio_target = (audio_noise - raw_audio_latents).detach()
+                    # Draw one noise sample for the entire training step. Prior,
+                    # primary, unconditional and preservation predictions must
+                    # all see the exact same noisy soundtrack.
+                    if (
+                        batch.audio_noise is not None
+                        and batch.audio_noise.shape == raw_audio_latents.shape
+                    ):
+                        audio_noise = batch.audio_noise.to(
+                            raw_audio_latents.device,
+                            dtype=raw_audio_latents.dtype,
+                        )
+                    else:
+                        audio_noise = torch.randn_like(raw_audio_latents)
+                        batch.audio_noise = audio_noise.detach()
+                    if batch.audio_target is None:
+                        batch.audio_target = (
+                            audio_noise - raw_audio_latents
+                        ).detach()
                     audio_latents = self.add_noise(
                         raw_audio_latents,
                         audio_noise,
@@ -1116,10 +1155,20 @@ class LTX2Model(BaseModel):
                             fps=float(frame_rate),
                             audio_units_per_second=audio_latents_per_second,
                         )
+                        if (
+                            batch.audio_loss_mask is not None
+                            and batch.audio_loss_mask.shape
+                            == temporal_audio_mask.shape
+                        ):
+                            # Reuse the first pass's condition selection,
+                            # including the all-false case.
+                            temporal_audio_mask = (
+                                1 - batch.audio_loss_mask
+                            ).to(device=self.device_torch, dtype=torch.bool)
+                        audio_conditioning_mask = temporal_audio_mask.to(
+                            device=self.device_torch, dtype=self.torch_dtype
+                        )
                         if temporal_audio_mask.any():
-                            audio_conditioning_mask = temporal_audio_mask.to(
-                                device=self.device_torch, dtype=self.torch_dtype
-                            )
                             audio_latents = (
                                 raw_audio_latents * audio_conditioning_mask.unsqueeze(-1)
                                 + audio_latents * (1 - audio_conditioning_mask.unsqueeze(-1))
@@ -1127,7 +1176,7 @@ class LTX2Model(BaseModel):
                             audio_timestep = timestep.unsqueeze(-1) * (
                                 1 - audio_conditioning_mask
                             )
-                            batch.audio_loss_mask = (1 - audio_conditioning_mask).detach()
+                        batch.audio_loss_mask = (1 - audio_conditioning_mask).detach()
                 else:
                     audio_latents = raw_audio_latents.to(
                         self.device_torch, dtype=self.torch_dtype
@@ -1227,9 +1276,15 @@ class LTX2Model(BaseModel):
             return_dict=False,
         )
 
-        # add audio latent to batch if we had audio
+        # Add the audio result to the correct prediction slot. Secondary passes
+        # must never replace the primary prediction used for backpropagation.
         if batch.audio_target is not None:
-            batch.audio_pred = noise_pred_audio
+            if is_primary_pred:
+                batch.audio_pred = noise_pred_audio
+                batch.audio_noisy = audio_latents.detach()
+                batch.audio_sigma = (audio_sigma / 1000.0).detach()
+            else:
+                batch.set_secondary_audio_pred(noise_pred_audio)
 
         unpacked_output = self.pipeline._unpack_latents(
             latents=noise_pred_video,

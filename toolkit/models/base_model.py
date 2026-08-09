@@ -285,6 +285,16 @@ class BaseModel:
             divisibility = divisibility * 2
         return divisibility
 
+    def get_frame_count_snapper(self):
+        """Return an optional, module-level function that snaps video frame counts.
+
+        Most architectures use the legacy ``temporal_compression * n + 1``
+        geometry. Models with a different packing grid can override this and
+        return a picklable function. Image items are always kept at one frame
+        and never pass through the snapper.
+        """
+        return None
+
     # these must be implemented in child classes
     def load_model(self):
         # override this in child classes

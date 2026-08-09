@@ -231,6 +231,14 @@ class EncryptedDatasetReader:
         data = self.decrypt_object_bytes(item.objectPath)
         return torchaudio.load(io.BytesIO(data))
 
+    def has_audio_stream(self, item: EncryptedDatasetItem) -> bool:
+        """Inspect encrypted media in memory without creating a plaintext sidecar."""
+        import av
+
+        data = self.decrypt_object_bytes(item.objectPath)
+        with av.open(io.BytesIO(data)) as container:
+            return len(container.streams.audio) > 0
+
     def load_audio_numpy(self, item: EncryptedDatasetItem, target_sample_rate: int):
         import torchaudio
 
@@ -249,6 +257,7 @@ class EncryptedDatasetReader:
         shrink_video_to_frames: bool,
         auto_frame_count: bool,
         temporal_compression: int,
+        frame_count_snapper=None,
     ):
         data = self.decrypt_object_bytes(item.objectPath)
         import av
@@ -301,8 +310,11 @@ class EncryptedDatasetReader:
         if auto_frame_count:
             duration_seconds = total_frames / video_fps
             selected_num_frames = int(duration_seconds * dataset_fps)
-            selected_num_frames = selected_num_frames // temporal_compression * temporal_compression
-            selected_num_frames += 1
+            if frame_count_snapper is not None:
+                selected_num_frames = frame_count_snapper(selected_num_frames)
+            else:
+                selected_num_frames = selected_num_frames // temporal_compression * temporal_compression
+                selected_num_frames += 1
             if selected_num_frames <= 1:
                 container.close()
                 raise EncryptedDatasetError("Computed encrypted video frame count is invalid")

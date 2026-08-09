@@ -1,6 +1,6 @@
 import os
 import copy
-from typing import TYPE_CHECKING, List, Union
+from typing import TYPE_CHECKING, Callable, List, Literal, Optional, Union
 import cv2
 import torch
 
@@ -30,6 +30,33 @@ if TYPE_CHECKING:
 
 printed_messages = []
 MAX_IMAGE_DIMENSION = 100_000
+VIDEO_EXTENSIONS = {
+    ".mp4", ".avi", ".mov", ".webm", ".mkv", ".wmv", ".m4v", ".flv"
+}
+
+
+def snap_fixed_video_frame_count(
+    num_frames: int,
+    *,
+    is_video: bool,
+    auto_frame_count: bool,
+    frame_count_snapper: Optional[Callable[[int], int]],
+) -> int:
+    """Apply model geometry before decoding so video, audio, and cache
+    metadata all agree on the same fixed clip length.
+
+    Auto-frame datasets are snapped after their source duration is known, and
+    mixed-media image items deliberately remain one frame.
+    """
+    if not is_video or auto_frame_count or frame_count_snapper is None:
+        return num_frames
+    snapped = frame_count_snapper(num_frames)
+    if isinstance(snapped, bool) or not isinstance(snapped, int) or snapped <= 1:
+        raise ValueError(
+            "A model frame-count snapper must return an integer greater than one "
+            f"for video items; got {snapped!r}"
+        )
+    return snapped
 
 
 def print_once(msg):
@@ -64,11 +91,37 @@ class FileItemDTO(
         self.encrypted_item = kwargs.get("encrypted_item", None)
         self.is_encrypted = self.encrypted_reader is not None and self.encrypted_item is not None
         self.dataset_config: "DatasetConfig" = kwargs.get("dataset_config", None)
-        self.is_video = self.dataset_config.num_frames > 1 or self.dataset_config.auto_frame_count
         self.is_audio_model = kwargs.get("is_audio_model", False)
+        dataset_is_video = (
+            self.dataset_config.num_frames > 1
+            or self.dataset_config.auto_frame_count
+        )
+        if dataset_is_video and self.dataset_config.include_images_in_video_dataset:
+            if self.is_encrypted:
+                self.is_video = self.encrypted_item.mediaKind == "video"
+            else:
+                self.is_video = os.path.splitext(self.path)[1].lower() in VIDEO_EXTENSIONS
+        else:
+            # Preserve legacy behavior for video datasets unless mixed media
+            # was explicitly enabled, including extensionless JSON entries.
+            self.is_video = dataset_is_video
         self.sample_rate = kwargs.get("sample_rate", 48000)
-        self.num_frames = self.dataset_config.num_frames
         self.temporal_compression = kwargs.get("temporal_compression", 8)
+        sd = kwargs.get("sd", None)
+        self.frame_count_snapper = (
+            sd.get_frame_count_snapper()
+            if self.is_video
+            and sd is not None
+            and hasattr(sd, "get_frame_count_snapper")
+            else None
+        )
+        requested_num_frames = self.dataset_config.num_frames if self.is_video else 1
+        self.num_frames = snap_fixed_video_frame_count(
+            requested_num_frames,
+            is_video=self.is_video,
+            auto_frame_count=self.dataset_config.auto_frame_count,
+            frame_count_snapper=self.frame_count_snapper,
+        )
         size_database = kwargs.get("size_database", {})
         dataset_root = kwargs.get("dataset_root", None)
         self.encode_control_in_text_embeddings = kwargs.get(
@@ -239,11 +292,24 @@ class DataLoaderBatchDTO:
                 if len(self.file_items[0].extra_values) > 0
                 else None
             )
-            self.audio_data: Union[List, None] = (
-                [x.audio_data for x in self.file_items]
-                if self.file_items[0].audio_data is not None
-                else None
-            )
+            self.audio_data: Union[List, None] = None
+            if any(x.audio_data is not None for x in self.file_items):
+                # A batch may combine silent and audio-bearing videos. Build a
+                # zero-waveform entry for each silent row from the first real
+                # soundtrack instead of assuming item zero has audio or
+                # passing None into a model audio encoder.
+                base_audio_data = next(
+                    x.audio_data for x in self.file_items if x.audio_data is not None
+                )
+                self.audio_data = [
+                    x.audio_data
+                    if x.audio_data is not None
+                    else {
+                        "waveform": torch.zeros_like(base_audio_data["waveform"]),
+                        "sample_rate": int(base_audio_data["sample_rate"]),
+                    }
+                    for x in self.file_items
+                ]
             self.audio_tensor: Union[torch.Tensor, None] = None
             self.first_frame_latents: Union[torch.Tensor, None] = None
             self.audio_latents: Union[torch.Tensor, None] = None
@@ -251,6 +317,25 @@ class DataLoaderBatchDTO:
             # just for holding noise and preds during training
             self.audio_target: Union[torch.Tensor, None] = None
             self.audio_pred: Union[torch.Tensor, None] = None
+            # Drawn once for a training step and reused by every secondary
+            # prediction so all audio targets refer to the same noisy sample.
+            self.audio_noise: Union[torch.Tensor, None] = None
+            self.audio_pred_uncond: Union[torch.Tensor, None] = None
+            self.audio_pred_prior: Union[torch.Tensor, None] = None
+            self.audio_pred_preservation: Union[torch.Tensor, None] = None
+            self.audio_pred_slot: Union[
+                Literal[
+                    "audio_pred_uncond",
+                    "audio_pred_prior",
+                    "audio_pred_preservation",
+                ],
+                None,
+            ] = None
+            self.audio_noisy: Union[torch.Tensor, None] = None
+            self.audio_sigma: Union[torch.Tensor, None] = None
+            # MiniMax-H3 noise-augments its spatial keyframe condition. Keep
+            # that draw stable across primary and secondary model passes.
+            self.keyframe_conditioning_noise: Union[torch.Tensor, None] = None
             self.audio_loss_mask: Union[torch.Tensor, None] = None
             self.video_loss_mask: Union[torch.Tensor, None] = None
             self.ltx_strategy = None
@@ -481,12 +566,30 @@ class DataLoaderBatchDTO:
                     if x.audio_tensor is not None:
                         base_audio_tensor = x.audio_tensor
                         break
+                max_audio_samples = max(
+                    x.audio_tensor.shape[-1]
+                    for x in self.file_items
+                    if x.audio_tensor is not None
+                )
                 audio_tensors = []
                 for x in self.file_items:
                     if x.audio_tensor is None:
-                        audio_tensors.append(torch.zeros_like(base_audio_tensor))
+                        audio_tensors.append(
+                            torch.zeros(
+                                *base_audio_tensor.shape[:-1],
+                                max_audio_samples,
+                                dtype=base_audio_tensor.dtype,
+                                device=base_audio_tensor.device,
+                            )
+                        )
                     else:
-                        audio_tensors.append(x.audio_tensor)
+                        audio_tensor = x.audio_tensor
+                        if audio_tensor.shape[-1] < max_audio_samples:
+                            audio_tensor = torch.nn.functional.pad(
+                                audio_tensor,
+                                (0, max_audio_samples - audio_tensor.shape[-1]),
+                            )
+                        audio_tensors.append(audio_tensor)
                 self.audio_tensor = torch.cat([x.unsqueeze(0) for x in audio_tensors])
 
         except Exception as e:
@@ -509,6 +612,11 @@ class DataLoaderBatchDTO:
     ):
         return [x.caption_short for x in self.file_items]
 
+    def set_secondary_audio_pred(self, pred: torch.Tensor) -> None:
+        """Store a secondary-pass prediction without replacing the primary."""
+        if self.audio_pred_slot is not None:
+            setattr(self, self.audio_pred_slot, pred)
+
     def cleanup(self):
         del self.latents
         del self.tensor
@@ -517,6 +625,14 @@ class DataLoaderBatchDTO:
         del self.audio_data
         del self.audio_target
         del self.audio_pred
+        del self.audio_noise
+        del self.audio_pred_uncond
+        del self.audio_pred_prior
+        del self.audio_pred_preservation
+        del self.audio_pred_slot
+        del self.audio_noisy
+        del self.audio_sigma
+        del self.keyframe_conditioning_noise
         del self.audio_loss_mask
         del self.video_loss_mask
         del self.ltx_strategy

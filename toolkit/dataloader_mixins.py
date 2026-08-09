@@ -325,6 +325,10 @@ class BucketsMixin:
 
             # check if bucket exists, if not, create it
             bucket_key = f'{file_item.crop_width}x{file_item.crop_height}'
+            if self.is_video:
+                # Keep one-frame images separate from every temporal video
+                # bucket even when their spatial dimensions match.
+                bucket_key = f'{bucket_key}x{file_item.num_frames}f'
             if bucket_key not in self.buckets:
                 self.buckets[bucket_key] = Bucket(file_item.crop_width, file_item.crop_height)
             self.buckets[bucket_key].file_list_idx.append(idx)
@@ -555,6 +559,7 @@ class ImageProcessingDTOMixin:
                     self.dataset_config.shrink_video_to_frames,
                     self.dataset_config.auto_frame_count,
                     self.temporal_compression,
+                    self.frame_count_snapper,
                 )
                 self.num_frames = selected_num_frames
                 frames = []
@@ -577,10 +582,13 @@ class ImageProcessingDTOMixin:
                 self.tensor = torch.stack(frames)
 
                 if do_audio:
-                    import torch.nn.functional as F
-
                     self.audio_data = None
                     self.audio_tensor = None
+                if do_audio and self.encrypted_reader.has_audio_stream(
+                    self.encrypted_item
+                ):
+                    import torch.nn.functional as F
+
                     waveform, sample_rate = self.encrypted_reader.load_audio_waveform(self.encrypted_item)
                     waveform = waveform_to_stereo(waveform)
                     if self.dataset_config.audio_normalize:
@@ -671,11 +679,13 @@ class ImageProcessingDTOMixin:
                 
                 desired_num_frames = int(vid_length_seconds * self.dataset_config.fps)
                 
-                # make sure it is divisible by temporal_compression
-                desired_num_frames = desired_num_frames // self.temporal_compression * self.temporal_compression
-                
-                # TODO, all models currently add a key frame, but future models may not, update here if this changes.
-                desired_num_frames += 1  # add one for the key frame that is always added
+                if self.frame_count_snapper is not None:
+                    desired_num_frames = self.frame_count_snapper(desired_num_frames)
+                else:
+                    # Default model geometry: temporal_compression * n + one
+                    # key frame.
+                    desired_num_frames = desired_num_frames // self.temporal_compression * self.temporal_compression
+                    desired_num_frames += 1
                 
                 if desired_num_frames <= 1:
                     raise Exception(
@@ -730,6 +740,25 @@ class ImageProcessingDTOMixin:
             if len(unique_frame_idxs) == 0:
                 raise Exception(f"No frames selected for video: {self.path}")
             processed_frames = {}
+
+            def process_rgb_frame(rgb_frame):
+                img = Image.fromarray(rgb_frame).convert('RGB')
+                if self.flip_x:
+                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                if self.flip_y:
+                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+                img = img.crop((
+                    self.crop_x,
+                    self.crop_y,
+                    self.crop_x + self.crop_width,
+                    self.crop_y + self.crop_height,
+                ))
+                if transform:
+                    img = transform(img)
+                return img
+
+            decode_with_pyav = False
             next_frame_pos = unique_frame_idxs[0]
             if next_frame_pos > 0:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, next_frame_pos)
@@ -781,44 +810,75 @@ class ImageProcessingDTOMixin:
                             next_frame_pos = fallback_pos + 1
                             break
                     else:
-                        # No fallback worked, raise a more detailed exception
-                        video_info = f"Video: {self.path}, Total frames: {total_frames}, FPS: {video_fps}"
-                        raise Exception(f"Failed to read frame {frame_idx} from video. {frame_pos_info}. {video_info}")
+                        # OpenCV's bundled FFmpeg cannot decode every codec
+                        # (notably some AV1 streams). Decode the still-missing
+                        # frames with PyAV below before declaring the file bad.
+                        decode_with_pyav = True
+                        break
                 
                 # Convert BGR to RGB
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # Convert to PIL Image
-                img = Image.fromarray(frame)
-                
-                # Apply the same processing as for single images
-                img = img.convert('RGB')
-                
-                if self.flip_x:
-                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
-                if self.flip_y:
-                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
-                
-                # Apply bucketing
-                img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
-                img = img.crop((
-                    self.crop_x,
-                    self.crop_y,
-                    self.crop_x + self.crop_width,
-                    self.crop_y + self.crop_height
-                ))
-                
-                # Apply transform if provided
-                if transform:
-                    img = transform(img)
+                processed_frames[frame_idx] = process_rgb_frame(frame)
 
-                processed_frames[frame_idx] = img
+            if decode_with_pyav:
+                # Do not keep two decoder stacks open against the same file
+                # (notably problematic on Windows), and make the fallback's
+                # ownership explicit before any PyAV exception can escape.
+                cap.release()
+                cap = None
+                needed = {
+                    frame_idx
+                    for frame_idx in unique_frame_idxs
+                    if frame_idx not in processed_frames
+                }
+                last_av_frame = None
+                last_decoded_idx = -1
+                try:
+                    import av
+
+                    with av.open(self.path) as container:
+                        for decoded_idx, av_frame in enumerate(container.decode(video=0)):
+                            last_decoded_idx = decoded_idx
+                            last_av_frame = av_frame
+                            if decoded_idx in needed:
+                                processed_frames[decoded_idx] = process_rgb_frame(
+                                    av_frame.to_ndarray(format='rgb24')
+                                )
+                                needed.discard(decoded_idx)
+                                if not needed:
+                                    break
+                except Exception as av_error:
+                    raise Exception(
+                        f"Failed to decode video with both OpenCV and PyAV: {av_error}"
+                    ) from av_error
+
+                if needed:
+                    if last_av_frame is None:
+                        raise Exception(
+                            f"Failed to read frames {sorted(needed)} from video with both OpenCV and PyAV. "
+                            f"Video: {self.path}, Total frames: {total_frames}, FPS: {video_fps}"
+                        )
+                    if any(frame_idx <= last_decoded_idx for frame_idx in needed):
+                        raise Exception(
+                            f"PyAV skipped requested non-tail frames {sorted(needed)} "
+                            f"while decoding {self.path}; refusing to replace interior frames"
+                        )
+                    # Metadata can slightly over-report the final frame. Match
+                    # the existing OpenCV recovery behavior by reusing the
+                    # last real frame for only those missing tail requests.
+                    tail_frame = process_rgb_frame(
+                        last_av_frame.to_ndarray(format='rgb24')
+                    )
+                    for frame_idx in needed:
+                        processed_frames[frame_idx] = tail_frame
 
             frames = [processed_frames[frame_idx] for frame_idx in frames_to_extract]
             
-            # Release the video capture
-            cap.release()
-            cap = None
+            # Release the OpenCV decoder unless ownership already moved to
+            # the PyAV fallback above.
+            if cap is not None:
+                cap.release()
+                cap = None
             
             # Stack frames into tensor [frames, channels, height, width]
             self.tensor = torch.stack(frames)
@@ -832,8 +892,17 @@ class ImageProcessingDTOMixin:
                 self.audio_tensor = None
 
                 try:
+                    import av
                     import torchaudio
                     import torch.nn.functional as F
+
+                    # torchaudio raises for a valid silent video. Probe the
+                    # container first so silent clips remain valid no-audio
+                    # examples while real decoder failures still surface.
+                    with av.open(self.path) as audio_probe:
+                        has_audio_stream = len(audio_probe.streams.audio) > 0
+                    if not has_audio_stream:
+                        return
 
                     # Compute the time range of the selected frames in the *source* video
                     # Include the last frame by extending to the next frame boundary.
@@ -976,7 +1045,7 @@ class ImageProcessingDTOMixin:
         if self.is_audio_model:
             self.load_and_process_audio()
             return
-        if self.dataset_config.num_frames > 1 or self.dataset_config.auto_frame_count:
+        if self.is_video:
             self.load_and_process_video(transform, only_load_latents)
             return
         try:
@@ -2014,19 +2083,18 @@ class LatentCachingFileItemDTOMixin:
             ("latent_space_version", self.latent_space_version),
             ("latent_version", self.latent_version),
         ])
-        is_video = False
+        is_video = self.is_video
         # when adding items, do it after so we dont change old latents
         if self.flip_x:
             item["flip_x"] = True
         if self.flip_y:
             item["flip_y"] = True
-        if self.dataset_config.auto_frame_count:
+        if is_video and self.dataset_config.auto_frame_count:
             # don't store num frames here as it is calculated dynamically
             item["auto_frame_count"] = True
             is_video = True
-        elif self.dataset_config.num_frames > 1:
-            item["num_frames"] = self.dataset_config.num_frames
-            is_video = True
+        elif is_video:
+            item["num_frames"] = self.num_frames
         if is_video and self.dataset_config.fps != 24:
             # only add fps if it deviates from the default
             item["fps"] = self.dataset_config.fps
@@ -2158,7 +2226,7 @@ class LatentCachingMixin:
             raise e
 
         # do first frame
-        is_video = self.dataset_config.auto_frame_count or self.dataset_config.num_frames > 1
+        is_video = file_item.is_video
         if is_video and self.dataset_config.do_i2v:
             frames = file_item.tensor.unsqueeze(0).to(device, dtype=dtype)
             if len(frames.shape) == 4:

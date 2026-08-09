@@ -621,6 +621,56 @@ class BlockOffloadManagerTest(unittest.TestCase):
         self.assertFalse(hasattr(model, "_block_offload_manager"))
         self.assertFalse(hasattr(model, "_aitk_layer_offloading_backend"))
 
+    def test_memory_manager_free_releases_legacy_managed_module_to_meta(self):
+        model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.LayerNorm(4))
+        unmanaged_to_calls = []
+        original_unmanaged_to = model[1].to
+
+        def tracking_unmanaged_to(*args, **kwargs):
+            unmanaged_to_calls.append((args, kwargs))
+            return original_unmanaged_to(*args, **kwargs)
+
+        model[1].to = tracking_unmanaged_to
+        MemoryManager.attach(model, torch.device("cpu"))
+
+        MemoryManager.free(model)
+
+        self.assertEqual(unmanaged_to_calls, [])
+        self.assertFalse(hasattr(model, "_memory_manager"))
+        self.assertFalse(hasattr(model, "_mm_to"))
+        self.assertFalse(hasattr(model[0], "_layer_memory_manager"))
+        self.assertEqual(model[0].weight.device.type, "meta")
+        self.assertEqual(model[1].weight.device.type, "meta")
+
+    def test_memory_manager_free_calls_block_manager_and_cleans_metadata(self):
+        class FakeBlockManager:
+            def __init__(self):
+                self.called = False
+
+            def detach(self):
+                self.called = True
+
+        model = torch.nn.Linear(4, 4)
+        manager = FakeBlockManager()
+        original_to = model.to
+        model._block_offload_manager = manager
+        model._block_offload_original_to = original_to
+        model.to = lambda *args, **kwargs: model
+        model._aitk_layer_offloading_backend = "block"
+        model._aitk_layer_offloading_component = "text_encoder"
+        model._aitk_block_offload_skipped_layers = ("layers.0",)
+
+        MemoryManager.free(model)
+
+        self.assertTrue(manager.called)
+        self.assertFalse(hasattr(model, "_block_offload_manager"))
+        self.assertFalse(hasattr(model, "_block_offload_original_to"))
+        self.assertEqual(model.to, original_to)
+        self.assertFalse(hasattr(model, "_aitk_layer_offloading_backend"))
+        self.assertFalse(hasattr(model, "_aitk_layer_offloading_component"))
+        self.assertFalse(hasattr(model, "_aitk_block_offload_skipped_layers"))
+        self.assertEqual(model.weight.device.type, "meta")
+
 
 if __name__ == "__main__":
     unittest.main()

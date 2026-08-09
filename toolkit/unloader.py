@@ -1,6 +1,4 @@
-import gc
 import torch
-from toolkit.basic import flush
 from toolkit.memory_management import MemoryManager
 from typing import TYPE_CHECKING
 
@@ -35,11 +33,6 @@ class FakeTextEncoder(torch.nn.Module):
         return self
 
 
-def _detach_and_cpu(te: torch.nn.Module):
-    MemoryManager.detach(te)
-    torch.nn.Module.to(te, "cpu")
-
-
 def unload_text_encoder(model: "BaseModel"):
     # unload the text encoder in a way that will work with all models and will not throw errors
     # we need to make it appear as a text encoder module without actually having one so all
@@ -51,8 +44,8 @@ def unload_text_encoder(model: "BaseModel"):
             pipe = model.pipeline
 
             # the pipeline stores text encoders like text_encoder, text_encoder_2, text_encoder_3, etc.
-            if hasattr(pipe, "text_encoder"):
-                _detach_and_cpu(pipe.text_encoder)
+            if getattr(pipe, "text_encoder", None) is not None:
+                MemoryManager.free(pipe.text_encoder)
                 te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
                 text_encoder_list.append(te)
                 pipe.text_encoder = te
@@ -60,16 +53,16 @@ def unload_text_encoder(model: "BaseModel"):
             i = 2
             while hasattr(pipe, f"text_encoder_{i}"):
                 real_te = getattr(pipe, f"text_encoder_{i}")
-                _detach_and_cpu(real_te)
-                te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
-                text_encoder_list.append(te)
-                setattr(pipe, f"text_encoder_{i}", te)
+                if real_te is not None:
+                    MemoryManager.free(real_te)
+                    te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
+                    text_encoder_list.append(te)
+                    setattr(pipe, f"text_encoder_{i}", te)
                 i += 1
 
-            if hasattr(pipe, "mllm"):
+            if getattr(pipe, "mllm", None) is not None:
                 real_te = pipe.mllm
-                if real_te is not None:
-                    _detach_and_cpu(real_te)
+                MemoryManager.free(real_te)
                 te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
                 text_encoder_list.append(te)
                 pipe.mllm = te
@@ -78,12 +71,10 @@ def unload_text_encoder(model: "BaseModel"):
             model.text_encoder = text_encoder_list
         else:
             # only has a single text encoder
-            _detach_and_cpu(model.text_encoder)
+            MemoryManager.free(model.text_encoder)
             model.text_encoder = FakeTextEncoder(
                 device=model.device_torch,
                 dtype=model.torch_dtype,
             )
 
-    torch.cuda.empty_cache()
-    gc.collect()
-    flush()
+    MemoryManager.release_cached_memory()

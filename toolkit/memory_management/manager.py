@@ -1,6 +1,9 @@
+import ctypes
+import gc
+import random
+
 import torch
 from .manager_modules import LinearLayerMemoryManager, ConvLayerMemoryManager, _DEVICE_STATE
-import random
 
 LINEAR_MODULES = [
     "Linear",
@@ -245,3 +248,82 @@ class MemoryManager:
             del module._aitk_layer_offloading_component
 
         torch.cuda.empty_cache()
+
+    @classmethod
+    def free(cls, module: torch.nn.Module):
+        """Detach memory management and irreversibly release module storage."""
+        block_manager = getattr(module, "_block_offload_manager", None)
+        if block_manager is not None:
+            block_manager.detach()
+            if hasattr(module, "_block_offload_manager"):
+                del module._block_offload_manager
+        if hasattr(module, "_block_offload_original_to"):
+            module.to = module._block_offload_original_to
+            del module._block_offload_original_to
+
+        if hasattr(module, "_memory_manager"):
+            if hasattr(module, "_mm_to"):
+                module.to = module._mm_to
+                del module._mm_to
+
+            del module._memory_manager
+
+            for child in module.modules():
+                lmm = getattr(child, "_layer_memory_manager", None)
+                if lmm is None:
+                    continue
+
+                original_forward = getattr(lmm, "_original_forward", None)
+                if original_forward is not None:
+                    if hasattr(child, "ara_lora_ref"):
+                        ara = child.ara_lora_ref()
+                        if ara is not None:
+                            ara.org_forward = original_forward
+                    else:
+                        child.forward = original_forward
+
+                del child._layer_memory_manager
+                if hasattr(child, "_memory_management_device"):
+                    del child._memory_management_device
+                if hasattr(child, "_is_memory_managed"):
+                    del child._is_memory_managed
+
+            keys_to_delete = [
+                dev
+                for dev in _DEVICE_STATE
+                if isinstance(dev, torch.device) and dev.type == "cuda"
+            ]
+            for key in keys_to_delete:
+                del _DEVICE_STATE[key]
+
+        for attr_name in (
+            "_aitk_layer_offloading_backend",
+            "_aitk_layer_offloading_component",
+            "_aitk_block_offload_skipped_layers",
+        ):
+            if hasattr(module, attr_name):
+                delattr(module, attr_name)
+
+        # Bypass an overridden .to() so discarded storage is never staged to CPU.
+        torch.nn.Module.to(module, "meta")
+        torch.cuda.empty_cache()
+
+    @classmethod
+    def release_cached_memory(cls):
+        """Best-effort release of freed CUDA, pinned-host, and libc memory."""
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for fn_name in ("_accelerator_emptyHostCache", "_host_emptyCache"):
+            fn = getattr(torch._C, fn_name, None)
+            if fn is not None:
+                try:
+                    fn()
+                    break
+                except Exception:
+                    pass
+
+        try:
+            ctypes.CDLL(None).malloc_trim(0)
+        except Exception:
+            pass

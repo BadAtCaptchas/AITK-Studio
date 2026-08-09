@@ -10,9 +10,12 @@ COMFY_MODELS_PATH = None
 if COMFY_PATH:
     COMFY_MODELS_PATH = os.path.join(COMFY_PATH, "models")
 
-# check if ENV variable is set
-if 'MODELS_PATH' in os.environ:
-    MODELS_PATH = os.environ['MODELS_PATH']
+# Only a nonblank environment value overrides the repository default. The UI
+# resolves its authenticated setting into this environment variable before a
+# job starts, so CLI and Studio launches share the same final precedence.
+_models_path_env = os.environ.get("MODELS_PATH", "").strip()
+if _models_path_env:
+    MODELS_PATH = _models_path_env
 else:
     MODELS_PATH = os.path.join(TOOLKIT_ROOT, "models")
 

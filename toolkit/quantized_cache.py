@@ -12,6 +12,12 @@ from optimum.quanto.tensor import qtypes
 from safetensors.torch import load_file, save_file
 
 from toolkit.paths import MODELS_PATH
+from toolkit.util.comfy_quant_import import (
+    INT8_EMBEDDING_FORMAT_VERSION,
+    INT8_EMBEDDING_PACKED_LAYOUT,
+    INT8_EMBEDDING_QTYPE,
+    Int8Embedding,
+)
 from toolkit.util.ostris_quant import (
     OstrisLinear,
     get_ostris_backend_metadata,
@@ -166,6 +172,8 @@ def _module_backend_name(module: OstrisLinear) -> str:
         if layout == "comfy_w4a4_int4_v1":
             return "convrotcomfyw4a4"
         return f"convrotint{int(getattr(module, 'crn_bits', 0))}"
+    if hasattr(module, "nv4_qdata"):
+        return "nvfp4"
     if hasattr(module, "uintx_packed"):
         return f"uint{int(getattr(module, 'uintx_bits', 0))}"
     bits = int(getattr(quantizer, "bits", 0))
@@ -176,6 +184,8 @@ def _module_backend_name(module: OstrisLinear) -> str:
 
 
 def _expected_packed_layout(qtype_name: str) -> str:
+    if qtype_name == "nvfp4":
+        return "nvfp4_awq_block16_v1"
     if qtype_name == "convrot4":
         return "nvfp4_e2m1_e4m3_v1"
     if qtype_name == "convrot8":
@@ -198,6 +208,8 @@ def _expected_packed_layout(qtype_name: str) -> str:
 
 
 def _expected_buffer_names(qtype_name: str) -> set[str]:
+    if qtype_name == "nvfp4":
+        return {"nv4_qdata", "nv4_scales", "nv4_pts", "nv4_pre_scale"}
     if qtype_name == "convrot4":
         return {"cr_qdata", "cr_scales", "cr_scales_blocked", "cr_pts"}
     if qtype_name == "convrot8":
@@ -323,7 +335,7 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
                 "regular_hadamard_v1"
                 if qtype_name.startswith("convrot")
                 else "none"
-                if qtype_name.startswith("uint")
+                if qtype_name.startswith("uint") or qtype_name == "nvfp4"
                 else "deterministic_rpbh_v1"
             ),
             "dimension": int(module.in_features),
@@ -347,6 +359,44 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
             ),
         },
         "codebook_identity": codebook_identity,
+    }
+
+
+def _int8_embedding_manifest(
+    name: str,
+    module: Int8Embedding,
+) -> Dict[str, Any]:
+    buffers = {
+        key: {
+            "shape": list(value.shape),
+            "dtype": str(value.dtype),
+            "digest_algorithm": "sha256",
+            "digest": _tensor_digest(value),
+        }
+        for key, value in module._buffers.items()
+        if isinstance(value, torch.Tensor)
+    }
+    if set(buffers) != {"qweight", "scales"}:
+        raise ValueError(f"int8 embedding {name!r} has an incompatible buffer set")
+    return {
+        "path": name,
+        "kind": INT8_EMBEDDING_QTYPE,
+        "qtype": INT8_EMBEDDING_QTYPE,
+        "backend_format_version": INT8_EMBEDDING_FORMAT_VERSION,
+        "num_embeddings": int(module.num_embeddings),
+        "embedding_dim": int(module.embedding_dim),
+        "original_dtype": _dtype_name(module.output_dtype),
+        "has_bias": False,
+        "buffers": buffers,
+        "attributes": {},
+        "options": {},
+        "packed_layout": INT8_EMBEDDING_PACKED_LAYOUT,
+        "rotation": {
+            "scheme": "none",
+            "dimension": int(module.embedding_dim),
+            "block": 0,
+        },
+        "codebook_identity": None,
     }
 
 
@@ -384,7 +434,9 @@ def _collect_ostris_state_dict(
     packed_paths = {entry["path"] for entry in packed_modules}
     for module_name, module in _named_modules_with_duplicates(model):
         prefix = f"{module_name}." if module_name else ""
-        if module_name in packed_paths and isinstance(module, OstrisLinear):
+        if module_name in packed_paths and isinstance(
+            module, (OstrisLinear, Int8Embedding)
+        ):
             for parameter_name, parameter in module._parameters.items():
                 if isinstance(parameter, torch.Tensor):
                     destination[prefix + parameter_name] = parameter
@@ -499,6 +551,86 @@ class QuantizedModelCache:
                 raise ValueError(f"packed cache contains duplicate module path {path!r}")
             seen_paths.add(path)
             qtype_name = entry["qtype"]
+            if qtype_name == INT8_EMBEDDING_QTYPE:
+                if entry.get("kind") != INT8_EMBEDDING_QTYPE:
+                    raise ValueError(
+                        f"cached int8 embedding kind is invalid for {path!r}"
+                    )
+                if not path:
+                    raise ValueError("a packed root embedding cannot be restored in place")
+                if (
+                    entry.get("backend_format_version")
+                    != INT8_EMBEDDING_FORMAT_VERSION
+                ):
+                    raise ValueError(
+                        f"cached int8 embedding format is incompatible for {path!r}"
+                    )
+                if entry.get("packed_layout") != INT8_EMBEDDING_PACKED_LAYOUT:
+                    raise ValueError(
+                        f"cached packed layout is incompatible for {path!r}"
+                    )
+                buffers = entry.get("buffers")
+                if not isinstance(buffers, dict) or set(buffers) != {
+                    "qweight",
+                    "scales",
+                }:
+                    raise ValueError(
+                        f"packed cache buffer set is incompatible for {path!r}"
+                    )
+                module = model.get_submodule(path)
+                if not isinstance(module, (torch.nn.Embedding, Int8Embedding)):
+                    raise TypeError(f"cached module {path!r} is not an nn.Embedding")
+                num_embeddings = int(entry["num_embeddings"])
+                embedding_dim = int(entry["embedding_dim"])
+                if (
+                    int(module.num_embeddings) != num_embeddings
+                    or int(module.embedding_dim) != embedding_dim
+                ):
+                    raise ValueError(f"cached shape does not match module {path!r}")
+                original_dtype = _parse_dtype(entry["original_dtype"])
+                if not original_dtype.is_floating_point:
+                    raise ValueError(
+                        f"cached output dtype is invalid for embedding {path!r}"
+                    )
+                prefix = f"{path}."
+                for buffer_name, expected in buffers.items():
+                    key = prefix + buffer_name
+                    if key not in state_dict:
+                        raise ValueError(f"packed cache is missing tensor {key!r}")
+                    value = state_dict[key]
+                    if (
+                        list(value.shape) != expected["shape"]
+                        or str(value.dtype) != expected["dtype"]
+                    ):
+                        raise ValueError(
+                            f"packed cache tensor {key!r} does not match manifest"
+                        )
+                    if expected.get("digest_algorithm") != "sha256" or not isinstance(
+                        expected.get("digest"), str
+                    ):
+                        raise ValueError(
+                            f"packed cache tensor {key!r} has no supported digest"
+                        )
+                    if _tensor_digest(value) != expected["digest"]:
+                        raise ValueError(
+                            f"packed cache tensor checksum failed for {key!r}"
+                        )
+                    packed_keys.add(key)
+                qweight = state_dict[prefix + "qweight"]
+                scales = state_dict[prefix + "scales"]
+                if (
+                    qweight.dtype != torch.int8
+                    or tuple(qweight.shape) != (num_embeddings, embedding_dim)
+                    or scales.dtype != torch.uint8
+                    or scales.numel() != num_embeddings * 4
+                ):
+                    raise ValueError(
+                        f"packed int8 embedding tensors are invalid for {path!r}"
+                    )
+                validated_entries.append(
+                    (INT8_EMBEDDING_QTYPE, entry, module, None, original_dtype, prefix)
+                )
+                continue
             backend = get_ostris_backend_metadata(qtype_name)
             if backend is None:
                 raise ValueError(f"unknown cached qtype {qtype_name!r}")
@@ -564,10 +696,22 @@ class QuantizedModelCache:
                 ):
                     raise ValueError(f"cached codebook identity is invalid for {path!r}")
             validated_entries.append(
-                (entry, module, quantizer, original_dtype, prefix)
+                ("linear", entry, module, quantizer, original_dtype, prefix)
             )
 
-        for entry, module, quantizer, original_dtype, prefix in validated_entries:
+        for kind, entry, module, quantizer, original_dtype, prefix in validated_entries:
+            if kind == INT8_EMBEDDING_QTYPE:
+                path = entry["path"]
+                replacement = Int8Embedding(
+                    state_dict[prefix + "qweight"].to(target_device),
+                    state_dict[prefix + "scales"].to(target_device),
+                    original_dtype,
+                    packed_scales=True,
+                )
+                parent_path, _, attribute = path.rpartition(".")
+                parent = model.get_submodule(parent_path) if parent_path else model
+                setattr(parent, attribute, replacement)
+                continue
             prepare_linear_for_ostris_cache(module, quantizer, original_dtype)
             for buffer_name in entry["buffers"]:
                 key = prefix + buffer_name
@@ -658,13 +802,14 @@ class QuantizedModelCache:
         cache_key: str,
         key_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
-        modules = [
-            _module_manifest(name, module)
-            for name, module in model.named_modules()
-            if isinstance(module, OstrisLinear)
-        ]
+        modules = []
+        for name, module in model.named_modules():
+            if isinstance(module, OstrisLinear):
+                modules.append(_module_manifest(name, module))
+            elif isinstance(module, Int8Embedding):
+                modules.append(_int8_embedding_manifest(name, module))
         if not modules:
-            raise ValueError("Model has no packed Ostris quantization to cache")
+            raise ValueError("Model has no packed Studio quantization to cache")
         state_dict = _collect_ostris_state_dict(model, modules)
         save_file(state_dict, os.path.join(tmp_dir, CACHE_WEIGHTS_NAME))
         qtypes_in_cache = sorted({entry["qtype"] for entry in modules})
@@ -702,7 +847,10 @@ class QuantizedModelCache:
         os.makedirs(tmp_dir, exist_ok=True)
 
         try:
-            has_ostris = any(isinstance(module, OstrisLinear) for module in model.modules())
+            has_ostris = any(
+                isinstance(module, (OstrisLinear, Int8Embedding))
+                for module in model.modules()
+            )
             backend_metadata: Dict[str, Any]
             if has_ostris:
                 backend_metadata = self._save_ostris(

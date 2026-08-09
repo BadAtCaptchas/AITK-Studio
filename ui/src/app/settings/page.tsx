@@ -904,6 +904,38 @@ export default function Settings() {
                     </FieldShell>
 
                     <FieldShell
+                      id="MODELS_PATH"
+                      label="Models folder"
+                      detail="Where shared base-model weights and first-load downloads are stored. Project runs and outputs remain isolated."
+                    >
+                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                        <input
+                          type="text"
+                          id="MODELS_PATH"
+                          name="MODELS_PATH"
+                          value={settings.MODELS_PATH}
+                          onChange={handleChange}
+                          disabled={settings.MODELS_PATH_LOCKED === 'true'}
+                          className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 disabled:cursor-not-allowed disabled:text-gray-500"
+                          placeholder="Enter models folder path"
+                        />
+                        <button
+                          type="button"
+                          disabled={settings.MODELS_PATH_LOCKED === 'true'}
+                          className="flex h-full w-12 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300 disabled:cursor-not-allowed disabled:text-gray-600"
+                          title="Models folder"
+                        >
+                          <FolderOpen className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {settings.MODELS_PATH_LOCKED === 'true' && (
+                        <p className="mt-2 text-xs text-amber-300">
+                          Locked by the MODELS_PATH environment variable.
+                        </p>
+                      )}
+                    </FieldShell>
+
+                    <FieldShell
                       id="DATASETS_FOLDER"
                       label="Dataset folder"
                       detail="Where datasets are stored and discovered."

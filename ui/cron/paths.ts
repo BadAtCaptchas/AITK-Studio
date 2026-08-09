@@ -1,10 +1,12 @@
 import path from 'path';
 import { db } from '../src/server/db';
+import { resolveModelsPathState } from '../src/server/modelsPath';
 
 export const TOOLKIT_ROOT = path.resolve('@', '..', '..');
 export const defaultTrainFolder = path.join(TOOLKIT_ROOT, 'output');
 export const defaultDatasetsFolder = path.join(TOOLKIT_ROOT, 'datasets');
 export const defaultDataRoot = path.join(TOOLKIT_ROOT, 'data');
+export const defaultModelsFolder = path.join(TOOLKIT_ROOT, 'models');
 
 console.log('TOOLKIT_ROOT:', TOOLKIT_ROOT);
 
@@ -36,4 +38,15 @@ export const getOpenRouterApiKey = async () => {
     token = row.value;
   }
   return token;
+};
+
+export const getModelsRoot = async () => {
+  const row = await db.settings.get('MODELS_PATH');
+  return (
+    await resolveModelsPathState({
+      defaultRoot: defaultModelsFolder,
+      settingValue: row?.value,
+      allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+    })
+  ).path;
 };

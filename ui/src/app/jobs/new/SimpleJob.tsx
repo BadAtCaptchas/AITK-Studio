@@ -189,7 +189,7 @@ export default function SimpleJob({
     return sections;
   }, [modelArch, jobType]);
 
-  const isVideoModel = !!(modelArch?.group === 'video');
+  const isVideoModel = Boolean(modelArch?.isVideoModel || modelArch?.group === 'video');
   const networkConfig = jobConfig.config.process[0].network;
   const networkType = networkConfig?.type ?? 'lora';
   const normalizedNetworkType = networkType.toLowerCase();
@@ -690,7 +690,7 @@ export default function SimpleJob({
     { value: 'lora', label: 'LoRA' },
     { value: 'dora', label: 'DoRA' },
     { value: 'lokr', label: 'LoKr' },
-  ];
+  ].filter(option => !modelArch?.allowedNetworkTypes || modelArch.allowedNetworkTypes.includes(option.value));
 
   const formatNumber = (value: number | null | undefined) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
@@ -1020,6 +1020,57 @@ export default function SimpleJob({
                   </button>
                 )}
 
+                {modelArch?.modelNotes && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const notes = modelArch.modelNotes;
+                      if (!notes) return;
+                      openDoc({
+                        title: `Notes - ${modelArch.label}`,
+                        description: (
+                          <div className="space-y-3">
+                            <p>{notes.summary}</p>
+                            {notes.link && (
+                              <p>
+                                <Link href={notes.link.href} className="text-cyan-300 underline hover:text-cyan-200">
+                                  {notes.link.label}
+                                </Link>
+                              </p>
+                            )}
+                            {notes.codeBlock && (
+                              <pre className="overflow-x-auto border border-gray-800 bg-gray-950 p-3 text-xs text-gray-300">
+                                <code>{notes.codeBlock}</code>
+                              </pre>
+                            )}
+                            {notes.paragraphs?.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
+                          </div>
+                        ),
+                      });
+                    }}
+                    className="flex w-full items-center gap-2 border border-amber-900 bg-amber-950/25 px-3 py-2 text-left text-sm text-amber-100 transition-colors hover:border-amber-800 hover:bg-amber-950/40"
+                  >
+                    <IoFlaskSharp className="h-4 w-4 shrink-0 text-amber-300" />
+                    <span>
+                      Experimental model. <span className="underline">Read model notes.</span>
+                    </span>
+                  </button>
+                )}
+
+                {modelArch?.additionalSections?.includes('model.assistant_lora_path') && (
+                  <div className="max-w-2xl">
+                    <TextInput
+                      label="Training adapter path"
+                      value={processConfig.model.assistant_lora_path ?? ''}
+                      docKey="config.process[0].model.assistant_lora_path"
+                      onChange={(value: string | null) => {
+                        setJobConfig(value?.trim() ? value : undefined, 'config.process[0].model.assistant_lora_path');
+                      }}
+                      placeholder="Hugging Face repository/file path"
+                    />
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
                   {disableSections.includes('trigger_word') ? null : (
                     <div>
@@ -1036,7 +1087,7 @@ export default function SimpleJob({
                       <p className="mt-1 text-xs text-gray-500">The token that represents your concept.</p>
                     </div>
                   )}
-                  <div>
+                  {processConfig.model.arch !== 'minimax_h3' && <div>
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                       <TextInput
                         label="Base LoRA path (optional)"
@@ -1071,7 +1122,7 @@ export default function SimpleJob({
                         {baseLoraUploadMessage}
                       </div>
                     )}
-                  </div>
+                  </div>}
                 </div>
 
                 <div>
@@ -1738,6 +1789,14 @@ export default function SimpleJob({
                       <div>
                         <FormGroup label="Settings">
                           <Checkbox label="Cache latents" checked={dataset.cache_latents_to_disk || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].cache_latents_to_disk`)} />
+                          {modelArch?.additionalSections?.includes('datasets.include_images_in_video_dataset') && (
+                            <Checkbox
+                              label="Include images with videos"
+                              docKey="datasets.include_images_in_video_dataset"
+                              checked={dataset.include_images_in_video_dataset || false}
+                              onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].include_images_in_video_dataset`)}
+                            />
+                          )}
                           <Checkbox label="Is regularization" checked={dataset.is_reg || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].is_reg`)} />
                           {!isAudioModel && (
                             <>

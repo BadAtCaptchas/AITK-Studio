@@ -3,7 +3,7 @@ import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { TOOLKIT_ROOT, getHFToken, getOpenRouterApiKey } from '../paths';
+import { TOOLKIT_ROOT, getHFToken, getModelsRoot, getOpenRouterApiKey } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
 import { getJobTrainingRoot } from '../../src/server/projects';
@@ -106,6 +106,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const trainingRoot = await getJobTrainingRoot(job);
       const hfToken = await getHFToken();
       const openRouterApiKey = await getOpenRouterApiKey();
+      const modelsRoot = await getModelsRoot();
       const telemetryEnabled = await isTelemetryEnabled();
       const tensorBoardEnabled = isTensorBoardEnabled();
       const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
@@ -209,6 +210,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         CUDA_DEVICE_ORDER: 'PCI_BUS_ID',
         CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
         IS_AI_TOOLKIT_UI: '1',
+        MODELS_PATH: modelsRoot,
         AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
         AITK_COMFY_INSTALL_PROGRESS_PATH: comfyInstallProgressPath,
         PYTHONUNBUFFERED: '1',

@@ -127,6 +127,9 @@ MageFlowModel, MageFlowEditModel = _optional_models(
         ("MageFlowEditModel", "mageflow_edit"),
     ),
 )
+MinimaxH3Model, = _optional_models(
+    ".minimax_h3", (("MinimaxH3Model", "minimax_h3"),)
+)
 
 
 AI_TOOLKIT_MODELS = [
@@ -167,4 +170,5 @@ AI_TOOLKIT_MODELS = [
     AnimaModel,
     MageFlowModel,
     MageFlowEditModel,
+    MinimaxH3Model,
 ]

@@ -117,6 +117,25 @@ const docs: { [key: string]: ConfigDoc } = {
       </>
     ),
   },
+  'config.process[0].model.assistant_lora_path': {
+    title: 'Training Adapter Path',
+    description: (
+      <>
+        An optional live adapter loaded alongside the trainable LoRA. MiniMax H3 uses its published alpha training
+        adapter by default to compensate for the released pre-quantized checkpoint during training and sampling.
+      </>
+    ),
+  },
+  'datasets.include_images_in_video_dataset': {
+    title: 'Include Images with Videos',
+    description: (
+      <>
+        Include still images found alongside videos in this dataset. Images are trained as one-frame samples and are
+        kept in separate temporal buckets from video clips. This is disabled by default and should only be enabled for
+        model architectures that explicitly support mixed image/video training.
+      </>
+    ),
+  },
   'datasets.audio_normalize': {
     title: 'Audio Normalize',
     description: (

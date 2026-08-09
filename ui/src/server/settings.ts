@@ -1,7 +1,8 @@
-import { defaultDatasetsFolder, defaultDataRoot, defaultProjectsFolder, defaultTrainFolder } from '../paths';
+import { defaultDatasetsFolder, defaultDataRoot, defaultModelsFolder, defaultProjectsFolder, defaultTrainFolder } from '../paths';
 import NodeCache from 'node-cache';
 import { db } from './db';
 import { normalizeStoragePathSetting } from './pathContainment';
+import { modelsPathFromEnv, resolveModelsPathState } from './modelsPath';
 
 const myCache = new NodeCache();
 export const PROJECTS_ENABLED_KEY = 'PROJECTS_ENABLED';
@@ -153,4 +154,23 @@ export const getProjectsRoot = async () => {
   }
   myCache.set(key, projectsRoot);
   return projectsRoot;
+};
+
+export const getModelsRoot = async () => {
+  const environmentPath = modelsPathFromEnv();
+  if (environmentPath) return environmentPath;
+
+  const key = 'MODELS_PATH';
+  const cached = myCache.get(key);
+  if (typeof cached === 'string' && cached) return cached;
+
+  const row = await db.settings.get(key);
+  const state = await resolveModelsPathState({
+    defaultRoot: defaultModelsFolder,
+    settingValue: row?.value,
+    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
+    envValue: null,
+  });
+  myCache.set(key, state.path);
+  return state.path;
 };

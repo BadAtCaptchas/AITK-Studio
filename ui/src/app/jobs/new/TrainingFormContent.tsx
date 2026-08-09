@@ -374,6 +374,29 @@ export function TrainingFormContent({
     if (!modelConfig?.name_or_path?.trim()) {
       messages.push({ level: 'error', message: 'Select or enter a base model path.' });
     }
+    if (modelConfig?.arch === 'minimax_h3') {
+      if (modelConfig.layer_offloading) {
+        messages.push({ level: 'error', message: 'MiniMax H3 does not support layer offloading.' });
+      }
+      if (!modelConfig.quantize || modelConfig.qtype !== 'convrot8') {
+        messages.push({ level: 'error', message: 'MiniMax H3 requires the ConvRot int8 transformer checkpoint.' });
+      }
+      if (!modelConfig.quantize_te || modelConfig.qtype_te !== 'nvfp4') {
+        messages.push({ level: 'error', message: 'MiniMax H3 requires the NVFP4 text-encoder checkpoint.' });
+      }
+      if (trainConfig?.train_text_encoder) {
+        messages.push({ level: 'error', message: 'MiniMax H3 does not support training its packed text encoder.' });
+      }
+      if (processConfig.network?.type !== 'lora') {
+        messages.push({ level: 'error', message: 'MiniMax H3 currently supports LoRA training only.' });
+      }
+      if (modelConfig.base_lora_path?.trim()) {
+        messages.push({ level: 'error', message: 'MiniMax H3 cannot merge a Base LoRA into its packed checkpoint.' });
+      }
+      if (modelConfig.inference_lora_path?.trim()) {
+        messages.push({ level: 'error', message: 'MiniMax H3 does not support a separate sample-time Inference LoRA.' });
+      }
+    }
     const baseLoraPath = modelConfig?.base_lora_path?.trim();
     if (baseLoraPath) {
       if (modelConfig?.inference_lora_path?.trim()) {
@@ -444,7 +467,7 @@ export function TrainingFormContent({
       const archName = `${modelConfig?.arch ?? ''}`.split(':')[0];
       const arch = modelArchs.find(option => option.name === archName);
       const networkType = `${processConfig?.network?.type ?? ''}`.toLowerCase();
-      if (arch?.group === 'audio' || arch?.group === 'video') {
+      if (arch?.group === 'audio' || arch?.group === 'video' || arch?.isVideoModel) {
         messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires an image LoRA job.' });
       }
       if (!processConfig?.network) {

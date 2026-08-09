@@ -24,6 +24,7 @@ type AdditionalSections =
   | 'datasets.audio_normalize'
   | 'datasets.audio_preserve_pitch'
   | 'datasets.auto_frame_count'
+  | 'datasets.include_images_in_video_dataset'
   | 'sample.ctrl_img'
   | 'sample.multi_ctrl_imgs'
   | 'train.audio_loss_multiplier'
@@ -49,6 +50,16 @@ export interface SampleTags {
   [key: string]: SampleTag;
 }
 
+export interface ModelNotes {
+  summary: string;
+  paragraphs?: string[];
+  codeBlock?: string;
+  link?: {
+    href: string;
+    label: string;
+  };
+}
+
 export interface ModelArch {
   name: string;
   label: string;
@@ -63,6 +74,8 @@ export interface ModelArch {
   accuracyRecoveryAdapters?: { [key: string]: string };
   sampleTags?: SampleTags;
   defaultAutoTrainingProfileId?: string;
+  modelNotes?: ModelNotes;
+  allowedNetworkTypes?: string[];
 }
 
 const defaultNameOrPath = '';
@@ -932,6 +945,94 @@ export const modelArchs: ModelArch[] = [
     additionalSections: ['model.low_vram', 'model.layer_offloading'],
   },
   {
+    name: 'minimax_h3',
+    label: 'MiniMax-H3',
+    group: 'experimental',
+    isVideoModel: true,
+    defaults: {
+      'config.process[0].model.name_or_path': ['Comfy-Org/MiniMax-H3', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ['nvfp4', 'qfloat8'],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].model.layer_offloading': [false, false],
+      'config.process[0].model.base_lora_path': [undefined, undefined],
+      'config.process[0].model.inference_lora_path': [undefined, undefined],
+      'config.process[0].model.model_kwargs.partition': ['fl2va_pruned', undefined],
+      'config.process[0].model.model_kwargs.max_text_length': [512, undefined],
+      'config.process[0].network.type': ['lora', 'lora'],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.train_text_encoder': [false, false],
+      'config.process[0].train.unload_text_encoder': [false, false],
+      'config.process[0].train.cache_text_embeddings': [true, false],
+      'config.process[0].network.linear': [16, defaultLinearRank],
+      'config.process[0].network.linear_alpha': [16, defaultLinearRank],
+      'config.process[0].network.network_kwargs.ignore_if_contains': [['adaln_proj'], []],
+      'config.process[0].sample.num_frames': [107, 1],
+      'config.process[0].sample.fps': [24, 1],
+      'config.process[0].sample.width': [768, 1024],
+      'config.process[0].sample.height': [768, 1024],
+      'config.process[0].sample.guidance_scale': [1, 4],
+      'config.process[0].sample.sample_steps': [28, 25],
+      'config.process[0].train.audio_loss_multiplier': [1.0, undefined],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+      'config.process[0].datasets[x].do_i2v': [false, undefined],
+      'config.process[0].datasets[x].do_audio': [true, undefined],
+      'config.process[0].datasets[x].cache_latents_to_disk': [true, false],
+      'config.process[0].datasets[x].fps': [24, undefined],
+      'config.process[0].datasets[x].num_frames': [39, undefined],
+      'config.process[0].datasets[x].auto_frame_count': [true, undefined],
+      'config.process[0].datasets[x].include_images_in_video_dataset': [true, false],
+      'config.process[0].model.assistant_lora_path': [
+        'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_alpha.safetensors',
+        undefined,
+      ],
+    },
+    disableSections: [
+      'network.conv',
+      'model.quantize',
+      'model.quantize_te',
+      'train.train_text_encoder',
+      'train.unload_text_encoder',
+    ],
+    additionalSections: [
+      'sample.ctrl_img',
+      'datasets.num_frames',
+      'model.low_vram',
+      'datasets.do_audio',
+      'datasets.audio_normalize',
+      'datasets.audio_preserve_pitch',
+      'datasets.do_i2v',
+      'train.audio_loss_multiplier',
+      'datasets.auto_frame_count',
+      'datasets.include_images_in_video_dataset',
+      'model.assistant_lora_path',
+    ],
+    modelNotes: {
+      summary:
+        'Experimental. First load downloads about 43 GB of shared base-model weights into the configured Models folder.',
+      link: { href: '/settings', label: 'Open Models folder settings' },
+      codeBlock: `<MODELS_PATH>/
+├── diffusion_models/
+│   └── minimax_h3_fl2va_pruned_int8_convrot.safetensors
+├── text_encoders/
+│   └── qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors
+└── vae/
+    ├── minimax_h3_video_vae_fp16.safetensors
+    └── minimax_h3_audio_vae_fp32.safetensors`,
+      paragraphs: [
+        'The supported checkpoints are pre-quantized: ConvRot int8 for the DiT and NVFP4 for the text encoder. Those quantization fields are fixed for the experimental preset.',
+        'The preset supports text-to-video, first-frame image-to-video, single-image training, and joint audio. Keep guidance at 1 and use 24 fps; video frame counts snap to the 17n+5 grid.',
+        'Layer offloading is disabled for H3. Low-VRAM mode still moves complete frozen components when they are not in use.',
+        'The initial integration supports LoRA training only; full-base, DoRA, and LoKr training are rejected.',
+        'Reference partitions can be selected for T2V and sampling, but ref2va I2V training is rejected until the selected video frame can be coupled safely to cached vision-token embeddings. Use fl2va for I2V training.',
+      ],
+    },
+    allowedNetworkTypes: ['lora'],
+  },
+  {
     name: 'ltx2',
     label: 'LTX-2',
     group: 'video',
@@ -1604,6 +1705,7 @@ export const quantizationOptions: SelectOption[] = [
   { value: 'convrotint3', label: 'ConvRot 3-bit weights' },
   { value: 'convrotint2', label: 'ConvRot 2-bit weights' },
   { value: 'convrotbitnet', label: 'ConvRot BitNet 1.58-bit weights' },
+  { value: 'nvfp4', label: 'NVFP4 pre-quantized (experimental)' },
   { value: 'uint7', label: '7 bit' },
   { value: 'uint6', label: '6 bit' },
   { value: 'uint5', label: '5 bit' },

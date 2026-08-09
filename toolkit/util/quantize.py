@@ -416,12 +416,74 @@ def _ostris_storage_bytes(module: OstrisLinear) -> tuple[int, int]:
             "cr_qdata",
             "cr8_qdata",
             "crn_qdata",
+            "nv4_qdata",
             "uintx_packed",
         ):
             compressed += _tensor_bytes(buffer)
         else:
             metadata += _tensor_bytes(buffer)
     return compressed, metadata
+
+
+def report_prequantized_ostris_model(
+    model: torch.nn.Module,
+    *,
+    component_label: Optional[str] = None,
+    qtype_label: Optional[str] = None,
+) -> QuantizationReport:
+    """Account for packed layers imported from an external checkpoint.
+
+    Importers do not run :func:`quantize`, but their storage and coverage must
+    still flow through the same telemetry shape used by locally quantized models.
+    """
+    # Imported int8 embeddings live next to OstrisLinear layers but deliberately
+    # do not subclass nn.Embedding: their dense ``weight`` is only a compatibility
+    # view. Include their packed buffers in the same component report.
+    from toolkit.util.comfy_quant_import import Int8Embedding
+
+    linear_modules = [
+        module for module in model.modules() if isinstance(module, OstrisLinear)
+    ]
+    embedding_modules = [
+        module for module in model.modules() if isinstance(module, Int8Embedding)
+    ]
+    backend_names = sorted(
+        {
+            str(
+                getattr(module, "ostris_backend_name", None)
+                or getattr(module.ostris_quantizer, "backend_name", "unknown")
+            )
+            for module in linear_modules
+        }
+        | ({"int8_embedding"} if embedding_modules else set())
+    )
+    label = qtype_label or "+".join(backend_names) or "unknown"
+    report = QuantizationReport(
+        qtype=label,
+        backend="ostris",
+        component=component_label,
+    )
+    for module in linear_modules:
+        original_bytes = _linear_weight_bytes(module)
+        compressed, metadata = _ostris_storage_bytes(module)
+        report.eligible_bytes += original_bytes
+        report.quantized_original_bytes += original_bytes
+        report.quantized_weight_count += module.logical_weight_numel
+        report.compressed_bytes += compressed
+        report.metadata_bytes += metadata
+        report.quantized_modules += 1
+    for module in embedding_modules:
+        original_bytes = int(module.qweight.numel()) * torch.empty(
+            (), dtype=module.output_dtype
+        ).element_size()
+        report.eligible_bytes += original_bytes
+        report.quantized_original_bytes += original_bytes
+        report.quantized_weight_count += int(module.qweight.numel())
+        report.compressed_bytes += _tensor_bytes(module.qweight)
+        report.metadata_bytes += _tensor_bytes(module.scales)
+        report.quantized_modules += 1
+    model._aitk_quantization_report = report
+    return report
 
 
 def is_quantized_tensor(t) -> bool:

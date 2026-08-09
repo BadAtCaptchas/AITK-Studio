@@ -109,6 +109,7 @@ def _register_builtin_backends() -> None:
         from toolkit.util.orbit_quant import ORBIT_QTYPES, OrbitQuantizer
         from toolkit.util.orbit_vq_quant import ORBIT_VQ_QTYPES, OrbitVQQuantizer
         from toolkit.util.convrot_quant import CONVROT_QTYPES, get_convrot_quantizer
+        from toolkit.util.nvfp4_quant import NVFP4_QTYPES, Nvfp4Quantizer
         from toolkit.util.uintx_quant import UINTX_QTYPES, UIntXQuantizer
 
         common_capabilities = (
@@ -205,6 +206,31 @@ def _register_builtin_backends() -> None:
                     kernel=options.kernel,
                     max_workspace_mb=options.max_workspace_mb,
                 ),
+            )
+
+        for name in NVFP4_QTYPES:
+            register_ostris_backend(
+                OstrisBackendMetadata(
+                    name=name,
+                    format_version=1,
+                    bits=4,
+                    status="experimental",
+                    capabilities=common_capabilities
+                    + (
+                        "torch_fallback",
+                        "packed_save_load",
+                        "comfyui_import",
+                        "awq_pre_scale",
+                    ),
+                    supported_devices=("cpu", "cuda"),
+                    shape_notes="nn.Linear only; in_features must be divisible by 16",
+                    device_notes=(
+                        "Full-precision activations with bounded NVFP4 weight "
+                        "dequantization; packed-weight merge and requantization "
+                        "are intentionally unsupported"
+                    ),
+                ),
+                lambda options: Nvfp4Quantizer(),
             )
 
         for name, bits in UINTX_QTYPES.items():

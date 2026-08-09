@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { defaultTrainFolder, defaultDatasetsFolder, defaultProjectsFolder } from '@/paths';
+import { defaultTrainFolder, defaultDatasetsFolder, defaultModelsFolder, defaultProjectsFolder } from '@/paths';
 import { flushCache, normalizeBooleanSetting, PROJECTS_ENABLED_KEY } from '@/server/settings';
 import { normalizeStoragePathSetting } from '@/server/pathContainment';
 import { db } from '@/server/db';
@@ -12,11 +12,16 @@ import { DEFAULT_EXTERNAL_COMFY_URL, normalizeExternalComfyLoraDir, normalizeExt
 import { IDEOGRAM_WORKFLOW_HISTORY_KEY } from '@/server/ideogramWorkflowHistory';
 import { isRequestAuthenticated } from '@/utils/authSession';
 import { TELEMETRY_ENABLED_SETTING_KEY } from '@/utils/telemetry';
+import { modelsPathFromEnv, resolveModelsPathState } from '@/server/modelsPath';
 
 type SettingsAccess = {
   authenticated: boolean;
   response: NextResponse | null;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 const storagePathSettings = [
   ['TRAINING_FOLDER', defaultTrainFolder],
@@ -49,7 +54,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const settings = await db.settings.list();
-    const settingsObject = settings.reduce((acc: any, setting) => {
+    const settingsObject = settings.reduce<Record<string, unknown>>((acc, setting) => {
       if (isEncryptedDatasetSecretSettingKey(setting.key)) return acc;
       if (isSecureCaptionSystemPromptSettingKey(setting.key)) return acc;
       if (isRemoteOllamaWorkersSettingKey(setting.key)) return acc;
@@ -64,6 +69,13 @@ export async function GET(request: NextRequest) {
           allowExternal: access.authenticated,
         })) || fallbackRoot;
     }
+    const modelsPathState = await resolveModelsPathState({
+      defaultRoot: defaultModelsFolder,
+      settingValue: settingsObject.MODELS_PATH,
+      allowExternal: access.authenticated,
+    });
+    settingsObject.MODELS_PATH = modelsPathState.path;
+    settingsObject.MODELS_PATH_LOCKED = modelsPathState.lockedByEnv ? 'true' : 'false';
     settingsObject.PROJECTS_ENABLED = normalizeBooleanSetting(settingsObject.PROJECTS_ENABLED, false);
     const offlineModeState = await getOfflineModeState();
     settingsObject[OFFLINE_MODE_SETTING_KEY] = offlineModeState.enabled ? 'true' : 'false';
@@ -98,13 +110,17 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    const body: unknown = await request.json();
+    if (!isRecord(body)) {
+      return NextResponse.json({ error: 'Settings payload must be an object' }, { status: 400 });
+    }
     const {
       HF_TOKEN,
       OPENROUTER_API_KEY,
       TRAINING_FOLDER,
       DATASETS_FOLDER,
       PROJECTS_FOLDER,
+      MODELS_PATH,
       PROJECTS_ENABLED,
       OFFLINE_MODE,
       TRAINING_ADVISOR_ENABLED,
@@ -144,6 +160,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const configuredModelsPath = modelsPathFromEnv();
+    let normalizedModelsPath: string | null = null;
+    if (!configuredModelsPath) {
+      const requestedModelsPath =
+        MODELS_PATH === undefined ? (await db.settings.get('MODELS_PATH'))?.value : MODELS_PATH;
+      normalizedModelsPath = await normalizeStoragePathSetting(requestedModelsPath, defaultModelsFolder, {
+        allowExternal: access.authenticated,
+      });
+      if (!normalizedModelsPath) {
+        return NextResponse.json(
+          { error: 'MODELS_PATH must stay inside the default models folder unless authentication is enabled' },
+          { status: 400 },
+        );
+      }
+    }
+
     let normalizedExternalComfyUrl = '';
     let normalizedExternalComfyLoraDir = '';
     try {
@@ -166,6 +198,7 @@ export async function POST(request: NextRequest) {
       TRAINING_FOLDER: normalizedTrainingFolder,
       DATASETS_FOLDER: normalizedDatasetsFolder,
       PROJECTS_FOLDER: normalizedProjectsFolder,
+      ...(normalizedModelsPath ? { MODELS_PATH: normalizedModelsPath } : {}),
       PROJECTS_ENABLED: normalizeBooleanSetting(existingProjectsEnabled, false),
       [OFFLINE_MODE_SETTING_KEY]: offlineModeState.lockedByEnv
         ? 'true'

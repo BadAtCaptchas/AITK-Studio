@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { FolderKanban, GitBranch, Home, Images, ListOrdered, LogOut, Plus, Settings, ShieldCheck, Wand2 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
-import { FaDiscord } from 'react-icons/fa6';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
 import UpdaterStatus from './UpdaterStatus';
@@ -87,16 +86,6 @@ const Sidebar = () => {
       </nav>
       <div className="hidden border-t border-gray-900/80 px-2 py-2 md:block">
         <div className="flex items-center justify-center gap-1.5">
-          <a
-            href="https://discord.gg/umF6SfKRtm"
-            target="_blank"
-            rel="noreferrer"
-            className={railButtonClass}
-            title="Discord"
-            aria-label="Discord"
-          >
-            <FaDiscord className="h-4 w-4" />
-          </a>
           <UpdaterStatus compact minimal />
           <ThemeToggle variant="rail" />
           {authRequired && (

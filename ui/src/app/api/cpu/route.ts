@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import si from 'systeminformation';
-import { createRequire } from 'module';
 import os from 'os';
 import { CpuInfo } from '@/types';
 import { fetchWorkerCpu, getRemoteWorker, isLocalWorker, runRemoteBackgroundPoll } from '@/server/remoteClient';
 import { cached } from '@/server/apiCache';
+import { loadMacstats, numberFromRecord } from '@/server/macstats';
 
 const isMac = os.platform() === 'darwin';
 
@@ -26,18 +26,23 @@ export async function GET(request: Request) {
 
       if (isMac) {
         try {
-          const nativeRequire = createRequire(import.meta.url);
-          const ms = nativeRequire('macstats') as any;
+          const ms = loadMacstats();
+          if (!ms) throw new Error('macstats unavailable');
           const ramData = ms.getRAMUsageSync();
           const cpuData = ms.getCpuDataSync();
+          const totalMemoryBytes = numberFromRecord(ramData, 'total', Number.NaN);
+          const freeMemoryBytes = numberFromRecord(ramData, 'free', Number.NaN);
+          if (!Number.isFinite(totalMemoryBytes) || !Number.isFinite(freeMemoryBytes)) {
+            throw new Error('macstats returned invalid memory data');
+          }
 
           cpuInfo = {
             name: `${cpuInfoRaw.manufacturer} ${cpuInfoRaw.brand}`,
             cores: cpuInfoRaw.cores,
-            temperature: cpuData.temperature || 0,
-            totalMemory: ramData.total / (1024 * 1024),
-            availableMemory: ramData.free / (1024 * 1024),
-            freeMemory: ramData.free / (1024 * 1024),
+            temperature: numberFromRecord(cpuData, 'temperature'),
+            totalMemory: totalMemoryBytes / (1024 * 1024),
+            availableMemory: freeMemoryBytes / (1024 * 1024),
+            freeMemory: freeMemoryBytes / (1024 * 1024),
             currentLoad: (await si.currentLoad()).currentLoad || 0,
           };
         } catch {

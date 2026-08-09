@@ -15,6 +15,7 @@ import { pipeline } from 'stream';
 import type { FileResponseResolution } from '../src/server/fileServing';
 import {
   configureFrontServerTimeouts,
+  proxyRetryDecision,
   registerWorkerCrash,
 } from './fileServerPolicy';
 
@@ -250,18 +251,20 @@ function proxy(
   res.once('close', abortUpstreamIfIncomplete);
   upstreamRequest.once('close', removeAbortListeners);
   upstreamRequest.once('error', (error: NodeJS.ErrnoException) => {
-    if (
-      error.code === 'ECONNREFUSED' &&
-      bodyless &&
-      attempt < 120 &&
-      !res.headersSent &&
-      !res.destroyed
-    ) {
+    const retryDecision = proxyRetryDecision({
+      method: req.method,
+      errorCode: error.code,
+      reusedSocket: upstreamRequest.reusedSocket,
+      attempt,
+      headersSent: res.headersSent,
+      responseDestroyed: res.destroyed,
+    });
+    if (retryDecision.retry) {
       setTimeout(() => {
         if (!req.destroyed && !res.destroyed && !res.writableEnded) {
           proxy(req, res, upstreamPort, attempt + 1);
         }
-      }, 250);
+      }, retryDecision.delayMs);
       return;
     }
     if (!res.headersSent && !res.destroyed) {

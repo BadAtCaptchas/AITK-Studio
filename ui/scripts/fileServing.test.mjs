@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import {
   configureFrontServerTimeouts,
+  proxyRetryDecision,
   registerWorkerCrash,
 } from '../dist/cron/fileServerPolicy.js';
 import {
@@ -71,6 +72,41 @@ test('front server disables Node request-body timeouts for streamed uploads', as
   assert.equal(server.requestTimeout, 0);
   const source = await readFile(new URL('../cron/fileServer.ts', import.meta.url), 'utf8');
   assert.match(source, /configureFrontServerTimeouts\(server\)/);
+});
+
+test('proxy retry policy only replays safe bodyless requests before a response starts', () => {
+  const base = {
+    method: 'GET',
+    attempt: 0,
+    headersSent: false,
+    responseDestroyed: false,
+  };
+  assert.deepEqual(
+    proxyRetryDecision({ ...base, errorCode: 'ECONNREFUSED', reusedSocket: false }),
+    { retry: true, delayMs: 250 },
+  );
+  for (const errorCode of ['ECONNRESET', 'EPIPE']) {
+    assert.deepEqual(
+      proxyRetryDecision({ ...base, errorCode, reusedSocket: true }),
+      { retry: true, delayMs: 0 },
+    );
+    assert.equal(
+      proxyRetryDecision({ ...base, errorCode, reusedSocket: false }).retry,
+      false,
+    );
+  }
+  assert.equal(
+    proxyRetryDecision({ ...base, method: 'POST', errorCode: 'ECONNRESET', reusedSocket: true }).retry,
+    false,
+  );
+  assert.equal(
+    proxyRetryDecision({ ...base, headersSent: true, errorCode: 'EPIPE', reusedSocket: true }).retry,
+    false,
+  );
+  assert.equal(
+    proxyRetryDecision({ ...base, attempt: 120, errorCode: 'ECONNREFUSED', reusedSocket: false }).retry,
+    false,
+  );
 });
 
 test('worker crash policy backs off, expires old crashes, and stops a crash loop', () => {

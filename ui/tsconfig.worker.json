@@ -50,6 +50,7 @@
         "src/server/pythonPath.ts",
         "src/server/apiCache.ts",
         "src/server/pathContainment.ts",
+        "src/server/macstats.ts",
         "src/server/scriptRunner.ts",
         "src/server/streamedUpload.ts",
         "src/server/archiveUploadChunks.ts",

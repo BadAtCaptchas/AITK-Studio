@@ -108,7 +108,17 @@ def _release_backward_weight_slot(state, idx):
     state["bwd_slot_free"][idx].record()
 
 
-def _stage_grads_to_cpu(state, idx, grad_w_gpu, grad_b_gpu):
+def _stage_grads_to_cpu(
+    state, idx, grad_w_gpu, grad_b_gpu, weight_cpu, bias_cpu
+):
+    """Stage freshly computed gradients into CPU memory asynchronously.
+
+    The returned tensors are destinations of asynchronous D2H copies. Host
+    consumers join those copies through :func:`sync_grad_transfers`. Gradient
+    accumulation is the exception: AccumulateGrad reads a previously populated
+    ``.grad`` immediately on the engine thread, so that path must join its slot
+    before returning.
+    """
     gs = state["transfer_grad_stream"]
     state["grad_compute_done"][idx].record()
     grad_w_cpu = grad_b_cpu = None
@@ -119,7 +129,19 @@ def _stage_grads_to_cpu(state, idx, grad_w_gpu, grad_b_gpu):
         if grad_b_gpu is not None:
             grad_b_cpu = grad_b_gpu.to("cpu", non_blocking=True)
         state["grad_xfer_done"][idx].record()
+    if (grad_w_cpu is not None and weight_cpu.grad is not None) or (
+        grad_b_cpu is not None and bias_cpu.grad is not None
+    ):
+        state["grad_xfer_done"][idx].synchronize()
     return grad_w_cpu, grad_b_cpu
+
+
+def sync_grad_transfers():
+    """Join pending gradient D2H copies before host-side grad consumers run."""
+    for state in _DEVICE_STATE.values():
+        stream = state.get("transfer_grad_stream")
+        if stream is not None:
+            stream.synchronize()
 
 
 # (ADD) detect torchao wrapper tensors
@@ -503,16 +525,20 @@ class _BouncingLinearFn(torch.autograd.Function):
             return out.to(x.device)
 
         state = _get_device_state(device)
-        idx, w_gpu, b_gpu = _stage_forward_weight(
-            state,
-            device,
-            _materialize_weight,
-            weight_cpu,
-            bias_cpu,
-            _materialize_bias,
-        )
-        out = F.linear(x, w_gpu, b_gpu)
-        _release_forward_slot(state, idx)
+        # current_stream() and any lazy quantization kernels must resolve to the
+        # configured process device, not whichever CUDA device is globally
+        # current (commonly cuda:0 in multi-GPU processes).
+        with torch.cuda.device(device):
+            idx, w_gpu, b_gpu = _stage_forward_weight(
+                state,
+                device,
+                _materialize_weight,
+                weight_cpu,
+                bias_cpu,
+                _materialize_bias,
+            )
+            out = F.linear(x, w_gpu, b_gpu)
+            _release_forward_slot(state, idx)
 
         ctx.save_for_backward(x, weight_cpu, bias_cpu, weight_scale_cpu)
         ctx.device = device
@@ -598,7 +624,12 @@ class _BouncingLinearFn(torch.autograd.Function):
                 b_grad_gpu = grad_out.sum(dim=tuple(range(grad_out.ndim - 1)))
                 state["b_grad_buffers"][idx] = b_grad_gpu
             grad_weight, grad_bias = _stage_grads_to_cpu(
-                state, idx, w_grad_gpu, b_grad_gpu
+                state,
+                idx,
+                w_grad_gpu,
+                b_grad_gpu,
+                weight_cpu,
+                bias_cpu,
             )
 
         return (
@@ -660,11 +691,12 @@ class _BouncingConv2dFn(torch.autograd.Function):
             return out.to(x.device)
 
         state = _get_device_state(device)
-        idx, w_gpu, b_gpu = _stage_forward_weight(
-            state, device, _materialize_conv_weight, weight_cpu, bias_cpu
-        )
-        out = F.conv2d(x, w_gpu, b_gpu, stride, padding, dilation, groups)
-        _release_forward_slot(state, idx)
+        with torch.cuda.device(device):
+            idx, w_gpu, b_gpu = _stage_forward_weight(
+                state, device, _materialize_conv_weight, weight_cpu, bias_cpu
+            )
+            out = F.conv2d(x, w_gpu, b_gpu, stride, padding, dilation, groups)
+            _release_forward_slot(state, idx)
 
         ctx.save_for_backward(x, weight_cpu, bias_cpu)
         ctx.meta = (device, stride, padding, dilation, groups, target_dtype)
@@ -792,7 +824,12 @@ class _BouncingConv2dFn(torch.autograd.Function):
                 b_grad_gpu = grad_out.sum(dim=(0, 2, 3))
                 state["b_grad_buffers"][idx] = b_grad_gpu
             grad_weight, grad_bias = _stage_grads_to_cpu(
-                state, idx, w_grad_gpu, b_grad_gpu
+                state,
+                idx,
+                w_grad_gpu,
+                b_grad_gpu,
+                weight_cpu,
+                bias_cpu,
             )
 
         return (

@@ -138,9 +138,14 @@ def regular_hadamard(rot_size: int, device, dtype=torch.bfloat16) -> torch.Tenso
     key = (rot_size, str(device), dtype)
 
     def build():
+        # fp32, not fp64: entries stay exactly +/-1 through the Kronecker
+        # products and rot_size is a power of four, so normalization by its
+        # power-of-two square root is exact. Besides avoiding an unnecessary
+        # conversion, this keeps cache misses usable on devices without fp64.
         r4 = torch.tensor(
             [[1.0, 1, 1, -1], [1, 1, -1, 1], [1, -1, 1, 1], [-1, 1, 1, 1]],
-            dtype=torch.float64,
+            dtype=torch.float32,
+            device="cpu",
         )
         h = r4.clone()
         while h.shape[0] < rot_size:
@@ -246,6 +251,27 @@ def quantize_nvfp4(
     return packed, scales, pts
 
 
+_e4m3_triton_ok_cache = {}
+
+
+def _e4m3_triton_ok(device) -> bool:
+    """Return whether Triton can compile e4m3 kernels for ``device``.
+
+    Triton's fp8e4nv support requires SM 8.9 or newer. Older CUDA devices fail
+    at kernel compilation, so they must use the numerically equivalent torch
+    fallback even when Triton itself is installed.
+    """
+    key = str(device)
+    if key not in _e4m3_triton_ok_cache:
+        try:
+            _e4m3_triton_ok_cache[key] = (
+                torch.cuda.get_device_capability(device) >= (8, 9)
+            )
+        except Exception:
+            _e4m3_triton_ok_cache[key] = False
+    return _e4m3_triton_ok_cache[key]
+
+
 def dequantize_nvfp4(
     packed: torch.Tensor,
     scales: torch.Tensor,
@@ -257,7 +283,12 @@ def dequantize_nvfp4(
     # single-pass triton path when available: the torch chain below is ~7 full-size
     # elementwise passes with fp32 intermediates, which made every convrot4 training
     # backward pay a dequant cost comparable to the gradient matmul itself
-    if _triton_available() and packed.is_cuda and dtype in (torch.bfloat16, torch.float16, torch.float32):
+    if (
+        _triton_available()
+        and packed.is_cuda
+        and dtype in (torch.bfloat16, torch.float16, torch.float32)
+        and _e4m3_triton_ok(packed.device)
+    ):
         return _fp4_dequant_op(
             packed, scales.view(torch.uint8), pts.reshape(1).view(torch.uint8),
             str(dtype).split(".")[-1],
@@ -299,6 +330,21 @@ def _triton_available() -> bool:
     return _triton_ok
 
 
+def _import_triton():
+    """Import Triton lazily and publish its names for older releases.
+
+    Older Triton versions resolve free variables in a JIT kernel exclusively
+    through ``fn.__globals__``. Kernels defined by the builders below therefore
+    need ``triton`` and ``tl`` at module scope as well as in their closure.
+    """
+    import triton as _triton
+    import triton.language as _tl
+
+    globals()["triton"] = _triton
+    globals()["tl"] = _tl
+    return _triton, _tl
+
+
 def _use_triton(kernel: str) -> bool:
     if kernel == "torch":
         return False
@@ -321,8 +367,7 @@ def _get_kernel():
     global _kernel
     if _kernel is not None:
         return _kernel
-    import triton
-    import triton.language as tl
+    triton, tl = _import_triton()
 
     @triton.jit
     def nvfp4_act_quant_kernel(
@@ -484,8 +529,7 @@ def _get_dequant_kernel():
     global _dequant_kernel
     if _dequant_kernel is not None:
         return _dequant_kernel
-    import triton
-    import triton.language as tl
+    triton, tl = _import_triton()
 
     @triton.jit
     def nvfp4_dequant_kernel(
@@ -939,8 +983,7 @@ def _get_int8_kernels():
     global _int8_kernels
     if _int8_kernels is not None:
         return _int8_kernels
-    import triton
-    import triton.language as tl
+    triton, tl = _import_triton()
     from triton.language.extra import libdevice
 
     @triton.jit
@@ -1633,8 +1676,7 @@ def _get_intn_kernel():
     global _intn_kernel
     if _intn_kernel is not None:
         return _intn_kernel
-    import triton
-    import triton.language as tl
+    triton, tl = _import_triton()
 
     @triton.jit
     def intn_unpack_kernel(
@@ -1670,8 +1712,7 @@ def _get_intn_grouped_kernel():
     global _intn_grouped_kernel
     if _intn_grouped_kernel is not None:
         return _intn_grouped_kernel
-    import triton
-    import triton.language as tl
+    triton, tl = _import_triton()
     from triton.language.extra import libdevice
 
     @triton.jit
@@ -1712,8 +1753,7 @@ def _get_bitnet_kernel():
     global _bitnet_kernel
     if _bitnet_kernel is not None:
         return _bitnet_kernel
-    import triton
-    import triton.language as tl
+    triton, tl = _import_triton()
     from triton.language.extra import libdevice
 
     @triton.jit
@@ -1814,8 +1854,7 @@ def _get_int_gemv_kernel():
     global _int_gemv_kernel
     if _int_gemv_kernel is not None:
         return _int_gemv_kernel
-    import triton
-    import triton.language as tl
+    triton, tl = _import_triton()
     from triton.language.extra import libdevice
 
     @triton.jit

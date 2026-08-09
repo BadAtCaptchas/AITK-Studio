@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { createRequire } from 'module';
 import os from 'os';
 import { getRemoteWorker, isLocalWorker, fetchWorkerGpu, runRemoteBackgroundPoll } from '@/server/remoteClient';
 import { cached } from '@/server/apiCache';
+import { firstFanRpm, loadMacstats, numberFromRecord } from '@/server/macstats';
 
 const execAsync = promisify(exec);
 
@@ -48,45 +48,37 @@ async function getMacGpuInfo(): Promise<MacGpuResult | null> {
     let memUsed = 0;
     let memTotal = memoryTotal;
 
-    try {
-      // Use createRequire to hide from webpack static analysis so it doesn't fail on non-mac platforms
-      const nativeRequire = createRequire(import.meta.url);
-      const ms = nativeRequire('macstats') as any;
-
+    const ms = loadMacstats();
+    if (ms) {
       try {
         const gpuData = ms.getGpuDataSync();
-        temperature = gpuData.temperature || 0;
-        gpuLoad = gpuData.usage || 0;
+        temperature = numberFromRecord(gpuData, 'temperature');
+        gpuLoad = numberFromRecord(gpuData, 'usage');
       } catch {
         // ignore
       }
 
       try {
         const fanData = ms.getFanDataSync();
-        const fanKeys = Object.keys(fanData);
-        if (fanKeys.length > 0) {
-          fanSpeed = fanData[fanKeys[0]].rpm || 0;
-        }
+        fanSpeed = firstFanRpm(fanData);
       } catch {
         // ignore
       }
 
       try {
         const powerData = ms.getPowerDataSync();
-        powerDraw = powerData.gpu || 0;
+        powerDraw = numberFromRecord(powerData, 'gpu');
       } catch {
         // ignore
       }
 
       try {
         const ramData = ms.getRAMUsageSync();
-        memUsed = ramData.used / (1024 * 1024);
-        memTotal = ramData.total / (1024 * 1024);
+        memUsed = numberFromRecord(ramData, 'used') / (1024 * 1024);
+        memTotal = numberFromRecord(ramData, 'total', memoryTotal * 1024 * 1024) / (1024 * 1024);
       } catch {
         // ignore
       }
-    } catch (error) {
-      console.warn('macstats not available:', error);
     }
 
     return { name: gpuName, memUsed, memTotal, gpuLoad, temperature, fanSpeed, powerDraw };

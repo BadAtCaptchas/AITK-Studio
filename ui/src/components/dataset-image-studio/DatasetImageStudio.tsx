@@ -2844,7 +2844,7 @@ export default function DatasetImageStudio({
 
   if (presentation === 'legacy')
     return (
-      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#02060a] text-gray-100">
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-gray-950 text-gray-100">
         <StudioToolbar
           selectedIndex={selectedIndex}
           itemCount={items.length}
@@ -2879,7 +2879,7 @@ export default function DatasetImageStudio({
           />
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden xl:flex-row">
-            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#03070b]">
+            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-gray-950">
               <div className="relative flex min-h-[260px] min-w-0 flex-1 items-stretch justify-stretch overflow-hidden">
                 <div className="absolute left-3 top-3 z-10 max-w-[calc(50%-1rem)] truncate rounded-md border border-gray-800 bg-gray-950/80 px-2 py-1 text-xs text-gray-300 backdrop-blur">
                   {selectedName}
@@ -2940,7 +2940,7 @@ export default function DatasetImageStudio({
               />
             </main>
 
-            <aside className="flex w-full max-h-[34dvh] min-h-[190px] min-w-0 flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-[#080d12] xl:max-h-none xl:min-h-0 xl:w-[410px] xl:flex-none xl:border-l xl:border-t-0">
+            <aside className="flex w-full max-h-[34dvh] min-h-[190px] min-w-0 flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-gray-950 xl:max-h-none xl:min-h-0 xl:w-[410px] xl:flex-none xl:border-l xl:border-t-0">
               <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto p-2 md:p-3">
                 {canAnnotate && captionParse.kind === 'ideogram' && (
                   <LayersPanel
@@ -3064,7 +3064,7 @@ export default function DatasetImageStudio({
 
   return (
     <>
-      <div className="caption-studio relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#05090d] text-gray-100">
+      <div className="caption-studio relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-gray-950 text-gray-100">
         <ImageNavigator
           items={items}
           selectedIndex={selectedIndex}
@@ -3088,14 +3088,14 @@ export default function DatasetImageStudio({
 
         {!workbenchCollapsed && (
           <section
-            className="relative flex flex-shrink-0 flex-col border-t border-cyan-400/80 bg-[#050c13]"
+            className="relative flex flex-shrink-0 flex-col border-t border-brand-400/80 bg-gray-950"
             style={{ height: `${workbenchHeight}px` }}
             aria-label="Caption workbench"
           >
             <button
               type="button"
               onPointerDown={handleWorkbenchResizeStart}
-              className="absolute -top-2 left-1/2 z-20 flex h-4 w-20 -translate-x-1/2 cursor-row-resize items-center justify-center text-cyan-300/70 hover:text-cyan-200"
+              className="absolute -top-2 left-1/2 z-20 flex h-4 w-20 -translate-x-1/2 cursor-row-resize items-center justify-center text-brand-300/70 hover:text-brand-200"
               title="Resize caption workbench"
             >
               <GripHorizontal className="h-4 w-4" />
@@ -3105,7 +3105,7 @@ export default function DatasetImageStudio({
               <button
                 type="button"
                 onClick={() => setWorkbenchCollapsed(true)}
-                className="sticky left-0 z-10 flex w-[42px] flex-shrink-0 items-center justify-center border-r border-[#273039] bg-[#050c13] text-gray-500 hover:bg-[#0a1118] hover:text-gray-200"
+                className="sticky left-0 z-10 flex w-[42px] flex-shrink-0 items-center justify-center border-r border-gray-800 bg-gray-950 text-gray-500 hover:bg-gray-950 hover:text-gray-200"
                 title="Collapse caption editor"
                 aria-label="Collapse caption editor"
               >
@@ -3116,7 +3116,7 @@ export default function DatasetImageStudio({
                 style={{ gridTemplateColumns: '353fr 566fr 320fr 121fr' }}
               >
                 <div className="flex min-w-[300px] gap-4 overflow-hidden">
-                  <div className="h-full w-[158px] flex-shrink-0 overflow-hidden rounded-[4px] border border-[#273039] bg-gray-950">
+                  <div className="h-full w-[158px] flex-shrink-0 overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
                     {selectedItem.kind === 'plain' ? (
                       <PlainThumb
                         path={selectedItem.path}
@@ -3169,7 +3169,7 @@ export default function DatasetImageStudio({
                         type="button"
                         onClick={handleRecaptionClick}
                         disabled={!canQueueSelectedRecaption}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-[#273039] bg-[#080d12] px-2 text-[11px] font-medium text-gray-300 hover:border-gray-600 hover:text-white disabled:opacity-40"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] font-medium text-gray-300 hover:border-gray-600 hover:text-white disabled:opacity-40"
                       >
                         {selectedRecaptionIsRunning ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -3181,7 +3181,7 @@ export default function DatasetImageStudio({
                       <button
                         type="button"
                         onClick={openRecaptionSettings}
-                        className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-[#273039] bg-[#080d12] text-gray-400 hover:text-white"
+                        className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-gray-800 bg-gray-950 text-gray-400 hover:text-white"
                         title="Recaption settings"
                       >
                         <Settings2 className="h-3.5 w-3.5" />
@@ -3201,12 +3201,12 @@ export default function DatasetImageStudio({
                   </div>
                 </div>
 
-                <div className="flex min-w-[410px] flex-col overflow-hidden rounded-[4px] border border-[#273039] bg-[#0a1118]">
-                  <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-[#202429] px-3">
+                <div className="flex min-w-[410px] flex-col overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
+                  <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-800 px-3">
                     <span className={classNames('h-2 w-2 rounded-full', captionStatus.dot)} />
                     <span className="text-[12px] font-semibold text-gray-200">Caption</span>
                     {isIdeogram && (
-                      <span className="rounded-[3px] bg-cyan-950 px-1.5 py-0.5 text-[10px] text-cyan-300">JSON</span>
+                      <span className="rounded-[3px] bg-brand-950 px-1.5 py-0.5 text-[10px] text-brand-300">JSON</span>
                     )}
                     <span className="ml-auto text-[11px] text-gray-600">
                       {isSaving ? 'Saving…' : isDirty ? 'Unsaved changes' : 'Saved'}
@@ -3221,7 +3221,7 @@ export default function DatasetImageStudio({
                     spellCheck
                     aria-label="Image caption"
                   />
-                  <div className="flex h-8 flex-shrink-0 items-center border-t border-[#202429] px-3 text-[10px] text-gray-600">
+                  <div className="flex h-8 flex-shrink-0 items-center border-t border-gray-800 px-3 text-[10px] text-gray-600">
                     <span>{captionWordCount.toLocaleString()} words</span>
                     <span className="mx-2 text-gray-800">•</span>
                     <span>{captionCharacterCount.toLocaleString()} characters</span>
@@ -3234,7 +3234,7 @@ export default function DatasetImageStudio({
                     type="button"
                     onClick={() => void saveAndNext()}
                     disabled={!isCaptionLoaded || isAutoCaptioning || isSaving}
-                    className="col-span-2 inline-flex items-center justify-center gap-2 rounded-[4px] bg-cyan-400 text-[16px] font-semibold text-[#021014] hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-45"
+                    className="col-span-2 inline-flex items-center justify-center gap-2 rounded-[4px] bg-brand-400 text-[16px] font-semibold text-[var(--brand-ink)] hover:bg-brand-300 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     Save & Next
@@ -3247,7 +3247,7 @@ export default function DatasetImageStudio({
                       'col-span-2 inline-flex items-center justify-center gap-2 rounded-[4px] border text-[14px] font-semibold',
                       selectedApproved
                         ? 'border-emerald-500/70 bg-emerald-950/40 text-emerald-300'
-                        : 'border-[#273039] bg-[#0a1118] text-gray-200 hover:border-emerald-700 hover:text-emerald-300',
+                        : 'border-gray-800 bg-gray-950 text-gray-200 hover:border-emerald-700 hover:text-emerald-300',
                     )}
                   >
                     <Check className="h-4 w-4" />
@@ -3257,7 +3257,7 @@ export default function DatasetImageStudio({
                     type="button"
                     onClick={() => selectIndex(selectedIndex - 1)}
                     disabled={selectedIndex === 0}
-                    className="inline-flex items-center justify-center gap-1 rounded-[4px] border border-[#273039] bg-[#0a1118] text-[12px] text-gray-300 hover:bg-gray-900 disabled:opacity-35"
+                    className="inline-flex items-center justify-center gap-1 rounded-[4px] border border-gray-800 bg-gray-950 text-[12px] text-gray-300 hover:bg-gray-900 disabled:opacity-35"
                   >
                     <ChevronLeft className="h-4 w-4" /> Previous
                   </button>
@@ -3265,20 +3265,20 @@ export default function DatasetImageStudio({
                     type="button"
                     onClick={() => selectIndex(selectedIndex + 1)}
                     disabled={selectedIndex >= items.length - 1}
-                    className="inline-flex items-center justify-center gap-1 rounded-[4px] border border-[#273039] bg-[#0a1118] text-[12px] text-gray-300 hover:bg-gray-900 disabled:opacity-35"
+                    className="inline-flex items-center justify-center gap-1 rounded-[4px] border border-gray-800 bg-gray-950 text-[12px] text-gray-300 hover:bg-gray-900 disabled:opacity-35"
                   >
                     Next <ChevronRight className="h-4 w-4" />
                   </button>
                   <div className="col-span-2 flex items-end justify-center pb-1 text-[11px] tabular-nums text-gray-600">
                     {selectedIndex + 1} of {items.length.toLocaleString()}
                     {recaptionFeedback ? (
-                      <span className="ml-2 max-w-[190px] truncate text-cyan-700">{recaptionFeedback}</span>
+                      <span className="ml-2 max-w-[190px] truncate text-brand-700">{recaptionFeedback}</span>
                     ) : null}
                   </div>
                 </div>
 
-                <div className="relative min-w-[110px] overflow-hidden rounded-[4px] border border-[#273039] bg-[#080d12]">
-                  <div className="flex h-[42px] w-full items-center border-b border-[#273039] px-3 text-left text-[12px] font-semibold text-gray-200">
+                <div className="relative min-w-[110px] overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
+                  <div className="flex h-[42px] w-full items-center border-b border-gray-800 px-3 text-left text-[12px] font-semibold text-gray-200">
                     <Settings2 className="mr-2 h-3.5 w-3.5" />
                     Tools
                   </div>
@@ -3290,8 +3290,8 @@ export default function DatasetImageStudio({
                         type="button"
                         onClick={() => openAdvancedMode(tool.value)}
                         className={classNames(
-                          'flex h-[41px] w-full items-center gap-2 border-b border-[#202429] px-3 text-[12px] last:border-b-0 hover:bg-gray-900',
-                          advancedMode === tool.value ? 'text-cyan-300' : 'text-gray-400',
+                          'flex h-[41px] w-full items-center gap-2 border-b border-gray-800 px-3 text-[12px] last:border-b-0 hover:bg-gray-900',
+                          advancedMode === tool.value ? 'text-brand-300' : 'text-gray-400',
                         )}
                       >
                         <Icon className="h-3.5 w-3.5" />
@@ -3308,7 +3308,7 @@ export default function DatasetImageStudio({
         <button
           type="button"
           onClick={() => setWorkbenchCollapsed(collapsed => !collapsed)}
-          className="flex h-[46px] flex-shrink-0 items-center justify-center gap-2 border-t border-[#202429] bg-[#0a0f14] text-[11px] font-medium text-gray-500 hover:bg-[#0d141b] hover:text-gray-200"
+          className="flex h-[46px] flex-shrink-0 items-center justify-center gap-2 border-t border-gray-800 bg-gray-950 text-[11px] font-medium text-gray-500 hover:bg-gray-950 hover:text-gray-200"
         >
           {workbenchCollapsed ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           {workbenchCollapsed ? 'Open caption editor' : 'Collapse caption editor'}
@@ -3320,7 +3320,7 @@ export default function DatasetImageStudio({
           advancedMode === 'json') && (
           <section
             className={classNames(
-              'absolute inset-x-0 bottom-0 z-40 flex min-h-0 flex-col bg-[#03070b]',
+              'absolute inset-x-0 bottom-0 z-40 flex min-h-0 flex-col bg-gray-950',
               advancedMode === 'palettes' || advancedMode === 'json' ? 'top-[46px]' : 'top-[61px]',
             )}
             aria-label={
@@ -3343,7 +3343,7 @@ export default function DatasetImageStudio({
               onSelectIndex={advancedMode === 'json' ? index => void selectJsonIndex(index) : selectIndex}
             />
 
-            <div className="flex min-h-0 flex-1 border-b border-[#273039]">
+            <div className="flex min-h-0 flex-1 border-b border-gray-800">
               {advancedMode === 'boxes' ? (
                 <StandaloneBoxesToolRail
                   activeTool={activeTool}
@@ -3375,7 +3375,7 @@ export default function DatasetImageStudio({
                 />
               ) : null}
 
-              <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#03070b]">
+              <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-gray-950">
                 <StudioMedia
                   item={selectedItem}
                   datasetName={datasetName}
@@ -3425,10 +3425,10 @@ export default function DatasetImageStudio({
                       if (colorIndex >= 0) handleStartImagePaletteSample(colorIndex);
                     }}
                     className={classNames(
-                      'absolute left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-[4px] border shadow-lg shadow-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-35',
+                      'absolute left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-[4px] border shadow-lg shadow-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-35',
                       activeImagePaletteSamplerIndex != null
-                        ? 'border-cyan-300 bg-cyan-400 text-[#03121a]'
-                        : 'border-[#33414d] bg-[#071019]/95 text-gray-200 hover:border-cyan-700 hover:text-cyan-200',
+                        ? 'border-brand-300 bg-brand-400 text-[var(--brand-ink)]'
+                        : 'border-gray-800 bg-gray-950/95 text-gray-200 hover:border-brand-700 hover:text-brand-200',
                     )}
                     title={
                       activeImagePaletteSamplerIndex != null
@@ -3444,11 +3444,11 @@ export default function DatasetImageStudio({
                     <Pipette className="h-4 w-4" />
                   </button>
                 ) : advancedMode === 'json' ? null : (
-                  <div className="absolute bottom-4 left-4 z-20 flex h-9 items-center overflow-hidden rounded-[4px] border border-[#33414d] bg-[#071019]/95 text-xs text-gray-200 shadow-lg shadow-black/30">
+                  <div className="absolute bottom-4 left-4 z-20 flex h-9 items-center overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950/95 text-xs text-gray-200 shadow-lg shadow-black/30">
                     <button
                       type="button"
                       onClick={() => setZoom(value => Math.max(0.5, Number((value - 0.25).toFixed(2))))}
-                      className="flex h-9 w-9 items-center justify-center border-r border-[#33414d] hover:bg-white/5"
+                      className="flex h-9 w-9 items-center justify-center border-r border-gray-800 hover:bg-white/5"
                       title="Zoom out"
                     >
                       <Minus className="h-4 w-4" />
@@ -3456,7 +3456,7 @@ export default function DatasetImageStudio({
                     <button
                       type="button"
                       onClick={() => setZoom(value => (value >= 2 ? 1 : Number((value + 0.25).toFixed(2))))}
-                      className="h-9 min-w-[54px] border-r border-[#33414d] px-2 tabular-nums hover:bg-white/5"
+                      className="h-9 min-w-[54px] border-r border-gray-800 px-2 tabular-nums hover:bg-white/5"
                       title="Cycle zoom"
                     >
                       {Math.round(zoom * 100)}%
@@ -3464,7 +3464,7 @@ export default function DatasetImageStudio({
                     <button
                       type="button"
                       onClick={() => setZoom(value => Math.min(2, Number((value + 0.25).toFixed(2))))}
-                      className="flex h-9 w-9 items-center justify-center border-r border-[#33414d] hover:bg-white/5"
+                      className="flex h-9 w-9 items-center justify-center border-r border-gray-800 hover:bg-white/5"
                       title="Zoom in"
                     >
                       <Plus className="h-4 w-4" />
@@ -3483,14 +3483,14 @@ export default function DatasetImageStudio({
 
               <aside
                 className={classNames(
-                  'flex flex-none flex-col bg-[#071019]',
+                  'flex flex-none flex-col bg-gray-950',
                   advancedMode === 'boxes'
-                    ? 'w-[clamp(410px,30.8vw,458px)] border-l border-[#273039]'
+                    ? 'w-[clamp(410px,30.8vw,458px)] border-l border-gray-800'
                     : advancedMode === 'layers'
-                      ? 'w-[clamp(410px,32.5vw,483px)] border-l border-[#273039]'
+                      ? 'w-[clamp(410px,32.5vw,483px)] border-l border-gray-800'
                       : advancedMode === 'palettes'
                         ? 'w-[clamp(546px,40.7vw,586px)]'
-                        : 'w-[clamp(700px,53.5vw,770px)] border-l border-[#273039]',
+                        : 'w-[clamp(700px,53.5vw,770px)] border-l border-gray-800',
                 )}
               >
                 {advancedMode === 'json' ? (
@@ -3623,7 +3623,7 @@ export default function DatasetImageStudio({
                         <button
                           type="button"
                           onClick={onConvertDatasetToJson}
-                          className="h-9 rounded-[4px] border border-cyan-800 bg-cyan-950/20 px-3 text-xs text-cyan-200 hover:bg-cyan-950/40"
+                          className="h-9 rounded-[4px] border border-brand-800 bg-brand-950/20 px-3 text-xs text-brand-200 hover:bg-brand-950/40"
                         >
                           Convert dataset to JSON
                         </button>
@@ -3651,7 +3651,7 @@ export default function DatasetImageStudio({
                         />
                       </div>
                     ) : (
-                      <div className="flex min-h-[220px] items-center justify-center border-b border-[#273039] px-6 text-center text-xs leading-5 text-gray-500">
+                      <div className="flex min-h-[220px] items-center justify-center border-b border-gray-800 px-6 text-center text-xs leading-5 text-gray-500">
                         {layerStructureDisabledReason || 'Layers are unavailable for this asset.'}
                       </div>
                     )}
@@ -3676,7 +3676,7 @@ export default function DatasetImageStudio({
 
             <section
               className={classNames(
-                'flex flex-none border-t border-[#273039] bg-[#050c13]',
+                'flex flex-none border-t border-gray-800 bg-gray-950',
                 advancedMode === 'json' ? 'h-[174px]' : 'h-[203px]',
               )}
               aria-label={
@@ -3693,7 +3693,7 @@ export default function DatasetImageStudio({
                 type="button"
                 onClick={closeAdvancedMode}
                 className={classNames(
-                  'flex flex-none items-center justify-center border-r border-[#273039] text-gray-500 hover:bg-[#0a1118] hover:text-gray-100',
+                  'flex flex-none items-center justify-center border-r border-gray-800 text-gray-500 hover:bg-gray-950 hover:text-gray-100',
                   advancedMode === 'json' ? 'w-[27px]' : 'w-[30px]',
                 )}
                 title="Return to gallery"
@@ -3721,7 +3721,7 @@ export default function DatasetImageStudio({
                   >
                     <div
                       className={classNames(
-                        'h-full flex-none overflow-hidden rounded-[4px] border border-[#273039] bg-gray-950',
+                        'h-full flex-none overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950',
                         advancedMode === 'json' ? 'w-[98px]' : 'w-[126px]',
                       )}
                     >
@@ -3784,13 +3784,13 @@ export default function DatasetImageStudio({
                     </div>
                   </div>
 
-                  <div className="flex min-w-0 flex-col overflow-hidden rounded-[4px] border border-[#273039] bg-[#071019]">
-                    <div className="flex h-10 flex-none items-center border-b border-[#273039] px-3">
+                  <div className="flex min-w-0 flex-col overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
+                    <div className="flex h-10 flex-none items-center border-b border-gray-800 px-3">
                       <button
                         type="button"
                         onClick={() => setCaptionTab('caption')}
                         className={classNames('mr-4 h-10 border-b-2 text-xs font-medium', {
-                          'border-cyan-400 text-gray-100': advancedMode === 'json' || captionTab === 'caption',
+                          'border-brand-400 text-gray-100': advancedMode === 'json' || captionTab === 'caption',
                           'border-transparent text-gray-500 hover:text-gray-200':
                             advancedMode !== 'json' && captionTab !== 'caption',
                         })}
@@ -3818,7 +3818,7 @@ export default function DatasetImageStudio({
                       className="min-h-0 flex-1 resize-none bg-transparent px-4 py-3 text-sm leading-6 text-gray-100 outline-none disabled:opacity-50"
                       aria-label="Image caption"
                     />
-                    <div className="flex h-7 flex-none items-center border-t border-[#273039] px-3 text-[10px] text-gray-600">
+                    <div className="flex h-7 flex-none items-center border-t border-gray-800 px-3 text-[10px] text-gray-600">
                       {captionWordCount.toLocaleString()} words
                       <span className="ml-auto">{hasUnsavedChanges ? 'Unsaved' : 'Saved just now'}</span>
                     </div>
@@ -3844,7 +3844,7 @@ export default function DatasetImageStudio({
                         (advancedMode === 'json' && jsonDraftAnalysis.validity !== 'valid')
                       }
                       className={classNames(
-                        'relative inline-flex items-center justify-center rounded-[4px] bg-cyan-400 px-3 text-sm font-semibold text-[#021014] hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-45',
+                        'relative inline-flex items-center justify-center rounded-[4px] bg-brand-400 px-3 text-sm font-semibold text-[var(--brand-ink)] hover:bg-brand-300 disabled:cursor-not-allowed disabled:opacity-45',
                         advancedMode === 'palettes' || advancedMode === 'json' ? 'col-span-3' : 'col-span-2',
                       )}
                     >
@@ -3852,7 +3852,7 @@ export default function DatasetImageStudio({
                         {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         Save & Next
                       </span>
-                      <span aria-hidden="true" className="absolute right-3 text-[10px] font-medium text-cyan-950/70">
+                      <span aria-hidden="true" className="absolute right-3 text-[10px] font-medium text-brand-950/70">
                         Ctrl + Enter
                       </span>
                     </button>
@@ -3865,7 +3865,7 @@ export default function DatasetImageStudio({
                           if (!toolsMenuOpen) updateToolsMenuPosition();
                           setToolsMenuOpen(open => !open);
                         }}
-                        className="inline-flex h-full w-full items-center justify-center gap-2 rounded-[4px] border border-[#273039] bg-[#071019] text-xs text-gray-200 hover:bg-[#0a1118]"
+                        className="inline-flex h-full w-full items-center justify-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 text-xs text-gray-200 hover:bg-gray-950"
                         aria-expanded={toolsMenuOpen}
                         aria-haspopup="menu"
                         aria-controls="caption-studio-workspace-tools"
@@ -3881,7 +3881,7 @@ export default function DatasetImageStudio({
                               id="caption-studio-workspace-tools"
                               role="menu"
                               aria-label="Workspace tools"
-                              className="fixed z-[100] w-[190px] overflow-hidden rounded-[4px] border border-[#33414d] bg-[#0b151e] p-1 shadow-xl shadow-black/50"
+                              className="fixed z-[100] w-[190px] overflow-hidden rounded-[4px] border border-gray-800 bg-gray-900 p-1 shadow-xl shadow-black/50"
                               style={{ left: toolsMenuPosition.left, top: toolsMenuPosition.top }}
                             >
                               {ADVANCED_WORKSPACE_TOOLS.map(tool => {
@@ -3894,7 +3894,7 @@ export default function DatasetImageStudio({
                                     onClick={() => switchAdvancedMode(tool.value)}
                                     className={classNames(
                                       'flex h-8 w-full items-center gap-2 rounded-[3px] px-2 text-left text-xs hover:bg-gray-800',
-                                      tool.value === advancedMode ? 'text-cyan-300' : 'text-gray-300',
+                                      tool.value === advancedMode ? 'text-brand-300' : 'text-gray-300',
                                     )}
                                   >
                                     <Icon className="h-4 w-4" /> {tool.label}
@@ -3905,7 +3905,7 @@ export default function DatasetImageStudio({
                                 type="button"
                                 role="menuitem"
                                 onClick={closeAdvancedMode}
-                                className="mt-1 flex h-8 w-full items-center gap-2 border-t border-[#273039] px-2 pt-1 text-left text-xs text-gray-400 hover:text-white"
+                                className="mt-1 flex h-8 w-full items-center gap-2 border-t border-gray-800 px-2 pt-1 text-left text-xs text-gray-400 hover:text-white"
                               >
                                 <X className="h-4 w-4" /> Return to gallery
                               </button>
@@ -3923,7 +3923,7 @@ export default function DatasetImageStudio({
                         (advancedMode === 'palettes' || advancedMode === 'json') && 'col-span-2',
                         selectedApproved
                           ? 'border-emerald-500/70 bg-emerald-950/40 text-emerald-300'
-                          : 'border-[#273039] bg-[#071019] text-gray-200 hover:text-emerald-300',
+                          : 'border-gray-800 bg-gray-950 text-gray-200 hover:text-emerald-300',
                       )}
                     >
                       <Check className="h-4 w-4" /> {selectedApproved ? 'Approved' : 'Approve'}
@@ -3938,7 +3938,7 @@ export default function DatasetImageStudio({
                       }
                       disabled={selectedIndex === 0}
                       className={classNames(
-                        'inline-flex items-center justify-center gap-2 rounded-[4px] border border-[#273039] bg-[#071019] text-xs text-gray-300 hover:bg-[#0a1118] disabled:opacity-35',
+                        'inline-flex items-center justify-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 text-xs text-gray-300 hover:bg-gray-950 disabled:opacity-35',
                         (advancedMode === 'palettes' || advancedMode === 'json') && 'col-span-2',
                       )}
                     >
@@ -3953,7 +3953,7 @@ export default function DatasetImageStudio({
                       }
                       disabled={selectedIndex >= items.length - 1}
                       className={classNames(
-                        'inline-flex items-center justify-center gap-2 rounded-[4px] border border-[#273039] bg-[#071019] text-xs text-gray-300 hover:bg-[#0a1118] disabled:opacity-35',
+                        'inline-flex items-center justify-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 text-xs text-gray-300 hover:bg-gray-950 disabled:opacity-35',
                         advancedMode === 'palettes' && 'ml-[9px]',
                         advancedMode === 'json' && 'ml-[10px]',
                       )}
@@ -3973,9 +3973,9 @@ export default function DatasetImageStudio({
               </div>
             </section>
             {advancedMode === 'palettes' ? (
-              <div className="h-[15px] flex-none bg-[#03070b]" />
+              <div className="h-[15px] flex-none bg-gray-950" />
             ) : advancedMode === 'json' ? (
-              <div className="h-[18px] flex-none bg-[#03070b]" />
+              <div className="h-[18px] flex-none bg-gray-950" />
             ) : null}
           </section>
         )}

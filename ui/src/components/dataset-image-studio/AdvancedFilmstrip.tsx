@@ -36,12 +36,12 @@ export function AdvancedFilmstrip({
   }, [selectedIndex]);
 
   return (
-    <nav className="flex h-[105px] flex-none border-b border-[#273039] bg-[#070d12]" aria-label="Dataset filmstrip">
+    <nav className="flex h-[105px] flex-none border-b border-gray-800 bg-gray-950" aria-label="Dataset filmstrip">
       <button
         type="button"
         onClick={() => onSelectIndex(selectedIndex - 1)}
         disabled={selectedIndex === 0}
-        className="flex w-9 flex-none items-center justify-center border-r border-[#202a33] text-gray-400 hover:bg-[#101820] hover:text-white disabled:opacity-25"
+        className="flex w-9 flex-none items-center justify-center border-r border-gray-800 text-gray-400 hover:bg-gray-900 hover:text-white disabled:opacity-25"
         title="Previous asset"
       >
         <ChevronLeft className="h-5 w-5" />
@@ -58,7 +58,7 @@ export function AdvancedFilmstrip({
               onClick={() => onSelectIndex(index)}
               className={classNames(
                 'relative h-[91px] w-[142px] flex-none overflow-hidden rounded-[2px] border-2 bg-gray-950 text-left',
-                selected ? 'border-cyan-400' : 'border-transparent hover:border-gray-600',
+                selected ? 'border-brand-400' : 'border-transparent hover:border-gray-600',
               )}
               title={name}
               aria-label={`Select ${name}`}
@@ -76,7 +76,7 @@ export function AdvancedFilmstrip({
                 />
               )}
               {selected ? (
-                <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-cyan-400 text-[#021014] shadow-md shadow-black/50">
+                <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-brand-400 text-[var(--brand-ink)] shadow-md shadow-black/50">
                   <Check className="h-3.5 w-3.5" />
                 </span>
               ) : null}
@@ -88,7 +88,7 @@ export function AdvancedFilmstrip({
         type="button"
         onClick={() => onSelectIndex(selectedIndex + 1)}
         disabled={selectedIndex >= items.length - 1}
-        className="flex w-8 flex-none items-center justify-center border-l border-[#202a33] text-gray-400 hover:bg-[#101820] hover:text-white disabled:opacity-25"
+        className="flex w-8 flex-none items-center justify-center border-l border-gray-800 text-gray-400 hover:bg-gray-900 hover:text-white disabled:opacity-25"
         title="Next asset"
       >
         <ChevronRight className="h-5 w-5" />

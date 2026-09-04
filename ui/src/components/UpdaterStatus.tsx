@@ -92,8 +92,8 @@ const stateMeta: Record<RepoUpdateState, StatusMeta> = {
   checking: {
     label: 'Checking for updates',
     icon: Loader2,
-    textClass: 'text-cyan-300',
-    subtleClass: 'text-cyan-500/80',
+    textClass: 'text-brand-300',
+    subtleClass: 'text-brand-500/80',
     active: true,
   },
   up_to_date: {
@@ -111,21 +111,21 @@ const stateMeta: Record<RepoUpdateState, StatusMeta> = {
   unknown_current: {
     label: 'Latest on GitHub',
     icon: GitBranch,
-    textClass: 'text-cyan-300',
+    textClass: 'text-brand-300',
     subtleClass: 'text-gray-500',
   },
   updating: {
     label: 'Updating',
     icon: Loader2,
-    textClass: 'text-cyan-300',
-    subtleClass: 'text-cyan-500/80',
+    textClass: 'text-brand-300',
+    subtleClass: 'text-brand-500/80',
     active: true,
   },
   restarting: {
     label: 'Restarting',
     icon: Loader2,
-    textClass: 'text-cyan-300',
-    subtleClass: 'text-cyan-500/80',
+    textClass: 'text-brand-300',
+    subtleClass: 'text-brand-500/80',
     active: true,
   },
   updated: {
@@ -580,7 +580,7 @@ export default function UpdaterStatus({ compact = false, minimal = false }: { co
             disabled={isRestarting}
             title="Restart app"
             aria-label="Restart app"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-cyan-800/60 text-cyan-300 transition-colors hover:bg-cyan-950/30 disabled:opacity-50"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-brand-800/60 text-brand-300 transition-colors hover:bg-brand-950/30 disabled:opacity-50"
           >
             {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
           </button>
@@ -644,7 +644,7 @@ export default function UpdaterStatus({ compact = false, minimal = false }: { co
           disabled={isRestarting}
           title="Restart app"
           aria-label="Restart app"
-          className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-sm border border-cyan-800/60 text-cyan-300 transition-colors hover:bg-cyan-950/30 disabled:opacity-50"
+          className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-sm border border-brand-800/60 text-brand-300 transition-colors hover:bg-brand-950/30 disabled:opacity-50"
         >
           {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
         </button>

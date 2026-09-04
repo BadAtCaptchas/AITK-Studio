@@ -44,7 +44,7 @@ export function StudioToolbar({
   onDeleteCurrent: () => void;
 }) {
   return (
-    <div className="operator-scrollbar-none flex h-14 flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-gray-900 bg-[#070b10] px-2 sm:gap-3 sm:px-3">
+    <div className="operator-scrollbar-none flex h-14 flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-gray-900 bg-gray-950 px-2 sm:gap-3 sm:px-3">
       <h2 className="min-w-36 flex-1 text-base font-semibold tracking-normal">Image Studio</h2>
       <div className="hidden items-center overflow-hidden rounded-md border border-gray-800 bg-gray-950 md:flex">
         <button
@@ -69,9 +69,9 @@ export function StudioToolbar({
       </div>
       <div className="hidden h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-3 text-sm md:flex">
         {isSaving ? (
-          <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+          <Loader2 className="h-4 w-4 animate-spin text-brand-400" />
         ) : (
-          <span className={classNames('h-2 w-2 rounded-full', isDirty ? 'bg-blue-400' : 'bg-emerald-400')} />
+          <span className={classNames('h-2 w-2 rounded-full', isDirty ? 'bg-brand-400' : 'bg-emerald-400')} />
         )}
         <span>{isSaving ? 'Saving' : isDirty ? 'Unsaved' : 'Saved'}</span>
       </div>
@@ -113,7 +113,7 @@ export function StudioToolbar({
       </button>
       <button
         type="button"
-        className="inline-flex h-10 items-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-500"
+        className="inline-flex h-10 items-center gap-2 rounded-md bg-brand-500 px-4 text-sm font-semibold text-[var(--brand-ink)] hover:bg-brand-500"
         onClick={onNext}
       >
         Next

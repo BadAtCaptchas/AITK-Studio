@@ -154,7 +154,7 @@ export default function ProjectRunDetailPage({
                         onClick={() => setActiveTab(tab.key)}
                         className={`inline-flex h-9 items-center gap-2 border px-3 text-sm ${
                           active
-                            ? 'border-cyan-800 bg-cyan-950/40 text-cyan-100'
+                            ? 'border-brand-800 bg-brand-950/40 text-brand-100'
                             : 'border-gray-800 bg-gray-950 text-gray-400 hover:text-gray-100'
                         }`}
                       >

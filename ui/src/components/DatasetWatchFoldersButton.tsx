@@ -638,7 +638,7 @@ export default function DatasetWatchFoldersButton({
                   <X className="h-3.5 w-3.5" />
                   Clear
                 </button>
-                <button type="button" className="operator-button border-blue-800 bg-blue-950/70 text-blue-100" onClick={saveWatcher} disabled={isSaving}>
+                <button type="button" className="operator-button border-brand-800 bg-brand-950/70 text-brand-100" onClick={saveWatcher} disabled={isSaving}>
                   {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                   Save
                 </button>

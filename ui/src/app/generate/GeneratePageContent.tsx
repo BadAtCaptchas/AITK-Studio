@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@headlessui/react';
-import { ArrowRight, FileJson, ImagePlus, Layers, Loader2, Upload, Wand2, X } from 'lucide-react';
+import { FileJson, ImagePlus, Layers, Loader2, Upload, Wand2, X } from 'lucide-react';
 import { TopBar, MainContent } from '@/components/layout';
 import {
   Checkbox,
@@ -567,10 +567,12 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     setPrompts(current => {
       const lines = current.split(/\r?\n/);
       if (lines.length === 0 || lines.every(line => !line.trim())) return triggerText;
-      return lines.map(line => {
-        if (!line.trim() || promptHasAnyTrigger(line, triggerWords)) return line;
-        return `${triggerText}, ${line}`;
-      }).join('\n');
+      return lines
+        .map(line => {
+          if (!line.trim() || promptHasAnyTrigger(line, triggerWords)) return line;
+          return `${triggerText}, ${line}`;
+        })
+        .join('\n');
     });
     setJsonPromptItems(null);
     setImportSummary('');
@@ -915,8 +917,11 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     <>
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
-          <Wand2 className="h-4 w-4 text-cyan-300" />
-          <h1 className="text-base font-semibold">Generate Images</h1>
+          <Wand2 className="h-4 w-4 text-brand-300" />
+          <h1 className="text-base font-semibold">Generate</h1>
+          <span className="hidden text-sm text-gray-400 sm:inline">
+            / {projectID ? 'Project workspace' : 'Local workspace'}
+          </span>
         </div>
         <div className="flex-1"></div>
         {gpuList.length > 0 && (
@@ -928,16 +933,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
             />
           </div>
         )}
-        <Button
-          className="operator-button border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900"
-          onClick={handleGenerate}
-          disabled={isBusy || !isSettingsLoaded || !isGPUInfoLoaded}
-          title={primaryButtonLabel}
-          aria-label={primaryButtonLabel}
-        >
-          {isBusy ? <Wand2 className="h-4 w-4 animate-pulse" /> : <ImagePlus className="h-4 w-4" />}
-          <span className="hidden sm:inline">{primaryButtonLabel}</span>
-        </Button>
       </TopBar>
 
       <MainContent>
@@ -950,149 +945,144 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
             </ul>
           </PageNotice>
         )}
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
-          <form
-            className="operator-panel space-y-4 p-3"
-            onSubmit={event => {
-              event.preventDefault();
-              void handleGenerate();
-            }}
-          >
-            <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
-              <Wand2 className="h-5 w-5 text-blue-400" />
-              <h2 className="font-medium text-gray-100">Prompt</h2>
-            </div>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".txt,.json,text/plain,application/json"
-              className="hidden"
-              onChange={event => {
-                const file = event.target.files?.[0];
-                if (file) void handlePromptFileImport(file);
-              }}
-            />
-
-            <TextInput label="Job Name" value={jobName} onChange={setJobName} required />
-            <div>
-              <div className="mb-1 mt-2 flex items-center justify-between gap-2">
-                <label className="block text-xs text-gray-300">Prompts</label>
-                <Button
-                  type="button"
-                  className="operator-button shrink-0 px-2 py-1 text-xs"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isBusy}
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Import</span>
-                </Button>
-              </div>
-              <TextAreaInput value={prompts} onChange={handlePromptTextChange} rows={5} required />
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                <span>
-                  {imageCount} image{imageCount === 1 ? '' : 's'} requested
-                </span>
-                {importSummary && (
-                  <span className="inline-flex items-center gap-1 border border-gray-800 bg-gray-950 px-2 py-1 text-gray-300">
-                    <FileJson className="h-3.5 w-3.5" />
-                    {importSummary}
-                  </span>
-                )}
-                {imageCount > 1 && <span className="text-amber-300">Multiple images will be created as a job.</span>}
-              </div>
-            </div>
-            <TextAreaInput label="Negative Prompt" value={negativePrompt} onChange={setNegativePrompt} rows={2} />
-
-            <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="Width" value={width} onChange={setWidth} min={64} max={4096} />
-              <NumberInput label="Height" value={height} onChange={setHeight} min={64} max={4096} />
-              <NumberInput label="Seed" value={seed} onChange={setSeed} />
-              <NumberInput label="Images per Prompt" value={numRepeats} onChange={setNumRepeats} min={1} max={100} />
-              <NumberInput label="Guidance" value={guidanceScale} onChange={setGuidanceScale} min={0} max={30} />
-              <NumberInput label="Steps" value={sampleSteps} onChange={setSampleSteps} min={1} max={200} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <SelectInput label="Sampler" value={sampler} onChange={setSampler} options={samplerOptions} />
-              <SelectInput label="Format" value={imageFormat} onChange={setImageFormat} options={imageFormatOptions} />
-            </div>
-
-            <FormGroup label="Run">
-              <Checkbox label="Start job now" checked={startImmediately} onChange={setStartImmediately} />
-              <Checkbox label="Write prompt files" checked={writePromptFile} onChange={setWritePromptFile} />
-            </FormGroup>
-
-            <FormGroup label="Backend">
-              <SelectInput
-                label="Generation Backend"
-                value={generationBackend}
-                onChange={value => setGenerationBackend(value as GenerationBackend)}
-                options={generationBackendOptions}
-              />
-              {generationBackend === 'comfy' && (
-                <div className="grid grid-cols-1 gap-3 pt-2">
-                  <div className="grid grid-cols-2 gap-3">
-                    <SelectInput
-                      label="Comfy Mode"
-                      value={comfyMode}
-                      onChange={value => setComfyMode(value as ComfyMode)}
-                      options={comfyModeOptions}
-                    />
-                    <SelectInput
-                      label="On Error"
-                      value={comfyOnError}
-                      onChange={value => setComfyOnError(value as ComfyOnError)}
-                      options={comfyOnErrorOptions}
-                    />
+        <div className="studio-generation-layout">
+          <div className="studio-generation-main">
+            <div className="studio-generation-canvas">
+              {status === 'generating' && (
+                <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
+                  <div className="flex items-center">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {cancelRequested
+                      ? 'Canceling generation'
+                      : isManagedComfyGeneration
+                        ? 'Preparing managed ComfyUI, then generating image'
+                        : 'Generating image'}
                   </div>
-                  {comfyMode === 'external' ? (
-                    <TextInput
-                      label="Comfy URL"
-                      value={comfyServerUrl}
-                      onChange={setComfyServerUrl}
-                      placeholder="http://127.0.0.1:8188"
-                    />
-                  ) : (
-                    <>
-                      <Checkbox
-                        label="Install Managed ComfyUI"
-                        checked={settings.COMFY_AUTO_INSTALL === 'true' || comfyManagedInstall}
-                        onChange={setComfyManagedInstall}
-                        disabled={settings.COMFY_AUTO_INSTALL === 'true'}
-                      />
-                      <TextInput
-                        label="Comfy Root"
-                        value={comfyRoot}
-                        onChange={setComfyRoot}
-                        placeholder=".aitk_comfy/ComfyUI"
-                      />
-                    </>
+                  {isManagedComfyGeneration && !cancelRequested && (
+                    <p className="max-w-md text-center text-xs text-gray-500">
+                      If managed ComfyUI is missing, AI Toolkit will download and install it before this image is
+                      generated.
+                    </p>
                   )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <TextInput
-                      label="Workflow"
-                      value={comfyWorkflowName}
-                      onChange={setComfyWorkflowName}
-                      placeholder="auto"
-                    />
-                    <TextInput
-                      label="Workflow JSON"
-                      value={comfyWorkflowPath}
-                      onChange={setComfyWorkflowPath}
-                      placeholder="optional path"
-                    />
+                  <Button
+                    type="button"
+                    onClick={cancelInlineGeneration}
+                    disabled={cancelRequested}
+                    className="operator-button border-red-800 bg-red-950 px-3 py-1.5 text-xs text-red-100 hover:bg-red-900 disabled:cursor-wait"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    {cancelRequested ? 'Canceling...' : 'Cancel'}
+                  </Button>
+                </div>
+              )}
+
+              {status !== 'generating' && inlineImagePath && (
+                <div className="overflow-hidden border border-gray-800 bg-gray-950">
+                  <img
+                    src={getMediaUrl(inlineImagePath)}
+                    alt="Generated image"
+                    className="max-h-[640px] w-full object-contain"
+                  />
+                  <div className="truncate border-t border-gray-800 px-3 py-2 text-xs text-gray-400">
+                    {inlineImagePath}
                   </div>
                 </div>
               )}
-            </FormGroup>
-          </form>
 
-          <div className="space-y-6">
-            <div className="operator-panel p-3">
+              {status !== 'generating' && !inlineImagePath && !inlineError && !inlineMessage && (
+                <div className="studio-canvas-empty">
+                  <ImagePlus className="mb-6 h-16 w-16 text-gray-600" strokeWidth={1} />
+                  <h2 className="text-2xl font-medium text-gray-100">Room for your next idea.</h2>
+                  <p className="mt-3 text-sm text-gray-400">Write a prompt to create your first image.</p>
+                </div>
+              )}
+
+              {inlineMessage && status !== 'generating' && (
+                <div role="status" className="mt-3 border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
+                  {inlineMessage}
+                </div>
+              )}
+
+              {inlineError && (
+                <div role="alert" className="mt-3 border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+                  {inlineError}
+                </div>
+              )}
+            </div>
+
+            <form
+              className="operator-panel studio-prompt-composer"
+              onSubmit={event => {
+                event.preventDefault();
+                void handleGenerate();
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.json,text/plain,application/json"
+                className="hidden"
+                onChange={event => {
+                  const file = event.target.files?.[0];
+                  if (file) void handlePromptFileImport(file);
+                }}
+              />
+
+              <div>
+                <div className="mb-1 mt-2 flex items-center justify-between gap-2">
+                  <span className="block text-sm font-medium text-gray-300">Prompt</span>
+                  <Button
+                    type="button"
+                    className="operator-button shrink-0 px-2 py-1 text-xs"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isBusy}
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Import</span>
+                  </Button>
+                </div>
+                <TextAreaInput
+                  label="Describe your image"
+                  value={prompts}
+                  onChange={handlePromptTextChange}
+                  rows={3}
+                  required
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                  <span>
+                    {imageCount} image{imageCount === 1 ? '' : 's'} requested
+                  </span>
+                  {importSummary && (
+                    <span className="inline-flex items-center gap-1 border border-gray-800 bg-gray-950 px-2 py-1 text-gray-300">
+                      <FileJson className="h-3.5 w-3.5" />
+                      {importSummary}
+                    </span>
+                  )}
+                  {imageCount > 1 && <span className="text-amber-300">Multiple images will be created as a job.</span>}
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs text-gray-400">
+                  {width} &times; {height} &middot; {numRepeats} per prompt &middot; Seed{' '}
+                  {seed === -1 ? 'random' : seed}
+                </span>
+                <Button
+                  type="submit"
+                  className="operator-button-primary h-11 px-5"
+                  disabled={isBusy || !isSettingsLoaded || !isGPUInfoLoaded}
+                >
+                  {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                  {primaryButtonLabel}
+                </Button>
+              </div>
+            </form>
+          </div>
+          <aside className="operator-panel studio-generation-settings" aria-label="Generation settings">
+            <div className="space-y-5">
               <div className="mb-3 flex items-center gap-2 border-b border-gray-800 pb-2">
-                <Layers className="h-5 w-5 text-amber-400" />
-                <h2 className="font-medium text-gray-100">Model</h2>
+                <Layers className="h-5 w-5 text-brand-400" />
+                <h2 className="font-medium text-gray-100">Generation settings</h2>
               </div>
 
               <input
@@ -1124,9 +1114,9 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
                   type="button"
                   aria-pressed={!useLora}
                   onClick={() => setUseLora(false)}
-                    className={`border px-3 py-2 text-sm ${
+                  className={`border px-3 py-2 text-sm ${
                     !useLora
-                      ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                      ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                       : 'border-gray-700 bg-gray-950 text-gray-300 hover:border-gray-500'
                   }`}
                 >
@@ -1136,9 +1126,9 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
                   type="button"
                   aria-pressed={useLora}
                   onClick={() => handleUseLoraChange(true)}
-                    className={`border px-3 py-2 text-sm ${
+                  className={`border px-3 py-2 text-sm ${
                     useLora
-                      ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                      ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                       : 'border-gray-700 bg-gray-950 text-gray-300 hover:border-gray-500'
                   }`}
                 >
@@ -1214,7 +1204,11 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
                             {word}
                           </button>
                         ))}
-                        <Button type="button" className="operator-button px-2 py-1 text-xs" onClick={insertSelectedLoraTrigger}>
+                        <Button
+                          type="button"
+                          className="operator-button px-2 py-1 text-xs"
+                          onClick={insertSelectedLoraTrigger}
+                        >
                           Insert
                         </Button>
                       </div>
@@ -1240,186 +1234,231 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
                   onChange={handleArchChange}
                   options={groupedModelOptions}
                 />
-                <CreatableSelectInput
+                <TextInput
                   label="Base Model"
                   value={modelConfig.name_or_path}
                   onChange={value => setModelConfig(current => ({ ...current, name_or_path: value }))}
-                  options={[]}
                   placeholder="Path or Hugging Face repo"
                 />
 
                 <div className="grid grid-cols-2 gap-3">
-                  <SelectInput
-                    label="Dtype"
-                    value={String(modelConfig.dtype || 'bf16')}
-                    onChange={value => setModelConfig(current => ({ ...current, dtype: value }))}
-                    options={dtypeOptions}
-                  />
-                  <SelectInput
-                    label="Transformer Quantization"
-                    value={modelConfig.quantize ? modelConfig.qtype : ''}
-                    onChange={value =>
-                      setModelConfig(current => ({
-                        ...current,
-                        quantize: value !== '',
-                        qtype: value || 'qfloat8',
-                      }))
-                    }
-                    options={quantizationOptions}
-                  />
-                  <SelectInput
-                    label="Text Encoder Quantization"
-                    value={modelConfig.quantize_te ? modelConfig.qtype_te : ''}
-                    onChange={value =>
-                      setModelConfig(current => ({
-                        ...current,
-                        quantize_te: value !== '',
-                        qtype_te: value || 'qfloat8',
-                      }))
-                    }
-                    options={quantizationOptions}
-                  />
-                  <div className="pt-7">
-                    <Checkbox
-                      label="Low VRAM"
-                      checked={Boolean(modelConfig.low_vram)}
-                      onChange={value => setModelConfig(current => ({ ...current, low_vram: value }))}
+                  <NumberInput label="Width" value={width} onChange={setWidth} min={64} max={4096} />
+                  <NumberInput label="Height" value={height} onChange={setHeight} min={64} max={4096} />
+                  <NumberInput label="Guidance" value={guidanceScale} onChange={setGuidanceScale} min={0} max={30} />
+                  <NumberInput label="Steps" value={sampleSteps} onChange={setSampleSteps} min={1} max={200} />
+                </div>
+
+                <details className="studio-disclosure">
+                  <summary>Output options</summary>
+                  <div className="grid grid-cols-2 gap-3">
+                    {' '}
+                    <NumberInput label="Seed" value={seed} onChange={setSeed} />
+                    <NumberInput
+                      label="Images per Prompt"
+                      value={numRepeats}
+                      onChange={setNumRepeats}
+                      min={1}
+                      max={100}
+                    />
+                    <SelectInput label="Sampler" value={sampler} onChange={setSampler} options={samplerOptions} />
+                    <SelectInput
+                      label="Format"
+                      value={imageFormat}
+                      onChange={setImageFormat}
+                      options={imageFormatOptions}
                     />
                   </div>
-                  {supportsLayerOffloading && (
-                    <div className="col-span-2 border border-gray-800 bg-gray-950 px-3 py-3">
-                      <Checkbox
-                        label="Layer Offloading"
-                        checked={Boolean(modelConfig.layer_offloading)}
-                        onChange={handleLayerOffloadingChange}
+                </details>
+
+                <details className="studio-disclosure">
+                  <summary>Negative prompt</summary>
+                  <div>
+                    {' '}
+                    <TextAreaInput
+                      label="Negative Prompt"
+                      value={negativePrompt}
+                      onChange={setNegativePrompt}
+                      rows={2}
+                    />
+                  </div>
+                </details>
+                <details className="studio-disclosure">
+                  <summary>Advanced model settings</summary>
+                  <div>
+                    {' '}
+                    <div className="grid grid-cols-2 gap-3">
+                      <SelectInput
+                        label="Dtype"
+                        value={String(modelConfig.dtype || 'bf16')}
+                        onChange={value => setModelConfig(current => ({ ...current, dtype: value }))}
+                        options={dtypeOptions}
                       />
-                      {modelConfig.layer_offloading && (
-                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                          <SelectInput
-                            label="Offload Backend"
-                            value={modelConfig.layer_offloading_backend ?? layerOffloadingMemoryProfile.backend}
-                            onChange={value =>
-                              setModelConfig(current => ({
-                                ...current,
-                                layer_offloading_backend: value as LayerOffloadingBackend,
-                              }))
-                            }
-                            options={layerOffloadingBackendOptions}
+                      <SelectInput
+                        label="Transformer Quantization"
+                        value={modelConfig.quantize ? modelConfig.qtype : ''}
+                        onChange={value =>
+                          setModelConfig(current => ({
+                            ...current,
+                            quantize: value !== '',
+                            qtype: value || 'qfloat8',
+                          }))
+                        }
+                        options={quantizationOptions}
+                      />
+                      <SelectInput
+                        label="Text Encoder Quantization"
+                        value={modelConfig.quantize_te ? modelConfig.qtype_te : ''}
+                        onChange={value =>
+                          setModelConfig(current => ({
+                            ...current,
+                            quantize_te: value !== '',
+                            qtype_te: value || 'qfloat8',
+                          }))
+                        }
+                        options={quantizationOptions}
+                      />
+                      <div className="pt-7">
+                        <Checkbox
+                          label="Low VRAM"
+                          checked={Boolean(modelConfig.low_vram)}
+                          onChange={value => setModelConfig(current => ({ ...current, low_vram: value }))}
+                        />
+                      </div>
+                      {supportsLayerOffloading && (
+                        <div className="col-span-2 border border-gray-800 bg-gray-950 px-3 py-3">
+                          <Checkbox
+                            label="Layer Offloading"
+                            checked={Boolean(modelConfig.layer_offloading)}
+                            onChange={handleLayerOffloadingChange}
                           />
-                          <SliderInput
-                            label="Transformer Offload %"
-                            value={Math.round(
-                              toFiniteNumber(modelConfig.layer_offloading_transformer_percent, 1.0) * 100,
-                            )}
-                            onChange={value =>
-                              handleLayerOffloadingPercentChange('layer_offloading_transformer_percent', value)
-                            }
-                            min={0}
-                            max={100}
-                            step={1}
-                          />
-                          <SliderInput
-                            label="Text Encoder Offload %"
-                            value={Math.round(
-                              toFiniteNumber(modelConfig.layer_offloading_text_encoder_percent, 1.0) * 100,
-                            )}
-                            onChange={value =>
-                              handleLayerOffloadingPercentChange('layer_offloading_text_encoder_percent', value)
-                            }
-                            min={0}
-                            max={100}
-                            step={1}
-                          />
+                          {modelConfig.layer_offloading && (
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <SelectInput
+                                label="Offload Backend"
+                                value={modelConfig.layer_offloading_backend ?? layerOffloadingMemoryProfile.backend}
+                                onChange={value =>
+                                  setModelConfig(current => ({
+                                    ...current,
+                                    layer_offloading_backend: value as LayerOffloadingBackend,
+                                  }))
+                                }
+                                options={layerOffloadingBackendOptions}
+                              />
+                              <SliderInput
+                                label="Transformer Offload %"
+                                value={Math.round(
+                                  toFiniteNumber(modelConfig.layer_offloading_transformer_percent, 1.0) * 100,
+                                )}
+                                onChange={value =>
+                                  handleLayerOffloadingPercentChange('layer_offloading_transformer_percent', value)
+                                }
+                                min={0}
+                                max={100}
+                                step={1}
+                              />
+                              <SliderInput
+                                label="Text Encoder Offload %"
+                                value={Math.round(
+                                  toFiniteNumber(modelConfig.layer_offloading_text_encoder_percent, 1.0) * 100,
+                                )}
+                                onChange={value =>
+                                  handleLayerOffloadingPercentChange('layer_offloading_text_encoder_percent', value)
+                                }
+                                min={0}
+                                max={100}
+                                step={1}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <Button
-                    type="button"
-                    className="operator-button border-emerald-800 bg-emerald-950/60 text-emerald-100 hover:bg-emerald-900"
-                    onClick={handleGenerate}
-                    disabled={isBusy || !isSettingsLoaded || !isGPUInfoLoaded}
-                  >
-                    {primaryButtonLabel}
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
+                  </div>
+                </details>
+                <details className="studio-disclosure">
+                  <summary>Run settings</summary>
+                  <div className="space-y-4">
+                    <TextInput label="Job name" value={jobName} onChange={setJobName} />{' '}
+                    <FormGroup label="Run">
+                      <Checkbox label="Start job now" checked={startImmediately} onChange={setStartImmediately} />
+                      <Checkbox label="Write prompt files" checked={writePromptFile} onChange={setWritePromptFile} />
+                    </FormGroup>
+                    <FormGroup label="Backend">
+                      <SelectInput
+                        label="Generation Backend"
+                        value={generationBackend}
+                        onChange={value => setGenerationBackend(value as GenerationBackend)}
+                        options={generationBackendOptions}
+                      />
+                      {generationBackend === 'comfy' && (
+                        <div className="grid grid-cols-1 gap-3 pt-2">
+                          <div className="grid grid-cols-2 gap-3">
+                            <SelectInput
+                              label="Comfy Mode"
+                              value={comfyMode}
+                              onChange={value => setComfyMode(value as ComfyMode)}
+                              options={comfyModeOptions}
+                            />
+                            <SelectInput
+                              label="On Error"
+                              value={comfyOnError}
+                              onChange={value => setComfyOnError(value as ComfyOnError)}
+                              options={comfyOnErrorOptions}
+                            />
+                          </div>
+                          {comfyMode === 'external' ? (
+                            <TextInput
+                              label="Comfy URL"
+                              value={comfyServerUrl}
+                              onChange={setComfyServerUrl}
+                              placeholder="http://127.0.0.1:8188"
+                            />
+                          ) : (
+                            <>
+                              <Checkbox
+                                label="Install Managed ComfyUI"
+                                checked={settings.COMFY_AUTO_INSTALL === 'true' || comfyManagedInstall}
+                                onChange={setComfyManagedInstall}
+                                disabled={settings.COMFY_AUTO_INSTALL === 'true'}
+                              />
+                              <TextInput
+                                label="Comfy Root"
+                                value={comfyRoot}
+                                onChange={setComfyRoot}
+                                placeholder=".aitk_comfy/ComfyUI"
+                              />
+                            </>
+                          )}
+                          <div className="grid grid-cols-2 gap-3">
+                            <TextInput
+                              label="Workflow"
+                              value={comfyWorkflowName}
+                              onChange={setComfyWorkflowName}
+                              placeholder="auto"
+                            />
+                            <TextInput
+                              label="Workflow JSON"
+                              value={comfyWorkflowPath}
+                              onChange={setComfyWorkflowPath}
+                              placeholder="optional path"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </FormGroup>
+                  </div>
+                </details>
               </div>
             </div>
-
-            <div className="operator-panel p-3">
-              <div className="mb-3 flex items-center gap-2 border-b border-gray-800 pb-2">
-                <ImagePlus className="h-5 w-5 text-green-400" />
-                <h2 className="font-medium text-gray-100">Result</h2>
-              </div>
-
-              {status === 'generating' && (
-                <div className="flex min-h-64 flex-col items-center justify-center gap-3 border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
-                  <div className="flex items-center">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {cancelRequested
-                      ? 'Canceling generation'
-                      : isManagedComfyGeneration
-                        ? 'Preparing managed ComfyUI, then generating image'
-                        : 'Generating image'}
-                  </div>
-                  {isManagedComfyGeneration && !cancelRequested && (
-                    <p className="max-w-md text-center text-xs text-gray-500">
-                      If managed ComfyUI is missing, AI Toolkit will download and install it before this image is generated.
-                    </p>
-                  )}
-                  <Button
-                    type="button"
-                    onClick={cancelInlineGeneration}
-                    disabled={cancelRequested}
-                    className="operator-button border-red-800 bg-red-950 px-3 py-1.5 text-xs text-red-100 hover:bg-red-900 disabled:cursor-wait"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                    {cancelRequested ? 'Canceling...' : 'Cancel'}
-                  </Button>
-                </div>
-              )}
-
-              {status !== 'generating' && inlineImagePath && (
-                <div className="overflow-hidden border border-gray-800 bg-gray-950">
-                  <img
-                    src={getMediaUrl(inlineImagePath)}
-                    alt="Generated image"
-                    className="max-h-[640px] w-full object-contain"
-                  />
-                  <div className="truncate border-t border-gray-800 px-3 py-2 text-xs text-gray-400">
-                    {inlineImagePath}
-                  </div>
-                </div>
-              )}
-
-              {status !== 'generating' && !inlineImagePath && !inlineError && !inlineMessage && (
-                <div className="flex min-h-64 items-center justify-center border border-dashed border-gray-800 bg-gray-950 px-4 text-center text-sm text-gray-500">
-                  Single-image generations appear here. Multiple prompts or repeats create a generate job.
-                </div>
-              )}
-
-              {inlineMessage && status !== 'generating' && (
-                <div className="mt-3 border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
-                  {inlineMessage}
-                </div>
-              )}
-
-              {inlineError && (
-                <div className="mt-3 border border-red-900 bg-red-950/30 px-3 py-2 text-sm text-red-300">
-                  {inlineError}
-                </div>
-              )}
-            </div>
-
-            <div className="operator-panel p-3">
-              <h2 className="mb-4 font-medium text-gray-100">Generation Jobs</h2>
+          </aside>
+          <details className="operator-panel studio-generation-jobs studio-disclosure">
+            <summary>
+              Generation jobs <span className="ml-auto text-xs font-normal text-gray-400">View jobs</span>
+            </summary>
+            <div>
               <JobsTable job_type="generate" projectID={projectID} />
             </div>
-          </div>
+          </details>
         </div>
       </MainContent>
     </>

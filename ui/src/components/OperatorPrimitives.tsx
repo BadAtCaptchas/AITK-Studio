@@ -7,7 +7,7 @@ type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 
 const toneClasses: Record<Tone, string> = {
   neutral: 'border-gray-700 bg-gray-900/70 text-gray-300',
-  info: 'border-cyan-700/70 bg-cyan-950/30 text-cyan-200',
+  info: 'border-brand-700/70 bg-brand-950/30 text-brand-200',
   success: 'border-emerald-700/70 bg-emerald-950/30 text-emerald-200',
   warning: 'border-amber-700/70 bg-amber-950/30 text-amber-200',
   danger: 'border-rose-700/70 bg-rose-950/30 text-rose-200',
@@ -74,7 +74,7 @@ export function ProgressBar({
 }) {
   const safeValue = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
   const fillClass = {
-    info: 'bg-cyan-500',
+    info: 'bg-brand-500',
     success: 'bg-emerald-500',
     warning: 'bg-amber-500',
     danger: 'bg-rose-500',

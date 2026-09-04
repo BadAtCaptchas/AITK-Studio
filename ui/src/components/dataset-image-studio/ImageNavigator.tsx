@@ -203,8 +203,8 @@ function ThumbnailTile({
         'group relative flex-shrink-0 overflow-hidden rounded-[3px] border border-b-2 bg-gray-950 text-left transition-[border-color,box-shadow,transform]',
         compact ? 'h-[70px] w-24 sm:h-[82px] sm:w-28 xl:h-[92px] xl:w-36' : 'w-full',
         {
-          'border-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.95),0_8px_22px_rgba(0,0,0,0.24)]': selected,
-          'border-cyan-500 shadow-[0_0_0_1px_rgba(6,182,212,0.8)]': !selected && bulkSelected,
+          'border-brand-400 shadow-[0_0_0_1px_rgb(var(--brand-400)/0.95),0_8px_22px_rgba(0,0,0,0.24)]': selected,
+          'border-brand-500 shadow-[0_0_0_1px_rgba(6,182,212,0.8)]': !selected && bulkSelected,
           'border-x-gray-800 border-t-gray-800 border-b-emerald-500 hover:border-x-gray-700 hover:border-t-gray-700':
             !selected && !bulkSelected && reviewState === 'approved',
           'border-x-gray-800 border-t-gray-800 border-b-amber-400 hover:border-x-gray-700 hover:border-t-gray-700':
@@ -256,7 +256,7 @@ function ThumbnailTile({
         </div>
         <div
           className={classNames(
-            'flex items-center gap-2 overflow-hidden border-t border-gray-900 bg-[#080d12] px-2 leading-none text-gray-300',
+            'flex items-center gap-2 overflow-hidden border-t border-gray-900 bg-gray-950 px-2 leading-none text-gray-300',
             compact ? 'h-6 text-[11px] sm:h-7 sm:text-xs' : 'h-7 text-[11px]',
           )}
         >
@@ -272,7 +272,7 @@ function ThumbnailTile({
         </div>
       </button>
       {selected && (
-        <span className="pointer-events-none absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-[#021014] shadow-lg">
+        <span className="pointer-events-none absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-brand-400 text-[var(--brand-ink)] shadow-lg">
           <Check className="h-4 w-4" strokeWidth={3} />
         </span>
       )}
@@ -289,7 +289,7 @@ function ThumbnailTile({
           className={classNames(
             'absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-[3px] border opacity-0 backdrop-blur transition-opacity group-hover:opacity-100',
             bulkSelected
-              ? 'border-cyan-400 bg-cyan-500 text-gray-950 opacity-100'
+              ? 'border-brand-400 bg-brand-500 text-[var(--brand-ink)] opacity-100'
               : 'border-gray-700 bg-gray-950/80 text-gray-300 hover:border-gray-500',
           )}
         >
@@ -1004,17 +1004,17 @@ export function ImageNavigator({
 
     return (
       <section
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#050a0f]"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-gray-950"
         aria-label="Dataset gallery"
       >
-        <div className="flex h-[61px] flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-[#202429] px-4">
+        <div className="flex h-[61px] flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-gray-800 px-4">
           <div className="relative w-[230px] flex-shrink-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
             <input
               value={searchQuery}
               onChange={event => setSearchQuery(event.target.value)}
               placeholder="Search photos & captions"
-              className="h-[34px] w-full rounded-[4px] border border-[#273039] bg-[#080d12] pl-9 pr-8 text-[13px] text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-400"
+              className="h-[34px] w-full rounded-[4px] border border-gray-800 bg-gray-950 pl-9 pr-8 text-[13px] text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-400"
               aria-label="Search photos and captions"
             />
             {searchQuery && (
@@ -1036,9 +1036,9 @@ export function ImageNavigator({
                 type="button"
                 onClick={() => setFilter(option.value)}
                 className={classNames(
-                  'rounded-[4px] border border-[#273039] bg-[#080d12] px-3 transition-colors hover:bg-gray-900',
+                  'rounded-[4px] border border-gray-800 bg-gray-950 px-3 transition-colors hover:bg-gray-900',
                   {
-                    'border-cyan-500/70 bg-cyan-950/40 text-cyan-300':
+                    'border-brand-500/70 bg-brand-950/40 text-brand-300':
                       filter === option.value && option.value === 'all',
                     'border-rose-800/70 bg-rose-950/30 text-rose-400':
                       filter === option.value && option.value === 'needs-caption',
@@ -1046,7 +1046,7 @@ export function ImageNavigator({
                       filter === option.value && option.value === 'needs-review',
                     'border-emerald-800/70 bg-emerald-950/30 text-emerald-400':
                       filter === option.value && option.value === 'approved',
-                    'text-cyan-300': filter !== option.value && option.value === 'all',
+                    'text-brand-300': filter !== option.value && option.value === 'all',
                     'text-rose-400': filter !== option.value && option.value === 'needs-caption',
                     'text-amber-300': filter !== option.value && option.value === 'needs-review',
                     'text-emerald-400': filter !== option.value && option.value === 'approved',
@@ -1066,7 +1066,7 @@ export function ImageNavigator({
             ))}
           </div>
 
-          <div className="flex h-[34px] flex-shrink-0 overflow-hidden rounded-[4px] border border-[#273039] bg-[#080d12]">
+          <div className="flex h-[34px] flex-shrink-0 overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
             <span className="flex items-center pl-2 text-[11px] text-gray-500">Sort:</span>
             <select
               value={sortMode}
@@ -1075,7 +1075,7 @@ export function ImageNavigator({
                 setSortMode(nextMode);
                 if (nextMode !== sortMode) setSortDirection(defaultSortDirection(nextMode));
               }}
-              className="h-full w-[96px] bg-[#080d12] px-1.5 text-[12px] text-gray-200 outline-none"
+              className="h-full w-[96px] bg-gray-950 px-1.5 text-[12px] text-gray-200 outline-none"
               aria-label="Sort gallery"
             >
               {sortOptions.map(option => (
@@ -1089,7 +1089,7 @@ export function ImageNavigator({
               title={directionTitle}
               disabled={sortMode === 'original'}
               onClick={() => setSortDirection(direction => (direction === 'desc' ? 'asc' : 'desc'))}
-              className="border-l border-[#273039] px-2 text-[10px] font-semibold text-gray-500 hover:bg-gray-900 disabled:opacity-35"
+              className="border-l border-gray-800 px-2 text-[10px] font-semibold text-gray-500 hover:bg-gray-900 disabled:opacity-35"
             >
               {directionLabel}
             </button>
@@ -1108,7 +1108,7 @@ export function ImageNavigator({
               step={1}
               value={thumbSize === 'sm' ? 0 : thumbSize === 'md' ? 1 : 2}
               onChange={event => setThumbSize((['sm', 'md', 'lg'] as ThumbSize[])[Number(event.target.value)] || 'md')}
-              className="h-4 min-w-0 flex-1 cursor-pointer accent-cyan-400"
+              className="h-4 min-w-0 flex-1 cursor-pointer accent-brand-400"
               aria-label="Gallery density"
             />
             <Grid3X3 className="h-4 w-4 flex-shrink-0" />
@@ -1122,14 +1122,14 @@ export function ImageNavigator({
             className={classNames(
               'relative inline-flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[4px] border text-[12px] font-medium',
               batchPanelOpen || selectedBulkCount > 0
-                ? 'border-cyan-500/60 bg-cyan-950/40 text-cyan-100'
-                : 'border-[#273039] bg-[#080d12] text-gray-300 hover:bg-gray-900',
+                ? 'border-brand-500/60 bg-brand-950/40 text-brand-100'
+                : 'border-gray-800 bg-gray-950 text-gray-300 hover:bg-gray-900',
             )}
           >
             <SlidersHorizontal className="h-3.5 w-3.5" />
             <span className="sr-only">Batch actions</span>
             {selectedBulkCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-400 px-1 text-[9px] font-bold text-gray-950">
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-400 px-1 text-[9px] font-bold text-[var(--brand-ink)]">
                 {selectedBulkCount}
               </span>
             )}
@@ -1140,7 +1140,7 @@ export function ImageNavigator({
           <button
             type="button"
             onClick={onAddImages}
-            className="inline-flex h-[34px] flex-shrink-0 items-center gap-2 rounded-[4px] border border-[#273039] bg-[#0b1219] px-3 text-[12px] font-semibold text-gray-100 hover:border-gray-600 hover:bg-gray-900"
+            className="inline-flex h-[34px] flex-shrink-0 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-[12px] font-semibold text-gray-100 hover:border-gray-600 hover:bg-gray-900"
           >
             <Upload className="h-4 w-4" />
             Add images
@@ -1149,9 +1149,9 @@ export function ImageNavigator({
         </div>
 
         {batchPanelOpen && (
-          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[#202429] bg-[#080d12] px-4 py-2">
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-800 bg-gray-950 px-4 py-2">
             <span className="inline-flex h-8 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
-              <span className="h-2 w-2 rounded-full bg-cyan-400" />
+              <span className="h-2 w-2 rounded-full bg-brand-400" />
               {selectedBulkCount.toLocaleString()} selected
             </span>
             <button
@@ -1192,7 +1192,7 @@ export function ImageNavigator({
                   setBulkMessage('');
                 }}
                 placeholder="Find caption keywords"
-                className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 pl-8 pr-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
+                className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 pl-8 pr-2 text-xs text-gray-100 outline-none focus:border-brand-600"
               />
             </div>
             <label className="inline-flex h-8 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-400">
@@ -1206,7 +1206,7 @@ export function ImageNavigator({
             <input
               value={bulkDestinationName}
               onChange={event => setBulkDestinationName(event.target.value)}
-              className="h-8 w-40 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
+              className="h-8 w-40 rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-brand-600"
               aria-label="Destination dataset"
             />
             <button
@@ -1236,7 +1236,7 @@ export function ImageNavigator({
           </div>
         )}
 
-        <div ref={gridMeasureRef} className="relative min-h-0 flex-1 bg-[#05090d]">
+        <div ref={gridMeasureRef} className="relative min-h-0 flex-1 bg-gray-950">
           <div
             ref={setGridScroller}
             className="operator-scrollbar-none absolute inset-0 overflow-y-auto px-4 pb-3 pt-2"
@@ -1300,9 +1300,9 @@ export function ImageNavigator({
   }
 
   return (
-    <div className="flex min-w-0 max-w-full flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-[#080d12]">
+    <div className="flex min-w-0 max-w-full flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-gray-950">
       {drawerOpen && (
-        <div className="flex h-[42dvh] min-h-[230px] flex-col border-b border-gray-900 bg-[#080d12] xl:max-h-[440px]">
+        <div className="flex h-[42dvh] min-h-[230px] flex-col border-b border-gray-900 bg-gray-950 xl:max-h-[440px]">
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-900 px-2 py-2 xl:px-3">
             <div className="relative min-w-[180px] flex-1 sm:max-w-sm">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
@@ -1310,7 +1310,7 @@ export function ImageNavigator({
                 value={searchQuery}
                 onChange={event => setSearchQuery(event.target.value)}
                 placeholder="Search"
-                className="h-9 w-full rounded-md border border-gray-800 bg-gray-950 pl-8 pr-8 text-sm text-gray-100 outline-none focus:border-blue-600"
+                className="h-9 w-full rounded-md border border-gray-800 bg-gray-950 pl-8 pr-8 text-sm text-gray-100 outline-none focus:border-brand-600"
               />
               {searchQuery && (
                 <button
@@ -1335,7 +1335,7 @@ export function ImageNavigator({
                   type="button"
                   onClick={() => setFilter(option.value as DatasetNavigatorFilter)}
                   className={classNames('border-r border-gray-800 px-3 last:border-r-0 hover:bg-gray-900', {
-                    'bg-blue-600 text-white hover:bg-blue-600': filter === option.value,
+                    'bg-brand-500 text-[var(--brand-ink)] hover:bg-brand-500': filter === option.value,
                     'text-gray-300': filter !== option.value,
                   })}
                 >
@@ -1395,7 +1395,7 @@ export function ImageNavigator({
             </div>
 
             <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
-              {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />}
+              {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-400" />}
               {scanState.status === 'done' && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
               {scanState.status === 'error' && <span className="h-2 w-2 rounded-full bg-rose-400" />}
               <span>
@@ -1417,7 +1417,7 @@ export function ImageNavigator({
 
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-900 px-2 py-2 xl:px-3">
             <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
-              <span className="h-2 w-2 rounded-full bg-cyan-400" />
+              <span className="h-2 w-2 rounded-full bg-brand-400" />
               <span>{selectedBulkCount.toLocaleString()} selected</span>
             </div>
             <button
@@ -1462,7 +1462,7 @@ export function ImageNavigator({
                   setBulkMessage('');
                 }}
                 placeholder="Caption keywords"
-                className="h-9 w-full rounded-md border border-gray-800 bg-gray-950 pl-8 pr-8 text-sm text-gray-100 outline-none focus:border-cyan-600"
+                className="h-9 w-full rounded-md border border-gray-800 bg-gray-950 pl-8 pr-8 text-sm text-gray-100 outline-none focus:border-brand-600"
               />
               {captionKeywordQuery && (
                 <button
@@ -1492,13 +1492,13 @@ export function ImageNavigator({
             <input
               value={bulkDestinationName}
               onChange={event => setBulkDestinationName(event.target.value)}
-              className="h-9 min-w-[180px] rounded-md border border-gray-800 bg-gray-950 px-2 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              className="h-9 min-w-[180px] rounded-md border border-gray-800 bg-gray-950 px-2 text-sm text-gray-100 outline-none focus:border-brand-600"
               aria-label="Destination dataset"
               title="Destination dataset"
             />
 
             <div className="flex h-9 items-center gap-2 rounded-md border border-gray-800 bg-gray-950 px-2 text-xs text-gray-300">
-              {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />}
+              {scanState.status === 'scanning' && <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-400" />}
               <span>{shownCaptionKeywordMatches.length.toLocaleString()} found</span>
               {captionPendingCount > 0 && (
                 <span className="text-gray-500">{captionPendingCount.toLocaleString()} pending</span>
@@ -1644,7 +1644,7 @@ export function ImageNavigator({
                 if (event.key === 'Enter') commitScrub();
               }}
               onBlur={commitScrub}
-              className="relative z-10 h-9 w-full cursor-pointer accent-blue-500"
+              className="relative z-10 h-9 w-full cursor-pointer accent-brand-500"
               title="Dataset scrubber"
             />
           </div>
@@ -1665,7 +1665,7 @@ export function ImageNavigator({
                 event.currentTarget.blur();
               }
             }}
-            className="h-9 w-28 flex-shrink-0 rounded-md border border-gray-800 bg-gray-950 px-2 text-center text-sm font-medium text-gray-100 outline-none focus:border-blue-600 sm:w-36"
+            className="h-9 w-28 flex-shrink-0 rounded-md border border-gray-800 bg-gray-950 px-2 text-center text-sm font-medium text-gray-100 outline-none focus:border-brand-600 sm:w-36"
             aria-label="Jump"
             title="Jump"
           />

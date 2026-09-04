@@ -94,9 +94,7 @@ function parseDatasetExplorerView(value: string | null | undefined): DatasetExpl
 
 function readDatasetViewCookie() {
   if (typeof document === 'undefined') return null;
-  const cookie = document.cookie
-    .split('; ')
-    .find(value => value.startsWith(`${DATASET_VIEW_STORAGE_KEY}=`));
+  const cookie = document.cookie.split('; ').find(value => value.startsWith(`${DATASET_VIEW_STORAGE_KEY}=`));
   if (!cookie) return null;
   return parseDatasetExplorerView(decodeURIComponent(cookie.split('=').slice(1).join('=')));
 }
@@ -526,7 +524,15 @@ export default function Datasets() {
     const query = datasetFilter.trim().toLowerCase();
     if (!query) return tableRows;
     return tableRows.filter(row =>
-      [row.name, row.source, row.worker, row.project_name, row.project_id ? 'project' : 'global', row.encrypted ? 'encrypted' : 'plain', row.captions]
+      [
+        row.name,
+        row.source,
+        row.worker,
+        row.project_name,
+        row.project_id ? 'project' : 'global',
+        row.encrypted ? 'encrypted' : 'plain',
+        row.captions,
+      ]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
@@ -591,10 +597,7 @@ export default function Datasets() {
     () =>
       bulkUnlockTargets.filter(target => {
         const ref = datasetRowKey(target);
-        return (
-          bulkUnlockStatus[ref] !== 'unlocked' &&
-          bulkUnlockManifests[ref]?.crypto.kdf.type === 'PBKDF2-SHA256'
-        );
+        return bulkUnlockStatus[ref] !== 'unlocked' && bulkUnlockManifests[ref]?.crypto.kdf.type === 'PBKDF2-SHA256';
       }).length,
     [bulkUnlockManifests, bulkUnlockStatus, bulkUnlockTargets],
   );
@@ -606,10 +609,7 @@ export default function Datasets() {
     () => isBulkUnlocking || Object.values(bulkUnlockStatus).some(status => status === 'unlocking'),
     [bulkUnlockStatus, isBulkUnlocking],
   );
-  const combineEncryptedSources = useMemo(
-    () => combineSources.filter(source => source.encrypted),
-    [combineSources],
-  );
+  const combineEncryptedSources = useMemo(() => combineSources.filter(source => source.encrypted), [combineSources]);
   const combineWorkerID = combineSources.length > 0 ? datasetWorkerID(combineSources[0]) : 'local';
   const folderImportGroups = useMemo(() => {
     const groups = new Map<string, FolderImportEntry[]>();
@@ -646,7 +646,10 @@ export default function Datasets() {
       const selectedRows = tableRows.filter(row => next.has(row.ref));
       const existingWorkerID = selectedRows[0]?.worker_id;
       const existingScopeID = selectedRows[0]?.project_id || 'global';
-      if ((existingWorkerID && existingWorkerID !== workerID) || (selectedRows.length > 0 && existingScopeID !== scopeID)) {
+      if (
+        (existingWorkerID && existingWorkerID !== workerID) ||
+        (selectedRows.length > 0 && existingScopeID !== scopeID)
+      ) {
         alert('Select datasets from one worker and workspace at a time.');
         return previous;
       }
@@ -766,10 +769,7 @@ export default function Datasets() {
       for (const target of bulkUnlockTargets) {
         const ref = datasetRowKey(target);
         const manifest = bulkUnlockManifests[ref];
-        if (
-          bulkUnlockStatus[ref] === 'unlocked' ||
-          manifest?.crypto.kdf.type !== 'PBKDF2-SHA256'
-        ) {
+        if (bulkUnlockStatus[ref] === 'unlocked' || manifest?.crypto.kdf.type !== 'PBKDF2-SHA256') {
           continue;
         }
         await unlockBulkDataset(
@@ -862,10 +862,9 @@ export default function Datasets() {
             ...renameDataset,
             name: renamedName,
             worker_id: workerID,
-            ref:
-              renameProjectID
-                ? `aitk-dataset://project/${encodeURIComponent(renameProjectID)}/${encodeURIComponent(renamedName)}`
-                : workerID === 'local'
+            ref: renameProjectID
+              ? `aitk-dataset://project/${encodeURIComponent(renameProjectID)}/${encodeURIComponent(renamedName)}`
+              : workerID === 'local'
                 ? `aitk-dataset://local/${encodeURIComponent(renamedName)}`
                 : makeRemoteDatasetRef(workerID, renamedName),
           },
@@ -1012,11 +1011,14 @@ export default function Datasets() {
       if (!hfOutputName) {
         setHfOutputName(hfOutputNameFromDataset(preview.datasetID, preview.selectedSplit));
       }
-      const countText = preview.rowCount != null ? `${preview.rowCount} row${preview.rowCount === 1 ? '' : 's'}` : 'Preview ready';
+      const countText =
+        preview.rowCount != null ? `${preview.rowCount} row${preview.rowCount === 1 ? '' : 's'}` : 'Preview ready';
       setHfImportStatus(countText);
     } catch (error: any) {
       setHfPreview(null);
-      setHfImportError(error?.response?.data?.error || error?.message || 'Failed to load Hugging Face dataset preview.');
+      setHfImportError(
+        error?.response?.data?.error || error?.message || 'Failed to load Hugging Face dataset preview.',
+      );
       setHfImportStatus('');
     } finally {
       setIsLoadingHfPreview(false);
@@ -1047,7 +1049,7 @@ export default function Datasets() {
             ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedName)}`
             : workerID === 'local'
               ? `/datasets/${encodeURIComponent(importedName)}`
-            : `/datasets/${encodeURIComponent(importedName)}?worker_id=${encodeURIComponent(workerID)}`,
+              : `/datasets/${encodeURIComponent(importedName)}?worker_id=${encodeURIComponent(workerID)}`,
         );
       }
     } catch (error: any) {
@@ -1189,10 +1191,9 @@ export default function Datasets() {
             project_name: combineProjectID
               ? combineSources.find(source => datasetProjectID(source) === combineProjectID)?.project_name || null
               : null,
-            ref:
-              combineProjectID
-                ? `aitk-dataset://project/${encodeURIComponent(combineProjectID)}/${encodeURIComponent(combined.name)}`
-                : combineWorkerID === 'local'
+            ref: combineProjectID
+              ? `aitk-dataset://project/${encodeURIComponent(combineProjectID)}/${encodeURIComponent(combined.name)}`
+              : combineWorkerID === 'local'
                 ? combined.ref || `aitk-dataset://local/${encodeURIComponent(combined.name)}`
                 : makeRemoteDatasetRef(combineWorkerID, combined.name),
           },
@@ -1209,7 +1210,7 @@ export default function Datasets() {
             ? `/projects/${encodeURIComponent(combineProjectID)}/datasets/${encodeURIComponent(combined.name)}`
             : combineWorkerID === 'local'
               ? `/datasets/${encodeURIComponent(combined.name)}`
-            : `/datasets/${encodeURIComponent(combined.name)}?worker_id=${encodeURIComponent(combineWorkerID)}`,
+              : `/datasets/${encodeURIComponent(combined.name)}?worker_id=${encodeURIComponent(combineWorkerID)}`,
         );
       }
     } catch (error: any) {
@@ -1309,10 +1310,9 @@ export default function Datasets() {
         worker_id: workerID,
         project_id: activeProjectID,
         project_name: resourceScope.selectedProject?.name || null,
-        ref:
-          activeProjectID
-            ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(datasetName)}`
-            : workerID === 'local'
+        ref: activeProjectID
+          ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(datasetName)}`
+          : workerID === 'local'
             ? `${workerID}:${datasetName}`
             : makeRemoteDatasetRef(workerID, datasetName),
       },
@@ -1430,8 +1430,7 @@ export default function Datasets() {
         datasets
           .filter(
             dataset =>
-              datasetWorkerID(dataset) === folderImportWorkerID &&
-              datasetProjectID(dataset) === activeProjectID,
+              datasetWorkerID(dataset) === folderImportWorkerID && datasetProjectID(dataset) === activeProjectID,
           )
           .map(dataset => dataset.name.toLowerCase()),
       );
@@ -1480,7 +1479,7 @@ export default function Datasets() {
             ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedDatasetName)}`
             : folderImportWorkerID === 'local'
               ? `/datasets/${encodeURIComponent(importedDatasetName)}`
-            : `/datasets/${encodeURIComponent(importedDatasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
+              : `/datasets/${encodeURIComponent(importedDatasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
         );
       }
 
@@ -1584,8 +1583,8 @@ export default function Datasets() {
     row.project_id
       ? `/projects/${encodeURIComponent(row.project_id)}/datasets/${encodeURIComponent(row.name)}`
       : row.source === 'remote'
-      ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
-      : `/datasets/${encodeURIComponent(row.name)}`;
+        ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
+        : `/datasets/${encodeURIComponent(row.name)}`;
 
   const datasetMediaLabel = (dataset: DatasetSummary, unlocked = false) => {
     if (dataset.encrypted) return unlocked ? 'Unlocked' : 'Locked';
@@ -1617,7 +1616,7 @@ export default function Datasets() {
       checked={isRowSelected(row)}
       disabled={isRowSelectionDisabled(row)}
       onChange={() => toggleDatasetSelection(row.dataset)}
-      className="h-4 w-4 rounded border-gray-600 bg-gray-900 text-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
+      className="h-4 w-4 rounded border-gray-600 bg-gray-900 text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
     />
   );
 
@@ -1626,7 +1625,7 @@ export default function Datasets() {
       {row.source === 'remote' && (
         <button
           type="button"
-          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${
             compact ? 'h-7 w-7' : 'h-8 w-8'
           }`}
           disabled={importingRef === row.ref}
@@ -1634,11 +1633,7 @@ export default function Datasets() {
           title="Import to Local"
           aria-label={`Import ${row.name} to Local`}
         >
-          {importingRef === row.ref ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
+          {importingRef === row.ref ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
         </button>
       )}
       {row.source === 'local' && !row.encrypted && !row.archived && (
@@ -1650,7 +1645,7 @@ export default function Datasets() {
           label={`Watch folders for ${row.name}`}
           icon="eye"
           iconOnly
-          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-cyan-700 hover:text-white ${
+          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-700 hover:text-white ${
             compact ? 'h-7 w-7' : 'h-8 w-8'
           }`}
           onRefresh={() => refreshDatasets({ background: true })}
@@ -1659,7 +1654,7 @@ export default function Datasets() {
       <button
         type="button"
         disabled={row.archived}
-        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-cyan-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${
+        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${
           compact ? 'h-7 w-7' : 'h-8 w-8'
         }`}
         onClick={() => openRenameDatasetModal(row.dataset)}
@@ -1702,7 +1697,7 @@ export default function Datasets() {
         row.encrypted
           ? row.unlocked
             ? 'border-emerald-700/70 bg-emerald-950/35 text-emerald-200'
-            : 'border-cyan-700/70 bg-cyan-950/35 text-cyan-200'
+            : 'border-brand-700/70 bg-brand-950/35 text-brand-200'
           : 'border-gray-700 bg-gray-900/80 text-gray-300'
       }`}
     >
@@ -1713,7 +1708,9 @@ export default function Datasets() {
   const renderWorkspaceBadge = (row: DatasetExplorerRow) => (
     <div className="flex min-w-0 flex-col items-start gap-1">
       <ProjectResourceBadge projectID={row.project_id} projectName={row.project_name} />
-      {row.archived ? <span className="text-[10px] font-medium uppercase tracking-wide text-amber-300">Archived</span> : null}
+      {row.archived ? (
+        <span className="text-[10px] font-medium uppercase tracking-wide text-amber-300">Archived</span>
+      ) : null}
     </div>
   );
 
@@ -1722,7 +1719,7 @@ export default function Datasets() {
       return (
         <div className="flex min-h-64 items-center justify-center border border-gray-800 bg-gray-950/40">
           <div className="flex items-center gap-2 text-sm text-gray-300">
-            <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
+            <Loader2 className="h-4 w-4 animate-spin text-brand-300" />
             Loading datasets
           </div>
         </div>
@@ -1745,17 +1742,56 @@ export default function Datasets() {
 
     if (filteredTableRows.length === 0) {
       return (
-        <PageNotice
-          tone="neutral"
-          title={datasetFilter ? 'No datasets match the filter' : 'No datasets found'}
-          action={
-            <button type="button" onClick={() => refreshDatasets()} className="operator-button py-1 text-xs">
-              Refresh
-            </button>
-          }
-        >
-          {datasetFilter ? 'Try a different dataset, worker, caption, or type filter.' : 'Create a dataset or import folders to prepare training data.'}
-        </PageNotice>
+        <div className="studio-library-empty operator-panel">
+          <div className="studio-empty-icon">
+            <FolderPlus className="h-12 w-12" strokeWidth={1.25} />
+          </div>
+          <h2 className="mt-6 text-2xl font-medium text-gray-100">
+            {datasetFilter
+              ? 'No matching datasets'
+              : tableRows.length > 0
+                ? 'No datasets in this view'
+                : 'Build your first dataset'}
+          </h2>
+          <p className="mt-3 max-w-md text-sm leading-6 text-gray-400">
+            {datasetFilter
+              ? 'Try a different dataset, worker, caption, or type filter.'
+              : aggregateScopeReadOnly
+                ? 'Choose Global or a project workspace to create or import a dataset.'
+                : selectedProjectArchived
+                  ? 'This project is archived. Its datasets are available to browse.'
+                  : 'Create a collection or bring in files you already have.'}
+          </p>
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
+            {datasetFilter ? (
+              <button type="button" className="operator-button" onClick={() => setDatasetFilter('')}>
+                Clear filter
+              </button>
+            ) : (
+              !aggregateScopeReadOnly &&
+              !selectedProjectArchived && (
+                <>
+                  <button
+                    type="button"
+                    className="operator-button-primary h-11 px-5"
+                    onClick={() => openNewDatasetModal()}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create dataset
+                  </button>
+                  <button
+                    type="button"
+                    className="operator-button h-11 px-5"
+                    onClick={() => setIsFolderImportModalOpen(true)}
+                  >
+                    <FolderPlus className="h-4 w-4" />
+                    Import folders
+                  </button>
+                </>
+              )
+            )}
+          </div>
+        </div>
       );
     }
 
@@ -1783,7 +1819,7 @@ export default function Datasets() {
             {filteredTableRows.map((row, index) => {
               const selected = isRowSelected(row);
               const rowClass = selected
-                ? 'bg-cyan-950/35 ring-1 ring-inset ring-cyan-700/45'
+                ? 'bg-brand-950/35 ring-1 ring-inset ring-brand-700/45'
                 : index % 2 === 0
                   ? 'bg-gray-950/20'
                   : 'bg-gray-900/35';
@@ -1794,7 +1830,10 @@ export default function Datasets() {
                 >
                   <div className="flex items-center justify-center px-3 py-2">{renderSelectionCheckbox(row)}</div>
                   <div className="min-w-0 px-3 py-2">
-                    <Link href={datasetHref(row)} className="flex min-w-0 items-center gap-3 text-gray-100 hover:text-cyan-100">
+                    <Link
+                      href={datasetHref(row)}
+                      className="flex min-w-0 items-center gap-3 text-gray-100 hover:text-brand-100"
+                    >
                       <DatasetFolderIcon
                         size="sm"
                         encrypted={row.encrypted}
@@ -1804,7 +1843,9 @@ export default function Datasets() {
                       />
                       <span className="min-w-0 truncate font-medium">{row.name}</span>
                     </Link>
-                    {row.dataset.path && <div className="mt-0.5 truncate text-xs text-gray-600">{row.dataset.path}</div>}
+                    {row.dataset.path && (
+                      <div className="mt-0.5 truncate text-xs text-gray-600">{row.dataset.path}</div>
+                    )}
                   </div>
                   <div className="px-3 py-2 text-xs text-gray-400">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
                   <div className="px-3 py-2">
@@ -1839,7 +1880,7 @@ export default function Datasets() {
               key={row.ref}
               className={`relative min-h-56 rounded-sm border p-3 transition-colors ${
                 selected
-                  ? 'border-cyan-700 bg-cyan-950/30 shadow-sm shadow-cyan-950/50'
+                  ? 'border-brand-700 bg-brand-950/30 shadow-sm shadow-brand-950/50'
                   : 'border-gray-800 bg-gray-950/45 hover:border-gray-700 hover:bg-gray-900/55'
               }`}
             >
@@ -1855,7 +1896,7 @@ export default function Datasets() {
                   remote={row.source === 'remote'}
                   previewSrc={datasetPreviewUrls[row.ref]}
                 />
-                <span className="line-clamp-2 min-h-10 max-w-full break-words text-sm font-medium text-gray-100 hover:text-cyan-100">
+                <span className="line-clamp-2 min-h-10 max-w-full break-words text-sm font-medium text-gray-100 hover:text-brand-100">
                   {row.name}
                 </span>
               </Link>
@@ -1864,7 +1905,9 @@ export default function Datasets() {
                 {renderTypeBadge(row)}
               </div>
               <div className="mt-1 flex justify-center">{renderWorkspaceBadge(row)}</div>
-              <div className="mt-2 text-center text-xs text-gray-500">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
+              <div className="mt-2 text-center text-xs text-gray-500">
+                {datasetMediaLabel(row.dataset, row.unlocked)}
+              </div>
               <div className="mt-1 truncate text-center text-xs text-gray-500">
                 {datasetCaptionLabel(row.dataset, row.unlocked)}
               </div>
@@ -1880,7 +1923,7 @@ export default function Datasets() {
     <>
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
-          <Database className="h-4 w-4 text-cyan-300" />
+          <Database className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Datasets</h1>
         </div>
         <div className="flex-1"></div>
@@ -1891,16 +1934,18 @@ export default function Datasets() {
           </div>
         )}
         <div className="flex items-center gap-2">
-          <Button
-            className="operator-button shrink-0 py-1"
-            disabled={!canBulkUnlockSelection}
-            onClick={() => openBulkUnlockModal()}
-            title="Unlock selected encrypted datasets"
-            aria-label="Unlock selected encrypted datasets"
-          >
-            <KeyRound className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Unlock</span>
-          </Button>
+          {selectedDatasets.length > 0 && (
+            <Button
+              className="operator-button shrink-0 py-1"
+              disabled={!canBulkUnlockSelection}
+              onClick={() => openBulkUnlockModal()}
+              title="Unlock selected encrypted datasets"
+              aria-label="Unlock selected encrypted datasets"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Unlock</span>
+            </Button>
+          )}
           <Button
             className="operator-button shrink-0 py-1"
             disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
@@ -1921,18 +1966,20 @@ export default function Datasets() {
             <FolderPlus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Import Folders</span>
           </Button>
+          {selectedDatasets.length > 0 && (
+            <Button
+              className="operator-button shrink-0 py-1"
+              disabled={!canCombineSelection || Boolean(selectedProjectArchived)}
+              onClick={() => openCombineModal()}
+              title="Combine selected datasets"
+              aria-label="Combine selected datasets"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Combine</span>
+            </Button>
+          )}
           <Button
-            className="operator-button shrink-0 py-1"
-            disabled={!canCombineSelection || Boolean(selectedProjectArchived)}
-            onClick={() => openCombineModal()}
-            title="Combine selected datasets"
-            aria-label="Combine selected datasets"
-          >
-            <Layers className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Combine</span>
-          </Button>
-          <Button
-            className="operator-button shrink-0 py-1"
+            className="operator-button-primary h-10 shrink-0"
             disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
             onClick={() => openNewDatasetModal()}
             title="New dataset"
@@ -1944,8 +1991,12 @@ export default function Datasets() {
         </div>
       </TopBar>
 
-      <MainContent>
-        <div className="mb-3 flex min-w-0 flex-col gap-2 border-b border-gray-900 pb-3 sm:flex-row sm:items-center sm:justify-between">
+      <MainContent className="studio-library-page">
+        <header className="studio-page-intro">
+          <h2>Better models start here.</h2>
+          <p>Organize the images, video, and audio your model learns from.</p>
+        </header>
+        <div className="studio-library-scope">
           <ResourceScopeFilter
             scope={resourceScope.scope}
             projectID={resourceScope.projectID}
@@ -1962,7 +2013,7 @@ export default function Datasets() {
                 : 'Global workspace'}
           </div>
         </div>
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="my-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-gray-500">
             {filteredTableRows.length} of {tableRows.length} datasets shown
             {selectedDatasets.length > 0 ? `, ${selectedDatasets.length} selected` : ''}
@@ -1973,7 +2024,9 @@ export default function Datasets() {
                 type="button"
                 onClick={() => updateDatasetView('details')}
                 className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors sm:flex-none ${
-                  datasetView === 'details' ? 'bg-gray-800 text-gray-100' : 'text-gray-400 hover:bg-gray-900 hover:text-gray-200'
+                  datasetView === 'details'
+                    ? 'bg-gray-800 text-gray-100'
+                    : 'text-gray-400 hover:bg-gray-900 hover:text-gray-200'
                 }`}
                 title="Details view"
                 aria-pressed={datasetView === 'details'}
@@ -1985,7 +2038,9 @@ export default function Datasets() {
                 type="button"
                 onClick={() => updateDatasetView('icons')}
                 className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors sm:flex-none ${
-                  datasetView === 'icons' ? 'bg-gray-800 text-gray-100' : 'text-gray-400 hover:bg-gray-900 hover:text-gray-200'
+                  datasetView === 'icons'
+                    ? 'bg-gray-800 text-gray-100'
+                    : 'text-gray-400 hover:bg-gray-900 hover:text-gray-200'
                 }`}
                 title="Large icons view"
                 aria-pressed={datasetView === 'icons'}
@@ -1999,8 +2054,9 @@ export default function Datasets() {
               <input
                 value={datasetFilter}
                 onChange={event => setDatasetFilter(event.target.value)}
-                placeholder="Filter datasets, workers, type"
-                className="h-8 w-full rounded-sm border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-cyan-700 focus:outline-none"
+                aria-label="Search datasets"
+                placeholder="Search datasets, workers, type"
+                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-brand-700 focus:outline-none"
               />
             </label>
           </div>
@@ -2012,6 +2068,47 @@ export default function Datasets() {
           </div>
         )}
         {datasetView === 'details' ? renderDetailsView() : renderIconView()}
+        {status === 'success' &&
+          tableRows.length === 0 &&
+          !datasetFilter &&
+          !aggregateScopeReadOnly &&
+          !selectedProjectArchived && (
+            <div className="studio-library-starts">
+              <button type="button" onClick={() => openNewDatasetModal()}>
+                <Plus />
+                <span>
+                  <strong>Create a dataset</strong>
+                  <small>Start with an empty collection</small>
+                </span>
+              </button>
+              <button type="button" onClick={() => setIsFolderImportModalOpen(true)}>
+                <FolderPlus />
+                <span>
+                  <strong>Import folders</strong>
+                  <small>Bring in local training files</small>
+                </span>
+              </button>
+              <button type="button" onClick={() => setIsHfImportModalOpen(true)}>
+                <CloudDownload />
+                <span>
+                  <strong>Import from Hugging Face</strong>
+                  <small>Add a dataset from the Hub</small>
+                </span>
+              </button>
+            </div>
+          )}
+        <footer className="mt-8 flex items-center justify-between border-t border-gray-800 py-5 text-xs text-gray-400">
+          <span>
+            {resourceScope.scope === 'project'
+              ? resourceScope.selectedProject?.name || 'Project workspace'
+              : resourceScope.scope === 'all'
+                ? 'All workspaces'
+                : 'Global workspace'}
+          </span>
+          <button type="button" className="operator-button" onClick={() => refreshDatasets()}>
+            Refresh
+          </button>
+        </footer>
       </MainContent>
 
       <Modal
@@ -2031,7 +2128,7 @@ export default function Datasets() {
                 onClick={() => setNewDatasetMode('plain')}
                 className={`rounded-md border px-3 py-2 text-left ${
                   newDatasetMode === 'plain'
-                    ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                    ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                     : 'border-gray-700 bg-gray-900 text-gray-300'
                 }`}
               >
@@ -2042,7 +2139,7 @@ export default function Datasets() {
                 onClick={() => setNewDatasetMode('encrypted')}
                 className={`rounded-md border px-3 py-2 text-left ${
                   newDatasetMode === 'encrypted'
-                    ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                    ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                     : 'border-gray-700 bg-gray-900 text-gray-300'
                 }`}
               >
@@ -2057,7 +2154,9 @@ export default function Datasets() {
                     type="button"
                     onClick={() => setCredentialMode('password')}
                     className={`rounded-md px-3 py-2 text-sm ${
-                      credentialMode === 'password' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                      credentialMode === 'password'
+                        ? 'bg-brand-500 text-[var(--brand-ink)]'
+                        : 'bg-gray-800 text-gray-300'
                     }`}
                   >
                     Password
@@ -2066,7 +2165,9 @@ export default function Datasets() {
                     type="button"
                     onClick={() => setCredentialMode('keyFile')}
                     className={`rounded-md px-3 py-2 text-sm ${
-                      credentialMode === 'keyFile' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                      credentialMode === 'keyFile'
+                        ? 'bg-brand-500 text-[var(--brand-ink)]'
+                        : 'bg-gray-800 text-gray-300'
                     }`}
                   >
                     Key File
@@ -2075,7 +2176,9 @@ export default function Datasets() {
                     type="button"
                     onClick={() => setCredentialMode('yubiKey')}
                     className={`rounded-md px-3 py-2 text-sm ${
-                      credentialMode === 'yubiKey' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                      credentialMode === 'yubiKey'
+                        ? 'bg-brand-500 text-[var(--brand-ink)]'
+                        : 'bg-gray-800 text-gray-300'
                     }`}
                   >
                     YubiKey
@@ -2123,7 +2226,7 @@ export default function Datasets() {
               <button
                 type="submit"
                 disabled={isCreatingDataset}
-                className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
                 {isCreatingDataset ? 'Creating...' : 'Confirm'}
               </button>
@@ -2171,7 +2274,7 @@ export default function Datasets() {
                   type="button"
                   onClick={handleBulkSharedPasswordUnlock}
                   disabled={!bulkSharedPassword || isBulkUnlockBusy}
-                  className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isBulkUnlocking ? 'Unlocking...' : `Unlock ${bulkPasswordTargetCount}`}
                 </button>
@@ -2196,7 +2299,8 @@ export default function Datasets() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-gray-100">{target.name}</div>
                       <div className="mt-0.5 text-xs text-gray-500">
-                        {target.worker_name || (datasetWorkerID(target) === 'local' ? 'Local' : datasetWorkerID(target))}
+                        {target.worker_name ||
+                          (datasetWorkerID(target) === 'local' ? 'Local' : datasetWorkerID(target))}
                       </div>
                     </div>
                     <div
@@ -2204,7 +2308,7 @@ export default function Datasets() {
                         isUnlocked
                           ? 'text-sm text-green-300'
                           : isBusy
-                            ? 'text-sm text-blue-300'
+                            ? 'text-sm text-brand-300'
                             : error
                               ? 'text-sm text-red-300'
                               : 'text-sm text-gray-400'
@@ -2243,7 +2347,7 @@ export default function Datasets() {
                           )
                         }
                         disabled={!rowPassword || isBulkUnlockBusy}
-                        className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Unlock
                       </button>
@@ -2270,7 +2374,7 @@ export default function Datasets() {
                           )
                         }
                         disabled={!rowKeyFile || isBulkUnlockBusy}
-                        className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Unlock
                       </button>
@@ -2285,14 +2389,10 @@ export default function Datasets() {
                       <button
                         type="button"
                         onClick={() =>
-                          unlockBulkDataset(
-                            target,
-                            { provider: 'webauthnPrf' },
-                            'Could not unlock with this YubiKey.',
-                          )
+                          unlockBulkDataset(target, { provider: 'webauthnPrf' }, 'Could not unlock with this YubiKey.')
                         }
                         disabled={isBulkUnlockBusy}
-                        className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Unlock
                       </button>
@@ -2358,7 +2458,7 @@ export default function Datasets() {
             <button
               type="submit"
               disabled={isRenamingDataset}
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRenamingDataset ? 'Renaming...' : 'Rename'}
             </button>
@@ -2550,7 +2650,7 @@ export default function Datasets() {
           )}
 
           {hfImportError && <div className="text-sm text-red-400">{hfImportError}</div>}
-          {hfImportStatus && !hfImportError && <div className="text-sm text-blue-300">{hfImportStatus}</div>}
+          {hfImportStatus && !hfImportError && <div className="text-sm text-brand-300">{hfImportStatus}</div>}
 
           <div className="flex flex-wrap justify-end gap-3">
             <button
@@ -2573,7 +2673,7 @@ export default function Datasets() {
             <button
               type="submit"
               disabled={isLoadingHfPreview || isImportingHfDataset || !hfDatasetInput.trim()}
-              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isImportingHfDataset && <Loader2 className="h-4 w-4 animate-spin" />}
               Import
@@ -2607,7 +2707,7 @@ export default function Datasets() {
               onClick={() => setFolderImportMode('separate')}
               className={`rounded-md border px-3 py-2 text-left ${
                 folderImportMode === 'separate'
-                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                   : 'border-gray-700 bg-gray-900 text-gray-300'
               }`}
             >
@@ -2623,7 +2723,7 @@ export default function Datasets() {
               }}
               className={`rounded-md border px-3 py-2 text-left ${
                 folderImportMode === 'combined'
-                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                   : 'border-gray-700 bg-gray-900 text-gray-300'
               }`}
             >
@@ -2637,7 +2737,7 @@ export default function Datasets() {
               onClick={() => setFolderImportOutputMode('plain')}
               className={`rounded-md border px-3 py-2 text-left ${
                 folderImportOutputMode === 'plain'
-                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                   : 'border-gray-700 bg-gray-900 text-gray-300'
               }`}
             >
@@ -2648,7 +2748,7 @@ export default function Datasets() {
               onClick={() => setFolderImportOutputMode('encrypted')}
               className={`rounded-md border px-3 py-2 text-left ${
                 folderImportOutputMode === 'encrypted'
-                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                   : 'border-gray-700 bg-gray-900 text-gray-300'
               }`}
             >
@@ -2689,7 +2789,7 @@ export default function Datasets() {
                   onClick={() => setFolderImportCredentialMode('password')}
                   className={`rounded-md px-3 py-2 text-sm ${
                     folderImportCredentialMode === 'password'
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-brand-500 text-[var(--brand-ink)]'
                       : 'bg-gray-800 text-gray-300'
                   }`}
                 >
@@ -2700,7 +2800,7 @@ export default function Datasets() {
                   onClick={() => setFolderImportCredentialMode('keyFile')}
                   className={`rounded-md px-3 py-2 text-sm ${
                     folderImportCredentialMode === 'keyFile'
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-brand-500 text-[var(--brand-ink)]'
                       : 'bg-gray-800 text-gray-300'
                   }`}
                 >
@@ -2711,7 +2811,7 @@ export default function Datasets() {
                   onClick={() => setFolderImportCredentialMode('yubiKey')}
                   className={`rounded-md px-3 py-2 text-sm ${
                     folderImportCredentialMode === 'yubiKey'
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-brand-500 text-[var(--brand-ink)]'
                       : 'bg-gray-800 text-gray-300'
                   }`}
                 >
@@ -2791,7 +2891,7 @@ export default function Datasets() {
             </div>
           )}
 
-          {folderImportStatus && <div className="text-sm text-blue-300">{folderImportStatus}</div>}
+          {folderImportStatus && <div className="text-sm text-brand-300">{folderImportStatus}</div>}
 
           <div className="flex justify-end space-x-3">
             <button
@@ -2805,7 +2905,7 @@ export default function Datasets() {
             <button
               type="submit"
               disabled={isImportingFolders || folderImportEntries.length === 0}
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isImportingFolders ? 'Importing...' : 'Import'}
             </button>
@@ -2832,7 +2932,7 @@ export default function Datasets() {
                   className="rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-sm text-gray-200"
                 >
                   {source.name}
-                  {source.encrypted ? <span className="ml-1 text-blue-300">(encrypted)</span> : null}
+                  {source.encrypted ? <span className="ml-1 text-brand-300">(encrypted)</span> : null}
                 </span>
               ))}
             </div>
@@ -2846,7 +2946,7 @@ export default function Datasets() {
               onClick={() => setCombineOutputMode('plain')}
               className={`rounded-md border px-3 py-2 text-left ${
                 combineOutputMode === 'plain'
-                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                   : 'border-gray-700 bg-gray-900 text-gray-300'
               }`}
             >
@@ -2857,7 +2957,7 @@ export default function Datasets() {
               onClick={() => setCombineOutputMode('encrypted')}
               className={`rounded-md border px-3 py-2 text-left ${
                 combineOutputMode === 'encrypted'
-                  ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                   : 'border-gray-700 bg-gray-900 text-gray-300'
               }`}
             >
@@ -2919,7 +3019,7 @@ export default function Datasets() {
                         <button
                           type="button"
                           onClick={() => unlockCombineSource(source)}
-                          className="rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+                          className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400"
                         >
                           Unlock
                         </button>
@@ -2939,7 +3039,9 @@ export default function Datasets() {
                   type="button"
                   onClick={() => setCombineCredentialMode('password')}
                   className={`rounded-md px-3 py-2 text-sm ${
-                    combineCredentialMode === 'password' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                    combineCredentialMode === 'password'
+                      ? 'bg-brand-500 text-[var(--brand-ink)]'
+                      : 'bg-gray-800 text-gray-300'
                   }`}
                 >
                   Password
@@ -2948,7 +3050,9 @@ export default function Datasets() {
                   type="button"
                   onClick={() => setCombineCredentialMode('keyFile')}
                   className={`rounded-md px-3 py-2 text-sm ${
-                    combineCredentialMode === 'keyFile' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                    combineCredentialMode === 'keyFile'
+                      ? 'bg-brand-500 text-[var(--brand-ink)]'
+                      : 'bg-gray-800 text-gray-300'
                   }`}
                 >
                   Key File
@@ -2957,7 +3061,9 @@ export default function Datasets() {
                   type="button"
                   onClick={() => setCombineCredentialMode('yubiKey')}
                   className={`rounded-md px-3 py-2 text-sm ${
-                    combineCredentialMode === 'yubiKey' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
+                    combineCredentialMode === 'yubiKey'
+                      ? 'bg-brand-500 text-[var(--brand-ink)]'
+                      : 'bg-gray-800 text-gray-300'
                   }`}
                 >
                   YubiKey
@@ -3006,7 +3112,7 @@ export default function Datasets() {
             <button
               type="submit"
               disabled={isCombiningDatasets}
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isCombiningDatasets ? 'Combining...' : 'Combine'}
             </button>

@@ -48,7 +48,7 @@ const availabilityMeta: Record<
   { label: string; className: string; icon: typeof HardDrive }
 > = {
   local: { label: 'Local', className: 'border-emerald-900 bg-emerald-950/50 text-emerald-200', icon: HardDrive },
-  remote: { label: 'Remote', className: 'border-cyan-900 bg-cyan-950/50 text-cyan-200', icon: Cloud },
+  remote: { label: 'Remote', className: 'border-brand-900 bg-brand-950/50 text-brand-200', icon: Cloud },
   both: { label: 'Synced', className: 'border-violet-900 bg-violet-950/50 text-violet-200', icon: Check },
   missing: { label: 'Unavailable', className: 'border-amber-900 bg-amber-950/50 text-amber-200', icon: TriangleAlert },
 };
@@ -120,7 +120,7 @@ function ArtifactMedia({ artifact, contain = false }: { artifact: ProjectArtifac
     );
   }
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center bg-[radial-gradient(circle_at_center,rgba(8,145,178,0.10),transparent_58%)]">
+    <div className="flex h-full w-full flex-col items-center justify-center bg-gray-900">
       <Icon className={classNames('text-gray-700', contain ? 'h-16 w-16' : 'h-9 w-9')} />
       {artifact.mediaKind === 'model' ? (
         <span className="mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-600">
@@ -269,14 +269,14 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
               value={query}
               onChange={event => setQuery(event.target.value)}
               placeholder={`Search ${mode}`}
-              className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+              className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
             />
           </label>
           <div className="operator-scrollbar-none flex min-w-0 items-center gap-2 overflow-x-auto">
             <select
               value={kindFilter}
               onChange={event => setKindFilter(event.target.value)}
-              className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-cyan-700"
+              className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-brand-700"
             >
               {kindOptions.map(([value, label]) => (
                 <option key={value} value={value}>
@@ -287,7 +287,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
             <select
               value={sourceFilter}
               onChange={event => setSourceFilter(event.target.value)}
-              className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-cyan-700"
+              className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-brand-700"
             >
               <option value="all">All sources</option>
               <option value="training">Training</option>
@@ -297,7 +297,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
             <select
               value={availabilityFilter}
               onChange={event => setAvailabilityFilter(event.target.value)}
-              className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-cyan-700"
+              className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-brand-700"
             >
               <option value="all">Anywhere</option>
               <option value="local">Local</option>
@@ -310,7 +310,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
               <select
                 value={sort}
                 onChange={event => setSort(event.target.value as typeof sort)}
-                className="h-9 rounded-sm border border-gray-800 bg-gray-950 pl-8 pr-7 text-xs text-gray-300 outline-none focus:border-cyan-700"
+                className="h-9 rounded-sm border border-gray-800 bg-gray-950 pl-8 pr-7 text-xs text-gray-300 outline-none focus:border-brand-700"
               >
                 <option value="newest">Newest</option>
                 <option value="name">Name</option>
@@ -324,7 +324,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
                 aria-label="Grid view"
                 className={classNames(
                   'operator-icon-button h-8 w-8',
-                  view === 'grid' ? 'bg-gray-800 text-cyan-200' : '',
+                  view === 'grid' ? 'bg-gray-800 text-brand-200' : '',
                 )}
               >
                 <Grid2X2 className="h-4 w-4" />
@@ -335,7 +335,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
                 aria-label="List view"
                 className={classNames(
                   'operator-icon-button h-8 w-8',
-                  view === 'list' ? 'bg-gray-800 text-cyan-200' : '',
+                  view === 'list' ? 'bg-gray-800 text-brand-200' : '',
                 )}
               >
                 <List className="h-4 w-4" />
@@ -417,7 +417,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
                   onClick={() => setSelectedID(artifact.id)}
                   className={classNames(
                     'group min-w-0 overflow-hidden rounded-md border bg-gray-900/40 text-left transition hover:border-gray-600',
-                    selectedArtifact ? 'border-cyan-700 ring-1 ring-cyan-900' : 'border-gray-800',
+                    selectedArtifact ? 'border-brand-700 ring-1 ring-brand-900' : 'border-gray-800',
                   )}
                 >
                   <div
@@ -466,7 +466,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
                     onClick={() => setSelectedID(artifact.id)}
                     className={classNames(
                       'grid w-full min-w-0 grid-cols-[minmax(0,1fr)_32px] items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-900/80 md:grid-cols-[minmax(0,1fr)_110px_100px_130px_32px]',
-                      selectedID === artifact.id ? 'bg-cyan-950/20' : '',
+                      selectedID === artifact.id ? 'bg-brand-950/20' : '',
                     )}
                   >
                     <span className="flex min-w-0 items-center gap-3">
@@ -498,7 +498,7 @@ export default function ProjectArtifactLibrary({ mode }: { mode: LibraryMode }) 
         <div className="absolute inset-0 z-20 flex justify-end bg-gray-950/70 backdrop-blur-[1px] lg:left-auto lg:w-[420px] lg:border-l lg:border-gray-800 lg:bg-gray-950 lg:backdrop-blur-none">
           <aside className="flex h-full w-full min-w-0 flex-col bg-gray-950 sm:max-w-[520px] lg:max-w-none">
             <div className="flex h-14 flex-none items-center gap-3 border-b border-gray-800 px-3">
-              <Info className="h-4 w-4 text-cyan-300" />
+              <Info className="h-4 w-4 text-brand-300" />
               <div className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-200">{selected.name}</div>
               <button
                 type="button"

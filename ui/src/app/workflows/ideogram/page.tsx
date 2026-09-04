@@ -268,7 +268,7 @@ function TextInput({
       value={value}
       onChange={event => onChange(event.target.value)}
       placeholder={placeholder}
-      className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+      className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
     />
   );
 }
@@ -297,7 +297,7 @@ function NumberInput({
         const next = Number(event.target.value);
         if (Number.isFinite(next)) onChange(next);
       }}
-      className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-700"
+      className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-700"
     />
   );
 }
@@ -307,7 +307,7 @@ function Select({ value, onChange, options }: { value: string; onChange: (value:
     <select
       value={value}
       onChange={event => onChange(event.target.value)}
-      className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-700"
+      className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-700"
     >
       {options.map(option => (
         <option key={option} value={option}>
@@ -343,7 +343,7 @@ function IconButton({
       className={classNames(
         'inline-flex h-8 w-8 items-center justify-center rounded-sm border text-gray-300 transition-colors disabled:cursor-not-allowed disabled:opacity-45',
         active
-          ? 'border-cyan-500/70 bg-cyan-500/15 text-cyan-100'
+          ? 'border-brand-500/70 bg-brand-500/15 text-brand-100'
           : danger
             ? 'border-rose-900 bg-rose-950/15 text-rose-200 hover:bg-rose-950/35'
             : 'border-gray-800 bg-gray-950 hover:border-gray-700 hover:bg-gray-900 hover:text-gray-100',
@@ -369,7 +369,7 @@ function ActionButton({
 }) {
   const toneClass = {
     neutral: 'border-gray-800 bg-gray-950 text-gray-200 hover:bg-gray-900',
-    cyan: 'border-cyan-700 bg-cyan-500 text-gray-950 hover:bg-cyan-400',
+    cyan: 'border-brand-700 bg-brand-500 text-[var(--brand-ink)] hover:bg-brand-400',
     emerald: 'border-emerald-800 bg-emerald-950/50 text-emerald-100 hover:bg-emerald-900',
     rose: 'border-rose-800 bg-rose-950/40 text-rose-100 hover:bg-rose-900/80',
   }[tone];
@@ -546,7 +546,7 @@ function PaletteColorRow({
           event.preventDefault();
           updateDraft(normalized);
         }}
-        className="h-8 min-w-0 rounded-sm border border-gray-800 bg-[#050a0f] px-2 font-mono text-xs uppercase text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+        className="h-8 min-w-0 rounded-sm border border-gray-800 bg-gray-950 px-2 font-mono text-xs uppercase text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
         placeholder="#22D3EE"
       />
       <IconButton title="Delete color" danger onClick={onDelete}>
@@ -580,7 +580,7 @@ function PaletteEditor({
         <button
           type="button"
           onClick={addColor}
-          className="inline-flex items-center gap-1 text-xs font-medium text-cyan-300 hover:text-cyan-100"
+          className="inline-flex items-center gap-1 text-xs font-medium text-brand-300 hover:text-brand-100"
         >
           <Plus className="h-3.5 w-3.5" />
           Add color
@@ -591,7 +591,7 @@ function PaletteEditor({
           <button
             type="button"
             onClick={addColor}
-            className="flex h-10 w-full items-center justify-center gap-2 rounded-sm border border-dashed border-gray-800 bg-gray-950 text-xs text-gray-500 hover:border-cyan-900 hover:text-cyan-200"
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-sm border border-dashed border-gray-800 bg-gray-950 text-xs text-gray-500 hover:border-brand-900 hover:text-brand-200"
           >
             <Plus className="h-4 w-4" />
             Add a palette color
@@ -1730,11 +1730,11 @@ export default function IdeogramWorkflowBuilderPage() {
         key={entry.id}
         className={classNames(
           'overflow-hidden rounded-sm border bg-gray-950 transition-colors',
-          active ? 'border-cyan-800 shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : 'border-gray-800 hover:border-gray-700',
+          active ? 'border-brand-800 shadow-[0_0_0_1px_rgb(var(--brand-400)/0.16)]' : 'border-gray-800 hover:border-gray-700',
         )}
       >
         <div className="grid grid-cols-[5.25rem_1fr] gap-3 p-2.5">
-          <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-sm border border-gray-800 bg-[#050a0f]">
+          <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-sm border border-gray-800 bg-gray-950">
             {thumbnailUrl ? (
               <img src={thumbnailUrl} alt={entry.title} className="h-full w-full object-contain" />
             ) : (
@@ -1776,13 +1776,13 @@ export default function IdeogramWorkflowBuilderPage() {
               </div>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-[11px] text-gray-500">
-              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">
+              <span className="truncate rounded-sm border border-gray-900 bg-gray-950 px-1.5 py-1">
                 {entry.aspectRatio.split(' ')[0]}
               </span>
-              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">
+              <span className="truncate rounded-sm border border-gray-900 bg-gray-950 px-1.5 py-1">
                 {entry.steps} steps
               </span>
-              <span className="truncate rounded-sm border border-gray-900 bg-[#050a0f] px-1.5 py-1">
+              <span className="truncate rounded-sm border border-gray-900 bg-gray-950 px-1.5 py-1">
                 CFG {entry.cfg}
               </span>
             </div>
@@ -1844,7 +1844,7 @@ export default function IdeogramWorkflowBuilderPage() {
 
   return (
     <>
-      <TopBar className="h-14 border-gray-900 bg-[#02060a] px-4">
+      <TopBar className="h-14 border-gray-900 bg-gray-950 px-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <h1 className="truncate text-lg font-semibold text-gray-100">Ideogram Workflow Builder</h1>
           <button
@@ -1938,7 +1938,7 @@ export default function IdeogramWorkflowBuilderPage() {
         </div>
       </TopBar>
 
-      <MainContent className="operator-scrollbar-none bg-[#02060a] px-2 pt-16 text-gray-100 xl:!overflow-hidden sm:px-3">
+      <MainContent className="operator-scrollbar-none bg-gray-950 px-2 pb-0 pt-16 text-gray-100 xl:!overflow-hidden sm:px-3">
         <div className="grid min-h-[calc(100dvh-4rem)] grid-cols-1 gap-2 xl:h-[calc(100dvh-4.5rem)] xl:min-h-0 xl:grid-cols-[315px_minmax(0,1fr)_360px]">
           <aside className="operator-panel flex min-h-0 flex-col overflow-hidden">
             <div className="operator-panel-header">
@@ -1960,7 +1960,7 @@ export default function IdeogramWorkflowBuilderPage() {
                   value={state.highLevelDescription}
                   onChange={event => updateState(current => ({ ...current, highLevelDescription: event.target.value }))}
                   rows={5}
-                  className="w-full resize-none rounded-sm border border-gray-800 bg-gray-950 px-3 py-2 text-sm leading-5 text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                  className="w-full resize-none rounded-sm border border-gray-800 bg-gray-950 px-3 py-2 text-sm leading-5 text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
                 />
               </Field>
 
@@ -1981,7 +1981,7 @@ export default function IdeogramWorkflowBuilderPage() {
                   value={state.background}
                   onChange={event => updateState(current => ({ ...current, background: event.target.value }))}
                   rows={3}
-                  className="w-full resize-none rounded-sm border border-gray-800 bg-gray-950 px-3 py-2 text-sm leading-5 text-gray-100 outline-none focus:border-cyan-700"
+                  className="w-full resize-none rounded-sm border border-gray-800 bg-gray-950 px-3 py-2 text-sm leading-5 text-gray-100 outline-none focus:border-brand-700"
                 />
               </Field>
 
@@ -2006,7 +2006,7 @@ export default function IdeogramWorkflowBuilderPage() {
                       className={classNames(
                         'h-9 border-r border-gray-800 px-2 text-xs last:border-r-0',
                         state.qualityPreset === option
-                          ? 'bg-cyan-500/15 text-cyan-100'
+                          ? 'bg-brand-500/15 text-brand-100'
                           : 'bg-gray-950 text-gray-400 hover:bg-gray-900',
                       )}
                     >
@@ -2083,7 +2083,7 @@ export default function IdeogramWorkflowBuilderPage() {
                   <button
                     type="button"
                     onClick={addLora}
-                    className="text-xs font-medium text-cyan-300 hover:text-cyan-100"
+                    className="text-xs font-medium text-brand-300 hover:text-brand-100"
                   >
                     Add
                   </button>
@@ -2160,7 +2160,7 @@ export default function IdeogramWorkflowBuilderPage() {
                       type="button"
                       disabled={!serverUrl || loraStatus === 'loading'}
                       onClick={() => void refreshLoras(serverUrl)}
-                      className="text-cyan-300 hover:text-cyan-100 disabled:text-gray-600"
+                      className="text-brand-300 hover:text-brand-100 disabled:text-gray-600"
                     >
                       Refresh
                     </button>
@@ -2169,7 +2169,7 @@ export default function IdeogramWorkflowBuilderPage() {
                     <select
                       value={copyToolkitPath}
                       onChange={event => setCopyToolkitPath(event.target.value)}
-                      className="h-9 min-w-0 rounded-sm border border-gray-800 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-cyan-700"
+                      className="h-9 min-w-0 rounded-sm border border-gray-800 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-brand-700"
                     >
                       {toolkitLoras.length === 0 ? <option value="">No Toolkit LoRAs found</option> : null}
                       {toolkitLoras.map(lora => (
@@ -2222,7 +2222,7 @@ export default function IdeogramWorkflowBuilderPage() {
                 ref={canvasViewportRef}
                 onPointerDown={startCanvasPan}
                 className={classNames(
-                  'operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-hidden bg-[#03070b] p-4',
+                  'operator-scrollbar-none relative flex min-h-[480px] flex-1 items-center justify-center overflow-hidden bg-gray-950 p-4',
                   activeTool === 'object' || activeTool === 'text'
                     ? 'cursor-crosshair'
                     : isCanvasPanning
@@ -2277,7 +2277,7 @@ export default function IdeogramWorkflowBuilderPage() {
                     data-composition-canvas="true"
                     onPointerDown={onCanvasPointerDown}
                     className={classNames(
-                      'relative overflow-hidden border border-gray-700 bg-[#071017] shadow-[0_0_0_1px_rgba(34,211,238,0.06)]',
+                      'relative overflow-hidden border border-gray-700 bg-gray-950 shadow-[0_0_0_1px_rgb(var(--brand-400)/0.06)]',
                       activeTool === 'object' || activeTool === 'text'
                         ? 'cursor-crosshair'
                         : isCanvasPanning
@@ -2342,8 +2342,8 @@ export default function IdeogramWorkflowBuilderPage() {
                               setSelectedElementIndex(index);
                             }}
                             className={classNames(
-                              'absolute -left-0.5 -top-7 flex max-w-[95%] items-center gap-1.5 rounded-sm border bg-[#05080c] px-2 py-1 text-left text-xs font-semibold text-gray-50 shadow-[0_1px_3px_rgba(0,0,0,0.75)]',
-                              selected ? 'border-cyan-300' : 'border-gray-500',
+                              'absolute -left-0.5 -top-7 flex max-w-[95%] items-center gap-1.5 rounded-sm border bg-gray-950 px-2 py-1 text-left text-xs font-semibold text-gray-50 shadow-[0_1px_3px_rgba(0,0,0,0.75)]',
+                              selected ? 'border-brand-300' : 'border-gray-500',
                             )}
                           >
                             <span
@@ -2362,7 +2362,7 @@ export default function IdeogramWorkflowBuilderPage() {
                                   title={handle.title}
                                   onPointerDown={event => startBoxDrag(event, index, handle.mode)}
                                   className={classNames(
-                                    'absolute z-30 border border-gray-950 p-0 shadow-[0_0_0_1px_rgba(255,255,255,0.18)] transition-transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-cyan-200',
+                                    'absolute z-30 border border-gray-950 p-0 shadow-[0_0_0_1px_rgba(255,255,255,0.18)] transition-transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-brand-200',
                                     handle.className,
                                   )}
                                   style={{ backgroundColor: color }}
@@ -2382,7 +2382,7 @@ export default function IdeogramWorkflowBuilderPage() {
                       </IconButton>
                     ) : null}
                     {canvasImage?.source === 'imported' ? (
-                      <button type="button" onClick={clearImportedImage} className="text-cyan-300 hover:text-cyan-100">
+                      <button type="button" onClick={clearImportedImage} className="text-brand-300 hover:text-brand-100">
                         Clear image
                       </button>
                     ) : null}
@@ -2390,7 +2390,7 @@ export default function IdeogramWorkflowBuilderPage() {
                       <button
                         type="button"
                         onClick={() => setCanvasImage(importedImage)}
-                        className="text-cyan-300 hover:text-cyan-100"
+                        className="text-brand-300 hover:text-brand-100"
                       >
                         Clear preview
                       </button>
@@ -2412,11 +2412,11 @@ export default function IdeogramWorkflowBuilderPage() {
                   <button
                     type="button"
                     onClick={() => setHistoryOpen(true)}
-                    className="inline-flex h-8 items-center gap-2 rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs font-medium text-gray-300 transition-colors hover:border-cyan-800 hover:text-cyan-100"
+                    className="inline-flex h-8 items-center gap-2 rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs font-medium text-gray-300 transition-colors hover:border-brand-800 hover:text-brand-100"
                   >
                     <History className="h-3.5 w-3.5" />
                     Generation History
-                    <span className="rounded-sm border border-gray-800 bg-[#050a0f] px-1.5 py-0.5 text-[10px] text-gray-500">
+                    <span className="rounded-sm border border-gray-800 bg-gray-950 px-1.5 py-0.5 text-[10px] text-gray-500">
                       {historyEntries.length}
                     </span>
                   </button>
@@ -2437,9 +2437,9 @@ export default function IdeogramWorkflowBuilderPage() {
                           setCanvasImage(image);
                           setLightboxImage(image);
                         }}
-                        className="relative overflow-hidden rounded-sm border border-gray-800 bg-gray-950 text-left transition-colors hover:border-cyan-700 focus:border-cyan-600 focus:outline-none"
+                        className="relative overflow-hidden rounded-sm border border-gray-800 bg-gray-950 text-left transition-colors hover:border-brand-700 focus:border-brand-600 focus:outline-none"
                       >
-                        <div className="flex h-44 w-full items-center justify-center bg-[#050a0f]">
+                        <div className="flex h-44 w-full items-center justify-center bg-gray-950">
                           <img src={image.objectUrl} alt={image.filename} className="h-full w-full object-contain" />
                         </div>
                         <div className="truncate border-t border-gray-800 px-2 py-1 text-xs text-gray-400">
@@ -2512,7 +2512,7 @@ export default function IdeogramWorkflowBuilderPage() {
                   type="button"
                   onClick={() => setActiveTab(tab)}
                   className={classNames('mr-5 h-12 border-b-2 text-sm font-semibold capitalize', {
-                    'border-cyan-400 text-cyan-100': activeTab === tab,
+                    'border-brand-400 text-brand-100': activeTab === tab,
                     'border-transparent text-gray-400 hover:text-gray-200': activeTab !== tab,
                   })}
                 >
@@ -2556,7 +2556,7 @@ export default function IdeogramWorkflowBuilderPage() {
                               }))
                             }
                             rows={4}
-                            className="w-full resize-none rounded-sm border border-gray-800 bg-[#050a0f] px-3 py-2 text-sm leading-5 text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                            className="w-full resize-none rounded-sm border border-gray-800 bg-gray-950 px-3 py-2 text-sm leading-5 text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
                           />
                         </Field>
                         <PaletteEditor
@@ -2588,7 +2588,7 @@ export default function IdeogramWorkflowBuilderPage() {
                           onClick={() => setSelectedElementIndex(index)}
                           className={classNames(
                             'flex w-full min-w-0 items-center gap-2 px-1 py-2 text-left text-xs',
-                            index === selectedElementIndex ? 'text-cyan-100' : 'text-gray-400',
+                            index === selectedElementIndex ? 'text-brand-100' : 'text-gray-400',
                           )}
                         >
                           <span
@@ -2639,7 +2639,7 @@ export default function IdeogramWorkflowBuilderPage() {
                       value={workflowJson}
                       readOnly
                       rows={24}
-                      className="operator-scrollbar-none h-[340px] w-full resize-none rounded-sm border border-gray-800 bg-[#050a0f] p-3 font-mono text-xs leading-relaxed text-cyan-50 outline-none"
+                      className="operator-scrollbar-none h-[340px] w-full resize-none rounded-sm border border-gray-800 bg-gray-950 p-3 font-mono text-xs leading-relaxed text-brand-50 outline-none"
                     />
                     {importMessage ? (
                       <div className="mt-2 rounded-sm border border-gray-800 bg-gray-900 px-3 py-2 text-xs text-gray-300">
@@ -2731,7 +2731,7 @@ export default function IdeogramWorkflowBuilderPage() {
           onMouseDown={() => setHistoryOpen(false)}
         >
           <aside
-            className="flex h-full w-full max-w-xl flex-col border-l border-gray-800 bg-[#05080c] shadow-2xl"
+            className="flex h-full w-full max-w-xl flex-col border-l border-gray-800 bg-gray-950 shadow-2xl"
             onMouseDown={event => event.stopPropagation()}
           >
             <div className="flex h-14 flex-none items-center justify-between gap-3 border-b border-gray-800 px-4">
@@ -2760,16 +2760,16 @@ export default function IdeogramWorkflowBuilderPage() {
             <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto p-4">
               <section className="mb-4 rounded-sm border border-gray-800 bg-gray-950 p-3">
                 <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-sm border border-gray-800 bg-[#050a0f] px-2 py-2">
+                  <div className="rounded-sm border border-gray-800 bg-gray-950 px-2 py-2">
                     <div className="text-lg font-semibold text-gray-100">{historyEntries.length}</div>
                     <div className="text-gray-500">Generations</div>
                   </div>
-                  <div className="rounded-sm border border-gray-800 bg-[#050a0f] px-2 py-2">
+                  <div className="rounded-sm border border-gray-800 bg-gray-950 px-2 py-2">
                     <div className="text-lg font-semibold text-amber-200">{favoriteHistoryEntries.length}</div>
                     <div className="text-gray-500">Favorites</div>
                   </div>
-                  <div className="rounded-sm border border-gray-800 bg-[#050a0f] px-2 py-2">
-                    <div className="text-lg font-semibold text-cyan-100">{recentHistoryEntries.length}</div>
+                  <div className="rounded-sm border border-gray-800 bg-gray-950 px-2 py-2">
+                    <div className="text-lg font-semibold text-brand-100">{recentHistoryEntries.length}</div>
                     <div className="text-gray-500">Recent</div>
                   </div>
                 </div>
@@ -2829,7 +2829,7 @@ export default function IdeogramWorkflowBuilderPage() {
           onMouseDown={() => setLightboxImage(null)}
         >
           <div
-            className="flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-sm border border-gray-800 bg-[#05080c] shadow-2xl"
+            className="flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-sm border border-gray-800 bg-gray-950 shadow-2xl"
             onMouseDown={event => event.stopPropagation()}
           >
             <div className="flex h-12 flex-none items-center justify-between gap-3 border-b border-gray-800 px-3">

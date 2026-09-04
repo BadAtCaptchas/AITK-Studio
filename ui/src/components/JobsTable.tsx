@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { CgSpinner } from 'react-icons/cg';
-import { Search } from 'lucide-react';
+import { ArrowRight, List, Loader2, Pause, Play, RefreshCw, Search } from 'lucide-react';
 import useJobsList from '@/hooks/useJobsList';
 import UniversalTable, { TableColumn } from '@/components/UniversalTable';
 import type { Job, Queue } from '@/types';
@@ -16,7 +16,10 @@ import { getTotalSteps } from '@/utils/jobs';
 import { PageNotice, ProgressBar, QueueStateBadge, StatusBadge } from '@/components/OperatorPrimitives';
 import { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
 
+export type JobsViewStatus = 'loading' | 'ready' | 'error';
+
 interface JobsTableProps {
+  variant?: 'default' | 'dashboard';
   autoStartQueue?: boolean;
   onlyActive?: boolean;
   job_type?: string | null;
@@ -24,6 +27,7 @@ interface JobsTableProps {
   includeProjectActive?: boolean;
   onJobsChange?: (jobs: Job[]) => void;
   onQueuesChange?: (queues: Queue[]) => void;
+  onStatusChange?: (status: JobsViewStatus) => void;
 }
 
 type JobGroup = {
@@ -58,13 +62,163 @@ function jobDetailHref(job: Job, projectID: string | null) {
   return `/jobs/${encodeURIComponent(job.id)}`;
 }
 
+interface DashboardQueueGroupProps {
+  group: JobGroup;
+  queue: Queue | undefined;
+  single: boolean;
+  loading: boolean;
+  jobsUnavailable: boolean;
+  queueAvailable: boolean;
+  queueError: boolean;
+  projectID: string | null;
+  onRefresh: () => void;
+  onRefreshJobs: () => void;
+}
+
+function DashboardQueueGroup({
+  group,
+  queue,
+  single,
+  loading,
+  jobsUnavailable,
+  queueAvailable,
+  queueError,
+  projectID,
+  onRefresh,
+  onRefreshJobs,
+}: DashboardQueueGroupProps) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const running = queue?.is_running === true;
+  const toggleQueue = async () => {
+    if (pending || !group.gpuIDs || !queueAvailable) return;
+    setPending(true);
+    setError(null);
+    try {
+      await (running ? stopQueue : startQueue)(group.gpuIDs, group.workerID);
+      onRefresh();
+    } catch {
+      setError(`Could not ${running ? 'stop' : 'start'} this queue. Please try again.`);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <div className="studio-queue-group">
+      <div className="studio-section-heading studio-queue-heading">
+        <h2 title={group.name}>{single ? 'Training queue' : group.name}</h2>
+        <div className="studio-queue-controls">
+          <span className="studio-queue-state">
+            {running ? <Play size={13} /> : <Pause size={13} />}
+            {queueError
+              ? 'Queue unavailable'
+              : !queueAvailable
+                ? 'Checking queue'
+                : running
+                  ? 'Queue running'
+                  : 'Queue stopped'}
+          </span>
+          <button
+            type="button"
+            onClick={() => void toggleQueue()}
+            disabled={pending || !queueAvailable || !group.gpuIDs}
+            className="studio-outline-button"
+            aria-label={`${running ? 'Stop' : 'Start'} queue for ${group.name}`}
+          >
+            {pending ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : running ? (
+              <Pause size={15} />
+            ) : (
+              <Play size={15} />
+            )}
+            {pending ? 'Please wait' : running ? 'Stop queue' : 'Start queue'}
+          </button>
+        </div>
+      </div>
+      {error && (
+        <p className="studio-queue-notice" role="alert">
+          {error}
+        </p>
+      )}
+      {single && (group.jobs.length > 0 || group.workerID !== 'local' || group.gpuIDs !== '0') && (
+        <p className="studio-group-label">
+          {group.name} · GPU {group.gpuIDs}
+        </p>
+      )}
+      {group.jobs.length === 0 ? (
+        <div className="studio-queue-empty" role="status">
+          <span className="studio-empty-icon">
+            {loading ? <Loader2 size={34} className="animate-spin" /> : <List size={34} strokeWidth={1.6} />}
+          </span>
+          <h3>{loading ? 'Loading jobs' : jobsUnavailable ? 'Job data unavailable' : 'No active jobs'}</h3>
+          <p>
+            {loading
+              ? 'Fetching the latest queue state.'
+              : jobsUnavailable
+                ? 'Refresh to reload the jobs for this queue.'
+                : 'Your next training run starts here.'}
+          </p>
+        </div>
+      ) : (
+        <ul className="studio-job-list">
+          {group.jobs.map(job => {
+            const { prefix, title } = jobDisplayTitle(job);
+            const total = job.job_type === 'train' ? (getTotalSteps(job) ?? 0) : 0;
+            return (
+              <li key={job.id}>
+                <div className="studio-job-title-row">
+                  <div className="min-w-0 flex-1">
+                    <Link href={jobDetailHref(job, projectID)} className="studio-job-title">
+                      {title}
+                    </Link>
+                    <div className="studio-job-meta">
+                      <span>
+                        {prefix} · GPU {job.gpu_ids}
+                      </span>
+                      {job.project_id && (
+                        <ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} />
+                      )}
+                    </div>
+                  </div>
+                  <StatusBadge status={job.status} />
+                </div>
+                {job.job_type === 'train' && (
+                  <div className="studio-job-progress">
+                    <span>
+                      {total ? `${job.step.toLocaleString()} / ${total.toLocaleString()} steps` : `Step ${job.step}`}
+                    </span>
+                    {total > 0 && <ProgressBar value={(job.step / total) * 100} />}
+                  </div>
+                )}
+                <div className="studio-job-bottom">
+                  <div className="min-w-0 break-words text-xs">
+                    {job.comfy_install_progress ? (
+                      <ComfyInstallProgressInline progress={job.comfy_install_progress} fallback={job.info} />
+                    ) : (
+                      <HFDownloadProgressInline progress={job.hf_download_progress} fallback={job.info} />
+                    )}
+                  </div>
+                  <JobActionBar job={job} onRefresh={onRefreshJobs} autoStartQueue={false} />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function JobsTable({
+  variant = 'default',
   onlyActive = false,
   job_type = null,
   projectID = null,
   includeProjectActive = false,
   onJobsChange,
   onQueuesChange,
+  onStatusChange,
 }: JobsTableProps) {
   const { jobs, status, refreshJobs } = useJobsList({
     onlyActive,
@@ -73,10 +227,24 @@ export default function JobsTable({
     projectID,
     includeProjectActive,
   });
-  const { queues, status: queueStatus, refreshQueues } = useQueueList();
+  const { queues, status: queueStatus, refreshQueues } = useQueueList(variant === 'dashboard' ? 5000 : null);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
-  const { workers, status: workerStatus } = useWorkers();
+  const { workers, status: workerStatus, refreshWorkers } = useWorkers();
   const [filterText, setFilterText] = useState('');
+  const [hasJobsLoaded, setHasJobsLoaded] = useState(false);
+
+  const viewStatus: JobsViewStatus =
+    status === 'error' || queueStatus === 'error' || workerStatus === 'error'
+      ? 'error'
+      : status === 'success' || hasJobsLoaded
+        ? 'ready'
+        : 'loading';
+  useEffect(() => {
+    if (status === 'success') setHasJobsLoaded(true);
+  }, [status]);
+  useEffect(() => {
+    onStatusChange?.(viewStatus);
+  }, [onStatusChange, viewStatus]);
 
   useEffect(() => {
     onJobsChange?.(jobs);
@@ -101,7 +269,7 @@ export default function JobsTable({
         return (
           <Link href={jobHref} className="flex min-w-0 items-center gap-2 font-medium text-gray-100">
             {['running', 'stopping'].includes(row.status) ? (
-              <CgSpinner className="h-4 w-4 flex-none animate-spin text-cyan-400" />
+              <CgSpinner className="h-4 w-4 flex-none animate-spin text-brand-400" />
             ) : null}
             <span className="rounded-sm border border-gray-800 bg-gray-950 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-500">
               {prefix}
@@ -180,7 +348,7 @@ export default function JobsTable({
   }, [filterText, jobs]);
 
   const jobsDict = useMemo<Record<string, JobGroup>>(() => {
-    if (!isGPUInfoLoaded) return {};
+    if (!isGPUInfoLoaded && variant !== 'dashboard') return {};
     if (filteredJobs.length === 0 && gpuList.length === 0 && queues.length === 0) return {};
 
     const jd: { [key: string]: JobGroup } = {};
@@ -231,8 +399,8 @@ export default function JobsTable({
       const key = `${workerID}:${gpuIDs}`;
       if (isRemoteWorker(workerID)) {
         ensureWorkerGpuGroup(workerID, gpuIDs).jobs.push(job);
-      } else if (activeJobStatuses.has(job.status) && key in jd) {
-        jd[key].jobs.push(job);
+      } else if (activeJobStatuses.has(job.status) && (key in jd || variant === 'dashboard')) {
+        ensureWorkerGpuGroup(workerID, gpuIDs).jobs.push(job);
       } else {
         jd.idle.jobs.push(job);
       }
@@ -250,7 +418,7 @@ export default function JobsTable({
       }
     });
     return jd;
-  }, [filteredJobs, gpuList, isGPUInfoLoaded, queues, workers]);
+  }, [filteredJobs, gpuList, isGPUInfoLoaded, queues, variant, workers]);
 
   let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading' || !isGPUInfoLoaded;
   if (Object.keys(jobsDict).length > 0) isLoading = false;
@@ -263,6 +431,77 @@ export default function JobsTable({
         : workerStatus === 'error'
           ? 'Workers could not be loaded.'
           : null;
+
+  if (variant === 'dashboard') {
+    const groups = Object.entries(jobsDict)
+      .filter(([key]) => key !== 'idle')
+      .sort(([a], [b]) => a.localeCompare(b));
+    const retry = () => {
+      refresh();
+      refreshWorkers();
+    };
+    return (
+      <div className="studio-queue-content">
+        {groups.length !== 1 && (
+          <div className="studio-section-heading">
+            <h2>Training queue</h2>
+            <button className="studio-icon-button" onClick={retry} aria-label="Refresh queues">
+              <RefreshCw size={16} />
+            </button>
+          </div>
+        )}
+        {tableError && (
+          <div className="studio-queue-notice" role="alert">
+            {tableError}{' '}
+            <button onClick={retry} className="studio-text-link">
+              Retry
+            </button>
+          </div>
+        )}
+        {groups.map(([key, group]) => (
+          <DashboardQueueGroup
+            key={key}
+            group={group}
+            queue={queues.find(q => q.worker_id === group.workerID && q.gpu_ids === group.gpuIDs)}
+            single={groups.length === 1}
+            loading={viewStatus === 'loading'}
+            jobsUnavailable={status === 'error'}
+            queueAvailable={queueStatus === 'success' || (queueStatus === 'loading' && queues.length > 0)}
+            queueError={queueStatus === 'error'}
+            projectID={projectID}
+            onRefresh={refresh}
+            onRefreshJobs={refreshJobs}
+          />
+        ))}
+        {groups.length === 0 && (
+          <div className="studio-queue-empty">
+            <span className="studio-empty-icon">
+              {viewStatus === 'loading' ? <Loader2 size={34} className="animate-spin" /> : <List size={34} />}
+            </span>
+            <h3>
+              {viewStatus === 'loading'
+                ? 'Loading your workspace'
+                : tableError
+                  ? 'Queue data unavailable'
+                  : 'No active jobs'}
+            </h3>
+            <p>
+              {viewStatus === 'loading'
+                ? 'Fetching jobs and worker information.'
+                : tableError
+                  ? 'Refresh to reconnect to your queues.'
+                  : 'Your next training run starts here.'}
+            </p>
+          </div>
+        )}
+        <div className="studio-queue-footer">
+          <Link href="/jobs" className="studio-text-link">
+            View all jobs <ArrowRight size={16} />
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading && Object.keys(jobsDict).length === 0) {
     return (
@@ -291,7 +530,7 @@ export default function JobsTable({
             value={filterText}
             onChange={event => setFilterText(event.target.value)}
             placeholder="Filter jobs, status, GPU"
-            className="h-8 w-full border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-cyan-700 focus:outline-none"
+            className="h-8 w-full border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-brand-700 focus:outline-none"
           />
         </label>
       </div>

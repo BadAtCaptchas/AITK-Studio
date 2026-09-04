@@ -48,7 +48,7 @@ export default function ProjectWorkspaceShell({
   return (
     <div className="flex h-full min-h-0 flex-col bg-gray-950 text-gray-100">
       {showHeader && (title || description || actions) ? (
-        <div className="flex min-h-14 flex-none items-center gap-3 border-b border-gray-900 bg-gray-950 px-3 py-2 sm:px-4">
+        <div className="flex min-h-[72px] flex-none items-center gap-4 border-b border-gray-800 bg-gray-950 px-5 py-3 sm:px-8">
           <div className="min-w-0 flex-1">
             {title ? <h2 className="truncate text-sm font-semibold text-gray-100 sm:text-base">{title}</h2> : null}
             {description ? <p className="mt-0.5 truncate text-xs text-gray-500">{description}</p> : null}

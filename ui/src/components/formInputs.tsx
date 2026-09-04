@@ -10,9 +10,9 @@ import { ConfigDoc, GroupedSelectOption, SelectOption } from '@/types';
 
 const Select = dynamic(() => import('react-select'), { ssr: false });
 
-const labelClasses = 'block text-xs mb-1 mt-2 text-gray-300';
+const labelClasses = 'block text-xs font-medium mb-1.5 mt-3 text-gray-300';
 const inputClasses =
-  'w-full text-sm px-3 py-1 bg-gray-950 dark:bg-gray-800 border border-gray-700 rounded-sm text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-gray-600 focus:border-transparent';
+  'w-full text-sm px-3 py-2 bg-gray-950 border border-gray-700 rounded-md text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-400/30 focus:border-brand-400';
 const getDocTooltip = (doc: ConfigDoc) => doc.tooltip || (typeof doc.title === 'string' ? doc.title : 'Open help');
 
 export interface InputProps {
@@ -56,6 +56,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>((props: Te
       <input
         ref={ref}
         type={type}
+        aria-label={label || placeholder}
         value={value}
         onChange={e => {
           if (!disabled) onChange(e.target.value);
@@ -103,6 +104,7 @@ export const TextAreaInput = forwardRef<HTMLTextAreaElement, TextAreaInputProps>
       )}
       <textarea
         ref={ref}
+        aria-label={label || placeholder}
         value={value}
         onChange={e => {
           if (!disabled) onChange(e.target.value);
@@ -161,6 +163,7 @@ export const NumberInput = (props: NumberInputProps) => {
       )}
       <input
         type="number"
+        aria-label={label || placeholder}
         value={inputValue}
         onChange={e => {
           const rawValue = e.target.value;
@@ -250,6 +253,7 @@ export const SelectInput = (props: SelectInputProps) => {
         </label>
       )}
       <Select
+        aria-label={props.label || props.placeholder}
         value={selectedOption}
         options={options}
         isDisabled={props.disabled}
@@ -338,6 +342,7 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
       <div className="flex min-w-0 gap-2">
         <div className={isCustom ? 'min-w-0 w-1/3' : 'min-w-0 w-full'}>
           <Select
+            aria-label={props.label || props.placeholder}
             value={selectedOption}
             options={selectOptions}
             isDisabled={props.disabled}
@@ -369,6 +374,7 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
         {isCustom && (
           <input
             ref={customInputRef}
+            aria-label={props.label || props.placeholder}
             type="text"
             value={value}
             onChange={e => onChange(e.target.value)}
@@ -413,8 +419,8 @@ export const Checkbox = (props: CheckboxProps) => {
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
         className={classNames(
-          'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2',
-          checked ? 'bg-blue-500' : 'bg-gray-600',
+          'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-2',
+          checked ? 'bg-brand-500' : 'bg-gray-600',
           disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-opacity-80',
         )}
       >
@@ -602,7 +608,7 @@ export const SliderInput: React.FC<SliderInputProps> = props => {
 
             {/* Fill */}
             <div
-              className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-3 rounded-sm bg-blue-500"
+              className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-3 rounded-sm bg-brand-500"
               style={{ width: `${percent}%` }}
             />
 
@@ -613,7 +619,7 @@ export const SliderInput: React.FC<SliderInputProps> = props => {
                 'absolute top-1/2 -translate-y-1/2 -ml-2',
                 'h-4 w-4 rounded-full bg-white shadow border border-gray-300 cursor-pointer',
                 'after:content-[""] after:absolute after:inset-[-6px] after:rounded-full after:bg-transparent', // expands hit area
-                dragging ? 'ring-2 ring-blue-600' : '',
+                dragging ? 'ring-2 ring-brand-600' : '',
               )}
               style={{ left: `calc(${percent}% )` }}
             />

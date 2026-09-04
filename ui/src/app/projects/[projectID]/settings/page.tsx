@@ -424,23 +424,23 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
 
             <section className="border border-gray-800 bg-gray-950">
               <div className="flex h-12 items-center gap-2 border-b border-gray-800 px-3">
-                <Settings className="h-4 w-4 text-cyan-300" />
+                <Settings className="h-4 w-4 text-brand-300" />
                 <h2 className="text-sm font-semibold text-gray-100">Project Identity</h2>
               </div>
               <div className="space-y-4 p-4">
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-400">Name</span>
-                  <input value={name} onChange={event => setName(event.target.value)} disabled={isArchived} className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600 disabled:opacity-60" />
+                  <input value={name} onChange={event => setName(event.target.value)} disabled={isArchived} className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600 disabled:opacity-60" />
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-400">Description</span>
-                  <textarea value={description} onChange={event => setDescription(event.target.value)} disabled={isArchived} rows={5} className="w-full resize-y border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none focus:border-cyan-600 disabled:opacity-60" />
+                  <textarea value={description} onChange={event => setDescription(event.target.value)} disabled={isArchived} rows={5} className="w-full resize-y border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none focus:border-brand-600 disabled:opacity-60" />
                 </label>
                 <div className="grid gap-3 text-xs sm:grid-cols-2">
                   <div className="border border-gray-800 bg-gray-900/40 p-3"><div className="text-gray-500">Project ID</div><div className="mt-1 break-all font-mono text-gray-300">{project?.id || '—'}</div></div>
                   <div className="border border-gray-800 bg-gray-900/40 p-3"><div className="text-gray-500">Slug</div><div className="mt-1 font-mono text-gray-300">{project?.slug || '—'}</div></div>
                 </div>
-                <button type="button" onClick={() => void saveProject()} disabled={!name.trim() || busy || isArchived} className="operator-button h-10 border-cyan-800 bg-cyan-950/40 text-cyan-100">
+                <button type="button" onClick={() => void saveProject()} disabled={!name.trim() || busy || isArchived} className="operator-button h-10 border-brand-800 bg-brand-950/40 text-brand-100">
                   {actionStatus === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save Settings
                 </button>
               </div>
@@ -448,7 +448,7 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
 
             <section className="border border-gray-800 bg-gray-950">
               <div className="flex h-12 items-center gap-2 border-b border-gray-800 px-3">
-                <Server className="h-4 w-4 text-cyan-300" />
+                <Server className="h-4 w-4 text-brand-300" />
                 <h2 className="text-sm font-semibold text-gray-100">Workspace Home</h2>
               </div>
               <div className="grid gap-3 p-4 text-sm sm:grid-cols-2">
@@ -460,7 +460,7 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
             <section className="border border-gray-800 bg-gray-950">
               <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 border-b border-gray-800 px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <RadioTower className="h-4 w-4 text-cyan-300" />
+                  <RadioTower className="h-4 w-4 text-brand-300" />
                   <h2 className="text-sm font-semibold text-gray-100">Execution Replicas</h2>
                 </div>
                 <span className="text-[11px] text-gray-500">project-sync-v1 only</span>
@@ -480,9 +480,9 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <Cloud className="h-4 w-4 text-cyan-300" />
+                            <Cloud className="h-4 w-4 text-brand-300" />
                             <span className="truncate text-sm font-semibold text-gray-200">{workerName}</span>
-                            <span className={`rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${replica.status === 'ready' ? 'border-emerald-900 text-emerald-300' : replica.status === 'syncing' ? 'border-cyan-900 text-cyan-300' : 'border-amber-900 text-amber-300'}`}>
+                            <span className={`rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${replica.status === 'ready' ? 'border-emerald-900 text-emerald-300' : replica.status === 'syncing' ? 'border-brand-900 text-brand-300' : 'border-amber-900 text-amber-300'}`}>
                               {replica.status}
                             </span>
                           </div>
@@ -545,7 +545,7 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
                       onChange={event => setSelectedWorkerID(event.target.value)}
                       disabled={busy || availableWorkers.length === 0}
                       aria-label="Worker to link as a project replica"
-                      className="h-9 min-w-0 flex-1 border border-gray-800 bg-gray-950 px-2 text-xs text-gray-200 outline-none focus:border-cyan-700 disabled:opacity-60"
+                      className="h-9 min-w-0 flex-1 border border-gray-800 bg-gray-950 px-2 text-xs text-gray-200 outline-none focus:border-brand-700 disabled:opacity-60"
                     >
                       {availableWorkers.length === 0 ? <option value="">No compatible unlinked workers</option> : null}
                       {availableWorkers.map(worker => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
@@ -554,7 +554,7 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
                       type="button"
                       onClick={() => void linkReplica()}
                       disabled={!selectedWorkerID || busy}
-                      className="operator-button h-9 border-cyan-900 bg-cyan-950/30 text-xs text-cyan-100"
+                      className="operator-button h-9 border-brand-900 bg-brand-950/30 text-xs text-brand-100"
                     >
                       {remoteAction === `link:${selectedWorkerID}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
                       Link Worker
@@ -637,7 +637,7 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
 
           <aside className="space-y-4">
             <section className="border border-gray-800 bg-gray-950">
-              <div className="flex h-12 items-center gap-2 border-b border-gray-800 px-3"><FolderCheck className="h-4 w-4 text-cyan-300" /><h2 className="text-sm font-semibold text-gray-100">Registered Storage</h2></div>
+              <div className="flex h-12 items-center gap-2 border-b border-gray-800 px-3"><FolderCheck className="h-4 w-4 text-brand-300" /><h2 className="text-sm font-semibold text-gray-100">Registered Storage</h2></div>
               <div className="divide-y divide-gray-800 text-xs">
                 {summary ? <div className="px-3 py-3"><div className="text-gray-500">Project root</div><div className="mt-1 break-all font-mono text-gray-300">{summary.roots.root}</div></div> : null}
                 {project?.storage_root_path ? <div className="px-3 py-3"><div className="text-gray-500">Storage boundary</div><div className="mt-1 break-all font-mono text-gray-300">{project.storage_root_path}</div></div> : null}
@@ -659,12 +659,12 @@ export default function ProjectSettingsPage({ params }: { params: Promise<{ proj
       <Modal isOpen={relocateOpen} onClose={() => setRelocateOpen(false)} title="Relocate archived workspace" size="md" closeOnOverlayClick={!busy}>
         <form onSubmit={event => { event.preventDefault(); void relocateProject(); }} className="space-y-4">
           <PageNotice tone="warning" title="Verified copy first">The current root remains authoritative until the destination inventory and hashes match.</PageNotice>
-          <label className="block"><span className="mb-1 block text-xs font-medium text-gray-400">Destination storage root</span><input value={destinationRoot} onChange={event => setDestinationRoot(event.target.value)} className="h-10 w-full border border-gray-700 bg-gray-950 px-3 font-mono text-sm text-gray-100 outline-none focus:border-cyan-600" /></label>
+          <label className="block"><span className="mb-1 block text-xs font-medium text-gray-400">Destination storage root</span><input value={destinationRoot} onChange={event => setDestinationRoot(event.target.value)} className="h-10 w-full border border-gray-700 bg-gray-950 px-3 font-mono text-sm text-gray-100 outline-none focus:border-brand-600" /></label>
           <fieldset><legend className="mb-2 text-xs font-medium text-gray-400">After verification</legend><div className="grid gap-2 sm:grid-cols-2">
-            <label className={`cursor-pointer border p-3 text-sm ${relocateMode === 'copy' ? 'border-cyan-700 bg-cyan-950/20 text-cyan-100' : 'border-gray-800 text-gray-400'}`}><input type="radio" className="sr-only" checked={relocateMode === 'copy'} onChange={() => setRelocateMode('copy')} /><span className="block font-medium">Keep old backup</span><span className="mt-1 block text-xs opacity-75">Register the new copy and leave the original unmanaged.</span></label>
+            <label className={`cursor-pointer border p-3 text-sm ${relocateMode === 'copy' ? 'border-brand-700 bg-brand-950/20 text-brand-100' : 'border-gray-800 text-gray-400'}`}><input type="radio" className="sr-only" checked={relocateMode === 'copy'} onChange={() => setRelocateMode('copy')} /><span className="block font-medium">Keep old backup</span><span className="mt-1 block text-xs opacity-75">Register the new copy and leave the original unmanaged.</span></label>
             <label className={`cursor-pointer border p-3 text-sm ${relocateMode === 'move' ? 'border-amber-700 bg-amber-950/20 text-amber-100' : 'border-gray-800 text-gray-400'}`}><input type="radio" className="sr-only" checked={relocateMode === 'move'} onChange={() => setRelocateMode('move')} /><span className="block font-medium">Move workspace</span><span className="mt-1 block text-xs opacity-75">Delete the old root only after the new root is registered.</span></label>
           </div></fieldset>
-          <div className="flex justify-end gap-2"><button type="button" onClick={() => setRelocateOpen(false)} disabled={busy} className="operator-button h-9">Cancel</button><button type="submit" disabled={!destinationRoot.trim() || busy} className="operator-button h-9 border-cyan-800 bg-cyan-950/40 text-cyan-100">{actionStatus === 'relocating' ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDrive className="h-4 w-4" />} Relocate</button></div>
+          <div className="flex justify-end gap-2"><button type="button" onClick={() => setRelocateOpen(false)} disabled={busy} className="operator-button h-9">Cancel</button><button type="submit" disabled={!destinationRoot.trim() || busy} className="operator-button h-9 border-brand-800 bg-brand-950/40 text-brand-100">{actionStatus === 'relocating' ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDrive className="h-4 w-4" />} Relocate</button></div>
         </form>
       </Modal>
     </ProjectWorkspaceShell>

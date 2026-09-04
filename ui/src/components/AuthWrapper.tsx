@@ -149,7 +149,7 @@ export default function AuthWrapper({ authRequired, children }: AuthWrapperProps
                 value={token}
                 ref={inputRef}
                 onChange={e => setToken(e.target.value)}
-                className="w-full px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 text-gray-100 transition duration-200"
+                className="w-full px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 focus:ring-opacity-50 text-gray-100 transition duration-200"
                 placeholder="Enter your password"
               />
               <div className='text-gray-500 text-xs mt-2'>
@@ -164,7 +164,7 @@ export default function AuthWrapper({ authRequired, children }: AuthWrapperProps
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-200 flex items-center justify-center"
+              className="w-full py-3 px-4 bg-brand-500 hover:bg-brand-400 rounded-lg text-[var(--brand-ink)] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-opacity-50 transition duration-200 flex items-center justify-center"
             >
               {isLoading ? (
                 <svg

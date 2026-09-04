@@ -134,16 +134,16 @@ export function StandaloneBoxesPanel({
   }, [filterOpen]);
 
   return (
-    <section className="flex min-h-0 flex-col bg-[#071019] text-gray-100" aria-label="Boxes">
-      <div className="flex h-9 flex-none items-center border-b border-[#273039] px-3">
+    <section className="flex min-h-0 flex-col bg-gray-950 text-gray-100" aria-label="Boxes">
+      <div className="flex h-9 flex-none items-center border-b border-gray-800 px-3">
         <h3 className="text-sm font-semibold tracking-tight text-gray-100">Boxes</h3>
         <span className="ml-3 text-xs font-medium tabular-nums text-gray-500" aria-label={`${rows.length} boxes`}>
           {rows.length}
         </span>
       </div>
 
-      <div className="flex h-10 flex-none items-center gap-1.5 border-b border-[#1d2831] px-3">
-        <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[4px] border border-[#33414d] bg-[#08121a] px-2.5 text-gray-500 focus-within:border-cyan-600 focus-within:text-gray-300">
+      <div className="flex h-10 flex-none items-center gap-1.5 border-b border-gray-800 px-3">
+        <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2.5 text-gray-500 focus-within:border-brand-600 focus-within:text-gray-300">
           <Search className="h-4 w-4 flex-none" aria-hidden="true" />
           <input
             type="search"
@@ -165,8 +165,8 @@ export function StandaloneBoxesPanel({
             aria-expanded={filterOpen}
             onClick={() => setFilterOpen(open => !open)}
             className={classNames(
-              'flex h-8 w-8 items-center justify-center rounded-[4px] border border-[#33414d] bg-[#08121a] transition-colors hover:border-gray-500 hover:text-white',
-              boxFilter === 'all' ? 'text-gray-400' : 'border-cyan-800 text-cyan-300',
+              'flex h-8 w-8 items-center justify-center rounded-[4px] border border-gray-800 bg-gray-950 transition-colors hover:border-gray-500 hover:text-white',
+              boxFilter === 'all' ? 'text-gray-400' : 'border-brand-800 text-brand-300',
             )}
           >
             <Filter className="h-4 w-4" aria-hidden="true" />
@@ -178,7 +178,7 @@ export function StandaloneBoxesPanel({
               id={filterMenuId}
               role="group"
               aria-label="Box filters"
-              className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-[4px] border border-[#33414d] bg-[#0b151e] p-1 shadow-xl shadow-black/50"
+              className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-[4px] border border-gray-800 bg-gray-900 p-1 shadow-xl shadow-black/50"
             >
               {BOX_FILTERS.map(filter => (
                 <button
@@ -192,7 +192,7 @@ export function StandaloneBoxesPanel({
                   className={classNames(
                     'flex h-7 w-full items-center rounded-[3px] px-2 text-left text-xs',
                     boxFilter === filter
-                      ? 'bg-cyan-950/60 text-cyan-200'
+                      ? 'bg-brand-950/60 text-brand-200'
                       : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100',
                   )}
                 >
@@ -208,7 +208,7 @@ export function StandaloneBoxesPanel({
           onClick={onAddBox}
           disabled={!onAddBox}
           aria-label="Add box"
-          className="flex h-8 flex-none items-center gap-1.5 rounded-[4px] border border-[#33414d] bg-[#08121a] px-3 text-xs font-medium text-gray-100 transition-colors hover:border-gray-500 hover:bg-[#0d1a24] disabled:cursor-not-allowed disabled:text-gray-600"
+          className="flex h-8 flex-none items-center gap-1.5 rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-xs font-medium text-gray-100 transition-colors hover:border-gray-500 hover:bg-gray-900 disabled:cursor-not-allowed disabled:text-gray-600"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           Add box
@@ -262,10 +262,10 @@ export function StandaloneBoxesPanel({
                 className={classNames(
                   'grid h-[41px] grid-cols-[18px_28px_12px_minmax(0,1fr)_28px_28px_28px] items-center gap-1 rounded-[3px] border px-1.5 transition-colors',
                   selected
-                    ? 'border-cyan-400 bg-cyan-950/30 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.08)]'
-                    : 'border-transparent bg-[#0d1821] hover:bg-[#12202b]',
+                    ? 'border-brand-400 bg-brand-950/30 shadow-[inset_0_0_0_1px_rgb(var(--brand-400)/0.08)]'
+                    : 'border-transparent bg-gray-900 hover:bg-gray-900',
                   hidden && 'opacity-45',
-                  dragTargetElementIndex === elementIndex && 'ring-1 ring-inset ring-cyan-300',
+                  dragTargetElementIndex === elementIndex && 'ring-1 ring-inset ring-brand-300',
                 )}
               >
                 <button

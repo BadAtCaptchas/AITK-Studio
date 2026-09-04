@@ -679,7 +679,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                   value={filterText}
                   onChange={event => setFilterText(event.target.value)}
                   placeholder="Filter datasets"
-                  className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-cyan-700"
+                  className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-700"
                 />
               </label>
             </div>
@@ -698,7 +698,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                   aria-pressed={readinessFilter === value}
                   className={`h-8 flex-none border px-3 text-xs transition-colors ${
                     readinessFilter === value
-                      ? 'border-cyan-800 bg-cyan-950/40 text-cyan-100'
+                      ? 'border-brand-800 bg-brand-950/40 text-brand-100'
                       : 'border-transparent text-gray-500 hover:border-gray-800 hover:text-gray-200'
                   }`}
                 >
@@ -725,7 +725,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                     >
                       <span className="flex min-w-0 items-center gap-3">
                         <span className="flex h-9 w-9 flex-none items-center justify-center rounded-sm border border-gray-800 bg-gray-900">
-                          <Database className="h-4 w-4 text-cyan-200" />
+                          <Database className="h-4 w-4 text-brand-200" />
                         </span>
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-gray-100">{dataset.name}</span>
@@ -746,7 +746,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                           label={`Watch folders for ${dataset.name}`}
                           icon="eye"
                           iconOnly
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-cyan-700 hover:text-white sm:h-8 sm:w-8"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-brand-700 hover:text-white sm:h-8 sm:w-8"
                           onRefresh={() => {
                             void refreshSummary();
                           }}
@@ -766,7 +766,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                         type="button"
                         onClick={() => copyDatasetToGlobal(dataset)}
                         disabled={actionStatus !== 'idle'}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-cyan-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-gray-400 transition-colors hover:bg-brand-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
                         title="Copy to global datasets"
                         aria-label={`Copy ${dataset.name} to global datasets`}
                       >
@@ -798,7 +798,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 {summary && filteredDatasets.length === 0 && (
                   <div className="flex min-h-[320px] items-center justify-center px-6 text-center">
                     <div>
-                      <Database className="mx-auto h-10 w-10 text-cyan-300" />
+                      <Database className="mx-auto h-10 w-10 text-brand-300" />
                       <div className="mt-3 text-sm font-semibold text-gray-200">
                         {summary.datasets.length === 0 ? 'No project datasets yet' : 'No datasets match'}
                       </div>
@@ -845,9 +845,9 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
           <fieldset>
             <legend className="mb-2 text-xs font-medium text-gray-400">Operation</legend>
             <div className="grid gap-2 sm:grid-cols-2">
-              <label className={`cursor-pointer border p-3 ${transferOperation === 'copy' ? 'border-cyan-700 bg-cyan-950/20' : 'border-gray-800 bg-gray-950'}`}>
+              <label className={`cursor-pointer border p-3 ${transferOperation === 'copy' ? 'border-brand-700 bg-brand-950/20' : 'border-gray-800 bg-gray-950'}`}>
                 <input type="radio" className="sr-only" checked={transferOperation === 'copy'} onChange={() => setTransferOperation('copy')} />
-                <span className="flex items-center gap-2 text-sm font-medium text-gray-100"><Copy className="h-4 w-4 text-cyan-300" /> Copy</span>
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-100"><Copy className="h-4 w-4 text-brand-300" /> Copy</span>
                 <span className="mt-1 block text-xs text-gray-500">Keep the source and create a verified destination copy.</span>
               </label>
               <label className={`cursor-pointer border p-3 ${transferOperation === 'move' ? 'border-amber-700 bg-amber-950/20' : 'border-gray-800 bg-gray-950'}`}>
@@ -859,7 +859,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
           </fieldset>
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-400">Destination</span>
-            <select value={transferDestination} onChange={event => setTransferDestination(event.target.value)} className="h-10 w-full border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600">
+            <select value={transferDestination} onChange={event => setTransferDestination(event.target.value)} className="h-10 w-full border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600">
               <option value="global">Global datasets</option>
               {transferProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
@@ -890,7 +890,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
               value={importFilterText}
               onChange={event => setImportFilterText(event.target.value)}
               placeholder="Filter global datasets"
-              className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-cyan-700"
+              className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-700"
             />
           </label>
 
@@ -910,12 +910,12 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                       type="button"
                       onClick={() => selectImportDataset(dataset)}
                       className={`grid w-full grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-3 px-3 py-3 text-left text-sm hover:bg-gray-900/70 ${
-                        selected ? 'bg-cyan-950/20 outline outline-1 outline-cyan-900/70' : ''
+                        selected ? 'bg-brand-950/20 outline outline-1 outline-brand-900/70' : ''
                       }`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
                         <span className="flex h-9 w-9 flex-none items-center justify-center rounded-sm border border-gray-800 bg-gray-900">
-                          <Database className="h-4 w-4 text-cyan-200" />
+                          <Database className="h-4 w-4 text-brand-200" />
                         </span>
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-gray-100">{dataset.name}</span>
@@ -944,7 +944,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 setImportError('');
               }}
               disabled={!selectedImportDataset}
-              className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-700 disabled:opacity-50"
+              className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-700 disabled:opacity-50"
             />
             {importDatasetName.trim() && importNameError ? <span className="mt-1 block text-xs text-rose-300">{importNameError}</span> : null}
           </label>
@@ -985,7 +985,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
               }}
               autoFocus
               placeholder="portrait_inputs"
-              className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 placeholder:text-gray-600 outline-none focus:border-cyan-700"
+              className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 placeholder:text-gray-600 outline-none focus:border-brand-700"
             />
             {newDatasetName.trim() && createNameError ? <span className="mt-1 block text-xs text-rose-300">{createNameError}</span> : null}
           </label>
@@ -998,7 +998,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 setCreateEncrypted(event.target.checked);
                 setCreateError('');
               }}
-              className="mt-1 h-4 w-4 rounded border-gray-700 bg-gray-950 text-cyan-500"
+              className="mt-1 h-4 w-4 rounded border-gray-700 bg-gray-950 text-brand-500"
             />
             <span>
               <span className="block text-sm font-medium text-gray-100">Encrypted dataset</span>
@@ -1017,7 +1017,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                     setDatasetPassword(event.target.value);
                     setCreateError('');
                   }}
-                  className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-700"
+                  className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-700"
                 />
               </label>
               <label className="block">
@@ -1029,7 +1029,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                     setDatasetPasswordConfirm(event.target.value);
                     setCreateError('');
                   }}
-                  className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-700"
+                  className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-700"
                 />
               </label>
               {encryptedPasswordError ? <div className="text-xs text-rose-300">{encryptedPasswordError}</div> : null}
@@ -1074,7 +1074,7 @@ export default function ProjectDatasetsPage({ params }: { params: Promise<{ proj
                 setUploadError('');
               }}
               autoFocus
-              className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-700"
+              className="h-9 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-700"
             />
             {uploadDatasetName.trim() && uploadNameError ? <span className="mt-1 block text-xs text-rose-300">{uploadNameError}</span> : null}
           </label>

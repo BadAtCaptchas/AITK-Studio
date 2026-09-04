@@ -77,6 +77,7 @@ export async function GET(request: NextRequest) {
     settingsObject.MODELS_PATH = modelsPathState.path;
     settingsObject.MODELS_PATH_LOCKED = modelsPathState.lockedByEnv ? 'true' : 'false';
     settingsObject.PROJECTS_ENABLED = normalizeBooleanSetting(settingsObject.PROJECTS_ENABLED, false);
+    settingsObject.TRAINING_LEGACY_VIEW = normalizeBooleanSetting(settingsObject.TRAINING_LEGACY_VIEW, false);
     const offlineModeState = await getOfflineModeState();
     settingsObject[OFFLINE_MODE_SETTING_KEY] = offlineModeState.enabled ? 'true' : 'false';
     settingsObject.OFFLINE_MODE_LOCKED = offlineModeState.lockedByEnv ? 'true' : 'false';
@@ -124,6 +125,7 @@ export async function POST(request: NextRequest) {
       PROJECTS_ENABLED,
       OFFLINE_MODE,
       TRAINING_ADVISOR_ENABLED,
+      TRAINING_LEGACY_VIEW,
       TELEMETRY_ENABLED,
       COMFY_AUTO_INSTALL,
       COMFY_EXTERNAL_URL,
@@ -190,6 +192,10 @@ export async function POST(request: NextRequest) {
 
     const existingProjectsEnabled =
       PROJECTS_ENABLED === undefined ? (await db.settings.get(PROJECTS_ENABLED_KEY))?.value : PROJECTS_ENABLED;
+    const existingTrainingLegacyView =
+      TRAINING_LEGACY_VIEW === undefined
+        ? (await db.settings.get('TRAINING_LEGACY_VIEW'))?.value
+        : TRAINING_LEGACY_VIEW;
     const offlineModeState = await getOfflineModeState();
     const existingOfflineMode =
       OFFLINE_MODE === undefined ? (await db.settings.get(OFFLINE_MODE_SETTING_KEY))?.value : OFFLINE_MODE;
@@ -204,6 +210,7 @@ export async function POST(request: NextRequest) {
         ? 'true'
         : normalizeBooleanSetting(existingOfflineMode, false),
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
+      TRAINING_LEGACY_VIEW: normalizeBooleanSetting(existingTrainingLegacyView, false),
       [TELEMETRY_ENABLED_SETTING_KEY]: normalizeBooleanSetting(TELEMETRY_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
       COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,

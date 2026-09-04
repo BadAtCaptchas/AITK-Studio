@@ -103,7 +103,7 @@ export default function ConfirmModal() {
       case 'warning':
         return 'bg-yellow-500';
       case 'info':
-        return 'bg-blue-500';
+        return 'bg-brand-500';
       default:
         return 'bg-red-500';
     }
@@ -117,7 +117,7 @@ export default function ConfirmModal() {
       case 'warning':
         return 'text-yellow-950';
       case 'info':
-        return 'text-blue-950';
+        return 'text-[var(--brand-ink)]';
       default:
         return 'text-red-950';
     }
@@ -131,7 +131,7 @@ export default function ConfirmModal() {
       case 'warning':
         return 'text-yellow-500';
       case 'info':
-        return 'text-blue-500';
+        return 'text-brand-500';
       default:
         return 'text-red-500';
     }
@@ -145,7 +145,7 @@ export default function ConfirmModal() {
       case 'warning':
         return 'bg-yellow-700 hover:bg-yellow-500';
       case 'info':
-        return 'bg-blue-700 hover:bg-blue-500';
+        return 'bg-brand-500 hover:bg-brand-400';
       default:
         return 'bg-red-700 hover:bg-red-500';
     }
@@ -204,7 +204,7 @@ export default function ConfirmModal() {
                 type="button"
                 onClick={() => void onConfirm()}
                 disabled={isSubmitting}
-                className={`inline-flex w-full items-center justify-center gap-2 rounded-md ${getButtonBgColor()} px-3 py-2 text-sm font-semibold text-white shadow-xs disabled:cursor-wait disabled:opacity-60 sm:ml-3 sm:w-auto`}
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-md ${getButtonBgColor()} px-3 py-2 text-sm font-semibold ${color === 'info' ? 'text-[var(--brand-ink)]' : 'text-white'} shadow-xs disabled:cursor-wait disabled:opacity-60 sm:ml-3 sm:w-auto`}
               >
                 {isSubmitting ? <FaSpinner aria-hidden="true" className="animate-spin" /> : null}
                 {isSubmitting ? 'Working…' : confirm?.confirmText || 'Confirm'}

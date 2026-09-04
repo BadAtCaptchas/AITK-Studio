@@ -49,10 +49,10 @@ export function Modal({
       <DialogBackdrop className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm transition-opacity" />
       <div className="fixed inset-0 flex w-screen items-center justify-center overflow-y-auto p-4">
         <DialogPanel
-          className={`relative mx-auto w-full ${sizeClasses[size]} rounded-lg border border-gray-700 bg-white shadow-xl transition-all dark:bg-gray-900`}
+          className={`relative mx-auto w-full ${sizeClasses[size]} rounded-xl border border-gray-800 bg-gray-950 text-gray-100 shadow-xl transition-all`}
         >
           {(title || showCloseButton) && (
-            <div className="flex items-center justify-between rounded-t-lg border-b border-gray-700 bg-gray-900 px-6 py-4">
+            <div className="flex items-center justify-between rounded-t-xl border-b border-gray-800 px-6 py-5">
               {title ? (
                 <DialogTitle className="text-xl font-semibold text-gray-100">{title}</DialogTitle>
               ) : null}

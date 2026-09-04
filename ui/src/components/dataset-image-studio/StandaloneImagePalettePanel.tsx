@@ -146,8 +146,8 @@ function ReviewIssueRow({
   const actionLabel = issue.kind === 'near-duplicate' ? 'Merge' : issue.kind === 'low-coverage' ? 'Review' : 'Assign';
 
   return (
-    <div className="grid min-h-[45px] grid-cols-[18px_minmax(0,1fr)_auto_80px] items-center gap-2 rounded-[4px] border border-[#27323c] bg-[#07131c] px-2.5 py-1">
-      <span className={warning ? 'text-amber-400' : 'text-cyan-400'} aria-hidden="true">
+    <div className="grid min-h-[45px] grid-cols-[18px_minmax(0,1fr)_auto_80px] items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-900 px-2.5 py-1">
+      <span className={warning ? 'text-amber-400' : 'text-brand-400'} aria-hidden="true">
         {issue.kind === 'low-coverage' ? (
           <TriangleAlert className="h-4 w-4" />
         ) : warning ? (
@@ -179,7 +179,7 @@ function ReviewIssueRow({
           else onAssignColor(issue);
         }}
         aria-label={`${actionLabel} ${issueTitle(issue).toLocaleLowerCase()} issue`}
-        className="flex h-7 items-center justify-center rounded-[4px] border border-[#34414d] bg-[#071019] px-3 text-xs font-medium text-gray-100 transition-colors hover:border-gray-500 hover:bg-[#0d1a24] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:text-gray-600"
+        className="flex h-7 items-center justify-center rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-xs font-medium text-gray-100 transition-colors hover:border-gray-500 hover:bg-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:text-gray-600"
       >
         {actionLabel}
       </button>
@@ -220,7 +220,7 @@ export function StandaloneImagePalettePanel({
 
   return (
     <section
-      className="flex h-full min-h-0 flex-col overflow-hidden bg-[#06111a] text-gray-100"
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-gray-950 text-gray-100"
       aria-labelledby="image-palette-heading"
     >
       <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto px-1 pb-1.5 pt-[10px]">
@@ -241,7 +241,7 @@ export function StandaloneImagePalettePanel({
             disabled={extractDisabled}
             onClick={onExtractPalette}
             title={extractTitle}
-            className="mr-1 flex h-8 w-[151px] flex-none items-center justify-center gap-2 rounded-[4px] border border-cyan-300/60 bg-cyan-400 text-xs font-semibold text-[#03121a] shadow-[0_1px_8px_rgba(34,211,238,0.12)] transition-colors hover:bg-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+            className="mr-1 flex h-8 w-[151px] flex-none items-center justify-center gap-2 rounded-[4px] border border-brand-300/60 bg-brand-400 text-xs font-semibold text-[var(--brand-ink)] shadow-[0_1px_8px_rgb(var(--brand-400)/0.12)] transition-colors hover:bg-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
           >
             {isExtracting ? (
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -270,12 +270,12 @@ export function StandaloneImagePalettePanel({
                     onClick={() => onSelectColor(color)}
                     aria-label={`Select palette color ${color}`}
                     aria-pressed={selected}
-                    className="group min-w-0 rounded-[3px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+                    className="group min-w-0 rounded-[3px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
                   >
                     <span
                       className={classNames(
                         'block rounded-[3px] border p-[1px] transition-colors',
-                        selected ? 'border-cyan-300' : 'border-transparent group-hover:border-gray-500',
+                        selected ? 'border-brand-300' : 'border-transparent group-hover:border-gray-500',
                       )}
                     >
                       <SwatchPreview color={color} />
@@ -283,7 +283,7 @@ export function StandaloneImagePalettePanel({
                     <span
                       className={classNames(
                         'mt-1 block truncate text-center font-mono text-[9px]',
-                        selected ? 'text-cyan-200' : 'text-gray-400',
+                        selected ? 'text-brand-200' : 'text-gray-400',
                       )}
                     >
                       {color}
@@ -294,12 +294,12 @@ export function StandaloneImagePalettePanel({
             </div>
           </div>
         ) : (
-          <div className="flex h-[63px] items-center justify-center rounded-[4px] border border-dashed border-[#33414d] text-xs text-gray-500">
+          <div className="flex h-[63px] items-center justify-center rounded-[4px] border border-dashed border-gray-800 text-xs text-gray-500">
             Extract a palette to review image colors
           </div>
         )}
 
-        <dl className="mt-[6px] grid h-[34px] grid-cols-2 items-center border-y border-[#26313b] text-[11px]">
+        <dl className="mt-[6px] grid h-[34px] grid-cols-2 items-center border-y border-gray-800 text-[11px]">
           <div className="grid grid-cols-[auto_1fr] items-center gap-6 pr-5">
             <dt className="text-gray-400">Confidence</dt>
             <dd className="truncate font-medium text-gray-100">{formatConfidence(confidence)}</dd>
@@ -334,7 +334,7 @@ export function StandaloneImagePalettePanel({
             ))}
           </div>
         ) : (
-          <div className="flex h-[45px] items-center justify-center rounded-[4px] border border-[#27323c] bg-[#07131c] text-xs text-gray-500">
+          <div className="flex h-[45px] items-center justify-center rounded-[4px] border border-gray-800 bg-gray-900 text-xs text-gray-500">
             No palette issues found
           </div>
         )}
@@ -345,13 +345,13 @@ export function StandaloneImagePalettePanel({
         </div>
 
         {normalizedPalette.length > 0 && layers.length > 0 ? (
-          <div className="operator-scrollbar-none -ml-1 w-full overflow-x-auto rounded-[4px] border border-[#2b3741]">
+          <div className="operator-scrollbar-none -ml-1 w-full overflow-x-auto rounded-[4px] border border-gray-800">
             <table className="w-full border-separate border-spacing-0 text-[10px]">
               <thead>
-                <tr className="h-[23px] bg-[#071019]">
+                <tr className="h-[23px] bg-gray-950">
                   <th
                     scope="col"
-                    className="sticky left-0 z-10 min-w-[138px] border-b border-r border-[#2b3741] bg-[#071019] px-2.5 text-left font-medium text-gray-300"
+                    className="sticky left-0 z-10 min-w-[138px] border-b border-r border-gray-800 bg-gray-950 px-2.5 text-left font-medium text-gray-300"
                   >
                     Layer
                   </th>
@@ -360,8 +360,8 @@ export function StandaloneImagePalettePanel({
                       key={color}
                       scope="col"
                       className={classNames(
-                        'min-w-[50px] border-b border-r border-[#2b3741] px-1 text-center font-mono text-[9px] last:border-r-0',
-                        normalizedSelectedColor === color ? 'bg-cyan-950/30 text-cyan-200' : 'text-gray-300',
+                        'min-w-[50px] border-b border-r border-gray-800 px-1 text-center font-mono text-[9px] last:border-r-0',
+                        normalizedSelectedColor === color ? 'bg-brand-950/30 text-brand-200' : 'text-gray-300',
                       )}
                     >
                       {color}
@@ -378,10 +378,10 @@ export function StandaloneImagePalettePanel({
                     }),
                   );
                   return (
-                    <tr key={layer.elementIndex} className="h-[27px] bg-[#07131c] hover:bg-[#0b1822]">
+                    <tr key={layer.elementIndex} className="h-[27px] bg-gray-900 hover:bg-gray-900">
                       <th
                         scope="row"
-                        className="sticky left-0 z-10 max-w-[180px] border-b border-r border-[#2b3741] bg-inherit px-2.5 text-left text-[11px] font-medium text-gray-100 last:border-b-0"
+                        className="sticky left-0 z-10 max-w-[180px] border-b border-r border-gray-800 bg-inherit px-2.5 text-left text-[11px] font-medium text-gray-100 last:border-b-0"
                         title={layer.label}
                       >
                         <span className="block truncate">{layer.label}</span>
@@ -394,8 +394,8 @@ export function StandaloneImagePalettePanel({
                           <td
                             key={color}
                             className={classNames(
-                              'border-b border-r border-[#2b3741] text-center last:border-r-0',
-                              normalizedSelectedColor === color && 'bg-cyan-950/20',
+                              'border-b border-r border-gray-800 text-center last:border-r-0',
+                              normalizedSelectedColor === color && 'bg-brand-950/20',
                             )}
                           >
                             <button
@@ -407,9 +407,9 @@ export function StandaloneImagePalettePanel({
                               aria-label={`${assigned ? 'Remove' : 'Assign'} ${color} ${assigned ? 'from' : 'to'} ${layer.label}`}
                               title={capacityReached ? `${layer.label} already has the maximum of 5 colors` : undefined}
                               className={classNames(
-                                'inline-flex h-[18px] w-[18px] items-center justify-center rounded-[2px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-35',
+                                'inline-flex h-[18px] w-[18px] items-center justify-center rounded-[2px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-35',
                                 assigned
-                                  ? 'border-cyan-300 bg-cyan-400 text-[#03121a]'
+                                  ? 'border-brand-300 bg-brand-400 text-[var(--brand-ink)]'
                                   : 'border-transparent bg-transparent text-transparent hover:border-gray-600 hover:bg-white/5',
                               )}
                             >
@@ -425,7 +425,7 @@ export function StandaloneImagePalettePanel({
             </table>
           </div>
         ) : (
-          <div className="flex h-[72px] items-center justify-center rounded-[4px] border border-dashed border-[#33414d] text-xs text-gray-500">
+          <div className="flex h-[72px] items-center justify-center rounded-[4px] border border-dashed border-gray-800 text-xs text-gray-500">
             {normalizedPalette.length === 0 ? 'No palette colors to assign' : 'No layers available'}
           </div>
         )}

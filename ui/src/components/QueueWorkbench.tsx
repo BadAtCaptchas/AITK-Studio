@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { DragEvent } from 'react';
+import type { DragEvent, ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import classNames from 'classnames';
@@ -26,7 +26,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import JobActionBar from '@/components/JobActionBar';
-import { PageNotice, ProgressBar, QueueStateBadge, StatusBadge } from '@/components/OperatorPrimitives';
+import { PageNotice, ProgressBar, StatusBadge } from '@/components/OperatorPrimitives';
 import { HFDownloadProgressInline } from '@/components/HFDownloadProgress';
 import { ComfyInstallProgressInline } from '@/components/ComfyInstallProgress';
 import useGPUInfo from '@/hooks/useGPUInfo';
@@ -41,6 +41,7 @@ import { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
 
 type QueueWorkbenchProps = {
   filterText: string;
+  emptyAction?: ReactNode;
   focusGpuIDs?: string | null;
   scope?: 'global' | 'all' | 'project';
   projectID?: string | null;
@@ -185,7 +186,7 @@ function statusAccent(job: Job) {
     return 'border-l-rose-500 bg-rose-950/10';
   }
   if (job.status === 'running') {
-    return 'border-l-blue-500 bg-blue-950/10';
+    return 'border-l-blue-500 bg-brand-950/10';
   }
   if (job.status === 'queued') {
     return 'border-l-amber-500 bg-amber-950/10';
@@ -197,11 +198,13 @@ function WorkerHero({
   group,
   queue,
   isBusy,
+  queueUnavailable,
   onRefresh,
 }: {
   group: JobGroup;
   queue: Queue | undefined;
   isBusy: boolean;
+  queueUnavailable: boolean;
   onRefresh: () => void;
 }) {
   const queueRunning = queue?.is_running === true;
@@ -209,18 +212,25 @@ function WorkerHero({
   const queued = group.jobs.filter(job => job.status === 'queued').length;
   const activeTotal = group.jobs.length;
 
+  const [togglePending, setTogglePending] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
   const toggleQueue = async () => {
-    if (!group.gpuIDs || isBusy) return;
-    if (queueRunning) {
-      await stopQueue(group.gpuIDs, group.workerID);
-    } else {
-      await startQueue(group.gpuIDs, group.workerID);
+    if (!group.gpuIDs || isBusy || togglePending || queueUnavailable) return;
+    setTogglePending(true);
+    setToggleError(null);
+    try {
+      if (queueRunning) await stopQueue(group.gpuIDs, group.workerID);
+      else await startQueue(group.gpuIDs, group.workerID);
+      onRefresh();
+    } catch (error: unknown) {
+      setToggleError(error instanceof Error ? error.message : 'Could not update this queue. Try again.');
+    } finally {
+      setTogglePending(false);
     }
-    onRefresh();
   };
 
   return (
-    <section className="border-y border-gray-900 py-3">
+    <section className="border-b border-gray-800 p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -230,10 +240,16 @@ function WorkerHero({
                 GPU {group.gpuIDs}
               </span>
             )}
-            <QueueStateBadge running={queueRunning} />
+            <span className="rounded-md border border-gray-800 bg-gray-900 px-2.5 py-1 text-xs text-gray-400">
+              {queueUnavailable ? 'Queue unavailable' : queueRunning ? 'Queue running' : 'Queue stopped'}
+            </span>
           </div>
           <div className="mt-1 text-sm text-gray-500">
-            {queueRunning ? 'Processing jobs in queue order.' : 'Queue is stopped. Start it when work is ready.'}
+            {queueUnavailable
+              ? 'Refresh to retrieve this queue state.'
+              : queueRunning
+                ? 'Processing jobs in queue order.'
+                : 'Queue is stopped. Start it when work is ready.'}
           </div>
         </div>
 
@@ -255,16 +271,16 @@ function WorkerHero({
         <div className="flex flex-wrap gap-2 lg:flex-none">
           <button
             type="button"
-            disabled={!group.gpuIDs || isBusy}
+            disabled={!group.gpuIDs || isBusy || togglePending || queueUnavailable}
             onClick={() => void toggleQueue()}
             className={classNames(
               'inline-flex h-9 items-center justify-center gap-2 border px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50',
               queueRunning
                 ? 'border-rose-800 bg-rose-950/50 text-rose-100 hover:bg-rose-900'
-                : 'border-blue-700 bg-blue-950/60 text-blue-100 hover:bg-blue-900',
+                : 'border-brand-700 bg-brand-950/60 text-brand-100 hover:bg-brand-900',
             )}
           >
-            {isBusy ? (
+            {isBusy || togglePending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : queueRunning ? (
               <PauseCircle className="h-4 w-4" />
@@ -283,22 +299,29 @@ function WorkerHero({
           </button>
         </div>
       </div>
+      {toggleError && (
+        <p role="alert" className="mt-3 text-sm text-rose-300">
+          {toggleError}
+        </p>
+      )}
     </section>
   );
 }
 
-function QueueEmptyState({ queueRunning }: { queueRunning: boolean }) {
+function QueueEmptyState({ queueRunning, action }: { queueRunning: boolean; action?: ReactNode }) {
   return (
-    <div className="border-b border-gray-900 px-3 py-4">
-      <div className="flex items-center gap-3 text-sm">
-        <CircleDashed className="h-5 w-5 flex-none text-gray-600" />
-        <div className="min-w-0">
-          <div className="font-medium text-gray-100">No queued jobs on this GPU</div>
-          <div className="mt-1 text-sm text-gray-400">
-            {queueRunning ? 'Add a training job to keep this worker busy.' : 'Add a training job to build the queue.'}
-          </div>
-        </div>
+    <div className="studio-queue-empty">
+      <div className="studio-empty-icon">
+        <ListFilter className="h-10 w-10 text-brand-400" strokeWidth={1.5} />
       </div>
+      <h3 className="mt-6 text-2xl font-medium text-gray-100">Ready for your first run</h3>
+      <p className="mt-3 text-sm text-gray-400">
+        {queueRunning
+          ? 'Add a training job to keep this worker busy.'
+          : 'Create a training job to add work to this queue.'}
+      </p>
+      {action && <div className="mt-7 flex flex-wrap justify-center gap-4">{action}</div>}
+      <p className="mt-10 text-xs text-gray-500">Jobs run in queue order. Start the queue when you are ready.</p>
     </div>
   );
 }
@@ -362,21 +385,25 @@ function QueueJobCard({
       style={
         selected
           ? {
-              backgroundColor: dragTarget ? 'rgba(8, 145, 178, 0.14)' : 'rgba(8, 145, 178, 0.08)',
+              backgroundColor: dragTarget ? 'rgb(var(--brand-400) / 0.14)' : 'rgb(var(--brand-400) / 0.08)',
             }
           : undefined
       }
       className={classNames(
         'group grid select-none gap-3 border-b border-l-2 border-gray-900 px-3 py-3 outline-none transition-[background-color,border-color,box-shadow] hover:bg-gray-900/35 lg:grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_auto] lg:items-center',
         statusAccent(job),
-        selected &&
-          'shadow-[inset_2px_0_0_rgba(34,211,238,0.95),inset_0_0_0_1px_rgba(34,211,238,0.18)]',
-        dragTarget && !selected && 'bg-blue-950/20',
+        selected && 'shadow-[inset_2px_0_0_rgb(var(--brand-400)/0.95),inset_0_0_0_1px_rgb(var(--brand-400)/0.18)]',
+        dragTarget && !selected && 'bg-brand-950/20',
         canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
       )}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <span className={classNames('w-6 flex-none text-right text-xs tabular-nums', selected ? 'text-cyan-200' : 'text-gray-600')}>
+        <span
+          className={classNames(
+            'w-6 flex-none text-right text-xs tabular-nums',
+            selected ? 'text-brand-200' : 'text-gray-600',
+          )}
+        >
           {index + 1}
         </span>
         {canDrag ? (
@@ -389,13 +416,11 @@ function QueueJobCard({
         )}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <span className={classNames('truncate text-sm font-semibold', selected ? 'text-white' : 'text-gray-100')}>
-              {title}
-            </span>
+            <span className="truncate text-sm font-semibold text-gray-100">{title}</span>
             <span
               className={classNames(
                 'border bg-gray-950 px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
-                selected ? 'border-cyan-500/30 text-cyan-100' : 'border-gray-800 text-gray-500',
+                selected ? 'border-brand-500/30 text-brand-100' : 'border-gray-800 text-gray-500',
               )}
             >
               {prefix}
@@ -490,9 +515,7 @@ function JobListLane({
           <h2 className="truncate text-sm font-semibold text-gray-100">{title}</h2>
           {description && <div className="mt-0.5 truncate text-xs text-gray-500">{description}</div>}
         </div>
-        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
-          {sortedJobs.length} jobs
-        </span>
+        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">{sortedJobs.length} jobs</span>
       </div>
       <div>
         {sortedJobs.map((job, index) => (
@@ -519,6 +542,8 @@ function JobListLane({
 
 function ActiveQueueLane({
   group,
+  emptyAction,
+  queueUnavailable,
   queue,
   selectedJobID,
   dragJobID,
@@ -535,6 +560,8 @@ function ActiveQueueLane({
   onCancelReorder,
 }: {
   group: JobGroup;
+  emptyAction?: ReactNode;
+  queueUnavailable: boolean;
   queue: Queue | undefined;
   selectedJobID: string | null;
   dragJobID: string | null;
@@ -556,20 +583,24 @@ function ActiveQueueLane({
   const hasPendingOrder = pendingReorder?.laneKey === laneKey;
 
   return (
-    <div className="space-y-2">
-      <WorkerHero group={group} queue={queue} isBusy={isSavingOrder} onRefresh={onRefresh} />
+    <div className="operator-panel overflow-hidden">
+      <WorkerHero
+        queueUnavailable={queueUnavailable}
+        group={group}
+        queue={queue}
+        isBusy={isSavingOrder}
+        onRefresh={onRefresh}
+      />
       <section className="border-t border-gray-900">
         <div className="flex min-w-0 flex-col gap-3 px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-2">
-            <ListFilter className="h-4 w-4 text-blue-300" />
+            <ListFilter className="h-4 w-4 text-brand-300" />
             <h2 className="truncate text-sm font-semibold text-gray-100">Queue order</h2>
-            <span className="text-xs text-gray-500">
-              {group.jobs.length}
-            </span>
+            <span className="text-xs text-gray-500">{group.jobs.length}</span>
           </div>
           <div className="flex flex-none items-center gap-2">
             {isSavingOrder && (
-              <span className="inline-flex items-center gap-1 text-xs text-blue-300">
+              <span className="inline-flex items-center gap-1 text-xs text-brand-300">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Saving order
               </span>
@@ -587,7 +618,7 @@ function ActiveQueueLane({
                 <button
                   type="button"
                   onClick={() => onApplyReorder(group)}
-                  className="inline-flex h-8 items-center border border-blue-500 bg-blue-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-blue-500"
+                  className="inline-flex h-8 items-center border border-brand-500 bg-brand-500 px-3 text-xs font-semibold text-[var(--brand-ink)] transition-colors hover:bg-brand-500"
                 >
                   Apply order
                 </button>
@@ -597,7 +628,7 @@ function ActiveQueueLane({
         </div>
         <div>
           {group.jobs.length === 0 ? (
-            <QueueEmptyState queueRunning={queueRunning} />
+            <QueueEmptyState queueRunning={queueRunning} action={emptyAction} />
           ) : (
             group.jobs.map((job, index) => (
               <QueueJobCard
@@ -624,7 +655,7 @@ function ActiveQueueLane({
 
 function EventIcon({ line }: { line: string }) {
   if (/error|failed|exit code/i.test(line)) return <XCircle className="h-4 w-4 text-rose-400" />;
-  if (/start|queued|running/i.test(line)) return <Info className="h-4 w-4 text-blue-400" />;
+  if (/start|queued|running/i.test(line)) return <Info className="h-4 w-4 text-brand-400" />;
   if (/complete|saved|done/i.test(line)) return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
   return <Clock3 className="h-4 w-4 text-gray-500" />;
 }
@@ -665,7 +696,9 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
             <div className="text-gray-500">GPU</div>
             <div className="text-gray-100">{job.gpu_ids || '-'}</div>
             <div className="text-gray-500">Workspace</div>
-            <div className="min-w-0"><ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} /></div>
+            <div className="min-w-0">
+              <ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} />
+            </div>
             <div className="text-gray-500">Added</div>
             <div className="text-gray-100">{formatDate(job.created_at)}</div>
             <div className="text-gray-500">ID</div>
@@ -677,14 +710,16 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
               <span>{Math.round(getProgress(job))}%</span>
             </div>
             <ProgressBar value={getProgress(job)} />
-            <div className="mt-1 text-xs text-gray-400">{totalSteps ? `${job.step} / ${totalSteps}` : `Step ${job.step}`}</div>
+            <div className="mt-1 text-xs text-gray-400">
+              {totalSteps ? `${job.step} / ${totalSteps}` : `Step ${job.step}`}
+            </div>
           </div>
         </section>
 
         <section className="border-b border-gray-900 px-4 py-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-gray-100">Recent Events</h3>
-            <Link href={jobDetailHref(job)} className="text-xs text-blue-300 hover:text-blue-200">
+            <Link href={jobDetailHref(job)} className="text-xs text-brand-300 hover:text-brand-200">
               View full log
             </Link>
           </div>
@@ -716,7 +751,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
           <div className="mt-3 flex flex-wrap gap-2 text-sm">
             <Link
               href={jobDetailHref(job)}
-              className="inline-flex h-9 items-center gap-2 border border-blue-800 bg-blue-950/40 px-3 text-blue-100 hover:bg-blue-900"
+              className="inline-flex h-9 items-center gap-2 border border-brand-800 bg-brand-950/40 px-3 text-brand-100 hover:bg-brand-900"
             >
               <PlayCircle className="h-4 w-4" />
               View Logs
@@ -738,10 +773,13 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
           </div>
           <div className="mt-5 border-t border-gray-900 pt-3 text-sm text-gray-300">
             <div className="flex items-center gap-2 font-medium text-gray-100">
-              <Info className="h-4 w-4 text-blue-300" />
+              <Info className="h-4 w-4 text-brand-300" />
               Having issues?
             </div>
-            <Link href={jobDetailHref(job)} className="mt-2 inline-flex items-center gap-2 text-xs text-blue-300 hover:text-blue-200">
+            <Link
+              href={jobDetailHref(job)}
+              className="mt-2 inline-flex items-center gap-2 text-xs text-brand-300 hover:text-brand-200"
+            >
               Check job details
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
@@ -752,20 +790,9 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
   );
 }
 
-function EmptyInspector() {
-  return (
-    <aside className="sticky top-3 flex min-h-[360px] items-center justify-center border-l border-gray-900 bg-gray-950/45 p-6 text-center text-sm text-gray-400">
-      <div>
-        <CircleDashed className="mx-auto mb-3 h-8 w-8 text-gray-600" />
-        <div className="font-medium text-gray-200">Select a job</div>
-        <div className="mt-1">Job details, logs, and actions will appear here.</div>
-      </div>
-    </aside>
-  );
-}
-
 export default function QueueWorkbench({
   filterText,
+  emptyAction,
   focusGpuIDs,
   scope = 'global',
   projectID = null,
@@ -778,7 +805,7 @@ export default function QueueWorkbench({
     projectID,
     includeProjectActive,
   });
-  const { queues, status: queueStatus, refreshQueues } = useQueueList();
+  const { queues, status: queueStatus, refreshQueues } = useQueueList(5000);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
   const [activeTab, setActiveTab] = useState<TabKey>('active');
@@ -824,7 +851,6 @@ export default function QueueWorkbench({
   }, [filterText, jobs]);
 
   const jobsDict = useMemo<Record<string, JobGroup>>(() => {
-    if (!isGPUInfoLoaded) return {};
     if (filteredJobs.length === 0 && gpuList.length === 0 && queues.length === 0) return {};
 
     const groups: Record<string, JobGroup> = {};
@@ -924,23 +950,7 @@ export default function QueueWorkbench({
   const idleJobs = jobsDict.idle?.jobs || [];
   const failedJobs = filteredJobs.filter(job => job.status === 'error' || job.status === 'failed');
   const activeJobs = filteredJobs.filter(job => activeJobStatuses.has(job.status));
-  const visibleJobs = useMemo(() => {
-    if (activeTab === 'history') return idleJobs;
-    if (activeTab === 'failed') return sortHistoryJobs(failedJobs, sort);
-    if (activeTab === 'all') return [...activeGroups.flatMap(group => group.jobs), ...idleJobs];
-    return [...activeGroups.flatMap(group => group.jobs), ...idleJobs.slice(0, 4)];
-  }, [activeGroups, activeTab, failedJobs, idleJobs, sort]);
-  const selectedJob =
-    filteredJobs.find(job => job.id === selectedJobID) ||
-    (hasInlineInspector ? visibleJobs[0] || filteredJobs[0] || null : null);
-
-  useEffect(() => {
-    if (!selectedJob) {
-      setSelectedJobID(null);
-      return;
-    }
-    if (selectedJobID !== selectedJob.id) setSelectedJobID(selectedJob.id);
-  }, [selectedJob, selectedJobID]);
+  const selectedJob = filteredJobs.find(job => job.id === selectedJobID) || null;
 
   const tableError =
     status === 'error'
@@ -951,7 +961,7 @@ export default function QueueWorkbench({
           ? 'Workers could not be loaded.'
           : null;
 
-  let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading' || !isGPUInfoLoaded;
+  let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading';
   if (Object.keys(jobsDict).length > 0) isLoading = false;
 
   const tabs: Array<{ key: TabKey; label: string; count: number; icon: typeof PlayCircle }> = [
@@ -1034,7 +1044,7 @@ export default function QueueWorkbench({
     setDragOverJobID(null);
   };
 
-  if (isLoading && Object.keys(jobsDict).length === 0) {
+  if (isLoading && !tableError && Object.keys(jobsDict).length === 0) {
     return (
       <div className="p-3">
         <PageNotice tone="neutral" title="Loading queues and jobs">
@@ -1045,7 +1055,22 @@ export default function QueueWorkbench({
   }
 
   return (
-    <div className="grid min-h-full gap-4 bg-gray-950 p-3 xl:grid-cols-[minmax(0,1fr)_340px]">
+    <div
+      className={classNames('grid gap-5', hasInlineInspector && selectedJob && 'xl:grid-cols-[minmax(0,1fr)_340px]')}
+    >
+      <div className="studio-queue-metrics xl:col-span-full">
+        {[
+          ['Running', jobs.filter(job => job.status === 'running').length],
+          ['Queued', jobs.filter(job => job.status === 'queued').length],
+          ['Completed', jobs.filter(job => job.status === 'completed').length],
+          ['Local GPUs', isGPUInfoLoaded ? gpuList.length : 'Unavailable'],
+        ].map(([label, value]) => (
+          <div key={label}>
+            <strong>{status === 'error' && label !== 'Local GPUs' ? 'Unavailable' : value}</strong>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
       <div className="min-w-0 space-y-2">
         <section className="border-b border-gray-900">
           <div className="flex min-w-0 flex-col gap-3 px-1 py-2 lg:flex-row lg:items-center lg:justify-between">
@@ -1061,15 +1086,13 @@ export default function QueueWorkbench({
                     className={classNames(
                       'inline-flex h-9 flex-none items-center gap-2 border-b-2 px-3 text-sm transition-colors',
                       active
-                        ? 'border-blue-500 text-gray-100'
+                        ? 'border-brand-500 text-gray-100'
                         : 'border-transparent text-gray-400 hover:text-gray-200',
                     )}
                   >
                     <Icon className="h-4 w-4" />
                     {tab.label}
-                    <span className="text-xs text-gray-500">
-                      {tab.count}
-                    </span>
+                    <span className="text-xs text-gray-500">{tab.count}</span>
                   </button>
                 );
               })}
@@ -1106,7 +1129,15 @@ export default function QueueWorkbench({
         )}
 
         {reorderError && (
-          <PageNotice tone="danger" title="Queue order was not saved" action={<button className="operator-icon-button h-7 w-7" onClick={() => setReorderError(null)}><X className="h-4 w-4" /></button>}>
+          <PageNotice
+            tone="danger"
+            title="Queue order was not saved"
+            action={
+              <button className="operator-icon-button h-7 w-7" onClick={() => setReorderError(null)}>
+                <X className="h-4 w-4" />
+              </button>
+            }
+          >
             {reorderError}
           </PageNotice>
         )}
@@ -1118,7 +1149,9 @@ export default function QueueWorkbench({
             return (
               <ActiveQueueLane
                 key={`${group.workerID}:${group.gpuIDs}`}
+                queueUnavailable={queueStatus === 'error' || queueStatus === 'loading'}
                 group={displayGroup}
+                emptyAction={filterText.trim() ? undefined : emptyAction}
                 queue={queue}
                 selectedJobID={selectedJobID}
                 dragJobID={dragJobID}
@@ -1136,6 +1169,12 @@ export default function QueueWorkbench({
               />
             );
           })}
+
+        {(activeTab === 'active' || activeTab === 'all') && activeGroups.length === 0 && (
+          <PageNotice tone="neutral" title={filterText.trim() ? 'No matching jobs' : 'No queues available'}>
+            Refresh device information or connect a worker to view its queue.
+          </PageNotice>
+        )}
 
         {activeTab === 'active' && idleJobs.length > 0 && (
           <JobListLane
@@ -1188,12 +1227,17 @@ export default function QueueWorkbench({
             onRefresh={refresh}
           />
         )}
-
       </div>
 
-      {hasInlineInspector && (
+      {hasInlineInspector && selectedJob && (
         <div className="min-w-0">
-          {selectedJob ? <SelectedJobInspector job={selectedJob} onRefresh={refresh} /> : <EmptyInspector />}
+          <div className="mb-2 flex justify-end">
+            <button type="button" className="operator-button" onClick={() => setSelectedJobID(null)}>
+              <X className="h-4 w-4" />
+              Close details
+            </button>
+          </div>
+          <SelectedJobInspector job={selectedJob} onRefresh={refresh} />
         </div>
       )}
     </div>

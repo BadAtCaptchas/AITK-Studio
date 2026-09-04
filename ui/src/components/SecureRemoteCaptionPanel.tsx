@@ -394,7 +394,7 @@ export default function SecureRemoteCaptionPanel() {
         <button
           type="submit"
           disabled={!canStart}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm text-white hover:bg-brand-600 disabled:opacity-50"
         >
           {submitStatus === 'starting' && <Loader2 className="h-4 w-4 animate-spin" />}
           Start Secure Caption Job

@@ -1,19 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { Queue } from '@/types';
 import { apiClient } from '@/utils/api';
+import usePollLoop from './usePollLoop';
 
-export default function useQueueList() {
+export default function useQueueList(reloadInterval: number | null = null) {
   const [queues, setQueues] = useState<Queue[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-  const refreshQueues = () => {
+  const fetchQueues = useCallback((signal?: AbortSignal) => {
     setStatus('loading');
-    apiClient
-      .get('/api/queue')
+    return apiClient
+      .get('/api/queue', { signal })
       .then(res => res.data)
       .then(data => {
+        if (signal?.aborted) return;
         if (data.error) {
           setStatus('error');
         } else {
@@ -22,12 +24,11 @@ export default function useQueueList() {
         }
       })
       .catch(() => {
+        if (signal?.aborted) return;
         setStatus('error');
       });
-  };
-  useEffect(() => {
-    refreshQueues();
   }, []);
+  usePollLoop(signal => fetchQueues(signal), reloadInterval);
 
-  return { queues, setQueues, status, refreshQueues };
+  return { queues, setQueues, status, refreshQueues: () => fetchQueues() };
 }

@@ -131,12 +131,12 @@ export function StandaloneBoxDetailsPanel({
   };
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col border-t border-[#273039] bg-[#071019]">
+    <section className="flex min-h-0 flex-1 flex-col border-t border-gray-800 bg-gray-950">
       <div className="flex h-9 flex-none items-center px-3 text-xs font-medium text-gray-400">Box properties</div>
 
       <div className="operator-scrollbar-none flex min-h-0 flex-1 flex-col overflow-y-auto">
         {!element || selectedElementIndex == null ? (
-          <div className="mx-3 rounded-[4px] border border-dashed border-[#33414d] px-3 py-4 text-xs leading-5 text-gray-500">
+          <div className="mx-3 rounded-[4px] border border-dashed border-gray-800 px-3 py-4 text-xs leading-5 text-gray-500">
             Select a box to edit its label, type, geometry, and description.
           </div>
         ) : (
@@ -144,7 +144,7 @@ export function StandaloneBoxDetailsPanel({
             <div className="grid grid-cols-[minmax(0,1fr)_144px] items-end gap-3">
               <label className="min-w-0">
                 <span className="mb-1 block text-[11px] text-gray-500">Label</span>
-                <span className="flex h-8 items-center gap-2 rounded-[4px] border border-[#33414d] bg-[#08121a] px-2.5 focus-within:border-cyan-600">
+                <span className="flex h-8 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2.5 focus-within:border-brand-600">
                   <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ backgroundColor: selectedLayerColor }} />
                   <input
                     value={labelDraft}
@@ -165,7 +165,7 @@ export function StandaloneBoxDetailsPanel({
                   />
                 </span>
               </label>
-              <div className="grid h-8 grid-cols-2 overflow-hidden rounded-[4px] border border-[#33414d] bg-[#08121a]">
+              <div className="grid h-8 grid-cols-2 overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
                 {([['obj', 'Object'], ['text', 'Text']] as const).map(([value, text]) => {
                   const active = value === (isText ? 'text' : 'obj');
                   return (
@@ -176,7 +176,7 @@ export function StandaloneBoxDetailsPanel({
                       aria-pressed={active}
                       onClick={() => onSelectedTypeChange(value)}
                       className={classNames('text-xs transition-colors disabled:opacity-45', {
-                        'bg-cyan-900/70 text-cyan-50': active,
+                        'bg-brand-900/70 text-brand-50': active,
                         'text-gray-400 hover:bg-white/5 hover:text-gray-100': !active,
                       })}
                     >
@@ -197,7 +197,7 @@ export function StandaloneBoxDetailsPanel({
                   {(['x', 'y', 'w', 'h'] as const).map(field => (
                     <label
                       key={field}
-                      className="flex h-8 min-w-0 items-center gap-1 rounded-[4px] border border-[#33414d] bg-[#08121a] px-2"
+                      className="flex h-8 min-w-0 items-center gap-1 rounded-[4px] border border-gray-800 bg-gray-950 px-2"
                     >
                       <span className="text-[10px] uppercase text-gray-600">{field}</span>
                       <input
@@ -224,7 +224,7 @@ export function StandaloneBoxDetailsPanel({
                     title={selectedLocked ? 'Unlock selected box' : 'Lock selected box'}
                     aria-label={selectedLocked ? 'Unlock selected box' : 'Lock selected box'}
                     className={classNames(
-                      'flex h-8 w-9 items-center justify-center rounded-[4px] border border-[#33414d] bg-[#08121a] hover:text-white disabled:opacity-45',
+                      'flex h-8 w-9 items-center justify-center rounded-[4px] border border-gray-800 bg-gray-950 hover:text-white disabled:opacity-45',
                       selectedLocked ? 'text-amber-300' : 'text-gray-500',
                     )}
                   >
@@ -233,7 +233,7 @@ export function StandaloneBoxDetailsPanel({
                 </div>
               </div>
             ) : (
-              <div className="rounded-[4px] border border-dashed border-[#33414d] px-3 py-2 text-[11px] text-gray-500">
+              <div className="rounded-[4px] border border-dashed border-gray-800 px-3 py-2 text-[11px] text-gray-500">
                 No box yet. Choose Box or Text, then draw on the image.
               </div>
             )}
@@ -252,7 +252,7 @@ export function StandaloneBoxDetailsPanel({
                     if (event.key === 'Escape') setDescriptionDraft(description);
                   }}
                   aria-label="Box description"
-                  className="operator-scrollbar-none h-14 w-full resize-none rounded-[4px] border border-[#33414d] bg-[#08121a] px-2.5 pb-4 pt-1.5 text-xs leading-4 text-gray-100 outline-none focus:border-cyan-600 disabled:opacity-50"
+                  className="operator-scrollbar-none h-14 w-full resize-none rounded-[4px] border border-gray-800 bg-gray-950 px-2.5 pb-4 pt-1.5 text-xs leading-4 text-gray-100 outline-none focus:border-brand-600 disabled:opacity-50"
                 />
                 <span className="pointer-events-none absolute bottom-1.5 right-2.5 text-[10px] tabular-nums text-gray-600">
                   {descriptionDraft.length} / 500
@@ -269,7 +269,7 @@ export function StandaloneBoxDetailsPanel({
         )}
 
         {autoBoxesOpen ? (
-          <div className="order-first mx-3 mb-2 space-y-2 rounded-[4px] border border-cyan-900/60 bg-cyan-950/10 p-3">
+          <div className="order-first mx-3 mb-2 space-y-2 rounded-[4px] border border-brand-900/60 bg-brand-950/10 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-[11px] font-medium text-gray-300">Generate boxes</div>
@@ -280,7 +280,7 @@ export function StandaloneBoxDetailsPanel({
                 disabled={!canGenerateAutoBoxes}
                 onClick={onGenerateAutoBoxes}
                 title={autoBoxDisabledReason || `Generate boxes with ${autoBoxProviderLabel}`}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-cyan-600/50 bg-cyan-500/15 px-3 text-[11px] font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-brand-600/50 bg-brand-500/15 px-3 text-[11px] font-medium text-brand-100 hover:bg-brand-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
               >
                 {isGeneratingBoxes ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
                 Generate
@@ -292,7 +292,7 @@ export function StandaloneBoxDetailsPanel({
                 <select
                   value={autoBoxProvider}
                   onChange={event => onAutoBoxProviderChange(event.target.value)}
-                  className="h-8 w-full rounded-[4px] border border-[#33414d] bg-[#08121a] px-2 text-[11px] text-gray-100 outline-none focus:border-cyan-600"
+                  className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] text-gray-100 outline-none focus:border-brand-600"
                 >
                   {AUTO_BOX_PROVIDERS.map(provider => (
                     <option key={provider.value} value={provider.value}>{provider.label}</option>
@@ -305,7 +305,7 @@ export function StandaloneBoxDetailsPanel({
                   value={autoBoxModel}
                   list={modelListId}
                   onChange={event => onAutoBoxModelChange(event.target.value)}
-                  className="h-8 w-full rounded-[4px] border border-[#33414d] bg-[#08121a] px-2 text-[11px] text-gray-100 outline-none focus:border-cyan-600"
+                  className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] text-gray-100 outline-none focus:border-brand-600"
                 />
                 <datalist id={modelListId}>
                   {autoBoxModels.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}
@@ -317,18 +317,18 @@ export function StandaloneBoxDetailsPanel({
                   <select
                     value={remoteWorkerId}
                     onChange={event => onRemoteWorkerChange(event.target.value)}
-                    className="h-8 w-full rounded-[4px] border border-[#33414d] bg-[#08121a] px-2 text-[11px] text-gray-100 outline-none focus:border-cyan-600"
+                    className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] text-gray-100 outline-none focus:border-brand-600"
                   >
                     {remoteWorkerOptions.map(worker => <option key={worker.value} value={worker.value}>{worker.label}</option>)}
                   </select>
                 </label>
               ) : null}
-              <label className="flex h-8 items-center gap-2 self-end rounded-[4px] border border-[#33414d] bg-[#08121a] px-2 text-[11px] text-gray-300">
+              <label className="flex h-8 items-center gap-2 self-end rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] text-gray-300">
                 <input
                   type="checkbox"
                   checked={autoBoxRefine}
                   onChange={event => onAutoBoxRefineChange(event.target.checked)}
-                  className="h-3.5 w-3.5 accent-cyan-400"
+                  className="h-3.5 w-3.5 accent-brand-400"
                 />
                 Refine pass
               </label>
@@ -347,7 +347,7 @@ export function StandaloneBoxDetailsPanel({
         type="button"
         onClick={() => onAutoBoxesOpenChange(!autoBoxesOpen)}
         aria-expanded={autoBoxesOpen}
-        className="mx-3 mb-2 flex h-12 flex-none items-center gap-2 rounded-[4px] border border-[#33414d] bg-[#08121a] px-3 text-left text-xs text-gray-200 hover:border-cyan-800 hover:bg-cyan-950/20"
+        className="mx-3 mb-2 flex h-12 flex-none items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-left text-xs text-gray-200 hover:border-brand-800 hover:bg-brand-950/20"
       >
         <WandSparkles className="h-4 w-4 flex-none text-gray-400" />
         <span className="min-w-0 flex-1">

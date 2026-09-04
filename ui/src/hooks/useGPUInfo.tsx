@@ -123,6 +123,6 @@ export default function useGPUInfo(
     setGpuList,
     isGPUInfoLoaded,
     status,
-    refreshGpuInfo: () => useLocalMonitor ? Promise.resolve() : fetchGpuInfo({ force: true }),
+    refreshGpuInfo: () => fetchGpuInfo({ force: true }),
   };
 }

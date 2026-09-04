@@ -36,7 +36,7 @@ export default function UniversalTable({
   errorMessage = null,
 }: TableProps) {
   return (
-    <div className="w-full overflow-hidden border border-gray-800 bg-gray-950/40">
+    <div className="w-full overflow-hidden rounded-lg border border-gray-800 bg-gray-950/40">
       {isLoading ? (
         <div className="flex justify-center p-6">
           <Loading />
@@ -75,7 +75,7 @@ export default function UniversalTable({
             <thead className={classNames('border-b border-gray-800 bg-gray-900 text-xs uppercase', theadClassName)}>
               <tr>
                 {columns.map(column => (
-                  <th key={column.key} className="px-3 py-2 font-medium">
+                  <th key={column.key} className="px-4 py-3 font-medium tracking-wide">
                     {column.title}
                   </th>
                 ))}
@@ -88,7 +88,7 @@ export default function UniversalTable({
                 return (
                   <tr key={index} className={`${rowClass} border-b border-gray-800 last:border-b-0 hover:bg-gray-800/70`}>
                     {columns.map(column => (
-                      <td key={column.key} className={classNames('px-3 py-2 align-middle', column.className)}>
+                      <td key={column.key} className={classNames('px-4 py-3 align-middle', column.className)}>
                         {column.render ? column.render(row) : row[column.key]}
                       </td>
                     ))}

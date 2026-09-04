@@ -238,7 +238,7 @@ function SettingSwitch({ checked, onChange, disabled = false }: { checked: boole
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
       className={`relative inline-flex h-6 w-11 flex-none items-center rounded-full border border-gray-700 transition-colors ${
-        checked ? 'bg-cyan-500/90' : 'bg-gray-700'
+        checked ? 'bg-brand-500/90' : 'bg-gray-700'
       } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
     >
       <span className="sr-only">Toggle setting</span>
@@ -734,12 +734,12 @@ export default function Settings() {
               saveStatusTone === 'error'
                 ? 'border-rose-500/35 bg-rose-950/20 text-rose-200'
                 : saveStatusTone === 'saving'
-                  ? 'border-cyan-500/35 bg-cyan-950/20 text-cyan-100'
+                  ? 'border-brand-500/35 bg-brand-950/20 text-brand-100'
                   : saveStatusTone === 'unsaved'
                     ? 'border-amber-500/35 bg-amber-950/20 text-amber-100'
                     : saveStatusTone === 'success'
                       ? 'border-emerald-500/35 bg-emerald-950/20 text-emerald-100'
-                  : 'border-cyan-500/25 bg-cyan-950/20 text-gray-300'
+                  : 'border-brand-500/25 bg-brand-950/20 text-gray-300'
             }`}
           >
             {saveStatusTone === 'saving' ? (
@@ -757,7 +757,7 @@ export default function Settings() {
             disabled={status === 'saving' || !hasUnsavedSettings}
             aria-label="Save settings"
             title="Save settings"
-            className="inline-flex h-9 w-10 items-center justify-center gap-2 border border-cyan-500 bg-cyan-500 px-0 text-sm font-semibold text-gray-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-4"
+            className="operator-button-primary h-10 w-10 px-0 sm:w-auto sm:px-4"
           >
             {status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             <span className="hidden sm:inline">Save changes</span>
@@ -779,7 +779,7 @@ export default function Settings() {
                       onClick={() => jumpToSection(section.id)}
                       className={`flex h-11 w-full items-center border-l-2 px-3 text-left text-sm transition-colors ${
                         active
-                          ? 'border-cyan-400 bg-gray-900/55 text-cyan-200'
+                          ? 'border-brand-400 bg-gray-900/55 text-brand-200'
                           : 'border-transparent text-gray-400 hover:bg-gray-900/35 hover:text-gray-200'
                       }`}
                     >
@@ -800,7 +800,7 @@ export default function Settings() {
                       onClick={() => jumpToSection(section.id)}
                       className={`h-9 flex-none border-b-2 px-3 text-sm ${
                         activeSection === section.id
-                          ? 'border-cyan-400 text-cyan-100'
+                          ? 'border-brand-400 text-brand-100'
                           : 'border-transparent text-gray-400'
                       }`}
                     >
@@ -1004,6 +1004,27 @@ export default function Settings() {
                   </div>
                 </section>
 
+                <section className="mt-7 border-t border-gray-900 pt-6" aria-labelledby="training-view-title">
+                  <h2 id="training-view-title" className="text-base font-semibold text-gray-100">Training form</h2>
+                  <div className="mt-3 flex items-center gap-4 rounded-lg border border-gray-800 p-4">
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor="training-legacy-view" className="text-sm font-semibold text-gray-100">Legacy view</label>
+                      <p id="training-legacy-view-detail" className="mt-1 text-sm text-gray-400">
+                        Show all training options on one page in a compact, legacy-style layout. Turn off to use the guided steps.
+                      </p>
+                    </div>
+                    <input
+                      id="training-legacy-view"
+                      type="checkbox"
+                      role="switch"
+                      aria-describedby="training-legacy-view-detail"
+                      checked={settings.TRAINING_LEGACY_VIEW === 'true'}
+                      onChange={event => setSettings(prev => ({ ...prev, TRAINING_LEGACY_VIEW: event.target.checked ? 'true' : 'false' }))}
+                      className="h-5 w-5 shrink-0 accent-brand-500"
+                    />
+                  </div>
+                </section>
+
                 <section className="mt-7 border-t border-gray-900 pt-6">
                   <div className="mb-3">
                     <h2 className="text-base font-semibold text-gray-100">Automation</h2>
@@ -1095,7 +1116,7 @@ export default function Settings() {
                               name="COMFY_EXTERNAL_URL"
                               value={settings.COMFY_EXTERNAL_URL}
                               onChange={handleChange}
-                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
                               placeholder="http://127.0.0.1:8188"
                             />
                           </FieldShell>
@@ -1110,7 +1131,7 @@ export default function Settings() {
                               name="COMFY_EXTERNAL_LORA_DIR"
                               value={settings.COMFY_EXTERNAL_LORA_DIR}
                               onChange={handleChange}
-                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                              className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
                               placeholder="E:\\ComfyUI\\models\\loras"
                             />
                           </FieldShell>
@@ -1125,7 +1146,7 @@ export default function Settings() {
                               type="button"
                               onClick={installComfyNow}
                               disabled={comfyInstallAction === 'installing' || comfyInstall?.installing}
-                              className="inline-flex h-9 items-center gap-2 border border-cyan-800 bg-cyan-950/40 px-3 text-sm text-cyan-100 hover:bg-cyan-900 disabled:opacity-50"
+                              className="inline-flex h-9 items-center gap-2 border border-brand-800 bg-brand-950/40 px-3 text-sm text-brand-100 hover:bg-brand-900 disabled:opacity-50"
                             >
                               {comfyInstallAction === 'installing' || comfyInstall?.installing ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1194,7 +1215,7 @@ export default function Settings() {
                               type="checkbox"
                               checked={workerForm.enabled}
                               onChange={e => setWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                              className="h-4 w-4 accent-cyan-500"
+                              className="h-4 w-4 accent-brand-500"
                             />
                             Enabled
                           </label>
@@ -1290,7 +1311,7 @@ export default function Settings() {
                                     <button type="button" className="h-8 border border-amber-800 px-2 text-xs text-amber-100 disabled:opacity-45" onClick={() => updateRemoteWorker(worker.id)} disabled={!canApplyWorkerUpdate || updaterBusy}>
                                       Update
                                     </button>
-                                    <button type="button" className={`h-8 border px-2 text-xs disabled:opacity-45 ${restartSuggested ? 'border-cyan-700 text-cyan-100' : 'border-gray-800 text-gray-300'}`} onClick={() => restartRemoteWorker(worker.id)} disabled={!worker.enabled || updaterBusy}>
+                                    <button type="button" className={`h-8 border px-2 text-xs disabled:opacity-45 ${restartSuggested ? 'border-brand-700 text-brand-100' : 'border-gray-800 text-gray-300'}`} onClick={() => restartRemoteWorker(worker.id)} disabled={!worker.enabled || updaterBusy}>
                                       {updaterAction === 'restarting' ? 'Restarting' : 'Restart'}
                                     </button>
                                     <button type="button" className="h-8 border border-rose-900 px-2 text-xs text-rose-200" onClick={() => deleteWorker(worker.id)}>
@@ -1338,7 +1359,7 @@ export default function Settings() {
                                     type="checkbox"
                                     checked={ollamaWorkerForm.enabled}
                                     onChange={e => setOllamaWorkerForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                                    className="h-4 w-4 accent-cyan-500"
+                                    className="h-4 w-4 accent-brand-500"
                                   />
                                   Enabled
                                 </label>
@@ -1425,7 +1446,7 @@ export default function Settings() {
                             <button type="button" onClick={startCloudflared} disabled={cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'} className="h-9 border border-emerald-800 px-3 text-sm text-emerald-100 disabled:opacity-50">
                               {cloudflaredAction === 'starting' ? 'Starting' : 'Start'}
                             </button>
-                            <button type="button" onClick={downloadCloudflared} disabled={!cloudflared?.downloadAvailable || cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'} className="inline-flex h-9 items-center gap-2 border border-cyan-800 px-3 text-sm text-cyan-100 disabled:opacity-50">
+                            <button type="button" onClick={downloadCloudflared} disabled={!cloudflared?.downloadAvailable || cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'} className="inline-flex h-9 items-center gap-2 border border-brand-800 px-3 text-sm text-brand-100 disabled:opacity-50">
                               {cloudflaredAction === 'downloading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                               Download
                             </button>

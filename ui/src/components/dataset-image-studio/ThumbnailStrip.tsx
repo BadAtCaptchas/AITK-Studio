@@ -31,7 +31,7 @@ export function ThumbnailStrip({
   const visibleThumbs = items.slice(thumbRange.start, thumbRange.end);
 
   return (
-    <div className="flex h-20 flex-shrink-0 items-center gap-2 border-t border-gray-900 bg-[#080d12] px-2 sm:h-24 xl:h-28 xl:gap-3 xl:px-3">
+    <div className="flex h-20 flex-shrink-0 items-center gap-2 border-t border-gray-900 bg-gray-950 px-2 sm:h-24 xl:h-28 xl:gap-3 xl:px-3">
       <button
         type="button"
         className="flex h-[70px] w-10 flex-shrink-0 items-center justify-center rounded-md border border-gray-900 bg-gray-950 text-gray-300 hover:bg-gray-900 sm:h-[86px] sm:w-12 xl:h-[104px] xl:w-16"
@@ -58,7 +58,7 @@ export function ThumbnailStrip({
               className={classNames(
                 'h-[70px] w-28 flex-shrink-0 overflow-hidden rounded-md border bg-gray-950 text-left transition-colors sm:h-[86px] sm:w-32 xl:h-[104px] xl:w-40',
                 {
-                  'border-blue-500 shadow-[0_0_0_1px_rgba(59,130,246,0.9)]': selected,
+                  'border-brand-500 shadow-[0_0_0_1px_rgba(59,130,246,0.9)]': selected,
                   'border-gray-800 hover:border-gray-700': !selected,
                 },
               )}

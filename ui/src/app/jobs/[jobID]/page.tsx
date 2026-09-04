@@ -33,7 +33,7 @@ const pages: Page[] = [
     value: 'overview',
     icon: MdDashboard,
     component: JobOverview,
-    mainCss: 'pt-24',
+    mainCss: 'pt-[124px]',
   },
   {
     name: 'Samples',
@@ -41,7 +41,7 @@ const pages: Page[] = [
     icon: MdImage,
     component: SampleImages,
     menuItem: SampleImagesMenu,
-    mainCss: 'pt-24',
+    mainCss: 'pt-[124px]',
     jobTypes: ['train', 'generate'],
   },
   {
@@ -49,7 +49,7 @@ const pages: Page[] = [
     value: 'loss_log',
     icon: MdShowChart,
     component: JobLossGraph,
-    mainCss: 'pt-24 pb-4',
+    mainCss: 'pt-[124px] pb-4',
     jobTypes: ['train'],
   },
   {
@@ -57,7 +57,7 @@ const pages: Page[] = [
     value: 'config',
     icon: MdCode,
     component: JobConfigViewer,
-    mainCss: 'pt-[88px] px-0 pb-0',
+    mainCss: 'pt-[112px] px-0 pb-0',
   },
 ];
 
@@ -142,7 +142,7 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
         )}
       </MainContent>
       {job && (
-      <div className="operator-scrollbar-none absolute left-0 top-12 flex h-9 w-full items-center overflow-x-auto border-b border-gray-800 bg-gray-900 px-2 text-sm">
+      <div className="operator-scrollbar-none absolute left-0 top-[72px] flex h-9 w-full items-center overflow-x-auto border-b border-gray-800 bg-gray-900 px-5 text-sm sm:px-8">
         {pages.map(page => {
           if (page.jobTypes && !page.jobTypes.includes(jobType)) {
             return null;
@@ -153,7 +153,7 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
               onClick={() => setPageKey(page.value)}
               className={`flex h-8 items-center gap-1.5 border-b-2 px-3 py-1 ${
                 page.value === pageKey
-                  ? 'border-cyan-400 text-cyan-100'
+                  ? 'border-brand-400 text-brand-100'
                   : 'border-transparent text-gray-400 hover:text-gray-100'
               }`}
             >

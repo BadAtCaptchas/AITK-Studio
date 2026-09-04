@@ -40,13 +40,13 @@ type FilePreview = {
 const protectedZones = new Set(['datasets', 'runs', 'models']);
 
 function itemIcon(item: Pick<ProjectFileTreeItem, 'kind' | 'name'>, className = 'h-4 w-4') {
-  if (item.kind === 'folder') return <Folder className={`${className} text-cyan-300`} />;
+  if (item.kind === 'folder') return <Folder className={`${className} text-brand-300`} />;
   const extension = item.name.split('.').pop()?.toLowerCase();
   if (['png', 'jpg', 'jpeg', 'webp', 'jxl', 'gif', 'bmp'].includes(extension || '')) {
     return <ImageIcon className={`${className} text-violet-300`} />;
   }
   if (['mp4', 'webm', 'mov', 'mkv'].includes(extension || '')) {
-    return <FileVideo className={`${className} text-blue-300`} />;
+    return <FileVideo className={`${className} text-brand-300`} />;
   }
   if (['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(extension || '')) {
     return <FileAudio className={`${className} text-emerald-300`} />;
@@ -237,7 +237,7 @@ export default function ProjectFilesPage({ params }: { params: Promise<{ project
                 value={filterText}
                 onChange={event => setFilterText(event.target.value)}
                 placeholder="Search every project zone"
-                className="h-10 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-800"
+                className="h-10 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-800"
               />
             </label>
             {searchTruncated ? <p className="mt-2 text-xs text-amber-300">Showing the first 250 matches.</p> : null}
@@ -281,7 +281,7 @@ export default function ProjectFilesPage({ params }: { params: Promise<{ project
           </div>
         </section>
 
-        <section className="min-h-[520px] overflow-auto bg-[#02060a] p-3 sm:p-4 lg:min-h-0">
+        <section className="min-h-[520px] overflow-auto bg-gray-950 p-3 sm:p-4 lg:min-h-0">
           <div className="mx-auto max-w-6xl space-y-4">
             <div className="border border-gray-800 bg-gray-950">
               <div className="flex min-h-12 flex-wrap items-center gap-1 border-b border-gray-800 px-3 py-2 text-xs text-gray-500">
@@ -300,7 +300,7 @@ export default function ProjectFilesPage({ params }: { params: Promise<{ project
               <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="flex h-10 w-10 flex-none items-center justify-center border border-gray-800 bg-gray-900">
-                    {preview?.item ? itemIcon(preview.item, 'h-5 w-5') : <Folder className="h-5 w-5 text-cyan-300" />}
+                    {preview?.item ? itemIcon(preview.item, 'h-5 w-5') : <Folder className="h-5 w-5 text-brand-300" />}
                   </span>
                   <div className="min-w-0">
                     <h2 className="truncate text-base font-semibold text-gray-100">{preview?.item.relativePath || preview?.item.name || 'Project root'}</h2>
@@ -392,11 +392,11 @@ export default function ProjectFilesPage({ params }: { params: Promise<{ project
         >
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-gray-400">New name</span>
-            <input autoFocus value={renameValue} onChange={event => setRenameValue(event.target.value)} className="h-10 w-full border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600" />
+            <input autoFocus value={renameValue} onChange={event => setRenameValue(event.target.value)} className="h-10 w-full border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600" />
           </label>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setRenameOpen(false)} disabled={mutationPending} className="operator-button h-9">Cancel</button>
-            <button type="submit" disabled={!renameValue.trim() || mutationPending} className="operator-button h-9 border-cyan-800 bg-cyan-950/50 text-cyan-100">
+            <button type="submit" disabled={!renameValue.trim() || mutationPending} className="operator-button h-9 border-brand-800 bg-brand-950/50 text-brand-100">
               {mutationPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />} Rename
             </button>
           </div>

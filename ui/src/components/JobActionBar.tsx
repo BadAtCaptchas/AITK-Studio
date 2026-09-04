@@ -855,7 +855,7 @@ export default function JobActionBar({
                       aria-pressed={checkpointMode === 'latest'}
                       className={`w-full rounded-md border px-3 py-3 text-left transition-colors ${
                         checkpointMode === 'latest'
-                          ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                          ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                           : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-gray-500'
                       }`}
                     >
@@ -873,7 +873,7 @@ export default function JobActionBar({
                       aria-pressed={checkpointMode === 'all'}
                       className={`w-full rounded-md border px-3 py-3 text-left transition-colors ${
                         checkpointMode === 'all'
-                          ? 'border-blue-500 bg-blue-500/10 text-gray-100'
+                          ? 'border-brand-500 bg-brand-500/10 text-gray-100'
                           : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-gray-500'
                       }`}
                     >
@@ -891,7 +891,7 @@ export default function JobActionBar({
                   <button
                     type="button"
                     onClick={startDialogExport}
-                    className="inline-flex w-full justify-center rounded-md bg-blue-700 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-blue-500 sm:ml-3 sm:w-auto"
+                    className="inline-flex w-full justify-center rounded-md bg-brand-700 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-brand-500 sm:ml-3 sm:w-auto"
                   >
                     Export
                   </button>
@@ -921,7 +921,7 @@ export default function JobActionBar({
           ) : exportStatus.phase === 'canceled' ? (
             <X className="mt-0.5 h-4 w-4 flex-none text-gray-400" />
           ) : (
-            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-blue-400" />
+            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-brand-400" />
           )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-3">
@@ -945,7 +945,7 @@ export default function JobActionBar({
             {exportStatus.phase === 'exporting' && (
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-700">
                 <div
-                  className="h-full rounded-full bg-blue-500 transition-all"
+                  className="h-full rounded-full bg-brand-500 transition-all"
                   style={{ width: `${Math.max(2, exportPercent)}%` }}
                 />
               </div>
@@ -966,7 +966,7 @@ export default function JobActionBar({
           ) : remoteStartStatus.phase === 'failed' ? (
             <X className="mt-0.5 h-4 w-4 flex-none text-red-400" />
           ) : (
-            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-blue-400" />
+            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-brand-400" />
           )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-3">
@@ -979,7 +979,7 @@ export default function JobActionBar({
             {remoteStartStatus.phase === 'starting' && (
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-700">
                 <div
-                  className="h-full rounded-full bg-blue-500 transition-all"
+                  className="h-full rounded-full bg-brand-500 transition-all"
                   style={{ width: `${Math.max(2, remoteStartPercent)}%` }}
                 />
               </div>
@@ -1000,7 +1000,7 @@ export default function JobActionBar({
           ) : modelDownloadStatus.phase === 'failed' ? (
             <X className="mt-0.5 h-4 w-4 flex-none text-red-400" />
           ) : (
-            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-blue-400" />
+            <Loader2 className="mt-0.5 h-4 w-4 flex-none animate-spin text-brand-400" />
           )}
           <div className="min-w-0 flex-1">
             <div className="truncate">{modelDownloadStatusLabel}</div>

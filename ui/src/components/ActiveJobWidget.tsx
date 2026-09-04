@@ -35,7 +35,7 @@ export default function ActiveJobWidget() {
             }
 
             let statusColor = 'text-gray-400';
-            if (job.status === 'running') statusColor = 'text-blue-400';
+            if (job.status === 'running') statusColor = 'text-brand-400';
             if (job.status === 'queued') statusColor = 'text-yellow-400';
             if (job.status === 'stopping') statusColor = 'text-orange-400';
 
@@ -46,7 +46,7 @@ export default function ActiveJobWidget() {
                   className="block min-w-0 border border-gray-800 bg-gray-900/50 px-2 py-2 transition-colors hover:bg-gray-900"
                 >
                   <div className="flex min-w-0 items-center gap-1.5">
-                    {isRunning && <CgSpinner className="animate-spin text-blue-400 flex-shrink-0" />}
+                    {isRunning && <CgSpinner className="animate-spin text-brand-400 flex-shrink-0" />}
                     <span className="text-xs text-gray-100 truncate min-w-0 flex-1">{label}</span>
                   </div>
                   {isTrain && totalSteps ? (

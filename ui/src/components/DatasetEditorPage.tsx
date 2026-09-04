@@ -511,7 +511,7 @@ export default function DatasetEditorPage({
             {status === 'success' && !encryptedManifest && imgList.length === 0 && (
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button
-                  className="operator-button whitespace-nowrap border-blue-800 bg-blue-950/70 text-blue-100"
+                  className="operator-button whitespace-nowrap border-brand-800 bg-brand-950/70 text-brand-100"
                   onClick={() =>
                     openImagesModal(datasetName, () => refreshImageList(datasetName), {
                       ...encryptedUploadOptions,
@@ -528,7 +528,7 @@ export default function DatasetEditorPage({
                     projectID={projectID}
                     workerID={workerID}
                     defaultSourcePath={defaultWatchSourcePath}
-                    className="operator-button whitespace-nowrap border-cyan-800 bg-cyan-950/70 text-cyan-100"
+                    className="operator-button whitespace-nowrap border-brand-800 bg-brand-950/70 text-brand-100"
                     onRefresh={() => refreshImageList(datasetName, { background: true })}
                   />
                 )}
@@ -816,13 +816,13 @@ export default function DatasetEditorPage({
       encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
       rootCaption={encryptedCatalog ? (encryptedCatalog.rootCaption ?? null) : undefined}
       idleLabel="Generate captions"
-      className="h-[34px] flex-shrink-0 !rounded-[4px] !bg-cyan-400 !px-3 !py-0 !text-[12px] !font-semibold !text-[#021014] hover:!bg-cyan-300"
+      className="h-[34px] flex-shrink-0 !rounded-[4px] !bg-brand-400 !px-3 !py-0 !text-[12px] !font-semibold !text-[var(--brand-ink)] hover:!bg-brand-300"
     />
   ) : null;
 
   return (
     <>
-      <TopBar className="h-[69px] gap-3 border-[#202429] bg-[#060b10] px-4">
+      <TopBar className="h-[69px] gap-3 border-gray-800 bg-gray-950 px-4">
         <div className="flex flex-shrink-0 items-center gap-3">
           <div className="h-7 w-[70px] overflow-hidden" aria-label="AITK Studio">
             <ThemeLogo className="!h-7 !w-[116px] max-w-none" />
@@ -841,7 +841,7 @@ export default function DatasetEditorPage({
               history.back();
             }
           }}
-          className="ml-3 inline-flex h-8 flex-shrink-0 items-center gap-2 rounded-[4px] border border-[#273039] bg-[#080d12] px-2.5 text-[12px] text-gray-400 hover:border-gray-600 hover:text-gray-100"
+          className="ml-3 inline-flex h-8 flex-shrink-0 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2.5 text-[12px] text-gray-400 hover:border-gray-600 hover:text-gray-100"
           title="Back to AITK Studio"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
@@ -855,12 +855,12 @@ export default function DatasetEditorPage({
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-800" />
           <span className="truncate font-medium text-gray-200">{datasetName}</span>
           {projectID && (
-            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-cyan-900/80 bg-cyan-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-300">
+            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-brand-900/80 bg-brand-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-300">
               Project
             </span>
           )}
           {isRemoteDataset && (
-            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-blue-900/80 bg-blue-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-300">
+            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-brand-900/80 bg-brand-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-300">
               Remote
             </span>
           )}
@@ -873,7 +873,7 @@ export default function DatasetEditorPage({
 
         <div className="flex flex-shrink-0 items-center gap-2">
           {isAutoCaptioning && (
-            <span className="hidden items-center gap-1.5 text-[11px] text-cyan-300 sm:inline-flex">
+            <span className="hidden items-center gap-1.5 text-[11px] text-brand-300 sm:inline-flex">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing queue
             </span>
           )}
@@ -886,7 +886,7 @@ export default function DatasetEditorPage({
           <button
             type="button"
             onClick={() => setDatasetMenuOpen(open => !open)}
-            className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-[#273039] bg-[#080d12] text-gray-400 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-gray-800 bg-gray-950 text-gray-400 hover:text-white"
             title="Dataset settings"
             aria-label="Dataset settings"
           >
@@ -896,7 +896,7 @@ export default function DatasetEditorPage({
       </TopBar>
 
       {datasetMenuOpen && (
-        <div className="absolute right-4 top-[60px] z-50 w-56 rounded-[4px] border border-[#273039] bg-[#0a1118] p-1.5 shadow-2xl">
+        <div className="absolute right-4 top-[60px] z-50 w-56 rounded-[4px] border border-gray-800 bg-gray-950 p-1.5 shadow-2xl">
           <button
             type="button"
             onClick={() => {
@@ -935,7 +935,7 @@ export default function DatasetEditorPage({
         </div>
       )}
 
-      <MainContent className="!top-[69px] !h-[calc(100%-69px)] overflow-hidden !px-0 !pt-0 sm:!px-0">
+      <MainContent className="!top-[69px] !h-[calc(100%-69px)] overflow-hidden !px-0 !pt-0 pb-0 sm:!px-0">
         {datasetActionError && (
           <PageNotice tone="danger" title="Dataset action failed" className="mx-auto mt-4 max-w-xl">
             {datasetActionError}
@@ -969,7 +969,7 @@ export default function DatasetEditorPage({
               )}
               {unlockError && <div className="text-sm text-red-400">{unlockError}</div>}
               <Button
-                className="operator-button w-full border-cyan-800 bg-cyan-950/60 text-cyan-100"
+                className="operator-button w-full border-brand-800 bg-brand-950/60 text-brand-100"
                 onClick={handleUnlock}
               >
                 Unlock
@@ -1060,7 +1060,7 @@ export default function DatasetEditorPage({
             <button
               type="submit"
               disabled={isRenamingDataset}
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRenamingDataset ? 'Renaming...' : 'Rename'}
             </button>

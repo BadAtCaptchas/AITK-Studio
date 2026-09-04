@@ -56,8 +56,8 @@ function RailButton({
       onClick={onClick}
       className={classNames(
         'group grid min-h-[48px] w-full grid-cols-[38px_minmax(0,1fr)] items-center gap-1 rounded-[4px] px-1 text-left transition-colors',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-300',
-        active ? 'text-cyan-200' : 'text-gray-400 hover:bg-[#101a23] hover:text-gray-100',
+        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-300',
+        active ? 'text-brand-200' : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100',
         disabled && 'cursor-not-allowed opacity-30 hover:bg-transparent hover:text-gray-400',
       )}
     >
@@ -65,8 +65,8 @@ function RailButton({
         className={classNames(
           'flex h-9 w-9 items-center justify-center rounded-[4px] border transition-colors',
           active
-            ? 'border-cyan-400 bg-cyan-400 text-[#021014] shadow-[0_0_16px_rgba(34,211,238,0.12)]'
-            : 'border-transparent text-gray-300 group-hover:border-[#33414d] group-hover:text-white',
+            ? 'border-brand-400 bg-brand-400 text-[var(--brand-ink)] shadow-[0_0_16px_rgb(var(--brand-400)/0.12)]'
+            : 'border-transparent text-gray-300 group-hover:border-gray-800 group-hover:text-white',
           disabled && 'group-hover:border-transparent group-hover:text-gray-300',
         )}
         aria-hidden="true"
@@ -79,7 +79,7 @@ function RailButton({
 }
 
 function RailDivider() {
-  return <div className="my-1 h-px w-full bg-[#273039]" aria-hidden="true" />;
+  return <div className="my-1 h-px w-full bg-gray-900" aria-hidden="true" />;
 }
 
 export function StandaloneBoxesToolRail({
@@ -98,7 +98,7 @@ export function StandaloneBoxesToolRail({
   return (
     <aside
       aria-label="Boxes tools"
-      className="operator-scrollbar-none flex w-[100px] flex-none flex-col overflow-y-auto border-r border-[#273039] bg-[#071019] px-2 py-3"
+      className="operator-scrollbar-none flex w-[100px] flex-none flex-col overflow-y-auto border-r border-gray-800 bg-gray-950 px-2 py-3"
     >
       <RailButton
         label="Select"

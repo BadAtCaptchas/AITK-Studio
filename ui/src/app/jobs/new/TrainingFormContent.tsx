@@ -23,10 +23,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import { apiClient } from '@/utils/api';
 import type { SelectOption } from '@/types';
 import { PageNotice } from '@/components/OperatorPrimitives';
-import {
-  getRememberedEncryptedDatasetKey,
-  rememberEncryptedDatasetKey,
-} from '@/utils/encryptedDatasets';
+import { getRememberedEncryptedDatasetKey, rememberEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
 import {
   makeRemoteDatasetRef,
@@ -57,6 +54,7 @@ export function TrainingFormContent({
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [workerID, setWorkerID] = useState('local');
   const { settings, isSettingsLoaded } = useSettings();
+  const legacyView = settings.TRAINING_LEGACY_VIEW === 'true';
   const { workers, status: workerStatus } = useWorkers();
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus } = useDatasetList({ includeRemote: !projectID, projectID });
@@ -262,7 +260,8 @@ export function TrainingFormContent({
       })
       .then(res => {
         const importedName = res.data?.dataset?.name;
-        const importedPath = res.data?.path || (importedName ? path.join(settings.DATASETS_FOLDER, importedName) : null);
+        const importedPath =
+          res.data?.path || (importedName ? path.join(settings.DATASETS_FOLDER, importedName) : null);
         if (!importedName || !importedPath) {
           throw new Error('Remote dataset import did not return a local dataset path');
         }
@@ -394,7 +393,10 @@ export function TrainingFormContent({
         messages.push({ level: 'error', message: 'MiniMax H3 cannot merge a Base LoRA into its packed checkpoint.' });
       }
       if (modelConfig.inference_lora_path?.trim()) {
-        messages.push({ level: 'error', message: 'MiniMax H3 does not support a separate sample-time Inference LoRA.' });
+        messages.push({
+          level: 'error',
+          message: 'MiniMax H3 does not support a separate sample-time Inference LoRA.',
+        });
       }
     }
     const baseLoraPath = modelConfig?.base_lora_path?.trim();
@@ -474,17 +476,26 @@ export function TrainingFormContent({
         messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires a LoRA network.' });
       }
       if (!['lora', 'locon', 'lycoris', 'lokr'].includes(networkType)) {
-        messages.push({ level: 'error', message: 'AuthenLoRA watermarking supports LoRA, LoCon, LyCORIS, and LoKr networks.' });
+        messages.push({
+          level: 'error',
+          message: 'AuthenLoRA watermarking supports LoRA, LoCon, LyCORIS, and LoKr networks.',
+        });
       }
       if (trainConfig?.loss_type === 'mean_flow' || trainConfig?.do_guidance_loss) {
-        messages.push({ level: 'error', message: 'AuthenLoRA watermarking currently supports the standard image LoRA loss path.' });
+        messages.push({
+          level: 'error',
+          message: 'AuthenLoRA watermarking currently supports the standard image LoRA loss path.',
+        });
       }
       if (!watermarkConfig.codec_path?.trim()) {
         messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires a local codec path.' });
       }
       const builtinMsgBits = AUTHENLORA_BUILTIN_CODEC_BITS[watermarkConfig.codec_path?.trim() || ''];
       if (builtinMsgBits && watermarkConfig.msg_bits !== builtinMsgBits) {
-        messages.push({ level: 'error', message: `AuthenLoRA ${builtinMsgBits}-bit built-in codec requires Message bits to be ${builtinMsgBits}.` });
+        messages.push({
+          level: 'error',
+          message: `AuthenLoRA ${builtinMsgBits}-bit built-in codec requires Message bits to be ${builtinMsgBits}.`,
+        });
       }
       if (!watermarkConfig.msg_bits || watermarkConfig.msg_bits < 1) {
         messages.push({ level: 'error', message: 'AuthenLoRA message bits must be greater than 0.' });
@@ -559,7 +570,9 @@ export function TrainingFormContent({
         setValidationMessages([
           {
             level: 'error',
-            message: error?.response?.data?.error || 'Training name already exists in this workspace. Choose a different name.',
+            message:
+              error?.response?.data?.error ||
+              'Training name already exists in this workspace. Choose a different name.',
           },
         ]);
       } else {
@@ -640,31 +653,33 @@ export function TrainingFormContent({
 
   return (
     <>
-      <TopBar className="h-16 !overflow-hidden border-gray-900 bg-gray-950 px-4">
+      <TopBar className="h-16 border-gray-900 bg-gray-950 px-4">
         <div className="flex min-w-0 items-center gap-3">
           <Button className="operator-icon-button h-9 w-9 flex-none" onClick={() => history.back()} title="Back">
             <ChevronLeft className="h-5 w-5" />
           </Button>
-          <h1 className="truncate text-lg font-semibold text-gray-100">
+          <h1 className="truncate text-sm font-semibold text-gray-100 sm:text-lg">
             {runId ? 'Edit Training Job' : projectID ? 'New Project Training Job' : 'New Training Job'}
           </h1>
         </div>
         <div className="flex-1"></div>
-        <div className="hidden min-w-40 md:block">
-          <SelectInput
-            value={workerID}
-            onChange={value => {
-              setWorkerID(value);
-              setGpuIDs(null);
-            }}
-            options={workerOptions}
-          />
-        </div>
-        <div className="hidden min-w-44 md:block">
+        {(showAdvancedView || legacyView) && (
+          <div className={legacyView ? 'min-w-40' : 'hidden min-w-40 md:block'}>
+            <SelectInput
+              value={workerID}
+              onChange={value => {
+                setWorkerID(value);
+                setGpuIDs(null);
+              }}
+              options={workerOptions}
+            />
+          </div>
+        )}
+        <div className="w-32 shrink-0 sm:w-44">
           <SelectInput value={trainerValue} onChange={handleJobTypeChange} options={jobTypeOptions} />
         </div>
-        {showAdvancedView && (
-          <div className="hidden min-w-32 lg:block">
+        {(showAdvancedView || legacyView) && (
+          <div className={legacyView ? 'min-w-32' : 'hidden min-w-32 lg:block'}>
             <SelectInput
               value={`${gpuIDs}`}
               onChange={value => setGpuIDs(value)}
@@ -672,7 +687,7 @@ export function TrainingFormContent({
             />
           </div>
         )}
-        {showAdvancedView && (
+        {(showAdvancedView || legacyView) && (
           <Button className="operator-button hidden py-1 lg:inline-flex" onClick={handleImportConfig}>
             Import Config
           </Button>
@@ -687,19 +702,25 @@ export function TrainingFormContent({
             title={showAdvancedView ? 'Show Simple' : 'Show Advanced'}
           >
             <SlidersHorizontal className="h-4 w-4" />
-            <span className="hidden sm:inline">{showAdvancedView ? 'Simple' : 'Advanced'}</span>
+            <span className="hidden sm:inline">
+              {showAdvancedView ? (legacyView ? 'Legacy' : 'Guided') : 'Advanced'}
+            </span>
           </Button>
         </div>
-        <div className="flex-none">
-          <Button
-            className="operator-button h-9 border-emerald-800 bg-emerald-600/90 px-3 py-1 font-semibold text-gray-950 hover:bg-emerald-500 sm:px-5"
-            onClick={() => saveJob()}
-            disabled={status === 'saving'}
-          >
-            <Sparkles className="h-4 w-4" />
-            <span className="hidden sm:inline">{status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}</span>
-          </Button>
-        </div>
+        {(showAdvancedView || legacyView) && (
+          <div className="flex-none">
+            <Button
+              className="operator-button-primary h-10 px-3 sm:px-5"
+              onClick={() => saveJob()}
+              disabled={status === 'saving'}
+            >
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                {status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}
+              </span>
+            </Button>
+          </div>
+        )}
       </TopBar>
 
       <input
@@ -725,6 +746,7 @@ export function TrainingFormContent({
             }
           >
             <SimpleJob
+              legacyView={legacyView}
               jobConfig={jobConfig}
               setJobConfig={setJobConfig}
               status={status}
@@ -735,6 +757,17 @@ export function TrainingFormContent({
               gpuList={gpuList}
               datasetOptions={datasetOptions}
               validationMessages={validationMessages}
+              computeControls={
+                <SelectInput
+                  label="Compute"
+                  value={workerID}
+                  onChange={value => {
+                    setWorkerID(value);
+                    setGpuIDs(null);
+                  }}
+                  options={workerOptions}
+                />
+              }
               workerLabel={workerLabel}
               trainerLabel={trainerLabel}
               onOpenAdvanced={() => setShowAdvancedView(true)}
@@ -769,7 +802,7 @@ export function TrainingFormContent({
             className="relative ml-auto flex h-full w-full flex-col border-l border-gray-800 bg-gray-950 shadow-2xl sm:w-[min(920px,calc(100vw-72px))]"
           >
             <header className="flex h-16 flex-none items-center gap-3 border-b border-gray-900 px-4">
-              <div className="flex h-9 w-9 items-center justify-center border border-gray-800 bg-gray-900 text-cyan-200">
+              <div className="flex h-9 w-9 items-center justify-center border border-gray-800 bg-gray-900 text-brand-200">
                 <TerminalSquare className="h-4 w-4" />
               </div>
               <div className="min-w-0 flex-1">
@@ -780,7 +813,10 @@ export function TrainingFormContent({
                   Editing this YAML updates the current job draft. Close returns to the same workspace position.
                 </p>
               </div>
-              <Button className="operator-button hidden h-9 px-3 py-1 sm:inline-flex" onClick={() => setRawConfigOpen(false)}>
+              <Button
+                className="operator-button hidden h-9 px-3 py-1 sm:inline-flex"
+                onClick={() => setRawConfigOpen(false)}
+              >
                 Close drawer
               </Button>
               <Button

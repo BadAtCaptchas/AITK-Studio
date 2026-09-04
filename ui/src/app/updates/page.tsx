@@ -87,9 +87,9 @@ const toneByState: Record<string, string> = {
   up_to_date: 'border-emerald-800 bg-emerald-950/20 text-emerald-100',
   updated: 'border-emerald-800 bg-emerald-950/20 text-emerald-100',
   update_available: 'border-amber-800 bg-amber-950/20 text-amber-100',
-  updating: 'border-cyan-800 bg-cyan-950/20 text-cyan-100',
-  restarting: 'border-cyan-800 bg-cyan-950/20 text-cyan-100',
-  checking: 'border-cyan-800 bg-cyan-950/20 text-cyan-100',
+  updating: 'border-brand-800 bg-brand-950/20 text-brand-100',
+  restarting: 'border-brand-800 bg-brand-950/20 text-brand-100',
+  checking: 'border-brand-800 bg-brand-950/20 text-brand-100',
   update_blocked: 'border-amber-800 bg-amber-950/20 text-amber-100',
   update_conflict: 'border-amber-800 bg-amber-950/20 text-amber-100',
   update_failed: 'border-rose-800 bg-rose-950/20 text-rose-100',
@@ -384,7 +384,7 @@ export default function UpdatesPage() {
     <>
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
-          <GitPullRequestArrow className="h-4 w-4 text-cyan-300" />
+          <GitPullRequestArrow className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Updates</h1>
         </div>
         <div className="flex-1"></div>
@@ -399,7 +399,7 @@ export default function UpdatesPage() {
           </button>
         )}
         {canRestart && (
-          <button type="button" onClick={requestRestart} disabled={isRestarting} className="operator-button border-cyan-800 bg-cyan-950/30 py-1 text-xs text-cyan-100 hover:bg-cyan-900/40">
+          <button type="button" onClick={requestRestart} disabled={isRestarting} className="operator-button border-brand-800 bg-brand-950/30 py-1 text-xs text-brand-100 hover:bg-brand-900/40">
             {isRestarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Power className="h-3.5 w-3.5" />}
             {isRestarting ? 'Restarting' : 'Restart'}
           </button>
@@ -474,7 +474,7 @@ export default function UpdatesPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <code className="rounded-sm border border-gray-800 bg-gray-950 px-2 py-1 text-xs text-cyan-200">
+                    <code className="rounded-sm border border-gray-800 bg-gray-950 px-2 py-1 text-xs text-brand-200">
                       {commit.shortSha}
                     </code>
                     {commit.url && (

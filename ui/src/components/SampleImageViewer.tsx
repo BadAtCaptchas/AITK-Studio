@@ -337,7 +337,7 @@ export default function SampleImageViewer({
                       src={getMediaUrl(ci)}
                       alt={`Control ${idx + 1}`}
                       className={`max-h-12 max-w-12 object-contain bg-black border-2 rounded cursor-pointer ${
-                        showingControlIdx === idx ? 'border-blue-500' : 'border-gray-700 hover:border-gray-500'
+                        showingControlIdx === idx ? 'border-brand-500' : 'border-gray-700 hover:border-gray-500'
                       }`}
                       onClick={() => setShowingControlIdx(idx)}
                       title={`Control image ${idx + 1}`}
@@ -365,7 +365,7 @@ export default function SampleImageViewer({
                   onClick={() => setShowBoxes(value => !value)}
                   title={showBoxes ? 'Hide bounding boxes' : 'Show bounding boxes'}
                   className={classNames('rounded-full bg-gray-900 p-1 leading-[0px] hover:opacity-100', {
-                    'text-blue-400 opacity-100': showBoxes,
+                    'text-brand-400 opacity-100': showBoxes,
                     'opacity-50': !showBoxes,
                   })}
                 >

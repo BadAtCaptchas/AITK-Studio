@@ -387,7 +387,7 @@ export default function AddImagesModal() {
                   Add Images to: {datasetName}
                 </DialogTitle>
                 {encrypted && (
-                  <p className="mb-3 text-xs text-blue-300">
+                  <p className="mb-3 text-xs text-brand-300">
                     Files and captions are encrypted in this browser before upload.
                   </p>
                 )}
@@ -400,7 +400,7 @@ export default function AddImagesModal() {
                       if (!isUploading) openFilePicker();
                     }}
                     className={`h-40 w-full flex flex-col items-center justify-center border-2 border-dashed rounded-lg cursor-pointer transition-colors
-                      ${isDragActive ? 'border-blue-400 bg-blue-500/10' : 'border-gray-600 hover:border-gray-400'}`}
+                      ${isDragActive ? 'border-brand-400 bg-brand-500/10' : 'border-gray-600 hover:border-gray-400'}`}
                   >
                     <FaUpload className="size-8 mb-3 text-gray-400" />
                     {!isUploading ? (
@@ -424,7 +424,7 @@ export default function AddImagesModal() {
                     </p>
                     <div className="w-full h-2.5 bg-white/20 rounded-full overflow-hidden">
                       <div
-                        className="h-2.5 bg-blue-500 rounded-full transition-[width] duration-150 ease-linear"
+                        className="h-2.5 bg-brand-500 rounded-full transition-[width] duration-150 ease-linear"
                         style={{ width: `${overallPercent}%` }}
                       />
                     </div>
@@ -504,14 +504,14 @@ function FileRow({ entry }: { entry: FileEntry }) {
     <div className="flex items-center gap-2 px-3 text-xs font-mono" style={{ height: ROW_HEIGHT }}>
       <span className="flex-shrink-0 w-4 text-center">
         {entry.status === 'error' && <FaTimesCircle className="text-red-400 inline" />}
-        {entry.status === 'uploading' && <FaSpinner className="text-blue-400 inline animate-spin" />}
+        {entry.status === 'uploading' && <FaSpinner className="text-brand-400 inline animate-spin" />}
         {entry.status === 'pending' && <span className="inline-block w-2 h-2 rounded-full bg-white/30" />}
       </span>
       <span className="truncate flex-1 opacity-80" title={entry.file.name}>
         {entry.file.name}
       </span>
       <span className="flex-shrink-0 w-16 text-right">
-        {entry.status === 'uploading' && <span className="text-blue-300">{entry.progress}%</span>}
+        {entry.status === 'uploading' && <span className="text-brand-300">{entry.progress}%</span>}
         {entry.status === 'error' && <span className="text-red-400">Failed</span>}
         {entry.status === 'pending' && <span className="text-white/30">Queued</span>}
       </span>

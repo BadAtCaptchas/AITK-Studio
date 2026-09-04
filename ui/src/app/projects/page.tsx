@@ -31,17 +31,17 @@ import type { ProjectCardSummary, ProjectRecord, ProjectWorkflowState } from '@/
 
 const workflowLabels: Record<ProjectWorkflowState, { label: string; className: string }> = {
   empty: { label: 'Ready to set up', className: 'border-gray-700 bg-gray-900 text-gray-300' },
-  preparing: { label: 'Preparing dataset', className: 'border-cyan-800 bg-cyan-950/40 text-cyan-200' },
+  preparing: { label: 'Preparing dataset', className: 'border-brand-800 bg-brand-950/40 text-brand-200' },
   training: { label: 'Training', className: 'border-emerald-800 bg-emerald-950/40 text-emerald-200' },
   review: { label: 'Review outputs', className: 'border-violet-800 bg-violet-950/40 text-violet-200' },
-  ready: { label: 'Ready to train', className: 'border-blue-800 bg-blue-950/40 text-blue-200' },
+  ready: { label: 'Ready to train', className: 'border-brand-800 bg-brand-950/40 text-brand-200' },
   attention: { label: 'Needs attention', className: 'border-amber-800 bg-amber-950/40 text-amber-200' },
 };
 
 function ProjectPreview({ card }: { card: ProjectCardSummary }) {
   const preview = card.latestOutput ? artifactPreviewUrl(card.latestOutput) : null;
   return (
-    <div className="relative aspect-[16/8] overflow-hidden border-b border-gray-800 bg-[radial-gradient(circle_at_top_right,rgba(8,145,178,0.16),transparent_45%),linear-gradient(135deg,rgba(17,24,39,0.9),rgba(3,7,18,1))]">
+    <div className="relative aspect-[16/8] overflow-hidden border-b border-gray-800 bg-gray-900">
       {preview && card.latestOutput?.mediaKind === 'image' ? (
         <img
           src={preview}
@@ -54,7 +54,7 @@ function ProjectPreview({ card }: { card: ProjectCardSummary }) {
         />
       ) : (
         <div className="flex h-full items-center justify-center">
-          <FolderKanban className="h-10 w-10 text-cyan-900" />
+          <FolderKanban className="h-10 w-10 text-brand-400" />
         </div>
       )}
       <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-gray-950/90 to-transparent" />
@@ -80,10 +80,10 @@ function ProjectCard({ card }: { card: ProjectCardSummary }) {
   return (
     <Link
       href={`/projects/${encodeURIComponent(project.id)}`}
-      className="group flex min-w-0 flex-col overflow-hidden rounded-md border border-gray-800 bg-gray-900/45 shadow-sm transition hover:-translate-y-0.5 hover:border-gray-700 hover:bg-gray-900/70"
+      className="group flex min-w-0 flex-col overflow-hidden rounded-lg border border-gray-800 bg-gray-900/40 transition hover:border-brand-700 hover:bg-gray-900/70"
     >
       <ProjectPreview card={card} />
-      <div className="flex min-w-0 flex-1 flex-col p-3.5">
+      <div className="flex min-w-0 flex-1 flex-col p-5">
         <div className="flex min-w-0 items-start gap-3">
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-semibold text-gray-100">{project.name}</h2>
@@ -91,9 +91,9 @@ function ProjectCard({ card }: { card: ProjectCardSummary }) {
               {project.description || 'A focused workspace for datasets, training, and generated results.'}
             </p>
           </div>
-          <ArrowRight className="mt-0.5 h-4 w-4 flex-none text-gray-600 transition group-hover:translate-x-0.5 group-hover:text-cyan-300" />
+          <ArrowRight className="mt-0.5 h-4 w-4 flex-none text-gray-600 transition group-hover:translate-x-0.5 group-hover:text-brand-300" />
         </div>
-        <div className="mt-4 grid grid-cols-4 gap-1 rounded-sm border border-gray-800 bg-gray-950/70 p-1">
+        <div className="mt-5 grid grid-cols-4 gap-2 border-t border-gray-800 pt-3">
           {[
             { icon: Database, label: 'Data', value: card.counts.datasets },
             { icon: Play, label: 'Runs', value: card.counts.jobs },
@@ -183,23 +183,19 @@ export default function ProjectsPage() {
     <>
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
-          <FolderKanban className="h-4 w-4 text-cyan-300" />
+          <FolderKanban className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Projects</h1>
         </div>
         <div className="flex-1" />
         {projectsEnabled ? (
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="operator-button h-9 border-cyan-800 bg-cyan-950/60 text-cyan-100 hover:bg-cyan-900/60"
-          >
+          <button type="button" onClick={() => setCreateOpen(true)} className="operator-button-primary h-10">
             <Plus className="h-4 w-4" /> New project
           </button>
         ) : null}
       </TopBar>
 
-      <MainContent className="bg-gray-950 px-0 pt-12 sm:px-0">
-        <div className="mx-auto max-w-[1480px] px-3 py-5 sm:px-5 lg:px-7">
+      <MainContent className="bg-gray-950 px-0 pt-[72px] sm:px-0">
+        <div className="mx-auto max-w-[1680px] px-5 py-8 sm:px-8 lg:px-10">
           {isSettingsLoaded && !projectsEnabled ? (
             <div className="max-w-2xl">
               <PageNotice
@@ -216,50 +212,47 @@ export default function ProjectsPage() {
               </PageNotice>
             </div>
           ) : (
-            <div className="space-y-5">
-              <section className="relative overflow-hidden rounded-md border border-gray-800 bg-[radial-gradient(circle_at_15%_0%,rgba(8,145,178,0.16),transparent_38%),linear-gradient(135deg,rgba(17,24,39,0.86),rgba(3,7,18,0.98))] p-5 sm:p-6">
-                <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-8">
+              <section className="border-b border-gray-800 pb-10 pt-4">
+                <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
                   <div className="max-w-2xl">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-400">
-                      Production workspaces
-                    </div>
-                    <h2 className="mt-2 text-xl font-semibold tracking-tight text-white sm:text-2xl">
-                      From raw dataset to review-ready model
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-400">Your studio</div>
+                    <h2 className="mt-3 text-4xl font-semibold tracking-[-0.045em] text-gray-100 sm:text-5xl">
+                      A space for every model.
                     </h2>
-                    <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-400">
+                    <p className="mt-5 max-w-xl text-base leading-relaxed text-gray-500">
                       Keep every dataset, run, output, model, and note together while the global workspace stays
                       available for quick tasks.
                     </p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 sm:min-w-[390px]">
+                  <div className="grid grid-cols-3 gap-6 sm:min-w-[360px]">
                     {[
                       { label: 'Active projects', value: activeCount, icon: FolderKanban },
                       { label: 'Running now', value: activeRuns, icon: Activity },
                       { label: 'Ready models', value: readyModels, icon: Boxes },
                     ].map(item => (
-                      <div key={item.label} className="rounded-sm border border-gray-800 bg-gray-950/60 p-3">
-                        <item.icon className="h-4 w-4 text-gray-600" />
-                        <div className="mt-2 text-lg font-semibold text-gray-100">{item.value}</div>
-                        <div className="text-[10px] uppercase tracking-wide text-gray-600">{item.label}</div>
+                      <div key={item.label} className="border-l border-gray-800 pl-5">
+                        <div className="text-3xl font-medium tracking-tight text-gray-100">{item.value}</div>
+                        <div className="mt-2 text-xs text-gray-500">{item.label}</div>
                       </div>
                     ))}
                   </div>
                 </div>
               </section>
 
-              <section className="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+              <section className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_280px]">
                 <Link
                   href="/dashboard"
-                  className="group flex min-h-44 flex-col rounded-md border border-dashed border-gray-700 bg-gray-900/25 p-4 transition hover:border-cyan-800 hover:bg-cyan-950/10"
+                  className="group order-last flex min-h-44 flex-col rounded-lg border border-gray-800 bg-gray-900/40 p-6 transition hover:border-brand-700"
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-md border border-gray-700 bg-gray-950 text-gray-400 group-hover:text-cyan-300">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gray-800/60 text-brand-400">
                     <Globe2 className="h-5 w-5" />
                   </span>
                   <div className="mt-4 text-sm font-semibold text-gray-200">Global Workspace</div>
                   <p className="mt-1 text-xs leading-relaxed text-gray-500">
                     Open shared datasets, queues, and generation tools outside any project.
                   </p>
-                  <span className="mt-auto inline-flex items-center gap-1 pt-4 text-xs font-medium text-cyan-400">
+                  <span className="mt-auto inline-flex items-center gap-1 pt-4 text-xs font-medium text-brand-400">
                     Open dashboard <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
                   </span>
                 </Link>
@@ -272,7 +265,7 @@ export default function ProjectsPage() {
                         onClick={() => setView('active')}
                         className={classNames(
                           'h-8 rounded-sm px-3 text-xs font-medium',
-                          view === 'active' ? 'bg-gray-700 text-gray-100' : 'text-gray-500 hover:text-gray-200',
+                          view === 'active' ? 'bg-brand-950 text-brand-300' : 'text-gray-500 hover:text-gray-200',
                         )}
                       >
                         Active <span className="ml-1 text-gray-500">{activeCount}</span>
@@ -282,7 +275,7 @@ export default function ProjectsPage() {
                         onClick={() => setView('archived')}
                         className={classNames(
                           'inline-flex h-8 items-center gap-1.5 rounded-sm px-3 text-xs font-medium',
-                          view === 'archived' ? 'bg-gray-700 text-gray-100' : 'text-gray-500 hover:text-gray-200',
+                          view === 'archived' ? 'bg-brand-950 text-brand-300' : 'text-gray-500 hover:text-gray-200',
                         )}
                       >
                         <Archive className="h-3.5 w-3.5" /> Archived{' '}
@@ -295,7 +288,7 @@ export default function ProjectsPage() {
                         value={query}
                         onChange={event => setQuery(event.target.value)}
                         placeholder="Search projects"
-                        className="h-10 w-full rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+                        className="h-10 w-full rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
                       />
                     </label>
                     <label className="relative flex-none">
@@ -303,7 +296,7 @@ export default function ProjectsPage() {
                       <select
                         value={sort}
                         onChange={event => setSort(event.target.value as typeof sort)}
-                        className="h-10 rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-8 text-xs text-gray-300 outline-none focus:border-cyan-700"
+                        className="h-10 rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-8 text-xs text-gray-300 outline-none focus:border-brand-700"
                       >
                         <option value="updated">Recently updated</option>
                         <option value="name">Project name</option>
@@ -323,17 +316,19 @@ export default function ProjectsPage() {
                       </PageNotice>
                     </div>
                   ) : visibleCards.length === 0 ? (
-                    <div className="mt-4 flex min-h-64 items-center justify-center rounded-md border border-dashed border-gray-800 bg-gray-900/20 p-6 text-center">
+                    <div className="mt-4 flex min-h-[360px] items-center justify-center p-6 text-center">
                       <div>
-                        <FolderKanban className="mx-auto h-8 w-8 text-gray-700" />
-                        <h3 className="mt-3 text-sm font-semibold text-gray-300">
+                        <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-gray-800/60">
+                          <FolderKanban className="h-8 w-8 text-gray-400" />
+                        </span>
+                        <h3 className="mt-6 text-xl font-medium tracking-tight text-gray-100">
                           {query
                             ? 'No projects match your search'
                             : view === 'archived'
                               ? 'No archived projects'
-                              : 'Create your first production workspace'}
+                              : 'Your next project starts here'}
                         </h3>
-                        <p className="mt-1 text-xs text-gray-600">
+                        <p className="mt-2 text-sm text-gray-500">
                           {query
                             ? 'Try a different project name or description.'
                             : 'Prepare a dataset, train, and review the result in one place.'}
@@ -342,7 +337,7 @@ export default function ProjectsPage() {
                           <button
                             type="button"
                             onClick={() => setCreateOpen(true)}
-                            className="operator-button mt-4 h-9"
+                            className="operator-button-primary mt-6 h-10"
                           >
                             <Plus className="h-4 w-4" /> New project
                           </button>

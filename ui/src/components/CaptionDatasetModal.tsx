@@ -269,7 +269,7 @@ export const CaptionDatasetModal: React.FC = () => {
   const tabButtonClass = (tab: 'simple' | 'advanced') =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
       activeTab === tab
-        ? 'border-blue-500 text-blue-400'
+        ? 'border-brand-500 text-brand-400'
         : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600'
     }`;
 
@@ -278,7 +278,7 @@ export const CaptionDatasetModal: React.FC = () => {
       <div className="relative space-y-4 text-gray-200">
         {showLoadingOverlay && (
           <div className="absolute -left-6 -right-6 -top-4 -bottom-4 z-10 flex items-center justify-center backdrop-blur-sm bg-gray-900/40">
-            <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
+            <Loader2 className="w-10 h-10 text-brand-400 animate-spin" />
           </div>
         )}
         <div className="flex items-center border-b border-gray-700 -mt-2">
@@ -351,7 +351,7 @@ export const CaptionDatasetModal: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               Add to Queue
             </button>

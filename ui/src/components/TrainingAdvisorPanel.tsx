@@ -164,7 +164,7 @@ function AdvisorResultPanel({
               error
                 ? 'border-rose-700 text-rose-300'
                 : initialLoading
-                  ? 'border-cyan-700 text-cyan-300'
+                  ? 'border-brand-700 text-brand-300'
                   : clean
                     ? 'border-emerald-600 text-emerald-300'
                     : 'border-amber-700 text-amber-300',

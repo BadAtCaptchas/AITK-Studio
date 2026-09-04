@@ -12,7 +12,7 @@ export const TopBar: React.FC<Props> = ({ children, className }) => {
   return (
     <div
       className={classNames(
-        'operator-scrollbar-none absolute top-0 left-0 z-10 flex h-12 w-full items-center gap-2 overflow-x-auto border-b border-gray-800 bg-gray-950/95 px-2',
+        'studio-page-topbar operator-scrollbar-none absolute top-0 left-0 z-10 flex w-full items-center gap-3 overflow-x-auto border-b border-gray-800 bg-gray-950/95',
         className,
       )}
     >
@@ -25,7 +25,7 @@ export const MainContent = React.forwardRef<HTMLDivElement, Props>(({ children, 
   return (
     <div
       ref={ref}
-      className={classNames('absolute top-0 left-0 h-full w-full overflow-auto px-3 pt-14 sm:px-4', className)}
+      className={classNames('studio-page-content absolute top-0 left-0 h-full w-full overflow-auto', className)}
     >
       {children ? children : null}
     </div>

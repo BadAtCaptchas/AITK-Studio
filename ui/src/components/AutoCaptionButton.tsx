@@ -62,7 +62,7 @@ export default function AutoCaptionButton({
   }
   return (
     <Button
-      className={classNames('inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1 text-white', className)}
+      className={classNames('inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-1 text-[var(--brand-ink)]', className)}
       onClick={() =>
         openCaptionDatasetModal(
           datasetPath,

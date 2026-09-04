@@ -40,7 +40,7 @@ function ProgressBar({ progress, compact = false }: { progress: HFDownloadProgre
   const percent = getPercent(progress);
   const isFailed = progress.status === 'failed';
   const isComplete = progress.status === 'completed';
-  const fillColor = isFailed ? 'bg-rose-400' : isComplete ? 'bg-emerald-400' : 'bg-cyan-400';
+  const fillColor = isFailed ? 'bg-rose-400' : isComplete ? 'bg-emerald-400' : 'bg-brand-400';
 
   return (
     <div
@@ -50,7 +50,7 @@ function ProgressBar({ progress, compact = false }: { progress: HFDownloadProgre
       )}
     >
       {percent == null ? (
-        <div className="absolute inset-y-0 w-1/2 animate-pulse rounded-full bg-gradient-to-r from-cyan-500/20 via-cyan-300 to-cyan-500/20" />
+        <div className="absolute inset-y-0 w-1/2 animate-pulse rounded-full bg-gradient-to-r from-brand-500/20 via-brand-300 to-brand-500/20" />
       ) : (
         <div className={classNames('h-full rounded-full transition-all duration-500', fillColor)} style={{ width: `${percent}%` }} />
       )}
@@ -76,14 +76,14 @@ export function HFDownloadProgressBand({ progress }: { progress: HFDownloadProgr
           ? 'border-rose-500/30 bg-rose-950/20'
           : isComplete
             ? 'border-emerald-500/30 bg-emerald-950/20'
-            : 'border-cyan-500/30 bg-gradient-to-r from-gray-950 via-cyan-950/20 to-gray-950',
+            : 'border-brand-500/30 bg-gradient-to-r from-gray-950 via-brand-950/20 to-gray-950',
       )}
     >
       <div className="flex min-w-0 items-start gap-3">
         <div
           className={classNames(
             'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md',
-            isFailed ? 'bg-rose-500/15 text-rose-300' : isComplete ? 'bg-emerald-500/15 text-emerald-300' : 'bg-cyan-500/15 text-cyan-300',
+            isFailed ? 'bg-rose-500/15 text-rose-300' : isComplete ? 'bg-emerald-500/15 text-emerald-300' : 'bg-brand-500/15 text-brand-300',
           )}
         >
           <Icon className={classNames('h-4 w-4', progress.status === 'downloading' && 'animate-pulse')} />
@@ -95,7 +95,7 @@ export function HFDownloadProgressBand({ progress }: { progress: HFDownloadProgr
               {progress.fileName && <p className="truncate text-xs text-gray-400">{progress.fileName}</p>}
             </div>
             <div className="shrink-0 text-right">
-              <p className={classNames('font-mono text-sm', isFailed ? 'text-rose-300' : isComplete ? 'text-emerald-300' : 'text-cyan-200')}>
+              <p className={classNames('font-mono text-sm', isFailed ? 'text-rose-300' : isComplete ? 'text-emerald-300' : 'text-brand-200')}>
                 {percent == null ? 'Active' : `${Math.round(percent)}%`}
               </p>
               {detail && <p className="text-xs text-gray-500">{detail}</p>}
@@ -123,7 +123,7 @@ export function HFDownloadProgressInline({ progress, fallback }: { progress: HFD
         <span
           className={classNames(
             'truncate text-xs font-medium',
-            isFailed ? 'text-rose-300' : isComplete ? 'text-emerald-300' : 'text-cyan-300',
+            isFailed ? 'text-rose-300' : isComplete ? 'text-emerald-300' : 'text-brand-300',
           )}
         >
           {progress.message}

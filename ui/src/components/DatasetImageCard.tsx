@@ -273,7 +273,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
       </div>
       <div
         className={classNames('w-full p-2 bg-gray-800 text-white text-sm rounded-b-lg h-[75px]', {
-          'border-blue-500 border-2': !isCaptionCurrent,
+          'border-brand-500 border-2': !isCaptionCurrent,
           'border-transparent border-2': isCaptionCurrent,
         })}
       >

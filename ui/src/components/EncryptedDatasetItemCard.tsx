@@ -169,7 +169,7 @@ const EncryptedDatasetItemCard: React.FC<EncryptedDatasetItemCardProps> = ({
       </div>
       <div
         className={classNames('h-[75px] w-full rounded-b-lg bg-gray-800 p-2 text-sm text-white', {
-          'border-2 border-blue-500': !captionCurrent,
+          'border-2 border-brand-500': !captionCurrent,
           'border-2 border-transparent': captionCurrent,
         })}
       >

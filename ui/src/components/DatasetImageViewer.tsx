@@ -513,7 +513,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
               </div>
               <div
                 className={classNames('rounded border-2 bg-gray-900 transition-colors', {
-                  'border-blue-500': !isCaptionCurrent,
+                  'border-brand-500': !isCaptionCurrent,
                   'border-gray-700': isCaptionCurrent,
                 })}
               >
@@ -538,7 +538,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                       className={classNames(
                         'inline-flex h-8 items-center gap-2 rounded-sm border px-2 hover:bg-gray-800',
                         {
-                          'border-blue-500 bg-blue-600 text-white hover:bg-blue-500': isDrawingBox,
+                          'border-brand-500 bg-brand-500 text-[var(--brand-ink)] hover:bg-brand-500': isDrawingBox,
                           'border-gray-700 text-gray-200': !isDrawingBox,
                         },
                       )}
@@ -571,7 +571,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                             type="button"
                             onClick={() => handleSelectedTypeChange('obj')}
                             className={classNames('px-2 py-1', {
-                              'bg-cyan-600 text-white': selectedElement.type !== 'text',
+                              'bg-brand-500 text-[var(--brand-ink)]': selectedElement.type !== 'text',
                               'text-gray-300 hover:bg-gray-800': selectedElement.type === 'text',
                             })}
                           >
@@ -602,7 +602,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                         <label className="flex flex-col gap-1">
                           <span className="text-gray-400">Text</span>
                           <textarea
-                            className="w-full rounded-sm border border-gray-700 bg-gray-950 p-1 text-gray-100 outline-none focus:border-blue-500"
+                            className="w-full rounded-sm border border-gray-700 bg-gray-950 p-1 text-gray-100 outline-none focus:border-brand-500"
                             rows={2}
                             value={selectedElement.text ?? ''}
                             onChange={event => handleSelectedFieldChange('text', event.target.value)}
@@ -612,7 +612,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                       <label className="flex flex-col gap-1">
                         <span className="text-gray-400">Description</span>
                         <textarea
-                          className="w-full rounded-sm border border-gray-700 bg-gray-950 p-1 text-gray-100 outline-none focus:border-blue-500"
+                          className="w-full rounded-sm border border-gray-700 bg-gray-950 p-1 text-gray-100 outline-none focus:border-brand-500"
                           rows={2}
                           value={selectedElement.desc ?? ''}
                           onChange={event => handleSelectedFieldChange('desc', event.target.value)}
@@ -638,7 +638,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                   }}
                   title={showBoxes ? 'Hide bounding boxes' : 'Show bounding boxes'}
                   className={classNames('rounded-full bg-gray-900 p-1 leading-[0px] hover:opacity-100', {
-                    'text-blue-400 opacity-100': showBoxes,
+                    'text-brand-400 opacity-100': showBoxes,
                     'opacity-50': !showBoxes,
                   })}
                 >
@@ -659,7 +659,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
                   }}
                   title={isEditingBoxes ? 'Done editing boxes' : 'Edit bounding boxes'}
                   className={classNames('rounded-full bg-gray-900 p-1 leading-[0px] hover:opacity-100', {
-                    'text-blue-400 opacity-100': isEditingBoxes,
+                    'text-brand-400 opacity-100': isEditingBoxes,
                     'opacity-50': !isEditingBoxes,
                   })}
                 >

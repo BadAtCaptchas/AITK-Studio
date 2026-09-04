@@ -53,8 +53,8 @@ export function ToolRail({
         className={classNames(
           'flex h-10 w-10 items-center justify-center rounded-[4px] border transition-colors',
           active
-            ? 'border-cyan-500/70 bg-cyan-400 text-[#021014]'
-            : 'border-transparent text-gray-400 hover:border-[#33414d] hover:bg-[#101a23] hover:text-gray-100',
+            ? 'border-brand-500/70 bg-brand-400 text-[var(--brand-ink)]'
+            : 'border-transparent text-gray-400 hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100',
           disabled && 'cursor-not-allowed opacity-30 hover:border-transparent hover:bg-transparent',
         )}
       >
@@ -63,13 +63,13 @@ export function ToolRail({
     );
 
     return (
-      <aside className="operator-scrollbar-none flex w-[65px] flex-none flex-col items-center gap-1 overflow-y-auto border-r border-[#273039] bg-[#071019] py-3">
+      <aside className="operator-scrollbar-none flex w-[65px] flex-none flex-col items-center gap-1 overflow-y-auto border-r border-gray-800 bg-gray-950 py-3">
         {toolButton('Select', <MousePointer2 className="h-[18px] w-[18px]" />, () => onToolChange('select'), activeTool === 'select', !canAnnotate)}
         {toolButton('Box', <SquareDashed className="h-[18px] w-[18px]" />, () => onToolChange('box'), activeTool === 'box', !canAnnotate)}
         {toolButton('Text', <Type className="h-[18px] w-[18px]" />, () => onToolChange('text'), activeTool === 'text', !canAnnotate)}
         {toolButton('Move', <Move className="h-[18px] w-[18px]" />, () => onToolChange('move'), activeTool === 'move', !canAnnotate)}
         {toolButton('Delete', <Trash2 className="h-[18px] w-[18px]" />, onDelete, false, !canAnnotate || !hasSelection)}
-        <div className="my-1 h-px w-8 bg-[#273039]" />
+        <div className="my-1 h-px w-8 bg-gray-900" />
         {toolButton('Undo', <Undo2 className="h-[18px] w-[18px]" />, onUndo, false, !canUndo)}
         {toolButton('Redo', <Redo2 className="h-[18px] w-[18px]" />, onRedo, false, !canRedo)}
         <div className="min-h-2 flex-1" />
@@ -80,7 +80,7 @@ export function ToolRail({
   }
 
   return (
-    <aside className="operator-scrollbar-none flex h-16 flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-gray-900 bg-[#060a0f] px-2 md:h-auto md:w-20 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-0 md:py-3">
+    <aside className="operator-scrollbar-none flex h-16 flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-gray-900 bg-gray-950 px-2 md:h-auto md:w-20 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-0 md:py-3">
       <ToolButton
         active={activeTool === 'box'}
         disabled={!canAnnotate}

@@ -129,7 +129,7 @@ export default function QuickCreateProjectModal({
               onChange={event => setName(event.target.value)}
               placeholder="Campaign character LoRA"
               autoFocus
-              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-600"
+              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-600"
             />
           </label>
           <label className="block">
@@ -139,7 +139,7 @@ export default function QuickCreateProjectModal({
             <select
               value={homeWorkerID}
               onChange={event => setHomeWorkerID(event.target.value)}
-              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600"
             >
               <option value="local">This studio (local)</option>
               {compatibleWorkers.map(worker => (
@@ -158,7 +158,7 @@ export default function QuickCreateProjectModal({
             onChange={event => setDescription(event.target.value)}
             placeholder="What are you preparing or training?"
             rows={2}
-            className="w-full resize-none rounded-sm border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-600"
+            className="w-full resize-none rounded-sm border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-600"
           />
         </label>
 
@@ -179,11 +179,11 @@ export default function QuickCreateProjectModal({
                   className={classNames(
                     'min-h-28 rounded-sm border p-3 text-left transition-colors',
                     selected
-                      ? 'border-cyan-700 bg-cyan-950/30 text-gray-100'
+                      ? 'border-brand-700 bg-brand-950/30 text-gray-100'
                       : 'border-gray-800 bg-gray-950/60 text-gray-400 hover:border-gray-700 hover:text-gray-200',
                   )}
                 >
-                  <Icon className={classNames('h-5 w-5', selected ? 'text-cyan-300' : 'text-gray-500')} />
+                  <Icon className={classNames('h-5 w-5', selected ? 'text-brand-300' : 'text-gray-500')} />
                   <span className="mt-2 block text-sm font-semibold">{option.label}</span>
                   <span className="mt-1 block text-xs leading-relaxed text-gray-500">{option.detail}</span>
                 </button>
@@ -199,7 +199,7 @@ export default function QuickCreateProjectModal({
               value={sourcePath}
               onChange={event => setSourcePath(event.target.value)}
               placeholder="Path on the home instance"
-              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 font-mono text-xs text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-600"
+              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 font-mono text-xs text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-600"
             />
           </label>
         ) : null}
@@ -210,7 +210,7 @@ export default function QuickCreateProjectModal({
             <select
               value={sourceProjectID}
               onChange={event => setSourceProjectID(event.target.value)}
-              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              className="h-10 w-full rounded-sm border border-gray-700 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600"
             >
               <option value="">Choose a project</option>
               {projects.map(project => (
@@ -235,7 +235,7 @@ export default function QuickCreateProjectModal({
           <button
             type="submit"
             disabled={!name.trim() || status === 'saving'}
-            className="operator-button h-9 border-cyan-800 bg-cyan-950/60 text-cyan-100 hover:bg-cyan-900/60"
+            className="operator-button h-9 border-brand-800 bg-brand-950/60 text-brand-100 hover:bg-brand-900/60"
           >
             {status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Create and open

@@ -99,11 +99,11 @@ export function ObjectDetailsPanel({
       </div>
       <div className="space-y-4 p-4">
         {canAnnotate && (
-          <div className="space-y-3 rounded-md border border-cyan-500/25 bg-cyan-950/10 p-3">
+          <div className="space-y-3 rounded-md border border-brand-500/25 bg-brand-950/10 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-cyan-100">
-                  <WandSparkles className="h-4 w-4 text-cyan-300" />
+                <div className="flex items-center gap-2 text-sm font-semibold text-brand-100">
+                  <WandSparkles className="h-4 w-4 text-brand-300" />
                   Auto Boxes
                 </div>
                 <div className="mt-1 truncate text-xs text-gray-500">
@@ -115,7 +115,7 @@ export function ObjectDetailsPanel({
                 disabled={!canGenerateAutoBoxes}
                 onClick={onGenerateAutoBoxes}
                 title={autoBoxDisabledReason || `Generate boxes with ${autoBoxProviderLabel}`}
-                className="inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
+                className="inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-md border border-brand-500/40 bg-brand-500/15 px-3 text-sm font-medium text-brand-100 hover:bg-brand-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
               >
                 {isGeneratingBoxes ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
                 Generate
@@ -127,7 +127,7 @@ export function ObjectDetailsPanel({
                 <select
                   value={autoBoxProvider}
                   onChange={event => onAutoBoxProviderChange(event.target.value)}
-                  className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-cyan-500"
+                  className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-brand-500"
                 >
                   {AUTO_BOX_PROVIDERS.map(provider => (
                     <option key={provider.value} value={provider.value}>
@@ -142,7 +142,7 @@ export function ObjectDetailsPanel({
                   value={autoBoxModel}
                   list={autoBoxModelListId}
                   onChange={event => onAutoBoxModelChange(event.target.value)}
-                  className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-cyan-500"
+                  className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-brand-500"
                 />
                 <datalist id={autoBoxModelListId}>
                   {autoBoxModelOptions.map(model => (
@@ -158,7 +158,7 @@ export function ObjectDetailsPanel({
                   <select
                     value={remoteWorkerId}
                     onChange={event => onRemoteWorkerChange(event.target.value)}
-                    className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-cyan-500"
+                    className="h-9 w-full rounded-md border border-gray-800 bg-gray-900 px-2 text-sm text-gray-100 outline-none focus:border-brand-500"
                   >
                     {remoteWorkerOptions.map(worker => (
                       <option key={worker.value} value={worker.value}>
@@ -196,7 +196,7 @@ export function ObjectDetailsPanel({
         ) : isPlainTextItem ? (
           <div className="space-y-3 rounded-md border border-gray-800 bg-gray-900/60 p-3 text-sm text-gray-300">
             <div className="flex items-center gap-2 text-gray-100">
-              <FileJson2 className="h-4 w-4 text-blue-300" />
+              <FileJson2 className="h-4 w-4 text-brand-300" />
               Text file editing
             </div>
             <p className="text-gray-400">
@@ -217,7 +217,7 @@ export function ObjectDetailsPanel({
               type="button"
               disabled={!canConvertDataset}
               onClick={onConvertDatasetToJson}
-              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-blue-500/50 bg-blue-600/20 text-sm font-medium text-blue-100 hover:bg-blue-600/30 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
+              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-brand-500/50 bg-brand-600/20 text-sm font-medium text-brand-100 hover:bg-brand-600/30 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
             >
               <WandSparkles className="h-4 w-4" />
               Convert dataset to JSON
@@ -233,7 +233,7 @@ export function ObjectDetailsPanel({
                   <input
                     value={selectedElement.type === 'text' ? selectedElement.text || '' : selectedElement.desc || ''}
                     onChange={event => onSelectedFieldChange(selectedElement.type === 'text' ? 'text' : 'desc', event.target.value)}
-                    className="h-10 min-w-0 flex-1 rounded-md border border-gray-800 bg-gray-900 px-3 text-sm text-gray-100 outline-none focus:border-blue-500"
+                    className="h-10 min-w-0 flex-1 rounded-md border border-gray-800 bg-gray-900 px-3 text-sm text-gray-100 outline-none focus:border-brand-500"
                   />
                 </div>
               </label>
@@ -257,7 +257,7 @@ export function ObjectDetailsPanel({
                 disabled={!canCaptionSelectedLayer}
                 onClick={onCaptionSelectedLayer}
                 title={selectedLayerIsCaptioning ? 'Captioning layer' : layerCaptionDisabledReason || `Caption selected layer with ${autoBoxProviderLabel}`}
-                className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
+                className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-brand-500/40 bg-brand-500/15 px-3 text-sm font-medium text-brand-100 hover:bg-brand-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
               >
                 {selectedLayerIsCaptioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
                 Caption Layer
@@ -293,7 +293,7 @@ export function ObjectDetailsPanel({
                   value={selectedElement.text || ''}
                   rows={2}
                   onChange={event => onSelectedFieldChange('text', event.target.value)}
-                  className="h-16 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 text-sm text-gray-100 outline-none focus:border-blue-500"
+                  className="h-16 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 text-sm text-gray-100 outline-none focus:border-brand-500"
                 />
               </label>
             )}
@@ -303,7 +303,7 @@ export function ObjectDetailsPanel({
                 value={selectedElement.desc || ''}
                 rows={4}
                 onChange={event => onSelectedFieldChange('desc', event.target.value)}
-                className="h-28 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 text-sm text-gray-100 outline-none focus:border-blue-500"
+                className="h-28 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 text-sm text-gray-100 outline-none focus:border-brand-500"
               />
             </label>
             <div>
@@ -316,7 +316,7 @@ export function ObjectDetailsPanel({
                     <div
                       key={`${rawColor}-${index}`}
                       className={classNames('inline-flex h-9 items-center gap-1 rounded-md border bg-gray-900 px-1.5', {
-                        'border-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.25)]': sampling,
+                        'border-brand-400 shadow-[0_0_0_1px_rgb(var(--brand-400)/0.25)]': sampling,
                         'border-gray-800': !sampling,
                       })}
                     >
@@ -327,7 +327,7 @@ export function ObjectDetailsPanel({
                         title={sampling ? 'Cancel color sample' : `Sample ${color} from image`}
                         onClick={() => (sampling ? onCancelPaletteSample() : onStartPaletteSample(index))}
                         className={classNames('flex h-7 w-7 items-center justify-center rounded hover:bg-gray-800', {
-                          'bg-cyan-500/20 text-cyan-100': sampling,
+                          'bg-brand-500/20 text-brand-100': sampling,
                           'text-gray-400 hover:text-gray-100': !sampling,
                         })}
                       >
@@ -426,7 +426,7 @@ export function CaptionEditorPanel({
           type="button"
           onClick={() => onCaptionTabChange('caption')}
           className={classNames('mr-5 h-12 border-b-2 text-sm font-semibold', {
-            'border-blue-500 text-gray-100': captionTab === 'caption',
+            'border-brand-500 text-gray-100': captionTab === 'caption',
             'border-transparent text-gray-400 hover:text-gray-200': captionTab !== 'caption',
           })}
         >
@@ -437,7 +437,7 @@ export function CaptionEditorPanel({
             type="button"
             onClick={() => onCaptionTabChange('json')}
             className={classNames('h-12 border-b-2 text-sm font-semibold', {
-              'border-blue-500 text-gray-100': captionTab === 'json',
+              'border-brand-500 text-gray-100': captionTab === 'json',
               'border-transparent text-gray-400 hover:text-gray-200': captionTab !== 'json',
             })}
           >
@@ -455,7 +455,7 @@ export function CaptionEditorPanel({
               rows={6}
               readOnly={isAutoCaptioning || !isCaptionLoaded}
               onChange={event => onCaptionDescriptionChange(event.target.value)}
-              className="h-36 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 text-sm text-gray-100 outline-none focus:border-blue-500 disabled:opacity-50"
+              className="h-36 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 text-sm text-gray-100 outline-none focus:border-brand-500 disabled:opacity-50"
             />
             <span className="mt-1 flex items-center justify-between text-xs text-gray-500">
               <span>{highLevelDescription.trim() ? highLevelDescription.trim().split(/\s+/).length : 0} words</span>
@@ -471,7 +471,7 @@ export function CaptionEditorPanel({
               rows={10}
               readOnly={isAutoCaptioning || !isCaptionLoaded}
               onChange={event => onCaptionTextChange(event.target.value)}
-              className="h-64 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 font-mono text-xs leading-relaxed text-gray-100 outline-none focus:border-blue-500 disabled:opacity-50"
+              className="h-64 w-full resize-none rounded-md border border-gray-800 bg-gray-900 p-3 font-mono text-xs leading-relaxed text-gray-100 outline-none focus:border-brand-500 disabled:opacity-50"
             />
           </label>
         )}
@@ -479,7 +479,7 @@ export function CaptionEditorPanel({
           <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-xs leading-none text-gray-500">
             {isDirty ? (
               <>
-                <span className="h-2 w-2 rounded-full bg-blue-400" />
+                <span className="h-2 w-2 rounded-full bg-brand-400" />
                 Unsaved changes (Ctrl+S to save)
               </>
             ) : (
@@ -500,7 +500,7 @@ export function CaptionEditorPanel({
               <SlidersHorizontal className="h-4 w-4" />
             </Button>
             <Button
-              className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-cyan-500/40 bg-cyan-600/20 px-3 text-sm font-medium leading-none text-cyan-100 hover:bg-cyan-600/30 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-9 flex-shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-md border border-brand-500/40 bg-brand-600/20 px-3 text-sm font-medium leading-none text-brand-100 hover:bg-brand-600/30 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!canRecaption || isAutoCaptioning || isSaving || isRecaptioning || isSelectedRecaptionQueued}
               onClick={onRecaption}
             >
@@ -519,7 +519,7 @@ export function CaptionEditorPanel({
         </div>
         {recaptionFeedback && (
           <div
-            className="mt-2 max-h-20 overflow-y-auto break-words rounded-md border border-cyan-500/10 bg-cyan-950/20 px-2 py-1.5 text-xs leading-relaxed text-cyan-200/80"
+            className="mt-2 max-h-20 overflow-y-auto break-words rounded-md border border-brand-500/10 bg-brand-950/20 px-2 py-1.5 text-xs leading-relaxed text-brand-200/80"
             title={recaptionFeedback}
           >
             {recaptionFeedback}

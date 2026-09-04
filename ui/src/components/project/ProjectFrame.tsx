@@ -119,7 +119,7 @@ export default function ProjectFrame({ children }: { children: ReactNode }) {
       <Sidebar />
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden text-gray-100">
         <header className="flex flex-none flex-col border-b border-gray-800 bg-gray-950/95">
-          <div className="flex min-h-16 items-center gap-3 px-3 py-2 sm:px-4">
+          <div className="flex min-h-[84px] items-center gap-4 px-5 py-3 sm:px-8">
             <Link
               href="/projects"
               aria-label="Back to projects"
@@ -128,7 +128,7 @@ export default function ProjectFrame({ children }: { children: ReactNode }) {
               {project?.badge_asset ? (
                 <img src={project.badge_asset} alt="" className="h-full w-full object-cover" />
               ) : (
-                <FolderKanban className="h-5 w-5 text-cyan-300" />
+                <FolderKanban className="h-5 w-5 text-brand-300" />
               )}
             </Link>
             <div className="min-w-0 flex-1">
@@ -168,7 +168,7 @@ export default function ProjectFrame({ children }: { children: ReactNode }) {
             {!archived && status === 'ready' ? (
               <Link
                 href={action.href}
-                className="operator-button h-9 flex-none border-cyan-800 bg-cyan-950/60 text-cyan-100 hover:bg-cyan-900/60"
+                className="operator-button-primary h-10 flex-none"
               >
                 <ActionIcon className="h-4 w-4" />
                 <span className="hidden sm:inline">{action.label}</span>
@@ -177,7 +177,7 @@ export default function ProjectFrame({ children }: { children: ReactNode }) {
           </div>
 
           <nav
-            className="operator-scrollbar-none flex min-w-0 gap-1 overflow-x-auto border-t border-gray-900 px-2 sm:px-3"
+            className="operator-scrollbar-none flex min-w-0 gap-2 overflow-x-auto border-t border-gray-800 px-4 sm:px-7"
             aria-label="Project sections"
           >
             {navItems.map(item => {
@@ -191,20 +191,20 @@ export default function ProjectFrame({ children }: { children: ReactNode }) {
                   aria-current={active ? 'page' : undefined}
                   className={classNames(
                     'group relative inline-flex h-11 flex-none items-center gap-2 px-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm',
-                    active ? 'text-cyan-100' : 'text-gray-500 hover:text-gray-200',
+                    active ? 'text-brand-100' : 'text-gray-500 hover:text-gray-200',
                   )}
                 >
                   <Icon
                     className={classNames(
                       'h-4 w-4',
-                      active ? 'text-cyan-300' : 'text-gray-600 group-hover:text-gray-400',
+                      active ? 'text-brand-300' : 'text-gray-600 group-hover:text-gray-400',
                     )}
                   />
                   {item.label}
                   <span
                     className={classNames(
                       'absolute inset-x-2 bottom-0 h-0.5 rounded-full transition-colors',
-                      active ? 'bg-cyan-400' : 'bg-transparent',
+                      active ? 'bg-brand-400' : 'bg-transparent',
                     )}
                   />
                 </Link>

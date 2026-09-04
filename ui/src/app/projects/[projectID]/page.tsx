@@ -99,7 +99,7 @@ function StageHeader({
           state === 'complete'
             ? 'border-emerald-700 bg-emerald-950/60 text-emerald-200'
             : state === 'active'
-              ? 'border-cyan-700 bg-cyan-950/60 text-cyan-200'
+              ? 'border-brand-700 bg-brand-950/60 text-brand-200'
               : state === 'warning'
                 ? 'border-amber-700 bg-amber-950/60 text-amber-200'
                 : 'border-gray-700 bg-gray-900 text-gray-500',
@@ -181,10 +181,10 @@ export default function ProjectWorkspacePage() {
         <div className="mx-auto max-w-[1680px] space-y-5 p-3 sm:p-5 lg:p-6">
           <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-400">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-brand-400">
                 Project overview
               </div>
-              <h1 className="mt-1 text-xl font-semibold tracking-tight text-white sm:text-2xl">
+              <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-gray-100 sm:text-4xl">
                 Move {projectName} through the studio
               </h1>
               <p className="mt-1.5 max-w-2xl text-sm text-gray-500">
@@ -246,7 +246,7 @@ export default function ProjectWorkspacePage() {
                   />
                   <div className="mt-5 grid grid-cols-3 gap-2">
                     <div className="rounded-sm border border-gray-800 bg-gray-900/50 p-2.5">
-                      <Database className="h-4 w-4 text-cyan-400" />
+                      <Database className="h-4 w-4 text-brand-400" />
                       <div className="mt-2 text-lg font-semibold text-gray-100">{datasets.length}</div>
                       <div className="text-[10px] uppercase tracking-wide text-gray-600">Datasets</div>
                     </div>
@@ -275,7 +275,7 @@ export default function ProjectWorkspacePage() {
                         {dataset.encrypted ? (
                           <LockKeyhole className="h-3.5 w-3.5 flex-none text-violet-300" />
                         ) : (
-                          <Database className="h-3.5 w-3.5 flex-none text-cyan-300" />
+                          <Database className="h-3.5 w-3.5 flex-none text-brand-300" />
                         )}
                         <span className="min-w-0 flex-1 truncate text-xs text-gray-300">{dataset.name}</span>
                         <span
@@ -296,7 +296,7 @@ export default function ProjectWorkspacePage() {
                   </div>
                   <Link
                     href={`${basePath}/datasets`}
-                    className="operator-button mt-auto h-9 w-full border-cyan-900 bg-cyan-950/30 text-cyan-100 hover:bg-cyan-900/40"
+                    className="operator-button mt-auto h-9 w-full border-brand-900 bg-brand-950/30 text-brand-100 hover:bg-brand-900/40"
                   >
                     {datasets.length > 0 ? 'Open datasets' : 'Add dataset'} <ArrowRight className="h-4 w-4" />
                   </Link>
@@ -355,7 +355,7 @@ export default function ProjectWorkspacePage() {
                           total runs
                         </div>
                         <div className="rounded-sm border border-gray-800 bg-gray-900/25 p-2.5 text-gray-500">
-                          <Clock3 className="mb-1.5 h-4 w-4 text-cyan-400" />
+                          <Clock3 className="mb-1.5 h-4 w-4 text-brand-400" />
                           <strong className="block truncate text-sm font-semibold text-gray-200">
                             {latestJob.speed_string || '—'}
                           </strong>{' '}
@@ -472,7 +472,7 @@ export default function ProjectWorkspacePage() {
                       <Play className="h-4 w-4 text-emerald-300" />
                       <h2 className="text-sm font-semibold text-gray-200">Recent runs</h2>
                     </div>
-                    <Link href={`${basePath}/runs`} className="text-xs font-medium text-cyan-400 hover:text-cyan-300">
+                    <Link href={`${basePath}/runs`} className="text-xs font-medium text-brand-400 hover:text-brand-300">
                       View all
                     </Link>
                   </div>
@@ -504,13 +504,13 @@ export default function ProjectWorkspacePage() {
 
                 <div className="min-w-0 rounded-md border border-gray-800 bg-gray-900/30">
                   <div className="flex items-center gap-2 border-b border-gray-800 px-3 py-2.5 sm:px-4">
-                    <FileText className="h-4 w-4 text-cyan-300" />
+                    <FileText className="h-4 w-4 text-brand-300" />
                     <h2 className="text-sm font-semibold text-gray-200">Recent activity</h2>
                   </div>
                   <div className="divide-y divide-gray-800/80">
                     {(overview?.recentActivity || []).slice(0, 6).map(item => (
                       <div key={item.id} className="flex min-w-0 gap-3 px-3 py-3 sm:px-4">
-                        <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-cyan-600" />
+                        <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-brand-600" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-medium text-gray-300">{item.label}</div>
                           <div className="mt-0.5 truncate text-[11px] text-gray-600">{item.detail}</div>
@@ -527,7 +527,7 @@ export default function ProjectWorkspacePage() {
                 </div>
               </section>
 
-              <section className="flex flex-col gap-3 rounded-md border border-gray-800 bg-gradient-to-r from-cyan-950/20 via-gray-950 to-violet-950/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <section className="flex flex-col gap-3 rounded-md border border-gray-800 bg-gradient-to-r from-brand-950/20 via-gray-950 to-violet-950/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="text-sm font-semibold text-gray-200">Continue with this project</div>
                   <p className="mt-1 text-xs text-gray-500">

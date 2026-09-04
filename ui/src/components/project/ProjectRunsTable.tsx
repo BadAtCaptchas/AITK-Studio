@@ -99,7 +99,7 @@ export default function ProjectRunsTable({ projectID }: { projectID: string }) {
     <div className="space-y-3">
       <div className="grid gap-2 sm:grid-cols-3">
         {[
-          { label: 'Active', value: counts.active, className: 'text-cyan-300' },
+          { label: 'Active', value: counts.active, className: 'text-brand-300' },
           { label: 'Completed', value: counts.completed, className: 'text-emerald-300' },
           { label: 'Needs attention', value: counts.failed, className: 'text-amber-300' },
         ].map(item => (
@@ -117,7 +117,7 @@ export default function ProjectRunsTable({ projectID }: { projectID: string }) {
             value={query}
             onChange={event => setQuery(event.target.value)}
             placeholder="Search run name, worker, or status"
-            className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-700"
+            className="h-9 w-full rounded-sm border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
           />
         </label>
         <div className="operator-scrollbar-none flex min-w-0 items-center gap-2 overflow-x-auto">
@@ -125,7 +125,7 @@ export default function ProjectRunsTable({ projectID }: { projectID: string }) {
           <select
             value={statusFilter}
             onChange={event => setStatusFilter(event.target.value as StatusFilter)}
-            className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-cyan-700"
+            className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-brand-700"
           >
             <option value="all">All statuses</option>
             <option value="active">Active</option>
@@ -136,7 +136,7 @@ export default function ProjectRunsTable({ projectID }: { projectID: string }) {
           <select
             value={typeFilter}
             onChange={event => setTypeFilter(event.target.value as TypeFilter)}
-            className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-cyan-700"
+            className="h-9 flex-none rounded-sm border border-gray-800 bg-gray-950 px-2.5 text-xs text-gray-300 outline-none focus:border-brand-700"
           >
             <option value="all">All run types</option>
             <option value="train">Training</option>
@@ -193,7 +193,7 @@ export default function ProjectRunsTable({ projectID }: { projectID: string }) {
                       className="flex min-w-0 items-center gap-2"
                     >
                       {['running', 'stopping'].includes(job.status) ? (
-                        <Activity className="h-4 w-4 flex-none animate-pulse text-cyan-400" />
+                        <Activity className="h-4 w-4 flex-none animate-pulse text-brand-400" />
                       ) : (
                         <Play className="h-4 w-4 flex-none text-gray-600" />
                       )}

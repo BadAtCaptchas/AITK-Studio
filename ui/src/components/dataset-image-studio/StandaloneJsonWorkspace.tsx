@@ -307,15 +307,15 @@ export function StandaloneJsonWorkspace({
 
   return (
     <section
-      className="flex h-full min-h-0 min-w-0 overflow-hidden bg-[#031019] text-gray-100"
+      className="flex h-full min-h-0 min-w-0 overflow-hidden bg-gray-950 text-gray-100"
       aria-label="Caption JSON workspace"
       title={disabled ? disabledReason : undefined}
     >
       <nav
-        className="flex w-[145px] flex-none flex-col border-r border-[#283640] bg-[#04111a]"
+        className="flex w-[145px] flex-none flex-col border-r border-gray-800 bg-gray-950"
         aria-label="JSON sections"
       >
-        <div className="flex h-12 flex-none items-center border-b border-[#27343e] px-4 text-gray-200">
+        <div className="flex h-12 flex-none items-center border-b border-gray-800 px-4 text-gray-200">
           <Wrench className="h-4 w-4" aria-hidden="true" />
           <span className="sr-only">JSON structure</span>
         </div>
@@ -331,10 +331,10 @@ export function StandaloneJsonWorkspace({
                   onClick={() => onSelectSection(section.id, section.path)}
                   aria-current={selected ? 'true' : undefined}
                   className={classNames(
-                    'flex h-[33px] w-full items-center gap-2 px-3 text-left text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-45',
+                    'flex h-[33px] w-full items-center gap-2 px-3 text-left text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-45',
                     selected
-                      ? 'border-r-2 border-cyan-300 bg-[#082432] text-cyan-100'
-                      : 'border-r-2 border-transparent text-gray-200 hover:bg-[#0a1a24] hover:text-white',
+                      ? 'border-r-2 border-brand-300 bg-brand-950 text-brand-100'
+                      : 'border-r-2 border-transparent text-gray-200 hover:bg-gray-900 hover:text-white',
                   )}
                 >
                   <SectionIcon kind={section.kind} />
@@ -358,10 +358,10 @@ export function StandaloneJsonWorkspace({
                           onClick={() => onSelectElement(element.index, element.path)}
                           aria-current={elementSelected ? 'true' : undefined}
                           className={classNames(
-                            'grid min-h-[49px] w-full grid-cols-[16px_minmax(0,1fr)] items-start gap-1.5 border-r-2 px-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-45',
+                            'grid min-h-[49px] w-full grid-cols-[16px_minmax(0,1fr)] items-start gap-1.5 border-r-2 px-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-45',
                             elementSelected
-                              ? 'border-cyan-300 bg-[#07364b] text-white'
-                              : 'border-transparent text-gray-300 hover:bg-[#0a1a24] hover:text-white',
+                              ? 'border-brand-300 bg-brand-950 text-white'
+                              : 'border-transparent text-gray-300 hover:bg-gray-900 hover:text-white',
                           )}
                         >
                           <span className="pt-px text-[10px] tabular-nums text-gray-500">{element.index + 1}</span>
@@ -389,8 +389,8 @@ export function StandaloneJsonWorkspace({
         </div>
       </nav>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#031019]">
-        <header className="flex h-12 flex-none items-center gap-2 border-b border-[#27343e] px-5">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-gray-950">
+        <header className="flex h-12 flex-none items-center gap-2 border-b border-gray-800 px-5">
           <h2 className="flex-none text-sm font-semibold tracking-tight text-gray-100">Caption JSON</h2>
 
           <span
@@ -398,7 +398,7 @@ export function StandaloneJsonWorkspace({
               'ml-2 inline-flex h-7 flex-none items-center gap-1.5 rounded-[4px] border px-2.5 text-[10px] font-medium',
               validity === 'valid' && 'border-emerald-900/70 bg-emerald-950/20 text-emerald-300',
               validity === 'invalid' && 'border-red-900/80 bg-red-950/20 text-red-300',
-              validity === 'checking' && 'border-cyan-900/70 bg-cyan-950/20 text-cyan-300',
+              validity === 'checking' && 'border-brand-900/70 bg-brand-950/20 text-brand-300',
             )}
             title={problemsTitle}
             role="status"
@@ -415,7 +415,7 @@ export function StandaloneJsonWorkspace({
           </span>
 
           <span
-            className="min-w-0 flex-1 truncate border-l border-[#26333d] pl-3 text-[11px] text-gray-400"
+            className="min-w-0 flex-1 truncate border-l border-gray-800 pl-3 text-[11px] text-gray-400"
             title={selectedPathLabel}
           >
             {selectedPathLabel}
@@ -426,7 +426,7 @@ export function StandaloneJsonWorkspace({
               type="button"
               disabled={disabled || !canUndo}
               onClick={() => runEditorHistoryAction('undo', onUndo)}
-              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-400 transition-colors hover:bg-[#10202a] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-400 transition-colors hover:bg-gray-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
               title="Undo JSON change"
               aria-label="Undo JSON change"
             >
@@ -436,7 +436,7 @@ export function StandaloneJsonWorkspace({
               type="button"
               disabled={disabled || !canRedo}
               onClick={() => runEditorHistoryAction('redo', onRedo)}
-              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-400 transition-colors hover:bg-[#10202a] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-400 transition-colors hover:bg-gray-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
               title="Redo JSON change"
               aria-label="Redo JSON change"
             >
@@ -446,7 +446,7 @@ export function StandaloneJsonWorkspace({
               type="button"
               disabled={disabled}
               onClick={() => void copyValue()}
-              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-400 transition-colors hover:bg-[#10202a] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-400 transition-colors hover:bg-gray-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
               title={copied ? 'Copied JSON' : 'Copy JSON'}
               aria-label={copied ? 'Copied JSON' : 'Copy JSON'}
             >
@@ -460,7 +460,7 @@ export function StandaloneJsonWorkspace({
               type="button"
               disabled={disabled}
               onClick={onFormat}
-              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-300 transition-colors hover:bg-[#10202a] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-8 w-8 items-center justify-center rounded-[4px] text-gray-300 transition-colors hover:bg-gray-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
               title="Format JSON"
               aria-label="Format JSON"
             >
@@ -470,7 +470,7 @@ export function StandaloneJsonWorkspace({
               type="button"
               disabled={applyDisabled}
               onClick={onApply}
-              className="ml-1 inline-flex h-8 min-w-[78px] items-center justify-center gap-1.5 rounded-[4px] border border-cyan-300/70 bg-cyan-400 px-2 text-[11px] font-semibold text-[#03121a] shadow-[0_1px_8px_rgba(34,211,238,0.12)] transition-colors hover:bg-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+              className="ml-1 inline-flex h-8 min-w-[78px] items-center justify-center gap-1.5 rounded-[4px] border border-brand-300/70 bg-brand-400 px-2 text-[11px] font-semibold text-[var(--brand-ink)] shadow-[0_1px_8px_rgb(var(--brand-400)/0.12)] transition-colors hover:bg-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
               title={applyDisabled && disabledReason ? disabledReason : 'Apply JSON'}
             >
               {isApplying ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
@@ -490,7 +490,7 @@ export function StandaloneJsonWorkspace({
             onMount={handleMount}
             onChange={nextValue => onChange(nextValue ?? '')}
             loading={
-              <div className="flex h-full items-center justify-center bg-[#031019] text-xs text-gray-500">
+              <div className="flex h-full items-center justify-center bg-gray-950 text-xs text-gray-500">
                 Loading JSON editor…
               </div>
             }
@@ -526,7 +526,7 @@ export function StandaloneJsonWorkspace({
           />
         </div>
 
-        <footer className="flex h-7 flex-none items-center border-t border-[#27343e] bg-[#07131c] px-4 text-[10px] text-gray-400">
+        <footer className="flex h-7 flex-none items-center border-t border-gray-800 bg-gray-900 px-4 text-[10px] text-gray-400">
           <div className="flex items-center gap-3" title={problemsTitle}>
             <span
               className={classNames(
@@ -562,7 +562,7 @@ export function StandaloneJsonWorkspace({
               type="button"
               disabled={disabled}
               onClick={onFormat}
-              className="inline-flex h-6 items-center gap-1.5 px-1 text-gray-300 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-30"
+              className="inline-flex h-6 items-center gap-1.5 px-1 text-gray-300 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-30"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
               Format

@@ -93,7 +93,7 @@ export default function AddSingleImageModal() {
                   <div
                     {...getRootProps()}
                     className={`h-40 w-full flex flex-col items-center justify-center border-2 border-dashed rounded-lg cursor-pointer transition-colors duration-200
-                      ${isDragActive ? 'border-blue-500 bg-blue-50/10' : 'border-gray-600'}`}
+                      ${isDragActive ? 'border-brand-500 bg-brand-50/10' : 'border-gray-600'}`}
                   >
                     <input {...getInputProps()} />
                     <FaUpload className="size-8 mb-3 text-gray-400" />
@@ -104,7 +104,7 @@ export default function AddSingleImageModal() {
                   {isUploading && (
                     <div className="mt-4">
                       <div className="w-full bg-gray-700 rounded-full h-2.5">
-                        <div className="bg-blue-600 h-2.5 rounded-full" style={{ width: `${uploadProgress}%` }}></div>
+                        <div className="bg-brand-600 h-2.5 rounded-full" style={{ width: `${uploadProgress}%` }}></div>
                       </div>
                       <p className="text-sm text-gray-300 mt-2 text-center">Uploading... {uploadProgress}%</p>
                     </div>

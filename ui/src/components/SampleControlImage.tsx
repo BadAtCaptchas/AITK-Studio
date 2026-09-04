@@ -147,7 +147,7 @@ export default function SampleControlImage({
         'transition-all duration-200 select-none overflow-hidden text-center',
         'h-20 w-20',
         backgroundUrl ? 'bg-gray-800 ring-gray-700' : 'bg-gradient-to-b from-gray-800 to-gray-900 ring-gray-700',
-        isDragActive ? 'outline outline-2 outline-blue-500' : 'hover:ring-gray-600',
+        isDragActive ? 'outline outline-2 outline-brand-500' : 'hover:ring-gray-600',
         className,
       )}
       style={

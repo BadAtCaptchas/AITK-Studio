@@ -98,7 +98,7 @@ export function RecaptionSettingsModal({
               value={provider}
               onChange={event => onProviderChange(event.target.value)}
               disabled={isRecaptioning}
-              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600"
             >
               {AUTO_BOX_PROVIDERS.map(option => (
                 <option key={option.value} value={option.value}>
@@ -113,7 +113,7 @@ export function RecaptionSettingsModal({
               value={outputFormat}
               onChange={event => onOutputFormatChange(event.target.value as RecaptionOutputFormat)}
               disabled={isRecaptioning}
-              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600"
             >
               <option value="text">Text caption</option>
               <option value="ideogram_json">Ideogram JSON</option>
@@ -129,7 +129,7 @@ export function RecaptionSettingsModal({
                 value={model}
                 onChange={event => onModelChange(event.target.value)}
                 disabled={isRecaptioning || remoteModelStatus === 'loading' || remoteModelOptions.length === 0}
-                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600 disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {remoteModelStatus === 'loading' && <option value="">Loading models...</option>}
                 {remoteModelStatus !== 'loading' && remoteModelOptions.length === 0 && (
@@ -148,7 +148,7 @@ export function RecaptionSettingsModal({
                   value={model}
                   onChange={event => onModelChange(event.target.value)}
                   disabled={isRecaptioning}
-                  className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+                  className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600"
                 />
                 <datalist id="recaption-model-options">
                   {modelOptions.map(option => (
@@ -168,7 +168,7 @@ export function RecaptionSettingsModal({
               value={maxNewTokens}
               onChange={event => onMaxNewTokensChange(Math.max(1, Number(event.target.value) || 1))}
               disabled={isRecaptioning}
-              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600"
             />
           </label>
         </div>
@@ -182,7 +182,7 @@ export function RecaptionSettingsModal({
                   value={remoteWorkerId}
                   onChange={event => onRemoteWorkerChange(event.target.value)}
                   disabled={isRecaptioning || remoteWorkerOptions.length === 0}
-                  className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+                  className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none focus:border-brand-600"
                 >
                   {remoteWorkerOptions.length === 0 && <option value="">No enabled workers</option>}
                   {remoteWorkerOptions.map(worker => (
@@ -223,7 +223,7 @@ export function RecaptionSettingsModal({
             onChange={event => onPromptChange(event.target.value)}
             disabled={isRecaptioning}
             rows={6}
-            className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+            className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-brand-600"
           />
         </label>
 
@@ -235,7 +235,7 @@ export function RecaptionSettingsModal({
                 type="button"
                 disabled={isRecaptioning}
                 onClick={onUseRootPrompt}
-                className="text-cyan-300 hover:text-cyan-200 disabled:opacity-45"
+                className="text-brand-300 hover:text-brand-200 disabled:opacity-45"
               >
                 Use ROOT_CAPTION.txt
               </button>
@@ -246,7 +246,7 @@ export function RecaptionSettingsModal({
             onChange={event => onSystemPromptChange(event.target.value)}
             disabled={isRecaptioning}
             rows={3}
-            className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-cyan-600"
+            className="w-full resize-none rounded-md border border-gray-800 bg-gray-950 p-3 text-sm text-gray-100 outline-none focus:border-brand-600"
           />
         </label>
         {rootPromptStatus === 'loading' && <div className="text-xs text-gray-500">Loading ROOT_CAPTION.txt</div>}
@@ -265,7 +265,7 @@ export function RecaptionSettingsModal({
           <button
             type="submit"
             disabled={!canQueueSelectedRecaption}
-            className="rounded-md bg-cyan-600 px-4 py-2 font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md bg-brand-500 px-4 py-2 font-medium text-[var(--brand-ink)] hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitLabel}
           </button>

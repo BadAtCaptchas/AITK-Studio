@@ -103,7 +103,7 @@ export default function CaptionMonitor({ datasetPath, projectID = null, onHeight
           {totalSteps > 0 && (
             <div className="hidden sm:flex items-center gap-2 flex-1 min-w-0">
               <div className="flex-1 bg-gray-700 rounded-full h-2 min-w-0">
-                <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+                <div className="h-2 rounded-full bg-brand-500 transition-all" style={{ width: `${progress}%` }} />
               </div>
               <span className="text-xs text-gray-300 whitespace-nowrap">
                 {job!.step} / {totalSteps}

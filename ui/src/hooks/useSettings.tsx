@@ -20,6 +20,7 @@ export interface Settings {
   OFFLINE_MODE: string;
   OFFLINE_MODE_LOCKED: string;
   TRAINING_ADVISOR_ENABLED: string;
+  TRAINING_LEGACY_VIEW: string;
   TELEMETRY_ENABLED: string;
   COMFY_AUTO_INSTALL: string;
   COMFY_EXTERNAL_URL: string;
@@ -40,6 +41,7 @@ const defaultSettings: Settings = {
   OFFLINE_MODE: 'false',
   OFFLINE_MODE_LOCKED: 'false',
   TRAINING_ADVISOR_ENABLED: 'false',
+  TRAINING_LEGACY_VIEW: 'false',
   TELEMETRY_ENABLED: 'false',
   COMFY_AUTO_INSTALL: 'false',
   COMFY_EXTERNAL_URL: DEFAULT_EXTERNAL_COMFY_URL,
@@ -74,6 +76,7 @@ function normalizeSettings(value: unknown = {}): Settings {
     OFFLINE_MODE: booleanStringSetting(data, 'OFFLINE_MODE'),
     OFFLINE_MODE_LOCKED: booleanStringSetting(data, 'OFFLINE_MODE_LOCKED'),
     TRAINING_ADVISOR_ENABLED: booleanStringSetting(data, 'TRAINING_ADVISOR_ENABLED'),
+    TRAINING_LEGACY_VIEW: booleanStringSetting(data, 'TRAINING_LEGACY_VIEW'),
     TELEMETRY_ENABLED: booleanStringSetting(data, 'TELEMETRY_ENABLED'),
     COMFY_AUTO_INSTALL: booleanStringSetting(data, 'COMFY_AUTO_INSTALL'),
     COMFY_EXTERNAL_URL: stringSetting(data, 'COMFY_EXTERNAL_URL', DEFAULT_EXTERNAL_COMFY_URL),

@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import {
   modelArchs,
   ModelArch,
@@ -78,11 +78,16 @@ import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
 import { setNestedValue } from '@/utils/hooks';
 import { parseRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
-import { AUTHENLORA_BUILTIN_CODEC_BITS, AUTHENLORA_CODEC_OPTIONS, getAuthenloraCodecSelectValue } from '@/utils/authenloraCodecs';
+import {
+  AUTHENLORA_BUILTIN_CODEC_BITS,
+  AUTHENLORA_CODEC_OPTIONS,
+  getAuthenloraCodecSelectValue,
+} from '@/utils/authenloraCodecs';
 import { uploadLoraFile } from '@/utils/streamedUploads';
 import { openDoc } from '@/components/DocModal';
 
 type Props = {
+  legacyView?: boolean;
   jobConfig: JobConfig;
   setJobConfig: (value: any, key?: string) => void;
   status: 'idle' | 'saving' | 'success' | 'error';
@@ -103,6 +108,7 @@ type Props = {
   >;
   validationMessages?: Array<{ level: 'error' | 'warning'; message: string }>;
   workerLabel?: string;
+  computeControls?: ReactNode;
   trainerLabel?: string;
   onOpenAdvanced?: () => void;
   onOpenRawConfig?: () => void;
@@ -141,10 +147,10 @@ const guidedStepItems = [
   { id: 'job-samples', title: 'Samples', detail: 'Add prompts to generate previews.' },
   { id: 'job-validation', title: 'Validation', detail: 'Track deterministic loss on held-out images.' },
   { id: 'job-review', title: 'Review', detail: 'Review settings before starting.' },
-  { id: 'job-advanced', title: 'Advanced', detail: 'Unlock full control over every option.' },
 ];
 
 export default function SimpleJob({
+  legacyView = false,
   jobConfig,
   setJobConfig,
   handleSubmit,
@@ -156,6 +162,7 @@ export default function SimpleJob({
   datasetOptions,
   validationMessages = [],
   workerLabel = 'Local worker',
+  computeControls,
   trainerLabel = 'LoRA Trainer',
   onOpenAdvanced,
   onOpenRawConfig,
@@ -166,7 +173,6 @@ export default function SimpleJob({
   const [randomPromptLoadingIndex, setRandomPromptLoadingIndex] = useState<number | null>(null);
   const [encryptedKeyRefreshKey, setEncryptedKeyRefreshKey] = useState(0);
   const baseLoraFileInputRef = useRef<HTMLInputElement | null>(null);
-  const scrollSpyLockUntilRef = useRef(0);
   const [baseLoraUploadStatus, setBaseLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [baseLoraUploadMessage, setBaseLoraUploadMessage] = useState('');
 
@@ -220,10 +226,14 @@ export default function SimpleJob({
     if (trainConfig.sega_distill_base_resolution === undefined) {
       setJobConfig(1024, 'config.process[0].train.sega_distill_base_resolution');
     }
-    if (trainConfig.sega_distill_strength === undefined) setJobConfig(1.0, 'config.process[0].train.sega_distill_strength');
-    if (trainConfig.sega_distill_min_scale === undefined) setJobConfig(0.5, 'config.process[0].train.sega_distill_min_scale');
-    if (trainConfig.sega_distill_max_scale === undefined) setJobConfig(2.0, 'config.process[0].train.sega_distill_max_scale');
-    if (trainConfig.sega_distill_on_reg === undefined) setJobConfig(false, 'config.process[0].train.sega_distill_on_reg');
+    if (trainConfig.sega_distill_strength === undefined)
+      setJobConfig(1.0, 'config.process[0].train.sega_distill_strength');
+    if (trainConfig.sega_distill_min_scale === undefined)
+      setJobConfig(0.5, 'config.process[0].train.sega_distill_min_scale');
+    if (trainConfig.sega_distill_max_scale === undefined)
+      setJobConfig(2.0, 'config.process[0].train.sega_distill_max_scale');
+    if (trainConfig.sega_distill_on_reg === undefined)
+      setJobConfig(false, 'config.process[0].train.sega_distill_on_reg');
   };
 
   const handleSegaDistillToggle = (enabled: boolean) => {
@@ -343,7 +353,9 @@ export default function SimpleJob({
           label: option?.label || dataset.folder_path,
         };
       })
-      .filter(dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path && !dataset.remote);
+      .filter(
+        dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path && !dataset.remote,
+      );
   }, [datasetOptions, encryptedKeyRefreshKey, jobConfig.config.process[0].datasets]);
 
   const accessibleRandomPromptDatasets = useMemo(
@@ -427,9 +439,7 @@ export default function SimpleJob({
       const tagKey =
         (modelArch.sampleTags.CAPTION && 'CAPTION') ||
         (modelArch.sampleTags.PROMPT && 'PROMPT') ||
-        Object.entries(modelArch.sampleTags).find(
-          ([, tag]) => tag.type === 'text' || tag.type === 'multiline',
-        )?.[0];
+        Object.entries(modelArch.sampleTags).find(([, tag]) => tag.type === 'text' || tag.type === 'multiline')?.[0];
 
       if (tagKey) {
         setJobConfig(
@@ -621,20 +631,26 @@ export default function SimpleJob({
   const datasetsConfig = processConfig.datasets || [];
   const sampleConfig = processConfig.sample;
   const validationConfig = processConfig.train.validation_config;
-  const validationItems = Array.isArray(validationConfig?.validation_items)
-    ? validationConfig.validation_items
-    : [];
+  const validationItems = Array.isArray(validationConfig?.validation_items) ? validationConfig.validation_items : [];
   const firstDataset = datasetsConfig[0] || defaultDatasetConfig;
   const firstSample = sampleConfig.samples?.[0] || { prompt: '' };
   const selectedDatasetOption = datasetOptions.find(option => option.value === firstDataset.folder_path);
   const selectedGpu = Array.isArray(gpuList) ? gpuList.find((gpu: any) => `${gpu.index}` === `${gpuIDs}`) : null;
   const samplePromptBlank = !processConfig.train.disable_sampling && !firstSample.prompt?.trim();
-  const incompleteValidationItems =
-    validationItems.filter(item => typeof item.image_path !== 'string' || !item.image_path.trim()).length;
-  const unresolvedDataset = !datasetsConfig.length || !firstDataset.folder_path || firstDataset.folder_path === defaultDatasetConfig.folder_path;
+  const incompleteValidationItems = validationItems.filter(
+    item => typeof item.image_path !== 'string' || !item.image_path.trim(),
+  ).length;
+  const unresolvedDataset =
+    !datasetsConfig.length ||
+    !firstDataset.folder_path ||
+    firstDataset.folder_path === defaultDatasetConfig.folder_path;
   const localReadinessMessages = [
-    ...(unresolvedDataset ? [{ level: 'error' as const, message: 'Select a target dataset before creating this job.' }] : []),
-    ...(samplePromptBlank ? [{ level: 'warning' as const, message: 'No sample prompt is configured. Add one in Basics or Samples.' }] : []),
+    ...(unresolvedDataset
+      ? [{ level: 'error' as const, message: 'Select a target dataset before creating this job.' }]
+      : []),
+    ...(samplePromptBlank
+      ? [{ level: 'warning' as const, message: 'No sample prompt is configured. Add one in Basics or Samples.' }]
+      : []),
     ...(validationConfig && validationItems.length === 0
       ? [{ level: 'error' as const, message: 'Add at least one held-out image before enabling validation loss.' }]
       : []),
@@ -700,7 +716,11 @@ export default function SimpleJob({
     if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
     return `${(Number(value) / 1024).toFixed(1)} GB`;
   };
-  const selectedGpuLabel = selectedGpu ? `GPU #${selectedGpu.index} - ${selectedGpu.name}` : gpuIDs ? `GPU #${gpuIDs}` : 'GPU not selected';
+  const selectedGpuLabel = selectedGpu
+    ? `GPU #${selectedGpu.index} - ${selectedGpu.name}`
+    : gpuIDs
+      ? `GPU #${gpuIDs}`
+      : 'GPU not selected';
   const selectedGpuMemory = selectedGpu?.memory
     ? `${formatMemory(selectedGpu.memory.free)} free / ${formatMemory(selectedGpu.memory.total)}`
     : 'Telemetry loading';
@@ -735,7 +755,9 @@ export default function SimpleJob({
 
   const renderSectionIntro = (title: string, detail: string) => (
     <div className="mb-5 border-b border-gray-900 pb-4">
-      <h2 className="text-lg font-semibold text-gray-100">{title}</h2>
+      <h2 tabIndex={-1} className="text-2xl font-semibold text-gray-100 outline-none">
+        {title}
+      </h2>
       <p className="mt-1 text-sm text-gray-500">{detail}</p>
     </div>
   );
@@ -747,107 +769,70 @@ export default function SimpleJob({
     Icon: typeof Settings2,
     children: ReactNode,
     defaultOpen = false,
-  ) => (
-    <details id={id} className="group border-t border-gray-900 bg-gray-950/30" open={defaultOpen}>
-      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm hover:bg-gray-900/45">
-        <Icon className="h-4 w-4 flex-none text-gray-300" />
-        <span className="min-w-0 flex-1">
-          <span className="font-semibold text-gray-100">{title}</span>
-          <span className="ml-3 hidden text-gray-500 sm:inline">{detail}</span>
-        </span>
-        <ChevronDown className="h-4 w-4 flex-none text-gray-400 transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="border-t border-gray-900 px-4 pb-5 pt-2">{children}</div>
-    </details>
-  );
+  ) =>
+    legacyView ? (
+      <section id={id} className="studio-legacy-card">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-100">
+          <Icon className="h-4 w-4 text-brand-400" />
+          {title}
+        </h3>
+        {children}
+      </section>
+    ) : (
+      <details id={id} className="group border-t border-gray-900 bg-gray-950/30" open={defaultOpen}>
+        <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm hover:bg-gray-900/45">
+          <Icon className="h-4 w-4 flex-none text-gray-300" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold text-gray-100">{title}</span>
+            <span className="ml-3 hidden text-gray-500 sm:inline">{detail}</span>
+          </span>
+          <ChevronDown className="h-4 w-4 flex-none text-gray-400 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="border-t border-gray-900 px-4 pb-5 pt-2">{children}</div>
+      </details>
+    );
 
-  useEffect(() => {
-    let animationFrame = 0;
-
-    const scheduleActiveStepUpdate = () => {
-      if (animationFrame) return;
-
-      animationFrame = window.requestAnimationFrame(() => {
-        animationFrame = 0;
-        if (Date.now() < scrollSpyLockUntilRef.current) return;
-
-        const scrollSpyStepIds = new Set([
-          'job-basics',
-          'job-dataset',
-          'job-training',
-          'job-samples',
-          'job-review',
-          'job-advanced',
-        ]);
-        const targets = stepItems
-          .filter(step => scrollSpyStepIds.has(step.id))
-          .map((step, index) => {
-            const element = document.getElementById(step.id);
-            if (!element) return null;
-            const rect = element.getBoundingClientRect();
-            return {
-              id: step.id,
-              index,
-              top: rect.top,
-              bottom: rect.bottom,
-              visiblePixels: Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0)),
-            };
-          })
-          .filter((target): target is { id: string; index: number; top: number; bottom: number; visiblePixels: number } => target !== null)
-          .sort((a, b) => a.top - b.top || a.index - b.index);
-
-        if (!targets.length) return;
-
-        const activationLine = Math.min(220, window.innerHeight * 0.32);
-        const headingBandBottom = window.innerHeight * 0.72;
-        const visibleHeadingTarget = targets
-          .filter(target => target.top >= 0 && target.top <= headingBandBottom)
-          .sort((a, b) => b.top - a.top || b.index - a.index)[0];
-        const containingTarget = targets.find(target => target.top <= activationLine && target.bottom > activationLine);
-        const visibleTarget = targets
-          .filter(target => target.visiblePixels > 0)
-          .sort((a, b) => b.visiblePixels - a.visiblePixels || Math.abs(a.top - activationLine) - Math.abs(b.top - activationLine))[0];
-        const passedTarget = [...targets].reverse().find(target => target.top <= activationLine);
-        const nextActiveStepId = visibleHeadingTarget?.id || containingTarget?.id || visibleTarget?.id || passedTarget?.id || targets[0].id;
-
-        setActiveStepId(current => (current === nextActiveStepId ? current : nextActiveStepId));
-      });
-    };
-
-    scheduleActiveStepUpdate();
-    const scrollListenerOptions: AddEventListenerOptions = { passive: true, capture: true };
-    window.addEventListener('scroll', scheduleActiveStepUpdate, scrollListenerOptions);
-    document.addEventListener('scroll', scheduleActiveStepUpdate, scrollListenerOptions);
-    window.addEventListener('resize', scheduleActiveStepUpdate);
-    window.addEventListener('hashchange', scheduleActiveStepUpdate);
-
-    return () => {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      window.removeEventListener('scroll', scheduleActiveStepUpdate, scrollListenerOptions);
-      document.removeEventListener('scroll', scheduleActiveStepUpdate, scrollListenerOptions);
-      window.removeEventListener('resize', scheduleActiveStepUpdate);
-      window.removeEventListener('hashchange', scheduleActiveStepUpdate);
-    };
-  }, [stepItems]);
-
-  const handleStepLinkClick = (id: string, event?: MouseEvent<HTMLAnchorElement>) => {
-    event?.preventDefault();
-    scrollSpyLockUntilRef.current = Date.now() + 1200;
+  const activeStepIndex = stepItems.findIndex(step => step.id === activeStepId);
+  const formRef = useRef<HTMLFormElement>(null);
+  const didSelectStep = useRef(false);
+  const selectStep = (id: string) => {
+    didSelectStep.current = true;
     setActiveStepId(id);
-
-    const element = document.getElementById(id);
-    if (!element) return;
-
     window.history.replaceState(null, '', `#${id}`);
-
-    element.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
   };
+  const nextStep = () => {
+    if (formRef.current && !formRef.current.reportValidity()) return;
+    const next = stepItems[activeStepIndex + 1];
+    if (next) selectStep(next.id);
+  };
+  useEffect(() => {
+    const syncHash = () => {
+      const id = window.location.hash.slice(1);
+      if (guidedStepItems.some(step => step.id === id)) setActiveStepId(id);
+    };
+    syncHash();
+    window.addEventListener('hashchange', syncHash);
+    return () => window.removeEventListener('hashchange', syncHash);
+  }, []);
+  useEffect(() => {
+    if (!didSelectStep.current) return;
+    const heading = document.querySelector<HTMLElement>(`#${activeStepId} h2`);
+    heading?.focus({ preventScroll: true });
+    document.getElementById('training-step-navigation')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [activeStepId]);
 
   return (
     <>
       <form
-        onSubmit={handleSubmit}
-        className={`relative min-h-full bg-gray-950 ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
+        ref={formRef}
+        onSubmit={event => {
+          if (legacyView || activeStepId === 'job-review') handleSubmit(event);
+          else {
+            event.preventDefault();
+            nextStep();
+          }
+        }}
+        className={`relative min-h-full bg-gray-950 ${legacyView ? 'studio-training-legacy' : ''} ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
       >
         <input
           ref={baseLoraFileInputRef}
@@ -862,64 +847,56 @@ export default function SimpleJob({
         {isLoading && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-gray-950/70">
             <div className="flex flex-col items-center gap-3 border border-gray-800 bg-gray-950 px-5 py-4">
-              <Loader2 className="h-6 w-6 animate-spin text-cyan-300" />
+              <Loader2 className="h-6 w-6 animate-spin text-brand-300" />
               <span className="text-sm text-gray-400">Loading training workspace...</span>
             </div>
           </div>
         )}
 
-        <div className="grid min-h-full grid-cols-1 xl:grid-cols-[190px_minmax(0,1fr)_330px]">
-          <aside className="hidden border-r border-gray-900 px-3 py-4 xl:block">
-            <nav className="sticky top-4 overflow-hidden border border-gray-900 bg-gray-950/45">
-              {stepItems.map((step, index) => {
-                const active = activeStepId === step.id;
-                return (
-                  <a
-                    key={step.id}
-                    href={`#${step.id}`}
-                    onClick={event => handleStepLinkClick(step.id, event)}
-                    aria-current={active ? 'step' : undefined}
-                    className={`flex min-h-[96px] gap-3 border-b border-gray-900 px-4 py-4 last:border-b-0 ${
-                      active ? 'border-l-2 border-l-cyan-400 bg-gray-900/50' : 'border-l-2 border-l-transparent hover:bg-gray-900/30'
-                    }`}
-                  >
-                    <span
-                      className={`mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full border text-xs ${
-                        active ? 'border-cyan-400 bg-cyan-400 text-gray-950' : 'border-gray-700 text-gray-500'
-                      }`}
-                    >
-                      {index + 1}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold text-gray-200">{step.title}</span>
-                      <span className="mt-2 block text-xs leading-5 text-gray-500">{step.detail}</span>
-                    </span>
-                  </a>
-                );
-              })}
-            </nav>
-          </aside>
-
-          <div className="min-w-0 px-4 py-4 sm:px-5 xl:px-4">
-            <div className="operator-scrollbar-none mb-4 flex gap-2 overflow-x-auto xl:hidden">
-              {stepItems.map((step, index) => (
-                <a
-                  key={step.id}
-                  href={`#${step.id}`}
-                  onClick={event => handleStepLinkClick(step.id, event)}
-                  aria-current={activeStepId === step.id ? 'step' : undefined}
-                  className={`flex h-10 flex-none items-center gap-2 border-b-2 px-2 text-sm ${
-                    activeStepId === step.id ? 'border-cyan-400 text-cyan-100' : 'border-transparent text-gray-400'
-                  }`}
-                >
-                  <span className="text-xs">{index + 1}</span>
-                  {step.title}
-                </a>
-              ))}
-            </div>
-
-            <section id="job-basics" className="scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">
-              {renderSectionIntro('Basics', 'Start with these fields. Defaults are safe for most LoRA jobs.')}
+        <header className="studio-page-intro px-5 pt-8 sm:px-8">
+          <h2>
+            {legacyView
+              ? 'Training configuration'
+              : runId
+                ? 'Refine your training setup.'
+                : 'Start with the essentials.'}
+          </h2>
+          <p>
+            {legacyView
+              ? 'All options in one place. Configure your model, training, datasets, and samples.'
+              : 'Choose your model. We will guide you through the rest.'}
+          </p>
+        </header>
+        {!legacyView && (
+          <nav id="training-step-navigation" aria-label="Training setup steps" className="studio-training-steps">
+            {stepItems.map((step, index) => (
+              <button
+                key={step.id}
+                type="button"
+                onClick={() => selectStep(step.id)}
+                aria-current={activeStepId === step.id ? 'step' : undefined}
+              >
+                <span>{index + 1}</span>
+                {step.title}
+              </button>
+            ))}
+          </nav>
+        )}
+        <div className="studio-training-layout">
+          <div className="studio-training-sections min-w-0">
+            <fieldset
+              id="job-basics"
+              hidden={!legacyView && activeStepId !== 'job-basics'}
+              disabled={!legacyView && activeStepId !== 'job-basics'}
+              className="studio-training-panel"
+            >
+              {!legacyView && (
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">Step 1 of 6</p>
+              )}
+              {renderSectionIntro(
+                legacyView ? 'Job & model' : 'Name your run',
+                'Give your training run a name and choose your base model.',
+              )}
 
               <div className="space-y-5">
                 <div className="max-w-2xl">
@@ -932,10 +909,12 @@ export default function SimpleJob({
                     disabled={runId !== null}
                     required
                   />
-                  <p className="mt-1 text-xs text-gray-500">A name to identify this run inside the current workspace.</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    A name to identify this run inside the current workspace.
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-[0.9fr_1.1fr_0.7fr]">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <SelectInput
                     label="Model architecture"
                     value={processConfig.model.arch}
@@ -944,17 +923,6 @@ export default function SimpleJob({
                     }}
                     options={groupedModelOptions}
                   />
-                  <TextInput
-                    label="Model path"
-                    value={processConfig.model.name_or_path}
-                    docKey="config.process[0].model.name_or_path"
-                    onChange={(value: string | null) => {
-                      if (value?.trim() === '') value = null;
-                      setJobConfig(value, 'config.process[0].model.name_or_path');
-                    }}
-                    placeholder="ostris/Flex.1-alpha"
-                    required
-                  />
                   <SelectInput
                     label="Target type"
                     value={networkType}
@@ -962,12 +930,25 @@ export default function SimpleJob({
                       setJobConfig(value, 'config.process[0].network.type');
                       if (value === 'lokr') {
                         setJobConfig(undefined, 'config.process[0].network.dropout');
-                        if (processConfig.train.sega_distill) setJobConfig(false, 'config.process[0].train.sega_distill');
+                        if (processConfig.train.sega_distill)
+                          setJobConfig(false, 'config.process[0].train.sega_distill');
                       }
                     }}
                     options={targetTypeOptions}
                   />
                 </div>
+
+                <TextInput
+                  label="Model path"
+                  value={processConfig.model.name_or_path}
+                  docKey="config.process[0].model.name_or_path"
+                  onChange={(value: string | null) => {
+                    if (value?.trim() === '') value = null;
+                    setJobConfig(value, 'config.process[0].model.name_or_path');
+                  }}
+                  placeholder="ostris/Flex.1-alpha"
+                  required
+                />
 
                 {modelArch?.gateUrl && (
                   <button
@@ -986,7 +967,7 @@ export default function SimpleJob({
                                 href={gateUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-cyan-300 underline hover:text-cyan-200"
+                                className="text-brand-300 underline hover:text-brand-200"
                               >
                                 {gateUrl}
                               </a>
@@ -997,12 +978,12 @@ export default function SimpleJob({
                                 href="https://huggingface.co/settings/tokens"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-cyan-300 underline hover:text-cyan-200"
+                                className="text-brand-300 underline hover:text-brand-200"
                               >
                                 read token
                               </a>{' '}
                               and add it on the{' '}
-                              <Link href="/settings" className="text-cyan-300 underline hover:text-cyan-200">
+                              <Link href="/settings" className="text-brand-300 underline hover:text-brand-200">
                                 settings page
                               </Link>
                               .
@@ -1011,9 +992,9 @@ export default function SimpleJob({
                         ),
                       });
                     }}
-                    className="flex w-full items-center gap-2 border border-cyan-900 bg-cyan-950/35 px-3 py-2 text-left text-sm text-cyan-100 transition-colors hover:border-cyan-800 hover:bg-cyan-950/55"
+                    className="flex w-full items-center gap-2 border border-brand-900 bg-brand-950/35 px-3 py-2 text-left text-sm text-brand-100 transition-colors hover:border-brand-800 hover:bg-brand-950/55"
                   >
-                    <Info className="h-4 w-4 shrink-0 text-cyan-300" />
+                    <Info className="h-4 w-4 shrink-0 text-brand-300" />
                     <span>
                       Gated model. <span className="underline">Learn more.</span>
                     </span>
@@ -1033,7 +1014,7 @@ export default function SimpleJob({
                             <p>{notes.summary}</p>
                             {notes.link && (
                               <p>
-                                <Link href={notes.link.href} className="text-cyan-300 underline hover:text-cyan-200">
+                                <Link href={notes.link.href} className="text-brand-300 underline hover:text-brand-200">
                                   {notes.link.label}
                                 </Link>
                               </p>
@@ -1083,7 +1064,7 @@ export default function SimpleJob({
                   </div>
                 ))}
 
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+                <div className="grid grid-cols-1 gap-5">
                   {disableSections.includes('trigger_word') ? null : (
                     <div>
                       <TextInput
@@ -1099,58 +1080,64 @@ export default function SimpleJob({
                       <p className="mt-1 text-xs text-gray-500">The token that represents your concept.</p>
                     </div>
                   )}
-                  {!processConfig.model.arch.startsWith('minimax_h3') && <div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                      <TextInput
-                        label="Base LoRA path (optional)"
-                        value={processConfig.model.base_lora_path ?? ''}
-                        docKey="config.process[0].model.base_lora_path"
-                        onChange={(value: string | undefined) => {
-                          if (value?.trim() === '') value = undefined;
-                          setJobConfig(value, 'config.process[0].model.base_lora_path');
-                        }}
-                        placeholder="e.g. path/to/base_lora.safetensors"
-                      />
-                      <button
-                        type="button"
-                        className="operator-icon-button mt-7 h-8 w-8 border-gray-800"
-                        onClick={() => baseLoraFileInputRef.current?.click()}
-                        disabled={baseLoraUploadStatus === 'uploading'}
-                        title="Upload or reuse Base LoRA"
-                        aria-label="Upload or reuse Base LoRA"
-                      >
-                        {baseLoraUploadStatus === 'uploading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <p className="mt-1 text-xs text-gray-500">Use this to continue training from a base LoRA.</p>
-                    {baseLoraUploadMessage && (
-                      <div
-                        className={`mt-2 border px-3 py-2 text-xs ${
-                          baseLoraUploadStatus === 'error'
-                            ? 'border-red-900 bg-red-950/30 text-red-300'
-                            : 'border-gray-800 bg-gray-950 text-gray-300'
-                        }`}
-                      >
-                        {baseLoraUploadMessage}
+                  {!processConfig.model.arch.startsWith('minimax_h3') && (
+                    <details className="studio-disclosure" open={legacyView || undefined}>
+                      <summary>Continue from an existing LoRA</summary>
+                      <div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                          <TextInput
+                            label="Base LoRA path (optional)"
+                            value={processConfig.model.base_lora_path ?? ''}
+                            docKey="config.process[0].model.base_lora_path"
+                            onChange={(value: string | undefined) => {
+                              if (value?.trim() === '') value = undefined;
+                              setJobConfig(value, 'config.process[0].model.base_lora_path');
+                            }}
+                            placeholder="e.g. path/to/base_lora.safetensors"
+                          />
+                          <button
+                            type="button"
+                            className="operator-icon-button mt-7 h-8 w-8 border-gray-800"
+                            onClick={() => baseLoraFileInputRef.current?.click()}
+                            disabled={baseLoraUploadStatus === 'uploading'}
+                            title="Upload or reuse Base LoRA"
+                            aria-label="Upload or reuse Base LoRA"
+                          >
+                            {baseLoraUploadStatus === 'uploading' ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <FolderOpen className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">Use this to continue training from a base LoRA.</p>
+                        {baseLoraUploadMessage && (
+                          <div
+                            className={`mt-2 border px-3 py-2 text-xs ${
+                              baseLoraUploadStatus === 'error'
+                                ? 'border-red-900 bg-red-950/30 text-red-300'
+                                : 'border-gray-800 bg-gray-950 text-gray-300'
+                            }`}
+                          >
+                            {baseLoraUploadMessage}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>}
+                    </details>
+                  )}
                 </div>
+              </div>
+            </fieldset>
 
-                <div>
-                  <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
-                    <SelectInput label="Dataset" value={firstDataset.folder_path} onChange={value => setDatasetPath(0, value)} options={datasetOptions} />
-                    <Link href="/datasets" className="operator-button mt-7 h-8 px-3">
-                      Manage datasets
-                    </Link>
-                  </div>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {selectedDatasetOption
-                      ? `${selectedDatasetOption.label}${selectedDatasetOption.encrypted ? ' - encrypted' : ''}`
-                      : 'Choose the images, video, or audio this job should learn from.'}
-                  </p>
-                </div>
-
+            <fieldset
+              id="job-training"
+              hidden={!legacyView && activeStepId !== 'job-training'}
+              disabled={!legacyView && activeStepId !== 'job-training'}
+              className="studio-training-panel"
+            >
+              {renderSectionIntro('Training', 'Set the pace and duration of your run.')}
+              <div className="mb-6">
+                {' '}
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-100">
                     Quick training settings <Info className="h-3.5 w-3.5 text-gray-500" />
@@ -1191,21 +1178,11 @@ export default function SimpleJob({
                       required
                     />
                   </div>
-                  <p className="mt-2 text-xs text-gray-500">These defaults work well for most LoRA training runs. Adjust later in Advanced if needed.</p>
+                  <p className="mt-2 text-xs text-gray-500">
+                    These defaults work well for most LoRA training runs. Adjust later in Advanced if needed.
+                  </p>
                 </div>
-
-                <TextAreaInput
-                  label="Sample prompt (optional)"
-                  value={firstSample.prompt ?? ''}
-                  onChange={setPrimarySamplePrompt}
-                  placeholder="a photo of sks dog in the forest, cinematic lighting"
-                  rows={3}
-                />
-                <p className="-mt-4 text-xs text-gray-500">We will use this to generate previews during training. You can add more prompts in the Samples step.</p>
               </div>
-            </section>
-
-            <section id="job-training" className="mt-3 scroll-mt-20 overflow-hidden border border-gray-900 bg-gray-950/45">
               {renderDisclosure(
                 'job-runtime',
                 'Runtime & saving',
@@ -1302,7 +1279,12 @@ export default function SimpleJob({
                       <Checkbox
                         label="Skip unconditional transformer"
                         checked={!!processConfig.model.model_kwargs?.skip_unconditional_transformer_for_training}
-                        onChange={value => setJobConfig(value ? true : undefined, 'config.process[0].model.model_kwargs.skip_unconditional_transformer_for_training')}
+                        onChange={value =>
+                          setJobConfig(
+                            value ? true : undefined,
+                            'config.process[0].model.model_kwargs.skip_unconditional_transformer_for_training',
+                          )
+                        }
                       />
                     </div>
                   )}
@@ -1322,7 +1304,8 @@ export default function SimpleJob({
                       setJobConfig(value, 'config.process[0].network.type');
                       if (value === 'lokr') {
                         setJobConfig(undefined, 'config.process[0].network.dropout');
-                        if (processConfig.train.sega_distill) setJobConfig(false, 'config.process[0].train.sega_distill');
+                        if (processConfig.train.sega_distill)
+                          setJobConfig(false, 'config.process[0].train.sega_distill');
                       }
                     }}
                     options={targetTypeOptions}
@@ -1458,7 +1441,9 @@ export default function SimpleJob({
                           label="TE learning rate"
                           value={processConfig.train.text_encoder_lr ?? processConfig.train.lr ?? null}
                           docKey={'train.text_encoder_lr'}
-                          onChange={value => setJobConfig(value ?? undefined, 'config.process[0].train.text_encoder_lr')}
+                          onChange={value =>
+                            setJobConfig(value ?? undefined, 'config.process[0].train.text_encoder_lr')
+                          }
                           placeholder={`${processConfig.train.lr || 0.0001}`}
                           min={0}
                         />
@@ -1494,8 +1479,10 @@ export default function SimpleJob({
                           checked={processConfig.train.diff_output_preservation || false}
                           onChange={value => {
                             setJobConfig(value, 'config.process[0].train.diff_output_preservation');
-                            if (value && processConfig.train.blank_prompt_preservation) setJobConfig(false, 'config.process[0].train.blank_prompt_preservation');
-                            if (value && processConfig.train.sega_distill) setJobConfig(false, 'config.process[0].train.sega_distill');
+                            if (value && processConfig.train.blank_prompt_preservation)
+                              setJobConfig(false, 'config.process[0].train.blank_prompt_preservation');
+                            if (value && processConfig.train.sega_distill)
+                              setJobConfig(false, 'config.process[0].train.sega_distill');
                           }}
                         />
                         {disableSections.includes('train.blank_prompt_preservation') ? null : (
@@ -1505,8 +1492,10 @@ export default function SimpleJob({
                             checked={processConfig.train.blank_prompt_preservation || false}
                             onChange={value => {
                               setJobConfig(value, 'config.process[0].train.blank_prompt_preservation');
-                              if (value && processConfig.train.diff_output_preservation) setJobConfig(false, 'config.process[0].train.diff_output_preservation');
-                              if (value && processConfig.train.sega_distill) setJobConfig(false, 'config.process[0].train.sega_distill');
+                              if (value && processConfig.train.diff_output_preservation)
+                                setJobConfig(false, 'config.process[0].train.diff_output_preservation');
+                              if (value && processConfig.train.sega_distill)
+                                setJobConfig(false, 'config.process[0].train.sega_distill');
                             }}
                           />
                         )}
@@ -1550,7 +1539,12 @@ export default function SimpleJob({
                         <NumberInput
                           label="Message bits"
                           value={watermarkConfig.msg_bits}
-                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.msg_bits, 'config.process[0].watermark.msg_bits')}
+                          onChange={value =>
+                            setJobConfig(
+                              value ?? defaultWatermarkConfig.msg_bits,
+                              'config.process[0].watermark.msg_bits',
+                            )
+                          }
                           min={1}
                         />
                         <TextInput
@@ -1562,27 +1556,45 @@ export default function SimpleJob({
                         <NumberInput
                           label="Mapper rank"
                           value={watermarkConfig.mapper_rank}
-                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.mapper_rank, 'config.process[0].watermark.mapper_rank')}
+                          onChange={value =>
+                            setJobConfig(
+                              value ?? defaultWatermarkConfig.mapper_rank,
+                              'config.process[0].watermark.mapper_rank',
+                            )
+                          }
                           min={1}
                         />
                         <NumberInput
                           label="Mapper LR"
                           value={watermarkConfig.mapper_lr}
-                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.mapper_lr, 'config.process[0].watermark.mapper_lr')}
+                          onChange={value =>
+                            setJobConfig(
+                              value ?? defaultWatermarkConfig.mapper_lr,
+                              'config.process[0].watermark.mapper_lr',
+                            )
+                          }
                           min={0}
                         />
                         <NumberInput
                           label="Watermark loss"
                           value={watermarkConfig.watermark_loss_weight}
                           onChange={value =>
-                            setJobConfig(value ?? defaultWatermarkConfig.watermark_loss_weight, 'config.process[0].watermark.watermark_loss_weight')
+                            setJobConfig(
+                              value ?? defaultWatermarkConfig.watermark_loss_weight,
+                              'config.process[0].watermark.watermark_loss_weight',
+                            )
                           }
                           min={0}
                         />
                         <NumberInput
                           label="Style loss"
                           value={watermarkConfig.style_loss_weight}
-                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.style_loss_weight, 'config.process[0].watermark.style_loss_weight')}
+                          onChange={value =>
+                            setJobConfig(
+                              value ?? defaultWatermarkConfig.style_loss_weight,
+                              'config.process[0].watermark.style_loss_weight',
+                            )
+                          }
                           min={0}
                         />
                         <NumberInput
@@ -1600,7 +1612,12 @@ export default function SimpleJob({
                         <NumberInput
                           label="Verify every"
                           value={watermarkConfig.verify_every}
-                          onChange={value => setJobConfig(value ?? defaultWatermarkConfig.verify_every, 'config.process[0].watermark.verify_every')}
+                          onChange={value =>
+                            setJobConfig(
+                              value ?? defaultWatermarkConfig.verify_every,
+                              'config.process[0].watermark.verify_every',
+                            )
+                          }
                           min={0}
                         />
                       </div>
@@ -1635,9 +1652,7 @@ export default function SimpleJob({
                   <NumberInput
                     label="Sample Start Step"
                     value={sampleConfig.sample_start_step ?? 0}
-                    onChange={value =>
-                      setJobConfig(value, 'config.process[0].sample.sample_start_step')
-                    }
+                    onChange={value => setJobConfig(value, 'config.process[0].sample.sample_start_step')}
                     placeholder="0"
                     className="pt-2"
                     min={0}
@@ -1697,7 +1712,11 @@ export default function SimpleJob({
                     required
                   />
                   <FormGroup label="Advanced sampling">
-                    <Checkbox label="Walk seed" checked={sampleConfig.walk_seed} onChange={value => setJobConfig(value, 'config.process[0].sample.walk_seed')} />
+                    <Checkbox
+                      label="Walk seed"
+                      checked={sampleConfig.walk_seed}
+                      onChange={value => setJobConfig(value, 'config.process[0].sample.walk_seed')}
+                    />
                     <Checkbox
                       label="Skip first sample"
                       checked={processConfig.train.skip_first_sample || false}
@@ -1730,7 +1749,6 @@ export default function SimpleJob({
               <button
                 type="button"
                 onClick={() => {
-                  setActiveStepId('job-advanced');
                   (onOpenRawConfig ?? onOpenAdvanced)?.();
                 }}
                 aria-haspopup="dialog"
@@ -1740,31 +1758,56 @@ export default function SimpleJob({
                 <TerminalSquare className="h-4 w-4 flex-none text-gray-300" />
                 <span className="min-w-0 flex-1">
                   <span className="font-semibold text-gray-100">Raw config</span>
-                  <span className="ml-3 hidden text-gray-500 sm:inline">Open the YAML inspector without leaving this workspace</span>
+                  <span className="ml-3 hidden text-gray-500 sm:inline">
+                    Open the YAML inspector without leaving this workspace
+                  </span>
                 </span>
-                <span className="hidden text-xs text-cyan-200 sm:inline">Open drawer</span>
+                <span className="hidden text-xs text-brand-200 sm:inline">Open drawer</span>
               </button>
-            </section>
+            </fieldset>
 
-            <section id="job-dataset" className="mt-3 scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">
-              {renderSectionIntro('Dataset', 'Choose what the model learns from and tune repeats, captions, and resolutions.')}
+            <fieldset
+              id="job-dataset"
+              hidden={!legacyView && activeStepId !== 'job-dataset'}
+              disabled={!legacyView && activeStepId !== 'job-dataset'}
+              className="studio-training-panel"
+            >
+              {renderSectionIntro(
+                'Dataset',
+                'Choose what the model learns from and tune repeats, captions, and resolutions.',
+              )}
               <div className="space-y-3">
                 {datasetsConfig.map((dataset, i) => (
                   <div key={i} className="border border-gray-900 bg-gray-950/35 p-3">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-gray-100">Dataset {i + 1}</div>
                       <div className="flex gap-1">
-                        <button type="button" onClick={() => duplicateDataset(i)} className="operator-icon-button h-7 w-7" title="Duplicate dataset">
+                        <button
+                          type="button"
+                          onClick={() => duplicateDataset(i)}
+                          className="operator-icon-button h-7 w-7"
+                          title="Duplicate dataset"
+                        >
                           <Copy className="h-3.5 w-3.5" />
                         </button>
-                        <button type="button" onClick={() => removeDataset(i)} className="operator-icon-button h-7 w-7 hover:border-rose-800 hover:bg-rose-950/60 hover:text-rose-100" title="Remove dataset">
+                        <button
+                          type="button"
+                          onClick={() => removeDataset(i)}
+                          className="operator-icon-button h-7 w-7 hover:border-rose-800 hover:bg-rose-950/60 hover:text-rose-100"
+                          title="Remove dataset"
+                        >
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
                     <div className={datasetStyleClass}>
                       <div>
-                        <SelectInput label="Target dataset" value={dataset.folder_path} onChange={value => setDatasetPath(i, value)} options={datasetOptions} />
+                        <SelectInput
+                          label="Target dataset"
+                          value={dataset.folder_path}
+                          onChange={value => setDatasetPath(i, value)}
+                          options={datasetOptions}
+                        />
                         <NumberInput
                           label="LoRA weight"
                           value={dataset.network_weight}
@@ -1784,7 +1827,9 @@ export default function SimpleJob({
                           label="Dataset batch size"
                           value={dataset.batch_size ?? null}
                           className="pt-2"
-                          onChange={value => setJobConfig(value ?? undefined, `config.process[0].datasets[${i}].batch_size`)}
+                          onChange={value =>
+                            setJobConfig(value ?? undefined, `config.process[0].datasets[${i}].batch_size`)
+                          }
                           placeholder={`${processConfig.train.batch_size}`}
                           min={1}
                           allowEmpty
@@ -1801,7 +1846,9 @@ export default function SimpleJob({
                           label="Caption dropout"
                           className="pt-2"
                           value={dataset.caption_dropout_rate}
-                          onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].caption_dropout_rate`)}
+                          onChange={value =>
+                            setJobConfig(value, `config.process[0].datasets[${i}].caption_dropout_rate`)
+                          }
                           placeholder="0.05"
                           min={0}
                           required
@@ -1809,21 +1856,47 @@ export default function SimpleJob({
                       </div>
                       <div>
                         <FormGroup label="Settings">
-                          <Checkbox label="Cache latents" checked={dataset.cache_latents_to_disk || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].cache_latents_to_disk`)} />
-                          <Checkbox label="Cache raw tensors" checked={dataset.cache_tensors_to_disk || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].cache_tensors_to_disk`)} />
+                          <Checkbox
+                            label="Cache latents"
+                            checked={dataset.cache_latents_to_disk || false}
+                            onChange={value =>
+                              setJobConfig(value, `config.process[0].datasets[${i}].cache_latents_to_disk`)
+                            }
+                          />
+                          <Checkbox
+                            label="Cache raw tensors"
+                            checked={dataset.cache_tensors_to_disk || false}
+                            onChange={value =>
+                              setJobConfig(value, `config.process[0].datasets[${i}].cache_tensors_to_disk`)
+                            }
+                          />
                           {modelArch?.additionalSections?.includes('datasets.include_images_in_video_dataset') && (
                             <Checkbox
                               label="Include images with videos"
                               docKey="datasets.include_images_in_video_dataset"
                               checked={dataset.include_images_in_video_dataset || false}
-                              onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].include_images_in_video_dataset`)}
+                              onChange={value =>
+                                setJobConfig(value, `config.process[0].datasets[${i}].include_images_in_video_dataset`)
+                              }
                             />
                           )}
-                          <Checkbox label="Is regularization" checked={dataset.is_reg || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].is_reg`)} />
+                          <Checkbox
+                            label="Is regularization"
+                            checked={dataset.is_reg || false}
+                            onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].is_reg`)}
+                          />
                           {!isAudioModel && (
                             <>
-                              <Checkbox label="Flip X" checked={dataset.flip_x || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_x`)} />
-                              <Checkbox label="Flip Y" checked={dataset.flip_y || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_y`)} />
+                              <Checkbox
+                                label="Flip X"
+                                checked={dataset.flip_x || false}
+                                onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_x`)}
+                              />
+                              <Checkbox
+                                label="Flip Y"
+                                checked={dataset.flip_y || false}
+                                onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_y`)}
+                              />
                             </>
                           )}
                         </FormGroup>
@@ -1856,48 +1929,145 @@ export default function SimpleJob({
                   Add Dataset
                 </button>
               </div>
-            </section>
+            </fieldset>
 
-            <section id="job-samples" className="mt-3 scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">
+            <fieldset
+              id="job-samples"
+              hidden={!legacyView && activeStepId !== 'job-samples'}
+              disabled={!legacyView && activeStepId !== 'job-samples'}
+              className="studio-training-panel"
+            >
               {renderSectionIntro('Samples', 'Add prompts used to preview the LoRA during training.')}
+              <div className="mb-6 space-y-5">
+                {' '}
+                <TextAreaInput
+                  label="Sample prompt (optional)"
+                  value={firstSample.prompt ?? ''}
+                  onChange={setPrimarySamplePrompt}
+                  placeholder="a photo of sks dog in the forest, cinematic lighting"
+                  rows={3}
+                />
+                <p className="-mt-4 text-xs text-gray-500">
+                  We will use this to generate previews during training. Add more prompts below.
+                </p>
+              </div>
               <div className="space-y-3">
                 {sampleConfig.samples.map((sample, i) => (
                   <div key={i} className="border border-gray-900 bg-gray-950/35 p-3">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-gray-100">Sample prompt {i + 1}</div>
                       <div className="flex gap-1">
-                        <button type="button" onClick={() => importRandomPromptFromDataset(i)} disabled={randomPromptLoadingIndex !== null || !canImportRandomPrompt} className="operator-icon-button h-7 w-7 disabled:opacity-50" title={randomPromptDisabledReason}>
-                          {randomPromptLoadingIndex === i ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Shuffle className="h-3.5 w-3.5" />}
+                        <button
+                          type="button"
+                          onClick={() => importRandomPromptFromDataset(i)}
+                          disabled={randomPromptLoadingIndex !== null || !canImportRandomPrompt}
+                          className="operator-icon-button h-7 w-7 disabled:opacity-50"
+                          title={randomPromptDisabledReason}
+                        >
+                          {randomPromptLoadingIndex === i ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Shuffle className="h-3.5 w-3.5" />
+                          )}
                         </button>
-                        <button type="button" onClick={() => setJobConfig(sampleConfig.samples.filter((_, index) => index !== i), 'config.process[0].sample.samples')} className="operator-icon-button h-7 w-7">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setJobConfig(
+                              sampleConfig.samples.filter((_, index) => index !== i),
+                              'config.process[0].sample.samples',
+                            )
+                          }
+                          className="operator-icon-button h-7 w-7"
+                        >
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
                     {modelArch?.hasMultiLinePrompts ? (
-                      <TextAreaInput label="Prompt" value={sample.prompt} onChange={value => setSamplePromptValue(i, value)} placeholder="Enter prompt" required />
+                      <TextAreaInput
+                        label="Prompt"
+                        value={sample.prompt}
+                        onChange={value => setSamplePromptValue(i, value)}
+                        placeholder="Enter prompt"
+                        required
+                      />
                     ) : (
-                      <TextInput label="Prompt" value={sample.prompt} onChange={value => setSamplePromptValue(i, value)} placeholder="Enter prompt" required />
+                      <TextInput
+                        label="Prompt"
+                        value={sample.prompt}
+                        onChange={value => setSamplePromptValue(i, value)}
+                        placeholder="Enter prompt"
+                        required
+                      />
                     )}
                     <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       {!isAudioModel && (
                         <>
-                          <TextInput label="Width" value={sample.width ? `${sample.width}` : ''} onChange={value => setJobConfig(value ? parseInt(value.replace(/\D/g, '')) || undefined : undefined, `config.process[0].sample.samples[${i}].width`)} placeholder={`${sampleConfig.width} default`} />
-                          <TextInput label="Height" value={sample.height ? `${sample.height}` : ''} onChange={value => setJobConfig(value ? parseInt(value.replace(/\D/g, '')) || undefined : undefined, `config.process[0].sample.samples[${i}].height`)} placeholder={`${sampleConfig.height} default`} />
+                          <TextInput
+                            label="Width"
+                            value={sample.width ? `${sample.width}` : ''}
+                            onChange={value =>
+                              setJobConfig(
+                                value ? parseInt(value.replace(/\D/g, '')) || undefined : undefined,
+                                `config.process[0].sample.samples[${i}].width`,
+                              )
+                            }
+                            placeholder={`${sampleConfig.width} default`}
+                          />
+                          <TextInput
+                            label="Height"
+                            value={sample.height ? `${sample.height}` : ''}
+                            onChange={value =>
+                              setJobConfig(
+                                value ? parseInt(value.replace(/\D/g, '')) || undefined : undefined,
+                                `config.process[0].sample.samples[${i}].height`,
+                              )
+                            }
+                            placeholder={`${sampleConfig.height} default`}
+                          />
                         </>
                       )}
-                      <TextInput label="Seed" value={sample.seed ? `${sample.seed}` : ''} onChange={value => setJobConfig(value ? parseInt(value.replace(/\D/g, '')) || undefined : undefined, `config.process[0].sample.samples[${i}].seed`)} placeholder={`${sampleConfig.seed} default`} />
-                      <TextInput label="LoRA scale" value={sample.network_multiplier ? `${sample.network_multiplier}` : ''} onChange={value => setJobConfig(value || undefined, `config.process[0].sample.samples[${i}].network_multiplier`)} placeholder="1.0 default" />
+                      <TextInput
+                        label="Seed"
+                        value={sample.seed ? `${sample.seed}` : ''}
+                        onChange={value =>
+                          setJobConfig(
+                            value ? parseInt(value.replace(/\D/g, '')) || undefined : undefined,
+                            `config.process[0].sample.samples[${i}].seed`,
+                          )
+                        }
+                        placeholder={`${sampleConfig.seed} default`}
+                      />
+                      <TextInput
+                        label="LoRA scale"
+                        value={sample.network_multiplier ? `${sample.network_multiplier}` : ''}
+                        onChange={value =>
+                          setJobConfig(value || undefined, `config.process[0].sample.samples[${i}].network_multiplier`)
+                        }
+                        placeholder="1.0 default"
+                      />
                     </div>
                   </div>
                 ))}
-                <button type="button" onClick={() => setJobConfig([...sampleConfig.samples, { prompt: '' }], 'config.process[0].sample.samples')} className="operator-button w-full">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setJobConfig([...sampleConfig.samples, { prompt: '' }], 'config.process[0].sample.samples')
+                  }
+                  className="operator-button w-full"
+                >
                   Add Prompt
                 </button>
               </div>
-            </section>
+            </fieldset>
 
-            <section id="job-validation" className="mt-3 scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">
+            <fieldset
+              id="job-validation"
+              hidden={!legacyView && activeStepId !== 'job-validation'}
+              disabled={!legacyView && activeStepId !== 'job-validation'}
+              className="studio-training-panel"
+            >
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="max-w-3xl">
                   {renderSectionIntro(
@@ -1906,8 +2076,8 @@ export default function SimpleJob({
                   )}
                   <p className="text-xs leading-5 text-gray-500">
                     Validation images are encoded once and evaluated with fixed noise, making the resulting{' '}
-                    <span className="font-mono text-gray-300">val/loss</span> series comparable throughout the run.
-                    Do not include these images in a training dataset.
+                    <span className="font-mono text-gray-300">val/loss</span> series comparable throughout the run. Do
+                    not include these images in a training dataset.
                   </p>
                 </div>
                 <Checkbox
@@ -1953,7 +2123,10 @@ export default function SimpleJob({
                     />
                     <SelectInput
                       label="Validation sigmas"
-                      value={(validationConfig.validation_sigmas ?? defaultValidationConfig.validation_sigmas ?? [0.5]).join(',')}
+                      value={(
+                        validationConfig.validation_sigmas ??
+                        defaultValidationConfig.validation_sigmas ?? [0.5]
+                      ).join(',')}
                       onChange={value =>
                         setJobConfig(
                           value
@@ -2041,10 +2214,18 @@ export default function SimpleJob({
                   Validation is optional. Enable it to configure held-out images and cadence.
                 </div>
               )}
-            </section>
+            </fieldset>
 
-            <section id="job-review" className="mt-3 scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">
-              {renderSectionIntro('Review', 'Confirm the worker, dataset, training plan, and any warnings before creating the job.')}
+            <fieldset
+              id="job-review"
+              hidden={!legacyView && activeStepId !== 'job-review'}
+              disabled={!legacyView && activeStepId !== 'job-review'}
+              className="studio-training-panel"
+            >
+              {renderSectionIntro(
+                'Review',
+                'Confirm the worker, dataset, training plan, and any warnings before creating the job.',
+              )}
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="border border-gray-900 bg-gray-950/35 p-3">
                   <h3 className="text-sm font-semibold text-gray-100">Training plan</h3>
@@ -2074,7 +2255,9 @@ export default function SimpleJob({
                     <div className="text-gray-500">GPU</div>
                     <div className="text-right text-gray-200">{selectedGpuLabel}</div>
                     <div className="text-gray-500">Dataset</div>
-                    <div className="max-w-52 truncate text-right text-gray-200">{selectedDatasetOption?.label || 'Not selected'}</div>
+                    <div className="max-w-52 truncate text-right text-gray-200">
+                      {selectedDatasetOption?.label || 'Not selected'}
+                    </div>
                     <div className="text-gray-500">Saves every</div>
                     <div className="text-gray-200">{formatNumber(processConfig.save.save_every)} steps</div>
                     <div className="text-gray-500">Data type</div>
@@ -2085,7 +2268,13 @@ export default function SimpleJob({
 
               <div className="mt-4 border border-gray-900 bg-gray-950/35 p-3">
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-100">
-                  {readinessErrors.length > 0 ? <AlertTriangle className="h-4 w-4 text-rose-300" /> : readinessWarnings.length > 0 ? <AlertTriangle className="h-4 w-4 text-amber-300" /> : <CheckCircle2 className="h-4 w-4 text-emerald-300" />}
+                  {readinessErrors.length > 0 ? (
+                    <AlertTriangle className="h-4 w-4 text-rose-300" />
+                  ) : readinessWarnings.length > 0 ? (
+                    <AlertTriangle className="h-4 w-4 text-amber-300" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                  )}
                   {readinessErrors.length > 0
                     ? `Issues (${readinessErrors.length})`
                     : readinessWarnings.length > 0
@@ -2095,7 +2284,10 @@ export default function SimpleJob({
                 {readinessMessages.length > 0 ? (
                   <div className="space-y-2">
                     {readinessMessages.slice(0, 4).map((message, index) => (
-                      <div key={`${message.level}-${index}`} className={`border px-2 py-2 text-xs ${message.level === 'error' ? 'border-rose-900 bg-rose-950/25 text-rose-200' : 'border-amber-900 bg-amber-950/20 text-amber-200'}`}>
+                      <div
+                        key={`${message.level}-${index}`}
+                        className={`border px-2 py-2 text-xs ${message.level === 'error' ? 'border-rose-900 bg-rose-950/25 text-rose-200' : 'border-amber-900 bg-amber-950/20 text-amber-200'}`}
+                      >
                         {message.message}
                       </div>
                     ))}
@@ -2105,157 +2297,99 @@ export default function SimpleJob({
                 )}
               </div>
 
-              <button
-                type="submit"
-                disabled={status === 'saving'}
-                className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 border border-emerald-700 bg-emerald-600/90 text-sm font-semibold text-gray-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
+              <button type="submit" disabled={status === 'saving'} className="operator-button-primary mt-5 h-11 w-full">
                 <Sparkles className="h-4 w-4" />
                 {status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}
               </button>
-            </section>
+            </fieldset>
 
-            <section id="job-advanced" className="mt-3 scroll-mt-20 border border-gray-900 bg-gray-950/45 px-4 py-4">
-              {renderSectionIntro('Advanced', 'Open deeper controls when the guided defaults are not enough.')}
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {!legacyView && (
+              <div className="mt-5 flex items-center justify-between gap-3">
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveStepId('job-advanced');
-                    (onOpenRawConfig ?? onOpenAdvanced)?.();
-                  }}
-                  className="flex min-h-28 items-start gap-3 border border-gray-900 bg-gray-950/35 p-4 text-left hover:bg-gray-900/35"
+                  className="operator-button h-11 px-5"
+                  disabled={activeStepIndex === 0}
+                  onClick={() => selectStep(stepItems[activeStepIndex - 1].id)}
                 >
-                  <TerminalSquare className="mt-0.5 h-5 w-5 flex-none text-cyan-200" />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-gray-100">Open raw config drawer</span>
-                    <span className="mt-2 block text-xs leading-5 text-gray-500">Inspect and edit YAML without leaving this guided workspace.</span>
-                  </span>
+                  Back
                 </button>
-                <button
-                  type="button"
-                  onClick={onOpenAdvanced}
-                  className="flex min-h-28 items-start gap-3 border border-gray-900 bg-gray-950/35 p-4 text-left hover:bg-gray-900/35"
-                >
-                  <SlidersHorizontal className="mt-0.5 h-5 w-5 flex-none text-gray-300" />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-gray-100">Switch to full advanced editor</span>
-                    <span className="mt-2 block text-xs leading-5 text-gray-500">Use the existing full-page editor for complete configuration control.</span>
-                  </span>
-                </button>
+                {activeStepIndex < stepItems.length - 1 && (
+                  <button type="button" className="operator-button-primary h-11 px-6" onClick={nextStep}>
+                    Continue to {stepItems[activeStepIndex + 1].title.toLowerCase()}{' '}
+                    <ChevronDown className="h-4 w-4 -rotate-90" />
+                  </button>
+                )}
               </div>
-            </section>
-
-            <div className="h-24" />
+            )}
           </div>
-
-          <aside id="job-readiness-rail" className="border-t border-gray-900 px-4 py-4 xl:border-l xl:border-t-0">
-            <div className="sticky top-4 space-y-5">
-              <section className="border border-gray-900 bg-gray-950/45 p-4">
-                <h2 className="text-lg font-semibold text-gray-100">Ready to train</h2>
-                <p className="mt-1 text-sm text-gray-500">Advisor checks your setup for issues.</p>
-                <div className="mt-4">
-                  <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} variant="rail" />
-                </div>
-              </section>
-
-              <section className="space-y-4 border border-gray-900 bg-gray-950/45 p-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-100">Worker & GPU</h3>
-                  <div className="mt-3 space-y-2 text-sm">
-                    <div className="flex items-center gap-2 text-gray-400">
-                      <Cpu className="h-4 w-4" />
-                      <span>{workerLabel}</span>
-                    </div>
-                    <div className="flex items-start gap-2 text-gray-300">
-                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                      <span className="min-w-0">
-                        <span className="block truncate">{selectedGpuLabel}</span>
-                        <span className="block text-xs text-gray-500">{selectedGpuMemory}</span>
-                      </span>
-                    </div>
-                    {showGPUSelect && (
-                      <SelectInput
-                        value={`${gpuIDs}`}
-                        onChange={value => setGpuIDs(value)}
-                        options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
-                      />
-                    )}
+          <aside id="job-readiness-rail" className="min-w-0">
+            <div className="operator-panel space-y-6 p-6">
+              <h2 className="text-lg font-semibold text-gray-100">Run overview</h2>
+              <div className="space-y-3">
+                {computeControls || (
+                  <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <Cpu className="h-4 w-4" />
+                    {workerLabel}
                   </div>
-                </div>
-
-                <div className="border-t border-gray-900 pt-4">
-                  <h3 className="text-sm font-semibold text-gray-100">Training summary</h3>
-                  <div className="mt-3 grid grid-cols-[1fr_auto] gap-y-2 text-sm">
-                    <div className="flex items-center gap-2 text-gray-500"><Settings2 className="h-3.5 w-3.5" />Trainer</div>
-                    <div className="text-gray-200">{trainerLabel}</div>
-                    <div className="flex items-center gap-2 text-gray-500"><Zap className="h-3.5 w-3.5" />Architecture</div>
-                    <div className="text-gray-200">{modelArch?.label || processConfig.model.arch}</div>
-                    <div className="flex items-center gap-2 text-gray-500"><Target className="h-3.5 w-3.5" />Target</div>
-                    <div className="text-gray-200">
-                      {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}
-                    </div>
-                    <div className="flex items-center gap-2 text-gray-500"><ListChecks className="h-3.5 w-3.5" />Steps</div>
-                    <div className="text-gray-200">{autoTrain ? 'Auto' : formatNumber(processConfig.train.steps)}</div>
-                    <div className="flex items-center gap-2 text-gray-500"><Gauge className="h-3.5 w-3.5" />Batch size</div>
-                    <div className="text-gray-200">{formatNumber(processConfig.train.batch_size)}</div>
-                    <div className="text-gray-500">Gradient accumulation</div>
-                    <div className="text-gray-200">{formatNumber(processConfig.train.gradient_accumulation)}</div>
-                    <div className="text-gray-500">Learning rate</div>
-                    <div className="text-gray-200">{processConfig.train.lr}</div>
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-900 pt-4">
-                  <h3 className="text-sm font-semibold text-gray-100">Estimated saving</h3>
-                  <div className="mt-3 grid grid-cols-[1fr_auto] gap-y-2 text-sm">
-                    <div className="flex items-center gap-2 text-gray-500"><Save className="h-3.5 w-3.5" />Saves every</div>
-                    <div className="text-gray-200">{formatNumber(processConfig.save.save_every)} steps</div>
-                    <div className="text-gray-500">Max saves to keep</div>
-                    <div className="text-gray-200">{formatNumber(processConfig.save.max_step_saves_to_keep)}</div>
-                    <div className="text-gray-500">Data type</div>
-                    <div className="text-gray-200">{processConfig.save.dtype?.toUpperCase()}</div>
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-900 pt-4">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-100">
-                    {readinessErrors.length > 0 ? <AlertTriangle className="h-4 w-4 text-rose-300" /> : readinessWarnings.length > 0 ? <AlertTriangle className="h-4 w-4 text-amber-300" /> : <CheckCircle2 className="h-4 w-4 text-emerald-300" />}
-                    {readinessErrors.length > 0
-                      ? `Issues (${readinessErrors.length})`
-                      : readinessWarnings.length > 0
-                        ? `Warnings (${readinessWarnings.length})`
-                        : 'No blocking issues'}
-                  </div>
-                  {readinessMessages.length > 0 ? (
-                    <div className="space-y-2">
-                      {readinessMessages.slice(0, 3).map((message, index) => (
-                        <div key={`${message.level}-${index}`} className={`border px-2 py-2 text-xs ${message.level === 'error' ? 'border-rose-900 bg-rose-950/25 text-rose-200' : 'border-amber-900 bg-amber-950/20 text-amber-200'}`}>
-                          {message.message}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-gray-500">Your setup is ready to be queued.</p>
-                  )}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={status === 'saving'}
-                  className="inline-flex h-11 w-full items-center justify-center gap-2 border border-emerald-700 bg-emerald-600/90 text-sm font-semibold text-gray-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  {status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}
-                </button>
-                <div className="text-center text-xs text-gray-500">Job will be queued when ready</div>
-              </section>
+                )}
+                <p className="break-words text-sm text-gray-200">{selectedGpuLabel}</p>
+                <p className="text-xs text-gray-400">{selectedGpuMemory}</p>
+                {showGPUSelect && (
+                  <SelectInput
+                    label="GPU"
+                    value={`${gpuIDs}`}
+                    onChange={value => setGpuIDs(value)}
+                    options={gpuList.map((gpu: { index: number }) => ({
+                      value: `${gpu.index}`,
+                      label: `GPU #${gpu.index}`,
+                    }))}
+                  />
+                )}
+              </div>
+              <dl className="grid grid-cols-[1fr_minmax(0,1fr)] gap-x-4 gap-y-4 border-t border-gray-800 pt-6 text-sm">
+                <dt className="text-gray-400">Model</dt>
+                <dd className="text-right text-gray-100">{modelArch?.label || processConfig.model.arch}</dd>
+                <dt className="text-gray-400">Target</dt>
+                <dd className="text-right text-gray-100">
+                  {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}
+                </dd>
+                <dt className="text-gray-400">Dataset</dt>
+                <dd className="break-words text-right text-gray-100">
+                  {selectedDatasetOption?.label || (unresolvedDataset ? 'Not selected' : firstDataset.folder_path)}
+                </dd>
+                {(legacyView || activeStepIndex >= 2) && (
+                  <>
+                    <dt className="text-gray-400">Steps</dt>
+                    <dd className="text-right text-gray-100">
+                      {autoTrain ? 'Auto' : formatNumber(processConfig.train.steps)}
+                    </dd>
+                    <dt className="text-gray-400">Learning rate</dt>
+                    <dd className="text-right text-gray-100">{processConfig.train.lr}</dd>
+                  </>
+                )}
+              </dl>
+              <p className="flex items-start gap-2 border-t border-gray-800 pt-5 text-xs leading-5 text-gray-400">
+                <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                You can review everything before creating the job.
+              </p>
             </div>
+            <button
+              type="button"
+              className="mt-5 inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:text-brand-400"
+              onClick={onOpenRawConfig ?? onOpenAdvanced}
+            >
+              <TerminalSquare className="h-4 w-4" />
+              Open raw configuration
+            </button>
+            {(legacyView || activeStepId === 'job-review') && (
+              <div className="operator-panel mt-5 p-5">
+                <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} variant="rail" />
+              </div>
+            )}
           </aside>
         </div>
       </form>
       <AddSingleImageModal />
     </>
   );
-
 }

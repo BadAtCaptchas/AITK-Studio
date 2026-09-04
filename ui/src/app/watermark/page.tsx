@@ -166,19 +166,19 @@ export default function WatermarkCheckerPage() {
 
   return (
     <>
-      <TopBar className="h-14 border-gray-900 bg-[#02060a] px-4">
+      <TopBar>
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <ShieldCheck className="h-5 w-5 text-cyan-200" />
+          <ShieldCheck className="h-5 w-5 text-brand-200" />
           <h1 className="truncate text-lg font-semibold text-gray-100">Watermark Checker</h1>
         </div>
       </TopBar>
 
-      <MainContent className="operator-scrollbar-none bg-[#02060a] px-3 pt-16 text-gray-100 sm:px-4">
+      <MainContent className="operator-scrollbar-none bg-gray-950 text-gray-100">
         <div className="mx-auto grid w-full max-w-6xl gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
           <section className="operator-panel overflow-hidden">
             <div className="operator-panel-header">
               <div className="flex min-w-0 items-center gap-2">
-                <ImagePlus className="h-4 w-4 text-cyan-200" />
+                <ImagePlus className="h-4 w-4 text-brand-200" />
                 <h2 className="truncate text-sm font-semibold text-gray-100">Image</h2>
               </div>
             </div>
@@ -195,7 +195,7 @@ export default function WatermarkCheckerPage() {
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
-                className="flex min-h-[360px] w-full items-center justify-center border border-dashed border-gray-800 bg-gray-950/55 p-4 text-left transition-colors hover:border-cyan-900 hover:bg-gray-950"
+                className="flex min-h-[360px] w-full items-center justify-center border border-dashed border-gray-800 bg-gray-950/55 p-4 text-left transition-colors hover:border-brand-900 hover:bg-gray-950"
               >
                 {previewUrl ? (
                   <img src={previewUrl} alt={file?.name || 'Selected image'} className="max-h-[620px] max-w-full object-contain" />
@@ -263,7 +263,7 @@ export default function WatermarkCheckerPage() {
                     {result.watermark_status === 'verified' ? (
                       <CheckCircle2 className="h-4 w-4 text-emerald-300" />
                     ) : result.watermark_status === 'candidate' ? (
-                      <ShieldCheck className="h-4 w-4 text-cyan-200" />
+                      <ShieldCheck className="h-4 w-4 text-brand-200" />
                     ) : result.watermark_status === 'not_detected' ? (
                       <AlertTriangle className="h-4 w-4 text-amber-300" />
                     ) : (

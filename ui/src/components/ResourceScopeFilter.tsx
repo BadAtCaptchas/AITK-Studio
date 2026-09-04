@@ -58,7 +58,7 @@ export default function ResourceScopeFilter({
         <select
           value={projectID || projects[0].id}
           onChange={event => onProjectChange(event.target.value)}
-          className="h-8 min-w-0 max-w-52 rounded-sm border border-cyan-800/70 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-cyan-500 [color-scheme:dark]"
+          className="h-8 min-w-0 max-w-52 rounded-sm border border-brand-800/70 bg-gray-950 px-2 text-xs text-gray-100 outline-none focus:border-brand-500 [color-scheme:dark]"
           aria-label="Project"
         >
           {projects.map(project => (
@@ -89,7 +89,7 @@ export function ProjectResourceBadge({
   }
   return (
     <span
-      className="inline-flex max-w-full items-center gap-1 rounded-sm border border-cyan-800/70 bg-cyan-950/35 px-1.5 py-0.5 text-[10px] font-medium text-cyan-200"
+      className="inline-flex max-w-full items-center gap-1 rounded-sm border border-brand-800/70 bg-brand-950/35 px-1.5 py-0.5 text-[10px] font-medium text-brand-200"
       title={projectName || projectID}
     >
       <FolderKanban className="h-3 w-3 flex-none" />

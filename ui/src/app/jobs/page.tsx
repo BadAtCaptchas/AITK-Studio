@@ -5,7 +5,19 @@ import { TopBar, MainContent } from '@/components/layout';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
-import { AlertTriangle, ArrowRight, CheckCircle2, CloudDownload, FileArchive, ListOrdered, Loader2, Plus, Search, Upload, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  CloudDownload,
+  FileArchive,
+  ListOrdered,
+  Loader2,
+  Plus,
+  Search,
+  Upload,
+  X,
+} from 'lucide-react';
 import { SelectInput } from '@/components/formInputs';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { downloadJobModelReferences, importTrainingJob } from '@/utils/jobs';
@@ -98,7 +110,7 @@ function getImportDetail(status: ImportStatus) {
 function getStageClass(isActive: boolean, isComplete: boolean, isFailed = false) {
   if (isFailed) return 'border-red-500/50 bg-red-500/10 text-red-200';
   if (isComplete) return 'border-green-500/50 bg-green-500/10 text-green-200';
-  if (isActive) return 'border-blue-500/60 bg-blue-500/10 text-blue-100';
+  if (isActive) return 'border-brand-500/60 bg-brand-500/10 text-brand-100';
   return 'border-gray-700 bg-gray-950 text-gray-400';
 }
 
@@ -142,19 +154,24 @@ export default function Dashboard() {
       error: null,
     });
     try {
-      const result = await importTrainingJob(file, gpuIDs, progress => {
-        setImportStatus(current => {
-          if (!current) return current;
-          const uploadDone = progress.percent !== null && progress.percent >= 100;
-          return {
-            ...current,
-            phase: uploadDone ? 'processing' : 'uploading',
-            loaded: progress.loaded,
-            total: progress.total,
-            uploadPercent: progress.percent,
-          };
-        });
-      }, activeProjectID);
+      const result = await importTrainingJob(
+        file,
+        gpuIDs,
+        progress => {
+          setImportStatus(current => {
+            if (!current) return current;
+            const uploadDone = progress.percent !== null && progress.percent >= 100;
+            return {
+              ...current,
+              phase: uploadDone ? 'processing' : 'uploading',
+              loaded: progress.loaded,
+              total: progress.total,
+              uploadPercent: progress.percent,
+            };
+          });
+        },
+        activeProjectID,
+      );
 
       setImportStatus(current => ({
         phase: 'completed',
@@ -229,22 +246,13 @@ export default function Dashboard() {
     <>
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
-          <ListOrdered className="h-4 w-4 text-cyan-300" />
+          <ListOrdered className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">
             <span className="hidden text-gray-500 sm:inline">AI Toolkit / </span>
             Queue
           </h1>
         </div>
         <div className="flex-1"></div>
-        <label className="relative hidden min-w-52 max-w-md flex-1 lg:block">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-          <input
-            value={filterText}
-            onChange={event => setFilterText(event.target.value)}
-            placeholder="Filter by name, status, worker..."
-            className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-blue-600"
-          />
-        </label>
         {gpuList.length > 0 && (
           <div className="mr-2">
             <SelectInput
@@ -281,7 +289,7 @@ export default function Dashboard() {
         <div>
           <Link
             href={activeProjectID ? `/projects/${encodeURIComponent(activeProjectID)}/runs/new` : '/jobs/new'}
-            className={`operator-button shrink-0 border-emerald-800 bg-emerald-950/60 py-1 text-emerald-100 hover:bg-emerald-900 ${
+            className={`operator-button-primary h-10 shrink-0 ${
               selectedProjectArchived || scopeRequiresTarget ? 'pointer-events-none opacity-40' : ''
             }`}
             title={
@@ -299,15 +307,13 @@ export default function Dashboard() {
           </Link>
         </div>
       </TopBar>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".zip,.aitk"
-        className="hidden"
-        onChange={handleFileSelected}
-      />
-      <MainContent className="bg-gray-950 px-0 pt-12 sm:px-0">
-        <section className="mx-3 mt-3 flex min-w-0 flex-col gap-2 border-b border-gray-900 pb-3 sm:flex-row sm:items-center sm:justify-between">
+      <input ref={fileInputRef} type="file" accept=".zip,.aitk" className="hidden" onChange={handleFileSelected} />
+      <MainContent className="studio-queue-page">
+        <header className="studio-page-intro">
+          <h2>Your training, in motion.</h2>
+          <p>Manage runs across your local and remote workers.</p>
+        </header>
+        <section className="mb-6 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <ResourceScopeFilter
             scope={resourceScope.scope}
             projectID={resourceScope.projectID}
@@ -337,7 +343,7 @@ export default function Dashboard() {
                     ? 'bg-green-500/10 text-green-300'
                     : importStatus.phase === 'failed'
                       ? 'bg-red-500/10 text-red-300'
-                      : 'bg-blue-500/10 text-blue-300'
+                      : 'bg-brand-500/10 text-brand-300'
                 }`}
               >
                 {importStatus.phase === 'completed' ? (
@@ -360,7 +366,7 @@ export default function Dashboard() {
                       onClick={() => setImportStatus(null)}
                       title="Dismiss import status"
                       aria-label="Dismiss import status"
-                    className="operator-icon-button h-7 w-7"
+                      className="operator-icon-button h-7 w-7"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -368,7 +374,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                    <span className="inline-flex min-w-0 max-w-full items-center gap-1 border border-gray-700 bg-gray-950 px-2 py-1">
+                  <span className="inline-flex min-w-0 max-w-full items-center gap-1 border border-gray-700 bg-gray-950 px-2 py-1">
                     <FileArchive className="h-3.5 w-3.5 flex-none" />
                     <span className="truncate">{importStatus.fileName}</span>
                   </span>
@@ -385,7 +391,7 @@ export default function Dashboard() {
                         ? 'bg-red-500'
                         : importStatus.phase === 'completed'
                           ? 'bg-green-500'
-                          : 'bg-blue-500'
+                          : 'bg-brand-500'
                     }`}
                     style={{ width: `${importProgressPercent}%` }}
                   />
@@ -473,7 +479,7 @@ export default function Dashboard() {
                             ? `/projects/${encodeURIComponent(importStatus.job.project_id)}/runs/${encodeURIComponent(importStatus.job.id)}`
                             : `/jobs/${importStatus.job.id}`
                         }
-                        className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600"
+                        className="inline-flex items-center gap-2 rounded-md bg-brand-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600"
                       >
                         View Job
                         <ArrowRight className="h-4 w-4" />
@@ -495,7 +501,7 @@ export default function Dashboard() {
                         ? 'border-red-500/40 bg-red-500/10 text-red-100'
                         : modelDownloadStatus.phase === 'completed'
                           ? 'border-green-500/40 bg-green-500/10 text-green-100'
-                          : 'border-blue-500/40 bg-blue-500/10 text-blue-100'
+                          : 'border-brand-500/40 bg-brand-500/10 text-brand-100'
                     }`}
                   >
                     {modelDownloadStatus.phase === 'downloading'
@@ -518,19 +524,42 @@ export default function Dashboard() {
             </div>
           </section>
         )}
-        <div className="lg:hidden px-3 pt-3">
-          <label className="relative block">
+        <div className="mb-5 flex justify-end">
+          {' '}
+          <label className="relative block w-full sm:max-w-md">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
             <input
               value={filterText}
               onChange={event => setFilterText(event.target.value)}
-              placeholder="Filter by name, status, worker..."
-              className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-blue-600"
+              aria-label="Search jobs"
+              placeholder="Search jobs, status, worker..."
+              className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-600"
             />
           </label>
         </div>
         <QueueWorkbench
           key={jobsTableKey}
+          emptyAction={
+            !selectedProjectArchived && !scopeRequiresTarget ? (
+              <>
+                <Link
+                  href={activeProjectID ? `/projects/${encodeURIComponent(activeProjectID)}/runs/new` : '/jobs/new'}
+                  className="operator-button-primary h-11 px-5"
+                >
+                  <Plus className="h-4 w-4" />
+                  New training job
+                </Link>
+                <button
+                  type="button"
+                  className="operator-button h-11"
+                  disabled={isImporting}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Import a configuration
+                </button>
+              </>
+            ) : undefined
+          }
           filterText={filterText}
           focusGpuIDs={gpuIDs}
           scope={resourceScope.scope}

@@ -67,7 +67,7 @@ function TrainingPhaseOverview({ summary }: { summary: TrainingPhaseSummary }) {
     <div className="space-y-2 border border-gray-800 bg-gray-950/50 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <Layers className="w-5 h-5 text-cyan-400 shrink-0" />
+          <Layers className="w-5 h-5 text-brand-400 shrink-0" />
           <div className="min-w-0">
             <p className="text-xs text-gray-400">Training phase</p>
             <p className="text-sm font-medium text-gray-100 truncate">
@@ -229,7 +229,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
           {/* Job Info Grid */}
           <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
             <div className="flex items-center space-x-4">
-              <HardDrive className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <HardDrive className="w-5 h-5 text-brand-600 dark:text-brand-400" />
               <div>
                 <p className="text-xs text-gray-400">Job Name</p>
                 <p className="text-sm font-medium text-gray-200">{job.name}</p>
@@ -237,7 +237,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
             </div>
 
             <div className="flex items-center space-x-4">
-              <Cpu className="w-5 h-5 text-cyan-500 dark:text-cyan-400" />
+              <Cpu className="w-5 h-5 text-brand-500 dark:text-brand-400" />
               <div>
                 <p className="text-xs text-gray-400">Assigned GPUs</p>
                 <p className="text-sm font-medium text-gray-200">

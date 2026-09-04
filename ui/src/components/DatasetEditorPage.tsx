@@ -43,6 +43,8 @@ import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCac
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
 import ThemeLogo from '@/components/ThemeLogo';
+import DatasetActionBar from '@/components/DatasetActionBar';
+import CaptionMonitor from '@/components/CaptionMonitor';
 
 type DatasetEditorPageProps = {
   datasetName: string;
@@ -878,6 +880,9 @@ export default function DatasetEditorPage({
           {!isRemoteDataset && !encryptedManifest && (
             <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden md:inline-flex" />
           )}
+          {!isRemoteDataset && !encryptedManifest && (
+            <DatasetActionBar datasetName={datasetName} projectID={projectID} />
+          )}
           <button
             type="button"
             onClick={() => setDatasetMenuOpen(open => !open)}
@@ -1030,6 +1035,9 @@ export default function DatasetEditorPage({
           />
         )}
       </MainContent>
+      {!isRemoteDataset && !encryptedManifest && (
+        <CaptionMonitor datasetPath={datasetPath} projectID={projectID} />
+      )}
       <Modal
         isOpen={isRenameModalOpen}
         onClose={closeRenameModal}

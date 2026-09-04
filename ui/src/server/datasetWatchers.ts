@@ -119,9 +119,7 @@ type WatcherStatusStore = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __aitkDatasetWatcherPending: Map<string, Map<string, PendingSourceObservation>> | undefined;
-  // eslint-disable-next-line no-var
   var __aitkDatasetWatcherLastPollAt: number | undefined;
 }
 

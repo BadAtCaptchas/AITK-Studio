@@ -31,7 +31,7 @@ export const defaultCaptionJobConfig: CaptionJobConfig = {
 
 
 const repairDefaults = (defaults: { [key: string]: any }) => {
-  let newDefaults: { [key: string]: any } = {};
+  const newDefaults: { [key: string]: any } = {};
   // if the key doesnt start with config.process[0]., then add it
   for (const key in defaults) {
     if (!key.startsWith('config.process[0].')) {
@@ -59,8 +59,8 @@ export const handleCaptionerTypeChange = (
   // update the defaults when a model is selected
   const newType = captionerTypes.find(model => model.name === newTypeName);
 
-  let currentDefaults = repairDefaults(currentType.defaults || {});
-  let newDefaults = repairDefaults(newType?.defaults || {});
+  const currentDefaults = repairDefaults(currentType.defaults || {});
+  const newDefaults = repairDefaults(newType?.defaults || {});
 
   // set new model
   setJobConfig(newTypeName, 'config.process[0].type');

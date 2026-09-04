@@ -17,6 +17,7 @@ from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.config_modules import GenerateImageConfig
 from toolkit.data_loader import get_dataloader_datasets
 from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO, FileItemDTO
+from toolkit.dto import DTO
 from toolkit.guidance import get_targeted_guidance_loss, get_guidance_loss, GuidanceType
 from toolkit.image_utils import show_tensors, show_latents
 from toolkit.image_io import open_static_image
@@ -211,6 +212,24 @@ class SDTrainer(BaseSDTrainProcess):
 
     def before_model_load(self):
         pass
+
+    def get_blank_control_image(self):
+        # noise instead of a black image so the fallback does not read as a
+        # meaningful (solid black) reference
+        control_image = torch.rand((1, 3, 224, 224), device=self.sd.device_torch, dtype=self.sd.torch_dtype)
+        if self.sd.has_multiple_control_images:
+            control_image = [control_image]
+        return control_image
+
+    def encode_static_prompt(self, prompt, **kwargs):
+        # static embeds (blank/trigger/uncond/DOP class) are always plain text.
+        # Some models (edit models) cannot encode a prompt without control images
+        # and raise, only then fall back to a blank control image. Real errors
+        # surface on the fallback call.
+        try:
+            return self.sd.encode_prompt(prompt, **kwargs)
+        except Exception:
+            return self.sd.encode_prompt(prompt, control_images=self.get_blank_control_image(), **kwargs)
     
     def cache_sample_prompts(self):
         if self.train_config.disable_sampling:
@@ -252,7 +271,13 @@ class SDTrainer(BaseSDTrainProcess):
                     has_control_images = True
                 # see if we need to encode the control images
                 if self.sd.encode_control_in_text_embeddings and has_control_images:
+                    self.sd.prepare_sample_prompt_context(gen_img_config)
                     
+                    video_exts = ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.wmv', '.m4v', '.flv']
+
+                    def _is_ctrl_video(pth):
+                        return os.path.splitext(str(pth))[1].lower() in video_exts
+
                     ctrl_img_list = []
                     
                     if gen_img_config.ctrl_img is not None:
@@ -357,24 +382,18 @@ class SDTrainer(BaseSDTrainProcess):
         
         # cache unconditional embeds (blank prompt)
         with torch.no_grad():
-            kwargs = {}
-            if self.sd.encode_control_in_text_embeddings:
-                # just do a blank image for unconditionals
-                control_image = torch.zeros((1, 3, 224, 224), device=self.sd.device_torch, dtype=self.sd.torch_dtype)
-                if self.sd.has_multiple_control_images:
-                    control_image = [control_image]
-                
-                kwargs['control_images'] = control_image
-            self.unconditional_embeds = self.sd.encode_prompt(
+            self.unconditional_embeds = self.encode_static_prompt(
                 [self.train_config.unconditional_prompt],
                 long_prompts=self.do_long_prompts,
-                **kwargs
             ).to(
                 self.device_torch,
                 dtype=self.sd.torch_dtype
             ).detach()
         
         if self.train_config.do_prior_divergence:
+            self.do_prior_prediction = True
+        if getattr(self.sd, 'dopsd_self_ref', False):
+            # D-OPSD: the teacher (prior) prediction is the training target
             self.do_prior_prediction = True
         # move vae to device if we did not cache latents
         if not self.is_latents_cached:
@@ -422,16 +441,9 @@ class SDTrainer(BaseSDTrainProcess):
                     raise ValueError("Cannot unload text encoder if training text encoder")
                 # cache embeddings
                 self.sd.text_encoder_to(self.device_torch)
-                encode_kwargs = {}
-                if self.sd.encode_control_in_text_embeddings:
-                    # just do a blank image for unconditionals
-                    control_image = torch.zeros((1, 3, 224, 224), device=self.sd.device_torch, dtype=self.sd.torch_dtype)
-                    if self.sd.has_multiple_control_images:
-                        control_image = [control_image]
-                    encode_kwargs['control_images'] = control_image
-                self.cached_blank_embeds = self.sd.encode_prompt("", **encode_kwargs)
+                self.cached_blank_embeds = self.encode_static_prompt("")
                 if self.trigger_word is not None:
-                    self.cached_trigger_embeds = self.sd.encode_prompt(self.trigger_word, **encode_kwargs)
+                    self.cached_trigger_embeds = self.encode_static_prompt(self.trigger_word)
                 if self.train_config.diff_output_preservation:
                     self.diff_output_preservation_embeds = self.sd.encode_prompt(self.train_config.diff_output_preservation_class)
                 
@@ -611,6 +623,13 @@ class SDTrainer(BaseSDTrainProcess):
         target_mask_multiplier = None
         dtype = get_torch_dtype(self.train_config.dtype)
 
+        # joint audio models return a DTO: video pred as the tensor, the audio
+        # pred and its target riding as extras on each pass's own prediction.
+        # Grab them before any math rebinds noise_pred to a plain tensor.
+        audio_pred = noise_pred.get('audio') if isinstance(noise_pred, DTO) else None
+        audio_target = noise_pred.get('audio_target') if isinstance(noise_pred, DTO) else None
+        audio_sigma = noise_pred.get('audio_sigma') if isinstance(noise_pred, DTO) else None
+
         has_mask = batch.mask_tensor is not None
 
         with torch.no_grad():
@@ -626,6 +645,7 @@ class SDTrainer(BaseSDTrainProcess):
             noise_pred = noise_pred * self.train_config.pred_scaler
 
         target = None
+        dopsd_normal_target = None
 
         if self.train_config.target_noise_multiplier != 1.0:
             noise = noise * self.train_config.target_noise_multiplier
@@ -693,6 +713,21 @@ class SDTrainer(BaseSDTrainProcess):
             assert not self.train_config.train_turbo
             # matching adapter prediction
             target = prior_pred
+            if getattr(self.sd, 'dopsd_self_ref', False):
+                if isinstance(prior_pred, DTO) and prior_pred.get('audio') is not None:
+                    # the teacher's audio prediction is the audio target too
+                    audio_target = prior_pred.get('audio').detach()
+                # D-OPSD bleed: also train against the normal (non-teacher) target
+                if hasattr(self.sd, 'get_loss_target'):
+                    dopsd_normal_target = self.sd.get_loss_target(
+                        noise=noise,
+                        batch=batch,
+                        timesteps=timesteps,
+                    ).detach()
+                elif self.sd.is_flow_matching:
+                    dopsd_normal_target = (noise - batch.latents).detach()
+                else:
+                    dopsd_normal_target = noise
         elif self.sd.prediction_type == 'v_prediction':
             # v-parameterization training
             target = self.sd.noise_scheduler.get_velocity(batch.tensor, noise, timesteps)
@@ -937,7 +972,6 @@ class SDTrainer(BaseSDTrainProcess):
                 # we also denoise as the unaugmented tensor is not a noisy diffirental
                 with torch.no_grad():
                     unaugmented_latents = self.sd.encode_images(batch.unaugmented_tensor).to(self.device_torch, dtype=dtype)
-                    unaugmented_latents = unaugmented_latents * self.train_config.latent_multiplier
                     target = unaugmented_latents.detach()
 
                 # Get the target for loss depending on the prediction type
@@ -1026,6 +1060,25 @@ class SDTrainer(BaseSDTrainProcess):
                 elif len(loss.shape) == 5:
                     timestep_weight = timestep_weight.view(-1, 1, 1, 1, 1).detach()
                 loss = loss * timestep_weight
+
+            if dopsd_normal_target is not None:
+                if self.train_config.loss_type == "mae":
+                    bleed_loss = torch.nn.functional.l1_loss(
+                        pred.float(), dopsd_normal_target.float(), reduction="none"
+                    )
+                else:
+                    bleed_loss = torch.nn.functional.mse_loss(
+                        pred.float(), dopsd_normal_target.float(), reduction="none"
+                    )
+                with torch.no_grad():
+                    bleed_scale = (
+                        loss.detach().mean()
+                        / bleed_loss.detach().mean().clamp(min=1e-8)
+                    )
+                bleed_strength = float(
+                    getattr(self.sd, 'dopsd_bleed_strength', 1.0)
+                )
+                loss = loss + bleed_loss * bleed_scale * bleed_strength
 
             video_loss_mask = getattr(batch, 'video_loss_mask', None)
             if video_loss_mask is not None and len(loss.shape) == 5:
@@ -1167,6 +1220,8 @@ class SDTrainer(BaseSDTrainProcess):
             else:
                 audio_loss = audio_loss_element.mean()
             audio_loss = audio_loss * self.train_config.audio_loss_multiplier
+            self.additional_logs['loss/img'] = loss.item()
+            self.additional_logs['loss/audio'] = audio_loss.item()
             loss = loss + audio_loss
 
         # check for additional losses
@@ -2380,6 +2435,18 @@ class SDTrainer(BaseSDTrainProcess):
                     else:
                         self.adapter.set_reference_images(None)
 
+                if self.train_config.do_guidance_loss and isinstance(self.train_config.guidance_loss_target, list):
+                    batch_size = noisy_latents.shape[0]
+                    # update the guidance value, random float between guidance_loss_target[0] and guidance_loss_target[1]
+                    # sample before the prior prediction so the prior, main, uncond, and
+                    # preservation passes all run at the same guidance values
+                    self._guidance_loss_target_batch = [
+                        random.uniform(
+                            self.train_config.guidance_loss_target[0],
+                            self.train_config.guidance_loss_target[1]
+                        ) for _ in range(batch_size)
+                    ]
+
                 prior_pred = None
 
                 do_inverted_masked_prior = False
@@ -2411,6 +2478,20 @@ class SDTrainer(BaseSDTrainProcess):
                             prior_embeds_to_use = concat_prompt_embeds(
                                 [blank_embeds] * noisy_latents.shape[0]
                             )
+
+                        is_dopsd = getattr(self.sd, 'dopsd_self_ref', False)
+                        if is_dopsd:
+                            if batch.dopsd_prompt_embeds is None:
+                                raise ValueError(
+                                    "D-OPSD requires cached text embeddings; enable "
+                                    "train.cache_text_embeddings"
+                                )
+                            prior_embeds_to_use = (
+                                batch.dopsd_prompt_embeds.clone()
+                                .detach()
+                                .to(self.device_torch, dtype=dtype)
+                            )
+                            batch.dopsd_teacher_pass = True
                         
                         batch.audio_pred_slot = "audio_pred_prior"
                         try:
@@ -2428,7 +2509,10 @@ class SDTrainer(BaseSDTrainProcess):
                             )
                         finally:
                             batch.audio_pred_slot = None
+                            if is_dopsd:
+                                batch.dopsd_teacher_pass = False
                         if prior_pred is not None:
+                            # a DTO prior pred keeps its audio extras through detach
                             prior_pred = prior_pred.detach()
 
                 # do the custom adapter after the prior prediction
@@ -2486,16 +2570,6 @@ class SDTrainer(BaseSDTrainProcess):
                                 pred_kwargs['down_block_additional_residuals'] = down_block_res_samples
                                 pred_kwargs['mid_block_additional_residual'] = mid_block_res_sample
                 
-                if self.train_config.do_guidance_loss and isinstance(self.train_config.guidance_loss_target, list):
-                    batch_size = noisy_latents.shape[0]
-                    # update the guidance value, random float between guidance_loss_target[0] and guidance_loss_target[1]
-                    self._guidance_loss_target_batch = [
-                        random.uniform(
-                            self.train_config.guidance_loss_target[0],
-                            self.train_config.guidance_loss_target[1]
-                        ) for _ in range(batch_size)
-                    ]
-
                 self.before_unet_predict()
                 
                 if unconditional_embeds is not None:

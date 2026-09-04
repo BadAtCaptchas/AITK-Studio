@@ -1,30 +1,14 @@
 from typing import List
+
 import torch
 from transformers import T5Tokenizer, UMT5EncoderModel
 from toolkit.models.loaders.comfy import get_comfy_path
 
-class PatchedT5Tokenizer(T5Tokenizer):
-    def __init__(
-        self,
-        vocab: str | list[tuple[str, float]] | None = None,
-        eos_token="</s>",
-        unk_token="<unk>",
-        pad_token="<pad>",
-        _spm_precompiled_charsmap=None,
-        extra_ids=100,
-        additional_special_tokens=None,
-        **kwargs,
-    ):
-        super().__init__(
-            vocab=vocab,
-            eos_token=eos_token,
-            unk_token=unk_token,
-            pad_token=pad_token,
-            _spm_precompiled_charsmap=None, # this is passing a empty byte string for some reason now.
-            extra_ids=extra_ids,
-            additional_special_tokens=additional_special_tokens,
-            **kwargs,
-        )
+from toolkit.models.v2.text_encoders.umt5 import (
+    PatchedT5Tokenizer,
+    UMT5TextEncoder,
+)
+
 
 def get_umt5_encoder(
     model_path: str,

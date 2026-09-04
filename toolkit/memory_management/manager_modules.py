@@ -864,6 +864,40 @@ class BaseLayerMemoryManager:
             param._is_memory_managed = True
 
 
+class EmbeddingLayerMemoryManager(BaseLayerMemoryManager):
+    """Offloads a (large, frozen) nn.Embedding by keeping the weight on cpu
+    and doing the row gather THERE: instead of staging a multi-GB vocab table
+    to the gpu, only the looked-up rows (tokens x dim, ~KBs) cross the bus.
+    Lookups happen once per prompt, so the cpu gather is free."""
+
+    def __init__(self, module: nn.Module, manager: "MemoryManager"):
+        super().__init__(module, manager)
+
+        # cpu-resident weight; no pinning — the weight never crosses the bus
+        module.weight.data = module.weight.data.to("cpu")
+        # subclass buffers (gemma's embed_scale) must join the cpu-side math
+        for buf_name, buf in module._buffers.items():
+            if buf is not None:
+                module._buffers[buf_name] = buf.to("cpu")
+
+        self._original_forward = module.forward
+
+        def _mm_forward(input_ids, *args, **kwargs):
+            if args or kwargs:
+                return self._original_forward(input_ids, *args, **kwargs)
+            out_device = (
+                input_ids.device
+                if input_ids.device.type == "cuda"
+                else self.manager.process_device
+            )
+            # the original forward preserves subclass behavior (scaled word
+            # embeddings multiply by embed_scale; raw F.embedding would not)
+            out = self._original_forward(input_ids.to("cpu"))
+            return out.to(out_device, non_blocking=True)
+
+        module.forward = _mm_forward
+
+
 class LinearLayerMemoryManager(BaseLayerMemoryManager):
     def __init__(
         self,

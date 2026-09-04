@@ -59,6 +59,13 @@ export const isImage = (filePath: string) => imgExtensions.includes(getFileExten
 export const isAudio = (filePath: string) => audioExtensions.includes(getFileExtension(filePath));
 export const isTextCaption = (filePath: string) => textCaptionExtensions.includes(getFileExtension(filePath));
 
+/** Keep the basename readable while encoding the directory as one catch-all segment. */
+export const encodeFilePathForUrl = (filePath: string) => {
+  const index = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+  if (index === -1) return encodeURIComponent(filePath);
+  return `${encodeURIComponent(filePath.slice(0, index))}/${encodeURIComponent(filePath.slice(index + 1))}`;
+};
+
 export const tagsToObj = (tagStr: string): Record<string, any> => {
   const result: Record<string, any> = {};
   const regex = /<([A-Z_][A-Z0-9_]*)>([\s\S]*?)<\/\1>/g;

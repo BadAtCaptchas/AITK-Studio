@@ -104,15 +104,19 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [Wan-AI/Wan2.2-TI2V-5B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers) (Wan 2.2 TI2V 5B)
 - [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) (LTX-2)
 - [Lightricks/LTX-2.3](https://huggingface.co/Lightricks/LTX-2.3) (LTX-2.3)
+- [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5) (LTX-2.5)
 
 ### Audio
 - [ACE-Step/Ace-Step1.5](https://huggingface.co/ACE-Step/Ace-Step1.5) (Ace Step 1.5)
 - [ACE-Step/acestep-v15-xl-base](https://huggingface.co/ACE-Step/acestep-v15-xl-base) (Ace Step 1.5 XL)
 
+### MiniMax H3
+- [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) (MiniMax H3 and MiniMax H3 Ref2VA, joint video/audio and single-image training)
+  - Supports T2V, first-frame I2V, image-only training, joint audio/video training, 24 fps defaults, automatic frame counts, and the H3 `17n+5` frame grid.
+  - Supports pruned and non-pruned checkpoints, local-first Comfy weights under `MODELS_PATH`, ConvRot/NVFP4 prequantized components, layer offloading, VSA sparse attention when available, and a dense-attention fallback.
+  - The shared base download is approximately 43 GB. Ref2VA supports multiple reference images/videos, picture or static-video presentation, the v1 training adapter, contrastive guidance, and D-OPSD self-distillation.
+
 ### Experimental
-- [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) (MiniMax H3, joint video/audio and single-image training)
-  - MiniMax H3 currently supports LoRA training with the released ConvRot8 DiT and NVFP4 text encoder checkpoints. Full-base and text-encoder training, packed-weight merging/re-quantization, and layer offloading are rejected; use the low-VRAM component movement instead.
-  - The shared base download is approximately 43 GB and is stored in the global Models Folder. `fl2va` supports I2V training; `ref2va` partitions support T2V and sampling, while `ref2va` I2V training remains disabled until reference-frame text-embedding caches can be coupled safely.
 - [lodestones/Zeta-Chroma](https://huggingface.co/lodestones/Zeta-Chroma) (Zeta Chroma)
 
 </details>

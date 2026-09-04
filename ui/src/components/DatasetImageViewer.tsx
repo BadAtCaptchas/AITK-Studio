@@ -7,7 +7,7 @@ import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import classNames from 'classnames';
 import { openConfirm } from './ConfirmModal';
 import { apiClient } from '@/utils/api';
-import { isVideo, isAudio } from '@/utils/basic';
+import { isVideo, isAudio, encodeFilePathForUrl } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';

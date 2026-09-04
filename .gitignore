@@ -167,6 +167,9 @@ cython_debug/
 /custom/*
 !/custom/.gitkeep
 /.tmp
+/.ffmpeg
+/.mingit
+/.uv
 /ui/.test-tmp/
 /venv.bkp
 /venv.*

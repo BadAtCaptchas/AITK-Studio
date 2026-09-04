@@ -23,6 +23,5 @@ export default function usePollLoop(
   useEffect(() => {
     return startSettledPollLoop(signal => callbackRef.current(signal), intervalMs);
     // The caller controls restart semantics explicitly through dependencies.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervalMs, ...dependencies]);
 }

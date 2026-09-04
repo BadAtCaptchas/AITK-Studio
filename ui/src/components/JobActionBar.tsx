@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save, RefreshCcw, Image } from 'lucide-react';
+import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save, RefreshCcw, Image as ImageIcon } from 'lucide-react';
 import {
   Button,
   Dialog,
@@ -180,6 +180,12 @@ function jobCloneHref(job: Job) {
   return `/jobs/new?cloneId=${encodeURIComponent(job.id)}`;
 }
 
+type PendingAction = 'start' | 'remove' | 'stop' | 'delete' | 'save' | 'sample' | 'markStopped';
+
+// If the job never reports a state change (e.g. the request silently failed
+// server-side), unlock the bar after this long so it can't stay stuck.
+const PENDING_TIMEOUT_MS = 30_000;
+
 export default function JobActionBar({
   job,
   onRefresh,
@@ -196,6 +202,8 @@ export default function JobActionBar({
   const [captionResultSyncing, setCaptionResultSyncing] = useState(false);
   const [exportDialog, setExportDialog] = useState<ExportDialogState>(null);
   const [checkpointMode, setCheckpointMode] = useState<TrainingJobCheckpointExportMode>('latest');
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const pendingStateKeyRef = useRef<string | null>(null);
   const exportStatusTimeout = useRef<number | null>(null);
   const modelDownloadStatusTimeout = useRef<number | null>(null);
   const remoteStartStatusTimeout = useRef<number | null>(null);
@@ -217,6 +225,39 @@ export default function JobActionBar({
   const canManualRemoteCaptionSync =
     job.job_type === 'caption' && job.worker_id !== 'local' && remoteCaptionDownloadStatus !== 'merged';
   const remoteCaptionActionBusy = captionResultSyncing || remoteCaptionDownloadStatus === 'downloading';
+  const jobStateKey = `${job.status}:${job.step}:${job.stop}:${job.queue_position ?? ''}`;
+  const isBusy = pending !== null;
+  const menuSpinner = <Loader2 className="h-4 w-4 animate-spin" />;
+
+  useEffect(() => {
+    if (pending && pendingStateKeyRef.current !== null && pendingStateKeyRef.current !== jobStateKey) {
+      setPending(null);
+      pendingStateKeyRef.current = null;
+    }
+  }, [jobStateKey, pending]);
+
+  useEffect(() => {
+    if (!pending) return;
+    const timeout = window.setTimeout(() => {
+      setPending(null);
+      pendingStateKeyRef.current = null;
+    }, PENDING_TIMEOUT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [pending]);
+
+  const runAction = async (action: PendingAction, task: () => Promise<void>, waitForJobUpdate = true) => {
+    if (pending) return;
+    pendingStateKeyRef.current = waitForJobUpdate ? jobStateKey : null;
+    setPending(action);
+    try {
+      await task();
+      if (!waitForJobUpdate) setPending(null);
+    } catch (error) {
+      setPending(null);
+      pendingStateKeyRef.current = null;
+      throw error;
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -540,8 +581,10 @@ export default function JobActionBar({
           aria-label="Remove from queue"
           onClick={async () => {
             if (!canRemoveFromQueue) return;
-            await markJobAsStopped(job.id);
-            if (onRefresh) onRefresh();
+            runAction('remove', async () => {
+              await markJobAsStopped(job.id);
+              if (onRefresh) onRefresh();
+            });
           }}
           className={actionButtonClass}
         >
@@ -553,16 +596,17 @@ export default function JobActionBar({
           title="Stop job"
           aria-label="Stop job"
           onClick={() => {
-            if (!canStop) return;
+            if (!canStop || isBusy) return;
             openConfirm({
               title: 'Stop Job',
               message: `Are you sure you want to stop the job "${job.name}"? You CAN resume later.`,
               type: 'info',
               confirmText: 'Stop',
-              onConfirm: async () => {
-                await stopJob(job.id);
-                if (onRefresh) onRefresh();
-              },
+              onConfirm: () =>
+                runAction('stop', async () => {
+                  await stopJob(job.id);
+                  if (onRefresh) onRefresh();
+                }),
             });
           }}
           className={actionButtonClass}
@@ -624,17 +668,18 @@ export default function JobActionBar({
             message: message,
             type: 'warning',
             confirmText: 'Delete',
-            onConfirm: async () => {
-              if (job.status === 'running') {
-                try {
-                  await stopJob(job.id);
-                } catch (e) {
-                  console.error('Error stopping job before deleting:', e);
+            onConfirm: () =>
+              runAction('delete', async () => {
+                if (job.status === 'running') {
+                  try {
+                    await stopJob(job.id);
+                  } catch (e) {
+                    console.error('Error stopping job before deleting:', e);
+                  }
                 }
-              }
-              await deleteJob(job.id);
-              if (afterDelete) afterDelete();
-            },
+                await deleteJob(job.id);
+                if (afterDelete) afterDelete();
+              }),
           });
         }}
         className={dangerousActionButtonClass}
@@ -662,23 +707,23 @@ export default function JobActionBar({
             </MenuItem>
           )}
           {job.job_type === 'train' && canStop && (
-            <MenuItem>
+            <MenuItem disabled={isBusy}>
               <div
                 className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
                 onClick={() => void handleSaveNextStep()}
               >
-                <Save className="w-4 h-4" />
+                {pending === 'save' ? menuSpinner : <Save className="w-4 h-4" />}
                 Save Next Step
               </div>
             </MenuItem>
           )}
           {job.job_type === 'train' && canStop && (
-            <MenuItem>
+            <MenuItem disabled={isBusy}>
               <div
                 className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded flex items-center gap-2"
                 onClick={() => void handleSampleNextStep()}
               >
-                <Image className="w-4 h-4" />
+                {pending === 'sample' ? menuSpinner : <ImageIcon className="w-4 h-4" />}
                 Sample Next Step
               </div>
             </MenuItem>
@@ -766,16 +811,18 @@ export default function JobActionBar({
             <div
               className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded"
               onClick={() => {
-                let message = `Are you sure you want to mark this job as stopped? This will set the job status to 'stopped' if the status is hung. Only do this if you are 100% sure the job is stopped. This will NOT stop the job.`;
+                if (isBusy) return;
+                const message = `Are you sure you want to mark this job as stopped? This will set the job status to 'stopped' if the status is hung. Only do this if you are 100% sure the job is stopped. This will NOT stop the job.`;
                 openConfirm({
                   title: 'Mark Job as Stopped',
                   message: message,
                   type: 'warning',
                   confirmText: 'Mark as Stopped',
-                  onConfirm: async () => {
-                    await markJobAsStopped(job.id);
-                    onRefresh && onRefresh();
-                  },
+                  onConfirm: () =>
+                    runAction('markStopped', async () => {
+                      await markJobAsStopped(job.id);
+                      onRefresh?.();
+                    }),
                 });
               }}
             >

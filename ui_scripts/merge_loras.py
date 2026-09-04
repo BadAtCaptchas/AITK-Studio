@@ -24,6 +24,15 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
+def pad_to_shape(tensor: torch.Tensor, shape: tuple) -> torch.Tensor:
+    """Zero-pad a tensor up to the given shape (e.g. to match a larger LoRA rank)."""
+    if tuple(tensor.shape) == tuple(shape):
+        return tensor
+    out = torch.zeros(shape, dtype=tensor.dtype, device=tensor.device)
+    out[tuple(slice(0, s) for s in tensor.shape)] = tensor
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Merge a list of LoRAs into a single checkpoint."
@@ -86,6 +95,24 @@ def main() -> int:
         for key, tensor in state_dict.items():
             scaled = tensor.to(torch.float32) * strength
             if key in merged:
+                existing = merged[key]
+                if existing.shape != scaled.shape:
+                    if existing.ndim != scaled.ndim:
+                        print(
+                            f"Cannot merge key '{key}': incompatible shapes "
+                            f"{tuple(existing.shape)} vs {tuple(scaled.shape)}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        return 2
+                    # Different LoRA ranks: zero-pad both to the max size on
+                    # each mismatched dim so they can merge as equal sizes.
+                    target = tuple(
+                        max(a, b) for a, b in zip(existing.shape, scaled.shape)
+                    )
+                    existing = pad_to_shape(existing, target)
+                    scaled = pad_to_shape(scaled, target)
+                    merged[key] = existing
                 merged[key].add_(scaled)
             else:
                 merged[key] = scaled

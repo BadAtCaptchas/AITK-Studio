@@ -1,3 +1,4 @@
+import path from 'path';
 import { defaultDatasetsFolder, defaultDataRoot, defaultModelsFolder, defaultProjectsFolder, defaultTrainFolder } from '../paths';
 import NodeCache from 'node-cache';
 import { db } from './db';
@@ -60,7 +61,7 @@ export const getDatasetsRoot = async () => {
   if (datasetsPath) {
     return datasetsPath;
   }
-  let row = await db.settings.get('DATASETS_FOLDER');
+  const row = await db.settings.get('DATASETS_FOLDER');
   datasetsPath = defaultDatasetsFolder;
   const normalizedDatasetsPath = await normalizeStoragePathSetting(row?.value, defaultDatasetsFolder, {
     allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
@@ -68,6 +69,9 @@ export const getDatasetsRoot = async () => {
   if (normalizedDatasetsPath) {
     datasetsPath = normalizedDatasetsPath;
   }
+  // Strip trailing slashes; the routes' `root + path.sep` prefix checks 403
+  // on every file if the stored path ends with a separator.
+  datasetsPath = path.resolve(datasetsPath);
   myCache.set(key, datasetsPath);
   return datasetsPath as string;
 };
@@ -78,7 +82,7 @@ export const getTrainingFolder = async () => {
   if (trainingRoot) {
     return trainingRoot;
   }
-  let row = await db.settings.get(key);
+  const row = await db.settings.get(key);
   trainingRoot = defaultTrainFolder;
   const normalizedTrainingRoot = await normalizeStoragePathSetting(row?.value, defaultTrainFolder, {
     allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
@@ -86,6 +90,7 @@ export const getTrainingFolder = async () => {
   if (normalizedTrainingRoot) {
     trainingRoot = normalizedTrainingRoot;
   }
+  trainingRoot = path.resolve(trainingRoot);
   myCache.set(key, trainingRoot);
   return trainingRoot as string;
 };
@@ -96,7 +101,7 @@ export const getHFToken = async () => {
   if (token) {
     return token;
   }
-  let row = await db.settings.get(key);
+  const row = await db.settings.get(key);
   token = '';
   if (row?.value && row.value !== '') {
     token = row.value;
@@ -111,7 +116,7 @@ export const getOpenRouterApiKey = async () => {
   if (token) {
     return token;
   }
-  let row = await db.settings.get(key);
+  const row = await db.settings.get(key);
   token = process.env.OPENROUTER_API_KEY?.trim() || process.env.AITK_OPENROUTER_API_KEY?.trim() || '';
   if (row?.value && row.value !== '') {
     token = row.value;
@@ -126,7 +131,7 @@ export const getDataRoot = async () => {
   if (dataRoot) {
     return dataRoot;
   }
-  let row = await db.settings.get(key);
+  const row = await db.settings.get(key);
   dataRoot = defaultDataRoot;
   const normalizedDataRoot = await normalizeStoragePathSetting(row?.value, defaultDataRoot, {
     allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
@@ -134,6 +139,7 @@ export const getDataRoot = async () => {
   if (normalizedDataRoot) {
     dataRoot = normalizedDataRoot;
   }
+  dataRoot = path.resolve(dataRoot);
   myCache.set(key, dataRoot);
   return dataRoot;
 };
@@ -144,7 +150,7 @@ export const getProjectsRoot = async () => {
   if (projectsRoot) {
     return projectsRoot;
   }
-  let row = await db.settings.get(key);
+  const row = await db.settings.get(key);
   projectsRoot = defaultProjectsFolder;
   const normalizedProjectsRoot = await normalizeStoragePathSetting(row?.value, defaultProjectsFolder, {
     allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),

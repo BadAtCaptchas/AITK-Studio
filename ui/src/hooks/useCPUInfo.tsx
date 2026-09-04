@@ -4,12 +4,15 @@ import { CpuInfo } from '@/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
+import useMonitorStream from './useMonitorStream';
 
 export default function useCPUInfo(reloadInterval: null | number = null, workerID = 'local') {
   const [cpuInfo, setCpuInfo] = useState<CpuInfo | null>(null);
   const [isCPUInfoLoaded, setIsLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const activeWorkerRef = useRef(workerID);
+  const monitor = useMonitorStream();
+  const useLocalMonitor = workerID === 'local';
   activeWorkerRef.current = workerID;
 
   const fetchCpuInfo = useCallback(async (signal?: AbortSignal) => {
@@ -37,7 +40,14 @@ export default function useCPUInfo(reloadInterval: null | number = null, workerI
     setStatus('idle');
   }, [workerID]);
 
-  usePollLoop(signal => fetchCpuInfo(signal), reloadInterval, [workerID]);
+  useEffect(() => {
+    if (!useLocalMonitor || !monitor.cpu) return;
+    setCpuInfo(monitor.cpu);
+    setIsLoaded(true);
+    setStatus('success');
+  }, [monitor.cpu, useLocalMonitor]);
 
-  return { cpuInfo, isCPUInfoLoaded, status, refreshCpuInfo: () => fetchCpuInfo() };
+  usePollLoop(signal => fetchCpuInfo(signal), useLocalMonitor ? null : reloadInterval, [workerID, useLocalMonitor]);
+
+  return { cpuInfo, isCPUInfoLoaded, status, refreshCpuInfo: () => useLocalMonitor ? Promise.resolve() : fetchCpuInfo() };
 }

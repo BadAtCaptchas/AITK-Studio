@@ -30,8 +30,6 @@ from .sega import (
 from .paths import resolve_single_file_model_path
 from safetensors.torch import load_file, save_file
 
-from transformers import AutoTokenizer, Qwen3ForCausalLM
-from diffusers import AutoencoderKL
 
 try:
     from diffusers import ZImagePipeline
@@ -300,11 +298,9 @@ class ZImageModel(BaseModel):
         flush()
 
         self.print_and_status_update("Text Encoder")
-        tokenizer = AutoTokenizer.from_pretrained(
-            base_model_path, subfolder="tokenizer", torch_dtype=dtype
-        )
-        text_encoder = Qwen3ForCausalLM.from_pretrained(
-            base_model_path, subfolder="text_encoder", torch_dtype=dtype
+        tokenizer = Qwen3TextEncoder.load_tokenizer(base_model_path)
+        text_encoder = Qwen3TextEncoder.load(
+            base_model_path, **self.component_load_kwargs("te")
         )
 
         if (
@@ -329,9 +325,7 @@ class ZImageModel(BaseModel):
             flush()
 
         self.print_and_status_update("Loading VAE")
-        vae = AutoencoderKL.from_pretrained(
-            base_model_path, subfolder="vae", torch_dtype=dtype
-        )
+        vae = KLVAE.load_model(base_model_path, dtype=dtype)
 
         self.noise_scheduler = ZImageModel.get_train_scheduler()
 
@@ -486,6 +480,9 @@ class ZImageModel(BaseModel):
         return False
 
     def save_model(self, output_path, meta, save_dtype):
+        # comfy-format single-file save (the standard save format regardless
+        # of how the model was loaded); prequantized layers keep their
+        # quantized storage
         transformer: ZImageTransformer2DModel = unwrap_model(self.model)
         if self.is_single_file:
             state_dict = transformer.state_dict()
@@ -520,16 +517,4 @@ class ZImageModel(BaseModel):
     def get_transformer_block_names(self) -> Optional[List[str]]:
         return ["layers"]
 
-    def convert_lora_weights_before_save(self, state_dict):
-        new_sd = {}
-        for key, value in state_dict.items():
-            new_key = key.replace("transformer.", "diffusion_model.")
-            new_sd[new_key] = value
-        return new_sd
-
-    def convert_lora_weights_before_load(self, state_dict):
-        new_sd = {}
-        for key, value in state_dict.items():
-            new_key = key.replace("diffusion_model.", "transformer.")
-            new_sd[new_key] = value
-        return new_sd
+    lora_keys_use_comfy_prefix = True

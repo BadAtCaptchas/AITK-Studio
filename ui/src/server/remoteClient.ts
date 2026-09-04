@@ -84,11 +84,8 @@ type RemoteBackgroundPollResult<T> =
     };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __remoteDiscoveryErrorLogState: Map<string, RemoteDiscoveryErrorLogState> | undefined;
-  // eslint-disable-next-line no-var
   var __remoteBackgroundPollLogState: Map<string, RemoteBackgroundPollLogState> | undefined;
-  // eslint-disable-next-line no-var
   var __remoteBackgroundPollCooldownState: Map<string, RemoteBackgroundPollCooldownState> | undefined;
 }
 

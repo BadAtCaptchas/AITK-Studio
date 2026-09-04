@@ -34,6 +34,17 @@ from .src.hidream_o1.model_config import model_config
 if TYPE_CHECKING:
     from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
 
+
+class HidreamO1Transformer(Qwen3VLForConditionalGeneration, OstrisTransformersMixin):
+    """The o1 DiT-in-LLM: the vendored Qwen3VL with the image-diffusion heads
+    (x_embedder / t_embedder1 / final_layer2). The generic Qwen3VLTextEncoder
+    must NOT be used here — it drops those keys as unexpected."""
+
+    @classmethod
+    def get_transformer_block_names(cls):
+        return ["model.language_model.layers"]
+
+
 scheduler_config = {
     "num_train_timesteps": 1000,
     "shift": 3.0,
@@ -141,7 +152,10 @@ class HidreamO1Model(BaseModel):
             warnings.warn(format_hidream_o1_torch_warning(torch), RuntimeWarning, stacklevel=2)
         self.is_flow_matching = True
         self.is_transformer = True
-        self.target_lora_modules = ["Qwen3VLForConditionalGeneration"]
+        self.target_lora_modules = [
+            "Qwen3VLForConditionalGeneration",
+            "HidreamO1Transformer",
+        ]
         self.noise_scale = self.model_config.model_kwargs.get(
             "noise_scale", DEFAULT_NOISE_SCALE
         )
@@ -202,7 +216,7 @@ class HidreamO1Model(BaseModel):
             )
 
             # transformer.load_state_dict(state_dict, assign=True)
-            transformer = Qwen3VLForConditionalGeneration.from_pretrained(
+            transformer = HidreamO1Transformer.from_pretrained(
                 None,
                 config=Qwen3VLConfig(**model_config),
                 state_dict=state_dict,
@@ -210,7 +224,7 @@ class HidreamO1Model(BaseModel):
             )
             del state_dict  # free memory
         else:
-            transformer = Qwen3VLForConditionalGeneration.from_pretrained(
+            transformer = HidreamO1Transformer.from_pretrained(
                 model_path,
                 torch_dtype=self.torch_dtype,
             )

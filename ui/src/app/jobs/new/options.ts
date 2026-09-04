@@ -1,4 +1,4 @@
-import { GroupedSelectOption, SelectOption, JobConfig } from '@/types';
+import { ConfigDoc, GroupedSelectOption, SelectOption, JobConfig } from '@/types';
 import { defaultSliderConfig } from './jobConfig';
 import { defaultAudioSampleConfig, defaultSampleConfig } from '@/helpers/defaultSamples';
 
@@ -76,6 +76,13 @@ export interface ModelArch {
   defaultAutoTrainingProfileId?: string;
   modelNotes?: ModelNotes;
   allowedNetworkTypes?: string[];
+  customModelSelectOptions?: Array<{
+    label: string;
+    options: SelectOption[];
+    getValue: (config: JobConfig) => string;
+    onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => void;
+    doc?: ConfigDoc;
+  }>;
 }
 
 const defaultNameOrPath = '';
@@ -967,6 +974,8 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.train_text_encoder': [false, false],
       'config.process[0].train.unload_text_encoder': [false, false],
       'config.process[0].train.cache_text_embeddings': [true, false],
+      'config.process[0].train.do_guidance_loss': [true, undefined],
+      'config.process[0].train.guidance_loss_target': [3.5, undefined],
       'config.process[0].network.linear': [16, defaultLinearRank],
       'config.process[0].network.linear_alpha': [16, defaultLinearRank],
       'config.process[0].network.network_kwargs.ignore_if_contains': [['adaln_proj'], []],
@@ -986,7 +995,7 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].datasets[x].auto_frame_count': [true, undefined],
       'config.process[0].datasets[x].include_images_in_video_dataset': [true, false],
       'config.process[0].model.assistant_lora_path': [
-        'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_alpha.safetensors',
+        'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_v1.safetensors',
         undefined,
       ],
     },
@@ -1012,7 +1021,7 @@ export const modelArchs: ModelArch[] = [
     ],
     modelNotes: {
       summary:
-        'Experimental. First load downloads about 43 GB of shared base-model weights into the configured Models folder.',
+        'Production MiniMax H3 support. First load downloads about 43 GB of shared weights into the configured Models folder.',
       link: { href: '/settings', label: 'Open Models folder settings' },
       codeBlock: `<MODELS_PATH>/
 ├── diffusion_models/
@@ -1025,10 +1034,132 @@ export const modelArchs: ModelArch[] = [
       paragraphs: [
         'The supported checkpoints are pre-quantized: ConvRot int8 for the DiT and NVFP4 for the text encoder. Those quantization fields are fixed for the experimental preset.',
         'The preset supports text-to-video, first-frame image-to-video, single-image training, and joint audio. Keep guidance at 1 and use 24 fps; video frame counts snap to the 17n+5 grid.',
-        'Layer offloading is disabled for H3. Low-VRAM mode still moves complete frozen components when they are not in use.',
-        'The initial integration supports LoRA training only; full-base, DoRA, and LoKr training are rejected.',
-        'Reference partitions can be selected for T2V and sampling, but ref2va I2V training is rejected until the selected video frame can be coupled safely to cached vision-token embeddings. Use fl2va for I2V training.',
+        'Layer offloading, dense attention fallback, pruned and non-pruned checkpoints, and matching pre-quantized ConvRot/NVFP4 weights are supported.',
+        'Use the separate MiniMax-H3 Ref2VA preset for reference-image and reference-video conditioning.',
       ],
+    },
+    customModelSelectOptions: [
+      {
+        label: 'Distillation handling',
+        options: [
+          { value: 'cg', label: 'Contrastive guidance' },
+          { value: 'ta', label: 'Training adapter' },
+          { value: 'both', label: 'Both (default)' },
+          { value: 'none', label: 'Neither' },
+        ],
+        getValue: (config: JobConfig) => {
+          const process = config.config.process[0];
+          const adapter = !!process.model.assistant_lora_path?.trim();
+          const guidance = !!process.train.do_guidance_loss;
+          return adapter && guidance ? 'both' : adapter ? 'ta' : guidance ? 'cg' : 'none';
+        },
+        onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+          const adapter = 'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_v1.safetensors';
+          const guidance = value === 'cg' || value === 'both';
+          setJobConfig(guidance || undefined, 'config.process[0].train.do_guidance_loss');
+          setJobConfig(guidance ? config.config.process[0].train.guidance_loss_target || 3.5 : undefined, 'config.process[0].train.guidance_loss_target');
+          setJobConfig(value === 'ta' || value === 'both' ? adapter : undefined, 'config.process[0].model.assistant_lora_path');
+        },
+        doc: {
+          title: 'MiniMax H3 distillation handling',
+          description: 'Choose contrastive guidance, the v1 training adapter, both, or neither. Saved explicit values remain authoritative.',
+        },
+      },
+    ],
+    allowedNetworkTypes: ['lora'],
+  },
+  {
+    name: 'minimax_h3_ref2va',
+    label: 'MiniMax-H3 Ref2VA',
+    group: 'video',
+    isVideoModel: true,
+    defaults: {
+      'config.process[0].model.name_or_path': ['Comfy-Org/MiniMax-H3', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ['nvfp4', 'qfloat8'],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].train.cache_text_embeddings': [true, false],
+      'config.process[0].train.do_guidance_loss': [true, undefined],
+      'config.process[0].train.guidance_loss_target': [3.5, undefined],
+      'config.process[0].model.assistant_lora_path': ['ostris/minimax_h3_training_adapter/minimax_h3_ref2va_training_adapter_v1.safetensors', undefined],
+      'config.process[0].network.linear': [16, defaultLinearRank],
+      'config.process[0].network.linear_alpha': [16, defaultLinearRank],
+      'config.process[0].network.network_kwargs.ignore_if_contains': [['adaln_proj'], []],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.num_frames': [107, 1],
+      'config.process[0].sample.fps': [24, 1],
+      'config.process[0].sample.width': [768, 1024],
+      'config.process[0].sample.height': [768, 1024],
+      'config.process[0].sample.guidance_scale': [1, 4],
+      'config.process[0].sample.sample_steps': [28, 25],
+      'config.process[0].train.audio_loss_multiplier': [1.0, undefined],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+      'config.process[0].datasets[x].do_audio': [true, undefined],
+      'config.process[0].datasets[x].cache_latents_to_disk': [true, false],
+      'config.process[0].datasets[x].fps': [24, undefined],
+      'config.process[0].datasets[x].num_frames': [39, undefined],
+      'config.process[0].datasets[x].auto_frame_count': [true, undefined],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: ['sample.multi_ctrl_imgs', 'datasets.multi_control_paths', 'datasets.num_frames', 'model.layer_offloading', 'model.low_vram', 'datasets.do_audio', 'datasets.audio_normalize', 'datasets.audio_preserve_pitch', 'train.audio_loss_multiplier', 'datasets.auto_frame_count', 'model.assistant_lora_path'],
+    customModelSelectOptions: [
+      {
+        label: 'Distillation handling',
+        options: [
+          { value: 'cg', label: 'Contrastive guidance' },
+          { value: 'ta', label: 'Training adapter' },
+          { value: 'both', label: 'Both (default)' },
+          { value: 'dopsd', label: 'D-OPSD self-distillation' },
+          { value: 'none', label: 'Neither' },
+        ],
+        getValue: (config: JobConfig) => {
+          const process = config.config.process[0];
+          if (process.model.model_kwargs?.dopsd) return 'dopsd';
+          const adapter = !!process.model.assistant_lora_path?.trim();
+          const guidance = !!process.train.do_guidance_loss;
+          return adapter && guidance ? 'both' : adapter ? 'ta' : guidance ? 'cg' : 'none';
+        },
+        onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+          const process = config.config.process[0];
+          const kwargs = { ...(process.model.model_kwargs || {}) };
+          if (value === 'dopsd') {
+            kwargs.dopsd = true;
+            kwargs.dopsd_bleed_strength = 1;
+          } else {
+            delete kwargs.dopsd;
+            delete kwargs.dopsd_bleed_strength;
+          }
+          const guidance = value === 'cg' || value === 'both';
+          setJobConfig(kwargs, 'config.process[0].model.model_kwargs');
+          setJobConfig(guidance || undefined, 'config.process[0].train.do_guidance_loss');
+          setJobConfig(guidance ? process.train.guidance_loss_target || 3.5 : undefined, 'config.process[0].train.guidance_loss_target');
+          setJobConfig(value === 'ta' || value === 'both' ? 'ostris/minimax_h3_training_adapter/minimax_h3_ref2va_training_adapter_v1.safetensors' : undefined, 'config.process[0].model.assistant_lora_path');
+        },
+      },
+      {
+        label: 'Image reference presentation',
+        options: [
+          { value: 'picture', label: 'Picture (default)' },
+          { value: 'video', label: 'Static video clip' },
+        ],
+        getValue: (config: JobConfig) => config.config.process[0].model.model_kwargs?.image_refs_as_video ? 'video' : 'picture',
+        onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+          const kwargs = { ...(config.config.process[0].model.model_kwargs || {}) };
+          if (value === 'video') kwargs.image_refs_as_video = true;
+          else {
+            delete kwargs.image_refs_as_video;
+            delete kwargs.image_ref_video_frames;
+          }
+          setJobConfig(kwargs, 'config.process[0].model.model_kwargs');
+        },
+      },
+    ],
+    modelNotes: {
+      summary: 'Reference-to-video H3 with image/video controls, shared Qwen3-VL conditioning, audio, and the 17n+5 frame grid.',
+      paragraphs: ['Still images can be presented natively as pictures or through the video-reference path as static clips. D-OPSD is mutually exclusive with preservation modes.'],
     },
     allowedNetworkTypes: ['lora'],
   },
@@ -1086,6 +1217,36 @@ export const modelArchs: ModelArch[] = [
     },
     disableSections: ['network.conv'],
     additionalSections: ['sample.ctrl_img', 'datasets.num_frames', 'model.layer_offloading', 'model.low_vram', 'datasets.do_audio', 'datasets.audio_normalize', 'datasets.audio_preserve_pitch', 'datasets.do_i2v', 'train.audio_loss_multiplier', 'train.ltx_strategy', 'datasets.auto_frame_count'],
+  },
+  {
+    name: 'ltx2.5',
+    label: 'LTX-2.5',
+    gateUrl: 'https://huggingface.co/Lightricks/LTX-2.5',
+    group: 'video',
+    isVideoModel: true,
+    defaults: {
+      'config.process[0].model.name_or_path': ['Lightricks/LTX-2.5', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.num_frames': [121, 1],
+      'config.process[0].sample.fps': [24, 1],
+      'config.process[0].sample.width': [768, 1024],
+      'config.process[0].sample.height': [768, 1024],
+      'config.process[0].train.audio_loss_multiplier': [1.0, undefined],
+      'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
+      'config.process[0].datasets[x].cache_latents_to_disk': [true, false],
+      'config.process[0].datasets[x].do_i2v': [false, undefined],
+      'config.process[0].datasets[x].do_audio': [true, undefined],
+      'config.process[0].datasets[x].fps': [24, undefined],
+      'config.process[0].datasets[x].auto_frame_count': [false, undefined],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: ['sample.ctrl_img', 'datasets.num_frames', 'model.layer_offloading', 'model.low_vram', 'datasets.do_audio', 'datasets.audio_normalize', 'datasets.audio_preserve_pitch', 'datasets.do_i2v', 'train.audio_loss_multiplier', 'datasets.auto_frame_count'],
   },
   {
     name: 'flux2_klein_4b',

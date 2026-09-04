@@ -703,7 +703,7 @@ class ConvRotQuantizer(OstrisQuantizer):
         d = module.in_features
         rot = self._rot_for(d)
         if d % BLOCK != 0 or module.out_features % BLOCK != 0 or rot < 16:
-            if d not in _skip_warned:
+            if d not in _skip_warned and d * module.out_features >= 1 << 20:
                 _skip_warned.add(d)
                 print_acc(
                     f"ConvRot: skipping linears with in_features={d} "
@@ -1255,14 +1255,36 @@ class ConvRotInt8Quantizer(OstrisQuantizer):
     def can_quantize(self, module: torch.nn.Linear) -> bool:
         d = module.in_features
         if d % BLOCK != 0 or module.out_features % 8 != 0 or self._rot_for(d) < 16:
-            if d not in _skip_warned:
+            if d not in _skip_warned and d * module.out_features >= 1 << 20:
                 _skip_warned.add(d)
                 print_acc(
                     f"ConvRot: skipping linears with in_features={d} "
                     f"(needs in divisible by 16, out by 8, and a power-of-4 block >= 16)"
                 )
             return False
+        if d < 128 and module.out_features % 16 != 0:
+            # cublasLt has no int8 kernel for K < 128 with N % 16 != 0
+            # (torch._int_mm raises CUBLAS_STATUS_NOT_SUPPORTED), e.g.
+            # omnigen2's 64 -> 2520 x_embedder
+            key = (d, module.out_features)
+            if key not in _skip_warned and d * module.out_features >= 1 << 20:
+                _skip_warned.add(key)
+                print_acc(
+                    f"ConvRot: skipping linears with in_features={d}, "
+                    f"out_features={module.out_features} (int8 gemm needs out "
+                    f"divisible by 16 when in < 128)"
+                )
+            return False
         return True
+
+    # takes the weight in its stored dtype and casts per row-chunk below: a
+    # full-size fp32 copy of a huge layer (e.g. a TE's vocab projection) was
+    # a multi-GB vram transient on top of the full-size rotated fp32 tensor
+    wants_fp32_weight = False
+
+    # fp32 working-set target per chunk; layers under this keep the one-shot
+    # path (identical math and bit-identical output to the historical code)
+    _QUANT_CHUNK_BYTES = 256 * 1024 * 1024
 
     def quantize_(self, module: torch.nn.Linear, weight_fp32: torch.Tensor) -> None:
         rot = self._rot_for(module.in_features)

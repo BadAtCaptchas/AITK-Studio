@@ -7,6 +7,9 @@ import { FaUpload, FaImage, FaTimes } from 'react-icons/fa';
 import { uploadTemporaryMediaFile } from '@/utils/streamedUploads';
 import { apiClient } from '@/utils/api';
 
+const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v', '.wmv', '.flv'];
+const isVideoPath = (p: string) => VIDEO_EXTS.some(ext => p.toLowerCase().endsWith(ext));
+
 interface Props {
   src: string | null | undefined;
   className?: string;
@@ -68,8 +71,10 @@ export default function SampleControlImage({
       setIsUploading(true);
       setUploadProgress(0);
 
-      const objectUrl = URL.createObjectURL(file);
-      setLocalPreview(objectUrl);
+      // an object URL only works as a background preview for images; video
+      // previews come from the server thumbnail after the upload lands
+      const objectUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+      if (objectUrl) setLocalPreview(objectUrl);
 
       try {
         const resp = await uploadTemporaryMediaFile(file, {
@@ -95,7 +100,7 @@ export default function SampleControlImage({
       } finally {
         setIsUploading(false);
         setUploadProgress(0);
-        URL.revokeObjectURL(objectUrl);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     },
@@ -160,7 +165,7 @@ export default function SampleControlImage({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         className="hidden"
         onChange={e => {
           const file = e.currentTarget.files?.[0];

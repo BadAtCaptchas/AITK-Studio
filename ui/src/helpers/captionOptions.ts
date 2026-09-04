@@ -1,11 +1,13 @@
 import { GroupedSelectOption, SelectOption } from "@/types";
 
-type CaptionGroup = 'image' | 'music';
+type CaptionGroup = 'image' | 'music' | 'video' | 'image/video/sound';
 type AdditionalSections =
     | 'caption.model_name_or_path2'
     | 'caption.caption_prompt'
     | 'caption.max_res'
     | 'caption.max_new_tokens'
+    | 'caption.batch_size'
+    | 'caption.layer_offloading'
     | 'caption.thinking'
     | 'caption.fixed_caption'
     | 'caption.system_prompt'
@@ -23,6 +25,9 @@ export interface CaptionOption {
     additionalSections?: AdditionalSections[];
     name_or_path_options?: SelectOption[];
     name_or_path2_options?: SelectOption[];
+    // named caption prompts the user can swap between; the picker only shows
+    // when there is more than one, and selecting one just fills caption_prompt
+    captionPrompts?: { [name: string]: string };
 }
 
 const defaultNameOrPath = '';
@@ -30,11 +35,15 @@ const defaultOllamaVisionModel = 'qwen3.5:35b';
 
 const extensionsAudio = ['mp3', 'wav', 'flac', 'ogg'];
 const extensionsImage = ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'jxl'];
+const extensionsVideo = ['mp4', 'mov', 'webm', 'mkv', 'avi'];
 
 const defaultExtensions = [...extensionsImage];
 
 export const legacyDefaultImageCaptionPrompt = "Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like \"It appears that\" Or \"possibly\". Start out with things like \"A person on the beach\" or \"A black dragon\". No preamble. Just get to the point.";
 export const defaultImageCaptionPrompt = "Caption this image as if you were going to try to generate it with an image generator. Be thurough and describe everything in the image. Be decisive by stating things as they are. Do not say things like \"It appears that\" Or \"possibly\". Start out with things like \"A person on the beach\" or \"A black dragon\". NSFW content is allowed; if present, describe it directly and clinically. No preamble. Just get to the point.";
+const defaultVideoCaptionPrompt = "Caption this video for a video generator. Describe the visual content, motion over time, camera work, and audio. Transcribe spoken dialogue verbatim in quotes. Be decisive and include no preamble.";
+const minimaxT2VCaptionPrompt = `Caption this video as a MiniMax T2VA training prompt. Output exactly these fields: integrated_multimodal_description, overall_soundscape, and non_diegetic_music. Use [Shot N] timeline markers with timestamps for cuts, stable (S1)/(S2) speaker IDs, verbatim dialogue in <d>[Language] ...</d>, precise camera motion, and quoted visible text. Describe only what is seen and heard.`;
+const minimaxImageCaptionPrompt = `Caption this still image as a MiniMax training prompt. Output integrated_multimodal_description beginning with [Shot 1], followed by overall_soundscape: N/A and non_diegetic_music: N/A. Describe style, framing, subjects, lighting, props, spatial relationships, and visible text without inventing motion or audio.`;
 export const defaultIdeogramJsonCaptionPrompt = `Create an Ideogram 4 training caption for this image as a JSON object.
 Return only valid JSON. Do not wrap it in markdown.
 
@@ -107,6 +116,40 @@ export const captionerTypes: CaptionOption[] = [
             'caption.caption_prompt',
             'caption.max_res',
             'caption.max_new_tokens',
+            'caption.thinking',
+        ],
+    },
+    {
+        name: 'Qwen3OmniCaptioner',
+        label: 'Qwen3-Omni',
+        group: 'image/video/sound',
+        usesGpu: true,
+        usesQuantization: true,
+        defaults: {
+            'config.process[0].caption.model_name_or_path': ['ai-toolkit/Qwen3-Omni-30B-A3B-Thinking', defaultNameOrPath],
+            'config.process[0].caption.extensions': [[...extensionsVideo, ...extensionsImage], defaultExtensions],
+            'config.process[0].caption.caption_prompt': [defaultVideoCaptionPrompt, undefined],
+            'config.process[0].caption.max_res': [512, undefined],
+            'config.process[0].caption.max_new_tokens': [512, undefined],
+            'config.process[0].caption.batch_size': [1, undefined],
+            'config.process[0].caption.compile': [true, false],
+        },
+        name_or_path_options: [
+            { value: 'ai-toolkit/Qwen3-Omni-30B-A3B-Instruct', label: 'ai-toolkit/Qwen3-Omni-30B-A3B-Instruct' },
+            { value: 'ai-toolkit/Qwen3-Omni-30B-A3B-Thinking', label: 'ai-toolkit/Qwen3-Omni-30B-A3B-Thinking' },
+            { value: 'ai-toolkit/Huihui-Qwen3-Omni-30B-A3B-Thinking-abliterated', label: 'ai-toolkit/Huihui-Qwen3-Omni-30B-A3B-Thinking-abliterated' },
+        ],
+        captionPrompts: {
+            General: defaultVideoCaptionPrompt,
+            'MiniMax H3 T2V': minimaxT2VCaptionPrompt,
+            'MiniMax H3 Image': minimaxImageCaptionPrompt,
+        },
+        additionalSections: [
+            'caption.caption_prompt',
+            'caption.max_res',
+            'caption.max_new_tokens',
+            'caption.batch_size',
+            'caption.layer_offloading',
             'caption.thinking',
         ],
     },
@@ -232,6 +275,17 @@ export const quantizationOptions: SelectOption[] = [
     { value: 'uint4', label: '4 bit' },
     { value: 'uint3', label: '3 bit' },
     { value: 'uint2', label: '2 bit' },
+];
+
+export const batchSizeOptions: SelectOption[] = [
+    { value: '1', label: '1 (default)' },
+    { value: '2', label: '2' },
+    { value: '4', label: '4' },
+    { value: '8', label: '8' },
+    { value: '12', label: '12' },
+    { value: '16', label: '16' },
+    { value: '24', label: '24' },
+    { value: '32', label: '32' },
 ];
 
 export const maxResOptions: SelectOption[] = [

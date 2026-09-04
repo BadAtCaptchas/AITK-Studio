@@ -63,7 +63,7 @@ class MiniMaxH3HardwareSmokeTest(unittest.TestCase):
             layer_offloading=False,
             assistant_lora_path=(
                 "ostris/minimax_h3_training_adapter/"
-                "minimax_h3_training_adapter_alpha.safetensors"
+                "minimax_h3_training_adapter_v1.safetensors"
             ),
             model_kwargs={
                 "partition": "fl2va_pruned",

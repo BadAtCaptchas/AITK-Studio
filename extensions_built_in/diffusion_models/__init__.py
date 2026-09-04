@@ -91,11 +91,12 @@ ZImageModel, = _optional_models(".z_image.z_image", (("ZImageModel", "zimage"),)
 ZImageL2PModel, = _optional_models(
     ".z_image.z_image_l2p_model", (("ZImageL2PModel", "zimage_l2p"),)
 )
-LTX2Model, LTX23Model = _optional_models(
+LTX2Model, LTX23Model, LTX25Model = _optional_models(
     ".ltx2",
     (
         ("LTX2Model", "ltx2"),
         ("LTX23Model", "ltx2.3"),
+        ("LTX25Model", "ltx2.5"),
     ),
 )
 ZetaChromaModel, = _optional_models(
@@ -127,8 +128,13 @@ MageFlowModel, MageFlowEditModel = _optional_models(
         ("MageFlowEditModel", "mageflow_edit"),
     ),
 )
-MinimaxH3Model, = _optional_models(
-    ".minimax_h3", (("MinimaxH3Model", "minimax_h3"),)
+MinimaxH3Model, MinimaxH3Ref2VAModel, MinimaxH3FastModel = _optional_models(
+    ".minimax_h3",
+    (
+        ("MinimaxH3Model", "minimax_h3"),
+        ("MinimaxH3Ref2VAModel", "minimax_h3_ref2va"),
+        ("MinimaxH3FastModel", "minimax_h3_vsa"),
+    ),
 )
 
 
@@ -155,6 +161,7 @@ AI_TOOLKIT_MODELS = [
     ZImageL2PModel,
     LTX2Model,
     LTX23Model,
+    LTX25Model,
     Flux2Klein4BModel,
     Flux2Klein9BModel,
     AsymFlux2Klein9BModel,
@@ -171,4 +178,6 @@ AI_TOOLKIT_MODELS = [
     MageFlowModel,
     MageFlowEditModel,
     MinimaxH3Model,
+    MinimaxH3Ref2VAModel,
+    MinimaxH3FastModel,
 ]

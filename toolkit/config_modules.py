@@ -346,7 +346,7 @@ class NetworkConfig:
 
         self.transformer_only = kwargs.get('transformer_only', True)
         
-        self.lokr_full_rank = kwargs.get('lokr_full_rank', False)
+        self.lokr_full_rank = kwargs.get('lokr_full_rank', True)
         if self.lokr_full_rank and self.type.lower() == 'lokr':
             self.linear = 9999999999
             self.linear_alpha = 9999999999
@@ -615,7 +615,6 @@ class TrainConfig:
         self.random_noise_shift = kwargs.get('random_noise_shift', 0.0)
         self.img_multiplier = kwargs.get('img_multiplier', 1.0)
         self.noisy_latent_multiplier = kwargs.get('noisy_latent_multiplier', 1.0)
-        self.latent_multiplier = kwargs.get('latent_multiplier', 1.0)
         self.negative_prompt = kwargs.get('negative_prompt', None)
         self.max_negative_prompts = kwargs.get('max_negative_prompts', 1)
         # multiplier applied to loos on regularization images
@@ -693,7 +692,6 @@ class TrainConfig:
 
         # standardize inputs to the meand std of the model knowledge
         self.standardize_images = kwargs.get('standardize_images', False)
-        self.standardize_latents = kwargs.get('standardize_latents', False)
 
         # if self.train_turbo and not self.noise_scheduler.startswith("euler"):
         #     raise ValueError(f"train_turbo is only supported with euler and wuler_a noise schedulers")
@@ -1288,6 +1286,7 @@ class DatasetConfig:
     """
 
     def __init__(self, **kwargs):
+        self.batch_size: Union[int, None] = kwargs.get('batch_size', None)
         self.type = kwargs.get('type', 'image')  # sd, slider, reference
         # will be legacy
         self.folder_path: str = kwargs.get('folder_path', None)
@@ -1371,6 +1370,9 @@ class DatasetConfig:
         self.cache_latents: bool = kwargs.get('cache_latents', False)
         # cache latents to disk will store them on disk. If both are true, it will save to disk, but keep in memory
         self.cache_latents_to_disk: bool = kwargs.get('cache_latents_to_disk', False)
+        # Persist compact source pixels/audio alongside latents for training
+        # modes such as D-OPSD that need the original media after caching.
+        self.cache_tensors_to_disk: bool = kwargs.get('cache_tensors_to_disk', False)
         self.cache_clip_vision_to_disk: bool = kwargs.get('cache_clip_vision_to_disk', False)
         self.cache_text_embeddings: bool = kwargs.get('cache_text_embeddings', False)
         self.load_image_when_caching_latents: bool = kwargs.get('load_image_when_caching_latents', False)
@@ -1965,49 +1967,29 @@ def validate_configs(
             # bypass the embedding
             train_config.bypass_guidance_embedding = True
 
-    if model_config.arch == 'minimax_h3':
-        if model_config.layer_offloading:
-            raise ValueError(
-                "MiniMax H3 layer offloading is not supported by Studio's packed-weight "
-                "offload backends yet. Disable model.layer_offloading and use low_vram."
-            )
-        if not model_config.quantize or str(model_config.qtype).lower() != 'convrot8':
-            raise ValueError(
-                "MiniMax H3 currently requires the checkpoint-matching convrot8 transformer."
-            )
-        if not model_config.quantize_te or str(model_config.qtype_te).lower() != 'nvfp4':
-            raise ValueError(
-                "MiniMax H3 currently requires the checkpoint-matching nvfp4 text encoder."
-            )
+    minimax_h3_arches = {'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa'}
+    if model_config.arch in minimax_h3_arches:
         if train_config.train_text_encoder:
             raise ValueError("MiniMax H3 text-encoder training is not supported; keep it frozen.")
         if network_config is None or str(network_config.type or '').lower() != 'lora':
-            raise ValueError("MiniMax H3 experimental training currently requires network.type lora.")
-        if model_config.base_lora_path is not None:
+            raise ValueError("MiniMax H3 training currently requires network.type lora.")
+
+        dopsd = bool(model_config.model_kwargs.get('dopsd', False))
+        if dopsd and model_config.arch != 'minimax_h3_ref2va':
+            raise ValueError("D-OPSD is only supported by the minimax_h3_ref2va architecture.")
+        if dopsd and (train_config.diff_output_preservation or train_config.blank_prompt_preservation):
             raise ValueError(
-                "MiniMax H3 does not support model.base_lora_path because its packed "
-                "base weights cannot be merged or requantized."
+                "MiniMax H3 D-OPSD cannot be combined with differential-output or blank-prompt preservation."
             )
-        if model_config.inference_lora_path is not None:
-            raise ValueError(
-                "MiniMax H3 does not support model.inference_lora_path; use the "
-                "fixed live assistant adapter and the training LoRA instead."
-            )
-        partition = str(
-            model_config.model_kwargs.get('partition', 'fl2va_pruned')
-        ).lower()
-        has_i2v_video_dataset = any(
-            dataset.do_i2v
-            and (dataset.num_frames > 1 or dataset.auto_frame_count)
-            for dataset in dataset_configs
-        )
-        if partition.startswith('ref2va') and has_i2v_video_dataset:
-            raise ValueError(
-                "MiniMax H3 ref2va I2V training is not supported yet because "
-                "the exact selected video reference frame cannot safely be "
-                "coupled to cached text embeddings. Use fl2va for I2V training "
-                "or disable dataset.do_i2v."
-            )
+        if dopsd and train_config.do_guidance_loss:
+            raise ValueError("MiniMax H3 D-OPSD cannot be combined with contrastive guidance loss.")
+        if dopsd and model_config.assistant_lora_path:
+            raise ValueError("MiniMax H3 D-OPSD cannot be combined with a training adapter.")
+
+        if 'image_ref_video_frames' in model_config.model_kwargs:
+            image_ref_frames = int(model_config.model_kwargs['image_ref_video_frames'])
+            if image_ref_frames < 5 or (image_ref_frames - 5) % 17 != 0:
+                raise ValueError("model_kwargs.image_ref_video_frames must use the MiniMax H3 17n+5 frame grid.")
     flux_guidance_bypass_policy = get_flux_guidance_bypass_policy(model_config)
     if flux_guidance_bypass_policy == 'forbidden' and train_config.bypass_guidance_embedding:
         raise ValueError(

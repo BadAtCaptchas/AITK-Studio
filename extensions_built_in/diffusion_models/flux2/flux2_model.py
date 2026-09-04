@@ -15,7 +15,6 @@ from toolkit.prompt_utils import PromptEmbeds
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
 )
-from toolkit.dequantize import patch_dequantization_on_save
 from toolkit.accelerator import unwrap_model
 from optimum.quanto import freeze, QTensor
 from toolkit.util.quantize import (
@@ -33,9 +32,14 @@ from toolkit.quantized_cache import (
 )
 
 from transformers import AutoProcessor, Mistral3ForConditionalGeneration
+from toolkit.models.v2.text_encoders.mistral3 import Mistral3TextEncoder
 from .src.model import Flux2, Flux2Params
 from .src.pipeline import Flux2Pipeline
-from .src.autoencoder import AutoEncoder, AutoEncoderParams, AutoEncoderSmallDecoderParams
+from toolkit.models.v2.vae.flux2_kl import (
+    AutoEncoder,
+    AutoEncoderParams,
+    AutoEncoderSmallDecoderParams,
+)
 from safetensors.torch import load_file, save_file
 from PIL import Image
 import torch.nn.functional as F
@@ -393,9 +397,6 @@ class Flux2Model(BaseModel):
         transformer_path = model_path
 
         self.print_and_status_update("Loading transformer")
-        with torch.device("meta"):
-            transformer = Flux2(self.get_flux2_params())
-
         # use local path if provided
         if os.path.exists(os.path.join(transformer_path, self.flux2_te_filename)):
             transformer_path = os.path.join(transformer_path, self.flux2_te_filename)
@@ -493,21 +494,8 @@ class Flux2Model(BaseModel):
                 download_kwargs["local_files_only"] = True
             vae_path = huggingface_hub.hf_hub_download(**download_kwargs)
         
-        vae_state_dict = load_file(vae_path, device="cpu")
-        
-        autoencoder_params = AutoEncoderParams()
-        if vae_state_dict['decoder.up.0.block.0.conv1.bias'].shape[0] == 96:
-            # this is the small decoder version
-            autoencoder_params = AutoEncoderSmallDecoderParams()
-        
-        with torch.device("meta"):
-            vae = AutoEncoder(autoencoder_params)
-
-        # cast to dtype
-        for key in vae_state_dict:
-            vae_state_dict[key] = vae_state_dict[key].to(dtype)
-
-        vae.load_state_dict(vae_state_dict, assign=True)
+        # config sniffed from the checkpoint (small-decoder detection)
+        vae = AutoEncoder.load_model(vae_path, dtype=dtype)
 
         self.noise_scheduler = Flux2Model.get_train_scheduler()
 
@@ -818,19 +806,7 @@ class Flux2Model(BaseModel):
     def get_transformer_block_names(self) -> Optional[List[str]]:
         return ["double_blocks", "single_blocks"]
 
-    def convert_lora_weights_before_save(self, state_dict):
-        new_sd = {}
-        for key, value in state_dict.items():
-            new_key = key.replace("transformer.", "diffusion_model.")
-            new_sd[new_key] = value
-        return new_sd
-
-    def convert_lora_weights_before_load(self, state_dict):
-        new_sd = {}
-        for key, value in state_dict.items():
-            new_key = key.replace("diffusion_model.", "transformer.")
-            new_sd[new_key] = value
-        return new_sd
+    lora_keys_use_comfy_prefix = True
 
     def encode_images(self, image_list: List[torch.Tensor], device=None, dtype=None):
         if device is None:

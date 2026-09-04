@@ -84,8 +84,8 @@ export const handleModelArchChange = (
 
   const numDatasets = jobConfig.config.process[0].datasets.length;
 
-  let currentDefaults = expandDatasetDefaults(currentArch.defaults || {}, numDatasets);
-  let newDefaults = expandDatasetDefaults(newArch?.defaults || {}, numDatasets);
+  const currentDefaults = expandDatasetDefaults(currentArch.defaults || {}, numDatasets);
+  const newDefaults = expandDatasetDefaults(newArch?.defaults || {}, numDatasets);
 
   if (currentDefaults[modelLowVramKey]?.[0] === true && !(keepLowVramForSamplesKey in currentDefaults)) {
     currentDefaults[keepLowVramForSamplesKey] = [true, false];

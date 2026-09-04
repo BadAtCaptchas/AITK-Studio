@@ -12,6 +12,8 @@ from optimum.quanto import freeze
 from toolkit.basic import flush
 from toolkit.util.quantize import quantize, get_qtype
 
+from toolkit.models.v2.text_encoders.qwen3_vl import patch_qwen_vl_patch_embed
+
 from .BaseCaptioner import BaseCaptioner
 import transformers
 import logging

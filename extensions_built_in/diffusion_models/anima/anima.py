@@ -3,7 +3,6 @@ from typing import List, Optional
 
 import torch
 import yaml
-from optimum.quanto import freeze
 from safetensors.torch import load_file, save_file
 
 from toolkit.accelerator import unwrap_model
@@ -11,6 +10,10 @@ from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.memory_management import attach_layer_offloading
 from toolkit.models.base_model import BaseModel
+from toolkit.models.v2.diffusion_models.cosmos import CosmosTransformer3DModel
+from toolkit.models.v2.text_encoders.anima import AnimaTextConditioner
+from toolkit.models.v2.text_encoders.qwen3 import Qwen3ModelEncoder
+from toolkit.models.v2.vae.qwen_image import QwenImageVAE
 from toolkit.prompt_utils import PromptEmbeds
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
@@ -18,8 +21,7 @@ from toolkit.samplers.custom_flowmatch_sampler import (
 from toolkit.util.quantize import get_qtype, quantize, quantize_model
 
 try:
-    from diffusers import AnimaAutoBlocks, AnimaModularPipeline, AnimaTextConditioner
-    from diffusers.models import CosmosTransformer3DModel
+    from diffusers import AnimaAutoBlocks, AnimaModularPipeline
     from diffusers.modular_pipelines import SequentialPipelineBlocks
     from diffusers.modular_pipelines.anima.modular_blocks_anima import (
         AnimaCoreDenoiseStep,

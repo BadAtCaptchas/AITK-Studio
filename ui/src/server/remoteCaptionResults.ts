@@ -45,7 +45,6 @@ import {
 import type { Job } from '../types';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __aitkRemoteCaptionResultSyncs: Set<string> | undefined;
 }
 

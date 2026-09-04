@@ -62,7 +62,6 @@ export type OllamaModelPullStatus = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __aitkOllamaModelPulls: Map<string, OllamaModelPullStatus> | undefined;
 }
 

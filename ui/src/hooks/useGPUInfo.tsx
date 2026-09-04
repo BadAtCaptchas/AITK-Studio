@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/utils/api';
 import { SharedAbortableRequestPool } from '@/utils/sharedAbortableRequest';
 import usePollLoop from './usePollLoop';
+import useMonitorStream from './useMonitorStream';
 
 const DEFAULT_GPU_CACHE_TTL_MS = 5000;
 
@@ -54,6 +55,8 @@ export default function useGPUInfo(
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const gpuIDsKey = gpuIds?.join(',') ?? '';
   const activeScopeRef = useRef('');
+  const monitor = useMonitorStream();
+  const useLocalMonitor = workerID === 'local';
   activeScopeRef.current = `${enabled}:${workerID}:${gpuIDsKey}`;
 
   const fetchGpuInfo = useCallback(async (fetchOptions?: FetchGpuInfoOptions) => {
@@ -97,9 +100,20 @@ export default function useGPUInfo(
     setStatus('idle');
   }, [enabled, gpuIDsKey, workerID]);
 
+  useEffect(() => {
+    if (!enabled || !useLocalMonitor || !monitor.gpu) return;
+    const data = monitor.gpu;
+    let gpus = [...data.gpus].sort((a, b) => a.index - b.index);
+    if (gpuIds) gpus = gpus.filter(gpu => gpuIds.includes(gpu.index));
+    setGpuData(data);
+    setGpuList(gpus);
+    setIsLoaded(true);
+    setStatus('success');
+  }, [enabled, gpuIDsKey, gpuIds, monitor.gpu, useLocalMonitor]);
+
   usePollLoop(
     signal => fetchGpuInfo({ signal }),
-    enabled ? reloadInterval : null,
+    enabled && !useLocalMonitor ? reloadInterval : null,
     [enabled, workerID, cacheTtlMs, gpuIDsKey],
   );
 
@@ -109,6 +123,6 @@ export default function useGPUInfo(
     setGpuList,
     isGPUInfoLoaded,
     status,
-    refreshGpuInfo: () => fetchGpuInfo({ force: true }),
+    refreshGpuInfo: () => useLocalMonitor ? Promise.resolve() : fetchGpuInfo({ force: true }),
   };
 }

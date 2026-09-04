@@ -11,7 +11,7 @@ from optimum.quanto import freeze
 from toolkit.util.quantize import quantize, get_qtype, quantize_model
 from toolkit.memory_management import attach_layer_offloading
 
-from transformers import AutoTokenizer, Qwen3ForCausalLM
+from toolkit.models.v2.text_encoders.qwen3 import Qwen3TextEncoder
 from toolkit.models.FakeVAE import FakeVAE
 from toolkit.paths import MODELS_PATH
 from safetensors.torch import load_file, save_file
@@ -22,7 +22,7 @@ HF_TOKEN = os.getenv("HF_TOKEN", None)
 
 try:
     from diffusers import ZImagePipeline
-    from diffusers.models.transformers.transformer_z_image import (
+    from toolkit.models.v2.diffusion_models.z_image import (
         ZImageTransformer2DModel as ZImageTransformer2DModelOriginal,
     )
     from diffusers.models.modeling_outputs import Transformer2DModelOutput
@@ -470,8 +470,9 @@ class ZImageL2PModel(ZImageModel):
         flush()
 
         self.print_and_status_update("Text Encoder")
-        tokenizer = AutoTokenizer.from_pretrained(
-            base_model_path, subfolder="tokenizer", torch_dtype=dtype
+        tokenizer = Qwen3TextEncoder.load_tokenizer(base_model_path)
+        text_encoder = Qwen3TextEncoder.load(
+            base_model_path, **self.component_load_kwargs("te")
         )
         text_encoder = Qwen3ForCausalLM.from_pretrained(
             base_model_path, subfolder="text_encoder", torch_dtype=dtype

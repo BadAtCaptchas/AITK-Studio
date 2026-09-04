@@ -27,6 +27,7 @@ import {
 } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
+import { openConfirm } from '@/components/ConfirmModal';
 
 interface Props {
   job: Job;
@@ -1027,7 +1028,6 @@ export default function JobLossGraph({ job }: Props) {
       uplotRef.current?.destroy();
       uplotRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structuralKey]);
 
   useEffect(() => {

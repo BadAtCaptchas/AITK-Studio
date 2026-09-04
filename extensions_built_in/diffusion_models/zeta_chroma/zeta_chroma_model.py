@@ -20,12 +20,11 @@ from safetensors.torch import load_file
 from optimum.quanto import QTensor
 from toolkit.metadata import get_meta_for_safetensors
 from safetensors.torch import load_file, save_file
-from transformers import AutoTokenizer, Qwen3ForCausalLM
+from toolkit.models.v2.text_encoders.qwen3 import Qwen3TextEncoder
 from diffusers import AutoencoderKL
 from toolkit.models.FakeVAE import FakeVAE
 from .zeta_chroma_transformer import ZImageDCT, ZImageDCTParams, vae_flatten, vae_unflatten, prepare_latent_image_ids, make_text_position_ids
 from .zeta_chroma_pipeline import ZetaChromaPipeline
-
 
 
 scheduler_config = {
@@ -94,10 +93,6 @@ class ZetaChromaModel(BaseModel):
 
         transformer_state_dict = load_file(transformer_path, device="cpu")
 
-        # cast to dtype
-        for key in transformer_state_dict:
-            transformer_state_dict[key] = transformer_state_dict[key].to(dtype)
-        
         # Auto-detect use_x0 from checkpoint
         use_x0 = "__x0__" in transformer_state_dict
 
@@ -109,10 +104,9 @@ class ZetaChromaModel(BaseModel):
             use_x0=use_x0,
         )
 
-        with torch.device("meta"):
-            transformer = ZImageDCT(model_params)
-            
-        transformer.load_state_dict(transformer_state_dict, assign=True)
+        transformer = ZImageDCT.load_from_state_dict(
+            transformer_state_dict, dtype, config=model_params
+        )
         del transformer_state_dict
 
         transformer.to(self.quantize_device, dtype=dtype)
@@ -146,11 +140,9 @@ class ZetaChromaModel(BaseModel):
         flush()
 
         self.print_and_status_update("Text Encoder")
-        tokenizer = AutoTokenizer.from_pretrained(
-            base_model_path, subfolder="tokenizer", torch_dtype=dtype
-        )
-        text_encoder = Qwen3ForCausalLM.from_pretrained(
-            base_model_path, subfolder="text_encoder", torch_dtype=dtype
+        tokenizer = Qwen3TextEncoder.load_tokenizer(base_model_path)
+        text_encoder = Qwen3TextEncoder.load(
+            base_model_path, **self.component_load_kwargs("te")
         )
 
         if (
@@ -206,8 +198,10 @@ class ZetaChromaModel(BaseModel):
             pipe.transformer = pipe.transformer.to(self.device_torch)
 
         flush()
-        # just to make sure everything is on the right device and dtype
-        text_encoder[0].to(self.device_torch)
+        # low_vram: the text encoder stays on cpu; get_prompt_embeds moves it
+        # to the gpu on demand
+        if not self.low_vram:
+            text_encoder[0].to(self.device_torch)
         text_encoder[0].requires_grad_(False)
         text_encoder[0].eval()
         flush()
@@ -373,16 +367,4 @@ class ZetaChromaModel(BaseModel):
     def get_transformer_block_names(self) -> Optional[List[str]]:
         return ["layers"]
 
-    def convert_lora_weights_before_save(self, state_dict):
-        new_sd = {}
-        for key, value in state_dict.items():
-            new_key = key.replace("transformer.", "diffusion_model.")
-            new_sd[new_key] = value
-        return new_sd
-
-    def convert_lora_weights_before_load(self, state_dict):
-        new_sd = {}
-        for key, value in state_dict.items():
-            new_key = key.replace("diffusion_model.", "transformer.")
-            new_sd[new_key] = value
-        return new_sd
+    lora_keys_use_comfy_prefix = True

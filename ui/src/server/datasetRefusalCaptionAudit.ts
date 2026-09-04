@@ -30,7 +30,6 @@ type CaptionAuditCandidate = {
 type CachedAudit = Omit<RefusalCaptionAuditResult, 'cached'>;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __datasetRefusalCaptionAuditCache: Map<string, CachedAudit> | undefined;
 }
 

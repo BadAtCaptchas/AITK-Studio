@@ -1458,34 +1458,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     latents = self.sd.encode_images(imgs)
                     batch.latents = latents
 
-                if self.train_config.standardize_latents:
-                    if self.sd.is_xl or self.sd.is_vega or self.sd.is_ssd:
-                        target_mean_list = [-0.1075, 0.0231, -0.0135, 0.2164]
-                        target_std_list = [0.8979, 0.7505, 0.9150, 0.7451]
-                    else:
-                        target_mean_list = [0.2949, -0.3188, 0.0807, 0.1929]
-                        target_std_list = [0.8560, 0.9629, 0.7778, 0.6719]
-
-                    latents_channel_mean = latents.mean(dim=(2, 3), keepdim=True)
-                    latents_channel_std = latents.std(dim=(2, 3), keepdim=True)
-                    latents = (latents - latents_channel_mean) / latents_channel_std
-                    target_mean = torch.tensor(target_mean_list, device=self.device_torch, dtype=dtype)
-                    target_std = torch.tensor(target_std_list, device=self.device_torch, dtype=dtype)
-                    # expand them to match dim
-                    target_mean = target_mean.unsqueeze(0).unsqueeze(2).unsqueeze(3)
-                    target_std = target_std.unsqueeze(0).unsqueeze(2).unsqueeze(3)
-
-                    latents = latents * target_std + target_mean
-                    batch.latents = latents
-
-                    # show_latents(latents, self.sd.vae, 'latents')
-
-
                 if batch.unconditional_tensor is not None and batch.unconditional_latents is None:
                     unconditional_imgs = batch.unconditional_tensor
                     unconditional_imgs = unconditional_imgs.to(self.device_torch, dtype=dtype)
                     unconditional_latents = self.sd.encode_images(unconditional_imgs)
-                    batch.unconditional_latents = unconditional_latents * self.train_config.latent_multiplier
+                    batch.unconditional_latents = unconditional_latents
 
                 unaugmented_latents = None
                 if self.train_config.loss_target == 'differential_noise':
@@ -1764,32 +1741,23 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     noise = noise * noise_multiplier
             with self.timer('make_noisy_latents'):
 
-                latent_multiplier = self.train_config.latent_multiplier
-
                 # handle adaptive scaling mased on std
                 if self.train_config.adaptive_scaling_factor:
                     std = latents.std(dim=(2, 3), keepdim=True)
-                    normalizer = 1 / (std + 1e-6)
-                    latent_multiplier = normalizer
+                    latents = latents * (1 / (std + 1e-6))
 
-                latents = latents * latent_multiplier
-                
                 if self.train_config.do_blank_stabilization:
                     # zero out latents with blank prompts
                     blank_latent = torch.zeros_like(latents)
                     for i, prompt in enumerate(conditioned_prompts):
                         if prompt.strip() == '':
                             latents[i] = blank_latent[i]
-                
+
                 batch.latents = latents
 
                 # normalize latents to a mean of 0 and an std of 1
                 # mean_zero_latents = latents - latents.mean()
                 # latents = mean_zero_latents / mean_zero_latents.std()
-
-                if batch.unconditional_latents is not None:
-                    batch.unconditional_latents = batch.unconditional_latents * self.train_config.latent_multiplier
-
 
                 noisy_latents = self.sd.add_noise(latents, noise, timesteps)
 
@@ -3160,15 +3128,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         except StopIteration:
                             with self.timer('reset_batch:reg'):
                                 # hit the end of an epoch, reset
-                                if self.progress_bar is not None:
-                                    self.progress_bar.pause()
                                 dataloader_iterator_reg = iter(dataloader_reg)
                                 trigger_dataloader_setup_epoch(dataloader_reg)
 
                             with self.timer('get_batch:reg'):
                                 batch = next(dataloader_iterator_reg)
-                            if self.progress_bar is not None:
-                                self.progress_bar.unpause()
                         is_reg_step = True
                     elif dataloader is not None:
                         try:
@@ -3177,8 +3141,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         except StopIteration:
                             with self.timer('reset_batch'):
                                 # hit the end of an epoch, reset
-                                if self.progress_bar is not None:
-                                    self.progress_bar.pause()
                                 dataloader_iterator = iter(dataloader)
                                 trigger_dataloader_setup_epoch(dataloader)
                                 self.epoch_num += 1
@@ -3188,8 +3150,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                     self.grad_accumulation_step = 0
                             with self.timer('get_batch'):
                                 batch = next(dataloader_iterator)
-                            if self.progress_bar is not None:
-                                self.progress_bar.unpause()
                     else:
                         batch = None
                     batch_list.append(batch)
@@ -3401,8 +3361,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.logger.log(extra_step_metrics)
 
                     if self.logging_config.log_every and self.step_num % self.logging_config.log_every == 0:
-                        if self.progress_bar is not None:
-                            self.progress_bar.pause()
                         with self.timer('log_to_tensorboard'):
                             # log to tensorboard
                             if self.accelerator.is_main_process:
@@ -3411,9 +3369,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                                         for key, value in loss_dict.items():
                                             self.writer.add_scalar(f"{key}", value, self.step_num)
                                         self.writer.add_scalar(f"lr", learning_rate, self.step_num)
-                                if self.progress_bar is not None:
-                                    self.progress_bar.unpause()
-                        
+
                         if self.accelerator.is_main_process:
                             # log to logger
                             telemetry_log = {
@@ -3452,13 +3408,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
 
                     if self.performance_log_every > 0 and self.step_num % self.performance_log_every == 0:
-                        if self.progress_bar is not None:
-                            self.progress_bar.pause()
                         # print the timers and clear them
                         self.timer.print()
                         self.timer.reset()
-                        if self.progress_bar is not None:
-                            self.progress_bar.unpause()
                 
                 # commit log
                 if self.accelerator.is_main_process:
@@ -3467,9 +3419,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                             self.logger.log(self.phase_manager.metrics_for_step(self.step_num))
                         self.logger.commit(step=self.step_num)
 
-                # sets progress bar to match out step
+                # sets progress bar to match our step (step is complete, so completed count is step + 1)
                 if self.progress_bar is not None:
-                    self.progress_bar.update(step - self.progress_bar.n)
+                    self.progress_bar.update(step + 1 - self.progress_bar.n)
 
                 #############################
                 # End of step

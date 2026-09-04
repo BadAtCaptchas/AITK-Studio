@@ -263,7 +263,7 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
     Array.isArray(jobConfig.config.process[0].sample.prompts) &&
     jobConfig.config.process[0].sample.prompts.length > 0
   ) {
-    let newSamples = [];
+    const newSamples = [];
     for (const prompt of jobConfig.config.process[0].sample.prompts) {
       newSamples.push({
         prompt: prompt,

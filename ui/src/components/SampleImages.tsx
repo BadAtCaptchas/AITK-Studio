@@ -7,6 +7,7 @@ import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
 import { Button } from '@headlessui/react';
 import { FaDownload } from 'react-icons/fa';
 import { apiClient } from '@/utils/api';
+import { getDownloadUrl } from '@/utils/media';
 import classNames from 'classnames';
 import { FaCaretDown, FaCaretUp } from 'react-icons/fa';
 import SampleImageViewer from './SampleImageViewer';
@@ -63,13 +64,14 @@ export const SampleImagesMenu = ({ job }: SampleImagesMenuProps) => {
     try {
       const res = await apiClient.post('/api/zip', {
         zipTarget: 'samples',
+        jobID: job?.id,
         jobName: job?.name,
       });
 
       const zipPath = res.data.zipPath; // e.g. /mnt/Train2/out/ui/.../samples.zip
       if (!zipPath) throw new Error('No zipPath in response');
 
-      const downloadPath = `/api/files/${encodeURIComponent(zipPath)}`;
+      const downloadPath = res.data.downloadUrl || getDownloadUrl(zipPath);
       const a = document.createElement('a');
       a.href = downloadPath;
       // optional: suggest filename (browser may ignore if server sets Content-Disposition)

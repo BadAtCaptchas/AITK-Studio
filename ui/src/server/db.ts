@@ -211,9 +211,7 @@ const DEFAULT_MONGODB_DB = 'ai_toolkit';
 const SQLITE_BUSY_TIMEOUT_MS = 30_000;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __aitkPrismaClient: PrismaClient | undefined;
-  // eslint-disable-next-line no-var
   var __aitkMongoClientPromise: Promise<MongoClient> | undefined;
 }
 
@@ -540,6 +538,12 @@ function sqliteGet<T = any>(sqlite: sqlite3.Database, sql: string, params: any[]
       if (err) reject(err);
       else resolve(row as T | undefined);
     });
+  });
+}
+
+function sqliteRun(sqlite: sqlite3.Database, sql: string, params: unknown[] = []) {
+  return new Promise<void>((resolve, reject) => {
+    sqlite.run(sql, params, err => (err ? reject(err) : resolve()));
   });
 }
 
@@ -2012,6 +2016,54 @@ export const db = {
         return readMongoMetrics(jobID, options);
       }
       return readSqliteMetrics(logPath, options);
+    },
+
+    async deleteLossRange(jobID: string, logPath: string, minStep: number, maxStep: number): Promise<void> {
+      if (isMongoProvider()) {
+        const mongo = await getMongoDb();
+        const metrics = mongoCollection(mongo, 'metrics');
+        const metricKeys = mongoCollection(mongo, 'metric_keys');
+        await metrics.deleteMany({ job_id: jobID, step: { $gte: minStep, $lte: maxStep } });
+        const keys = await metrics.distinct('key', { job_id: jobID });
+        await metricKeys.deleteMany({ job_id: jobID, key: { $nin: keys } });
+        for (const key of keys) {
+          const [first, last] = await Promise.all([
+            metrics.find({ job_id: jobID, key }).sort({ step: 1 }).limit(1).next(),
+            metrics.find({ job_id: jobID, key }).sort({ step: -1 }).limit(1).next(),
+          ]);
+          await metricKeys.updateOne(
+            { job_id: jobID, key },
+            { $set: { first_seen_step: Number(first?.step), last_seen_step: Number(last?.step) } },
+          );
+        }
+        return;
+      }
+
+      if (!(await pathExists(logPath))) throw new Error('No loss log for this job');
+      const sqlite = openSqliteDb(logPath);
+      try {
+        await sqliteRun(sqlite, 'BEGIN');
+        try {
+          await sqliteRun(sqlite, 'DELETE FROM metrics WHERE step >= ? AND step <= ?', [minStep, maxStep]);
+          await sqliteRun(sqlite, 'DELETE FROM steps WHERE step >= ? AND step <= ?', [minStep, maxStep]);
+          await sqliteRun(
+            sqlite,
+            'DELETE FROM metric_keys WHERE NOT EXISTS (SELECT 1 FROM metrics WHERE metrics.key = metric_keys.key)',
+          );
+          await sqliteRun(
+            sqlite,
+            `UPDATE metric_keys SET
+              first_seen_step = (SELECT MIN(step) FROM metrics WHERE metrics.key = metric_keys.key),
+              last_seen_step = (SELECT MAX(step) FROM metrics WHERE metrics.key = metric_keys.key)`,
+          );
+          await sqliteRun(sqlite, 'COMMIT');
+        } catch (error) {
+          await sqliteRun(sqlite, 'ROLLBACK').catch(() => undefined);
+          throw error;
+        }
+      } finally {
+        await closeSqliteDb(sqlite);
+      }
     },
 
     async deleteForJob(jobID: string): Promise<void> {

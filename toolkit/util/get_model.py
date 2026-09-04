@@ -57,6 +57,23 @@ def get_all_models() -> List[BaseModel]:
     return list(dict.fromkeys(all_model_classes))
 
 
+# archs the legacy StableDiffusion monolith still serves (see the arch
+# normalization in toolkit/config_modules.py)
+LEGACY_ARCHS = {
+    "sd1",
+    "sd2",
+    "sd3",
+    "sdxl",
+    "pixart",
+    "pixart_sigma",
+    "auraflow",
+    "flux",
+    "lumina2",
+    "vega",
+    "ssd",
+}
+
+
 def get_model_class(config: ModelConfig):
     all_models = get_all_models()
     for ModelClass in all_models:

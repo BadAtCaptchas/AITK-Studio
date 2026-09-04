@@ -25,6 +25,17 @@ class Qwen3VLCaptionerExtension(Extension):
         return Qwen3VLCaptioner
 
 
+class Qwen3OmniCaptionerExtension(Extension):
+    uid = "Qwen3OmniCaptioner"
+    name = "Qwen 3 Omni Captioner"
+
+    @classmethod
+    def get_process(cls):
+        from .Qwen3OmniCaptioner import Qwen3OmniCaptioner
+
+        return Qwen3OmniCaptioner
+
+
 class SecureRemoteOllamaCaptionerExtension(Extension):
     uid = "SecureRemoteOllamaCaptioner"
     name = "Secure Remote Ollama Captioner"
@@ -63,5 +74,6 @@ AI_TOOLKIT_EXTENSIONS = [
     OllamaCaptionerExtension,
     OpenRouterCaptionerExtension,
     Qwen3VLCaptionerExtension,
+    Qwen3OmniCaptionerExtension,
     SecureRemoteOllamaCaptionerExtension,
 ]

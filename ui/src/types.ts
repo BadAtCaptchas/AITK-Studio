@@ -522,6 +522,29 @@ export interface GPUApiResponse {
 }
 
 /**
+ * System monitor stream (SSE at /api/monitor)
+ */
+
+// Rolling history only logs load + memory; everything else (temps, fans,
+// power, clocks) is instantaneous-only via MonitorSample.
+export interface MonitorHistoryPoint {
+  t: number; // epoch ms
+  cpu: { load: number; memUsedMb: number };
+  // one entry per GPU, same order as MonitorSample.gpu.gpus (sorted by index)
+  gpus: { load: number; memUsedMb: number }[];
+}
+
+export interface MonitorSample {
+  t: number;
+  cpu: CpuInfo | null;
+  gpu: GPUApiResponse;
+}
+
+export interface MonitorInit extends MonitorSample {
+  history: MonitorHistoryPoint[];
+}
+
+/**
  * Training configuration
  */
 
@@ -573,7 +596,9 @@ export interface DatasetConfig {
   is_reg: boolean;
   network_weight: number;
   cache_latents_to_disk?: boolean;
+  cache_tensors_to_disk?: boolean;
   cache_text_embeddings?: boolean;
+  batch_size?: number;
   resolution: number[];
   controls: string[];
   control_path?: string | null;
@@ -733,6 +758,7 @@ export interface TrainConfig {
   loss_type: TrainLossType;
   t0_loss_target?: boolean;
   do_guidance_loss?: boolean;
+  guidance_loss_target?: number;
   guidance_loss_schedule: 'constant' | 'sigma';
   do_prior_divergence?: boolean;
   inverted_mask_prior?: boolean;
@@ -922,6 +948,9 @@ export interface CaptionProcessConfig {
     caption_prompt?: string;
     max_res?: number;
     max_new_tokens?: number;
+    batch_size?: number;
+    layer_offloading?: boolean;
+    layer_offloading_percent?: number;
     fixed_caption?: string;
     remote_worker_id?: string;
     remote_ollama_worker_id?: string;

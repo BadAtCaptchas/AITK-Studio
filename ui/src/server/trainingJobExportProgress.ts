@@ -58,7 +58,6 @@ const TERMINAL_EXPORT_STATUSES = new Set<TrainingJobExportStatus>(['completed', 
 const ACTIVE_EXPORT_STATUSES = new Set<TrainingJobExportStatus>(['queued', 'preparing', 'zipping', 'finalizing', 'canceling']);
 
 declare global {
-  // eslint-disable-next-line no-var
   var __trainingJobExportProgressStore: ExportProgressStore | undefined;
 }
 

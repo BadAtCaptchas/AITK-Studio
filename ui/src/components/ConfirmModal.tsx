@@ -88,7 +88,7 @@ export default function ConfirmModal() {
   };
 
   let Icon = FaExclamationTriangle;
-  let color = confirm?.type || 'danger';
+  const color = confirm?.type || 'danger';
 
   // Use conditional rendering for icon
   if (color === 'info') {

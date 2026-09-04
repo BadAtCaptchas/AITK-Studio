@@ -251,7 +251,7 @@ export async function POST(request: NextRequest) {
     const sourceJobConfig = await readJsonFile<any>(path.join(extractRoot, 'job_config.json'));
     const sourceName = sourceJob?.name || sourceJobConfig?.config?.name || manifest.source.jobName;
     const importedName = await getAvailableJobName(sourceName, trainingRoot, project?.id || null);
-    let warnings = [...(manifest.warnings || [])];
+    const warnings = [...(manifest.warnings || [])];
     const modelReferences = Array.isArray(manifest.models?.references) ? manifest.models.references : [];
 
     if (importedName !== safeNameSegment(sourceName, 'imported_job')) {

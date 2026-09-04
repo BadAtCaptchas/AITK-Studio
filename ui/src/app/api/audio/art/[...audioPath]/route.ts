@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
+import { catchAllToFilePath } from '@/server/catchAllPath';
 
 /**
  * Serves embedded album art from an MP3 file's ID3v2 tag.

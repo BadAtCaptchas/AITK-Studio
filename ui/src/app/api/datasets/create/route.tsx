@@ -30,14 +30,15 @@ export async function POST(request: Request) {
       });
     }
 
-    let { name, encrypted, encryptedManifest } = body;
+    let { name } = body;
+    const { encrypted, encryptedManifest } = body;
     const { datasetsRoot } = await resolveDatasetScope(body.project_id);
     name = cleanDatasetName(name || '');
     if (!name) {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
 
-    let datasetPath = resolveDatasetFolder(datasetsRoot, name);
+    const datasetPath = resolveDatasetFolder(datasetsRoot, name);
 
     // if folder doesnt exist, create it
     if (!fs.existsSync(datasetPath)) {

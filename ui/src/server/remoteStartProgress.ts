@@ -33,7 +33,6 @@ const ACTIVE_REMOTE_START_STATUSES = new Set<RemoteStartProgressStatus>([
 ]);
 
 declare global {
-  // eslint-disable-next-line no-var
   var __remoteStartProgressStore: RemoteStartProgressStore | undefined;
 }
 

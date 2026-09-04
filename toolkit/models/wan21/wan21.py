@@ -10,7 +10,8 @@ from toolkit.memory_management import attach_layer_offloading
 from toolkit.models.base_model import BaseModel
 from toolkit.prompt_utils import PromptEmbeds
 from transformers import AutoTokenizer, UMT5EncoderModel
-from diffusers import  WanPipeline, WanTransformer3DModel, AutoencoderKL
+from diffusers import  WanPipeline, AutoencoderKL
+from toolkit.models.v2.diffusion_models.wan import WanTransformer3DModel
 from .autoencoder_kl_wan import AutoencoderKLWan
 from toolkit.models.vae_tiling import temporary_vae_tiling
 import os
@@ -50,8 +51,9 @@ from diffusers.pipelines.wan.pipeline_wan import XLA_AVAILABLE
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from typing import Any, Callable, Dict, List, Optional, Union
 from toolkit.models.wan21.wan_lora_convert import convert_to_diffusers, convert_to_original
-from toolkit.util.quantize import quantize_model
-from toolkit.models.loaders.umt5 import get_umt5_encoder
+from toolkit.models.v2.text_encoders.umt5 import UMT5TextEncoder
+from toolkit.models.v2.vae.wan import WanVAE
+from toolkit.metadata import get_meta_for_safetensors
 
 # for generation only?
 scheduler_configUniPC = {
@@ -387,6 +389,12 @@ class Wan21(BaseModel):
             raise ValueError(
                 "Loading LoRA is not supported for Wan2.1 models currently")
 
+        # load + quantize + offload + placement, all driven by model_config
+        transformer = WanTransformer3DModel.load(
+            transformer_path,
+            subfolder=subfolder,
+            **self.component_load_kwargs("transformer"),
+        )
         flush()
         
         if self.model_config.quantize:
@@ -464,12 +472,9 @@ class Wan21(BaseModel):
 
         self.print_and_status_update("Loading UMT5EncoderModel")
         
-        tokenizer, text_encoder = get_umt5_encoder(
-            model_path=te_path,
-            tokenizer_subfolder="tokenizer",
-            encoder_subfolder="text_encoder",
-            torch_dtype=dtype,
-            comfy_files=self._comfy_te_file
+        tokenizer = UMT5TextEncoder.load_tokenizer(te_path)
+        text_encoder = UMT5TextEncoder.load(
+            te_path, **self.component_load_kwargs("te")
         )
 
         orbit_text_encoder_quantization = (
@@ -530,11 +535,9 @@ class Wan21(BaseModel):
         
         if self._wan_vae_path is not None:
             # load the vae from individual repo
-            vae = AutoencoderKLWan.from_pretrained(
-                self._wan_vae_path, torch_dtype=dtype).to(dtype=dtype)
+            vae = WanVAE.load_model(self._wan_vae_path, dtype=dtype, subfolder="")
         else:
-            vae = AutoencoderKLWan.from_pretrained(
-                vae_path, subfolder="vae", torch_dtype=dtype).to(dtype=dtype)
+            vae = WanVAE.load_model(vae_path, dtype=dtype)
         flush()
 
         self.print_and_status_update("Making pipe")
@@ -556,7 +559,10 @@ class Wan21(BaseModel):
         pipe.transformer = pipe.transformer.to(self.device_torch)
 
         flush()
-        text_encoder.to(self.device_torch)
+        # low_vram: the text encoder stays on cpu; get_prompt_embeds moves it
+        # to the gpu on demand
+        if not self.model_config.low_vram:
+            text_encoder.to(self.device_torch)
         text_encoder.requires_grad_(False)
         text_encoder.eval()
         pipe.transformer = pipe.transformer.to(self.device_torch)
@@ -773,16 +779,15 @@ class Wan21(BaseModel):
         return False
 
     def save_model(self, output_path, meta, save_dtype):
-        # only save the unet
-        transformer: Wan21 = unwrap_model(self.model)
-        transformer.save_pretrained(
-            save_directory=os.path.join(output_path, 'transformer'),
-            safe_serialization=True,
+        # comfy-format single-file save (original wan key layout)
+        transformer = unwrap_model(self.model)
+        if not output_path.endswith(".safetensors"):
+            output_path += ".safetensors"
+        transformer.save_model(
+            output_path,
+            dtype=save_dtype,
+            metadata=get_meta_for_safetensors(meta, name=self.arch),
         )
-
-        meta_path = os.path.join(output_path, 'aitk_meta.yaml')
-        with open(meta_path, 'w') as f:
-            yaml.dump(meta, f)
 
     def get_loss_target(self, *args, **kwargs):
         noise = kwargs.get('noise')

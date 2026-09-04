@@ -8,6 +8,7 @@ import av
             
 from toolkit import image_utils
 from toolkit.basic import get_quick_signature_string
+from toolkit.dto import DTO
 from toolkit.dataloader_mixins import (
     CaptionProcessingDTOMixin,
     ImageProcessingDTOMixin,
@@ -127,6 +128,11 @@ class FileItemDTO(
         self.encode_control_in_text_embeddings = kwargs.get(
             "encode_control_in_text_embeddings", False
         )
+        self.encode_first_frame_in_text_embeddings = kwargs.get(
+            "encode_first_frame_in_text_embeddings", False
+        )
+        # D-OPSD: also cache teacher embeds with the item's own media as reference 1
+        self.dopsd_self_ref = kwargs.get("dopsd_self_ref", False)
         self.te_padding_side = kwargs.get("te_padding_side", "right")
         self.latent_space_version = kwargs.get("latent_space_version", "sd1")
         self.text_embedding_space_version = kwargs.get("text_embedding_space_version", "sd1")
@@ -312,7 +318,7 @@ class DataLoaderBatchDTO:
                 ]
             self.audio_tensor: Union[torch.Tensor, None] = None
             self.first_frame_latents: Union[torch.Tensor, None] = None
-            self.audio_latents: Union[torch.Tensor, None] = None
+            self._audio_latents: Union[torch.Tensor, None] = None
 
             # just for holding noise and preds during training
             self.audio_target: Union[torch.Tensor, None] = None
@@ -340,9 +346,25 @@ class DataLoaderBatchDTO:
             self.video_loss_mask: Union[torch.Tensor, None] = None
             self.ltx_strategy = None
             
+            # control-video reference paths (encoded + disk-cached lazily by
+            # models with supports_video_control_images)
+            self.control_video_paths_list: Union[List, None] = None
+            if any(getattr(x, 'control_video_paths', None) for x in self.file_items):
+                self.control_video_paths_list = [
+                    list(getattr(x, 'control_video_paths', None) or [])
+                    for x in self.file_items
+                ]
+
+            # set by the trainer around the D-OPSD teacher pass
+            self.dopsd_teacher_pass: bool = False
+
             self.num_frames: int = self.file_items[0].num_frames
 
-            if not is_latents_cached or self.file_items[0].dataset_config.load_image_when_caching_latents:
+            if (
+                not is_latents_cached
+                or self.file_items[0].dataset_config.load_image_when_caching_latents
+                or self.file_items[0].dataset_config.cache_tensors_to_disk
+            ):
                 # only return a tensor if latents are not cached, or if we are explicitly
                 # loading the raw image alongside the cached latents
                 self.tensor: torch.Tensor = torch.cat(
@@ -351,10 +373,9 @@ class DataLoaderBatchDTO:
             # if we have encoded latents, we concatenate them
             self.latents: Union[torch.Tensor, None] = None
             if is_latents_cached:
-                # this get_latent call with trigger loading all cached items from the disk
-                self.latents = torch.cat(
-                    [x.get_latent().unsqueeze(0) for x in self.file_items]
-                )
+                # this get_latent call with trigger loading all cached items from the disk.
+                # DTO.stack keeps any extra streams (audio, ...) riding on the batch latents
+                self.latents = DTO.stack([x.get_latent() for x in self.file_items])
                 if any(
                     [x._cached_first_frame_latent is not None for x in self.file_items]
                 ):
@@ -372,23 +393,11 @@ class DataLoaderBatchDTO:
                             for x in self.file_items
                         ]
                     )
-                if any([x._cached_audio_latent is not None for x in self.file_items]):
-                    # find one to use as a base; item 0 may not have one
-                    base_audio_latent = None
-                    for x in self.file_items:
-                        if x._cached_audio_latent is not None:
-                            base_audio_latent = x._cached_audio_latent
-                            break
-                    self.audio_latents = torch.cat(
-                        [
-                            x._cached_audio_latent.unsqueeze(0)
-                            if x._cached_audio_latent is not None
-                            else torch.zeros_like(base_audio_latent).unsqueeze(0)
-                            for x in self.file_items
-                        ]
-                    )
-
             self.prompt_embeds: Union[PromptEmbeds, None] = None
+            # diff output preservation embeds (trigger word replaced with class)
+            self.dop_prompt_embeds: Union[PromptEmbeds, None] = None
+            # D-OPSD teacher embeds (trigger word replaced with the self-reference token)
+            self.dopsd_prompt_embeds: Union[PromptEmbeds, None] = None
             # if self.file_items[0].control_tensor is not None:
             # if any have a control tensor, we concatenate them
             if any([x.control_tensor is not None for x in self.file_items]):
@@ -559,6 +568,46 @@ class DataLoaderBatchDTO:
                 
                 self.prompt_embeds = concat_prompt_embeds(prompt_embeds_list, padding_side=padding_side)
 
+            if any([x.dop_prompt_embeds is not None for x in self.file_items]):
+                # find one to use as a base
+                base_dop_prompt_embeds = None
+                for x in self.file_items:
+                    if x.dop_prompt_embeds is not None:
+                        base_dop_prompt_embeds = x.dop_prompt_embeds
+                        break
+                dop_prompt_embeds_list = []
+                for x in self.file_items:
+                    if x.dop_prompt_embeds is None:
+                        y = base_dop_prompt_embeds
+                    else:
+                        y = x.dop_prompt_embeds
+                    if x.text_embedding_space_version == "zimage":
+                        # z image needs to be a list if it is not already
+                        if not isinstance(y.text_embeds, list):
+                            y.text_embeds = [y.text_embeds]
+                    dop_prompt_embeds_list.append(y)
+                padding_side = self.file_items[0].te_padding_side
+
+                self.dop_prompt_embeds = concat_prompt_embeds(dop_prompt_embeds_list, padding_side=padding_side)
+
+            if any([getattr(x, 'dopsd_prompt_embeds', None) is not None for x in self.file_items]):
+                # find one to use as a base
+                base_dopsd_prompt_embeds = None
+                for x in self.file_items:
+                    if x.dopsd_prompt_embeds is not None:
+                        base_dopsd_prompt_embeds = x.dopsd_prompt_embeds
+                        break
+                dopsd_prompt_embeds_list = []
+                for x in self.file_items:
+                    if x.dopsd_prompt_embeds is None:
+                        y = base_dopsd_prompt_embeds
+                    else:
+                        y = x.dopsd_prompt_embeds
+                    dopsd_prompt_embeds_list.append(y)
+                padding_side = self.file_items[0].te_padding_side
+
+                self.dopsd_prompt_embeds = concat_prompt_embeds(dopsd_prompt_embeds_list, padding_side=padding_side)
+
             if any([x.audio_tensor is not None for x in self.file_items]):
                 # find one to use as a base
                 base_audio_tensor = None
@@ -617,6 +666,43 @@ class DataLoaderBatchDTO:
         if self.audio_pred_slot is not None:
             setattr(self, self.audio_pred_slot, pred)
 
+    @property
+    def latents(self) -> Union[torch.Tensor, None]:
+        return self._latents
+
+    @latents.setter
+    def latents(self, value):
+        # math on a DTO returns a plain tensor, so trainer code that rescales
+        # or re-noises the latents would silently drop the extra streams
+        # (audio, ...) riding on them. Re-attach them here so assignments stay
+        # plain tensor code everywhere else.
+        prev = getattr(self, '_latents', None)
+        if isinstance(prev, DTO) and value is not None and not isinstance(value, DTO):
+            value = DTO(value, **prev.extras)
+        self._latents = value
+
+    @latents.deleter
+    def latents(self):
+        self._latents = None
+
+    @property
+    def audio_latents(self) -> Union[torch.Tensor, None]:
+        # New caches carry audio in the DTO; retain the explicit field for
+        # legacy in-memory cache entries and live model code.
+        if isinstance(self.latents, DTO):
+            audio = self.latents.get('audio')
+            if audio is not None:
+                return audio
+        return getattr(self, '_audio_latents', None)
+
+    @audio_latents.setter
+    def audio_latents(self, value):
+        self._audio_latents = value
+
+    @audio_latents.deleter
+    def audio_latents(self):
+        self._audio_latents = None
+
     def cleanup(self):
         del self.latents
         del self.tensor
@@ -637,7 +723,6 @@ class DataLoaderBatchDTO:
         del self.video_loss_mask
         del self.ltx_strategy
         del self.first_frame_latents
-        del self.audio_latents
         for file_item in self.file_items:
             file_item.cleanup()
 

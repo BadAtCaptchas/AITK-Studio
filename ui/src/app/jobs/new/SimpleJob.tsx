@@ -289,7 +289,7 @@ export default function SimpleJob({
     if (!modelArch) return null;
     if (!modelArch.sampleTags) return null;
     if (!jobConfig.config.process[0].sample.samples) return null;
-    let sampleArr: any[] = [];
+    const sampleArr: any[] = [];
     for (let i = 0; i < jobConfig.config.process[0].sample.samples.length; i++) {
       const taggedPrompt = jobConfig.config.process[0].sample.samples[i].prompt;
       const tagsObj = tagsToObj(taggedPrompt);
@@ -301,7 +301,7 @@ export default function SimpleJob({
   const modelArchTagSections: SampleTags[] | null = useMemo(() => {
     if (!modelArch?.sampleTags) return null;
     const maxPerGroup = 5;
-    let sections: SampleTags[] = [];
+    const sections: SampleTags[] = [];
     let subSection: SampleTags = {};
     for (const [tagKey, tag] of Object.entries(modelArch.sampleTags)) {
       if ((tag.full && Object.keys(subSection).length > 0) || Object.keys(subSection).length >= maxPerGroup) {
@@ -553,7 +553,7 @@ export default function SimpleJob({
     if (!hasARA) {
       return quantizationOptions;
     }
-    let newQuantizationOptions = [
+    const newQuantizationOptions = [
       {
         label: 'Standard',
         options: [quantizationOptions[0], quantizationOptions[1]],
@@ -561,7 +561,7 @@ export default function SimpleJob({
     ];
 
     // add ARAs if they exist for the model
-    let ARAs: SelectOption[] = [];
+    const ARAs: SelectOption[] = [];
     if (modelArch.accuracyRecoveryAdapters) {
       for (const [label, value] of Object.entries(modelArch.accuracyRecoveryAdapters)) {
         ARAs.push({ value, label });
@@ -574,7 +574,7 @@ export default function SimpleJob({
       });
     }
 
-    let additionalQuantizationOptions: SelectOption[] = [];
+    const additionalQuantizationOptions: SelectOption[] = [];
     // add the quantization options if they are not already included
     for (let i = 2; i < quantizationOptions.length; i++) {
       const option = quantizationOptions[i];
@@ -1071,6 +1071,18 @@ export default function SimpleJob({
                   </div>
                 )}
 
+                {modelArch?.customModelSelectOptions?.map(customOption => (
+                  <div className="max-w-2xl" key={customOption.label}>
+                    <SelectInput
+                      label={customOption.label}
+                      value={customOption.getValue(jobConfig)}
+                      doc={customOption.doc}
+                      onChange={value => customOption.onChange(value, jobConfig, setJobConfig)}
+                      options={customOption.options}
+                    />
+                  </div>
+                ))}
+
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
                   {disableSections.includes('trigger_word') ? null : (
                     <div>
@@ -1087,7 +1099,7 @@ export default function SimpleJob({
                       <p className="mt-1 text-xs text-gray-500">The token that represents your concept.</p>
                     </div>
                   )}
-                  {processConfig.model.arch !== 'minimax_h3' && <div>
+                  {!processConfig.model.arch.startsWith('minimax_h3') && <div>
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                       <TextInput
                         label="Base LoRA path (optional)"
@@ -1768,6 +1780,15 @@ export default function SimpleJob({
                           placeholder="1"
                           docKey={'dataset.num_repeats'}
                         />
+                        <NumberInput
+                          label="Dataset batch size"
+                          value={dataset.batch_size ?? null}
+                          className="pt-2"
+                          onChange={value => setJobConfig(value ?? undefined, `config.process[0].datasets[${i}].batch_size`)}
+                          placeholder={`${processConfig.train.batch_size}`}
+                          min={1}
+                          allowEmpty
+                        />
                       </div>
                       <div>
                         <TextInput
@@ -1789,6 +1810,7 @@ export default function SimpleJob({
                       <div>
                         <FormGroup label="Settings">
                           <Checkbox label="Cache latents" checked={dataset.cache_latents_to_disk || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].cache_latents_to_disk`)} />
+                          <Checkbox label="Cache raw tensors" checked={dataset.cache_tensors_to_disk || false} onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].cache_tensors_to_disk`)} />
                           {modelArch?.additionalSections?.includes('datasets.include_images_in_video_dataset') && (
                             <Checkbox
                               label="Include images with videos"

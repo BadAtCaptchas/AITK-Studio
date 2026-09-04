@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import classNames from 'classnames';
-import { CheckCircle2, Cloud, Image, LockKeyhole } from 'lucide-react';
+import { CheckCircle2, Cloud, Image as ImageIcon, LockKeyhole } from 'lucide-react';
 
 type DatasetFolderIconSize = 'sm' | 'md' | 'lg';
 
@@ -129,7 +129,7 @@ export default function DatasetFolderIcon({
             classes.image,
           )}
         >
-          <Image className={classes.glyph} strokeWidth={2.4} />
+          <ImageIcon className={classes.glyph} strokeWidth={2.4} />
         </span>
       )}
       {(encrypted || remote) && (

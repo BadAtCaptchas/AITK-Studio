@@ -75,7 +75,7 @@ test('series colors remain tied to their stable series position', () => {
   assert.deepEqual(activeKeys.map(key => colors[key]), ['green', 'blue']);
 });
 
-test('sample-now and caption controls retain project, remote, and database safeguards', () => {
+test('sample-now and caption controls retain global, remote, and database safeguards', () => {
   const read = relativePath => readFileSync(path.join(uiDirectory, relativePath), 'utf8');
   const route = read('src/app/api/jobs/[jobID]/sample_now/route.ts');
   const prepareDb = read('scripts/prepare-db.mjs');
@@ -85,7 +85,9 @@ test('sample-now and caption controls retain project, remote, and database safeg
   const logHook = read('src/hooks/useJobLog.tsx');
 
   assert.match(route, /isRequestAuthenticated/);
-  assert.match(route, /assertProjectJobEnabled\(job, 'write'\)/);
+  assert.match(route, /job\.job_type !== 'train'/);
+  assert.match(route, /job\.status !== 'running'/);
+  assert.doesNotMatch(route, /assertProjectJobEnabled|project_id/);
   assert.match(route, /remote_job_id/);
   assert.match(route, /sample_now`/);
   assert.match(route, /sample_now: true/);

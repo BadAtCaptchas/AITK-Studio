@@ -133,23 +133,31 @@ test('sqlite journal mode override is normalized and safely falls back to WAL', 
   assert.match(warnings[0], /Invalid AI_TOOLKIT_DB_JOURNAL_MODE/);
 });
 
-test('validation uploads and previews retain project-space boundaries', () => {
+test('validation uploads and previews use protected global storage', () => {
   const uploadRoute = read('src/app/api/img/upload/route.ts');
   const controlImage = read('src/components/SampleControlImage.tsx');
   const simpleJob = read('src/app/jobs/new/SimpleJob.tsx');
   const jobConfig = read('src/app/jobs/new/jobConfig.ts');
   const streamedUploads = read('src/utils/streamedUploads.ts');
 
-  assert.match(uploadRoute, /resolveOptionalProject\(projectID \|\| null, \{ intent: 'write' \}\)/);
-  assert.match(uploadRoute, /getProjectValidationRoot\(project\)/);
-  assert.match(controlImage, /\/api\/projects\/\$\{encodeURIComponent\(projectID\)\}\/files/);
-  assert.match(controlImage, /params: \{ path: src \}/);
-  assert.match(streamedUploads, /'X-AITK-Project-ID'/);
+  assert.match(uploadRoute, /path\.join\(await getDataRoot\(\), 'images'\)/);
+  assert.match(uploadRoute, /streamRequestToStagingFile\(request, imageRoot/);
+  assert.match(uploadRoute, /moveStagedUploadNoReplace/);
+  assert.match(uploadRoute, /cleanupStagedUpload\(stagingPath\)/);
+  assert.match(controlImage, /\/api\/img\/\$\{encodeURIComponent\(src\)\}/);
+  assert.match(controlImage, /uploadTemporaryMediaFile\(file/);
+  assert.doesNotMatch(streamedUploads, /X-AITK-Project-ID|projectID/);
+  const fileServing = read('src/server/fileServing.ts');
+  assert.match(fileServing, /realpathIfExists\(filepath\)/);
+  assert.match(fileServing, /isPathWithinRoot\(root, canonicalPath\)/);
+  const middleware = read('src/middleware.ts');
+  assert.match(middleware, /hasObsoleteWorkspaceScope\(request\.nextUrl\.searchParams\)/);
+  assert.match(middleware, /hasObsoleteWorkspaceHeaders\(request\.headers\)/);
   assert.match(jobConfig, /resolution: 1024/);
   assert.match(jobConfig, /validate_every_n_steps: 1/);
   assert.match(jobConfig, /validation_sigmas: \[0\.5\]/);
   assert.match(simpleJob, /objectCopy\(defaultValidationConfig\)/);
-  assert.match(simpleJob, /projectID=\{projectID\}/);
+  assert.doesNotMatch(simpleJob, /projectID|project_id/);
   assert.doesNotMatch(simpleJob, /!item\.prompt\.trim\(\)/);
 });
 
@@ -173,20 +181,26 @@ test('validation settings are rejected at the real save boundary', () => {
   );
 
   const trainingForm = read('src/app/jobs/new/TrainingFormContent.tsx');
+  const trainingValidation = read('src/utils/trainingValidation.ts');
   const jobsRoute = read('src/app/api/jobs/route.ts');
-  assert.match(trainingForm, /getValidationConfigErrors\(trainConfig\?\.validation_config\)/);
-  assert.match(jobsRoute, /getJobValidationConfigErrors\(projectJobConfig\)/);
+  assert.match(trainingForm, /validateTrainingConfig\(config,/);
+  assert.match(trainingValidation, /getValidationConfigErrors\(trainConfig\?\.validation_config\)/);
+  assert.match(jobsRoute, /getJobValidationConfigErrors\(resolvedJobConfig\)/);
+  assert.match(jobsRoute, /validation_errors: validationConfigErrors/);
 });
 
-test('updates to linked remote project jobs resync and relink portable project inputs', () => {
+test('updates to global remote jobs rewrite dataset references and retain the remote mapping', () => {
   const jobsRoute = read('src/app/api/jobs/route.ts');
 
-  assert.match(jobsRoute, /import \{ prepareProjectJobReplica \} from '@\/server\/projectSync'/);
+  assert.match(jobsRoute, /assertGlobalPayload\(await request\.json\(\)\)/);
   assert.match(
     jobsRoute,
-    /if \(existing\.project_id\) \{[\s\S]*prepareProjectJobReplica\(\{[\s\S]*job_config: JSON\.stringify\(projectJobConfig\)/,
+    /rewriteSameWorkerRemoteDatasetRefsForWorker\(resolvedJobConfig, worker\)/,
   );
-  assert.match(jobsRoute, /remote_job_id: linked\.remoteJob\.id/);
+  assert.match(jobsRoute, /id: existing\.remote_job_id/);
+  assert.match(jobsRoute, /job_config: remoteJobConfig/);
+  assert.match(jobsRoute, /remote_job_id: workerChanged \? null : existing\.remote_job_id/);
+  assert.doesNotMatch(jobsRoute, /prepareProjectJobReplica|projectSync|project_id/);
 });
 
 test('sample grids and validation loss defaults include the upstream behavior', () => {
@@ -240,7 +254,10 @@ test('polling hooks guard request identity and clear data when their request sco
   assert.match(metrics, /signal => refreshMetrics\(\{ full: needsFullRefreshRef\.current, signal \}\)/);
 
   assert.match(job, /setJob\(null\);\s+setStatus\('idle'\);/);
-  assert.match(job, /\[jobID, projectID\]/);
+  assert.match(job, /const requestScope = jobID;/);
+  assert.match(job, /activeScopeRef\.current !== currentRequestScope/);
+  assert.match(job, /usePollLoop\(signal => refreshJob\(signal\), reloadInterval, \[jobID\]\)/);
+  assert.doesNotMatch(job, /projectID|project_id/);
   assert.match(files, /activeJobIDRef\.current !== requestJobID/);
   assert.match(files, /setFiles\(\[\]\);/);
   assert.match(samples, /activeJobIDRef\.current !== requestJobID/);

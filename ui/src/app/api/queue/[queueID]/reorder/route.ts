@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import { QueueReorderError, reorderQueueJobs } from '@/server/queueReorder';
 
@@ -5,7 +6,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { queueID } = await params;
 
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const workerID = typeof body.worker_id === 'string' && body.worker_id.trim() ? body.worker_id.trim() : 'local';
     const jobIDs = Array.isArray(body.job_ids) ? body.job_ids : [];
     const jobs = await reorderQueueJobs(queueID, jobIDs, workerID);

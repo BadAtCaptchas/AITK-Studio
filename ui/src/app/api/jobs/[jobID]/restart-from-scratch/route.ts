@@ -1,9 +1,7 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import { JobStartError } from '@/server/jobStart';
-import {
-  restartTrainingJobFromScratch,
-  TrainingJobRestartError,
-} from '@/server/trainingJobRestart';
+import { restartTrainingJobFromScratch, TrainingJobRestartError } from '@/server/trainingJobRestart';
 import type { JobStartRequest } from '@/types';
 import { isRequestAuthenticated } from '@/utils/authSession';
 
@@ -35,7 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   let body: JobStartRequest = {};
   try {
-    body = await request.json();
+    body = assertGlobalPayload(await request.json());
   } catch {
     body = {};
   }

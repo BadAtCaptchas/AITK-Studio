@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -129,7 +130,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Image upload is too large.' }, { status: 413 });
     }
 
-    const formData = await request.formData();
+    const formData = assertGlobalPayload(await request.formData());
     const file = formData.get('image');
     if (!isUploadedFile(file)) {
       return NextResponse.json({ error: 'Image file is required.' }, { status: 400 });
@@ -178,7 +179,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     console.error('Watermark check error:', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Watermark check failed.' }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Watermark check failed.' },
+      { status: 500 },
+    );
   } finally {
     if (tempDir) {
       try {

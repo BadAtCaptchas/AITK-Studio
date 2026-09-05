@@ -11,9 +11,7 @@ import {
   rememberEncryptedDatasetKey,
   unlockEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
-
 export type TrainingJobCheckpointExportMode = 'latest' | 'all';
-
 export type TrainingJobExportProgress = {
   exportID: string;
   jobID: string;
@@ -34,72 +32,68 @@ export type TrainingJobExportProgress = {
   createdAt: string;
   updatedAt: string;
 };
-
 export type TrainingJobExportResult = {
   zipPath: string;
   fileName: string;
   warnings: string[];
 };
-
 export type TrainingJobImportProgress = {
   loaded: number;
   total: number | null;
   percent: number | null;
 };
-
 export type TrainingJobImportResult = {
   job: Job;
   warnings: string[];
 };
-
 const MAX_TRAINING_JOB_IMPORT_BYTES = 64 * 1024 * 1024 * 1024;
 const TRAINING_JOB_IMPORT_CHUNK_BYTES = 64 * 1024 * 1024;
-
 export type JobModelPrefetchResult = {
   handledValues: string[];
-  downloads: Array<{ value: string; path: string; kind: string; cached?: boolean }>;
+  downloads: Array<{
+    value: string;
+    path: string;
+    kind: string;
+    cached?: boolean;
+  }>;
   warnings: string[];
   updatedConfig: boolean;
   job: Job;
 };
-
 export type StartJobOptions = {
   durableEncryptedDatasetKeys?: boolean;
   background?: boolean;
   onRemoteStartProgress?: (progress: RemoteStartProgress) => void;
 };
-
 function basenameFromPath(value: string) {
-  return value.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || value;
+  return (
+    value
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() || value
+  );
 }
-
 function promptForDurableEncryptedResume() {
   if (typeof window === 'undefined') return false;
   return window.confirm(
     'Store a wrapped copy of this encrypted dataset key on the server so the job can resume from the queue after an app restart? This requires AITK_DURABLE_DATASET_KEY_SECRET on the server; changing that secret invalidates durable resume for queued jobs.',
   );
 }
-
 function apiErrorMessage(error: any, fallback = 'Request failed') {
   return error?.response?.data?.error || error?.message || fallback;
 }
-
 function isDurableEncryptedKeySecretError(error: any) {
   return error?.response?.status === 400 && error?.response?.data?.code === 'durable_encrypted_key_secret_unavailable';
 }
-
 function promptStartWithoutDurableEncryptedResume(message: string) {
   if (typeof window === 'undefined') return false;
   return window.confirm(`${message}\n\nStart this job now without storing the encrypted dataset key for resume?`);
 }
-
 async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: string }) {
-  const remembered =
-    getRememberedEncryptedDatasetKey(dataset.path) || getRememberedEncryptedDatasetKey(dataset.name);
+  const remembered = getRememberedEncryptedDatasetKey(dataset.path) || getRememberedEncryptedDatasetKey(dataset.name);
   if (remembered) {
     return { datasetPath: dataset.path, keyB64: remembered };
   }
-
   const datasetName = dataset.name || basenameFromPath(dataset.path);
   const res = await apiClient.post('/api/datasets/listImages', { datasetName });
   const manifest = res.data?.manifest;
@@ -110,11 +104,9 @@ async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: st
     rememberEncryptedDatasetKey(datasetName, unlocked.rawKeyB64);
     return { datasetPath: dataset.path, keyB64: unlocked.rawKeyB64 };
   }
-
   if (manifest.crypto?.kdf?.type !== 'PBKDF2-SHA256') {
     throw new Error(`Encrypted dataset ${datasetName} requires its key file. Unlock the dataset page first.`);
   }
-
   const password = window.prompt(`Password for encrypted dataset "${datasetName}"`);
   if (!password) throw new Error(`Encrypted dataset key required for ${datasetName}`);
   const { rawKeyB64: keyB64 } = await unlockEncryptedDatasetKey(manifest, { provider: 'password', password });
@@ -122,7 +114,6 @@ async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: st
   rememberEncryptedDatasetKey(datasetName, keyB64);
   return { datasetPath: dataset.path, keyB64 };
 }
-
 const runStartLikeJobAction = (
   jobID: string,
   actionPath: 'start' | 'restart-from-scratch',
@@ -143,7 +134,6 @@ const runStartLikeJobAction = (
         }
       }
     };
-
     const postStart = async (payload: {
       encryptedDatasetKeys?: EncryptedDatasetStartKey[];
       durableEncryptedDatasetKeys?: boolean;
@@ -158,11 +148,10 @@ const runStartLikeJobAction = (
         await waitForRemoteStart(data.startID);
       }
     };
-
     postStart({
-        encryptedDatasetKeys,
-        durableEncryptedDatasetKeys: options.durableEncryptedDatasetKeys === true,
-      })
+      encryptedDatasetKeys,
+      durableEncryptedDatasetKeys: options.durableEncryptedDatasetKeys === true,
+    })
       .then(() => {
         console.log(successLabel);
         resolve();
@@ -180,7 +169,9 @@ const runStartLikeJobAction = (
             });
             const invalidPathKeys = new Set(
               invalidDatasets
-                .map((dataset: any) => (typeof dataset?.path === 'string' ? dataset.path.replace(/[\\/]+$/, '').toLowerCase() : null))
+                .map((dataset: any) =>
+                  typeof dataset?.path === 'string' ? dataset.path.replace(/[\\/]+$/, '').toLowerCase() : null,
+                )
                 .filter((value: string | null): value is string => !!value),
             );
             const supplied = (encryptedDatasetKeys || []).filter(
@@ -221,7 +212,6 @@ const runStartLikeJobAction = (
       });
   });
 };
-
 export const startJob = (
   jobID: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
@@ -229,7 +219,6 @@ export const startJob = (
 ) => {
   return runStartLikeJobAction(jobID, 'start', 'Job started', 'Failed to start job.', encryptedDatasetKeys, options);
 };
-
 export const restartJobFromScratch = (
   jobID: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
@@ -244,7 +233,6 @@ export const restartJobFromScratch = (
     options,
   );
 };
-
 export const stopJob = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
@@ -260,7 +248,6 @@ export const stopJob = (jobID: string) => {
       });
   });
 };
-
 export const deleteJob = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
@@ -276,7 +263,6 @@ export const deleteJob = (jobID: string) => {
       });
   });
 };
-
 export const markJobAsStopped = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
@@ -292,7 +278,6 @@ export const markJobAsStopped = (jobID: string) => {
       });
   });
 };
-
 export const saveJobNow = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
@@ -308,13 +293,9 @@ export const saveJobNow = (jobID: string) => {
       });
   });
 };
-
 export const retryRemoteCaptionResult = (jobID: string) => {
-  return apiClient
-    .post(`/api/jobs/${jobID}/remote-caption-result`, { retryFailed: true })
-    .then(res => res.data as Job);
+  return apiClient.post(`/api/jobs/${jobID}/remote-caption-result`, { retryFailed: true }).then(res => res.data as Job);
 };
-
 export const exportTrainingJob = (
   jobID: string,
   includeDatasets: boolean,
@@ -324,39 +305,34 @@ export const exportTrainingJob = (
     .post(`/api/jobs/${jobID}/export`, { includeDatasets, checkpointMode })
     .then(res => res.data as TrainingJobExportResult);
 };
-
 export const startTrainingJobExport = (
   jobID: string,
   includeDatasets: boolean,
   checkpointMode: TrainingJobCheckpointExportMode = 'latest',
 ) => {
-  return apiClient
-    .post(`/api/jobs/${jobID}/export`, { includeDatasets, checkpointMode, background: true })
-    .then(res => res.data as { exportID: string; statusUrl: string; progress: TrainingJobExportProgress });
+  return apiClient.post(`/api/jobs/${jobID}/export`, { includeDatasets, checkpointMode, background: true }).then(
+    res =>
+      res.data as {
+        exportID: string;
+        statusUrl: string;
+        progress: TrainingJobExportProgress;
+      },
+  );
 };
-
 export const getTrainingJobExportProgress = (jobID: string, exportID: string) => {
-  return apiClient
-    .get(`/api/jobs/${jobID}/export/${exportID}`)
-    .then(res => res.data as TrainingJobExportProgress);
+  return apiClient.get(`/api/jobs/${jobID}/export/${exportID}`).then(res => res.data as TrainingJobExportProgress);
 };
-
 export const cancelTrainingJobExport = (jobID: string, exportID: string) => {
-  return apiClient
-    .delete(`/api/jobs/${jobID}/export/${exportID}`)
-    .then(res => res.data as TrainingJobExportProgress);
+  return apiClient.delete(`/api/jobs/${jobID}/export/${exportID}`).then(res => res.data as TrainingJobExportProgress);
 };
-
 export const importTrainingJob = (
   file: File,
   gpuIDs: string | null,
   onUploadProgress?: (progress: TrainingJobImportProgress) => void,
-  projectID?: string | null,
 ) => {
   if (file.size > MAX_TRAINING_JOB_IMPORT_BYTES) {
     return Promise.reject(new Error('Training job archives must be 64 GB or smaller.'));
   }
-
   const uploadID = globalThis.crypto.randomUUID();
   const chunksTotal = Math.max(1, Math.ceil(file.size / TRAINING_JOB_IMPORT_CHUNK_BYTES));
   const commonParams = {
@@ -372,7 +348,6 @@ export const importTrainingJob = (
       percent: total ? Math.min(100, Math.round((loaded / total) * 100)) : 100,
     });
   };
-
   return (async () => {
     reportProgress(0);
     let uploadedBytes = 0;
@@ -384,8 +359,6 @@ export const importTrainingJob = (
         ...commonParams,
         chunkIndex: String(chunkIndex),
       });
-      if (projectID) params.set('project_id', projectID);
-
       await apiClient.post(`/api/jobs/import?${params.toString()}`, chunk, {
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -395,16 +368,13 @@ export const importTrainingJob = (
           reportProgress(uploadedBytes + Math.min(event.loaded, chunk.size));
         },
       });
-
       uploadedBytes += chunk.size;
       reportProgress(uploadedBytes);
     }
-
     const completeParams = new URLSearchParams({
       aitk_upload: 'complete',
       ...commonParams,
     });
-    if (projectID) completeParams.set('project_id', projectID);
     if (gpuIDs) completeParams.set('gpu_ids', gpuIDs);
     const response = await apiClient.post(`/api/jobs/import?${completeParams.toString()}`, undefined, {
       headers: { 'X-AITK-File-Name': encodeURIComponent(file.name) },
@@ -412,24 +382,16 @@ export const importTrainingJob = (
     return response.data as TrainingJobImportResult;
   })();
 };
-
 export const sampleJobNow = async (jobID: string): Promise<void> => {
   const response = await apiClient.post(`/api/jobs/${jobID}/sample_now`);
   console.log('Job set to sample on next step:', response.data);
 };
-
 export const getRemoteStartProgress = (jobID: string, startID: string) => {
-  return apiClient
-    .get(`/api/jobs/${jobID}/start-progress/${startID}`)
-    .then(res => res.data as RemoteStartProgress);
+  return apiClient.get(`/api/jobs/${jobID}/start-progress/${startID}`).then(res => res.data as RemoteStartProgress);
 };
-
 export const downloadJobModelReferences = (jobID: string) => {
-  return apiClient
-    .post(`/api/jobs/${jobID}/prefetch-models`)
-    .then(res => res.data as JobModelPrefetchResult);
+  return apiClient.post(`/api/jobs/${jobID}/prefetch-models`).then(res => res.data as JobModelPrefetchResult);
 };
-
 export const downloadServerFile = (filePath: string, fileName?: string) => {
   const a = document.createElement('a');
   a.href = getDownloadUrl(filePath);
@@ -438,11 +400,9 @@ export const downloadServerFile = (filePath: string, fileName?: string) => {
   a.click();
   a.remove();
 };
-
 export const getJobConfig = (job: Job) => {
   return JSON.parse(job.job_config) as JobConfig;
 };
-
 export const getAvaliableJobActions = (job: Job) => {
   const jobConfig = getJobConfig(job);
   const isStopping = job.stop && job.status === 'running';
@@ -460,12 +420,10 @@ export const getAvaliableJobActions = (job: Job) => {
   }
   return { canDelete, canEdit, canStop, canStart, canRemoveFromQueue, canRestartFromScratch };
 };
-
 export const getNumberOfSamples = (job: Job) => {
   const jobConfig = getJobConfig(job);
   return jobConfig.config.process[0].sample?.prompts?.length || 0;
 };
-
 export const getTotalSteps = (job: Job): number | null => {
   const jobConfig = getJobConfig(job);
   if (jobConfig.config.process[0].train?.auto_train) return null;

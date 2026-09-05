@@ -37,48 +37,51 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
   const activeJobIDRef = useRef(jobID);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>('idle');
 
-  const refresh = useCallback((signal?: AbortSignal) => {
-    if (isRefreshingRef.current) return;
-    isRefreshingRef.current = true;
-    const requestJobID = jobID;
-    let loadStatus: 'loading' | 'refreshing' = 'loading';
-    if (didInitialLoadRef.current) {
-      loadStatus = 'refreshing';
-    }
-    setStatus(loadStatus);
-    const offset = offsetRef.current;
-    return apiClient
-      .get(`/api/jobs/${jobID}/log`, {
-        ...(offset !== null ? { params: { offset } } : {}),
-        signal,
-      })
-      .then(res => res.data)
-      .then(data => {
-        if (activeJobIDRef.current !== requestJobID) return;
-        const payload = parseJobLogResponse(data);
-        offsetRef.current = payload.offset;
-        const terminal = terminalRef.current;
-        if (!terminal) return;
-        if (payload.reset) {
-          terminal.reset();
-        }
-        terminal.write(payload.log);
-        setLog(terminal.toString());
-        setStatus('success');
-        didInitialLoadRef.current = true;
-      })
-      .catch(error => {
-        if (signal?.aborted) return;
-        if (activeJobIDRef.current !== requestJobID) return;
-        console.error('Error fetching log:', error);
-        setStatus('error');
-      })
-      .finally(() => {
-        if (activeJobIDRef.current === requestJobID) {
-          isRefreshingRef.current = false;
-        }
-      });
-  }, [jobID]);
+  const refresh = useCallback(
+    (signal?: AbortSignal) => {
+      if (!jobID || isRefreshingRef.current) return;
+      isRefreshingRef.current = true;
+      const requestJobID = jobID;
+      let loadStatus: 'loading' | 'refreshing' = 'loading';
+      if (didInitialLoadRef.current) {
+        loadStatus = 'refreshing';
+      }
+      setStatus(loadStatus);
+      const offset = offsetRef.current;
+      return apiClient
+        .get(`/api/jobs/${jobID}/log`, {
+          ...(offset !== null ? { params: { offset } } : {}),
+          signal,
+        })
+        .then(res => res.data)
+        .then(data => {
+          if (activeJobIDRef.current !== requestJobID) return;
+          const payload = parseJobLogResponse(data);
+          offsetRef.current = payload.offset;
+          const terminal = terminalRef.current;
+          if (!terminal) return;
+          if (payload.reset) {
+            terminal.reset();
+          }
+          terminal.write(payload.log);
+          setLog(terminal.toString());
+          setStatus('success');
+          didInitialLoadRef.current = true;
+        })
+        .catch(error => {
+          if (signal?.aborted) return;
+          if (activeJobIDRef.current !== requestJobID) return;
+          console.error('Error fetching log:', error);
+          setStatus('error');
+        })
+        .finally(() => {
+          if (activeJobIDRef.current === requestJobID) {
+            isRefreshingRef.current = false;
+          }
+        });
+    },
+    [jobID],
+  );
 
   useEffect(() => {
     activeJobIDRef.current = jobID;

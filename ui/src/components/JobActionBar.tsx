@@ -1,6 +1,22 @@
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, Trash2, Pen, Play, Pause, Cog, X, Download, Loader2, CheckCircle2, CloudDownload, Save, RefreshCcw, Image as ImageIcon } from 'lucide-react';
+import {
+  Eye,
+  Trash2,
+  Pen,
+  Play,
+  Pause,
+  Cog,
+  X,
+  Download,
+  Loader2,
+  CheckCircle2,
+  CloudDownload,
+  Save,
+  RefreshCcw,
+  Image as ImageIcon,
+} from 'lucide-react';
 import {
   Button,
   Dialog,
@@ -35,7 +51,6 @@ import {
 } from '@/utils/jobs';
 import { startQueue } from '@/utils/queue';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
-
 interface JobActionBarProps {
   job: Job;
   onRefresh?: () => void;
@@ -44,14 +59,15 @@ interface JobActionBarProps {
   className?: string;
   autoStartQueue?: boolean;
 }
-
 type ExportMode = 'state' | 'datasets';
 type ExportStatus = {
   mode: ExportMode;
   phase: 'exporting' | 'ready' | 'failed' | 'canceled';
   progress: TrainingJobExportProgress | null;
 };
-type ExportDialogState = { includeDatasets: boolean } | null;
+type ExportDialogState = {
+  includeDatasets: boolean;
+} | null;
 type ModelDownloadStatus = {
   phase: 'downloading' | 'completed' | 'failed';
   handledCount: number;
@@ -63,11 +79,9 @@ type RemoteStartStatus = {
   progress: RemoteStartProgress | null;
   error: string | null;
 };
-
 function sleep(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms));
 }
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -79,48 +93,45 @@ function formatBytes(bytes: number) {
   }
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
-
 function getExportPhase(progress: TrainingJobExportProgress): ExportStatus['phase'] {
   if (progress.status === 'completed') return 'ready';
   if (progress.status === 'failed') return 'failed';
   if (progress.status === 'canceled') return 'canceled';
   return 'exporting';
 }
-
 function getExportProgressDetail(progress: TrainingJobExportProgress | null) {
   if (!progress) return null;
-
-  const files =
-    progress.entriesTotal > 0 ? `${progress.entriesProcessed} / ${progress.entriesTotal} files` : null;
+  const files = progress.entriesTotal > 0 ? `${progress.entriesProcessed} / ${progress.entriesTotal} files` : null;
   const bytes =
-    progress.bytesTotal > 0
-      ? `${formatBytes(progress.bytesProcessed)} / ${formatBytes(progress.bytesTotal)}`
-      : null;
-
+    progress.bytesTotal > 0 ? `${formatBytes(progress.bytesProcessed)} / ${formatBytes(progress.bytesTotal)}` : null;
   return [files, bytes].filter(Boolean).join(' · ');
 }
-
 function getExportStatusLabel(exportStatus: ExportStatus | null) {
   if (!exportStatus) return '';
   if (exportStatus.phase === 'canceled') return 'Export canceled';
   if (exportStatus.progress?.status === 'canceling') return 'Canceling export...';
   if (exportStatus.phase === 'failed') return 'Export failed';
   if (exportStatus.phase === 'ready') return 'Export ready';
-
   return (
     exportStatus.progress?.message ||
     (exportStatus.mode === 'datasets' ? 'Starting dataset export...' : 'Starting job export...')
   );
 }
-
 function getApiErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === 'object' && 'response' in error) {
-    const response = (error as { response?: { data?: { error?: string } } }).response;
+    const response = (
+      error as {
+        response?: {
+          data?: {
+            error?: string;
+          };
+        };
+      }
+    ).response;
     if (response?.data?.error) return response.data.error;
   }
   return error instanceof Error ? error.message : fallback;
 }
-
 function getModelDownloadStatusLabel(status: ModelDownloadStatus) {
   if (status.phase === 'downloading') return 'Downloading referenced models...';
   if (status.phase === 'failed') return status.error || 'Model download failed';
@@ -129,23 +140,18 @@ function getModelDownloadStatusLabel(status: ModelDownloadStatus) {
   }
   return status.warnings[0] || 'No downloadable model references were found.';
 }
-
 function getRemoteStartStatusLabel(status: RemoteStartStatus) {
   if (status.phase === 'completed') return 'Remote job started';
   if (status.phase === 'failed') return status.error || status.progress?.error || 'Remote start failed';
   return status.progress?.message || 'Starting remote job...';
 }
-
 function getRemoteStartProgressDetail(progress: RemoteStartProgress | null) {
   if (!progress) return null;
   const dataset = progress.datasetName ? progress.datasetName : null;
   const bytes =
-    progress.bytesTotal > 0
-      ? `${formatBytes(progress.bytesProcessed)} / ${formatBytes(progress.bytesTotal)}`
-      : null;
+    progress.bytesTotal > 0 ? `${formatBytes(progress.bytesProcessed)} / ${formatBytes(progress.bytesTotal)}` : null;
   return [dataset, bytes].filter(Boolean).join(' / ');
 }
-
 function getRemoteCaptionState(job: Job) {
   try {
     const state = JSON.parse(job.job_config)?.config?.remote_caption;
@@ -154,38 +160,22 @@ function getRemoteCaptionState(job: Job) {
     return null;
   }
 }
-
 const actionButtonClass = 'operator-icon-button align-middle';
 const dangerousActionButtonClass =
   'operator-icon-button align-middle hover:border-rose-800 hover:bg-rose-950/50 hover:text-rose-100';
-
 function jobDetailHref(job: Job) {
-  if (job.project_id) {
-    return `/projects/${encodeURIComponent(job.project_id)}/runs/${encodeURIComponent(job.id)}`;
-  }
   return `/jobs/${encodeURIComponent(job.id)}`;
 }
-
 function jobEditHref(job: Job) {
-  if (job.project_id) {
-    return `/projects/${encodeURIComponent(job.project_id)}/runs/new?id=${encodeURIComponent(job.id)}`;
-  }
   return `/jobs/new?id=${encodeURIComponent(job.id)}`;
 }
-
 function jobCloneHref(job: Job) {
-  if (job.project_id) {
-    return `/projects/${encodeURIComponent(job.project_id)}/runs/new?cloneId=${encodeURIComponent(job.id)}`;
-  }
   return `/jobs/new?cloneId=${encodeURIComponent(job.id)}`;
 }
-
 type PendingAction = 'start' | 'remove' | 'stop' | 'delete' | 'save' | 'sample' | 'markStopped';
-
 // If the job never reports a state change (e.g. the request silently failed
 // server-side), unlock the bar after this long so it can't stay stuck.
-const PENDING_TIMEOUT_MS = 30_000;
-
+const PENDING_TIMEOUT_MS = 30000;
 export default function JobActionBar({
   job,
   onRefresh,
@@ -219,7 +209,8 @@ export default function JobActionBar({
   const isRemoteStarting = remoteStartStatus?.phase === 'starting';
   const remoteCaptionState = getRemoteCaptionState(job);
   const remoteCaptionDownloadStatus = remoteCaptionState?.downloadStatus || null;
-  const remoteCaptionLastError = typeof remoteCaptionState?.lastError === 'string' ? remoteCaptionState.lastError : null;
+  const remoteCaptionLastError =
+    typeof remoteCaptionState?.lastError === 'string' ? remoteCaptionState.lastError : null;
   const canRetryRemoteCaptionSync =
     job.job_type === 'caption' && job.worker_id !== 'local' && remoteCaptionDownloadStatus === 'failed';
   const canManualRemoteCaptionSync =
@@ -228,14 +219,12 @@ export default function JobActionBar({
   const jobStateKey = `${job.status}:${job.step}:${job.stop}:${job.queue_position ?? ''}`;
   const isBusy = pending !== null;
   const menuSpinner = <Loader2 className="h-4 w-4 animate-spin" />;
-
   useEffect(() => {
     if (pending && pendingStateKeyRef.current !== null && pendingStateKeyRef.current !== jobStateKey) {
       setPending(null);
       pendingStateKeyRef.current = null;
     }
   }, [jobStateKey, pending]);
-
   useEffect(() => {
     if (!pending) return;
     const timeout = window.setTimeout(() => {
@@ -244,7 +233,6 @@ export default function JobActionBar({
     }, PENDING_TIMEOUT_MS);
     return () => window.clearTimeout(timeout);
   }, [pending]);
-
   const runAction = async (action: PendingAction, task: () => Promise<void>, waitForJobUpdate = true) => {
     if (pending) return;
     pendingStateKeyRef.current = waitForJobUpdate ? jobStateKey : null;
@@ -258,7 +246,6 @@ export default function JobActionBar({
       throw error;
     }
   };
-
   useEffect(() => {
     return () => {
       isMounted.current = false;
@@ -274,9 +261,7 @@ export default function JobActionBar({
       activeExportID.current = null;
     };
   }, []);
-
   if (!afterDelete) afterDelete = onRefresh;
-
   const clearExportStatusSoon = () => {
     if (exportStatusTimeout.current !== null) {
       window.clearTimeout(exportStatusTimeout.current);
@@ -288,7 +273,6 @@ export default function JobActionBar({
       exportStatusTimeout.current = null;
     }, 2500);
   };
-
   const clearModelDownloadStatusSoon = () => {
     if (modelDownloadStatusTimeout.current !== null) {
       window.clearTimeout(modelDownloadStatusTimeout.current);
@@ -300,7 +284,6 @@ export default function JobActionBar({
       modelDownloadStatusTimeout.current = null;
     }, 3500);
   };
-
   const clearRemoteStartStatusSoon = () => {
     if (remoteStartStatusTimeout.current !== null) {
       window.clearTimeout(remoteStartStatusTimeout.current);
@@ -312,18 +295,15 @@ export default function JobActionBar({
       remoteStartStatusTimeout.current = null;
     }, 3500);
   };
-
   const updateExportStatus = (mode: ExportMode, progress: TrainingJobExportProgress) => {
     if (!isMounted.current) return;
     setExportStatus({ mode, phase: getExportPhase(progress), progress });
   };
-
   const waitForExport = async (mode: ExportMode, exportID: string) => {
     while (true) {
       await sleep(500);
       const progress = await getTrainingJobExportProgress(job.id, exportID);
       updateExportStatus(mode, progress);
-
       if (progress.status === 'completed') return progress;
       if (progress.status === 'canceled') return progress;
       if (progress.status === 'failed') {
@@ -331,27 +311,23 @@ export default function JobActionBar({
       }
     }
   };
-
   const handleCancelExport = async () => {
     const exportID = activeExportID.current || exportStatus?.progress?.exportID;
     if (!exportID || cancelExportInFlight.current) return;
-
     cancelExportInFlight.current = true;
     try {
       const progress = await cancelTrainingJobExport(job.id, exportID);
       updateExportStatus(exportStatus?.mode || (progress.includeDatasets ? 'datasets' : 'state'), progress);
     } catch (error) {
       console.error('Error canceling export:', error);
-      alert('Failed to cancel export. Please try again.');
+      reportWorkflowError('Failed to cancel export. Please try again.');
     } finally {
       cancelExportInFlight.current = false;
     }
   };
-
   const handleExport = async (includeDatasets: boolean, checkpointMode: TrainingJobCheckpointExportMode) => {
     const exportMode: ExportMode = includeDatasets ? 'datasets' : 'state';
     if (exportInFlight.current) return;
-
     exportInFlight.current = true;
     if (exportStatusTimeout.current !== null) {
       window.clearTimeout(exportStatusTimeout.current);
@@ -362,7 +338,6 @@ export default function JobActionBar({
       const started = await startTrainingJobExport(job.id, includeDatasets, checkpointMode);
       activeExportID.current = started.exportID;
       updateExportStatus(exportMode, started.progress);
-
       const progress = await waitForExport(exportMode, started.exportID);
       if (progress.status === 'canceled') {
         setExportStatus({ mode: exportMode, phase: 'canceled', progress });
@@ -372,16 +347,15 @@ export default function JobActionBar({
       if (!progress.zipPath || !progress.fileName) {
         throw new Error('Export completed without a downloadable file.');
       }
-
       downloadServerFile(progress.zipPath, progress.fileName);
       setExportStatus({ mode: exportMode, phase: 'ready', progress });
       clearExportStatusSoon();
       if (progress.warnings?.length) {
-        alert(`Export completed with warnings:\n\n${progress.warnings.join('\n')}`);
+        reportWorkflowError(`Export completed with warnings:\n\n${progress.warnings.join('\n')}`);
       }
     } catch (error) {
       console.error('Error exporting job:', error);
-      alert('Failed to export job. Please try again.');
+      reportWorkflowError('Failed to export job. Please try again.');
       setExportStatus({ mode: exportMode, phase: 'failed', progress: null });
       clearExportStatusSoon();
     } finally {
@@ -389,23 +363,19 @@ export default function JobActionBar({
       activeExportID.current = null;
     }
   };
-
   const openExportDialog = (includeDatasets: boolean) => {
     if (isExporting) return;
     setCheckpointMode('latest');
     setExportDialog({ includeDatasets });
   };
-
   const startDialogExport = () => {
     if (!exportDialog) return;
     const includeDatasets = exportDialog.includeDatasets;
     setExportDialog(null);
     void handleExport(includeDatasets, checkpointMode);
   };
-
   const handleDownloadModelReferences = async () => {
     if (job.job_type !== 'train' || modelDownloadInFlight.current) return;
-
     modelDownloadInFlight.current = true;
     if (modelDownloadStatusTimeout.current !== null) {
       window.clearTimeout(modelDownloadStatusTimeout.current);
@@ -435,10 +405,8 @@ export default function JobActionBar({
       modelDownloadInFlight.current = false;
     }
   };
-
   const handleStartJob = async () => {
     if (!canStart || remoteStartInFlight.current) return;
-
     const useRemoteStartProgress = job.job_type === 'train' && job.worker_id !== 'local';
     remoteStartInFlight.current = true;
     if (remoteStartStatusTimeout.current !== null) {
@@ -448,7 +416,6 @@ export default function JobActionBar({
     if (useRemoteStartProgress) {
       setRemoteStartStatus({ phase: 'starting', progress: null, error: null });
     }
-
     try {
       await startJob(job.id, undefined, {
         background: useRemoteStartProgress,
@@ -483,36 +450,32 @@ export default function JobActionBar({
         }));
         clearRemoteStartStatusSoon();
       } else {
-        alert(message);
+        reportWorkflowError(message);
       }
     } finally {
       remoteStartInFlight.current = false;
     }
   };
-
   const handleSaveNextStep = async () => {
     try {
       await saveJobNow(job.id);
       onRefresh?.();
     } catch (error) {
       console.error('Error requesting checkpoint save:', error);
-      alert(getApiErrorMessage(error, 'Failed to request a checkpoint save.'));
+      reportWorkflowError(getApiErrorMessage(error, 'Failed to request a checkpoint save.'));
     }
   };
-
   const handleSampleNextStep = async () => {
     try {
       await sampleJobNow(job.id);
       onRefresh?.();
     } catch (error) {
       console.error('Error requesting sample:', error);
-      alert(getApiErrorMessage(error, 'Failed to request a sample.'));
+      reportWorkflowError(getApiErrorMessage(error, 'Failed to request a sample.'));
     }
   };
-
   const handleRestartFromScratch = () => {
     if (!canRestartFromScratch) return;
-
     openConfirm({
       title: 'Restart From Scratch',
       message: `Restart "${job.name}" from scratch? This will permanently delete its checkpoints, samples, logs, and training metrics. The job config and datasets will remain.`,
@@ -523,12 +486,11 @@ export default function JobActionBar({
           await restartJobFromScratch(job.id);
           onRefresh?.();
         } catch (error) {
-          alert(getApiErrorMessage(error, 'Failed to restart job from scratch.'));
+          reportWorkflowError(getApiErrorMessage(error, 'Failed to restart job from scratch.'));
         }
       },
     });
   };
-
   const handleRetryRemoteCaptionResult = async () => {
     if (captionResultInFlight.current) return;
     captionResultInFlight.current = true;
@@ -538,14 +500,13 @@ export default function JobActionBar({
       onRefresh?.();
     } catch (error) {
       console.error('Error syncing remote caption result:', error);
-      alert(getApiErrorMessage(error, 'Failed to sync remote caption result.'));
+      reportWorkflowError(getApiErrorMessage(error, 'Failed to sync remote caption result.'));
       onRefresh?.();
     } finally {
       captionResultInFlight.current = false;
       setCaptionResultSyncing(false);
     }
   };
-
   const exportStatusLabel = getExportStatusLabel(exportStatus);
   const modelDownloadStatusLabel = modelDownloadStatus ? getModelDownloadStatusLabel(modelDownloadStatus) : '';
   const remoteStartStatusLabel = remoteStartStatus ? getRemoteStartStatusLabel(remoteStartStatus) : '';
@@ -560,8 +521,8 @@ export default function JobActionBar({
     !!(activeExportID.current || exportStatus?.progress?.exportID) &&
     exportStatus?.progress?.status !== 'canceling' &&
     exportStatus?.progress?.cancelRequested !== true;
-  const startActionLabel = ['stopped', 'error', 'completed'].includes(job.status) ? 'Resume job' : 'Start job';
-
+  const startActionLabel =
+    job.step > 0 && ['stopped', 'error', 'completed'].includes(job.status) ? 'Resume run' : 'Start run';
   return (
     <div className={`inline-flex items-center justify-end gap-1 ${className || ''}`}>
       {canStart && (
@@ -570,9 +531,10 @@ export default function JobActionBar({
           aria-label={startActionLabel}
           disabled={isRemoteStarting}
           onClick={() => void handleStartJob()}
-          className={`${actionButtonClass} ${isRemoteStarting ? 'cursor-wait opacity-80' : ''}`}
+          className={`${actionButtonClass} ${hideView ? '!w-auto gap-2 px-3' : ''} ${isRemoteStarting ? 'cursor-wait opacity-80' : ''}`}
         >
           {isRemoteStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          {hideView && <span>{startActionLabel}</span>}
         </Button>
       )}
       {canRemoveFromQueue && (
@@ -698,10 +660,7 @@ export default function JobActionBar({
         <MenuItems anchor="bottom" className="z-50 mt-2 w-60 border border-gray-700 bg-gray-950 px-2 py-2">
           {job.job_type === 'train' && (
             <MenuItem>
-              <Link
-                href={jobCloneHref(job)}
-                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
-              >
+              <Link href={jobCloneHref(job)} className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block">
                 Clone Job
               </Link>
             </MenuItem>
@@ -731,9 +690,7 @@ export default function JobActionBar({
           {job.job_type === 'train' && (
             <MenuItem>
               <div
-                className={`px-4 py-1 rounded flex items-center gap-2 ${
-                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-                }`}
+                className={`px-4 py-1 rounded flex items-center gap-2 ${isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'}`}
                 aria-disabled={isExporting}
                 onClick={() => openExportDialog(false)}
               >
@@ -745,9 +702,7 @@ export default function JobActionBar({
           {job.job_type === 'train' && (
             <MenuItem>
               <div
-                className={`px-4 py-1 rounded flex items-center gap-2 ${
-                  isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-                }`}
+                className={`px-4 py-1 rounded flex items-center gap-2 ${isExporting ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'}`}
                 aria-disabled={isExporting}
                 onClick={() => openExportDialog(true)}
               >
@@ -759,9 +714,7 @@ export default function JobActionBar({
           {job.job_type === 'train' && (
             <MenuItem>
               <div
-                className={`px-4 py-1 rounded flex items-center gap-2 ${
-                  isDownloadingModels ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-                }`}
+                className={`px-4 py-1 rounded flex items-center gap-2 ${isDownloadingModels ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'}`}
                 aria-disabled={isDownloadingModels}
                 onClick={() => void handleDownloadModelReferences()}
               >
@@ -777,9 +730,7 @@ export default function JobActionBar({
           {canManualRemoteCaptionSync && (
             <MenuItem>
               <div
-                className={`px-4 py-1 rounded flex items-center gap-2 ${
-                  remoteCaptionActionBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'
-                }`}
+                className={`px-4 py-1 rounded flex items-center gap-2 ${remoteCaptionActionBusy ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-gray-800'}`}
                 aria-disabled={remoteCaptionActionBusy}
                 onClick={() => {
                   if (!remoteCaptionActionBusy) void handleRetryRemoteCaptionResult();
@@ -957,9 +908,7 @@ export default function JobActionBar({
         <div
           role="status"
           aria-live="polite"
-          className={`fixed ${
-            exportStatus ? 'bottom-24' : 'bottom-4'
-          } right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
+          className={`fixed ${exportStatus ? 'bottom-24' : 'bottom-4'} right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
         >
           {remoteStartStatus.phase === 'completed' ? (
             <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-green-400" />
@@ -991,9 +940,7 @@ export default function JobActionBar({
         <div
           role="status"
           aria-live="polite"
-          className={`fixed ${
-            exportStatus || remoteStartStatus ? 'bottom-44' : 'bottom-4'
-          } right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
+          className={`fixed ${exportStatus || remoteStartStatus ? 'bottom-44' : 'bottom-4'} right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] items-start gap-2 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 shadow-lg`}
         >
           {modelDownloadStatus.phase === 'completed' ? (
             <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-green-400" />

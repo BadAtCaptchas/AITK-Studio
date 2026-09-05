@@ -311,5 +311,3 @@ export default function useMonitorStream(): MonitorStreamState {
 
   return snapshot;
 }
-
-

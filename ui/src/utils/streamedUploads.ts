@@ -1,10 +1,8 @@
 import type { AxiosProgressEvent } from 'axios';
 import { apiClient } from './api';
-
 function encodedHeaderValue(value: string) {
   return encodeURIComponent(value);
 }
-
 export async function uploadLoraFile(
   file: File,
   options: {
@@ -24,12 +22,10 @@ export async function uploadLoraFile(
     timeout: 0,
   });
 }
-
 export async function uploadTemporaryMediaFile(
   file: File,
   options:
     | {
-        projectID?: string | null;
         onUploadProgress?: (event: AxiosProgressEvent) => void;
       }
     | ((event: AxiosProgressEvent) => void) = {},
@@ -39,22 +35,17 @@ export async function uploadTemporaryMediaFile(
     headers: {
       'Content-Type': 'application/octet-stream',
       'X-AITK-File-Name': encodedHeaderValue(file.name),
-      ...(normalizedOptions.projectID
-        ? { 'X-AITK-Project-ID': encodedHeaderValue(normalizedOptions.projectID) }
-        : {}),
     },
     onUploadProgress: normalizedOptions.onUploadProgress,
     timeout: 0,
   });
 }
-
 export async function uploadDatasetFile(
   file: File | Blob,
   options: {
     datasetName: string;
     filename?: string;
     workerID?: string;
-    projectID?: string | null;
     relativePath?: string;
     sourceFolderPath?: string;
     failIfDatasetExists?: boolean;
@@ -71,11 +62,9 @@ export async function uploadDatasetFile(
       ...(options.workerID && options.workerID !== 'local'
         ? { 'X-AITK-Worker-ID': encodedHeaderValue(options.workerID) }
         : {}),
-      ...(options.projectID ? { 'X-AITK-Project-ID': encodedHeaderValue(options.projectID) } : {}),
+
       ...(options.relativePath ? { 'X-AITK-Relative-Path': encodedHeaderValue(options.relativePath) } : {}),
-      ...(options.sourceFolderPath
-        ? { 'X-AITK-Source-Folder': encodedHeaderValue(options.sourceFolderPath) }
-        : {}),
+      ...(options.sourceFolderPath ? { 'X-AITK-Source-Folder': encodedHeaderValue(options.sourceFolderPath) } : {}),
       ...(options.failIfDatasetExists ? { 'X-AITK-Fail-If-Dataset-Exists': '1' } : {}),
       ...(options.encryptedObjectPath
         ? { 'X-AITK-Encrypted-Object-Path': encodedHeaderValue(options.encryptedObjectPath) }

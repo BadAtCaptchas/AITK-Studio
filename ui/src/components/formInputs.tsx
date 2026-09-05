@@ -16,6 +16,9 @@ const inputClasses =
 const getDocTooltip = (doc: ConfigDoc) => doc.tooltip || (typeof doc.title === 'string' ? doc.title : 'Open help');
 
 export interface InputProps {
+  id?: string;
+  error?: string;
+  hint?: string;
   label?: string;
   docKey?: string | null;
   doc?: ConfigDoc | null;
@@ -33,27 +36,34 @@ export interface TextInputProps extends InputProps {
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>((props: TextInputProps, ref) => {
   const { label, value, onChange, placeholder, required, disabled, type = 'text', className, docKey = null } = props;
+  const generatedId = React.useId();
+  const fieldId = props.id || generatedId;
   let { doc } = props;
   if (!doc && docKey) {
     doc = getDoc(docKey);
   }
   return (
-    <div className={classNames(className)}>
+    <div data-field-label={typeof label === 'string' ? label : undefined} className={classNames(className)}>
       {label && (
-        <label className={labelClasses}>
-          {label}{' '}
+        <div className={labelClasses}>
+          <label htmlFor={fieldId}>{label}</label>
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              className="ml-2 rounded p-1 text-gray-400"
+              aria-label={`Help: ${label || 'field'}`}
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
-              <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+              <CircleHelp className="inline h-4 w-4" aria-hidden="true" />
+            </button>
           )}
-        </label>
+        </div>
       )}
       <input
+        id={fieldId}
+        aria-invalid={Boolean(props.error)}
+        aria-describedby={props.error || props.hint ? `${fieldId}-feedback` : undefined}
         ref={ref}
         type={type}
         aria-label={label || placeholder}
@@ -66,6 +76,15 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>((props: Te
         required={required}
         disabled={disabled}
       />
+      {(props.error || props.hint) && (
+        <p
+          id={`${fieldId}-feedback`}
+          className={`mt-2 text-xs ${props.error ? 'text-rose-400' : 'text-gray-400'}`}
+          role={props.error ? 'alert' : undefined}
+        >
+          {props.error || props.hint}
+        </p>
+      )}
     </div>
   );
 });
@@ -82,27 +101,34 @@ export interface TextAreaInputProps extends InputProps {
 
 export const TextAreaInput = forwardRef<HTMLTextAreaElement, TextAreaInputProps>((props: TextAreaInputProps, ref) => {
   const { label, value, onChange, placeholder, required, disabled, rows = 4, className, docKey = null } = props;
+  const generatedId = React.useId();
+  const fieldId = props.id || generatedId;
   let { doc } = props;
   if (!doc && docKey) {
     doc = getDoc(docKey);
   }
   return (
-    <div className={classNames(className)}>
+    <div data-field-label={typeof label === 'string' ? label : undefined} className={classNames(className)}>
       {label && (
-        <label className={labelClasses}>
-          {label}{' '}
+        <div className={labelClasses}>
+          <label htmlFor={fieldId}>{label}</label>
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              className="ml-2 rounded p-1 text-gray-400"
+              aria-label={`Help: ${label || 'field'}`}
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
-              <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+              <CircleHelp className="inline h-4 w-4" aria-hidden="true" />
+            </button>
           )}
-        </label>
+        </div>
       )}
       <textarea
+        id={fieldId}
+        aria-invalid={Boolean(props.error)}
+        aria-describedby={props.error || props.hint ? `${fieldId}-feedback` : undefined}
         ref={ref}
         aria-label={label || placeholder}
         value={value}
@@ -115,6 +141,15 @@ export const TextAreaInput = forwardRef<HTMLTextAreaElement, TextAreaInputProps>
         disabled={disabled}
         rows={rows}
       />
+      {(props.error || props.hint) && (
+        <p
+          id={`${fieldId}-feedback`}
+          className={`mt-2 text-xs ${props.error ? 'text-rose-400' : 'text-gray-400'}`}
+          role={props.error ? 'alert' : undefined}
+        >
+          {props.error || props.hint}
+        </p>
+      )}
     </div>
   );
 });
@@ -132,6 +167,8 @@ export interface NumberInputProps extends InputProps {
 
 export const NumberInput = (props: NumberInputProps) => {
   const { label, value, onChange, placeholder, required, min, max, allowEmpty, docKey = null } = props;
+  const generatedId = React.useId();
+  const fieldId = props.id || generatedId;
   let { doc } = props;
   if (!doc && docKey) {
     doc = getDoc(docKey);
@@ -146,22 +183,27 @@ export const NumberInput = (props: NumberInputProps) => {
   }, [value]);
 
   return (
-    <div className={classNames(props.className)}>
+    <div data-field-label={typeof label === 'string' ? label : undefined} className={classNames(props.className)}>
       {label && (
-        <label className={labelClasses}>
-          {label}{' '}
+        <div className={labelClasses}>
+          <label htmlFor={fieldId}>{label}</label>
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              className="ml-2 rounded p-1 text-gray-400"
+              aria-label={`Help: ${label || 'field'}`}
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
-              <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+              <CircleHelp className="inline h-4 w-4" aria-hidden="true" />
+            </button>
           )}
-        </label>
+        </div>
       )}
       <input
+        id={fieldId}
+        aria-invalid={Boolean(props.error)}
+        aria-describedby={props.error || props.hint ? `${fieldId}-feedback` : undefined}
         type="number"
         aria-label={label || placeholder}
         value={inputValue}
@@ -204,6 +246,15 @@ export const NumberInput = (props: NumberInputProps) => {
         max={max}
         step="any"
       />
+      {(props.error || props.hint) && (
+        <p
+          id={`${fieldId}-feedback`}
+          className={`mt-2 text-xs ${props.error ? 'text-rose-400' : 'text-gray-400'}`}
+          role={props.error ? 'alert' : undefined}
+        >
+          {props.error || props.hint}
+        </p>
+      )}
     </div>
   );
 };
@@ -217,6 +268,8 @@ export interface SelectInputProps extends InputProps {
 
 export const SelectInput = (props: SelectInputProps) => {
   const { label, value, onChange, options, docKey = null } = props;
+  const generatedId = React.useId();
+  const fieldId = props.id || generatedId;
   let { doc } = props;
   if (!doc && docKey) {
     doc = getDoc(docKey);
@@ -234,25 +287,31 @@ export const SelectInput = (props: SelectInputProps) => {
   }
   return (
     <div
+      data-field-label={label}
       className={classNames(props.className, {
         'opacity-30 cursor-not-allowed': props.disabled,
       })}
     >
       {label && (
-        <label className={labelClasses}>
-          {label}{' '}
+        <div className={labelClasses}>
+          <label htmlFor={fieldId}>{label}</label>
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              className="ml-2 rounded p-1 text-gray-400"
+              aria-label={`Help: ${label || 'field'}`}
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
-              <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+              <CircleHelp className="inline h-4 w-4" aria-hidden="true" />
+            </button>
           )}
-        </label>
+        </div>
       )}
       <Select
+        inputId={fieldId}
+        aria-invalid={Boolean(props.error)}
+        aria-describedby={props.error || props.hint ? `${fieldId}-feedback` : undefined}
         aria-label={props.label || props.placeholder}
         value={selectedOption}
         options={options}
@@ -267,6 +326,15 @@ export const SelectInput = (props: SelectInputProps) => {
           }
         }}
       />
+      {(props.error || props.hint) && (
+        <p
+          id={`${fieldId}-feedback`}
+          className={`mt-2 text-xs ${props.error ? 'text-rose-400' : 'text-gray-400'}`}
+          role={props.error ? 'alert' : undefined}
+        >
+          {props.error || props.hint}
+        </p>
+      )}
     </div>
   );
 };
@@ -282,6 +350,8 @@ const CUSTOM_SELECT_VALUE = '__custom__';
 
 export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
   const { label, value, onChange, options, docKey = null } = props;
+  const generatedId = React.useId();
+  const fieldId = props.id || generatedId;
   let { doc } = props;
   if (!doc && docKey) {
     doc = getDoc(docKey);
@@ -321,28 +391,33 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
 
   return (
     <div
+      data-field-label={label}
       className={classNames(props.className, {
         'opacity-30 cursor-not-allowed': props.disabled,
       })}
     >
       {label && (
-        <label className={labelClasses}>
-          {label}{' '}
+        <div className={labelClasses}>
+          <label htmlFor={fieldId}>{label}</label>
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              className="ml-2 rounded p-1 text-gray-400"
+              aria-label={`Help: ${label || 'field'}`}
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
-              <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+              <CircleHelp className="inline h-4 w-4" aria-hidden="true" />
+            </button>
           )}
-        </label>
+        </div>
       )}
       <div className="flex min-w-0 gap-2">
         <div className={isCustom ? 'min-w-0 w-1/3' : 'min-w-0 w-full'}>
           <Select
-            aria-label={props.label || props.placeholder}
+            inputId={fieldId}
+            aria-invalid={Boolean(props.error)}
+            aria-describedby={props.error || props.hint ? `${fieldId}-feedback` : undefined}
             value={selectedOption}
             options={selectOptions}
             isDisabled={props.disabled}
@@ -373,8 +448,11 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
         </div>
         {isCustom && (
           <input
+            id={`${fieldId}-custom`}
+            aria-label={`${label || 'Value'}: custom value`}
+            aria-invalid={Boolean(props.error)}
+            aria-describedby={props.error || props.hint ? `${fieldId}-feedback` : undefined}
             ref={customInputRef}
-            aria-label={props.label || props.placeholder}
             type="text"
             value={value}
             onChange={e => onChange(e.target.value)}
@@ -384,6 +462,15 @@ export const CreatableSelectInput = (props: CreatableSelectInputProps) => {
           />
         )}
       </div>
+      {(props.error || props.hint) && (
+        <p
+          id={`${fieldId}-feedback`}
+          className={`mt-2 text-xs ${props.error ? 'text-rose-400' : 'text-gray-400'}`}
+          role={props.error ? 'alert' : undefined}
+        >
+          {props.error || props.hint}
+        </p>
+      )}
     </div>
   );
 };
@@ -401,6 +488,7 @@ export interface CheckboxProps {
 
 export const Checkbox = (props: CheckboxProps) => {
   const { label, checked, onChange, required, disabled } = props;
+  const fieldId = React.useId();
   let { doc } = props;
   if (!doc && props.docKey) {
     doc = getDoc(props.docKey);
@@ -409,7 +497,10 @@ export const Checkbox = (props: CheckboxProps) => {
   const id = React.useId();
 
   return (
-    <div className={classNames('flex items-center gap-3', props.className)}>
+    <div
+      data-field-label={typeof label === 'string' ? label : undefined}
+      className={classNames('flex items-center gap-3', props.className)}
+    >
       <button
         type="button"
         role="switch"
@@ -444,13 +535,15 @@ export const Checkbox = (props: CheckboxProps) => {
             {label}
           </label>
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              aria-label="Open field help"
+              className="inline-block ml-1 rounded p-1 text-xs text-gray-400"
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+            </button>
           )}
         </>
       )}
@@ -468,25 +561,28 @@ interface FormGroupProps {
 
 export const FormGroup: React.FC<FormGroupProps> = props => {
   const { label, className, children, docKey = null } = props;
+  const fieldId = React.useId();
   let { doc } = props;
   if (!doc && docKey) {
     doc = getDoc(docKey);
   }
   return (
-    <div className={classNames(className)}>
+    <div data-field-label={typeof label === 'string' ? label : undefined} className={classNames(className)}>
       {label && (
-        <label className={classNames(labelClasses, 'mb-2')}>
+        <div className={classNames(labelClasses, 'mb-2')}>
           {label}{' '}
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              aria-label="Open field help"
+              className="inline-block ml-1 rounded p-1 text-xs text-gray-400"
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
               <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+            </button>
           )}
-        </label>
+        </div>
       )}
       <div className="space-y-2">{children}</div>
     </div>
@@ -505,6 +601,7 @@ export interface SliderInputProps extends InputProps {
 
 export const SliderInput: React.FC<SliderInputProps> = props => {
   const { label, value, onChange, min, max, step = 1, disabled, className, docKey = null, showValue = true } = props;
+  const fieldId = React.useId();
   let { doc } = props;
   if (!doc && docKey) {
     doc = getDoc(docKey);
@@ -579,24 +676,51 @@ export const SliderInput: React.FC<SliderInputProps> = props => {
   return (
     <div className={classNames(className, disabled ? 'opacity-30 cursor-not-allowed' : '')}>
       {label && (
-        <label className={labelClasses}>
-          {label}{' '}
+        <div className={labelClasses}>
+          <label htmlFor={fieldId}>{label}</label>
           {doc && (
-            <div
-              className="inline-block ml-1 text-xs text-gray-500 cursor-pointer"
+            <button
+              type="button"
+              className="ml-2 rounded p-1 text-gray-400"
+              aria-label={`Help: ${label || 'field'}`}
               title={getDocTooltip(doc)}
               onClick={() => openDoc(doc)}
             >
-              <CircleHelp className="inline-block w-4 h-4 cursor-pointer" />
-            </div>
+              <CircleHelp className="inline h-4 w-4" aria-hidden="true" />
+            </button>
           )}
-        </label>
+        </div>
       )}
 
       <div className="flex items-center gap-3">
         <div className="flex-1">
           <div
             ref={trackRef}
+            id={fieldId}
+            role="slider"
+            tabIndex={disabled ? -1 : 0}
+            aria-label={label}
+            aria-valuemin={min}
+            aria-valuemax={max}
+            aria-valuenow={value}
+            aria-disabled={disabled}
+            onKeyDown={event => {
+              if (disabled) return;
+              const next =
+                event.key === 'Home'
+                  ? min
+                  : event.key === 'End'
+                    ? max
+                    : ['ArrowRight', 'ArrowUp'].includes(event.key)
+                      ? value + step
+                      : ['ArrowLeft', 'ArrowDown'].includes(event.key)
+                        ? value - step
+                        : null;
+              if (next !== null) {
+                event.preventDefault();
+                onChange(snapToStep(next));
+              }
+            }}
             onPointerDown={onPointerDown}
             className={classNames(
               'relative w-full h-6 select-none outline-none',

@@ -29,8 +29,6 @@
     "test:krea2-edit": "node --test scripts/krea2EditOptions.test.mjs",
     "test:remote": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs scripts/remoteClient.test.mjs scripts/jobsApiList.test.mjs scripts/queueSync.test.mjs scripts/openRouterPricing.test.mjs",
     "test:queue-reorder": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/queueReorder.test.mjs",
-    "test:projects": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/projects.test.mjs scripts/projectsLifecycle.test.mjs scripts/projectSetup.test.mjs",
-    "test:project-sync": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/projectSyncProtocol.test.mjs",
     "test:dataset-media": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/datasetMedia.test.mjs",
     "test:lifecycle": "node --test scripts/appLifecycle.test.mjs",
     "test:dependency-install": "node --test scripts/installDeps.test.mjs",
@@ -63,7 +61,8 @@
     "test:lora-library": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/loraLibrary.test.mjs",
     "test:scripts": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/scriptRunner.test.mjs",
     "migrate_sqlite_to_mongo": "node scripts/migrate-sqlite-to-mongo.mjs",
-    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,css,scss}\""
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,css,scss}\"",
+    "test:global-upgrade": "node --test scripts/globalWorkspaceUpgrade.test.mjs"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.0",

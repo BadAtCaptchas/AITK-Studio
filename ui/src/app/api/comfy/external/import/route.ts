@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import {
   ExternalComfyError,
@@ -16,12 +17,15 @@ function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json({ error: error instanceof Error ? error.message : 'External ComfyUI import failed.' }, { status: 500 });
+  return NextResponse.json(
+    { error: error instanceof Error ? error.message : 'External ComfyUI import failed.' },
+    { status: 500 },
+  );
 }
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const promptId = typeof body?.promptId === 'string' ? body.promptId.trim() : '';
     if (!promptId) {
       return NextResponse.json({ error: 'promptId is required.' }, { status: 400 });
@@ -42,7 +46,8 @@ export async function POST(request: Request) {
       promptId,
       serverUrl,
       images: imageRefsFromHistoryEntry(entry),
-      status: typeof entry === 'object' && entry && 'status' in entry ? (entry as Record<string, unknown>).status : null,
+      status:
+        typeof entry === 'object' && entry && 'status' in entry ? (entry as Record<string, unknown>).status : null,
     });
   } catch (error) {
     return errorResponse(error);

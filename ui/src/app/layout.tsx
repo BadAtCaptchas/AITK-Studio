@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import './graphite.css';
 import './studio-workspaces.css';
+import './journey.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import ConfirmModal from '@/components/ConfirmModal';
 import AuthWrapper from '@/components/AuthWrapper';

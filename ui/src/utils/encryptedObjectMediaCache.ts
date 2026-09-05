@@ -1,18 +1,13 @@
 import type { EncryptedDatasetItem } from '../types';
-
 export type EncryptedObjectRequestBody = {
   datasetName: string;
   objectPath: string;
   worker_id: string;
-  project_id?: string;
 };
-
 export type EncryptedObjectMediaStatus = 'locked' | 'loading' | 'ready' | 'error';
-
 export type EncryptedObjectMediaLoadOptions = {
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   cryptoKey: CryptoKey;
   item: Pick<EncryptedDatasetItem, 'objectPath' | 'updatedAt' | 'mimeType'>;
   loadEncryptedObject: (body: EncryptedObjectRequestBody) => Promise<Blob>;
@@ -20,32 +15,26 @@ export type EncryptedObjectMediaLoadOptions = {
   createObjectUrl?: (blob: Blob) => string;
   revokeObjectUrl?: (url: string) => void;
 };
-
 const ENCRYPTED_OBJECT_MEDIA_CACHE_LIMIT = 128;
 const ENCRYPTED_OBJECT_MEDIA_LOAD_CONCURRENCY = 4;
-
 type CacheEntry = {
   url: string;
   lastUsed: number;
   revokeObjectUrl: (url: string) => void;
 };
-
 type QueueEntry<T> = {
   task: () => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
 };
-
 const cryptoKeyIDs = new WeakMap<object, number>();
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<string>>();
 const queue: QueueEntry<unknown>[] = [];
-
 let nextCryptoKeyID = 1;
 let accessCounter = 1;
 let activeLoads = 0;
 let cacheGeneration = 0;
-
 function cryptoKeyID(cryptoKey: CryptoKey) {
   const keyObject = cryptoKey as object;
   let id = cryptoKeyIDs.get(keyObject);
@@ -56,29 +45,21 @@ function cryptoKeyID(cryptoKey: CryptoKey) {
   }
   return id;
 }
-
-function projectScope(workerID: string, projectID?: string | null) {
-  return workerID === 'local' && projectID ? projectID : '';
-}
-
 function defaultCreateObjectUrl(blob: Blob) {
   if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
     throw new Error('Object URLs are not available in this environment.');
   }
   return URL.createObjectURL(blob);
 }
-
 function defaultRevokeObjectUrl(url: string) {
   if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
     URL.revokeObjectURL(url);
   }
 }
-
 function cacheKey(options: EncryptedObjectMediaLoadOptions) {
   const workerID = options.workerID || 'local';
   return JSON.stringify([
     workerID,
-    projectScope(workerID, options.projectID),
     options.datasetName,
     cryptoKeyID(options.cryptoKey),
     options.item.objectPath,
@@ -86,12 +67,10 @@ function cacheKey(options: EncryptedObjectMediaLoadOptions) {
     options.item.mimeType || 'application/octet-stream',
   ]);
 }
-
 function touch(entry: CacheEntry) {
   entry.lastUsed = accessCounter;
   accessCounter += 1;
 }
-
 function evictLeastRecentlyUsed() {
   while (cache.size > ENCRYPTED_OBJECT_MEDIA_CACHE_LIMIT) {
     let oldestKey = '';
@@ -108,7 +87,6 @@ function evictLeastRecentlyUsed() {
     if (oldest) oldest.revokeObjectUrl(oldest.url);
   }
 }
-
 function pumpQueue() {
   while (activeLoads < ENCRYPTED_OBJECT_MEDIA_LOAD_CONCURRENCY && queue.length > 0) {
     const entry = queue.shift();
@@ -123,23 +101,19 @@ function pumpQueue() {
       });
   }
 }
-
 function runLimited<T>(task: () => Promise<T>) {
   return new Promise<T>((resolve, reject) => {
     queue.push({ task, resolve: resolve as (value: unknown) => void, reject });
     pumpQueue();
   });
 }
-
 export function buildEncryptedObjectRequestBody({
   datasetName,
   workerID,
-  projectID,
   objectPath,
 }: {
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   objectPath: string;
 }): EncryptedObjectRequestBody {
   const body: EncryptedObjectRequestBody = {
@@ -147,12 +121,8 @@ export function buildEncryptedObjectRequestBody({
     objectPath,
     worker_id: workerID || 'local',
   };
-  if (body.worker_id === 'local' && projectID) {
-    body.project_id = projectID;
-  }
   return body;
 }
-
 export async function loadEncryptedObjectMediaUrl(options: EncryptedObjectMediaLoadOptions) {
   const key = cacheKey(options);
   const cached = cache.get(key);
@@ -160,10 +130,8 @@ export async function loadEncryptedObjectMediaUrl(options: EncryptedObjectMediaL
     touch(cached);
     return cached.url;
   }
-
   const pending = inFlight.get(key);
   if (pending) return pending;
-
   const generation = cacheGeneration;
   const createObjectUrl = options.createObjectUrl || defaultCreateObjectUrl;
   const revokeObjectUrl = options.revokeObjectUrl || defaultRevokeObjectUrl;
@@ -171,7 +139,6 @@ export async function loadEncryptedObjectMediaUrl(options: EncryptedObjectMediaL
     const body = buildEncryptedObjectRequestBody({
       datasetName: options.datasetName,
       workerID: options.workerID,
-      projectID: options.projectID,
       objectPath: options.item.objectPath,
     });
     const encryptedBlob = await options.loadEncryptedObject(body);
@@ -188,11 +155,9 @@ export async function loadEncryptedObjectMediaUrl(options: EncryptedObjectMediaL
   }).finally(() => {
     inFlight.delete(key);
   });
-
   inFlight.set(key, promise);
   return promise;
 }
-
 export function clearEncryptedObjectMediaCache() {
   cacheGeneration += 1;
   cache.forEach(entry => entry.revokeObjectUrl(entry.url));

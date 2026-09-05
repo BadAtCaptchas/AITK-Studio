@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import { getTrainingFolder } from '@/server/settings';
 import {
@@ -14,7 +15,7 @@ export const maxDuration = 1200;
 export async function POST(request: Request) {
   let body: unknown;
   try {
-    body = await request.json();
+    body = assertGlobalPayload(await request.json());
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }

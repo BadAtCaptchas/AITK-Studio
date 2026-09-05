@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { db } from '@/server/db';
-import { assertProjectJobEnabled } from '@/server/projects';
+
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -22,11 +22,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  }
-  try {
-    await assertProjectJobEnabled(job);
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
   }
 
   if (job.status !== 'running') {

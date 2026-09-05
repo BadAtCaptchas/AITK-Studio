@@ -1,5 +1,5 @@
 'use client';
-
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@headlessui/react';
@@ -27,16 +27,12 @@ import { groupedModelOptions, modelArchs, quantizationOptions } from '@/app/jobs
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { getLayerOffloadingMemoryProfile, type LayerOffloadingBackend } from '@/utils/memoryProfiles';
 import { uploadLoraFile } from '@/utils/streamedUploads';
-
 type GeneratedLora = {
   id: string;
   label: string;
   path: string;
   filename: string;
-  source: 'job' | 'uploaded' | 'project';
-  scope?: 'global' | 'project';
-  projectId?: string;
-  projectName?: string;
+  source: 'job' | 'uploaded';
   portableRef?: string;
   jobId?: string;
   jobName?: string;
@@ -48,7 +44,6 @@ type GeneratedLora = {
   originalFilename?: string;
   model?: Partial<ModelConfig> & Record<string, unknown>;
 };
-
 type GeneratorModelConfig = ModelConfig & {
   dtype?: string;
   lora_path?: string;
@@ -60,7 +55,6 @@ type GeneratorModelConfig = ModelConfig & {
   quantize_kwargs?: ModelConfig['quantize_kwargs'];
   [key: string]: unknown;
 };
-
 type PromptImageSettings = {
   prompt: string;
   width?: number;
@@ -83,46 +77,38 @@ type PromptImageSettings = {
   network_multiplier?: number;
   [key: string]: unknown;
 };
-
 const dtypeOptions: SelectOption[] = [
   { value: 'bf16', label: 'bf16' },
   { value: 'float16', label: 'float16' },
   { value: 'float32', label: 'float32' },
 ];
-
 const samplerOptions: SelectOption[] = [
   { value: 'flowmatch', label: 'flowmatch' },
   { value: 'ddpm', label: 'ddpm' },
 ];
-
 const generationBackendOptions: SelectOption[] = [
   { value: 'native', label: 'Native' },
   { value: 'comfy', label: 'ComfyUI' },
 ];
-
 const comfyModeOptions: SelectOption[] = [
   { value: 'external', label: 'External' },
   { value: 'managed', label: 'Managed' },
 ];
-
 const comfyOnErrorOptions: SelectOption[] = [
   { value: 'fail', label: 'Fail' },
   { value: 'native', label: 'Native fallback' },
   { value: 'skip', label: 'Skip' },
 ];
-
 const imageFormatOptions: SelectOption[] = [
   { value: 'png', label: 'PNG' },
   { value: 'jpg', label: 'JPG' },
   { value: 'webp', label: 'WEBP' },
   { value: 'jxl', label: 'JXL' },
 ];
-
 const layerOffloadingBackendOptions: SelectOption[] = [
   { value: 'block', label: 'Block' },
   { value: 'legacy', label: 'Legacy' },
 ];
-
 function getArchDefault(archName: string, key: string, fallback: unknown) {
   const arch = modelArchs.find(item => item.name === archName);
   const value = arch?.defaults?.[key];
@@ -131,17 +117,14 @@ function getArchDefault(archName: string, key: string, fallback: unknown) {
   }
   return value ?? fallback;
 }
-
 function getArchNumberDefault(archName: string, key: string, fallback: number) {
   const value = getArchDefault(archName, key, fallback);
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
-
 function archSupportsSection(archName: string, section: 'model.layer_offloading') {
   return Boolean(modelArchs.find(item => item.name === archName)?.additionalSections?.includes(section));
 }
-
 function getDefaultModelConfig(archName: string): GeneratorModelConfig {
   const memoryProfile = getLayerOffloadingMemoryProfile(archName);
   return {
@@ -171,11 +154,9 @@ function getDefaultModelConfig(archName: string): GeneratorModelConfig {
     ),
   };
 }
-
 function getDefaultSampler(archName: string) {
   return String(getArchDefault(archName, 'config.process[0].sample.sampler', 'flowmatch'));
 }
-
 function sanitizeJobName(value: string) {
   return value
     .trim()
@@ -183,7 +164,6 @@ function sanitizeJobName(value: string) {
     .replace(/^_+|_+$/g, '')
     .slice(0, 80);
 }
-
 function makeDefaultJobName() {
   const timestamp = new Date()
     .toISOString()
@@ -195,44 +175,36 @@ function makeDefaultJobName() {
     .slice(0, 14);
   return `generate_${timestamp}`;
 }
-
 function joinPath(root: string, ...parts: string[]) {
   const separator = root.includes('\\') ? '\\' : '/';
   return [root.replace(/[\\/]+$/, ''), ...parts.map(part => part.replace(/^[\\/]+|[\\/]+$/g, ''))].join(separator);
 }
-
 function splitPrompts(value: string) {
   return value
     .split(/\r?\n/)
     .map(prompt => prompt.trim())
     .filter(Boolean);
 }
-
 function toFiniteNumber(value: unknown, fallback: number) {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
-
 function promptItemsFromText(value: string): PromptImageSettings[] {
   return splitPrompts(value).map(prompt => ({ prompt }));
 }
-
 function normalizePromptEntry(item: unknown): PromptImageSettings | null {
   if (typeof item === 'string') {
     const prompt = item.trim();
     return prompt ? { prompt } : null;
   }
-
   if (!item || typeof item !== 'object') {
     return null;
   }
-
   const raw = item as Record<string, unknown>;
   const prompt = String(raw.prompt ?? raw.text ?? raw.caption ?? '').trim();
   if (!prompt) {
     return null;
   }
-
   const normalized: PromptImageSettings = { ...raw, prompt };
   if (raw.guidance != null && raw.guidance_scale == null) normalized.guidance_scale = toFiniteNumber(raw.guidance, 4);
   if (raw.steps != null && raw.sample_steps == null) normalized.sample_steps = toFiniteNumber(raw.steps, 20);
@@ -243,11 +215,9 @@ function normalizePromptEntry(item: unknown): PromptImageSettings | null {
   if (raw.format != null && raw.ext == null) normalized.ext = String(raw.format);
   return normalized;
 }
-
 function promptItemsFromJsonText(value: string): PromptImageSettings[] {
   const parsed = JSON.parse(value);
   let source: unknown = parsed;
-
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const parsedObject = parsed as Record<string, unknown>;
     if (Array.isArray(parsedObject.images)) source = parsedObject.images;
@@ -255,11 +225,9 @@ function promptItemsFromJsonText(value: string): PromptImageSettings[] {
     else if (Array.isArray(parsedObject.samples)) source = parsedObject.samples;
     else if (parsedObject.prompt != null) source = [parsedObject];
   }
-
   const items = Array.isArray(source) ? source : [source];
   return items.map(normalizePromptEntry).filter((item): item is PromptImageSettings => item !== null);
 }
-
 function cleanPromptImageSettings(item: PromptImageSettings) {
   const cleaned: PromptImageSettings = { prompt: item.prompt };
   Object.entries(item).forEach(([key, value]) => {
@@ -268,7 +236,6 @@ function cleanPromptImageSettings(item: PromptImageSettings) {
   });
   return cleaned;
 }
-
 function getPromptNumber(item: PromptImageSettings, keys: string[], fallback: number) {
   for (const key of keys) {
     if (item[key] != null && item[key] !== '') {
@@ -277,7 +244,6 @@ function getPromptNumber(item: PromptImageSettings, keys: string[], fallback: nu
   }
   return fallback;
 }
-
 function getPromptString(item: PromptImageSettings, keys: string[], fallback: string) {
   for (const key of keys) {
     if (item[key] != null && item[key] !== '') {
@@ -286,7 +252,6 @@ function getPromptString(item: PromptImageSettings, keys: string[], fallback: st
   }
   return fallback;
 }
-
 function cleanModelConfig(modelConfig: GeneratorModelConfig, useLora: boolean, loraPath: string) {
   const model: GeneratorModelConfig = {
     ...modelConfig,
@@ -297,40 +262,28 @@ function cleanModelConfig(modelConfig: GeneratorModelConfig, useLora: boolean, l
     qtype_te: modelConfig.quantize_te ? modelConfig.qtype_te || 'qfloat8' : '',
     model_kwargs: modelConfig.model_kwargs || {},
   };
-
   delete model.assistant_lora_path;
   delete model.inference_lora_path;
   delete model.lora_path;
-
   if (useLora && loraPath.trim()) {
     model.lora_path = loraPath.trim();
   }
-
   return model;
 }
-
 function formatLoraSource(lora: GeneratedLora) {
-  if (lora.projectName) return `${lora.projectName}${lora.jobName ? ` / ${lora.jobName}` : ''}`;
   return lora.source === 'uploaded' ? 'Uploaded' : lora.jobName || 'Training job';
 }
-
 function formatMegabytes(bytes: number) {
   return `${Math.max(1, Math.round(bytes / 1024 / 1024))} MB`;
 }
-
 function promptHasAnyTrigger(prompt: string, triggerWords: string[]) {
   const lowerPrompt = prompt.toLowerCase();
   return triggerWords.some(word => lowerPrompt.includes(word.toLowerCase()));
 }
 
-type GeneratePageContentProps = {
-  projectIDOverride?: string | null;
-};
-
-export function GeneratePageContent({ projectIDOverride = null }: GeneratePageContentProps = {}) {
+export function GeneratePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const projectID = projectIDOverride ?? searchParams.get('project_id');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loraFileInputRef = useRef<HTMLInputElement | null>(null);
   const inlineAbortControllerRef = useRef<AbortController | null>(null);
@@ -343,7 +296,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
   const [useLora, setUseLora] = useState(false);
   const [loraPath, setLoraPath] = useState('');
   const [loras, setLoras] = useState<GeneratedLora[]>([]);
-  const [loraScope, setLoraScope] = useState<'global' | 'project' | 'all'>(projectID ? 'project' : 'global');
   const [loraStatus, setLoraStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [loraUploadStatus, setLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [loraUploadProgress, setLoraUploadProgress] = useState(0);
@@ -378,31 +330,25 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
   const [cancelRequested, setCancelRequested] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const appliedModelRef = useRef('');
-
   useEffect(() => {
     if (isGPUInfoLoaded && gpuIDs === null) {
       setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
     }
   }, [gpuIDs, gpuList, isGPUInfoLoaded]);
-
   const refreshLoras = useCallback(async () => {
     setLoraStatus('loading');
     try {
-      const params = new URLSearchParams({ scope: loraScope });
-      if (projectID) params.set('project_id', projectID);
-      const res = await apiClient.get(`/api/generate/loras?${params.toString()}`);
+      const res = await apiClient.get('/api/generate/loras');
       setLoras(res.data.loras || []);
       setLoraStatus('success');
     } catch (error) {
       console.error('Error fetching LoRAs:', error);
       setLoraStatus('error');
     }
-  }, [loraScope, projectID]);
-
+  }, []);
   useEffect(() => {
     void refreshLoras();
   }, [refreshLoras]);
-
   useEffect(() => {
     return () => {
       inlineAbortControllerRef.current?.abort();
@@ -412,14 +358,11 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       }
     };
   }, []);
-
   const loraOptions = useMemo<SelectOption[]>(
     () => loras.map(lora => ({ value: lora.path, label: lora.label })),
     [loras],
   );
-
   const selectedLora = useMemo(() => loras.find(lora => lora.path === loraPath), [loras, loraPath]);
-
   useEffect(() => {
     const modelRef = searchParams.get('model_ref')?.trim() || '';
     if (!modelRef || appliedModelRef.current === modelRef || loras.length === 0) return;
@@ -432,10 +375,17 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     setLoraPath(matching.path);
     applyLoraModelDefaults(matching);
     setLoraUploadTriggerWords(matching.triggerWords?.join(', ') || '');
+    if (matching.triggerWords?.length) setPrompts(matching.triggerWords.join(', ') + ', ');
   }, [loras, searchParams]);
-
+  const requestedModel = searchParams.get('model_ref')?.trim();
+  const missingRequestedModel = Boolean(
+    requestedModel &&
+      loraStatus === 'success' &&
+      !loras.some(
+        lora => lora.portableRef === requestedModel || lora.path === requestedModel || lora.id === requestedModel,
+      ),
+  );
   const currentPromptItems = useMemo(() => jsonPromptItems ?? promptItemsFromText(prompts), [jsonPromptItems, prompts]);
-
   const imageCount = useMemo(() => {
     const repeats = Math.max(1, Math.floor(numRepeats || 1));
     return currentPromptItems.length * repeats;
@@ -448,7 +398,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     () => getLayerOffloadingMemoryProfile(modelConfig.arch),
     [modelConfig.arch],
   );
-
   const isBusy = status === 'saving' || status === 'generating';
   const isManagedComfyGeneration = generationBackend === 'comfy' && comfyMode === 'managed';
   const primaryButtonLabel =
@@ -461,13 +410,11 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
         : imageCount === 1
           ? 'Generate Image'
           : 'Create Job';
-
   const clearStatusResetTimeout = () => {
     if (statusResetTimeoutRef.current === null) return;
     window.clearTimeout(statusResetTimeoutRef.current);
     statusResetTimeoutRef.current = null;
   };
-
   const scheduleStatusIdle = () => {
     clearStatusResetTimeout();
     statusResetTimeoutRef.current = window.setTimeout(() => {
@@ -475,7 +422,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       statusResetTimeoutRef.current = null;
     }, 1500);
   };
-
   const applyLoraModelDefaults = (lora: GeneratedLora) => {
     if (!lora.model) return;
     setModelConfig(current => ({
@@ -485,17 +431,11 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       arch: String(lora.model?.arch || current.arch),
       dtype: String((lora.model as GeneratorModelConfig).dtype || current.dtype || 'bf16'),
       model_kwargs: (lora.model?.model_kwargs as Record<string, unknown>) || current.model_kwargs || {},
-      low_vram: current.low_vram,
-      layer_offloading: current.layer_offloading,
-      layer_offloading_backend: current.layer_offloading_backend,
-      layer_offloading_transformer_percent: current.layer_offloading_transformer_percent,
-      layer_offloading_text_encoder_percent: current.layer_offloading_text_encoder_percent,
     }));
     if (lora.model.arch) {
       setSampler(getDefaultSampler(String(lora.model.arch)));
     }
   };
-
   const handleLoraPathChange = (value: string) => {
     setLoraPath(value);
     const lora = loras.find(item => item.path === value);
@@ -504,7 +444,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       setLoraUploadTriggerWords(lora.triggerWords?.join(', ') || '');
     }
   };
-
   const handleUseLoraChange = (checked: boolean) => {
     setUseLora(checked);
     if (checked && !loraPath && loras[0]) {
@@ -513,14 +452,12 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       setLoraUploadTriggerWords(loras[0].triggerWords?.join(', ') || '');
     }
   };
-
   const handleLoraUpload = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.safetensors')) {
       setLoraUploadStatus('error');
       setLoraUploadMessage('LoRA upload must be a .safetensors file.');
       return;
     }
-
     setLoraUploadStatus('uploading');
     setLoraUploadProgress(0);
     setLoraUploadMessage('');
@@ -558,11 +495,9 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       }
     }
   };
-
   const insertSelectedLoraTrigger = () => {
     const triggerWords = selectedLora?.triggerWords?.filter(Boolean) ?? [];
     if (triggerWords.length === 0) return;
-
     const triggerText = triggerWords.join(', ');
     setPrompts(current => {
       const lines = current.split(/\r?\n/);
@@ -577,12 +512,10 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     setJsonPromptItems(null);
     setImportSummary('');
   };
-
   const handleArchChange = (archName: string) => {
     setModelConfig(getDefaultModelConfig(archName));
     setSampler(getDefaultSampler(archName));
   };
-
   const handleLayerOffloadingChange = (checked: boolean) => {
     setModelConfig(current => ({
       ...current,
@@ -594,7 +527,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
         current.layer_offloading_text_encoder_percent ?? layerOffloadingMemoryProfile.textEncoderPercent,
     }));
   };
-
   const handleLayerOffloadingPercentChange = (
     key: 'layer_offloading_transformer_percent' | 'layer_offloading_text_encoder_percent',
     value: number,
@@ -604,7 +536,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       [key]: Math.max(0, Math.min(1, value * 0.01)),
     }));
   };
-
   const handlePromptTextChange = (value: string) => {
     setPrompts(value);
     setJsonPromptItems(null);
@@ -612,7 +543,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     setInlineError('');
     setInlineMessage('');
   };
-
   const handlePromptFileImport = async (file: File) => {
     try {
       const fileText = await file.text();
@@ -620,7 +550,7 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       if (isJsonFile) {
         const importedItems = promptItemsFromJsonText(fileText);
         if (importedItems.length === 0) {
-          alert('No prompts were found in the JSON file.');
+          reportWorkflowError('No prompts were found in the JSON file.');
           return;
         }
         setJsonPromptItems(importedItems);
@@ -629,7 +559,7 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       } else {
         const importedItems = promptItemsFromText(fileText);
         if (importedItems.length === 0) {
-          alert('No prompts were found in the text file.');
+          reportWorkflowError('No prompts were found in the text file.');
           return;
         }
         setJsonPromptItems(null);
@@ -641,14 +571,13 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       setInlineMessage('');
     } catch (error) {
       console.error('Error importing prompt file:', error);
-      alert('Failed to import prompt file.');
+      reportWorkflowError('Failed to import prompt file.');
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     }
   };
-
   const getGenerationValidationErrors = (promptItems: PromptImageSettings[], model: GeneratorModelConfig) => {
     const errors: string[] = [];
     if (!isSettingsLoaded || !settings.TRAINING_FOLDER) {
@@ -689,13 +618,11 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     }
     return errors;
   };
-
   const validateGeneration = (promptItems: PromptImageSettings[], model: GeneratorModelConfig) => {
     const errors = getGenerationValidationErrors(promptItems, model);
     setValidationErrors(errors);
     return errors.length === 0;
   };
-
   const buildComfyConfig = (): ComfyConfig => {
     const comfyAutoInstall = settings.COMFY_AUTO_INSTALL === 'true';
     const comfy: ComfyConfig = {
@@ -715,14 +642,12 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
     }
     return comfy;
   };
-
   const buildGenerateJobConfig = (
     promptItems: PromptImageSettings[],
     normalizedJobName: string,
     model: GeneratorModelConfig,
   ) => {
     const promptList = promptItems.map(item => item.prompt);
-
     const sampleItems = promptItems.map(item => ({
       prompt: item.prompt,
       width: getPromptNumber(item, ['width'], width || 1024),
@@ -732,7 +657,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       guidance_scale: getPromptNumber(item, ['guidance_scale', 'guidance'], guidanceScale ?? 4),
       sample_steps: getPromptNumber(item, ['sample_steps', 'steps', 'num_inference_steps'], sampleSteps ?? 20),
     }));
-
     const outputFolder = joinPath(settings.TRAINING_FOLDER, normalizedJobName, 'samples');
     const backendConfig =
       generationBackend === 'comfy'
@@ -794,18 +718,14 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       },
     };
   };
-
   const createGenerateJob = async (promptItems = currentPromptItems) => {
     if (isBusy) return;
     const normalizedJobName = sanitizeJobName(jobName) || makeDefaultJobName();
     const model = cleanModelConfig(modelConfig, useLora, loraPath);
     const selectedGpuIDs = gpuIDs;
-
     if (!validateGeneration(promptItems, model)) return;
     if (!selectedGpuIDs) return;
-
     const jobConfig = buildGenerateJobConfig(promptItems, normalizedJobName, model);
-
     clearStatusResetTimeout();
     setStatus('saving');
     try {
@@ -816,18 +736,12 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
         job_type: 'generate',
         job_ref: useLora ? loraPath.trim() : model.name_or_path,
         job_config: jobConfig,
-        project_id: projectID || undefined,
       });
-
       if (startImmediately) {
         await startJob(res.data.id);
         await startQueue(selectedGpuIDs, 'local');
       }
-      router.push(
-        projectID
-          ? `/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(res.data.id)}`
-          : `/jobs/${res.data.id}`,
-      );
+      router.push(`/jobs/${res.data.id}`);
     } catch (error: any) {
       console.error('Error creating generate job:', error);
       if (error.response?.status === 409) {
@@ -840,26 +754,22 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       scheduleStatusIdle();
     }
   };
-
   const cancelInlineGeneration = () => {
     if (status !== 'generating' || cancelRequested) return;
     setCancelRequested(true);
     inlineAbortControllerRef.current?.abort();
   };
-
   const generateInline = async (promptItems = currentPromptItems) => {
     if (isBusy) return;
     const normalizedJobName = sanitizeJobName(jobName) || makeDefaultJobName();
     const model = cleanModelConfig(modelConfig, useLora, loraPath);
     const selectedGpuIDs = gpuIDs;
-
     if (!validateGeneration(promptItems, model)) return;
     if (!selectedGpuIDs) return;
     if (imageCount !== 1) {
       setValidationErrors(['Multiple images must be created as a generate job.']);
       return;
     }
-
     const jobConfig = buildGenerateJobConfig(promptItems, normalizedJobName, model);
     const abortController = new AbortController();
     let generationCanceled = false;
@@ -876,7 +786,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
         {
           gpu_ids: selectedGpuIDs,
           job_config: jobConfig,
-          project_id: projectID || undefined,
         },
         { signal: abortController.signal },
       );
@@ -904,7 +813,6 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       }
     }
   };
-
   const handleGenerate = async () => {
     if (imageCount === 1) {
       await generateInline(currentPromptItems);
@@ -912,16 +820,13 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
       await createGenerateJob(currentPromptItems);
     }
   };
-
   return (
     <>
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
           <Wand2 className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Generate</h1>
-          <span className="hidden text-sm text-gray-400 sm:inline">
-            / {projectID ? 'Project workspace' : 'Local workspace'}
-          </span>
+          <span className="hidden text-sm text-gray-400 sm:inline">/ {'Local workspace'}</span>
         </div>
         <div className="flex-1"></div>
         {gpuList.length > 0 && (
@@ -1096,18 +1001,7 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
                 }}
               />
 
-              <div className="mb-3">
-                <SelectInput
-                  label="Model library scope"
-                  value={loraScope}
-                  onChange={value => setLoraScope(value as 'global' | 'project' | 'all')}
-                  options={[
-                    ...(projectID ? [{ value: 'project', label: 'This project' }] : []),
-                    { value: 'global', label: 'Global workspace' },
-                    { value: 'all', label: projectID ? 'Project + global' : 'All workspaces' },
-                  ]}
-                />
-              </div>
+              <div className="mb-3"></div>
 
               <div className="mb-4 grid grid-cols-2 gap-2">
                 <button
@@ -1215,6 +1109,14 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
                     ) : (
                       <div className="mt-2 text-gray-500">No trigger metadata</div>
                     )}
+                  </div>
+                )}
+                {missingRequestedModel && (
+                  <div role="alert" className="rounded-md border border-amber-700 p-3 text-sm text-amber-300">
+                    This checkpoint is no longer available. Choose another LoRA or return to Models.{' '}
+                    <button type="button" className="underline" onClick={() => void refreshLoras()}>
+                      Refresh models
+                    </button>
                   </div>
                 )}
                 {useLora && loraStatus === 'success' && loras.length === 0 && (
@@ -1456,7 +1358,7 @@ export function GeneratePageContent({ projectIDOverride = null }: GeneratePageCo
               Generation jobs <span className="ml-auto text-xs font-normal text-gray-400">View jobs</span>
             </summary>
             <div>
-              <JobsTable job_type="generate" projectID={projectID} />
+              <JobsTable job_type="generate" />
             </div>
           </details>
         </div>

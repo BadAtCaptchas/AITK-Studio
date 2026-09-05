@@ -8,10 +8,7 @@ import { test } from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const {
-  mergeEncryptedCaptionDataset,
-  mergePlainCaptionDataset,
-} = require('../dist/src/server/remoteCaptionMerge.js');
+const { mergeEncryptedCaptionDataset, mergePlainCaptionDataset } = require('../dist/src/server/remoteCaptionMerge.js');
 const {
   hasMatchingTargetMediaFile,
   resolveDatasetDirectoryInsideRoot,
@@ -99,7 +96,6 @@ test('plain remote caption merge copies caption files only', async () => {
   assert.equal(await fs.readFile(path.join(target, 'a.txt'), 'utf8'), 'new caption');
 });
 
-
 test('plain remote caption merge rejects non-caption extensions', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-plain-caption-ext-'));
   const source = path.join(root, 'source');
@@ -167,7 +163,7 @@ test('remote caption dataset paths must stay inside the datasets root after real
   const outside = path.join(root, 'outside');
   await fs.mkdir(dataset, { recursive: true });
   await fs.mkdir(outside, { recursive: true });
-  await fs.symlink(outside, path.join(datasetsRoot, 'outside-link'));
+  await fs.symlink(outside, path.join(datasetsRoot, 'outside-link'), process.platform === 'win32' ? 'junction' : 'dir');
 
   assert.equal(await resolveDatasetDirectoryInsideRoot(dataset, datasetsRoot), await fs.realpath(dataset));
   await assert.rejects(
@@ -206,5 +202,8 @@ test('encrypted remote caption merge copies caption object and updates catalog',
   assert.equal(catalog.items[0].captionObjectPath, 'objects/img1.caption.bin');
 
   const copiedCaption = JSON.parse(await fs.readFile(path.join(target, 'objects', 'img1.caption.bin'), 'utf8'));
-  assert.equal(decryptPayload(copiedCaption, objectAad('objects/img1.caption.bin')).toString('utf8'), 'remote encrypted caption');
+  assert.equal(
+    decryptPayload(copiedCaption, objectAad('objects/img1.caption.bin')).toString('utf8'),
+    'remote encrypted caption',
+  );
 });

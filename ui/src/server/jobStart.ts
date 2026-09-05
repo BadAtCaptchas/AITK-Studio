@@ -9,10 +9,7 @@ import {
   uploadBundleToWorker,
   withoutRemoteRedirects,
 } from './remoteClient';
-import {
-  dispatchRemoteCaptionJob,
-  isRemoteCaptionDispatchError,
-} from './remoteCaptionDispatch';
+import { dispatchRemoteCaptionJob, isRemoteCaptionDispatchError } from './remoteCaptionDispatch';
 import {
   getEncryptedDatasetsForJobConfig,
   getKeyForRequiredDataset,
@@ -25,18 +22,8 @@ import {
   storeDurableEncryptedDatasetKeys,
 } from './encryptedDatasetSecrets';
 import { isAnyRemoteOllamaCaptionJob } from './secureRemoteCaptionJobs';
-import {
-  syncRemoteDatasetsForJobConfig,
-  type RemoteDatasetSyncMapping,
-} from './remoteDatasetSync';
-import { areProjectsEnabled, PROJECT_SPACES_DISABLED_MESSAGE } from './settings';
-import { getAITKInstanceID, ProjectError, resolveProject } from './projects';
-import { prepareProjectJobReplica, ProjectSyncError } from './projectSync';
-import { PROJECT_SYNC_PROTOCOL, ProjectSyncProtocolError } from './projectSyncProtocol';
-import {
-  authorizeReplicaJobExecution,
-  type ReplicaExecutionAuthorization,
-} from './projectSyncWorker';
+import { syncRemoteDatasetsForJobConfig, type RemoteDatasetSyncMapping } from './remoteDatasetSync';
+
 import { startJobNow } from '../../cron/actions/startJob';
 import type { EncryptedDatasetStartKey, Job, RemoteStartProgress } from '../types';
 
@@ -127,7 +114,6 @@ export async function prepareJobStart(
   jobID: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
   durableEncryptedDatasetKeys = false,
-  replicaExecutionAuthorization?: ReplicaExecutionAuthorization | null,
 ): Promise<PreparedJobStart> {
   if (!isValidJobId(jobID)) {
     failStart({ error: 'Invalid job ID' }, 400);
@@ -137,27 +123,6 @@ export async function prepareJobStart(
   if (!job) {
     failStart({ error: 'Job not found' }, 404);
   }
-  if (job.project_id && !(await areProjectsEnabled())) {
-    failStart({ error: PROJECT_SPACES_DISABLED_MESSAGE }, 403);
-  }
-  if (job.project_id) {
-    try {
-      if (replicaExecutionAuthorization) {
-        await authorizeReplicaJobExecution(job, replicaExecutionAuthorization);
-      } else {
-        await resolveProject(job.project_id, { intent: 'execute' });
-      }
-    } catch (error) {
-      if (error instanceof ProjectError) {
-        failStart({ error: error.message, code: error.code }, error.status);
-      }
-      if (error instanceof ProjectSyncProtocolError) {
-        failStart({ error: error.message, code: error.code }, error.status);
-      }
-      throw error;
-    }
-  }
-
   let jobConfig: any;
   try {
     jobConfig = JSON.parse(job.job_config);
@@ -179,7 +144,10 @@ export async function prepareJobStart(
 
   let encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
   let useDurableEncryptedKeys = requiredEncryptedDatasets.length > 0 && encryptedKeyCoverage.durableKeys.length > 0;
-  let invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(requiredEncryptedDatasets, encryptedKeysForLaunch);
+  let invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(
+    requiredEncryptedDatasets,
+    encryptedKeysForLaunch,
+  );
   if (invalidEncryptedDatasets.length > 0) {
     failStart(
       {
@@ -227,10 +195,7 @@ export async function prepareJobStart(
   };
 }
 
-async function queueLocalJob(
-  prepared: PreparedJobStart,
-  options: { startQueue?: boolean; info?: string } = {},
-) {
+async function queueLocalJob(prepared: PreparedJobStart, options: { startQueue?: boolean; info?: string } = {}) {
   const { job, jobID } = prepared;
   const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
 
@@ -322,14 +287,8 @@ export async function startPreparedJob(
   prepared: PreparedJobStart,
   options: { startQueue?: boolean; queueInfo?: string; onRemoteStartProgress?: RemoteStartProgressCallback } = {},
 ): Promise<Job> {
-  const {
-    job,
-    jobID,
-    jobConfig,
-    requiredEncryptedDatasets,
-    encryptedKeysForLaunch,
-    useDurableEncryptedKeys,
-  } = prepared;
+  const { job, jobID, jobConfig, requiredEncryptedDatasets, encryptedKeysForLaunch, useDurableEncryptedKeys } =
+    prepared;
 
   if (!isLocalWorker(job.worker_id)) {
     try {
@@ -366,34 +325,6 @@ export async function startPreparedJob(
       let remoteJobConfig = jobConfig;
       let remoteEncryptedKeysForLaunch = encryptedKeysForLaunch;
       let remoteWarnings: string[] = [];
-
-      if (job.project_id && !remoteJobId) {
-        onProgress?.({
-          status: 'preparing',
-          message: 'Syncing project inputs to the execution replica',
-          percent: 12,
-          datasetName: null,
-          bytesProcessed: 0,
-          bytesTotal: 0,
-        });
-        const linked = await prepareProjectJobReplica(job);
-        remoteJobId = linked.remoteJob.id;
-        remoteJobConfig = JSON.parse(linked.remoteJob.job_config);
-        await db.jobs.update(jobID, {
-          remote_job_id: linked.remoteJob.id,
-          remote_error: null,
-          remote_sync_at: new Date(),
-        });
-        onProgress?.({
-          status: 'preparing',
-          message: 'Project launch sync completed',
-          percent: 68,
-          datasetName: null,
-          bytesProcessed: linked.operation.bytes_done,
-          bytesTotal: linked.operation.bytes_total,
-          remoteJobID: linked.remoteJob.id,
-        });
-      }
 
       if (!remoteJobId) {
         const datasetSync = await syncRemoteDatasetsForJobConfig(jobConfig, worker, {
@@ -495,16 +426,8 @@ export async function startPreparedJob(
         remoteJobID: remoteJobId,
       });
       const remoteStartHasKeys = requiredEncryptedDatasets.length > 0;
-      const homeInstanceID = job.project_id ? await getAITKInstanceID() : null;
       const remoteStartInit: RequestInit = {
         method: 'POST',
-        headers: homeInstanceID
-          ? {
-              'X-AITK-Project-Sync': PROJECT_SYNC_PROTOCOL,
-              'X-AITK-Project-ID': job.project_id as string,
-              'X-AITK-Home-Instance': homeInstanceID,
-            }
-          : undefined,
         body: JSON.stringify({
           encryptedDatasetKeys: remoteStartHasKeys ? remoteEncryptedKeysForLaunch : undefined,
           durableEncryptedDatasetKeys: useDurableEncryptedKeys,
@@ -544,9 +467,6 @@ export async function startPreparedJob(
       return synced;
     } catch (error) {
       if (error instanceof JobStartError) throw error;
-      if (error instanceof ProjectSyncError) {
-        failStart({ error: error.message, code: error.code }, error.status);
-      }
       const message = error instanceof Error ? error.message : 'Failed to start remote job';
       options.onRemoteStartProgress?.({
         status: 'failed',
@@ -583,14 +503,6 @@ export async function startJobFromRequest(
   jobID: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
   durableEncryptedDatasetKeys = false,
-  replicaExecutionAuthorization?: ReplicaExecutionAuthorization | null,
 ) {
-  return startPreparedJob(
-    await prepareJobStart(
-      jobID,
-      encryptedDatasetKeys,
-      durableEncryptedDatasetKeys,
-      replicaExecutionAuthorization,
-    ),
-  );
+  return startPreparedJob(await prepareJobStart(jobID, encryptedDatasetKeys, durableEncryptedDatasetKeys));
 }

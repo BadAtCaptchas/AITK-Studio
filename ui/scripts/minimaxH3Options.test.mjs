@@ -44,7 +44,7 @@ test('MiniMax H3 preset exposes current checkpoints and distillation choices', (
 test('H3 notes and mixed-media control use typed plain option data', () => {
   const options = readSource('src/app/jobs/new/options.ts');
   const simpleJob = readSource('src/app/jobs/new/SimpleJob.tsx');
-  const trainingForm = readSource('src/app/jobs/new/TrainingFormContent.tsx');
+  const trainingForm = readSource('src/utils/trainingValidation.ts');
   const types = readSource('src/types.ts');
   assert.match(options, /export interface ModelNotes/);
   assert.match(options, /modelNotes\?: ModelNotes/);

@@ -1,5 +1,4 @@
 'use client';
-
 import classNames from 'classnames';
 import {
   ArrowLeft,
@@ -65,7 +64,6 @@ import {
   itemName,
   statusForCaption,
 } from './utils';
-
 type ThumbSize = 'sm' | 'md' | 'lg';
 type CaptionStudioFilter = DatasetNavigatorFilter | 'needs-review' | 'approved';
 type ScanState = {
@@ -74,30 +72,30 @@ type ScanState = {
   total: number;
   error?: string;
 };
-
 const SCAN_CHUNK_SIZE = 160;
 const ENCRYPTED_SCAN_CONCURRENCY = 6;
 const THUMB_SIZE_CONFIG: Record<
   ThumbSize,
-  { label: string; tileWidth: number; imageHeight: number; tileHeight: number }
+  {
+    label: string;
+    tileWidth: number;
+    imageHeight: number;
+    tileHeight: number;
+  }
 > = {
   sm: { label: 'S', tileWidth: 132, imageHeight: 86, tileHeight: 116 },
   md: { label: 'M', tileWidth: 168, imageHeight: 112, tileHeight: 142 },
   lg: { label: 'L', tileWidth: 220, imageHeight: 150, tileHeight: 180 },
 };
-
 function useElementSize<T extends HTMLElement>() {
   const [element, setElement] = useState<T | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-
   useEffect(() => {
     if (!element) return;
-
     const update = () => {
       const rect = element.getBoundingClientRect();
       setSize({ width: Math.max(0, rect.width), height: Math.max(0, rect.height) });
     };
-
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
@@ -107,16 +105,13 @@ function useElementSize<T extends HTMLElement>() {
       window.removeEventListener('resize', update);
     };
   }, [element]);
-
   return { ref: setElement, size };
 }
-
 function previewBoxesForCaption(cached?: CaptionCacheEntry) {
   if (!cached?.loaded) return [];
   const parsed = parseIdeogramCaption(cached.caption);
   return parsed.kind === 'ideogram' ? extractIdeogramBoxes(parsed.data).slice(0, 3) : [];
 }
-
 function itemExtension(item: DatasetStudioItem) {
   const rawName = item.kind === 'encrypted' ? item.item.extension || item.item.name : item.path;
   const cleanName = rawName.split(/[?#]/, 1)[0];
@@ -131,12 +126,10 @@ function itemExtension(item: DatasetStudioItem) {
       : '';
   return extension || null;
 }
-
 function defaultSortDirection(mode: DatasetNavigatorSortMode): DatasetNavigatorSortDirection {
   if (mode === 'name' || mode === 'extension' || mode === 'media-type' || mode === 'caption-status') return 'asc';
   return 'desc';
 }
-
 function sortDirectionLabel(mode: DatasetNavigatorSortMode, direction: DatasetNavigatorSortDirection) {
   if (mode === 'original') return '--';
   if (mode === 'name' || mode === 'extension' || mode === 'media-type') return direction === 'asc' ? 'A-Z' : 'Z-A';
@@ -144,13 +137,11 @@ function sortDirectionLabel(mode: DatasetNavigatorSortMode, direction: DatasetNa
   if (mode === 'added' || mode === 'captioned') return direction === 'desc' ? 'Newest' : 'Oldest';
   return direction === 'asc' ? 'Needs' : 'Done';
 }
-
 function sortDirectionTitle(mode: DatasetNavigatorSortMode, direction: DatasetNavigatorSortDirection) {
   if (mode === 'original') return 'Choose a sort first';
   if (mode === 'caption-status') return direction === 'asc' ? 'Needs caption first' : 'Captioned first';
   return `${sortDirectionLabel(mode, direction)} first`;
 }
-
 function ThumbnailTile({
   item,
   index,
@@ -158,7 +149,6 @@ function ThumbnailTile({
   bulkSelected,
   datasetName,
   workerID,
-  projectID,
   encryptedKey,
   captionCache,
   approvedKeys,
@@ -173,14 +163,16 @@ function ThumbnailTile({
   bulkSelected?: boolean;
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   captionCache: Map<string, CaptionCacheEntry>;
   approvedKeys: Set<string>;
   onSelect: (index: number) => void;
   onToggleBulkSelect?: (index: number) => void;
   mode: 'compact' | 'drawer';
-  tileSize?: { imageHeight: number; tileHeight: number };
+  tileSize?: {
+    imageHeight: number;
+    tileHeight: number;
+  };
 }) {
   const key = itemKey(item);
   const name = itemName(item);
@@ -196,7 +188,6 @@ function ThumbnailTile({
         : 'needs-review';
   const previewBoxes = previewBoxesForCaption(cached);
   const compact = mode === 'compact';
-
   return (
     <div
       className={classNames(
@@ -229,13 +220,7 @@ function ThumbnailTile({
           {item.kind === 'plain' ? (
             <PlainThumb path={item.path} mediaUrl={item.mediaUrl} alt={name} />
           ) : (
-            <EncryptedThumb
-              datasetName={datasetName}
-              workerID={workerID}
-              projectID={projectID}
-              cryptoKey={encryptedKey}
-              item={item.item}
-            />
+            <EncryptedThumb datasetName={datasetName} workerID={workerID} cryptoKey={encryptedKey} item={item.item} />
           )}
           {previewBoxes.length > 0 && (
             <div className="pointer-events-none absolute inset-0">
@@ -299,7 +284,6 @@ function ThumbnailTile({
     </div>
   );
 }
-
 function IconButton({
   title,
   onClick,
@@ -329,13 +313,11 @@ function IconButton({
     </button>
   );
 }
-
 export function ImageNavigator({
   items,
   selectedIndex,
   datasetName,
   workerID,
-  projectID,
   encryptedKey,
   isAutoCaptioning,
   liveCaptionRefresh,
@@ -355,7 +337,6 @@ export function ImageNavigator({
   selectedIndex: number;
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   isAutoCaptioning?: boolean;
   liveCaptionRefresh?: boolean;
@@ -377,7 +358,6 @@ export function ImageNavigator({
   }) => Promise<BulkCaptionActionResult>;
   onDeleteImages?: (items: DatasetStudioItem[], label?: string) => Promise<DeleteImagesResult>;
 }) {
-  const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [batchPanelOpen, setBatchPanelOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -404,19 +384,16 @@ export function ImageNavigator({
   const [gridScroller, setGridScroller] = useState<HTMLDivElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { ref: gridMeasureRef, size: gridSize } = useElementSize<HTMLDivElement>();
-
   useEffect(() => {
     setJumpText(`${selectedIndex + 1} / ${items.length.toLocaleString()}`);
     setScrubValue(selectedIndex + 1);
   }, [items.length, selectedIndex]);
-
   useEffect(() => {
     scanControllerRef.current?.abort();
     scanControllerRef.current = null;
     scanStartedRef.current = false;
     setScanState({ status: 'idle', scanned: 0, total: items.length });
   }, [items.length]);
-
   useEffect(() => {
     scanControllerRef.current?.abort();
     scanControllerRef.current = null;
@@ -435,12 +412,10 @@ export function ImageNavigator({
     setSortMode('original');
     setSortDirection('desc');
   }, [datasetName, workerID]);
-
   const notifyCaptionCacheChange = useCallback(() => {
     setLocalCacheVersion(version => version + 1);
     onCaptionCacheChange();
   }, [onCaptionCacheChange]);
-
   useEffect(() => {
     const availableKeys = new Set(items.map(item => itemKey(item)));
     setSelectedBulkKeys(previous => {
@@ -448,7 +423,6 @@ export function ImageNavigator({
       return next.size === previous.size ? previous : next;
     });
   }, [items]);
-
   const entries = useMemo(
     () =>
       items.map((item, index) => {
@@ -472,7 +446,6 @@ export function ImageNavigator({
       }),
     [captionCache, captionCacheVersion, items, localCacheVersion],
   );
-
   const filteredEntries = useMemo(() => {
     const baseFilter: DatasetNavigatorFilter = filter === 'needs-caption' || filter === 'has-boxes' ? filter : 'all';
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -587,7 +560,10 @@ export function ImageNavigator({
     shownCaptionKeywordMatches.length > 0 &&
     captionPendingCount === 0 &&
     !bulkBusyAction;
-  const sortOptions: Array<{ value: DatasetNavigatorSortMode; label: string }> = [
+  const sortOptions: Array<{
+    value: DatasetNavigatorSortMode;
+    label: string;
+  }> = [
     { value: 'original', label: 'Original Order' },
     { value: 'name', label: 'File Name' },
     { value: 'extension', label: 'File Extension' },
@@ -600,7 +576,6 @@ export function ImageNavigator({
   ];
   const directionLabel = sortDirectionLabel(sortMode, sortDirection);
   const directionTitle = sortDirectionTitle(sortMode, sortDirection);
-
   const commitIndex = useCallback(
     (index: number) => {
       const next = clampIndex(index, items.length);
@@ -608,17 +583,14 @@ export function ImageNavigator({
     },
     [items.length, onSelectIndex, selectedIndex],
   );
-
   const commitJump = useCallback(() => {
     const parsed = parseNavigatorJump(jumpText, items.length);
     if (parsed != null) commitIndex(parsed);
     setJumpText(`${(parsed ?? selectedIndex) + 1} / ${items.length.toLocaleString()}`);
   }, [commitIndex, items.length, jumpText, selectedIndex]);
-
   const commitScrub = useCallback(() => {
     commitIndex(scrubValue - 1);
   }, [commitIndex, scrubValue]);
-
   const toggleBulkSelectedIndex = useCallback(
     (index: number) => {
       const item = items[index];
@@ -637,7 +609,6 @@ export function ImageNavigator({
     },
     [items],
   );
-
   const selectShownBulkItems = useCallback(() => {
     setDeleteSelectionMessage('');
     setSelectedBulkKeys(previous => {
@@ -649,12 +620,10 @@ export function ImageNavigator({
       return next;
     });
   }, [filteredIndexes, items]);
-
   const clearBulkSelection = useCallback(() => {
     setDeleteSelectionMessage('');
     setSelectedBulkKeys(new Set());
   }, []);
-
   const runSelectedImageDelete = useCallback(async () => {
     if (!onDeleteImages || selectedBulkItems.length === 0 || isBulkDeletingImages) return;
     setIsBulkDeletingImages(true);
@@ -687,21 +656,15 @@ export function ImageNavigator({
       setIsBulkDeletingImages(false);
     }
   }, [isBulkDeletingImages, onDeleteImages, selectedBulkItems]);
-
   const bulkResultMessage = useCallback((result: BulkCaptionActionResult) => {
     if (result.action === 'move') {
-      return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} moved${
-        result.destinationName ? ` to ${result.destinationName}` : ''
-      }.`;
+      return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} moved${result.destinationName ? ` to ${result.destinationName}` : ''}.`;
     }
     if (result.action === 'delete') {
       return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} deleted.`;
     }
-    return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} captions updated${
-      result.removedWords ? `, ${result.removedWords.toLocaleString()} words removed` : ''
-    }.`;
+    return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} captions updated${result.removedWords ? `, ${result.removedWords.toLocaleString()} words removed` : ''}.`;
   }, []);
-
   const runBulkAction = useCallback(
     async (action: BulkCaptionAction) => {
       if (!onBulkCaptionAction || !canRunBulkAction) return;
@@ -721,7 +684,6 @@ export function ImageNavigator({
         );
         if (!confirmed) return;
       }
-
       setBulkBusyAction(action);
       setBulkMessage('');
       try {
@@ -749,18 +711,23 @@ export function ImageNavigator({
       shownCaptionKeywordMatches,
     ],
   );
-
   const setCacheEntry = useCallback(
     (item: DatasetStudioItem, caption: string) => {
       captionCache.set(itemKey(item), { caption, saved: caption, loaded: true });
     },
     [captionCache],
   );
-
   const scanPlainChunk = useCallback(
     async (chunk: DatasetStudioItem[], signal: AbortSignal) => {
       const plainItems = chunk.filter(
-        (item): item is Extract<DatasetStudioItem, { kind: 'plain' }> => item.kind === 'plain',
+        (
+          item,
+        ): item is Extract<
+          DatasetStudioItem,
+          {
+            kind: 'plain';
+          }
+        > => item.kind === 'plain',
       );
       if (plainItems.length === 0) return 0;
       const directItems = plainItems.filter(isPlainTextCaptionItem);
@@ -768,11 +735,7 @@ export function ImageNavigator({
       await Promise.all(
         directItems.map(async item => {
           try {
-            const response = await apiClient.post(
-              '/api/caption/get',
-              { imgPath: item.path, direct: true, ...projectPayload },
-              { signal },
-            );
+            const response = await apiClient.post('/api/caption/get', { imgPath: item.path, direct: true }, { signal });
             setCacheEntry(item, captionResponseToText(response.data));
           } catch {
             setCacheEntry(item, '');
@@ -782,7 +745,7 @@ export function ImageNavigator({
       if (sidecarItems.length > 0) {
         const response = await apiClient.post(
           '/api/caption/getBatch',
-          { imgPaths: sidecarItems.map(item => item.path), ...projectPayload },
+          { imgPaths: sidecarItems.map(item => item.path) },
           { signal },
         );
         const captions: Record<string, unknown> = response.data?.captions || {};
@@ -794,18 +757,23 @@ export function ImageNavigator({
     },
     [setCacheEntry],
   );
-
   const scanEncryptedChunk = useCallback(
     async (chunk: DatasetStudioItem[], signal: AbortSignal) => {
       const encryptedItems = chunk.filter(
-        (item): item is Extract<DatasetStudioItem, { kind: 'encrypted' }> => item.kind === 'encrypted',
+        (
+          item,
+        ): item is Extract<
+          DatasetStudioItem,
+          {
+            kind: 'encrypted';
+          }
+        > => item.kind === 'encrypted',
       );
       if (encryptedItems.length === 0) return 0;
       if (!encryptedKey) {
         encryptedItems.forEach(item => setCacheEntry(item, ''));
         return encryptedItems.length;
       }
-
       let cursor = 0;
       let completed = 0;
       const workerCount = Math.min(ENCRYPTED_SCAN_CONCURRENCY, encryptedItems.length);
@@ -820,7 +788,7 @@ export function ImageNavigator({
               try {
                 const response = await apiClient.post(
                   '/api/datasets/encrypted/object',
-                  buildEncryptedObjectRequestBody({ datasetName, workerID, projectID, objectPath: captionPath }),
+                  buildEncryptedObjectRequestBody({ datasetName, workerID, objectPath: captionPath }),
                   { responseType: 'blob', signal },
                 );
                 const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
@@ -837,13 +805,11 @@ export function ImageNavigator({
       );
       return completed;
     },
-    [datasetName, encryptedKey, projectID, projectPayload, setCacheEntry, workerID],
+    [datasetName, encryptedKey, null, setCacheEntry, workerID],
   );
-
   useEffect(() => {
     if (!drawerOpen || scanStartedRef.current) return;
     scanStartedRef.current = true;
-
     const controller = new AbortController();
     scanControllerRef.current = controller;
     const runScan = async () => {
@@ -858,7 +824,6 @@ export function ImageNavigator({
         scanControllerRef.current = null;
         return;
       }
-
       let scanned = cachedCount;
       try {
         for (let index = 0; index < missingItems.length; index += SCAN_CHUNK_SIZE) {
@@ -886,16 +851,13 @@ export function ImageNavigator({
         });
       }
     };
-
     void runScan();
   }, [captionCache, drawerOpen, items, notifyCaptionCacheChange, scanEncryptedChunk, scanPlainChunk]);
-
   useEffect(() => {
     const shouldLiveRefreshCaptions = isAutoCaptioning || liveCaptionRefresh;
     if (!shouldLiveRefreshCaptions || items.length === 0) return;
     const controller = new AbortController();
     let busy = false;
-
     const refreshMissingCaptions = async () => {
       if (busy || controller.signal.aborted) return;
       const targets = items
@@ -906,7 +868,6 @@ export function ImageNavigator({
         })
         .slice(0, SCAN_CHUNK_SIZE);
       if (targets.length === 0) return;
-
       busy = true;
       try {
         await scanPlainChunk(targets, controller.signal);
@@ -920,7 +881,6 @@ export function ImageNavigator({
         busy = false;
       }
     };
-
     void refreshMissingCaptions();
     const interval = window.setInterval(refreshMissingCaptions, 5000);
     return () => {
@@ -936,21 +896,17 @@ export function ImageNavigator({
     scanEncryptedChunk,
     scanPlainChunk,
   ]);
-
   useEffect(() => {
     return () => scanControllerRef.current?.abort();
   }, []);
-
   useEffect(() => {
     gridRowsRef.current = gridRows;
   }, [gridRows]);
-
   useEffect(() => {
     if (!drawerOpen) {
       autoScrollKeyRef.current = '';
       return;
     }
-
     const autoScrollKey = [
       selectedIndex,
       sortMode,
@@ -963,7 +919,6 @@ export function ImageNavigator({
     ].join('|');
     if (autoScrollKeyRef.current === autoScrollKey) return;
     autoScrollKeyRef.current = autoScrollKey;
-
     const rowIndex = gridRowsRef.current.findIndex(row => row.includes(selectedIndex));
     if (rowIndex >= 0) {
       window.setTimeout(() => virtuosoRef.current?.scrollToIndex({ index: rowIndex, align: 'center' }), 0);
@@ -979,7 +934,6 @@ export function ImageNavigator({
     sortDirection,
     sortMode,
   ]);
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setBatchPanelOpen(false);
@@ -987,21 +941,22 @@ export function ImageNavigator({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
-
   const scrubberMarkers = useMemo(() => {
     const marked = entries.filter(entry => entry.status === 'missing' || entry.status === 'has-boxes');
     const step = Math.max(1, Math.ceil(marked.length / 140));
     return marked.filter((_, index) => index % step === 0);
   }, [entries]);
-
   if (presentation === 'studio') {
-    const studioFilters: Array<{ value: CaptionStudioFilter; label: string; count: number }> = [
+    const studioFilters: Array<{
+      value: CaptionStudioFilter;
+      label: string;
+      count: number;
+    }> = [
       { value: 'all', label: 'All', count: items.length },
       { value: 'needs-caption', label: 'Missing', count: statusCounts.missing },
       { value: 'needs-review', label: 'Needs review', count: reviewCounts.needsReview },
       { value: 'approved', label: 'Approved', count: reviewCounts.approved },
     ];
-
     return (
       <section
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-gray-950"
@@ -1267,7 +1222,6 @@ export function ImageNavigator({
                             bulkSelected={selectedBulkKeys.has(itemKey(item))}
                             datasetName={datasetName}
                             workerID={workerID}
-                            projectID={projectID}
                             encryptedKey={encryptedKey}
                             captionCache={captionCache}
                             approvedKeys={approvedKeys}
@@ -1298,7 +1252,6 @@ export function ImageNavigator({
       </section>
     );
   }
-
   return (
     <div className="flex min-w-0 max-w-full flex-shrink-0 flex-col overflow-hidden border-t border-gray-900 bg-gray-950">
       {drawerOpen && (
@@ -1582,7 +1535,6 @@ export function ImageNavigator({
                               bulkSelected={selectedBulkKeys.has(itemKey(item))}
                               datasetName={datasetName}
                               workerID={workerID}
-                              projectID={projectID}
                               encryptedKey={encryptedKey}
                               captionCache={captionCache}
                               approvedKeys={approvedKeys}
@@ -1709,7 +1661,6 @@ export function ImageNavigator({
                   selected={index === selectedIndex}
                   datasetName={datasetName}
                   workerID={workerID}
-                  projectID={projectID}
                   encryptedKey={encryptedKey}
                   captionCache={captionCache}
                   approvedKeys={approvedKeys}

@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -8,9 +9,7 @@ import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClien
 import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAccess';
 import { findDatasetItemsRecursivelyAsync } from '@/server/datasetImages';
 import { findExistingCaptionSidecarAsync, isTextCaptionFilePath } from '@/server/captionFiles';
-import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
-import { createProjectAssetUrl } from '@/server/projectAssetUrls';
-import { getProjectRoots, isPathInside } from '@/server/projects';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 const brotliCompress = promisify(zlib.brotliCompress);
 const gzipCompress = promisify(zlib.gzip);
@@ -21,11 +20,6 @@ type DatasetImageListEntry = {
   added_at: string | null;
   captioned_at: string | null;
   size_bytes: number;
-};
-
-type ProjectAssetContext = {
-  projectID: string;
-  projectRoot: string;
 };
 
 function dateToIso(date: Date | undefined) {
@@ -49,23 +43,9 @@ async function captionedAtForItem(itemPath: string) {
   }
 }
 
-async function imageEntry(
-  imgPath: string,
-  root: string | null,
-  projectAsset: ProjectAssetContext | null,
-): Promise<DatasetImageListEntry> {
+async function imageEntry(imgPath: string, root: string | null): Promise<DatasetImageListEntry> {
   const stat = await fs.promises.stat(imgPath);
   let mediaUrl: string | undefined;
-  if (projectAsset) {
-    if (!isPathInside(projectAsset.projectRoot, imgPath) || path.resolve(projectAsset.projectRoot) === path.resolve(imgPath)) {
-      throw new DatasetScopeError('Project dataset item escapes the project root', 403);
-    }
-    mediaUrl = createProjectAssetUrl(
-      projectAsset.projectID,
-      path.relative(projectAsset.projectRoot, imgPath),
-      'inline',
-    );
-  }
   return {
     img_path: root && imgPath.startsWith(root) ? imgPath.slice(root.length) : imgPath,
     ...(mediaUrl ? { media_url: mediaUrl } : {}),
@@ -97,21 +77,19 @@ async function jsonResponse(request: Request, payload: unknown) {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json();
+  const body = assertGlobalPayload(await request.json());
   const { datasetName } = body;
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
-  const projectID = body?.project_id;
+
   const compact = body?.compact === true;
 
   try {
-    await assertProjectScopeEnabled(projectID);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: error.status || 400 });
   }
 
   if (!isLocalWorker(workerID)) {
     try {
-      rejectRemoteProjectScope(workerID, projectID);
     } catch (error: any) {
       return NextResponse.json({ error: error.message }, { status: error.status || 400 });
     }
@@ -139,15 +117,10 @@ export async function POST(request: Request) {
 
   let datasetFolder: string;
   let datasetsPath: string;
-  let projectAsset: ProjectAssetContext | null = null;
   try {
-    const scope = await resolveDatasetScope(projectID, { intent: 'read' });
+    const scope = await resolveDatasetScope();
     datasetsPath = scope.datasetsRoot;
     datasetFolder = resolveDatasetFolder(datasetsPath, datasetName);
-    if (scope.project) {
-      const roots = await getProjectRoots(scope.project);
-      projectAsset = { projectID: scope.project.id, projectRoot: roots.root };
-    }
   } catch (error: any) {
     if (error instanceof DatasetScopeError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -173,9 +146,7 @@ export async function POST(request: Request) {
     const imageFiles = await findDatasetItemsRecursivelyAsync(datasetFolder);
     imageFiles.sort((a, b) => a.localeCompare(b));
     const root = datasetFolder + path.sep;
-    const images = await Promise.all(
-      imageFiles.map(imgPath => imageEntry(imgPath, compact ? root : null, projectAsset)),
-    );
+    const images = await Promise.all(imageFiles.map(imgPath => imageEntry(imgPath, compact ? root : null)));
 
     return jsonResponse(request, compact ? { root, images } : { images });
   } catch (error) {

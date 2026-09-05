@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
-import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
+import { getJobTrainingRoot } from '@/server/trainingPaths';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -19,11 +19,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  }
-  try {
-    await assertProjectJobEnabled(job);
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
   }
 
   if (!isLocalWorker(job.worker_id)) {
@@ -72,13 +67,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     .sort();
 
   // get the file size for each file
-  const fileObjects = await Promise.all(files.map(async file => {
-    const stats = await fs.promises.stat(file);
-    return {
-      path: file,
-      size: stats.size,
-    };
-  }));
+  const fileObjects = await Promise.all(
+    files.map(async file => {
+      const stats = await fs.promises.stat(file);
+      return {
+        path: file,
+        size: stats.size,
+      };
+    }),
+  );
 
   // include the optimizer state if it exists
   const optimizerPath = path.join(jobFolder, 'optimizer.pt');

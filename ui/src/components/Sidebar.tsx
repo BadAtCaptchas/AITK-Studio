@@ -1,56 +1,36 @@
 'use client';
-
 import Link from 'next/link';
-import {
-  FolderKanban,
-  GitBranch,
-  LayoutDashboard,
-  Images,
-  ListOrdered,
-  LogOut,
-  Plus,
-  Settings,
-  ShieldCheck,
-  Wand2,
-} from 'lucide-react';
+import { Home, Database, Play, Box, Wrench, LogOut, Settings, Wand2 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
 import UpdaterStatus from './UpdaterStatus';
-import useSettings from '@/hooks/useSettings';
 import { authRequiredState, logout } from '@/utils/api';
-
 const Sidebar = () => {
   const pathname = usePathname();
   const [authRequired] = authRequiredState.use();
-  const { settings } = useSettings();
-  const projectsEnabled = settings.PROJECTS_ENABLED !== 'false';
   const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Projects', href: '/projects', icon: FolderKanban },
+    { name: 'Home', href: '/dashboard', icon: Home },
+    { name: 'Datasets', href: '/datasets', icon: Database },
+    { name: 'Training', href: '/jobs', icon: Play },
+    { name: 'Models', href: '/models', icon: Box },
     { name: 'Generate', href: '/generate', icon: Wand2 },
-    { name: 'Datasets', href: '/datasets', icon: Images },
-    { name: 'Queue', href: '/jobs', icon: ListOrdered },
-    { name: 'New Job', href: '/jobs/new', icon: Plus },
-    { name: 'Workflows', href: '/workflows', icon: GitBranch },
-    { name: 'Watermark', href: '/watermark', icon: ShieldCheck },
+    { name: 'Tools', href: '/tools', icon: Wrench },
     { name: 'Settings', href: '/settings', icon: Settings },
-  ].filter(item => item.name !== 'Projects' || projectsEnabled);
-
+  ];
   const railButtonClass =
     'flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-500 transition-colors hover:border-gray-800 hover:bg-gray-900/60 hover:text-gray-100';
-
   const isActive = (href: string) => {
     if (href === '/jobs') {
-      return pathname === '/jobs' || (pathname.startsWith('/jobs/') && !pathname.startsWith('/jobs/new'));
+      return pathname === '/jobs' || pathname.startsWith('/jobs/');
     }
+    if (href === '/tools') return ['/tools', '/workflows', '/watermark'].some(route => pathname.startsWith(route));
     return pathname === href || pathname.startsWith(`${href}/`);
   };
-
   return (
     <aside className="studio-sidebar">
       <div className="studio-brand">
-        <Link href="/dashboard" className="flex min-w-0 items-center" aria-label="AITK Studio dashboard">
+        <Link href="/dashboard" className="flex min-w-0 items-center" aria-label="AITK Studio home">
           <ThemeLogo className="mr-0 h-10" />
         </Link>
         <div className="flex items-center gap-1 md:hidden">
@@ -75,7 +55,7 @@ const Sidebar = () => {
           {navigation.map(item => {
             const active = isActive(item.href);
             return (
-              <li key={item.name} className={item.name === 'Workflows' ? 'studio-utility-start' : undefined}>
+              <li key={item.name} className={item.name === 'Tools' ? 'studio-utility-start' : undefined}>
                 <Link
                   href={item.href}
                   aria-current={active ? 'page' : undefined}
@@ -111,5 +91,4 @@ const Sidebar = () => {
     </aside>
   );
 };
-
 export default Sidebar;

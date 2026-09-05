@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import { Readable } from 'stream';
 import { db } from '@/server/db';
-import { assertProjectJobEnabled } from '@/server/projects';
+
 import { resolveJobSampleFile } from '@/server/jobSamples';
 
 type SampleRouteParams = {
@@ -42,11 +42,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
   const job = await db.jobs.findById(jobID);
   if (!job) {
     return new NextResponse('Job not found', { status: 404 });
-  }
-  try {
-    await assertProjectJobEnabled(job);
-  } catch (error: any) {
-    return new NextResponse(error?.message || 'Project spaces are disabled', { status: error?.status || 403 });
   }
 
   const sampleFile = await resolveJobSampleFile(job, sampleSegments[0], {

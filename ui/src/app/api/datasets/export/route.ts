@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -12,12 +13,12 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const { datasetName, project_id } = await request.json();
+    const { datasetName } = assertGlobalPayload(await request.json());
     if (typeof datasetName !== 'string') {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
 
-    const { datasetsRoot } = await resolveDatasetScope(project_id);
+    const { datasetsRoot } = await resolveDatasetScope();
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     if (!fs.existsSync(datasetFolder) || !fs.statSync(datasetFolder).isDirectory()) {
       return NextResponse.json({ error: 'Dataset not found' }, { status: 404 });

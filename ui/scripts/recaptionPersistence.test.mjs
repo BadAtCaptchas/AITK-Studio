@@ -136,10 +136,22 @@ test('DatasetImageStudio gates localStorage persistence for encrypted datasets',
     'utf8',
   );
 
-  assert.match(source, /const hasEncryptedItems = useMemo\(\(\) => items\.some\(item => item\.kind === 'encrypted'\), \[items\]\);/);
+  assert.match(
+    source,
+    /const hasEncryptedItems = useMemo\(\(\) => items\.some\(item => item\.kind === 'encrypted'\), \[items\]\);/,
+  );
   assert.match(source, /const canPersistRecaptionState = !hasEncryptedItems;/);
-  assert.match(source, /if \(!hasEncryptedItems \|\| typeof window === 'undefined'\) return;[\s\S]*removeItem\(recaptionQueueStorageKeyValue\)[\s\S]*removeItem\(recaptionStorageKey\)/);
-  assert.match(source, /if \(!canPersistRecaptionState\) return;[\s\S]*readPersistedRecaptionQueue\(storageKey\)/);
-  assert.match(source, /if \(!canPersistRecaptionState\) return;[\s\S]*window\.localStorage\.setItem\(storageKey, JSON\.stringify\(snapshot\)\)/);
-  assert.match(source, /if \(!canPersistRecaptionState\) \{[\s\S]*setHasRecaptionSettingsForDataset\(true\);[\s\S]*return;[\s\S]*window\.localStorage\.setItem\(recaptionStorageKey, JSON\.stringify\(settings\)\)/);
+  assert.match(
+    source,
+    /if \(!hasEncryptedItems \|\| typeof window === 'undefined'\)\s+return;[\s\S]*removeItem\(recaptionQueueStorageKeyValue\)[\s\S]*removeItem\(recaptionStorageKey\)/,
+  );
+  assert.match(source, /if \(!canPersistRecaptionState\)\s+return;[\s\S]*readPersistedRecaptionQueue\(storageKey\)/);
+  assert.match(
+    source,
+    /if \(!canPersistRecaptionState\)\s+return;[\s\S]*window\.localStorage\.setItem\(storageKey, JSON\.stringify\(snapshot\)\)/,
+  );
+  assert.match(
+    source,
+    /if \(!canPersistRecaptionState\) \{[\s\S]*setHasRecaptionSettingsForDataset\(true\);[\s\S]*return;[\s\S]*window\.localStorage\.setItem\(recaptionStorageKey, JSON\.stringify\(settings\)\)/,
+  );
 });

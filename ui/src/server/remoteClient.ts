@@ -1,3 +1,4 @@
+import { isLegacyScopedRecord } from '../utils/obsoleteWorkspaceGuard';
 import path from 'path';
 import fs from 'fs/promises';
 import { createReadStream, existsSync } from 'fs';
@@ -21,8 +22,6 @@ import {
   resolveConfigPath,
 } from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
-import { PROJECT_SYNC_PROTOCOL } from './projectSyncProtocol';
-import { queueProjectResultsSync } from './projectSyncHooks';
 
 const REMOTE_BACKGROUND_POLL_TIMEOUT_MS = 5_000;
 const REMOTE_BACKGROUND_COOLDOWN_MS = 30_000;
@@ -269,12 +268,7 @@ export async function getRemoteBackgroundPollEligibility(
   if (cooldown && now < cooldown.until) {
     const seconds = Math.max(1, Math.ceil((cooldown.until - now) / 1000));
     const reason = `cooling down for ${seconds}s after ${cooldown.reason}`;
-    logRemoteBackgroundPoll(
-      worker,
-      feature,
-      `Skipping ${feature} for worker ${worker.name}: ${reason}.`,
-      'info',
-    );
+    logRemoteBackgroundPoll(worker, feature, `Skipping ${feature} for worker ${worker.name}: ${reason}.`, 'info');
     return { allowed: false, reason };
   }
   if (cooldown) {
@@ -423,7 +417,8 @@ export async function fetchRemoteJob(workerId: string, remoteJobId: string) {
 }
 
 async function fetchWorkerJob(worker: WorkerNodeRecord, remoteJobId: string, init: RemoteRequestInit = {}) {
-  return remoteJson<Job | null>(worker, `/api/jobs?id=${encodeURIComponent(remoteJobId)}`, init);
+  const job = await remoteJson<Job | null>(worker, `/api/jobs?id=${encodeURIComponent(remoteJobId)}`, init);
+  return isLegacyScopedRecord(job) ? null : job;
 }
 
 export function isRemoteJobMissingError(error: unknown) {
@@ -455,9 +450,10 @@ export async function markRemoteJobMissing(localJob: Job) {
 export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string | null) {
   const query = new URLSearchParams({ local_only: '1' });
   if (jobType) query.set('job_type', jobType);
-  return remoteJson<{ jobs: Job[] }>(worker, `/api/jobs?${query.toString()}`, {
+  const result = await remoteJson<{ jobs: Job[] }>(worker, `/api/jobs?${query.toString()}`, {
     timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS,
   });
+  return { jobs: result.jobs.filter(job => !isLegacyScopedRecord(job)) };
 }
 
 function remoteJobPatch(
@@ -517,12 +513,12 @@ function shouldPreserveLocalJobConfig(existingLocalJob: Job, workerId: string) {
 
 async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job, localJobId?: string) {
   const baseName = remoteJob.name || remoteJob.id;
-  const existing = await db.jobs.findByNameInScope(baseName, null);
+  const existing = await db.jobs.findByName(baseName);
   if (!existing || existing.id === localJobId) return baseName;
   if (existing.worker_id === worker.id && existing.remote_job_id === remoteJob.id) return baseName;
 
   const workerScopedName = `${baseName} (${worker.name})`;
-  const scopedExisting = await db.jobs.findByNameInScope(workerScopedName, null);
+  const scopedExisting = await db.jobs.findByName(workerScopedName);
   if (!scopedExisting || scopedExisting.id === localJobId) return workerScopedName;
   if (scopedExisting.worker_id === worker.id && scopedExisting.remote_job_id === remoteJob.id) return workerScopedName;
 
@@ -562,9 +558,6 @@ async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
     await clearDurableEncryptedDatasetKeys(synced.id).catch(error =>
       console.error('Error clearing durable encrypted dataset keys:', error),
     );
-    await queueProjectResultsSync(synced).catch(error =>
-      console.error('Error queueing project results sync:', error),
-    );
   }
 
   return synced;
@@ -587,7 +580,7 @@ export async function syncRemoteJob(localJob: Job, options: { background?: boole
       if ('reason' in poll) return localJob;
       remoteJob = poll.value;
     }
-    if (!remoteJob) {
+    if (!remoteJob || isLegacyScopedRecord(remoteJob)) {
       return markRemoteJobMissing(localJob);
     }
 
@@ -601,9 +594,6 @@ export async function syncRemoteJob(localJob: Job, options: { background?: boole
     if (remoteJob.status === 'completed' && !getJobRemoteCaptionState(synced)) {
       await clearDurableEncryptedDatasetKeys(localJob.id).catch(error =>
         console.error('Error clearing durable encrypted dataset keys:', error),
-      );
-      await queueProjectResultsSync(synced).catch(error =>
-        console.error('Error queueing project results sync:', error),
       );
     }
     return synced;
@@ -864,15 +854,11 @@ export async function uploadBundleToWorker(
   zipPath: string,
   gpuIds: string,
   onProgress?: (progress: FileUploadProgress) => void,
-  projectSync?: { projectID: string; homeInstanceID: string },
 ) {
   return remoteZipFileJson<{ job: Job; warnings: string[] }>(
     worker,
     appendQueryParams('/api/jobs/import', {
       gpu_ids: gpuIds,
-      project_id: projectSync?.projectID,
-      project_sync: projectSync ? PROJECT_SYNC_PROTOCOL : null,
-      home_instance_id: projectSync?.homeInstanceID,
     }),
     {
       filePath: zipPath,

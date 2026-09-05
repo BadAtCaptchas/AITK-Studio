@@ -29,16 +29,21 @@ test('sample thumbnails resolve inside the authorized root and use jpeg content 
 test('sample thumbnail resolution rejects traversal and symlink escapes', async t => {
   const root = await makeRoot();
   const outside = await makeRoot();
-  t.after(() => Promise.all([fs.rm(root, { recursive: true, force: true }), fs.rm(outside, { recursive: true, force: true })]));
+  t.after(() =>
+    Promise.all([fs.rm(root, { recursive: true, force: true }), fs.rm(outside, { recursive: true, force: true })]),
+  );
   await fs.writeFile(path.join(outside, 'escape.jpg'), 'jpeg');
-  await fs.symlink(outside, path.join(root, '.thumbs'));
+  await fs.symlink(outside, path.join(root, '.thumbs'), process.platform === 'win32' ? 'junction' : 'dir');
 
   assert.equal(await resolveSampleThumbnail(root, 'escape'), null);
   assert.equal(await resolveSampleThumbnail(root, '../escape'), null);
 });
 
 test('sample thumbnail URLs preserve existing remote proxy parameters', () => {
-  assert.equal(getSampleThumbnailUrl('/api/jobs/job-1/samples/sample.png'), '/api/jobs/job-1/samples/sample.png?thumb=1');
+  assert.equal(
+    getSampleThumbnailUrl('/api/jobs/job-1/samples/sample.png'),
+    '/api/jobs/job-1/samples/sample.png?thumb=1',
+  );
   assert.equal(
     getSampleThumbnailUrl('remote://job-1/img/%2Fapi%2Fjobs%2Fremote-1%2Fsamples%2Fsample.mp4/sample.mp4'),
     '/api/remote-assets?job_id=job-1&type=img&path=%2Fapi%2Fjobs%2Fremote-1%2Fsamples%2Fsample.mp4&thumb=1',

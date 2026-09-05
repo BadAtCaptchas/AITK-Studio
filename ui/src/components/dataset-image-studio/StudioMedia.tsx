@@ -1,5 +1,4 @@
 'use client';
-
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Loader2, Pipette } from 'lucide-react';
 import classNames from 'classnames';
@@ -16,22 +15,18 @@ import {
 import { getMediaUrl } from '@/utils/media';
 import { itemKind, itemName, sampleImageColorAt } from './utils';
 import type { DatasetStudioItem, ImageSize } from './types';
-
 type EncryptedObjectUrlState = {
   url: string | null;
   status: EncryptedObjectMediaStatus;
   error: unknown;
 };
-
 async function fetchEncryptedObjectBlob(body: EncryptedObjectRequestBody) {
   const response = await apiClient.post('/api/datasets/encrypted/object', body, { responseType: 'blob' });
   return response.data as Blob;
 }
-
 export function useEncryptedObjectUrl(
   datasetName: string,
   workerID: string,
-  projectID: string | null | undefined,
   cryptoKey: CryptoKey | null | undefined,
   item: EncryptedDatasetItem | null,
   enabled = true,
@@ -41,7 +36,6 @@ export function useEncryptedObjectUrl(
     status: 'locked',
     error: null,
   });
-
   useEffect(() => {
     if (!item || !enabled) {
       setState({ url: null, status: 'locked', error: null });
@@ -51,14 +45,11 @@ export function useEncryptedObjectUrl(
       setState({ url: null, status: 'locked', error: null });
       return;
     }
-
     let cancelled = false;
     setState({ url: null, status: 'loading', error: null });
-
     loadEncryptedObjectMediaUrl({
       datasetName,
       workerID,
-      projectID,
       cryptoKey,
       item,
       loadEncryptedObject: fetchEncryptedObjectBlob,
@@ -73,23 +64,18 @@ export function useEncryptedObjectUrl(
         console.error('Encrypted media load failed:', error);
         setState({ url: null, status: 'error', error });
       });
-
     return () => {
       cancelled = true;
     };
-  }, [cryptoKey, datasetName, enabled, item, projectID, workerID]);
-
+  }, [cryptoKey, datasetName, enabled, item, null, workerID]);
   return state;
 }
-
 function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-
     const updateSize = () => {
       const rect = element.getBoundingClientRect();
       setSize({
@@ -97,21 +83,17 @@ function useElementSize<T extends HTMLElement>() {
         height: Math.max(0, rect.height),
       });
     };
-
     updateSize();
     const observer = new ResizeObserver(updateSize);
     observer.observe(element);
     window.addEventListener('resize', updateSize);
-
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', updateSize);
     };
   }, []);
-
   return { ref, size };
 }
-
 export function PlainThumb({
   path,
   mediaUrl,
@@ -153,25 +135,21 @@ export function PlainThumb({
     />
   );
 }
-
 export function EncryptedThumb({
   datasetName,
   workerID,
-  projectID,
   cryptoKey,
   item,
   onNaturalSizeChange,
 }: {
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   cryptoKey: CryptoKey | null | undefined;
   item: EncryptedDatasetItem;
   onNaturalSizeChange?: (size: ImageSize) => void;
 }) {
   const shouldLoadMedia = item.mediaKind !== 'audio';
-  const { url, status } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, item, shouldLoadMedia);
-
+  const { url, status } = useEncryptedObjectUrl(datasetName, workerID, cryptoKey, item, shouldLoadMedia);
   if (item.mediaKind === 'audio') {
     return (
       <div className="flex h-full w-full items-center justify-center bg-gray-900 text-[10px] text-gray-400">Audio</div>
@@ -211,12 +189,10 @@ export function EncryptedThumb({
     />
   );
 }
-
 export function StudioMedia({
   item,
   datasetName,
   workerID,
-  projectID,
   cryptoKey,
   children,
   zoom,
@@ -229,7 +205,6 @@ export function StudioMedia({
   item: DatasetStudioItem;
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   cryptoKey?: CryptoKey | null;
   children: React.ReactNode;
   zoom: number;
@@ -240,22 +215,22 @@ export function StudioMedia({
   onImageElementChange?: (image: HTMLImageElement | null) => void;
 }) {
   const encryptedItem = item.kind === 'encrypted' ? item.item : null;
-  const { url, status } = useEncryptedObjectUrl(datasetName, workerID, projectID, cryptoKey, encryptedItem);
+  const { url, status } = useEncryptedObjectUrl(datasetName, workerID, cryptoKey, encryptedItem);
   const kind = itemKind(item);
   const src = item.kind === 'plain' ? getMediaUrl(item.mediaUrl || item.path) : url;
   const name = itemName(item);
   const { ref: frameRef, size: frameSize } = useElementSize<HTMLDivElement>();
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
-
+  const [naturalSize, setNaturalSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   useEffect(() => {
     setNaturalSize(null);
     onNaturalSizeChange?.(null);
     onImageElementChange?.(null);
   }, [onImageElementChange, onNaturalSizeChange, src]);
-
   useEffect(() => () => onImageElementChange?.(null), [onImageElementChange]);
-
   const fittedSize = useMemo(() => {
     if (!naturalSize || frameSize.width <= 0 || frameSize.height <= 0) return null;
     const availableWidth = Math.max(1, frameSize.width - 24);
@@ -268,19 +243,15 @@ export function StudioMedia({
       height: Math.round(scaledHeight),
     };
   }, [frameSize.height, frameSize.width, naturalSize, zoom]);
-
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame || !fittedSize) return;
-
     const animationFrame = window.requestAnimationFrame(() => {
       frame.scrollLeft = Math.max(0, (frame.scrollWidth - frame.clientWidth) / 2);
       frame.scrollTop = Math.max(0, (frame.scrollHeight - frame.clientHeight) / 2);
     });
-
     return () => window.cancelAnimationFrame(animationFrame);
   }, [fittedSize, frameRef]);
-
   if (item.kind === 'encrypted' && status === 'locked') {
     return (
       <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
@@ -288,7 +259,6 @@ export function StudioMedia({
       </div>
     );
   }
-
   if (item.kind === 'encrypted' && status === 'error') {
     return (
       <div className="flex h-full w-full items-center justify-center text-sm text-red-300">
@@ -296,7 +266,6 @@ export function StudioMedia({
       </div>
     );
   }
-
   if (item.kind === 'encrypted' && (status === 'loading' || !src)) {
     return (
       <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
@@ -305,7 +274,6 @@ export function StudioMedia({
       </div>
     );
   }
-
   if (kind === 'audio' && src) {
     return (
       <div className="flex h-full w-full items-center justify-center p-4">
@@ -313,7 +281,6 @@ export function StudioMedia({
       </div>
     );
   }
-
   if (kind === 'video' && src) {
     return (
       <div className="flex h-full w-full items-center justify-center overflow-hidden">
@@ -321,7 +288,6 @@ export function StudioMedia({
       </div>
     );
   }
-
   if (kind === 'text') {
     return (
       <div className="flex h-full w-full items-center justify-center p-6 text-center text-gray-300">
@@ -336,7 +302,6 @@ export function StudioMedia({
       </div>
     );
   }
-
   return (
     <div
       ref={frameRef}

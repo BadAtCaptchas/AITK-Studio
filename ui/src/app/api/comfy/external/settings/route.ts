@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import {
   ExternalComfyError,
@@ -14,7 +15,10 @@ function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json({ error: error instanceof Error ? error.message : 'External ComfyUI settings failed.' }, { status: 500 });
+  return NextResponse.json(
+    { error: error instanceof Error ? error.message : 'External ComfyUI settings failed.' },
+    { status: 500 },
+  );
 }
 
 export async function GET() {
@@ -28,9 +32,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const serverUrl = await saveExternalComfyUrl(body?.server_url ?? body?.serverUrl ?? '');
-    const hasLoraDir = Object.prototype.hasOwnProperty.call(body || {}, 'lora_dir') || Object.prototype.hasOwnProperty.call(body || {}, 'loraDir');
+    const hasLoraDir =
+      Object.prototype.hasOwnProperty.call(body || {}, 'lora_dir') ||
+      Object.prototype.hasOwnProperty.call(body || {}, 'loraDir');
     const loraDir = hasLoraDir
       ? await saveExternalComfyLoraDir(body?.lora_dir ?? body?.loraDir ?? '')
       : await getSavedExternalComfyLoraDir();

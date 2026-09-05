@@ -1,3 +1,4 @@
+import { assertGlobalPayload, isLegacyScopedRecord, ObsoleteWorkspaceError } from '../utils/obsoleteWorkspaceGuard';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -9,9 +10,12 @@ import { DATASET_TEXT_CAPTION_EXTENSIONS, captionSidecarPath } from './captionFi
 import { isEncryptedDatasetFolder, resolveDatasetFolder } from './encryptedDatasets';
 import { isRootCaptionFileName, readDatasetRootCaption, ROOT_CAPTION_FILE_NAME } from './datasetRootCaption';
 import { getOpenRouterApiKey } from './settings';
-import { generateSingleImageRecaption, type RecaptionProvider, type RecaptionOutputFormat } from './datasetSingleRecaption';
+import {
+  generateSingleImageRecaption,
+  type RecaptionProvider,
+  type RecaptionOutputFormat,
+} from './datasetSingleRecaption';
 import { TOOLKIT_ROOT } from '../paths';
-import type { ProjectScopeIntent } from '../types';
 
 export const DATASET_WATCHERS_SETTING_KEY = 'DATASET_WATCHERS_V1';
 export const DATASET_WATCHER_STATUS_SETTING_KEY = 'DATASET_WATCHER_STATUS_V1';
@@ -49,7 +53,6 @@ export type DatasetWatcherAutoCaptionConfig = {
 export type DatasetWatcherConfig = {
   id: string;
   datasetName: string;
-  projectID: string | null;
   enabled: boolean;
   sourcePath: string;
   includeSubfolders: boolean;
@@ -166,11 +169,6 @@ function asBoolean(value: unknown, fallback: boolean) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function normalizeProjectID(value: unknown) {
-  const projectID = asString(value);
-  return projectID || null;
-}
-
 function normalizeRecaptionProvider(value: unknown): RecaptionProvider {
   return value === 'ollama' || value === 'remote_ollama' ? value : 'openrouter';
 }
@@ -217,7 +215,6 @@ function normalizeWatcher(raw: unknown): DatasetWatcherConfig | null {
   return {
     id,
     datasetName,
-    projectID: normalizeProjectID(raw.projectID),
     enabled: raw.enabled !== false,
     sourcePath,
     includeSubfolders: asBoolean(raw.includeSubfolders, true),
@@ -229,6 +226,7 @@ function normalizeWatcher(raw: unknown): DatasetWatcherConfig | null {
 }
 
 function normalizeIncomingWatcher(raw: unknown, existing?: DatasetWatcherConfig | null): DatasetWatcherConfig {
+  assertGlobalPayload(raw);
   if (!isRecord(raw)) throw new Error('Watcher config is required');
   const now = nowIso();
   const id = asString(raw.id) || existing?.id || randomUUID();
@@ -246,7 +244,6 @@ function normalizeIncomingWatcher(raw: unknown, existing?: DatasetWatcherConfig 
   return {
     id,
     datasetName,
-    projectID: normalizeProjectID(raw.projectID ?? existing?.projectID),
     enabled: asBoolean(raw.enabled, existing?.enabled ?? true),
     sourcePath,
     includeSubfolders: asBoolean(raw.includeSubfolders, existing?.includeSubfolders ?? true),
@@ -276,7 +273,9 @@ function normalizeStatus(raw: unknown): DatasetWatcherStatus | null {
         ? raw.autoCaptionActivePath
         : null,
     lastError: typeof raw.lastError === 'string' && raw.lastError.trim() ? raw.lastError : null,
-    warnings: Array.isArray(raw.warnings) ? raw.warnings.filter((item): item is string => typeof item === 'string') : [],
+    warnings: Array.isArray(raw.warnings)
+      ? raw.warnings.filter((item): item is string => typeof item === 'string')
+      : [],
   };
 }
 
@@ -286,8 +285,10 @@ async function readWatcherRows() {
   try {
     const parsed = JSON.parse(row.value);
     const values = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.watchers) ? parsed.watchers : [];
+    if (values.some(isLegacyScopedRecord)) throw new ObsoleteWorkspaceError();
     return values.map(normalizeWatcher).filter(Boolean) as DatasetWatcherConfig[];
-  } catch {
+  } catch (error) {
+    if (error instanceof ObsoleteWorkspaceError) throw error;
     return [];
   }
 }
@@ -328,26 +329,9 @@ export function isDatasetWatchersSettingKey(key: string) {
   return key === DATASET_WATCHERS_SETTING_KEY || key === DATASET_WATCHER_STATUS_SETTING_KEY;
 }
 
-export async function listDatasetWatchers(
-  filter: { datasetName?: string; projectID?: string | null } = {},
-  options: { intent?: ProjectScopeIntent } = {},
-) {
-  const watchers = await readWatcherRows();
-  const rawProjectID = 'projectID' in filter ? normalizeProjectID(filter.projectID) : null;
-  const canonicalProjectID =
-    'projectID' in filter && rawProjectID
-      ? (await resolveDatasetScope(rawProjectID, { intent: options.intent ?? 'write' })).projectID
-      : rawProjectID;
-  const acceptedProjectIDs = new Set([rawProjectID, canonicalProjectID].filter(Boolean) as string[]);
-  return watchers.filter(watcher => {
-    if (filter.datasetName && watcher.datasetName !== filter.datasetName) return false;
-    if ('projectID' in filter) {
-      const watcherProjectID = watcher.projectID || null;
-      if (!canonicalProjectID && watcherProjectID) return false;
-      if (canonicalProjectID && !acceptedProjectIDs.has(watcherProjectID || '')) return false;
-    }
-    return true;
-  });
+export async function listDatasetWatchers(filter: { datasetName?: string } = {}) {
+  assertGlobalPayload(filter);
+  return (await readWatcherRows()).filter(watcher => !filter.datasetName || watcher.datasetName === filter.datasetName);
 }
 
 export async function getDatasetWatcherStatuses(ids?: string[]) {
@@ -369,7 +353,6 @@ export async function saveDatasetWatcher(rawWatcher: unknown) {
     const nextWatcher = normalizeIncomingWatcher(rawWatcher, existing);
     assertWatcherLimit(watchers, nextWatcher.id);
     const validation = await validateDatasetWatcher(nextWatcher);
-    nextWatcher.projectID = validation.projectID;
     const shouldSeedBaseline =
       !existing ||
       existing.sourcePath !== nextWatcher.sourcePath ||
@@ -633,8 +616,8 @@ async function assertNotRootDirectory(directory: string) {
   }
 }
 
-async function resolveWatcherDataset(watcher: Pick<DatasetWatcherConfig, 'datasetName' | 'projectID'>) {
-  const scope = await resolveDatasetScope(watcher.projectID);
+async function resolveWatcherDataset(watcher: Pick<DatasetWatcherConfig, 'datasetName'>) {
+  const scope = await resolveDatasetScope();
   const datasetFolder = resolveDatasetFolder(scope.datasetsRoot, watcher.datasetName);
   const stat = await fsp.stat(datasetFolder).catch(() => null);
   if (!stat?.isDirectory()) throw new Error('Dataset folder was not found');
@@ -655,11 +638,11 @@ export async function validateDatasetWatcher(watcher: DatasetWatcherConfig) {
   if (isPathInsideOrSame(sourceRealPath, datasetRealPath) || isPathInsideOrSame(datasetRealPath, sourceRealPath)) {
     throw new Error('Watch folder cannot overlap the destination dataset folder');
   }
-  return { sourceRealPath, datasetFolder, datasetRealPath, projectID: scope.projectID };
+  return { sourceRealPath, datasetFolder, datasetRealPath };
 }
 
-export async function readWatcherSourceRootCaption(sourcePath: string, projectID: string | null = null) {
-  const scope = await resolveDatasetScope(projectID, { intent: 'read' });
+export async function readWatcherSourceRootCaption(sourcePath: string) {
+  const scope = await resolveDatasetScope();
   const sourceRoot = await resolveAccessibleDirectory(sourcePath);
   await assertNotRootDirectory(sourceRoot);
   await assertSourcePathAllowed(sourceRoot, scope.datasetsRoot);
@@ -722,10 +705,7 @@ async function filesHaveSameContent(leftPath: string, rightPath: string) {
       ]);
       if (leftRead.bytesRead !== rightRead.bytesRead || leftRead.bytesRead === 0) return false;
       if (
-        Buffer.compare(
-          leftBuffer.subarray(0, leftRead.bytesRead),
-          rightBuffer.subarray(0, rightRead.bytesRead),
-        ) !== 0
+        Buffer.compare(leftBuffer.subarray(0, leftRead.bytesRead), rightBuffer.subarray(0, rightRead.bytesRead)) !== 0
       ) {
         return false;
       }
@@ -770,7 +750,11 @@ function isAutoCaptionableImage(filePath: string) {
 }
 
 function isAutoCaptionCandidate(watcher: DatasetWatcherConfig, candidate: SourceCandidate) {
-  return watcher.autoCaption?.enabled === true && candidate.kind === 'media' && isAutoCaptionableImage(candidate.absolutePath);
+  return (
+    watcher.autoCaption?.enabled === true &&
+    candidate.kind === 'media' &&
+    isAutoCaptionableImage(candidate.absolutePath)
+  );
 }
 
 function cleanPathSegment(segment: string, fallback: string) {
@@ -916,7 +900,9 @@ async function seedImportManifestBaseline(
   const now = Date.now();
   const releaseLock = await acquireWatcherLock(validation.datasetFolder, watcher.id, now);
   if (!releaseLock) {
-    throw new Error('Dataset watcher is currently syncing. Try saving the watcher again after the current scan finishes.');
+    throw new Error(
+      'Dataset watcher is currently syncing. Try saving the watcher again after the current scan finishes.',
+    );
   }
 
   try {
@@ -962,7 +948,9 @@ function isStableCandidate(
     size: candidate.size,
     mtimeMs: candidate.mtimeMs,
     firstSeenAt:
-      previous && previous.size === candidate.size && previous.mtimeMs === candidate.mtimeMs ? previous.firstSeenAt : now,
+      previous && previous.size === candidate.size && previous.mtimeMs === candidate.mtimeMs
+        ? previous.firstSeenAt
+        : now,
     lastSeenAt: now,
   });
   return (
@@ -1012,7 +1000,10 @@ async function autoCaptionImportedFile(options: {
     throw new Error('Remote Ollama worker is required for auto-caption');
   }
 
-  const rootCaption = await readDatasetRootCaption(options.datasetFolder).catch(() => ({ found: false, systemPrompt: '' }));
+  const rootCaption = await readDatasetRootCaption(options.datasetFolder).catch(() => ({
+    found: false,
+    systemPrompt: '',
+  }));
   const systemPrompt = autoCaption.systemPrompt || (rootCaption.found ? rootCaption.systemPrompt : '');
   const outputFormat = autoCaption.outputFormat || 'text';
   const result = await generateSingleImageRecaption({
@@ -1180,7 +1171,9 @@ export async function runDatasetWatcherOnce(
       processableCandidates.push(candidate);
     }
 
-    autoCaptionTotalCount = processableCandidates.filter(candidate => isAutoCaptionCandidate(watcher, candidate)).length;
+    autoCaptionTotalCount = processableCandidates.filter(candidate =>
+      isAutoCaptionCandidate(watcher, candidate),
+    ).length;
     autoCaptionPendingCount = autoCaptionTotalCount;
     if (autoCaptionTotalCount > 0) {
       await writeRunStatus('scanning');
@@ -1209,7 +1202,9 @@ export async function runDatasetWatcherOnce(
 
       const destination = await copyCandidateIntoDataset({ watcher, datasetFolder, candidate });
       if (!destination) {
-        warnings.push(`${candidate.relativePath}: Source file changed during import; it will be retried on the next scan.`);
+        warnings.push(
+          `${candidate.relativePath}: Source file changed during import; it will be retried on the next scan.`,
+        );
         pendingByScope().get(pendingScope)?.delete(key);
         dropAutoCaptionCandidate(candidate);
         await writeRunStatus('importing');
@@ -1273,7 +1268,10 @@ export async function runEnabledDatasetWatchers(options: DatasetWatcherRunOption
   const results: DatasetWatcherRunResult[] = [];
   for (const watcher of watchers) {
     if (!watcher.enabled) {
-      await writeStatus(watcher.id, { ...defaultWatcherStatus('disabled'), lastScanAt: nowIso(options.now ?? Date.now()) });
+      await writeStatus(watcher.id, {
+        ...defaultWatcherStatus('disabled'),
+        lastScanAt: nowIso(options.now ?? Date.now()),
+      });
       continue;
     }
     results.push(await runDatasetWatcherOnce(watcher, options));

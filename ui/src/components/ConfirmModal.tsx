@@ -178,10 +178,12 @@ export default function ConfirmModal() {
                   <div className="mt-2">
                     <p className="text-sm text-gray-200">{confirm?.message}</p>
                     <div className={classNames('mt-4 w-full', { hidden: !confirm?.inputTitle })}>
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        void onConfirm();
-                      }}>
+                      <form
+                        onSubmit={e => {
+                          e.preventDefault();
+                          void onConfirm();
+                        }}
+                      >
                         <TextInput
                           value={inputValue}
                           ref={inputRef}

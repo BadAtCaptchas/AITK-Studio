@@ -6,9 +6,6 @@ import { getCloudflaredConfig, startCloudflared, stopCloudflared } from '../src/
 import { purgeLegacyDurableEncryptedDatasetKeys } from '../src/server/encryptedDatasetSecrets';
 import { syncRemoteCaptionResults } from '../src/server/remoteCaptionResults';
 import { runDatasetWatchersIfDue } from '../src/server/datasetWatchers';
-import { recoverIncompleteProjectCreations } from '../src/server/projects';
-import { areProjectsEnabled } from '../src/server/settings';
-import { processProjectSyncQueue } from '../src/server/projectSync';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
@@ -49,9 +46,6 @@ class CronWorker {
     await processQueue();
     await syncRemoteCaptionResults();
     await runDatasetWatchersIfDue();
-    if (await areProjectsEnabled()) {
-      await processProjectSyncQueue();
-    }
   }
 
   async stop() {
@@ -67,14 +61,6 @@ class CronWorker {
 let cronWorker: CronWorker | null = null;
 
 async function startCronWorker() {
-  try {
-    if (await areProjectsEnabled()) {
-      await recoverIncompleteProjectCreations();
-    }
-  } catch (error) {
-    console.error('Error recovering incomplete project creation operations:', error);
-  }
-
   try {
     const purged = await purgeLegacyDurableEncryptedDatasetKeys();
     if (purged > 0) {
@@ -128,9 +114,7 @@ function waitWithTimeout(promise: Promise<void>, timeoutMs: number) {
   return new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(resolve, timeoutMs);
 
-    promise
-      .then(resolve, reject)
-      .finally(() => clearTimeout(timeout));
+    promise.then(resolve, reject).finally(() => clearTimeout(timeout));
   });
 }
 

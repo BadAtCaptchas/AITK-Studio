@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -5,11 +6,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
-import {
-  extractZipSafely,
-  getExtractedDatasetPath,
-  readDatasetExportManifest,
-} from '@/server/datasetTransfer';
+import { extractZipSafely, getExtractedDatasetPath, readDatasetExportManifest } from '@/server/datasetTransfer';
 import { isEncryptedDatasetFolder, listDatasetSummaries } from '@/server/encryptedDatasets';
 import { nextAvailablePath } from '@/server/trainingJobTransfer';
 import type { DatasetSummary } from '@/types';
@@ -27,8 +24,8 @@ export async function POST(request: NextRequest) {
   let workRoot: string | null = null;
 
   try {
-    const body = await request.json();
-    const { datasetsRoot } = await resolveDatasetScope(body?.project_id);
+    const body = assertGlobalPayload(await request.json());
+    const { datasetsRoot } = await resolveDatasetScope();
     await fsp.mkdir(datasetsRoot, { recursive: true });
 
     const importID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -63,16 +60,15 @@ export async function POST(request: NextRequest) {
     const importedName = path.basename(targetPath);
     const allDatasets = await listDatasetSummaries(datasetsRoot);
     const imported = allDatasets.find(dataset => dataset.name === importedName);
-    const dataset: DatasetSummary =
-      imported || {
-        name: importedName,
-        encrypted: isEncryptedDatasetFolder(targetPath),
-        source: 'local',
-        worker_id: 'local',
-        worker_name: 'Local',
-        ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
-        path: targetPath,
-      };
+    const dataset: DatasetSummary = imported || {
+      name: importedName,
+      encrypted: isEncryptedDatasetFolder(targetPath),
+      source: 'local',
+      worker_id: 'local',
+      worker_name: 'Local',
+      ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
+      path: targetPath,
+    };
 
     return NextResponse.json({
       dataset,

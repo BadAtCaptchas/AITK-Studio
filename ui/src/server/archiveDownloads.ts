@@ -5,8 +5,8 @@ import archiver from 'archiver';
 import { db } from './db';
 import { resolveDatasetScope, isPathInside } from './datasetScope';
 import { resolveDatasetFolder } from './encryptedDatasets';
-import { createProjectAssetUrl } from './projectAssetUrls';
-import { getJobTrainingRoot, getProjectRoots } from './projects';
+
+import { getJobTrainingRoot } from './trainingPaths';
 import { getRemoteWorker, isLocalWorker, remoteJson } from './remoteClient';
 import { makeRemoteAssetRef } from './remoteAssets';
 
@@ -17,13 +17,14 @@ export type ArchiveRequest = {
   jobID?: string;
   jobName?: string;
   datasetName?: string;
-  project_id?: string | null;
 };
 
 export type ArchiveResult = { zipPath: string; fileName: string; downloadUrl?: string };
 
 function safeName(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value === path.basename(value) && value !== '.' && value !== '..';
+  return (
+    typeof value === 'string' && value.length > 0 && value === path.basename(value) && value !== '.' && value !== '..'
+  );
 }
 
 async function collectFiles(root: string, captionsOnly: boolean): Promise<string[]> {
@@ -56,9 +57,11 @@ async function writeArchive(outputPath: string, entries: Array<{ source: string;
 
 async function datasetArchive(request: ArchiveRequest): Promise<ArchiveResult> {
   if (!safeName(request.datasetName)) throw new Error('Invalid datasetName');
-  const scope = await resolveDatasetScope(request.project_id, { intent: 'read' });
+  const scope = await resolveDatasetScope();
   const canonicalRoot = await fsp.realpath(scope.datasetsRoot);
-  const canonicalFolder = await fsp.realpath(resolveDatasetFolder(scope.datasetsRoot, request.datasetName)).catch(() => null);
+  const canonicalFolder = await fsp
+    .realpath(resolveDatasetFolder(scope.datasetsRoot, request.datasetName))
+    .catch(() => null);
   if (!canonicalFolder || !isPathInside(canonicalRoot, canonicalFolder)) throw new Error('Dataset not found');
 
   const captionsOnly = request.zipTarget === 'dataset_captions';
@@ -71,21 +74,13 @@ async function datasetArchive(request: ArchiveRequest): Promise<ArchiveResult> {
     files.map(source => ({ source, name: path.join(request.datasetName!, path.relative(canonicalFolder, source)) })),
   );
 
-  if (scope.project) {
-    const projectRoot = (await getProjectRoots(scope.project)).root;
-    return {
-      zipPath: outputPath,
-      fileName,
-      downloadUrl: createProjectAssetUrl(scope.project.id, path.relative(projectRoot, outputPath), 'attachment'),
-    };
-  }
   return { zipPath: outputPath, fileName };
 }
 
 async function resolveSampleJob(request: ArchiveRequest) {
   if (request.jobID) return db.jobs.findById(request.jobID);
   if (!safeName(request.jobName)) return null;
-  const matches = (await db.jobs.list()).filter(job => !job.project_id && job.name === request.jobName);
+  const matches = (await db.jobs.list()).filter(job => job.name === request.jobName);
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -113,18 +108,11 @@ async function sampleArchive(request: ArchiveRequest): Promise<ArchiveResult> {
   const files = await collectFiles(samplesRoot, false);
   if (files.length === 0) throw new Error('Samples folder is empty');
   const outputPath = path.join(jobRoot, 'samples.zip');
-  await writeArchive(outputPath, files.map(source => ({ source, name: path.join('samples', path.relative(samplesRoot, source)) })));
+  await writeArchive(
+    outputPath,
+    files.map(source => ({ source, name: path.join('samples', path.relative(samplesRoot, source)) })),
+  );
 
-  if (job.project_id) {
-    const project = await db.projects.findById(job.project_id);
-    if (!project) throw new Error('Project not found');
-    const projectRoot = (await getProjectRoots(project)).root;
-    return {
-      zipPath: outputPath,
-      fileName: 'samples.zip',
-      downloadUrl: createProjectAssetUrl(project.id, path.relative(projectRoot, outputPath), 'attachment'),
-    };
-  }
   return { zipPath: outputPath, fileName: 'samples.zip' };
 }
 

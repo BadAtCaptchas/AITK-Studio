@@ -16,11 +16,9 @@ import {
 } from '@/utils/encryptedDatasets';
 import { FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS } from '@/utils/folderImport';
 import { uploadDatasetFile } from '@/utils/streamedUploads';
-
 export interface AddImagesModalState {
   datasetName: string;
   workerID?: string;
-  projectID?: string | null;
   onComplete?: () => void;
   openedByDrag?: boolean;
   encrypted?: {
@@ -30,41 +28,34 @@ export interface AddImagesModalState {
     onUpdate: (manifest: EncryptedDatasetManifest, catalog: EncryptedDatasetCatalog) => void;
   };
 }
-
 export const addImagesModalState = createGlobalState<AddImagesModalState | null>(null);
-
 export const openImagesModal = (
   datasetName: string,
   onComplete: () => void,
-  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID' | 'projectID'>,
+  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID'>,
 ) => {
   addImagesModalState.set({
     datasetName,
     workerID: options?.workerID,
-    projectID: options?.projectID,
     onComplete,
     encrypted: options?.encrypted,
   });
 };
-
 /** Call on a page that knows its datasetName — auto-opens the modal when files are dragged onto the page. */
 export function useOpenImagesModalOnDrag(
   datasetName: string,
   onComplete: () => void,
-  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID' | 'projectID'>,
+  options?: Pick<AddImagesModalState, 'encrypted' | 'workerID'>,
 ) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-
   useEffect(() => {
     if (!datasetName) return;
-
     let depth = 0;
     const isFileDrag = (e: DragEvent) => {
       const types = e?.dataTransfer?.types;
       return !!types && Array.from(types).includes('Files');
     };
-
     const onDragEnter = (e: DragEvent) => {
       if (!isFileDrag(e)) return;
       depth += 1;
@@ -73,7 +64,6 @@ export function useOpenImagesModalOnDrag(
           addImagesModalState.set({
             datasetName,
             workerID: options?.workerID,
-            projectID: options?.projectID,
             onComplete: onCompleteRef.current,
             openedByDrag: true,
             encrypted: options?.encrypted,
@@ -101,7 +91,6 @@ export function useOpenImagesModalOnDrag(
         addImagesModalState.set({ ...current, openedByDrag: false });
       }
     };
-
     window.addEventListener('dragenter', onDragEnter);
     window.addEventListener('dragleave', onDragLeave);
     window.addEventListener('drop', onDrop);
@@ -110,12 +99,12 @@ export function useOpenImagesModalOnDrag(
       window.removeEventListener('dragleave', onDragLeave);
       window.removeEventListener('drop', onDrop);
     };
-  }, [datasetName, options?.encrypted, options?.projectID, options?.workerID]);
+  }, [datasetName, options?.encrypted, null, options?.workerID]);
 }
-
-type AcceptMap = { [mime: string]: string[] };
+type AcceptMap = {
+  [mime: string]: string[];
+};
 type FileStatus = 'pending' | 'uploading' | 'error';
-
 interface FileEntry {
   id: number;
   file: File;
@@ -123,17 +112,13 @@ interface FileEntry {
   progress: number;
   error?: string;
 }
-
 const MAX_CONCURRENT = 3;
 const ROW_HEIGHT = 32;
 const VISIBLE_ROWS = 8;
-
 let nextId = 0;
-
 export default function AddImagesModal() {
   const [modalInfo, setModalInfo] = addImagesModalState.use();
   const open = modalInfo !== null;
-
   const [isUploading, setIsUploading] = useState(false);
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -142,26 +127,20 @@ export default function AddImagesModal() {
   const abortRef = useRef(false);
   const modalInfoRef = useRef(modalInfo);
   modalInfoRef.current = modalInfo;
-
   const datasetName = modalInfo?.datasetName ?? '';
   const workerID = modalInfo?.workerID ?? 'local';
-  const projectID = modalInfo?.projectID ?? null;
   const encrypted = modalInfo?.encrypted ?? null;
-
   const uploadSingleFile = useCallback(
     async (entry: FileEntry): Promise<'done' | 'error'> => {
       if (abortRef.current) return 'error';
-
       const id = entry.id;
       setFileEntries(prev =>
         prev.map(e => (e.id === id ? { ...e, status: 'uploading' as FileStatus, progress: 0 } : e)),
       );
-
       try {
         await uploadDatasetFile(entry.file, {
           datasetName,
           workerID,
-          projectID,
           onUploadProgress: pe => {
             const percent = Math.round(((pe.loaded || 0) * 100) / (pe.total || pe.loaded || 1));
             setFileEntries(prev => prev.map(e => (e.id === id ? { ...e, progress: percent } : e)));
@@ -183,23 +162,20 @@ export default function AddImagesModal() {
         return 'error';
       }
     },
-    [datasetName, projectID, workerID],
+    [datasetName, null, workerID],
   );
-
   const resetState = useCallback(() => {
     setFileEntries([]);
     setTotalCount(0);
     setDoneCount(0);
     setErrorCount(0);
   }, []);
-
   const uploadEncryptedFiles = useCallback(
     async (acceptedFiles: File[]) => {
       if (!encrypted || acceptedFiles.length === 0) return;
       const pairs = pairMediaAndCaptionFiles(acceptedFiles);
       const rootCaption = await readRootCaptionFile(acceptedFiles);
       if (pairs.length === 0 && rootCaption === null) return;
-
       const entries: FileEntry[] = pairs.map(({ file }) => ({
         id: nextId++,
         file,
@@ -212,11 +188,12 @@ export default function AddImagesModal() {
       setErrorCount(0);
       setIsUploading(true);
       abortRef.current = false;
-
       try {
-        const encryptedObjects: Array<{ objectPath: string; blob: Blob }> = [];
+        const encryptedObjects: Array<{
+          objectPath: string;
+          blob: Blob;
+        }> = [];
         const newItems: EncryptedDatasetItem[] = [];
-
         for (let i = 0; i < pairs.length; i += 1) {
           if (abortRef.current) return;
           const entryId = entries[i].id;
@@ -228,34 +205,27 @@ export default function AddImagesModal() {
           const built = await buildEncryptedDatasetItem(file, encrypted.cryptoKey, caption);
           newItems.push(built.item);
           encryptedObjects.push(...built.encryptedObjects);
-          setFileEntries(prev =>
-            prev.map(entry => (entry.id === entryId ? { ...entry, progress: 75 } : entry)),
-          );
+          setFileEntries(prev => prev.map(entry => (entry.id === entryId ? { ...entry, progress: 75 } : entry)));
         }
-
         const nextCatalog: EncryptedDatasetCatalog = {
           ...encrypted.catalog,
           items: [...encrypted.catalog.items, ...newItems],
           ...(rootCaption !== null ? { rootCaption } : {}),
         };
         const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encrypted.cryptoKey, encrypted.manifest);
-
         for (const encryptedObject of encryptedObjects) {
           await uploadDatasetFile(encryptedObject.blob, {
             datasetName,
             filename: encryptedObject.objectPath.replace(/^objects\//, '') || 'object.bin',
             workerID,
-            projectID,
             encryptedObjectPath: encryptedObject.objectPath,
           });
         }
         await apiClient.post('/api/datasets/encrypted/update', {
           datasetName,
           worker_id: workerID,
-          project_id: projectID,
           manifest: nextManifest,
         });
-
         encrypted.onUpdate(nextManifest, nextCatalog);
         setDoneCount(entries.length);
         setFileEntries([]);
@@ -276,14 +246,12 @@ export default function AddImagesModal() {
         setIsUploading(false);
       }
     },
-    [datasetName, encrypted, projectID, resetState, setModalInfo, workerID],
+    [datasetName, encrypted, null, resetState, setModalInfo, workerID],
   );
-
   const processQueue = useCallback(
     async (entries: FileEntry[]) => {
       setIsUploading(true);
       abortRef.current = false;
-
       let nextIndex = 0;
       const runNext = async (): Promise<void> => {
         while (nextIndex < entries.length) {
@@ -292,10 +260,8 @@ export default function AddImagesModal() {
           await uploadSingleFile(entries[idx]);
         }
       };
-
       const workers = Array.from({ length: Math.min(MAX_CONCURRENT, entries.length) }, () => runNext());
       await Promise.all(workers);
-
       setIsUploading(false);
       if (!abortRef.current) {
         modalInfoRef.current?.onComplete?.();
@@ -305,7 +271,6 @@ export default function AddImagesModal() {
     },
     [uploadSingleFile, setModalInfo, resetState],
   );
-
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return;
@@ -313,7 +278,6 @@ export default function AddImagesModal() {
         void uploadEncryptedFiles(acceptedFiles);
         return;
       }
-
       const entries: FileEntry[] = acceptedFiles.map(file => ({
         id: nextId++,
         file,
@@ -328,14 +292,12 @@ export default function AddImagesModal() {
     },
     [encrypted, processQueue, uploadEncryptedFiles],
   );
-
   const handleCancel = useCallback(() => {
     abortRef.current = true;
     setIsUploading(false);
     setModalInfo(null);
     resetState();
   }, [setModalInfo, resetState]);
-
   const dropAccept = useMemo<AcceptMap>(
     () => ({
       'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.jxl'],
@@ -346,7 +308,6 @@ export default function AddImagesModal() {
     }),
     [],
   );
-
   const {
     getRootProps,
     getInputProps,
@@ -359,9 +320,7 @@ export default function AddImagesModal() {
     noClick: true,
     noKeyboard: true,
   });
-
   const overallPercent = totalCount > 0 ? Math.round(((doneCount + errorCount) / totalCount) * 100) : 0;
-
   return (
     <Dialog
       open={open}
@@ -448,9 +407,7 @@ export default function AddImagesModal() {
               <button
                 type="button"
                 onClick={handleCancel}
-                className={`inline-flex w-full justify-center rounded-md px-3 py-2 text-sm font-semibold text-white shadow-xs sm:ml-3 sm:w-auto ${
-                  isUploading ? 'bg-red-600 hover:bg-red-500' : 'bg-gray-600 hover:bg-gray-500'
-                }`}
+                className={`inline-flex w-full justify-center rounded-md px-3 py-2 text-sm font-semibold text-white shadow-xs sm:ml-3 sm:w-auto ${isUploading ? 'bg-red-600 hover:bg-red-500' : 'bg-gray-600 hover:bg-gray-500'}`}
               >
                 {isUploading ? 'Cancel Upload' : 'Close'}
               </button>
@@ -461,26 +418,21 @@ export default function AddImagesModal() {
     </Dialog>
   );
 }
-
 /** Virtualized file progress list */
 function FileProgressList({ entries }: { entries: FileEntry[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
-
   const totalHeight = entries.length * ROW_HEIGHT;
   const containerHeight = Math.min(entries.length, VISIBLE_ROWS) * ROW_HEIGHT;
-
   const startIdx = Math.floor(scrollTop / ROW_HEIGHT);
   const endIdx = Math.min(entries.length, startIdx + VISIBLE_ROWS + 2);
   const visibleEntries = entries.slice(startIdx, endIdx);
   const offsetY = startIdx * ROW_HEIGHT;
-
   const onScroll = useCallback(() => {
     if (containerRef.current) {
       setScrollTop(containerRef.current.scrollTop);
     }
   }, []);
-
   return (
     <div
       ref={containerRef}
@@ -498,7 +450,6 @@ function FileProgressList({ entries }: { entries: FileEntry[] }) {
     </div>
   );
 }
-
 function FileRow({ entry }: { entry: FileEntry }) {
   return (
     <div className="flex items-center gap-2 px-3 text-xs font-mono" style={{ height: ROW_HEIGHT }}>

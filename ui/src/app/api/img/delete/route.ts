@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const { imgPath } = body;
     if (typeof imgPath !== 'string') {
       return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
@@ -35,8 +36,8 @@ export async function POST(request: Request) {
     const datasetsPath = await getDatasetsRoot();
     const trainingPath = await getTrainingFolder();
     const normalizedImgPath = path.resolve(imgPath);
-    const allowedRoots = [datasetsPath, trainingPath].map((root) => path.resolve(root));
-    const isWithinAllowedRoot = allowedRoots.some((root) => {
+    const allowedRoots = [datasetsPath, trainingPath].map(root => path.resolve(root));
+    const isWithinAllowedRoot = allowedRoots.some(root => {
       const rel = path.relative(root, normalizedImgPath);
       return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
     });
@@ -47,7 +48,10 @@ export async function POST(request: Request) {
     }
 
     if (findEncryptedDatasetRoot(normalizedImgPath, datasetsPath)) {
-      return NextResponse.json({ error: 'Encrypted dataset objects must be deleted through the encrypted dataset API' }, { status: 403 });
+      return NextResponse.json(
+        { error: 'Encrypted dataset objects must be deleted through the encrypted dataset API' },
+        { status: 403 },
+      );
     }
 
     // make sure it is an image

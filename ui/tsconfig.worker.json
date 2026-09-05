@@ -19,6 +19,8 @@
         }
     },
     "include": [
+        "src/utils/trainingValidation.ts",
+        "src/utils/homeJourney.ts",
         "cron/**/*.ts",
         "src/paths.ts",
         "src/utils/basic.ts",
@@ -89,13 +91,6 @@
         "src/server/queueReorder.ts",
         "src/server/jobStart.ts",
         "src/server/jobsApiList.ts",
-        "src/server/projects.ts",
-        "src/server/projectSetup.ts",
-        "src/server/projectAssetUrls.ts",
-        "src/server/projectSyncProtocol.ts",
-        "src/server/projectSyncWorker.ts",
-        "src/server/projectSync.ts",
-        "src/server/projectSyncHooks.ts",
         "src/server/trainingJobRestart.ts",
         "src/server/remoteAssets.ts",
         "src/server/sampleThumbnails.ts",

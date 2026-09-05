@@ -3,11 +3,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
-import {
-  extractZipSafely,
-  getExtractedDatasetPath,
-  readDatasetExportManifest,
-} from '@/server/datasetTransfer';
+import { extractZipSafely, getExtractedDatasetPath, readDatasetExportManifest } from '@/server/datasetTransfer';
 import {
   archiveUploadMode,
   assembleArchiveUploadChunks,
@@ -42,8 +38,7 @@ async function copyArchivePath(sourcePath: string, targetPath: string) {
 
 async function saveDatasetArchiveUpload(request: NextRequest, uploadPath: string) {
   const url = new URL(request.url);
-  const preferredNameRaw =
-    url.searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name');
+  const preferredNameRaw = url.searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name');
   const contentType = (request.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
   if (!['application/octet-stream', 'application/zip', 'application/x-zip-compressed'].includes(contentType)) {
     const error = new InvalidUploadError('Dataset archives must use a streamed binary request');
@@ -92,16 +87,15 @@ async function importDatasetArchiveFromZip(
   const importedName = path.basename(targetPath);
   const allDatasets = await listDatasetSummaries(datasetsRoot);
   const imported = allDatasets.find(dataset => dataset.name === importedName);
-  const dataset: DatasetSummary =
-    imported || {
-      name: importedName,
-      encrypted: isEncryptedDatasetFolder(targetPath),
-      source: 'local',
-      worker_id: 'local',
-      worker_name: 'Local',
-      ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
-      path: targetPath,
-    };
+  const dataset: DatasetSummary = imported || {
+    name: importedName,
+    encrypted: isEncryptedDatasetFolder(targetPath),
+    source: 'local',
+    worker_id: 'local',
+    worker_name: 'Local',
+    ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
+    path: targetPath,
+  };
 
   return {
     dataset,
@@ -135,11 +129,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const projectID = request.nextUrl.searchParams.get('project_id') ?? request.headers.get('x-aitk-project-id');
   let workRoot: string | null = null;
 
   try {
-    const { datasetsRoot } = await resolveDatasetScope(projectID);
+    const { datasetsRoot } = await resolveDatasetScope();
     await fsp.mkdir(datasetsRoot, { recursive: true });
 
     const chunkUploadRoot = path.join(datasetsRoot, '.aitk-dataset-import-archive-chunks');
@@ -153,7 +146,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const importID = uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const importID =
+      uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     workRoot =
       uploadMode === 'complete'
         ? path.join(chunkUploadRoot, importID)
@@ -190,23 +184,20 @@ export async function POST(request: NextRequest) {
         })();
         return NextResponse.json(getArchiveUploadImportStatus(importID));
       }
-      await assembleArchiveUploadChunks(
-        chunkUploadRoot,
-        importID,
-        readArchiveUploadChunksTotal(request),
-        uploadPath,
-        { maxBytes: MAX_DATASET_ARCHIVE_BYTES, expectedBytes: expectedBytes ?? undefined },
-      );
+      await assembleArchiveUploadChunks(chunkUploadRoot, importID, readArchiveUploadChunksTotal(request), uploadPath, {
+        maxBytes: MAX_DATASET_ARCHIVE_BYTES,
+        expectedBytes: expectedBytes ?? undefined,
+      });
     }
 
-    return NextResponse.json(await importDatasetArchiveFromZip(uploadPath, extractRoot, datasetsRoot, preferredNameRaw));
+    return NextResponse.json(
+      await importDatasetArchiveFromZip(uploadPath, extractRoot, datasetsRoot, preferredNameRaw),
+    );
   } catch (error) {
     console.error('Dataset archive import failed:', error);
     const message = error instanceof Error ? error.message : 'Failed to import dataset archive';
     let status =
-      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
-        ? error.status
-        : 500;
+      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 500;
     if (error instanceof DatasetScopeError) {
       status = error.status;
     } else if (

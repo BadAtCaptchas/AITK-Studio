@@ -5,7 +5,7 @@
 - AITK Studio is a Python diffusion-model training toolkit with a Next.js/React control surface in `ui/`.
 - Root-level Python code (`run.py`, `toolkit/`, `extensions/`, `extensions_built_in/`) owns training, model integration, and CLI workflows.
 - `ui/` is a Next 15 / React 19 / TypeScript app with Tailwind, Prisma-backed UI state, API routes under `ui/src/app/api/**/route.ts`, server helpers under `ui/src/server/`, shared helpers under `ui/src/utils/`, and a cron worker under `ui/cron/`.
-- When changing code that touches datasets, configs, runs, outputs, models, project files, or training/generation state, preserve project-space isolation as well as global-path behavior. Use existing project helpers such as `resolveDatasetScope`, `getProjectRoots`, and `ensureProjectFolders` instead of hard-coded global folders so project-scoped data stays under `PROJECTS_FOLDER`.
+- AITK Studio uses one global training workspace. Resolve configured dataset, training, and model roots through existing settings and path helpers, including `resolveDatasetScope` and `getJobTrainingRoot`; never hard-code runtime folders. Preserve canonical path-containment checks and encrypted-data protections. Retired workspace compatibility belongs only in the database upgrade and obsolete-request guards.
 - Treat `datasets/`, `models/`, `output/`, `projects/`, `aitk_db.db*`, `.tmp/`, and generated runtime artifacts as user/runtime data. Do not clean, rename, or rewrite them unless the task explicitly requires it.
 - Do not hand-edit generated Prisma client files under `ui/src/generated/prisma/`; update the Prisma/schema path and regenerate instead.
 
@@ -43,5 +43,5 @@
 ## Security and Data Handling
 
 - Remote workers, encrypted datasets, bearer auth, OpenRouter/Ollama calls, Hugging Face downloads, Cloudflared, and update flows are security-sensitive. Do not log or persist dataset secrets, API tokens, bearer tokens, unwrapped encryption keys, or plaintext encrypted-dataset contents unless existing code already deliberately does so.
-- Preserve path-scope checks for datasets, projects, files, and remote imports. Prefer existing helpers such as dataset/project scope resolvers instead of ad hoc path concatenation.
+- Preserve path-containment checks for datasets, files, and remote imports. Prefer existing global dataset and storage resolvers instead of ad hoc path concatenation.
 - Treat network, filesystem, subprocess, and database inputs as untrusted even when TypeScript types say otherwise.

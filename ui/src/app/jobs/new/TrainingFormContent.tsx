@@ -1,6 +1,13 @@
 'use client';
-
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
+import {
+  isEditableTrainingConfig,
+  validateTrainingConfig,
+  type ValidationMessage,
+  type TrainingFieldTarget,
+} from '@/utils/trainingValidation';
 import { useEffect, useRef, useState } from 'react';
+import { readTrainingDraft, useTrainingDraft } from '@/hooks/useTrainingDraft';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobConfig';
 import { jobTypeOptions, modelArchs } from './options';
@@ -15,7 +22,7 @@ import useWorkers from '@/hooks/useWorkers';
 import YAML from 'yaml';
 import path from 'path';
 import { TopBar, MainContent } from '@/components/layout';
-import { Button } from '@headlessui/react';
+import { Button, Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { ChevronLeft, SlidersHorizontal, Sparkles, TerminalSquare, X } from 'lucide-react';
 import SimpleJob from './SimpleJob';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
@@ -33,31 +40,22 @@ import {
 } from '@/utils/remoteDatasetRefs';
 import { AUTHENLORA_BUILTIN_CODEC_BITS } from '@/utils/authenloraCodecs';
 import { getValidationConfigErrors } from '@/utils/validationConfig';
-
 const isDev = process.env.NODE_ENV === 'development';
-
-type ValidationMessage = {
-  level: 'error' | 'warning';
-  message: string;
-};
-
-export function TrainingFormContent({
-  projectIDOverride = null,
-}: {
-  projectIDOverride?: string | null;
-} = {}) {
+export function TrainingFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const runId = searchParams.get('id');
   const cloneId = searchParams.get('cloneId');
-  const projectID = projectIDOverride ?? searchParams.get('project_id');
-  const [gpuIDs, setGpuIDs] = useState<string | null>(null);
-  const [workerID, setWorkerID] = useState('local');
-  const { settings, isSettingsLoaded } = useSettings();
+  const draftKey = runId || (cloneId ? `clone:${cloneId}` : 'new');
+  const appliedDataset = useRef<string | null>(null);
+  const restoredDraft = useRef(readTrainingDraft(draftKey)).current;
+  const [gpuIDs, setGpuIDs] = useState<string | null>(restoredDraft?.gpuIDs ?? null);
+  const [workerID, setWorkerID] = useState(restoredDraft?.workerID || 'local');
+  const { settings, isSettingsLoaded, settingsStatus, settingsError, refreshSettings } = useSettings();
   const legacyView = settings.TRAINING_LEGACY_VIEW === 'true';
-  const { workers, status: workerStatus } = useWorkers();
-  const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, workerID);
-  const { datasets, status: datasetFetchStatus } = useDatasetList({ includeRemote: !projectID, projectID });
+  const { workers, status: workerStatus, refreshWorkers } = useWorkers();
+  const { gpuList, isGPUInfoLoaded, status: gpuStatus, refreshGpuInfo } = useGPUInfo(null, null, workerID);
+  const { datasets, status: datasetFetchStatus, refreshDatasets } = useDatasetList({ includeRemote: true });
   const [datasetOptions, setDatasetOptions] = useState<
     Array<
       SelectOption & {
@@ -71,32 +69,41 @@ export function TrainingFormContent({
     >
   >([]);
   const [showAdvancedView, setShowAdvancedView] = useState(false);
+  const [rawEditorValid, setRawEditorValid] = useState(true);
+  const closeRawConfig = () => {
+    if (!rawEditorValid)
+      reportWorkflowError('Invalid raw changes were not applied. Your last valid configuration is retained.');
+    setRawConfigOpen(false);
+    setRawEditorValid(true);
+  };
   const [rawConfigOpen, setRawConfigOpen] = useState(false);
-
-  const [jobConfig, setJobConfig] = useNestedState<JobConfig>(objectCopy(migrateJobConfig(defaultJobConfig)));
+  const [jobConfig, setJobConfig] = useNestedState<JobConfig>(
+    restoredDraft?.config || objectCopy(migrateJobConfig(defaultJobConfig)),
+  );
+  const draft = useTrainingDraft(draftKey, { config: jobConfig, workerID, gpuIDs });
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [validationMessages, setValidationMessages] = useState<ValidationMessage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const handleImportConfig = () => {
     fileInputRef.current?.click();
   };
-
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const text = reader.result as string;
-        let parsed: any;
+        let parsed: unknown;
         if (file.name.endsWith('.json') || file.name.endsWith('.jsonc')) {
           parsed = JSON.parse(text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''));
         } else {
           parsed = YAML.parse(text);
         }
-
+        if (!isEditableTrainingConfig(parsed))
+          throw new Error(
+            'Config needs a training name, model, training settings, samples, and datasets with resolutions.',
+          );
         // Set required fields (same pattern as AdvancedJob.handleChange)
         try {
           parsed.config.process[0].sqlite_db_path = './aitk_db.db';
@@ -106,24 +113,20 @@ export function TrainingFormContent({
         } catch (err) {
           console.warn('Could not set required fields on imported config:', err);
         }
-
         migrateJobConfig(parsed);
         setJobConfig(parsed);
       } catch (err) {
         console.error('Failed to parse config file:', err);
-        alert('Failed to parse config file. Please check the file format.');
+        reportWorkflowError('Failed to parse config file. Please check the file format.');
       }
     };
     reader.readAsText(file);
-
     // Reset so the same file can be re-imported
     e.target.value = '';
   };
-
   useEffect(() => {
     if (!isSettingsLoaded) return;
     if (datasetFetchStatus !== 'success') return;
-
     const datasetOptions = datasets.map(dataset => {
       const source = (dataset.source || 'local') as 'local' | 'remote';
       const workerID = dataset.worker_id || 'local';
@@ -145,7 +148,17 @@ export function TrainingFormContent({
       };
     });
     setDatasetOptions(datasetOptions);
-
+    const requestedDataset = searchParams.get('dataset');
+    const chosenDataset = datasetOptions.find(
+      option =>
+        option.value === requestedDataset || option.ref === requestedDataset || option.name === requestedDataset,
+    );
+    if (requestedDataset && chosenDataset && appliedDataset.current !== requestedDataset) {
+      appliedDataset.current = requestedDataset;
+      setJobConfig((previous: JobConfig) =>
+        setNestedValue(previous, chosenDataset.value, 'config.process[0].datasets[0].folder_path'),
+      );
+    }
     if (datasetOptions.length > 0) {
       const defaultDatasetPath = defaultDatasetConfig.folder_path;
       // Use functional updater so we check the *current* state, not a stale closure
@@ -163,16 +176,14 @@ export function TrainingFormContent({
         return updated;
       });
     }
-  }, [datasets, settings, isSettingsLoaded, datasetFetchStatus]);
-
+  }, [datasets, settings, isSettingsLoaded, datasetFetchStatus, searchParams, runId, cloneId]);
   // clone existing job
   useEffect(() => {
-    if (cloneId) {
+    if (cloneId && !restoredDraft) {
       apiClient
         .get(`/api/jobs?id=${cloneId}`)
         .then(res => res.data)
         .then(data => {
-          console.log('Clone Training:', data);
           setGpuIDs(data.gpu_ids);
           setWorkerID(data.worker_id || 'local');
           const newJobConfig = migrateJobConfig(JSON.parse(data.job_config));
@@ -182,14 +193,12 @@ export function TrainingFormContent({
         .catch(error => console.error('Error fetching training:', error));
     }
   }, [cloneId]);
-
   useEffect(() => {
-    if (runId) {
+    if (runId && !restoredDraft) {
       apiClient
         .get(`/api/jobs?id=${runId}`)
         .then(res => res.data)
         .then(data => {
-          console.log('Training:', data);
           setGpuIDs(data.gpu_ids);
           setWorkerID(data.worker_id || 'local');
           setJobConfig(migrateJobConfig(JSON.parse(data.job_config)));
@@ -197,7 +206,6 @@ export function TrainingFormContent({
         .catch(error => console.error('Error fetching training:', error));
     }
   }, [runId]);
-
   useEffect(() => {
     if (isGPUInfoLoaded) {
       if (gpuIDs === null) {
@@ -205,33 +213,18 @@ export function TrainingFormContent({
       }
     }
   }, [gpuList, isGPUInfoLoaded]);
-
   useEffect(() => {
     if (isSettingsLoaded) {
       setJobConfig(settings.TRAINING_FOLDER, 'config.process[0].training_folder');
     }
   }, [settings, isSettingsLoaded]);
-
-  useEffect(() => {
-    if (!rawConfigOpen) return;
-
-    const previousOverflow = document.body.style.overflow;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setRawConfigOpen(false);
-      }
-    };
-
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [rawConfigOpen]);
-
-  const copyRememberedRemoteDatasetKey = (remoteRef: string, imported: { name: string; path: string }) => {
+  const copyRememberedRemoteDatasetKey = (
+    remoteRef: string,
+    imported: {
+      name: string;
+      path: string;
+    },
+  ) => {
     const parsed = parseRemoteDatasetRef(remoteRef);
     if (!parsed) return;
     const remembered =
@@ -242,21 +235,24 @@ export function TrainingFormContent({
     rememberEncryptedDatasetKey(imported.path, remembered);
     rememberEncryptedDatasetKey(imported.name, remembered);
   };
-
   const importRemoteDatasetForJob = async (
     remoteRef: string,
-    cache: Map<string, Promise<{ name: string; path: string }>>,
+    cache: Map<
+      string,
+      Promise<{
+        name: string;
+        path: string;
+      }>
+    >,
   ) => {
     const existing = cache.get(remoteRef);
     if (existing) return existing;
     const parsed = parseRemoteDatasetRef(remoteRef);
     if (!parsed) throw new Error('Invalid remote dataset reference');
-
     const promise = apiClient
       .post('/api/datasets/import-remote', {
         worker_id: parsed.workerID,
         datasetName: parsed.datasetName,
-        project_id: projectID || undefined,
       })
       .then(res => {
         const importedName = res.data?.dataset?.name;
@@ -272,10 +268,15 @@ export function TrainingFormContent({
     cache.set(remoteRef, promise);
     return promise;
   };
-
   const importRemoteDatasetsForJobConfig = async (rawConfig: JobConfig, targetWorkerID: string) => {
     const nextConfig = objectCopy(rawConfig) as JobConfig;
-    const importCache = new Map<string, Promise<{ name: string; path: string }>>();
+    const importCache = new Map<
+      string,
+      Promise<{
+        name: string;
+        path: string;
+      }>
+    >();
     const datasetPathFields = [
       'folder_path',
       'dataset_path',
@@ -288,7 +289,6 @@ export function TrainingFormContent({
       'inpaint_path',
       'clip_image_path',
     ];
-
     for (const processConfig of nextConfig.config.process || []) {
       for (const dataset of processConfig.datasets || []) {
         for (const field of datasetPathFields) {
@@ -325,13 +325,10 @@ export function TrainingFormContent({
         }
       }
     }
-
     return nextConfig;
   };
-
   const applyComfyAutoInstallSetting = (rawConfig: JobConfig): JobConfig => {
     if (settings.COMFY_AUTO_INSTALL !== 'true') return rawConfig;
-
     const nextConfig = objectCopy(rawConfig) as JobConfig;
     for (const processConfig of nextConfig.config?.process ?? []) {
       const processSections = processConfig as Record<string, any>;
@@ -344,206 +341,34 @@ export function TrainingFormContent({
     }
     return nextConfig;
   };
-
-  const validateJobBeforeSave = (rawConfig: JobConfig): ValidationMessage[] => {
-    const messages: ValidationMessage[] = [];
-    const name = rawConfig.config?.name?.trim() || '';
-    const processConfig = rawConfig.config?.process?.[0];
-    const trainConfig = processConfig?.train;
-    const modelConfig = processConfig?.model;
-    const datasetsConfig = processConfig?.datasets || [];
-    const sampleConfig = processConfig?.sample;
-
-    if (!name) {
-      messages.push({ level: 'error', message: 'Training name is required.' });
-    }
-    if (name === '.' || name.includes('..') || /[\\/]/.test(name)) {
-      messages.push({ level: 'error', message: 'Training name cannot contain path separators or "..".' });
-    }
-    if (!workerID) {
-      messages.push({ level: 'error', message: 'Select a worker before creating the job.' });
-    }
-    if (!gpuIDs) {
-      messages.push({ level: 'error', message: 'Select a GPU before creating the job.' });
-    }
-    if (!processConfig) {
-      messages.push({ level: 'error', message: 'Job config must include one process.' });
-      return messages;
-    }
-    if (!modelConfig?.name_or_path?.trim()) {
-      messages.push({ level: 'error', message: 'Select or enter a base model path.' });
-    }
-    if (modelConfig?.arch === 'minimax_h3') {
-      if (modelConfig.layer_offloading) {
-        messages.push({ level: 'error', message: 'MiniMax H3 does not support layer offloading.' });
-      }
-      if (!modelConfig.quantize || modelConfig.qtype !== 'convrot8') {
-        messages.push({ level: 'error', message: 'MiniMax H3 requires the ConvRot int8 transformer checkpoint.' });
-      }
-      if (!modelConfig.quantize_te || modelConfig.qtype_te !== 'nvfp4') {
-        messages.push({ level: 'error', message: 'MiniMax H3 requires the NVFP4 text-encoder checkpoint.' });
-      }
-      if (trainConfig?.train_text_encoder) {
-        messages.push({ level: 'error', message: 'MiniMax H3 does not support training its packed text encoder.' });
-      }
-      if (processConfig.network?.type !== 'lora') {
-        messages.push({ level: 'error', message: 'MiniMax H3 currently supports LoRA training only.' });
-      }
-      if (modelConfig.base_lora_path?.trim()) {
-        messages.push({ level: 'error', message: 'MiniMax H3 cannot merge a Base LoRA into its packed checkpoint.' });
-      }
-      if (modelConfig.inference_lora_path?.trim()) {
-        messages.push({
-          level: 'error',
-          message: 'MiniMax H3 does not support a separate sample-time Inference LoRA.',
-        });
-      }
-    }
-    const baseLoraPath = modelConfig?.base_lora_path?.trim();
-    if (baseLoraPath) {
-      if (modelConfig?.inference_lora_path?.trim()) {
-        messages.push({
-          level: 'error',
-          message: 'Base LoRA Path cannot be used with sample-time Inference LoRA Path.',
-        });
-      }
-      const baseLoraName = baseLoraPath.split(/[\\/]/).pop() || baseLoraPath;
-      if (/\.[^./\\]+$/.test(baseLoraName) && !baseLoraName.toLowerCase().endsWith('.safetensors')) {
-        messages.push({ level: 'error', message: 'Base LoRA Path must be a .safetensors adapter.' });
-      }
-      const baseLoraStrength = Number(modelConfig?.base_lora_strength ?? 1.0);
-      if (!Number.isFinite(baseLoraStrength)) {
-        messages.push({ level: 'error', message: 'Base LoRA Strength must be a finite number.' });
-      }
-    }
-    if (!datasetsConfig.length) {
-      messages.push({ level: 'error', message: 'Add at least one dataset.' });
-    }
-
-    const unresolvedDatasets = datasetsConfig.filter(dataset => {
-      return !dataset.folder_path || dataset.folder_path === defaultDatasetConfig.folder_path;
+  const validateJobBeforeSave = (config: JobConfig) =>
+    validateTrainingConfig(config, {
+      workerID,
+      gpuIDs,
+      datasetOptions,
+      unselectedDatasetPath: defaultDatasetConfig.folder_path,
+      isNonImageModel: modelArchs.some(
+        arch =>
+          arch.name === config.config.process[0]?.model.arch &&
+          (arch.group === 'audio' || arch.group === 'video' || arch.isVideoModel),
+      ),
+      isDatasetUnlocked: (datasetPath, name) =>
+        Boolean(getRememberedEncryptedDatasetKey(datasetPath) || (name && getRememberedEncryptedDatasetKey(name))),
     });
-    if (unresolvedDatasets.length > 0) {
-      messages.push({ level: 'error', message: 'Select a target dataset for every dataset entry.' });
-    }
-
-    datasetsConfig.forEach((dataset, index) => {
-      const datasetOption = datasetOptions.find(option => option.value === dataset.folder_path);
-      if (datasetOption?.encrypted) {
-        const remembered =
-          getRememberedEncryptedDatasetKey(dataset.folder_path) ||
-          (datasetOption.name ? getRememberedEncryptedDatasetKey(datasetOption.name) : null);
-        if (!remembered && !parseRemoteDatasetRef(dataset.folder_path)) {
-          messages.push({
-            level: 'warning',
-            message: `Dataset ${index + 1} is encrypted. Unlock it before starting or resuming this job.`,
-          });
-        }
-      }
-      if (!dataset.is_reg && (!dataset.resolution || dataset.resolution.length === 0)) {
-        messages.push({ level: 'error', message: `Dataset ${index + 1} needs at least one resolution.` });
-      }
-      if ((dataset.num_repeats ?? 1) < 1) {
-        messages.push({ level: 'error', message: `Dataset ${index + 1} repeats must be at least 1.` });
-      }
-    });
-
-    if (!trainConfig?.auto_train && (!trainConfig?.steps || trainConfig.steps < 1)) {
-      messages.push({ level: 'error', message: 'Training steps must be at least 1.' });
-    }
-    if (!trainConfig?.batch_size || trainConfig.batch_size < 1) {
-      messages.push({ level: 'error', message: 'Batch size must be at least 1.' });
-    }
-    if (!trainConfig?.gradient_accumulation || trainConfig.gradient_accumulation < 1) {
-      messages.push({ level: 'error', message: 'Gradient accumulation must be at least 1.' });
-    }
-    if (trainConfig?.lr == null || trainConfig.lr < 0) {
-      messages.push({ level: 'error', message: 'Learning rate must be zero or greater.' });
-    }
-    for (const message of getValidationConfigErrors(trainConfig?.validation_config)) {
-      messages.push({ level: 'error', message });
-    }
-
-    const watermarkConfig = processConfig?.watermark;
-    if (watermarkConfig?.enabled) {
-      const archName = `${modelConfig?.arch ?? ''}`.split(':')[0];
-      const arch = modelArchs.find(option => option.name === archName);
-      const networkType = `${processConfig?.network?.type ?? ''}`.toLowerCase();
-      if (arch?.group === 'audio' || arch?.group === 'video' || arch?.isVideoModel) {
-        messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires an image LoRA job.' });
-      }
-      if (!processConfig?.network) {
-        messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires a LoRA network.' });
-      }
-      if (!['lora', 'locon', 'lycoris', 'lokr'].includes(networkType)) {
-        messages.push({
-          level: 'error',
-          message: 'AuthenLoRA watermarking supports LoRA, LoCon, LyCORIS, and LoKr networks.',
-        });
-      }
-      if (trainConfig?.loss_type === 'mean_flow' || trainConfig?.do_guidance_loss) {
-        messages.push({
-          level: 'error',
-          message: 'AuthenLoRA watermarking currently supports the standard image LoRA loss path.',
-        });
-      }
-      if (!watermarkConfig.codec_path?.trim()) {
-        messages.push({ level: 'error', message: 'AuthenLoRA watermarking requires a local codec path.' });
-      }
-      const builtinMsgBits = AUTHENLORA_BUILTIN_CODEC_BITS[watermarkConfig.codec_path?.trim() || ''];
-      if (builtinMsgBits && watermarkConfig.msg_bits !== builtinMsgBits) {
-        messages.push({
-          level: 'error',
-          message: `AuthenLoRA ${builtinMsgBits}-bit built-in codec requires Message bits to be ${builtinMsgBits}.`,
-        });
-      }
-      if (!watermarkConfig.msg_bits || watermarkConfig.msg_bits < 1) {
-        messages.push({ level: 'error', message: 'AuthenLoRA message bits must be greater than 0.' });
-      }
-      if (!watermarkConfig.mapper_rank || watermarkConfig.mapper_rank < 1) {
-        messages.push({ level: 'error', message: 'AuthenLoRA mapper rank must be greater than 0.' });
-      }
-      if (watermarkConfig.mapper_lr < 0) {
-        messages.push({ level: 'error', message: 'AuthenLoRA mapper learning rate must be zero or greater.' });
-      }
-      if (watermarkConfig.watermark_loss_weight < 0 || watermarkConfig.style_loss_weight < 0) {
-        messages.push({ level: 'error', message: 'AuthenLoRA loss weights must be zero or greater.' });
-      }
-      if (watermarkConfig.zero_message_probability < 0 || watermarkConfig.zero_message_probability > 1) {
-        messages.push({ level: 'error', message: 'AuthenLoRA zero message chance must be between 0 and 1.' });
-      }
-      if (watermarkConfig.verify_every < 0) {
-        messages.push({ level: 'error', message: 'AuthenLoRA verify every must be zero or greater.' });
-      }
-      const secret = watermarkConfig.secret?.trim();
-      if (secret && (secret.length !== watermarkConfig.msg_bits || /[^01]/.test(secret))) {
-        messages.push({ level: 'error', message: 'AuthenLoRA secret bits must be binary and match Message bits.' });
-      }
-    }
-
-    const samplingDisabled = trainConfig?.disable_sampling === true;
-    const samplePrompts = sampleConfig?.samples || [];
-    if (!samplingDisabled && samplePrompts.length === 0) {
-      messages.push({ level: 'warning', message: 'No sample prompts are configured.' });
-    }
-    if (!samplingDisabled && samplePrompts.some(sample => !sample.prompt?.trim())) {
-      messages.push({ level: 'warning', message: 'One or more sample prompts are blank.' });
-    }
-
-    return messages;
-  };
-
   const saveJob = async () => {
-    if (status === 'saving') return;
+    if (!isSettingsLoaded || settingsStatus === 'error') {
+      reportWorkflowError('Load settings before saving this training run.');
+      return;
+    }
+    if (status === 'saving' || !rawEditorValid) return;
     const jobConfigWithSettings = applyComfyAutoInstallSetting(jobConfig);
     const validation = validateJobBeforeSave(jobConfigWithSettings);
-    setValidationMessages(validation);
+    setValidationMessages([]);
     if (validation.some(message => message.level === 'error')) {
       setStatus('idle');
       return;
     }
     setStatus('saving');
-
     try {
       const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings, workerID);
       setJobConfig(preparedJobConfig);
@@ -553,13 +378,11 @@ export function TrainingFormContent({
         worker_id: workerID,
         gpu_ids: gpuIDs,
         job_config: preparedJobConfig,
-        project_id: projectID || undefined,
       });
+      draft.markSaved();
       setStatus('success');
       setValidationMessages([]);
-      if (projectID) {
-        router.push(`/projects/${encodeURIComponent(projectID)}/runs/${encodeURIComponent(res.data.id || runId)}`);
-      } else if (runId) {
+      if (runId) {
         router.push(`/jobs/${runId}`);
       } else {
         router.push(`/jobs/${res.data.id}`);
@@ -570,6 +393,7 @@ export function TrainingFormContent({
         setValidationMessages([
           {
             level: 'error',
+            target: { step: 'job-basics', label: 'Training name' },
             message:
               error?.response?.data?.error ||
               'Training name already exists in this workspace. Choose a different name.',
@@ -577,7 +401,11 @@ export function TrainingFormContent({
         ]);
       } else {
         setValidationMessages([
-          { level: 'error', message: error?.response?.data?.error || 'Failed to save job. Please try again.' },
+          {
+            level: 'error',
+            target: { step: 'job-review', label: '' },
+            message: error?.response?.data?.error || 'Failed to save job. Please try again.',
+          },
         ]);
       }
       console.log('Error saving training:', error);
@@ -587,14 +415,50 @@ export function TrainingFormContent({
       }, 2000);
     }
   };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     saveJob();
   };
-
-  const validationErrors = validationMessages.filter(message => message.level === 'error');
-  const validationWarnings = validationMessages.filter(message => message.level === 'warning');
+  const currentFindings: ValidationMessage[] = [
+    ...(!rawEditorValid
+      ? [
+          {
+            level: 'error' as const,
+            message: 'Fix the raw configuration before saving.',
+            target: { step: 'raw', label: 'Raw configuration' },
+          },
+        ]
+      : []),
+    ...(!isSettingsLoaded || settingsStatus === 'error'
+      ? [
+          {
+            level: 'error' as const,
+            message: settingsError || 'Loading training settings…',
+            target: { step: 'settings', label: 'Settings' },
+          },
+        ]
+      : []),
+    ...validationMessages,
+    ...validateJobBeforeSave(jobConfig),
+  ];
+  const [focusTarget, setFocusTarget] = useState<(TrainingFieldTarget & { nonce: number }) | null>(null);
+  const revealFinding = (message: ValidationMessage) => {
+    if (message.target.step === 'settings') {
+      void refreshSettings();
+      return;
+    }
+    if (message.target.step === 'raw') {
+      setRawConfigOpen(true);
+      return;
+    }
+    setShowAdvancedView(false);
+    setFocusTarget({ ...message.target, nonce: Date.now() });
+  };
+  useEffect(() => {
+    setValidationMessages([]);
+  }, [jobConfig, workerID, gpuIDs]);
+  const validationErrors = currentFindings.filter(message => message.level === 'error');
+  const validationWarnings = currentFindings.filter(message => message.level === 'warning');
   const workerOptions = [
     { value: 'local', label: 'Local worker' },
     ...workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
@@ -620,7 +484,11 @@ export function TrainingFormContent({
     }
     setJobConfig(value, 'config.process[0].type');
   };
-  const transformAdvancedConfig = (parsed: any) => {
+  const transformAdvancedConfig = (parsed: unknown) => {
+    if (!isEditableTrainingConfig(parsed))
+      throw new Error(
+        'Config needs a training name, model, training settings, samples, and datasets with resolutions.',
+      );
     try {
       parsed.config.process[0].sqlite_db_path = './aitk_db.db';
       parsed.config.process[0].training_folder = settings.TRAINING_FOLDER;
@@ -632,34 +500,58 @@ export function TrainingFormContent({
     return migrateJobConfig(parsed);
   };
   const renderAdvancedConfigEditor = () => (
-    <AdvancedConfigEditor config={jobConfig} setConfig={setJobConfig} transformOnParse={transformAdvancedConfig} />
+    <AdvancedConfigEditor
+      config={jobConfig}
+      setConfig={setJobConfig}
+      transformOnParse={transformAdvancedConfig}
+      onValidityChange={setRawEditorValid}
+    />
   );
   const validationSummary =
-    validationMessages.length > 0 ? (
+    currentFindings.length > 0 ? (
       <PageNotice
         tone={validationErrors.length > 0 ? 'danger' : 'warning'}
         title={validationErrors.length > 0 ? 'Fix these issues before saving' : 'Review before saving'}
       >
         <ul className="list-disc space-y-1 pl-4">
           {validationErrors.map((message, index) => (
-            <li key={`error-${index}`}>{message.message}</li>
+            <li key={`error-${index}`}>
+              <button
+                type="button"
+                className="text-left underline underline-offset-2"
+                onClick={() => revealFinding(message)}
+              >
+                {message.message}
+              </button>
+            </li>
           ))}
           {validationWarnings.map((message, index) => (
-            <li key={`warning-${index}`}>{message.message}</li>
+            <li key={`warning-${index}`}>
+              <button
+                type="button"
+                className="text-left underline underline-offset-2"
+                onClick={() => revealFinding(message)}
+              >
+                {message.message}
+              </button>
+            </li>
           ))}
         </ul>
       </PageNotice>
     ) : null;
-
   return (
     <>
       <TopBar className="h-16 border-gray-900 bg-gray-950 px-4">
         <div className="flex min-w-0 items-center gap-3">
-          <Button className="operator-icon-button h-9 w-9 flex-none" onClick={() => history.back()} title="Back">
+          <Button
+            className="operator-icon-button h-9 w-9 flex-none"
+            onClick={() => draft.leaveSetup(() => router.back())}
+            title="Back"
+          >
             <ChevronLeft className="h-5 w-5" />
           </Button>
           <h1 className="truncate text-sm font-semibold text-gray-100 sm:text-lg">
-            {runId ? 'Edit Training Job' : projectID ? 'New Project Training Job' : 'New Training Job'}
+            {runId ? 'Edit training' : 'New training'}
           </h1>
         </div>
         <div className="flex-1"></div>
@@ -696,7 +588,7 @@ export function TrainingFormContent({
           <Button
             className="operator-button h-9 border-gray-700 bg-gray-900 px-3 py-1 text-gray-100"
             onClick={() => {
-              setRawConfigOpen(false);
+              closeRawConfig();
               setShowAdvancedView(!showAdvancedView);
             }}
             title={showAdvancedView ? 'Show Simple' : 'Show Advanced'}
@@ -712,7 +604,7 @@ export function TrainingFormContent({
             <Button
               className="operator-button-primary h-10 px-3 sm:px-5"
               onClick={() => saveJob()}
-              disabled={status === 'saving'}
+              disabled={status === 'saving' || validationErrors.length > 0}
             >
               <Sparkles className="h-4 w-4" />
               <span className="hidden sm:inline">
@@ -738,6 +630,44 @@ export function TrainingFormContent({
         </div>
       ) : (
         <MainContent className="bg-gray-950 px-0 pt-16 sm:px-0">
+          {(settingsError || gpuStatus === 'error' || datasetFetchStatus === 'error' || workerStatus === 'error') && (
+            <div className="px-4 pb-4">
+              <PageNotice tone="danger" title="Some setup information is unavailable">
+                {settingsError && (
+                  <p>
+                    {settingsError}{' '}
+                    <button type="button" className="underline" onClick={() => void refreshSettings()}>
+                      Retry settings
+                    </button>
+                  </p>
+                )}
+                {gpuStatus === 'error' && (
+                  <p>
+                    Compute information could not be loaded.{' '}
+                    <button type="button" className="underline" onClick={() => void refreshGpuInfo()}>
+                      Retry compute
+                    </button>
+                  </p>
+                )}
+                {datasetFetchStatus === 'error' && (
+                  <p>
+                    Datasets could not be loaded.{' '}
+                    <button type="button" className="underline" onClick={() => refreshDatasets()}>
+                      Retry datasets
+                    </button>
+                  </p>
+                )}
+                {workerStatus === 'error' && (
+                  <p>
+                    Remote workers could not be loaded.{' '}
+                    <button type="button" className="underline" onClick={refreshWorkers}>
+                      Retry workers
+                    </button>
+                  </p>
+                )}
+              </PageNotice>
+            </div>
+          )}
           <ErrorBoundary
             fallback={
               <div className="flex h-64 items-center justify-center border border-red-300 bg-red-100 text-lg font-medium text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400">
@@ -756,7 +686,9 @@ export function TrainingFormContent({
               setGpuIDs={setGpuIDs}
               gpuList={gpuList}
               datasetOptions={datasetOptions}
-              validationMessages={validationMessages}
+              validationMessages={currentFindings}
+              focusTarget={focusTarget}
+              onRevealFinding={revealFinding}
               computeControls={
                 <SelectInput
                   label="Compute"
@@ -772,9 +704,11 @@ export function TrainingFormContent({
               trainerLabel={trainerLabel}
               onOpenAdvanced={() => setShowAdvancedView(true)}
               onOpenRawConfig={() => setRawConfigOpen(true)}
-              projectID={projectID}
               isLoading={
-                !isSettingsLoaded || !isGPUInfoLoaded || workerStatus === 'loading' || datasetFetchStatus !== 'success'
+                settingsStatus === 'loading' ||
+                !isGPUInfoLoaded ||
+                workerStatus === 'loading' ||
+                ['idle', 'loading'].includes(datasetFetchStatus)
               }
               comfyAutoInstall={settings.COMFY_AUTO_INSTALL === 'true'}
             />
@@ -785,19 +719,14 @@ export function TrainingFormContent({
       )}
 
       {rawConfigOpen && !showAdvancedView && (
-        <div
-          className="fixed inset-0 z-50 flex bg-black/65 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="raw-config-title"
-        >
+        <Dialog open onClose={closeRawConfig} className="fixed inset-0 z-50 flex bg-black/65 backdrop-blur-sm">
           <button
             type="button"
             className="absolute inset-0 cursor-default"
-            onClick={() => setRawConfigOpen(false)}
+            onClick={closeRawConfig}
             aria-label="Close raw config"
           />
-          <section
+          <DialogPanel
             id="raw-config-drawer"
             className="relative ml-auto flex h-full w-full flex-col border-l border-gray-800 bg-gray-950 shadow-2xl sm:w-[min(920px,calc(100vw-72px))]"
           >
@@ -806,30 +735,27 @@ export function TrainingFormContent({
                 <TerminalSquare className="h-4 w-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <h2 id="raw-config-title" className="truncate text-base font-semibold text-gray-100">
+                <DialogTitle id="raw-config-title" className="truncate text-base font-semibold text-gray-100">
                   Raw config
-                </h2>
+                </DialogTitle>
                 <p className="truncate text-xs text-gray-500">
                   Editing this YAML updates the current job draft. Close returns to the same workspace position.
                 </p>
               </div>
-              <Button
-                className="operator-button hidden h-9 px-3 py-1 sm:inline-flex"
-                onClick={() => setRawConfigOpen(false)}
-              >
+              <Button className="operator-button hidden h-9 px-3 py-1 sm:inline-flex" onClick={closeRawConfig}>
                 Close drawer
               </Button>
               <Button
                 className="operator-icon-button h-9 w-9 flex-none"
-                onClick={() => setRawConfigOpen(false)}
+                onClick={closeRawConfig}
                 title="Close raw config"
               >
                 <X className="h-4 w-4" />
               </Button>
             </header>
             <div className="min-h-0 flex-1">{renderAdvancedConfigEditor()}</div>
-          </section>
-        </div>
+          </DialogPanel>
+        </Dialog>
       )}
     </>
   );

@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -8,14 +9,13 @@ import {
   validateEncryptedManifest,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
-import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
-    await assertProjectScopeEnabled(body?.project_id);
-    rejectRemoteProjectScope(workerID, body?.project_id);
+
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
       const { worker_id, ...remoteBody } = body;
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 
     let { name } = body;
     const { encrypted, encryptedManifest } = body;
-    const { datasetsRoot } = await resolveDatasetScope(body.project_id);
+    const { datasetsRoot } = await resolveDatasetScope();
     name = cleanDatasetName(name || '');
     if (!name) {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });

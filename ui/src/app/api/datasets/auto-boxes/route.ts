@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   boolFromValue,
@@ -5,7 +6,7 @@ import {
   plainOpenRouterImageDataUrl,
   positiveNumberFromValue,
 } from '@/server/openRouterImageData';
-import { assertProjectScopeEnabled, DatasetScopeError } from '@/server/datasetScope';
+import { DatasetScopeError } from '@/server/datasetScope';
 import { generateOpenRouterBoxPatches } from '@/server/openRouterBoxes';
 import { generateOllamaBoxPatches, generateRemoteOllamaBoxPatches } from '@/server/ollamaVision';
 import { getOpenRouterApiKey } from '@/server/settings';
@@ -31,8 +32,8 @@ export async function POST(request: NextRequest) {
     let imageDataUrl = '';
 
     if (contentType.includes('multipart/form-data')) {
-      const formData = await request.formData();
-      await assertProjectScopeEnabled(formData.get('project_id'));
+      const formData = assertGlobalPayload(await request.formData());
+
       caption = String(formData.get('caption') || '');
       model = String(formData.get('model') || '');
       provider = normalizeProvider(formData.get('provider'));
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       }
       imageDataUrl = await encryptedOpenRouterUploadImageDataUrl(formData, 'Auto Boxes');
     } else {
-      const body = await request.json();
+      const body = assertGlobalPayload(await request.json());
       caption = typeof body?.caption === 'string' ? body.caption : '';
       model = typeof body?.model === 'string' ? body.model : '';
       provider = normalizeProvider(body?.provider);
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
       if (!imageWidth || !imageHeight) {
         throw new Error('Image width and height are required for Auto Boxes.');
       }
-      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Auto Boxes', body?.project_id);
+      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Auto Boxes');
     }
 
     const imageSize = { width: imageWidth, height: imageHeight };
@@ -88,9 +89,6 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     const status = error instanceof DatasetScopeError ? error.status : 400;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to create boxes.' },
-      { status },
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create boxes.' }, { status });
   }
 }

@@ -1,35 +1,33 @@
 'use client';
-
 import classNames from 'classnames';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { extractIdeogramBoxes, parseIdeogramCaption } from '@/utils/ideogramCaption';
 import type { CaptionCacheEntry, DatasetStudioItem } from './types';
 import { EncryptedThumb, PlainThumb } from './StudioMedia';
 import { itemKey, itemName, statusForCaption } from './utils';
-
 export function ThumbnailStrip({
   items,
   thumbRange,
   selectedIndex,
   datasetName,
   workerID,
-  projectID,
   encryptedKey,
   captionCache,
   onSelectIndex,
 }: {
   items: DatasetStudioItem[];
-  thumbRange: { start: number; end: number };
+  thumbRange: {
+    start: number;
+    end: number;
+  };
   selectedIndex: number;
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   encryptedKey?: CryptoKey | null;
   captionCache: Map<string, CaptionCacheEntry>;
   onSelectIndex: (index: number) => void;
 }) {
   const visibleThumbs = items.slice(thumbRange.start, thumbRange.end);
-
   return (
     <div className="flex h-20 flex-shrink-0 items-center gap-2 border-t border-gray-900 bg-gray-950 px-2 sm:h-24 xl:h-28 xl:gap-3 xl:px-3">
       <button
@@ -48,7 +46,8 @@ export function ThumbnailStrip({
           const status = statusForCaption(cached?.caption || '', Boolean(cached?.loaded));
           const selected = index === selectedIndex;
           const parsedCaption = cached?.loaded ? parseIdeogramCaption(cached.caption) : null;
-          const previewBoxes = parsedCaption?.kind === 'ideogram' ? extractIdeogramBoxes(parsedCaption.data).slice(0, 3) : [];
+          const previewBoxes =
+            parsedCaption?.kind === 'ideogram' ? extractIdeogramBoxes(parsedCaption.data).slice(0, 3) : [];
           return (
             <button
               key={key}
@@ -70,7 +69,6 @@ export function ThumbnailStrip({
                   <EncryptedThumb
                     datasetName={datasetName}
                     workerID={workerID}
-                    projectID={projectID}
                     cryptoKey={encryptedKey}
                     item={item.item}
                   />

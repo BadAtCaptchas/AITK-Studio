@@ -8,7 +8,6 @@ function makeJob(overrides = {}) {
   return {
     id: 'job-1',
     name: 'Job 1',
-    project_id: null,
     worker_id: 'local',
     remote_job_id: null,
     remote_sync_at: null,
@@ -54,98 +53,28 @@ test('local-only jobs API listing returns only local jobs without remote sync', 
     },
   );
 
-  assert.deepEqual(calls, [['list', { job_type: 'caption', project_id: null }]]);
-  assert.deepEqual(jobs.map(job => job.id), ['local-job', 'legacy-local-job']);
+  assert.deepEqual(calls, [['list', { job_type: 'caption' }]]);
+  assert.deepEqual(
+    jobs.map(job => job.id),
+    ['local-job', 'legacy-local-job'],
+  );
 });
 
-test('jobs API listing can include active project jobs for queue surfaces', async () => {
-  const calls = [];
-  const globalStopped = makeJob({ id: 'global-stopped', job_type: 'train', status: 'stopped' });
-  const globalQueued = makeJob({ id: 'global-queued', job_type: 'train', status: 'queued' });
-  const projectRunning = makeJob({
-    id: 'project-running',
-    job_type: 'train',
-    project_id: 'project-1',
-    status: 'running',
-  });
-  const projectStopped = makeJob({
-    id: 'project-stopped',
-    job_type: 'train',
-    project_id: 'project-1',
-    status: 'stopped',
-  });
-  const discoveredJobIds = new Set(['project-running']);
-
-  const jobs = await listJobsForJobsApi(
-    { jobType: 'train', includeProjectActive: true },
-    {
-      discoverRemoteJobs: async jobType => {
-        calls.push(['discover', jobType]);
-        return discoveredJobIds;
-      },
-      listJobs: async options => {
-        calls.push(['list', options]);
-        if (Array.isArray(options.status)) {
-          return [globalQueued, projectRunning, projectStopped].filter(job => options.status.includes(job.status));
-        }
-        return [globalStopped, globalQueued];
-      },
-      syncRemoteJobs: async (listedJobs, alreadySyncedJobIds) => {
-        calls.push(['sync', listedJobs.map(job => job.id), alreadySyncedJobIds]);
-        return listedJobs;
-      },
-    },
-  );
-
-  assert.deepEqual(jobs.map(job => job.id), ['global-stopped', 'global-queued', 'project-running']);
-  assert.deepEqual(calls[0], ['discover', 'train']);
-  assert.deepEqual(calls[1], ['list', { job_type: 'train', project_id: null }]);
-  assert.deepEqual(calls[2], ['list', { job_type: 'train', status: ['queued', 'starting', 'running', 'stopping'] }]);
-  assert.deepEqual(calls[3][0], 'sync');
-  assert.deepEqual(calls[3][1], ['global-stopped', 'global-queued', 'project-running']);
-  assert.equal(calls[3][2], discoveredJobIds);
-});
-
-test('local-only active project listing filters merged jobs without remote sync', async () => {
-  const calls = [];
-  const localGlobalJob = makeJob({ id: 'local-global', worker_id: 'local', status: 'queued' });
-  const localProjectJob = makeJob({
-    id: 'local-project',
-    project_id: 'project-1',
-    worker_id: 'local',
-    status: 'running',
-  });
-  const remoteProjectJob = makeJob({
-    id: 'remote-project',
-    project_id: 'project-1',
-    worker_id: 'worker-1',
-    status: 'running',
-  });
-
-  const jobs = await listJobsForJobsApi(
-    { jobType: 'caption', localOnly: true, includeProjectActive: true },
-    {
-      listJobs: async options => {
-        calls.push(['list', options]);
-        if (Array.isArray(options.status)) {
-          return [localProjectJob, remoteProjectJob];
-        }
-        return [localGlobalJob];
-      },
-      discoverRemoteJobs: async () => {
-        throw new Error('local-only listing must not discover remote jobs');
-      },
-      syncRemoteJobs: async () => {
-        throw new Error('local-only listing must not sync remote mirrors');
-      },
-    },
-  );
-
-  assert.deepEqual(calls, [
-    ['list', { job_type: 'caption', project_id: null }],
-    ['list', { job_type: 'caption', status: ['queued', 'starting', 'running', 'stopping'] }],
-  ]);
-  assert.deepEqual(jobs.map(job => job.id), ['local-global', 'local-project']);
+test('obsolete listing arguments are refused before discovery or storage reads', async () => {
+  for (const options of [{ scope: 'all' }, { project_id: 'old' }, { includeProjectActive: true }]) {
+    const unexpected = async () => {
+      assert.fail('No side effects for obsolete scope');
+    };
+    await assert.rejects(
+      () =>
+        listJobsForJobsApi(options, {
+          listJobs: unexpected,
+          discoverRemoteJobs: unexpected,
+          syncRemoteJobs: unexpected,
+        }),
+      /removed/,
+    );
+  }
 });
 
 test('jobs API listing still discovers before syncing remote mirrors', async () => {
@@ -171,9 +100,12 @@ test('jobs API listing still discovers before syncing remote mirrors', async () 
     },
   );
 
-  assert.deepEqual(jobs.map(job => job.id), ['local-job']);
+  assert.deepEqual(
+    jobs.map(job => job.id),
+    ['local-job'],
+  );
   assert.deepEqual(calls[0], ['discover', 'training']);
-  assert.deepEqual(calls[1], ['list', { job_type: 'training', project_id: null }]);
+  assert.deepEqual(calls[1], ['list', { job_type: 'training' }]);
   assert.deepEqual(calls[2][0], 'sync');
   assert.deepEqual(calls[2][1], ['local-job']);
   assert.equal(calls[2][2], discoveredJobIds);
@@ -202,41 +134,23 @@ test('jobs API listing returns cached remote mirrors when remote polling is skip
     },
   );
 
-  assert.deepEqual(jobs.map(job => job.id), ['local-job', 'cached-mirror']);
+  assert.deepEqual(
+    jobs.map(job => job.id),
+    ['local-job', 'cached-mirror'],
+  );
   assert.deepEqual(calls, [
     ['discover', 'training'],
-    ['list', { job_type: 'training', project_id: null }],
+    ['list', { job_type: 'training' }],
     ['sync', ['local-job', 'cached-mirror']],
   ]);
 });
 
-test('jobs API all scope leaves project_id unfiltered', async () => {
-  const calls = [];
-  const globalJob = makeJob({ id: 'global-job' });
-  const projectJob = makeJob({ id: 'project-job', project_id: 'project-1' });
-
-  const jobs = await listJobsForJobsApi(
-    { jobType: 'train', scope: 'all' },
-    {
-      listJobs: async options => {
-        calls.push(['list', options]);
-        return [globalJob, projectJob];
-      },
-      discoverRemoteJobs: async jobType => {
-        calls.push(['discover', jobType]);
-        return new Set();
-      },
-      syncRemoteJobs: async listedJobs => {
-        calls.push(['sync', listedJobs.map(job => job.id)]);
-        return listedJobs;
-      },
-    },
+test('legacy scoped mirrors never enter the global listing', async () => {
+  const global = makeJob({ id: 'global' });
+  const legacy = makeJob({ id: 'old', project_id: 'former' });
+  const jobs = await listJobsForJobsApi({ localOnly: true }, { listJobs: async () => [global, legacy] });
+  assert.deepEqual(
+    jobs.map(job => job.id),
+    ['global'],
   );
-
-  assert.deepEqual(jobs.map(job => job.id), ['global-job', 'project-job']);
-  assert.deepEqual(calls, [
-    ['discover', 'train'],
-    ['list', { job_type: 'train' }],
-    ['sync', ['global-job', 'project-job']],
-  ]);
 });

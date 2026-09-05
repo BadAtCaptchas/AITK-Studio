@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getSecureCaptionSystemPrompt,
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const dataset = await validateSecureCaptionDataset(String(body?.datasetName || ''));
     const systemPrompt = await setSecureCaptionSystemPrompt(
       dataset.datasetName,

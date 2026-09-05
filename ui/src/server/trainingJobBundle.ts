@@ -4,7 +4,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from './settings';
 import { db } from './db';
-import { getJobTrainingRoot, getProjectRoots } from './projects';
+import { getJobTrainingRoot } from './trainingPaths';
 import type { WorkerNodeRecord } from './db';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from './remoteDatasetPaths';
 import {
@@ -47,7 +47,11 @@ async function collectFilesForArchive(
   }));
 }
 
-async function writeZip(outputPath: string, entries: ArchiveFileEntry[], jsonEntries: Array<{ archivePath: string; value: unknown }>) {
+async function writeZip(
+  outputPath: string,
+  entries: ArchiveFileEntry[],
+  jsonEntries: Array<{ archivePath: string; value: unknown }>,
+) {
   await fsp.mkdir(path.dirname(outputPath), { recursive: true });
   await new Promise<void>((resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
@@ -101,11 +105,10 @@ export async function createRemoteTrainingJobBundle(
   const targetJobConfig = options.targetJobConfig
     ? options.targetJobConfig
     : options.targetWorker
-    ? await rewriteSameWorkerRemoteDatasetRefsForWorker(sourceJobConfig, options.targetWorker)
-    : sourceJobConfig;
+      ? await rewriteSameWorkerRemoteDatasetRefsForWorker(sourceJobConfig, options.targetWorker)
+      : sourceJobConfig;
   const trainingRoot = await getJobTrainingRoot(job);
-  const project = job.project_id ? await db.projects.findById(job.project_id) : null;
-  const datasetsRoot = project ? (await getProjectRoots(project)).datasets : await getDatasetsRoot();
+  const datasetsRoot = await getDatasetsRoot();
   const jobFolder = path.join(trainingRoot, job.name);
   const warnings: string[] = [];
 
@@ -142,7 +145,9 @@ export async function createRemoteTrainingJobBundle(
     training: {
       archivePath: 'training',
       dbStep: job.step,
-      latestCheckpointPath: latestCheckpointRelativePath ? path.posix.join('training', latestCheckpointRelativePath) : null,
+      latestCheckpointPath: latestCheckpointRelativePath
+        ? path.posix.join('training', latestCheckpointRelativePath)
+        : null,
       latestCheckpointStep: latestCheckpoint.step,
       optimizerIncluded: fs.existsSync(path.join(jobFolder, 'optimizer.pt')),
       status: job.status,
@@ -157,16 +162,11 @@ export async function createRemoteTrainingJobBundle(
     warnings,
   };
 
-  const trainingFiles = await collectFilesForArchive(
-    jobFolder,
-    'training',
-    true,
-    (_absolutePath, relativePath) => {
-      if (!shouldIncludeTrainingExportPath(_absolutePath, relativePath)) return false;
-      if (checkpointMode === 'all' || !isCheckpointExportPath(relativePath)) return true;
-      return relativePath.replace(/\\/g, '/') === latestCheckpointRelativePath;
-    },
-  );
+  const trainingFiles = await collectFilesForArchive(jobFolder, 'training', true, (_absolutePath, relativePath) => {
+    if (!shouldIncludeTrainingExportPath(_absolutePath, relativePath)) return false;
+    if (checkpointMode === 'all' || !isCheckpointExportPath(relativePath)) return true;
+    return relativePath.replace(/\\/g, '/') === latestCheckpointRelativePath;
+  });
 
   const datasetFiles = (
     await Promise.all(

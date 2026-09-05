@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Cpu } from 'lucide-react';
 import useJobByRef from '@/hooks/useJobByRef';
@@ -8,44 +7,34 @@ import useGPUInfo from '@/hooks/useGPUInfo';
 import GPUWidget from '@/components/GPUWidget';
 import JobActionBar from '@/components/JobActionBar';
 import { getTotalSteps } from '@/utils/jobs';
-
 interface CaptionMonitorProps {
   datasetPath: string;
-  projectID?: string | null;
   // Reports the current docked height (px) so the page can pad content to match.
   onHeightChange?: (height: number) => void;
 }
-
 // A small floating module that pops up from the bottom while a dataset is being
 // auto-captioned. It is a simplified version of the job page: action bar, GPU
 // info, and the live log.
-export default function CaptionMonitor({ datasetPath, projectID = null, onHeightChange }: CaptionMonitorProps) {
-  const { job, refreshJob } = useJobByRef(datasetPath, 3000, 'caption', projectID);
+export default function CaptionMonitor({ datasetPath, onHeightChange }: CaptionMonitorProps) {
+  const { job, refreshJob } = useJobByRef(datasetPath, 3000, 'caption');
   // Start collapsed; an active run pops it open via the effect below.
   const [collapsed, setCollapsed] = useState(true);
-
   const isActive = !!(job && (job.status === 'running' || job.status === 'queued'));
-
   // Reset the collapsed state whenever a new captioning run starts.
   useEffect(() => {
     if (isActive) setCollapsed(false);
   }, [job?.id, isActive]);
-
   const gpuIds = useMemo(() => {
     if (!job) return [];
     if (job.gpu_ids === 'mps') return [0];
     return job.gpu_ids.split(',').map(id => parseInt(id));
   }, [job?.gpu_ids]);
-
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, 5000);
   const { log, status: statusLog } = useJobLog(job?.id ?? '', isActive ? 2000 : null);
-
   const totalSteps = (job ? getTotalSteps(job) : 0) ?? 0;
   const progress = totalSteps > 0 ? (job!.step / totalSteps) * 100 : 0;
-
   const logRef = useRef<HTMLDivElement>(null);
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
-
   const logLines: string[] = useMemo(() => {
     // Log is already terminal-rendered by useJobLog — one entry per line.
     let splits: string[] = log.split('\n');
@@ -55,20 +44,17 @@ export default function CaptionMonitor({ datasetPath, projectID = null, onHeight
     }
     return splits;
   }, [log]);
-
   const handleScroll = () => {
     if (logRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = logRef.current;
       setIsScrolledToBottom(scrollHeight - scrollTop - clientHeight < 10);
     }
   };
-
   useEffect(() => {
     if (logRef.current && isScrolledToBottom) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [log, isScrolledToBottom]);
-
   // Animate the docked height instead of translating, so the collapsed panel
   // never extends below the container and adds scroll. No job for this
   // dataset -> 0 (hidden), collapsed -> just the header bar, expanded ->
@@ -77,11 +63,10 @@ export default function CaptionMonitor({ datasetPath, projectID = null, onHeight
   const PANEL_HEIGHT = 300;
   let height = 0;
   if (job) height = collapsed ? HEADER_HEIGHT : PANEL_HEIGHT;
-
   useEffect(() => {
     onHeightChange?.(height);
   }, [height, onHeightChange]);
-
+  if (!job) return null;
   return (
     <div
       className="absolute bottom-0 left-0 w-full z-40 overflow-hidden transition-[height] duration-300"

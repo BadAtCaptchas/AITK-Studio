@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 // src/app/api/datasets/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
@@ -11,7 +12,7 @@ import {
   writeDatasetImportMetadata,
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
-import { assertProjectScopeEnabled, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { resolveDatasetScope } from '@/server/datasetScope';
 import {
   cleanupStagedUpload,
   decodedUploadHeader,
@@ -169,7 +170,6 @@ function forwardedStreamHeaders(request: NextRequest) {
     'content-length',
     'x-aitk-dataset-name',
     'x-aitk-file-name',
-    'x-aitk-project-id',
     'x-aitk-relative-path',
     'x-aitk-source-folder',
     'x-aitk-fail-if-dataset-exists',
@@ -184,7 +184,7 @@ function forwardedStreamHeaders(request: NextRequest) {
 async function streamPlainDatasetFile(request: NextRequest) {
   const datasetName = decodedUploadHeader(request, 'x-aitk-dataset-name', 256).trim();
   const workerID = decodedUploadHeader(request, 'x-aitk-worker-id', 256).trim() || 'local';
-  const projectID = decodedUploadHeader(request, 'x-aitk-project-id', 256).trim() || null;
+
   const originalFilename = decodedUploadHeader(request, 'x-aitk-file-name', 512);
   const requestedRelativePath = decodedUploadHeader(request, 'x-aitk-relative-path', 2_048);
   const sourceFolderPath = decodedUploadHeader(request, 'x-aitk-source-folder', 4_096);
@@ -194,8 +194,6 @@ async function streamPlainDatasetFile(request: NextRequest) {
   if (!datasetName) return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
   if (!originalFilename) return NextResponse.json({ error: 'Upload filename is required' }, { status: 400 });
 
-  await assertProjectScopeEnabled(projectID);
-  rejectRemoteProjectScope(workerID, projectID);
   if (!isLocalWorker(workerID)) {
     const worker = await getRemoteWorker(workerID);
     const result = await remoteJson(worker, '/api/datasets/upload', {
@@ -207,7 +205,7 @@ async function streamPlainDatasetFile(request: NextRequest) {
     return NextResponse.json(result);
   }
 
-  const { datasetsRoot } = await resolveDatasetScope(projectID);
+  const { datasetsRoot } = await resolveDatasetScope();
   const uploadDir = resolveDatasetUploadDir(datasetsRoot, datasetName);
   if (
     failIfDatasetExists &&
@@ -292,13 +290,10 @@ export async function POST(request: NextRequest) {
     // Next's FormData parser buffers the request, so reject an oversized body
     // from its declared length before parsing it into memory.
     assertMultipartRequestLength(request);
-    const formData = await request.formData();
+    const formData = assertGlobalPayload(await request.formData());
     const workerValue = formData.get('worker_id');
     const workerID = typeof workerValue === 'string' && workerValue ? workerValue : 'local';
-    const projectValue = formData.get('project_id');
-    const projectID = typeof projectValue === 'string' && projectValue ? projectValue : null;
-    await assertProjectScopeEnabled(projectID);
-    rejectRemoteProjectScope(workerID, projectID);
+
     const files = formData.getAll('files');
     assertMultipartUploadBounds(files);
     const datasetNameValue = formData.get('datasetName');
@@ -309,7 +304,7 @@ export async function POST(request: NextRequest) {
     if (!datasetName) {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
-    const { datasetsRoot } = await resolveDatasetScope(projectID);
+    const { datasetsRoot } = await resolveDatasetScope();
     if (!datasetsRoot) {
       return NextResponse.json({ error: 'Datasets path not found' }, { status: 500 });
     }
@@ -397,7 +392,7 @@ export async function POST(request: NextRequest) {
     }
 
     const savedFiles: string[] = [];
-    
+
     // Process files sequentially to avoid overwhelming the system
     for (let i = 0; i < files.length; i++) {
       const file = files[i] as File;
@@ -437,13 +432,8 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     console.error('Upload error:', error);
     const status =
-      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
-        ? error.status
-        : 500;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Error uploading files' },
-      { status },
-    );
+      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 500;
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Error uploading files' }, { status });
   }
 }
 

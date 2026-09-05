@@ -1,15 +1,11 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import yauzl from 'yauzl';
 import { isMac } from '@/helpers/basic';
-import {
-  getDatasetsRoot,
-  getTrainingFolder,
-  isProjectSpacesDisabledError,
-  PROJECT_SPACES_DISABLED_MESSAGE,
-} from '@/server/settings';
+import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import { TOOLKIT_ROOT } from '@/paths';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
@@ -35,7 +31,7 @@ import {
   saveArchiveUploadChunk,
 } from '@/server/archiveUploadChunks';
 import { db } from '@/server/db';
-import { ensureProjectFolders, ProjectError, resolveOptionalProject } from '@/server/projects';
+
 import {
   cleanupStagedUpload,
   InvalidUploadError,
@@ -49,7 +45,8 @@ export const dynamic = 'force-dynamic';
 const MAX_TRAINING_JOB_ARCHIVE_BYTES = 64 * 1024 * 1024 * 1024;
 
 async function readJsonFile<T>(filePath: string): Promise<T> {
-  return JSON.parse(await fsp.readFile(filePath, 'utf8')) as T;
+  const value: unknown = JSON.parse(await fsp.readFile(filePath, 'utf8'));
+  return assertGlobalPayload(value) as T;
 }
 
 async function extractZipSafely(zipPath: string, destination: string) {
@@ -149,14 +146,14 @@ function getExtractedArchivePath(extractRoot: string, archivePath: string) {
   return resolved;
 }
 
-async function getAvailableJobName(sourceName: string, trainingRoot: string, projectID: string | null) {
+async function getAvailableJobName(sourceName: string, trainingRoot: string) {
   const baseName = safeNameSegment(sourceName, 'imported_job');
   const candidates = [baseName, `${baseName}_imported`];
   let suffix = 2;
 
   while (true) {
     const candidate = candidates.shift() || `${baseName}_imported_${suffix++}`;
-    const existingJob = await db.jobs.findByNameInScope(candidate, projectID);
+    const existingJob = await db.jobs.findByName(candidate);
     const candidateFolder = path.join(trainingRoot, candidate);
     if (!existingJob && !fs.existsSync(candidateFolder)) {
       return candidate;
@@ -198,13 +195,8 @@ export async function POST(request: NextRequest) {
   let workRoot: string | null = null;
 
   try {
-    const project = await resolveOptionalProject(
-      request.nextUrl.searchParams.get('project_id') ?? request.headers.get('x-aitk-project-id'),
-      { intent: 'write' },
-    );
-    const projectRoots = project ? await ensureProjectFolders(project) : null;
-    const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
-    const datasetsRoot = projectRoots?.datasets || (await getDatasetsRoot());
+    const trainingRoot = await getTrainingFolder();
+    const datasetsRoot = await getDatasetsRoot();
     await fsp.mkdir(trainingRoot, { recursive: true });
     await fsp.mkdir(datasetsRoot, { recursive: true });
 
@@ -219,7 +211,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const importId = uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const importId =
+      uploadMode === 'complete' ? readArchiveUploadID(request) : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     workRoot =
       uploadMode === 'complete'
         ? path.join(chunkUploadRoot, importId)
@@ -232,13 +225,10 @@ export async function POST(request: NextRequest) {
         : await saveJobArchiveUpload(request, uploadPath);
     if (uploadMode === 'complete') {
       const expectedBytes = readArchiveUploadFileBytes(request, MAX_TRAINING_JOB_ARCHIVE_BYTES);
-      await assembleArchiveUploadChunks(
-        chunkUploadRoot,
-        importId,
-        readArchiveUploadChunksTotal(request),
-        uploadPath,
-        { maxBytes: MAX_TRAINING_JOB_ARCHIVE_BYTES, expectedBytes: expectedBytes ?? undefined },
-      );
+      await assembleArchiveUploadChunks(chunkUploadRoot, importId, readArchiveUploadChunksTotal(request), uploadPath, {
+        maxBytes: MAX_TRAINING_JOB_ARCHIVE_BYTES,
+        expectedBytes: expectedBytes ?? undefined,
+      });
     }
     await extractZipSafely(uploadPath, extractRoot);
 
@@ -250,7 +240,7 @@ export async function POST(request: NextRequest) {
     const sourceJob = await readJsonFile<any>(path.join(extractRoot, 'job.json'));
     const sourceJobConfig = await readJsonFile<any>(path.join(extractRoot, 'job_config.json'));
     const sourceName = sourceJob?.name || sourceJobConfig?.config?.name || manifest.source.jobName;
-    const importedName = await getAvailableJobName(sourceName, trainingRoot, project?.id || null);
+    const importedName = await getAvailableJobName(sourceName, trainingRoot);
     const warnings = [...(manifest.warnings || [])];
     const modelReferences = Array.isArray(manifest.models?.references) ? manifest.models.references : [];
 
@@ -295,7 +285,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    let gpuIds = typeof requestedGpuIds === 'string' && requestedGpuIds.trim() ? requestedGpuIds : sourceJob?.gpu_ids || '0';
+    let gpuIds =
+      typeof requestedGpuIds === 'string' && requestedGpuIds.trim() ? requestedGpuIds : sourceJob?.gpu_ids || '0';
     if (isMac()) {
       gpuIds = 'mps';
     }
@@ -337,17 +328,10 @@ export async function POST(request: NextRequest) {
       speed_string: '',
       queue_position: queuePosition,
       job_type: 'train',
-      project_id: project?.id || null,
     });
 
     return NextResponse.json({ job, warnings });
   } catch (error) {
-    if (isProjectSpacesDisabledError(error)) {
-      return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
-    }
-    if (error instanceof ProjectError) {
-      return NextResponse.json({ error: error.message, code: error.code, details: error.details }, { status: error.status });
-    }
     console.error('Training job import failed:', error);
     const message = error instanceof Error ? error.message : 'Failed to import training job';
     const status =

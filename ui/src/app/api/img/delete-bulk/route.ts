@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import {
   deletePlainImagePaths,
@@ -50,7 +51,10 @@ function combineBulkResults(results: ImageDeleteBulkResult[]) {
   return combined;
 }
 
-function mapRemoteResult(result: ImageDeleteBulkResult, refByRemotePath: Record<string, string>): ImageDeleteBulkResult {
+function mapRemoteResult(
+  result: ImageDeleteBulkResult,
+  refByRemotePath: Record<string, string>,
+): ImageDeleteBulkResult {
   const mapPath = (remotePath: string) => refByRemotePath[remotePath] || remotePath;
   return {
     ...result,
@@ -82,13 +86,11 @@ function splitRemoteAndLocalPaths(imgPaths: unknown) {
     if (remoteAsset.type !== 'img') {
       return { localPaths: null, remoteGroups: null, error: 'Invalid remote image path' };
     }
-    const group =
-      remoteGroups.get(remoteAsset.workerID) ||
-      {
-        workerID: remoteAsset.workerID,
-        paths: [],
-        refByRemotePath: {},
-      };
+    const group = remoteGroups.get(remoteAsset.workerID) || {
+      workerID: remoteAsset.workerID,
+      paths: [],
+      refByRemotePath: {},
+    };
     group.paths.push(remoteAsset.path);
     group.refByRemotePath[remoteAsset.path] = value;
     remoteGroups.set(remoteAsset.workerID, group);
@@ -106,7 +108,7 @@ export async function POST(request: Request) {
     const authError = await requireAuth(request);
     if (authError) return authError;
 
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const { localPaths, remoteGroups, error } = splitRemoteAndLocalPaths(body?.imgPaths);
     if (error || !localPaths || !remoteGroups) {
       return NextResponse.json({ error: error || 'Invalid image paths' }, { status: 400 });
@@ -115,7 +117,7 @@ export async function POST(request: Request) {
     const results: ImageDeleteBulkResult[] = [];
 
     if (localPaths.length > 0) {
-      const { datasetsRoot, trainingRoot } = await resolveDatasetScope(body?.project_id);
+      const { datasetsRoot, trainingRoot } = await resolveDatasetScope();
       results.push(await deletePlainImagePaths(localPaths, datasetsRoot, trainingRoot));
     }
 

@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   boolFromValue,
@@ -7,7 +8,7 @@ import {
 } from '@/server/openRouterImageData';
 import { generateOpenRouterBoxPatches } from '@/server/openRouterBoxes';
 import { getOpenRouterApiKey } from '@/server/settings';
-import { assertProjectScopeEnabled, DatasetScopeError } from '@/server/datasetScope';
+import { DatasetScopeError } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 
@@ -23,8 +24,8 @@ export async function POST(request: NextRequest) {
     let imageDataUrl = '';
 
     if (contentType.includes('multipart/form-data')) {
-      const formData = await request.formData();
-      await assertProjectScopeEnabled(formData.get('project_id'));
+      const formData = assertGlobalPayload(await request.formData());
+
       caption = String(formData.get('caption') || '');
       model = String(formData.get('model') || '');
       refine = boolFromValue(formData.get('refine'));
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
       }
       imageDataUrl = await encryptedOpenRouterUploadImageDataUrl(formData, 'Auto Boxes');
     } else {
-      const body = await request.json();
+      const body = assertGlobalPayload(await request.json());
       caption = typeof body?.caption === 'string' ? body.caption : '';
       model = typeof body?.model === 'string' ? body.model : '';
       refine = body?.refine === true;
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
       if (!imageWidth || !imageHeight) {
         throw new Error('Image width and height are required for Auto Boxes.');
       }
-      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Auto Boxes', body?.project_id);
+      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Auto Boxes');
     }
 
     const result = await generateOpenRouterBoxPatches({

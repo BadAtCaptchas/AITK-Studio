@@ -1,12 +1,9 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  isEncryptedDatasetFolder,
-  resolveDatasetFolder,
-  resolveEncryptedObjectPath,
-} from '@/server/encryptedDatasets';
+import { isEncryptedDatasetFolder, resolveDatasetFolder, resolveEncryptedObjectPath } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, RemoteClientError, remoteFetch } from '@/server/remoteClient';
-import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 function copyResponseHeaders(source: Response) {
   const headers = new Headers();
@@ -30,14 +27,12 @@ function remoteClientErrorResponse(error: RemoteClientError) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { datasetName, objectPath, worker_id, project_id } = await request.json();
+    const { datasetName, objectPath, worker_id } = assertGlobalPayload(await request.json());
     if (typeof datasetName !== 'string' || typeof objectPath !== 'string') {
       return NextResponse.json({ error: 'Invalid encrypted object request' }, { status: 400 });
     }
-    await assertProjectScopeEnabled(project_id);
 
     if (!isLocalWorker(worker_id)) {
-      rejectRemoteProjectScope(worker_id, project_id);
       const worker = await getRemoteWorker(worker_id);
       const remoteResponse = await remoteFetch(worker, '/api/datasets/encrypted/object', {
         method: 'POST',
@@ -50,7 +45,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { datasetsRoot } = await resolveDatasetScope(project_id, { intent: 'read' });
+    const { datasetsRoot } = await resolveDatasetScope();
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     if (!isEncryptedDatasetFolder(datasetFolder)) {
       return NextResponse.json({ error: 'Encrypted dataset not found' }, { status: 404 });

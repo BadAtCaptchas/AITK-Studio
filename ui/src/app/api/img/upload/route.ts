@@ -2,7 +2,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDataRoot } from '@/server/settings';
-import { getProjectValidationRoot, resolveOptionalProject } from '@/server/projects';
+
 import {
   cleanupStagedUpload,
   decodedUploadHeader,
@@ -57,14 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unsupported media type' }, { status: 415 });
     }
 
-    const projectID = decodedUploadHeader(request, 'x-aitk-project-id', 256);
-    const project = await resolveOptionalProject(projectID || null, { intent: 'write' });
-    if (project && !VALIDATION_IMAGE_EXTENSIONS.has(extension)) {
-      return NextResponse.json({ error: 'Project validation uploads must be images' }, { status: 415 });
-    }
-    const imageRoot = project
-      ? await getProjectValidationRoot(project)
-      : path.join(await getDataRoot(), 'images');
+    const imageRoot = path.join(await getDataRoot(), 'images');
     const staged = await streamRequestToStagingFile(request, imageRoot, {
       maxBytes: MAX_FILE_BYTES,
       prefix: 'media-upload',
@@ -94,12 +87,7 @@ export async function POST(request: NextRequest) {
     await cleanupStagedUpload(stagingPath);
     console.error('Upload error:', error);
     const status =
-      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
-        ? error.status
-        : 500;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Error uploading file' },
-      { status },
-    );
+      error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 500;
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Error uploading file' }, { status });
   }
 }

@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -5,25 +6,13 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getDatabaseConfig } from '@/server/db';
-import {
-  getHFToken,
-  getTrainingFolder,
-  isProjectSpacesDisabledError,
-  PROJECT_SPACES_DISABLED_MESSAGE,
-} from '@/server/settings';
+import { getHFToken, getTrainingFolder } from '@/server/settings';
 import { prepareHfTokenEnv } from '@/server/hfTokenEnv';
 import { getToolkitPythonPath } from '@/server/tensorboard';
-import { getProjectRoots, ProjectError, resolveOptionalProject } from '@/server/projects';
+
 import { isOfflineModeEnabled, offlineChildProcessEnv } from '@/server/networkPolicy';
 import { isTelemetryEnabled } from '@/server/telemetry';
-import { generateOnProjectReplica, ProjectSyncError } from '@/server/projectSync';
-import { assertExecutionReplica } from '@/server/projectSyncWorker';
-import {
-  makePortableProjectRef,
-  PROJECT_SYNC_PROTOCOL,
-  ProjectSyncProtocolError,
-  resolvePortableProjectConfig,
-} from '@/server/projectSyncProtocol';
+
 import { isRequestAuthenticated } from '@/utils/authSession';
 import { telemetryChildProcessEnv } from '@/utils/telemetry';
 
@@ -98,7 +87,8 @@ function getGenerateConfig(jobConfig: unknown) {
     return null;
   }
   const processRecord = processConfig as Record<string, unknown>;
-  if (!processRecord.generate || typeof processRecord.generate !== 'object' || Array.isArray(processRecord.generate)) return null;
+  if (!processRecord.generate || typeof processRecord.generate !== 'object' || Array.isArray(processRecord.generate))
+    return null;
   return {
     jobConfig: jobConfig as InlineGenerateJobConfig,
     processConfig: processConfig as InlineGenerateProcessConfig,
@@ -283,38 +273,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
-    const projectSyncRequest = request.headers.get('x-aitk-project-sync') === PROJECT_SYNC_PROTOCOL;
-    const requestedWorkerID = typeof body.worker_id === 'string' ? body.worker_id.trim() : 'local';
-    if (!projectSyncRequest && requestedWorkerID && requestedWorkerID !== 'local') {
-      if (typeof body.project_id !== 'string' || !body.project_id.trim()) {
-        return NextResponse.json(
-          { error: 'Remote generation requires project_id', code: 'PROJECT_SYNC_PROJECT_REQUIRED' },
-          { status: 400 },
-        );
-      }
-      return NextResponse.json(
-        await generateOnProjectReplica({
-          projectIdentifier: body.project_id,
-          workerID: requestedWorkerID,
-          jobConfig: body.job_config,
-          gpuIDs: typeof body.gpu_ids === 'string' && body.gpu_ids.trim() ? body.gpu_ids.trim() : '0',
-          signal: request.signal,
-        }),
-      );
-    }
-    const replicaProject = projectSyncRequest
-      ? await assertExecutionReplica(
-          typeof body.project_id === 'string' ? body.project_id : '',
-          request.headers.get('x-aitk-home-instance'),
-        )
-      : null;
-    const replicaRoots = replicaProject ? await getProjectRoots(replicaProject) : null;
+    const body = assertGlobalPayload(await request.json());
     const rawJobConfig: unknown = JSON.parse(JSON.stringify(body.job_config || null));
-    const jobConfigValue = replicaProject
-      ? resolvePortableProjectConfig(rawJobConfig, replicaRoots!.root, replicaProject.id)
-      : rawJobConfig;
-    const generateContext = getGenerateConfig(jobConfigValue);
+    const generateContext = getGenerateConfig(rawJobConfig);
     if (!generateContext) {
       return NextResponse.json({ error: 'Inline generation requires a generate job config.' }, { status: 400 });
     }
@@ -329,16 +290,14 @@ export async function POST(request: NextRequest) {
     }
 
     const gpuIds = typeof body.gpu_ids === 'string' && body.gpu_ids.trim() ? body.gpu_ids.trim() : '0';
-    const project = replicaProject || (await resolveOptionalProject(body.project_id, { intent: 'execute' }));
-    const projectRoots = project ? await getProjectRoots(project) : null;
-    const trainingRoot = projectRoots?.runs || (await getTrainingFolder());
+    const trainingRoot = await getTrainingFolder();
     const hfToken = await getHFToken();
     const telemetryEnabled = await isTelemetryEnabled();
     const dbConfig = getDatabaseConfig();
     const baseName = sanitizeName(jobConfig.config?.name);
     const runName = `${baseName}_${Date.now()}`;
     const runFolder = path.join(trainingRoot, '.inline_generate', runName);
-    const outputFolder = projectRoots ? path.join(projectRoots.outputs, runName) : path.join(runFolder, 'samples');
+    const outputFolder = path.join(runFolder, 'samples');
     const configPath = path.join(runFolder, '.job_config.json');
     const logPath = path.join(runFolder, 'log.txt');
     const launchLogPath = path.join(runFolder, 'launch.log');
@@ -412,30 +371,10 @@ export async function POST(request: NextRequest) {
       imagePath,
       output_folder: outputFolder,
       log_path: logPath,
-      ...(replicaProject
-        ? {
-            portable_image_ref: makePortableProjectRef(
-              replicaProject.id,
-              path.relative(replicaRoots!.root, imagePath).replace(/\\/g, '/'),
-            ),
-          }
-        : {}),
     });
   } catch (error: any) {
     if (isInlineGenerationCanceledError(error)) {
       return NextResponse.json({ error: error.message }, { status: 499 });
-    }
-    if (isProjectSpacesDisabledError(error)) {
-      return NextResponse.json({ error: PROJECT_SPACES_DISABLED_MESSAGE }, { status: 403 });
-    }
-    if (error instanceof ProjectError) {
-      return NextResponse.json({ error: error.message, code: error.code, details: error.details }, { status: error.status });
-    }
-    if (error instanceof ProjectSyncError || error instanceof ProjectSyncProtocolError) {
-      return NextResponse.json(
-        { error: error.message, code: error.code, details: error.details },
-        { status: error.status },
-      );
     }
     console.error('Inline generation failed:', error);
     return NextResponse.json({ error: error?.message || 'Inline generation failed.' }, { status: 500 });

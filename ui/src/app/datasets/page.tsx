@@ -1,5 +1,6 @@
 'use client';
-
+import { getTrainingReturnPath } from '@/hooks/useTrainingDraft';
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import Link from 'next/link';
@@ -33,10 +34,8 @@ import DatasetWatchFoldersButton from '@/components/DatasetWatchFoldersButton';
 import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadge';
 import { TopBar, MainContent } from '@/components/layout';
 import { PageNotice } from '@/components/OperatorPrimitives';
-import ResourceScopeFilter, { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
 import { apiClient } from '@/utils/api';
-import { useRouter } from 'next/navigation';
-import useResourceScope from '@/hooks/useResourceScope';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { aggregateAutoCaptionProgressByDataset } from '@/utils/datasetWatcherStatus';
 import {
   buildEncryptedDatasetItem,
@@ -64,9 +63,7 @@ import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
 import { uploadDatasetFile } from '@/utils/streamedUploads';
-
 type DatasetExplorerView = 'details' | 'icons';
-
 type DatasetExplorerRow = {
   dataset: DatasetSummary;
   name: string;
@@ -77,28 +74,20 @@ type DatasetExplorerRow = {
   captions: string;
   ref: string;
   worker_id: string;
-  project_id: string | null;
-  project_name: string | null;
-  archived: boolean;
 };
-
 const DATASET_VIEW_STORAGE_KEY = 'aitk.datasets.view';
-
 function isPreviewableImagePath(value: string) {
   return isImage(value) || isImage(getDisplayPath(value));
 }
-
 function parseDatasetExplorerView(value: string | null | undefined): DatasetExplorerView | null {
   return value === 'details' || value === 'icons' ? value : null;
 }
-
 function readDatasetViewCookie() {
   if (typeof document === 'undefined') return null;
   const cookie = document.cookie.split('; ').find(value => value.startsWith(`${DATASET_VIEW_STORAGE_KEY}=`));
   if (!cookie) return null;
   return parseDatasetExplorerView(decodeURIComponent(cookie.split('=').slice(1).join('=')));
 }
-
 function readStoredDatasetView() {
   if (typeof window === 'undefined') return null;
   try {
@@ -107,7 +96,6 @@ function readStoredDatasetView() {
     return readDatasetViewCookie();
   }
 }
-
 function writeStoredDatasetView(view: DatasetExplorerView) {
   if (typeof window === 'undefined') return;
   try {
@@ -121,29 +109,14 @@ function writeStoredDatasetView(view: DatasetExplorerView) {
     // If both storage mechanisms are blocked, the current in-memory state still updates.
   }
 }
-
 function datasetRowKey(dataset: DatasetSummary) {
-  const scope = dataset.project_id ? `project:${dataset.project_id}` : 'global';
-  return dataset.ref || `${scope}:${dataset.worker_id || 'local'}:${dataset.name}`;
+  return dataset.ref || `global:${dataset.worker_id || 'local'}:${dataset.name}`;
 }
-
 function datasetWorkerID(dataset: DatasetSummary) {
   return dataset.worker_id || 'local';
 }
-
-function datasetProjectID(dataset: DatasetSummary) {
-  return dataset.project_id || null;
-}
-
 function getRememberedDatasetKey(dataset: DatasetSummary) {
   const workerID = datasetWorkerID(dataset);
-  const projectID = datasetProjectID(dataset);
-  if (projectID) {
-    return (
-      getRememberedEncryptedDatasetKey(datasetRowKey(dataset)) ||
-      getRememberedEncryptedDatasetKey(`project:${projectID}:${dataset.name}`)
-    );
-  }
   return (
     getRememberedEncryptedDatasetKey(datasetRowKey(dataset)) ||
     getRememberedEncryptedDatasetKey(dataset.name) ||
@@ -151,15 +124,9 @@ function getRememberedDatasetKey(dataset: DatasetSummary) {
     (workerID !== 'local' ? getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(workerID, dataset.name)) : null)
   );
 }
-
 function rememberDatasetKey(dataset: DatasetSummary, rawKeyB64: string) {
   const workerID = datasetWorkerID(dataset);
-  const projectID = datasetProjectID(dataset);
   rememberEncryptedDatasetKey(datasetRowKey(dataset), rawKeyB64);
-  if (projectID) {
-    rememberEncryptedDatasetKey(`project:${projectID}:${dataset.name}`, rawKeyB64);
-    return;
-  }
   rememberEncryptedDatasetKey(dataset.name, rawKeyB64);
   if (dataset.path) rememberEncryptedDatasetKey(dataset.path, rawKeyB64);
   if (workerID !== 'local') {
@@ -167,7 +134,6 @@ function rememberDatasetKey(dataset: DatasetSummary, rawKeyB64: string) {
     rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, dataset.name), rawKeyB64);
   }
 }
-
 function captionStatusSearchText(dataset: DatasetSummary, unlocked = false) {
   if (dataset.encrypted) return unlocked ? 'captions unlocked encrypted' : 'captions locked encrypted';
   if (typeof dataset.itemCount !== 'number' || typeof dataset.missingCaptionCount !== 'number') {
@@ -177,7 +143,6 @@ function captionStatusSearchText(dataset: DatasetSummary, unlocked = false) {
   if (dataset.missingCaptionCount > 0) return `${dataset.missingCaptionCount} missing captions`;
   return 'captions complete captioned';
 }
-
 function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSummary; unlocked?: boolean }) {
   const itemCount = typeof dataset.itemCount === 'number' ? dataset.itemCount : null;
   const missingCount = typeof dataset.missingCaptionCount === 'number' ? dataset.missingCaptionCount : null;
@@ -187,7 +152,6 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
       : itemCount !== null && missingCount !== null
         ? Math.max(itemCount - missingCount, 0)
         : null;
-
   if (dataset.encrypted && unlocked) {
     return (
       <span
@@ -199,7 +163,6 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
       </span>
     );
   }
-
   if (dataset.encrypted) {
     return (
       <span
@@ -211,7 +174,6 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
       </span>
     );
   }
-
   if (itemCount === null || missingCount === null || captionedCount === null) {
     return (
       <span
@@ -223,7 +185,6 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
       </span>
     );
   }
-
   if (itemCount === 0) {
     return (
       <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs font-medium text-gray-300">
@@ -232,10 +193,8 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
       </span>
     );
   }
-
   const hasMissingCaptions = missingCount > 0;
   const coveragePercent = Math.max(0, Math.min(100, (captionedCount / itemCount) * 100));
-
   return (
     <div
       className="flex min-w-[9.5rem] flex-col gap-1"
@@ -269,14 +228,12 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
     </div>
   );
 }
-
 type FolderImportEntry = {
   id: string;
   file: File;
   relativePath: string;
   rootName: string;
 };
-
 type HfDatasetPreview = {
   datasetID: string;
   configs: string[];
@@ -284,18 +241,18 @@ type HfDatasetPreview = {
   selectedConfig: string;
   selectedSplit: string;
   rowCount?: number | null;
-  features: Array<{ name: string; kind: string }>;
+  features: Array<{
+    name: string;
+    kind: string;
+  }>;
   imageColumns: string[];
   textColumns: string[];
   suggestedImageColumn: string | null;
   suggestedCaptionColumn: string | null;
   samples: Array<Record<string, unknown>>;
 };
-
 type HfCaptionMode = 'auto' | 'none' | 'column';
-
 type BulkUnlockStatus = 'loading' | 'locked' | 'unlocking' | 'unlocked' | 'error';
-
 function cleanClientDatasetName(name: string) {
   return name
     .trim()
@@ -303,27 +260,32 @@ function cleanClientDatasetName(name: string) {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
-
 function relativePathForFile(file: File) {
-  return ((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name).replace(/\\/g, '/');
+  return (
+    (
+      file as File & {
+        webkitRelativePath?: string;
+      }
+    ).webkitRelativePath || file.name
+  ).replace(/\\/g, '/');
 }
-
 function fileSystemPathForFile(file: File) {
-  const value = (file as File & { path?: unknown }).path;
+  const value = (
+    file as File & {
+      path?: unknown;
+    }
+  ).path;
   return typeof value === 'string' ? value.trim() : '';
 }
-
 function dirnameFromClientPath(filePath: string) {
   const trimmed = filePath.trim().replace(/[\\/]+$/, '');
   const lastSlash = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
   return lastSlash > 0 ? trimmed.slice(0, lastSlash) : '';
 }
-
 function restoreClientPathSeparators(normalizedPath: string, sourcePath: string) {
   if (sourcePath.includes('\\')) return normalizedPath.replace(/\//g, '\\');
   return normalizedPath;
 }
-
 function sourceFolderPathForEntry(entry: FolderImportEntry) {
   const filePath = fileSystemPathForFile(entry.file);
   if (!filePath) return '';
@@ -331,14 +293,11 @@ function sourceFolderPathForEntry(entry: FolderImportEntry) {
   const normalizedFilePath = filePath.replace(/\\/g, '/').replace(/\/+$/, '');
   const normalizedRelativePath = relativeInsideSource.replace(/\\/g, '/').replace(/^\/+/, '');
   const suffix = normalizedRelativePath ? `/${normalizedRelativePath}` : '';
-
   if (suffix && normalizedFilePath.toLowerCase().endsWith(suffix.toLowerCase())) {
     return restoreClientPathSeparators(normalizedFilePath.slice(0, -suffix.length), filePath);
   }
-
   return dirnameFromClientPath(filePath);
 }
-
 function sourceFolderPathForEntries(entries: FolderImportEntry[]) {
   const sourcePaths = Array.from(
     new Set(
@@ -350,7 +309,6 @@ function sourceFolderPathForEntries(entries: FolderImportEntry[]) {
   );
   return sourcePaths.length === 1 ? sourcePaths[0] : '';
 }
-
 function nextClientDatasetName(preferredName: string, usedNames: Set<string>) {
   const baseName = cleanClientDatasetName(preferredName) || 'imported_folder';
   let candidate = baseName;
@@ -362,19 +320,19 @@ function nextClientDatasetName(preferredName: string, usedNames: Set<string>) {
   usedNames.add(candidate.toLowerCase());
   return candidate;
 }
-
 function hfOutputNameFromDataset(datasetID: string, split?: string) {
   const base = cleanClientDatasetName(datasetID.replace(/^https?:\/\/(?:www\.)?huggingface\.co\/datasets\//i, ''));
   const splitSuffix = split && split !== 'train' ? `_${cleanClientDatasetName(split)}` : '';
   return `${base || 'hf_dataset'}${splitSuffix}`;
 }
-
 export default function Datasets() {
   const router = useRouter();
-  const resourceScope = useResourceScope();
-  const activeProjectID = resourceScope.scope === 'project' ? resourceScope.projectID : null;
-  const selectedProjectArchived = resourceScope.selectedProject?.lifecycle_state === 'archived';
-  const aggregateScopeReadOnly = resourceScope.scope === 'all';
+  const searchParams = useSearchParams();
+  const returnToTraining = searchParams.get('returnTo') === 'training';
+  const [importChooserOpen, setImportChooserOpen] = useState(false);
+  useEffect(() => {
+    if (searchParams.get('action') === 'import') setImportChooserOpen(true);
+  }, [searchParams]);
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
   const setFolderImportInputRef = useCallback((node: HTMLInputElement | null) => {
     folderImportInputRef.current = node;
@@ -383,9 +341,7 @@ export default function Datasets() {
     node.setAttribute('directory', '');
   }, []);
   const { datasets, errors, status, refreshDatasets } = useDatasetList({
-    includeRemote: resourceScope.scope !== 'project',
-    scope: resourceScope.scope,
-    projectID: activeProjectID,
+    includeRemote: true,
   });
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
@@ -457,10 +413,8 @@ export default function Datasets() {
   const [hfImportError, setHfImportError] = useState('');
   const [isLoadingHfPreview, setIsLoadingHfPreview] = useState(false);
   const [isImportingHfDataset, setIsImportingHfDataset] = useState(false);
-
   const datasetWatcherLive = useDatasetWatcherLiveRefresh({
-    enabled: status === 'success' && resourceScope.scope !== 'all',
-    projectID: activeProjectID,
+    enabled: status === 'success',
     workerID: 'local',
     onRefresh: () => refreshDatasets({ background: true }),
   });
@@ -468,11 +422,9 @@ export default function Datasets() {
     () => aggregateAutoCaptionProgressByDataset(datasetWatcherLive.watchers, datasetWatcherLive.statuses),
     [datasetWatcherLive.statuses, datasetWatcherLive.watchers],
   );
-
   useEffect(() => {
     const rememberedView = readStoredDatasetView();
     if (rememberedView) setDatasetView(rememberedView);
-
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== DATASET_VIEW_STORAGE_KEY) return;
       const nextView = parseDatasetExplorerView(event.newValue);
@@ -481,18 +433,15 @@ export default function Datasets() {
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
-
   const updateDatasetView = useCallback((view: DatasetExplorerView) => {
     setDatasetView(view);
     writeStoredDatasetView(view);
   }, []);
-
   const isDatasetUnlocked = useCallback(
     (dataset: DatasetSummary) =>
       dataset.encrypted && (unlockedDatasetRefs.has(datasetRowKey(dataset)) || !!getRememberedDatasetKey(dataset)),
     [unlockedDatasetRefs],
   );
-
   const rememberUnlockedDataset = useCallback((dataset: DatasetSummary, rawKeyB64: string) => {
     rememberDatasetKey(dataset, rawKeyB64);
     setUnlockedDatasetRefs(previous => {
@@ -501,7 +450,6 @@ export default function Datasets() {
       return next;
     });
   }, []);
-
   // Transform datasets array into rows with objects
   const tableRows: DatasetExplorerRow[] = datasets.map(dataset => {
     const unlocked = isDatasetUnlocked(dataset);
@@ -515,29 +463,17 @@ export default function Datasets() {
       captions: captionStatusSearchText(dataset, unlocked),
       ref: datasetRowKey(dataset),
       worker_id: datasetWorkerID(dataset),
-      project_id: datasetProjectID(dataset),
-      project_name: dataset.project_name || null,
-      archived: dataset.project_lifecycle_state === 'archived',
     };
   });
   const filteredTableRows = useMemo(() => {
     const query = datasetFilter.trim().toLowerCase();
     if (!query) return tableRows;
     return tableRows.filter(row =>
-      [
-        row.name,
-        row.source,
-        row.worker,
-        row.project_name,
-        row.project_id ? 'project' : 'global',
-        row.encrypted ? 'encrypted' : 'plain',
-        row.captions,
-      ]
+      [row.name, row.source, row.worker, row.encrypted ? 'encrypted' : 'plain', row.captions]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
   }, [datasetFilter, tableRows]);
-
   useEffect(() => {
     filteredTableRows
       .filter(row => !row.encrypted && !datasetPreviewRequestsRef.current.has(row.ref))
@@ -548,7 +484,6 @@ export default function Datasets() {
           .post('/api/datasets/listImages', {
             datasetName: row.name,
             worker_id: row.worker_id,
-            ...(row.project_id ? { project_id: row.project_id } : {}),
           })
           .then(response => {
             const images = Array.isArray(response.data?.images) ? response.data.images : [];
@@ -565,13 +500,6 @@ export default function Datasets() {
           });
       });
   }, [filteredTableRows]);
-
-  useEffect(() => {
-    setSelectedDatasetRefs(new Set());
-    setDatasetPreviewUrls({});
-    datasetPreviewRequestsRef.current.clear();
-  }, [activeProjectID, resourceScope.scope]);
-
   const selectedDatasets = useMemo(
     () => tableRows.filter(row => selectedDatasetRefs.has(row.ref)).map(row => row.dataset),
     [selectedDatasetRefs, tableRows],
@@ -585,13 +513,7 @@ export default function Datasets() {
     [selectedDatasets],
   );
   const selectedWorkerID = selectedWorkerIDs.length === 1 ? selectedWorkerIDs[0] : null;
-  const selectedScopeIDs = useMemo(
-    () => Array.from(new Set(selectedDatasets.map(dataset => datasetProjectID(dataset) || 'global'))),
-    [selectedDatasets],
-  );
-  const selectedScopeID = selectedScopeIDs.length === 1 ? selectedScopeIDs[0] : null;
-  const combineProjectID = selectedScopeID && selectedScopeID !== 'global' ? selectedScopeID : null;
-  const canCombineSelection = selectedDatasets.length >= 2 && selectedWorkerID !== null && selectedScopeID !== null;
+  const canCombineSelection = selectedDatasets.length >= 2 && selectedWorkerID !== null;
   const canBulkUnlockSelection = selectedEncryptedDatasets.length > 0;
   const bulkPasswordTargetCount = useMemo(
     () =>
@@ -632,11 +554,9 @@ export default function Datasets() {
     });
     return Array.from(options.entries()).map(([id, name]) => ({ id, name }));
   }, [datasets]);
-
   const toggleDatasetSelection = (dataset: DatasetSummary) => {
     const ref = datasetRowKey(dataset);
     const workerID = datasetWorkerID(dataset);
-    const scopeID = datasetProjectID(dataset) || 'global';
     setSelectedDatasetRefs(previous => {
       const next = new Set(previous);
       if (next.has(ref)) {
@@ -645,19 +565,14 @@ export default function Datasets() {
       }
       const selectedRows = tableRows.filter(row => next.has(row.ref));
       const existingWorkerID = selectedRows[0]?.worker_id;
-      const existingScopeID = selectedRows[0]?.project_id || 'global';
-      if (
-        (existingWorkerID && existingWorkerID !== workerID) ||
-        (selectedRows.length > 0 && existingScopeID !== scopeID)
-      ) {
-        alert('Select datasets from one worker and workspace at a time.');
+      if (existingWorkerID && existingWorkerID !== workerID) {
+        reportWorkflowError('Select datasets from one worker at a time.');
         return previous;
       }
       next.add(ref);
       return next;
     });
   };
-
   const loadBulkUnlockManifest = useCallback(async (dataset: DatasetSummary) => {
     const ref = datasetRowKey(dataset);
     setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'loading' }));
@@ -666,7 +581,6 @@ export default function Datasets() {
       const res = await apiClient.post('/api/datasets/listImages', {
         datasetName: dataset.name,
         worker_id: datasetWorkerID(dataset),
-        ...(datasetProjectID(dataset) ? { project_id: datasetProjectID(dataset) } : {}),
       });
       if (res.data?.encrypted && res.data?.manifest) {
         setBulkUnlockManifests(previous => ({ ...previous, [ref]: res.data.manifest }));
@@ -680,7 +594,6 @@ export default function Datasets() {
       setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Could not load encrypted manifest.' }));
     }
   }, []);
-
   const closeBulkUnlockModal = () => {
     if (isBulkUnlockBusy) return;
     setIsBulkUnlockModalOpen(false);
@@ -692,13 +605,11 @@ export default function Datasets() {
     setBulkRowPasswords({});
     setBulkRowKeyFiles({});
   };
-
   const openBulkUnlockModal = () => {
     if (!canBulkUnlockSelection) {
-      alert('Select at least one encrypted dataset.');
+      reportWorkflowError('Select at least one encrypted dataset.');
       return;
     }
-
     const targets = selectedEncryptedDatasets;
     const initialStatus: Record<string, BulkUnlockStatus> = {};
     const rememberedRefs = new Set<string>();
@@ -711,7 +622,6 @@ export default function Datasets() {
         initialStatus[ref] = 'loading';
       }
     });
-
     if (rememberedRefs.size > 0) {
       setUnlockedDatasetRefs(previous => {
         const next = new Set(previous);
@@ -719,7 +629,6 @@ export default function Datasets() {
         return next;
       });
     }
-
     setBulkUnlockTargets(targets);
     setBulkUnlockManifests({});
     setBulkUnlockStatus(initialStatus);
@@ -732,7 +641,6 @@ export default function Datasets() {
       if (!getRememberedDatasetKey(target)) void loadBulkUnlockManifest(target);
     });
   };
-
   const unlockBulkDataset = async (
     dataset: DatasetSummary,
     request: Parameters<typeof unlockEncryptedDatasetKey>[1],
@@ -745,7 +653,6 @@ export default function Datasets() {
       setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Encrypted manifest is still loading.' }));
       return false;
     }
-
     setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'unlocking' }));
     setBulkUnlockErrors(previous => ({ ...previous, [ref]: '' }));
     try {
@@ -761,7 +668,6 @@ export default function Datasets() {
       return false;
     }
   };
-
   const handleBulkSharedPasswordUnlock = async () => {
     if (!bulkSharedPassword || isBulkUnlocking) return;
     setIsBulkUnlocking(true);
@@ -782,7 +688,6 @@ export default function Datasets() {
       setIsBulkUnlocking(false);
     }
   };
-
   const closeCombineModal = () => {
     if (isCombiningDatasets) return;
     setIsCombineModalOpen(false);
@@ -798,10 +703,9 @@ export default function Datasets() {
     setCombineSourceErrors({});
     setCombineSourceLoading({});
   };
-
   const openCombineModal = () => {
     if (!canCombineSelection) {
-      alert('Select at least two datasets from the same worker.');
+      reportWorkflowError('Select at least two datasets from the same worker.');
       return;
     }
     const sources = selectedDatasets;
@@ -819,30 +723,25 @@ export default function Datasets() {
     );
     setIsCombineModalOpen(true);
   };
-
   const openRenameDatasetModal = (dataset: DatasetSummary) => {
     setRenameDataset(dataset);
     setRenameDatasetName(dataset.name);
     setRenameDatasetError('');
   };
-
   const closeRenameDatasetModal = () => {
     if (isRenamingDataset) return;
     setRenameDataset(null);
     setRenameDatasetName('');
     setRenameDatasetError('');
   };
-
   const handleRenameDataset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!renameDataset || isRenamingDataset) return;
-
     const normalizedName = cleanClientDatasetName(renameDatasetName);
     if (!normalizedName) {
       setRenameDatasetError('Dataset name is required.');
       return;
     }
-
     try {
       setIsRenamingDataset(true);
       setRenameDatasetError('');
@@ -851,20 +750,17 @@ export default function Datasets() {
         name: renameDataset.name,
         newName: renameDatasetName,
         worker_id: workerID,
-        ...(datasetProjectID(renameDataset) ? { project_id: datasetProjectID(renameDataset) } : {}),
       });
       const renamedName = res.data?.name || normalizedName;
       const rememberedKey = getRememberedDatasetKey(renameDataset);
       if (rememberedKey) {
-        const renameProjectID = datasetProjectID(renameDataset);
         rememberUnlockedDataset(
           {
             ...renameDataset,
             name: renamedName,
             worker_id: workerID,
-            ref: renameProjectID
-              ? `aitk-dataset://project/${encodeURIComponent(renameProjectID)}/${encodeURIComponent(renamedName)}`
-              : workerID === 'local'
+            ref:
+              workerID === 'local'
                 ? `aitk-dataset://local/${encodeURIComponent(renamedName)}`
                 : makeRemoteDatasetRef(workerID, renamedName),
           },
@@ -886,11 +782,9 @@ export default function Datasets() {
       setIsRenamingDataset(false);
     }
   };
-
   const handleDeleteDataset = (dataset: DatasetSummary) => {
     const datasetName = dataset.name;
     const workerID = datasetWorkerID(dataset);
-    const projectID = datasetProjectID(dataset);
     openConfirm({
       title: 'Delete Dataset',
       message: `Are you sure you want to delete the dataset "${datasetName}"? This action cannot be undone.`,
@@ -901,7 +795,6 @@ export default function Datasets() {
           .post('/api/datasets/delete', {
             name: datasetName,
             worker_id: workerID,
-            ...(projectID ? { project_id: projectID } : {}),
           })
           .then(() => {
             console.log('Dataset deleted:', datasetName);
@@ -913,7 +806,6 @@ export default function Datasets() {
       },
     });
   };
-
   const handleImportDataset = async (dataset: any) => {
     if (!dataset?.worker_id || dataset.worker_id === 'local') return;
     const ref = dataset.ref || `${dataset.worker_id}:${dataset.name}`;
@@ -922,7 +814,6 @@ export default function Datasets() {
       const res = await apiClient.post('/api/datasets/import-remote', {
         worker_id: dataset.worker_id,
         datasetName: dataset.name,
-        ...(activeProjectID ? { project_id: activeProjectID } : {}),
       });
       refreshDatasets();
       const importedName = res.data?.dataset?.name;
@@ -937,30 +828,21 @@ export default function Datasets() {
             name: importedName,
             encrypted: true,
             worker_id: 'local',
-            project_id: activeProjectID,
-            project_name: resourceScope.selectedProject?.name || null,
-            ref: activeProjectID
-              ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(importedName)}`
-              : `aitk-dataset://local/${encodeURIComponent(importedName)}`,
+            ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
             path: importedPath,
           },
           remembered,
         );
       }
       if (importedName) {
-        router.push(
-          activeProjectID
-            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedName)}`
-            : `/datasets/${encodeURIComponent(importedName)}`,
-        );
+        router.push(`/datasets/${encodeURIComponent(importedName)}`);
       }
     } catch (error: any) {
-      alert(error?.response?.data?.error || 'Failed to import remote dataset.');
+      reportWorkflowError(error?.response?.data?.error || 'Failed to import remote dataset.');
     } finally {
       setImportingRef(null);
     }
   };
-
   const closeHfImportModal = () => {
     if (isLoadingHfPreview || isImportingHfDataset) return;
     setIsHfImportModalOpen(false);
@@ -977,7 +859,6 @@ export default function Datasets() {
     setHfImportStatus('');
     setHfImportError('');
   };
-
   const hfRequestPayload = (action: 'preview' | 'import') => {
     const maxRowsValue = hfMaxRows.trim() ? Number(hfMaxRows) : undefined;
     return {
@@ -991,10 +872,8 @@ export default function Datasets() {
       captionColumn: hfCaptionMode === 'column' ? hfCaptionColumn || undefined : undefined,
       outputName: action === 'import' ? hfOutputName || undefined : undefined,
       maxRows: Number.isFinite(maxRowsValue) && Number(maxRowsValue) > 0 ? Math.floor(Number(maxRowsValue)) : undefined,
-      project_id: activeProjectID || undefined,
     };
   };
-
   const handleLoadHfPreview = async () => {
     if (!hfDatasetInput.trim() || isLoadingHfPreview) return;
     try {
@@ -1024,7 +903,6 @@ export default function Datasets() {
       setIsLoadingHfPreview(false);
     }
   };
-
   const handleImportHfDataset = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!hfDatasetInput.trim() || isImportingHfDataset) return;
@@ -1045,11 +923,9 @@ export default function Datasets() {
       setIsHfImportModalOpen(false);
       if (importedName) {
         router.push(
-          activeProjectID
-            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedName)}`
-            : workerID === 'local'
-              ? `/datasets/${encodeURIComponent(importedName)}`
-              : `/datasets/${encodeURIComponent(importedName)}?worker_id=${encodeURIComponent(workerID)}`,
+          workerID === 'local'
+            ? `/datasets/${encodeURIComponent(importedName)}`
+            : `/datasets/${encodeURIComponent(importedName)}?worker_id=${encodeURIComponent(workerID)}`,
         );
       }
     } catch (error: any) {
@@ -1059,7 +935,6 @@ export default function Datasets() {
       setIsImportingHfDataset(false);
     }
   };
-
   useEffect(() => {
     if (!isCombineModalOpen || combineEncryptedSources.length === 0) return;
     combineEncryptedSources.forEach(source => {
@@ -1070,7 +945,6 @@ export default function Datasets() {
         .post('/api/datasets/listImages', {
           datasetName: source.name,
           worker_id: datasetWorkerID(source),
-          ...(datasetProjectID(source) ? { project_id: datasetProjectID(source) } : {}),
         })
         .then(res => {
           if (res.data?.encrypted && res.data?.manifest) {
@@ -1087,7 +961,6 @@ export default function Datasets() {
         });
     });
   }, [combineEncryptedSources, combineSourceErrors, combineSourceLoading, combineSourceManifests, isCombineModalOpen]);
-
   const unlockCombineSource = async (source: DatasetSummary) => {
     const ref = datasetRowKey(source);
     const manifest = combineSourceManifests[ref];
@@ -1125,18 +998,15 @@ export default function Datasets() {
       setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Could not unlock this dataset.' }));
     }
   };
-
   const handleCombineDatasets = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isCombiningDatasets) return;
     if (combineSources.length < 2) return;
-
     const missingKey = combineEncryptedSources.find(source => !combineSourceKeys[datasetRowKey(source)]);
     if (missingKey) {
-      alert(`Unlock "${missingKey.name}" before combining.`);
+      reportWorkflowError(`Unlock "${missingKey.name}" before combining.`);
       return;
     }
-
     try {
       setIsCombiningDatasets(true);
       let outputEncryptedManifest = null;
@@ -1144,7 +1014,7 @@ export default function Datasets() {
       if (combineOutputMode === 'encrypted') {
         if (combineCredentialMode === 'password') {
           if (!combinePassword || combinePassword !== combinePasswordConfirm) {
-            alert('Password and confirmation must match.');
+            reportWorkflowError('Password and confirmation must match.');
             return;
           }
           const result = await createEmptyEncryptedManifest('password', combinePassword);
@@ -1157,7 +1027,7 @@ export default function Datasets() {
             outputKeyB64 = result.rawKeyB64;
           } else {
             if (!combineKeyFile) {
-              alert('Select a key file.');
+              reportWorkflowError('Select a key file.');
               return;
             }
             const result = await createEmptyEncryptedManifest('keyFile', combineKeyFile);
@@ -1166,10 +1036,9 @@ export default function Datasets() {
           }
         }
       }
-
       const res = await apiClient.post('/api/datasets/combine', {
         worker_id: combineWorkerID,
-        ...(combineProjectID ? { project_id: combineProjectID } : {}),
+
         sourceDatasets: combineSources.map(source => source.name),
         outputName: combineOutputName,
         outputEncrypted: combineOutputMode === 'encrypted',
@@ -1180,46 +1049,36 @@ export default function Datasets() {
         outputEncryptedManifest,
         outputKeyB64,
       });
-
       const combined = res.data?.dataset as DatasetSummary | undefined;
       if (outputKeyB64 && combined?.name) {
         rememberUnlockedDataset(
           {
             ...combined,
             worker_id: combineWorkerID,
-            project_id: combineProjectID,
-            project_name: combineProjectID
-              ? combineSources.find(source => datasetProjectID(source) === combineProjectID)?.project_name || null
-              : null,
-            ref: combineProjectID
-              ? `aitk-dataset://project/${encodeURIComponent(combineProjectID)}/${encodeURIComponent(combined.name)}`
-              : combineWorkerID === 'local'
+            ref:
+              combineWorkerID === 'local'
                 ? combined.ref || `aitk-dataset://local/${encodeURIComponent(combined.name)}`
                 : makeRemoteDatasetRef(combineWorkerID, combined.name),
           },
           outputKeyB64,
         );
       }
-
       refreshDatasets();
       setSelectedDatasetRefs(new Set());
       setIsCombineModalOpen(false);
       if (combined?.name) {
         router.push(
-          combineProjectID
-            ? `/projects/${encodeURIComponent(combineProjectID)}/datasets/${encodeURIComponent(combined.name)}`
-            : combineWorkerID === 'local'
-              ? `/datasets/${encodeURIComponent(combined.name)}`
-              : `/datasets/${encodeURIComponent(combined.name)}?worker_id=${encodeURIComponent(combineWorkerID)}`,
+          combineWorkerID === 'local'
+            ? `/datasets/${encodeURIComponent(combined.name)}`
+            : `/datasets/${encodeURIComponent(combined.name)}?worker_id=${encodeURIComponent(combineWorkerID)}`,
         );
       }
     } catch (error: any) {
-      alert(error?.response?.data?.error || 'Failed to combine datasets.');
+      reportWorkflowError(error?.response?.data?.error || 'Failed to combine datasets.');
     } finally {
       setIsCombiningDatasets(false);
     }
   };
-
   const addFolderImportFiles = (fileList: FileList | null) => {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
@@ -1238,19 +1097,16 @@ export default function Datasets() {
         if (parts.some(part => part.startsWith('.'))) return false;
         return FOLDER_IMPORT_SUPPORTED_EXTENSIONS.has(folderImportExtension(entry.relativePath));
       });
-
     if (entries.length === 0) {
-      alert('No supported media or caption files were found in that folder.');
+      reportWorkflowError('No supported media or caption files were found in that folder.');
       return;
     }
-
     setFolderImportEntries(previous => [...previous, ...entries]);
     setFolderImportStatus('');
     if (!folderImportDatasetName && folderImportMode === 'combined') {
       setFolderImportDatasetName(`${entries[0].rootName}_combined`);
     }
   };
-
   const closeFolderImportModal = () => {
     if (isImportingFolders) return;
     setIsFolderImportModalOpen(false);
@@ -1265,7 +1121,6 @@ export default function Datasets() {
     setFolderImportKeyFile(null);
     setFolderImportWorkerID('local');
   };
-
   const uploadFolderImportBatch = async (
     workerID: string,
     datasetName: string,
@@ -1278,14 +1133,12 @@ export default function Datasets() {
       await uploadDatasetFile(entry.file, {
         datasetName,
         workerID,
-        projectID: activeProjectID,
         relativePath: relativePaths[index] || entry.relativePath || entry.file.name,
         sourceFolderPath,
         failIfDatasetExists: index === 0,
       });
     }
   };
-
   const createFolderImportEncryption = async () => {
     if (folderImportCredentialMode === 'password') {
       if (!folderImportPassword || folderImportPassword !== folderImportPasswordConfirm) {
@@ -1301,25 +1154,17 @@ export default function Datasets() {
     }
     return createEmptyEncryptedManifest('keyFile', folderImportKeyFile);
   };
-
   const rememberFolderImportOutputKey = (workerID: string, datasetName: string, rawKeyB64: string) => {
     rememberUnlockedDataset(
       {
         name: datasetName,
         encrypted: true,
         worker_id: workerID,
-        project_id: activeProjectID,
-        project_name: resourceScope.selectedProject?.name || null,
-        ref: activeProjectID
-          ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(datasetName)}`
-          : workerID === 'local'
-            ? `${workerID}:${datasetName}`
-            : makeRemoteDatasetRef(workerID, datasetName),
+        ref: workerID === 'local' ? `${workerID}:${datasetName}` : makeRemoteDatasetRef(workerID, datasetName),
       },
       rawKeyB64,
     );
   };
-
   const buildEncryptedFolderImportPayload = async (
     entries: FolderImportEntry[],
     relativePaths: string[],
@@ -1333,7 +1178,6 @@ export default function Datasets() {
         captionFiles.set(folderImportCaptionKey(relativePath), entry.file);
       }
     });
-
     const allocateCatalogName = createFlattenedFileNameAllocator();
     const rootCaption = await readRootCaptionFile(
       entries.map(entry => entry.file),
@@ -1344,8 +1188,10 @@ export default function Datasets() {
       items: [],
       ...(rootCaption !== null ? { rootCaption } : {}),
     };
-    const encryptedObjects: Array<{ objectPath: string; blob: Blob }> = [];
-
+    const encryptedObjects: Array<{
+      objectPath: string;
+      blob: Blob;
+    }> = [];
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index];
       const mediaKind = getMediaKind(entry.file);
@@ -1362,15 +1208,12 @@ export default function Datasets() {
       catalog.items.push(item);
       encryptedObjects.push(...itemObjects);
     }
-
     if (catalog.items.length === 0) {
       throw new Error('No supported media files were found in the selected folders.');
     }
-
     const { manifest: encryptedManifest } = await encryptCatalog(catalog, key, manifest);
     return { manifest: encryptedManifest, encryptedObjects, itemCount: catalog.items.length };
   };
-
   const uploadEncryptedFolderImportBatch = async (
     workerID: string,
     datasetName: string,
@@ -1381,7 +1224,7 @@ export default function Datasets() {
     const createResult = await apiClient
       .post('/api/datasets/create', {
         worker_id: workerID,
-        ...(activeProjectID ? { project_id: activeProjectID } : {}),
+
         name: datasetName,
         encrypted: true,
         encryptedManifest: encryption.manifest,
@@ -1394,14 +1237,12 @@ export default function Datasets() {
       encryption.manifest,
       encryption.key,
     );
-
     const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
     for (const encryptedObject of encryptedPayload.encryptedObjects) {
       await uploadDatasetFile(encryptedObject.blob, {
         datasetName: createdName,
         filename: encryptedObject.objectPath.split('/').pop() || 'object.bin',
         workerID,
-        projectID: activeProjectID,
         sourceFolderPath,
         encryptedObjectPath: encryptedObject.objectPath,
       });
@@ -1409,32 +1250,25 @@ export default function Datasets() {
     await apiClient.post('/api/datasets/encrypted/update', {
       datasetName: createdName,
       worker_id: workerID,
-      project_id: activeProjectID,
       manifest: encryptedPayload.manifest,
     });
     rememberFolderImportOutputKey(workerID, createdName, encryption.rawKeyB64);
     return { datasetName: createdName, itemCount: encryptedPayload.itemCount };
   };
-
   const handleImportFolders = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isImportingFolders) return;
     if (folderImportEntries.length === 0) {
-      alert('Choose at least one folder.');
+      reportWorkflowError('Choose at least one folder.');
       return;
     }
-
     try {
       setIsImportingFolders(true);
       const targetDatasetNames = new Set(
         datasets
-          .filter(
-            dataset =>
-              datasetWorkerID(dataset) === folderImportWorkerID && datasetProjectID(dataset) === activeProjectID,
-          )
+          .filter(dataset => datasetWorkerID(dataset) === folderImportWorkerID)
           .map(dataset => dataset.name.toLowerCase()),
       );
-
       if (folderImportMode === 'separate') {
         let importedCount = 0;
         for (const group of folderImportGroups) {
@@ -1452,11 +1286,11 @@ export default function Datasets() {
       } else {
         const datasetName = cleanClientDatasetName(folderImportDatasetName);
         if (!datasetName) {
-          alert('Output dataset name is required.');
+          reportWorkflowError('Output dataset name is required.');
           return;
         }
         if (targetDatasetNames.has(datasetName.toLowerCase())) {
-          alert('A dataset with that name already exists.');
+          reportWorkflowError('A dataset with that name already exists.');
           return;
         }
         setFolderImportStatus(`Importing ${datasetName}...`);
@@ -1475,14 +1309,11 @@ export default function Datasets() {
         const importedDatasetName = importResult.datasetName;
         setFolderImportStatus(`Imported ${importedDatasetName}.`);
         router.push(
-          activeProjectID
-            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(importedDatasetName)}`
-            : folderImportWorkerID === 'local'
-              ? `/datasets/${encodeURIComponent(importedDatasetName)}`
-              : `/datasets/${encodeURIComponent(importedDatasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
+          folderImportWorkerID === 'local'
+            ? `/datasets/${encodeURIComponent(importedDatasetName)}`
+            : `/datasets/${encodeURIComponent(importedDatasetName)}?worker_id=${encodeURIComponent(folderImportWorkerID)}`,
         );
       }
-
       refreshDatasets();
       setIsFolderImportModalOpen(false);
       setFolderImportEntries([]);
@@ -1492,12 +1323,11 @@ export default function Datasets() {
       setFolderImportPasswordConfirm('');
       setFolderImportKeyFile(null);
     } catch (error: any) {
-      alert(error?.response?.data?.error || error?.message || 'Failed to import folders.');
+      reportWorkflowError(error?.response?.data?.error || error?.message || 'Failed to import folders.');
     } finally {
       setIsImportingFolders(false);
     }
   };
-
   const handleCreateDataset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isCreatingDataset) return;
@@ -1508,7 +1338,7 @@ export default function Datasets() {
       if (newDatasetMode === 'encrypted') {
         if (credentialMode === 'password') {
           if (!datasetPassword || datasetPassword !== datasetPasswordConfirm) {
-            alert('Password and confirmation must match.');
+            reportWorkflowError('Password and confirmation must match.');
             return;
           }
           const result = await createEmptyEncryptedManifest('password', datasetPassword);
@@ -1521,7 +1351,7 @@ export default function Datasets() {
             rawKeyB64 = result.rawKeyB64;
           } else {
             if (!datasetKeyFile) {
-              alert('Select a key file.');
+              reportWorkflowError('Select a key file.');
               return;
             }
             const result = await createEmptyEncryptedManifest('keyFile', datasetKeyFile);
@@ -1530,11 +1360,10 @@ export default function Datasets() {
           }
         }
       }
-
       const data = await apiClient
         .post('/api/datasets/create', {
           name: newDatasetName,
-          ...(activeProjectID ? { project_id: activeProjectID } : {}),
+
           encrypted: newDatasetMode === 'encrypted',
           encryptedManifest,
         })
@@ -1546,11 +1375,7 @@ export default function Datasets() {
             name: data.name,
             encrypted: true,
             worker_id: 'local',
-            project_id: activeProjectID,
-            project_name: resourceScope.selectedProject?.name || null,
-            ref: activeProjectID
-              ? `aitk-dataset://project/${encodeURIComponent(activeProjectID)}/${encodeURIComponent(data.name)}`
-              : `aitk-dataset://local/${encodeURIComponent(data.name)}`,
+            ref: `aitk-dataset://local/${encodeURIComponent(data.name)}`,
           },
           rawKeyB64,
         );
@@ -1562,11 +1387,7 @@ export default function Datasets() {
       setDatasetKeyFile(null);
       setIsNewDatasetModalOpen(false);
       if (data.name) {
-        router.push(
-          activeProjectID
-            ? `/projects/${encodeURIComponent(activeProjectID)}/datasets/${encodeURIComponent(data.name)}`
-            : `/datasets/${encodeURIComponent(data.name)}`,
-        );
+        router.push(`/datasets/${encodeURIComponent(data.name)}`);
       }
     } catch (error) {
       console.error('Error creating new dataset:', error);
@@ -1574,25 +1395,19 @@ export default function Datasets() {
       setIsCreatingDataset(false);
     }
   };
-
   const openNewDatasetModal = () => {
     setIsNewDatasetModalOpen(true);
   };
-
   const datasetHref = (row: DatasetExplorerRow) =>
-    row.project_id
-      ? `/projects/${encodeURIComponent(row.project_id)}/datasets/${encodeURIComponent(row.name)}`
-      : row.source === 'remote'
-        ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
-        : `/datasets/${encodeURIComponent(row.name)}`;
-
+    row.source === 'remote'
+      ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
+      : `/datasets/${encodeURIComponent(row.name)}`;
   const datasetMediaLabel = (dataset: DatasetSummary, unlocked = false) => {
     if (dataset.encrypted) return unlocked ? 'Unlocked' : 'Locked';
     if (typeof dataset.itemCount !== 'number') return 'Not scanned';
     if (dataset.itemCount === 0) return 'No media';
     return `${dataset.itemCount} media item${dataset.itemCount === 1 ? '' : 's'}`;
   };
-
   const datasetCaptionLabel = (dataset: DatasetSummary, unlocked = false) => {
     if (dataset.encrypted) return unlocked ? 'Captions unlocked' : 'Captions locked';
     if (typeof dataset.itemCount !== 'number' || typeof dataset.missingCaptionCount !== 'number') return 'Not scanned';
@@ -1602,13 +1417,9 @@ export default function Datasets() {
     }
     return 'Captions complete';
   };
-
   const isRowSelected = (row: DatasetExplorerRow) => selectedDatasetRefs.has(row.ref);
   const isRowSelectionDisabled = (row: DatasetExplorerRow) =>
-    !isRowSelected(row) &&
-    ((selectedWorkerID !== null && selectedWorkerID !== row.worker_id) ||
-      (selectedScopeID !== null && selectedScopeID !== (row.project_id || 'global')));
-
+    !isRowSelected(row) && selectedWorkerID !== null && selectedWorkerID !== row.worker_id;
   const renderSelectionCheckbox = (row: DatasetExplorerRow) => (
     <input
       type="checkbox"
@@ -1619,15 +1430,12 @@ export default function Datasets() {
       className="h-4 w-4 rounded border-gray-600 bg-gray-900 text-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
     />
   );
-
   const renderDatasetActions = (row: DatasetExplorerRow, compact = false) => (
     <div className="flex justify-end gap-1">
       {row.source === 'remote' && (
         <button
           type="button"
-          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${
-            compact ? 'h-7 w-7' : 'h-8 w-8'
-          }`}
+          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${compact ? 'h-7 w-7' : 'h-8 w-8'}`}
           disabled={importingRef === row.ref}
           onClick={() => handleImportDataset(row.dataset)}
           title="Import to Local"
@@ -1636,27 +1444,27 @@ export default function Datasets() {
           {importingRef === row.ref ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
         </button>
       )}
-      {row.source === 'local' && !row.encrypted && !row.archived && (
+      {row.source === 'local' && !row.encrypted && (
         <DatasetWatchFoldersButton
           datasetName={row.name}
-          projectID={row.project_id}
           workerID={row.worker_id}
           defaultSourcePath={row.dataset.importSourcePath}
           label={`Watch folders for ${row.name}`}
           icon="eye"
           iconOnly
-          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-700 hover:text-white ${
-            compact ? 'h-7 w-7' : 'h-8 w-8'
-          }`}
+          className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-700 hover:text-white ${compact ? 'h-7 w-7' : 'h-8 w-8'}`}
           onRefresh={() => refreshDatasets({ background: true })}
         />
       )}
+      <Link
+        className="operator-button text-xs"
+        href={`/jobs/new?dataset=${encodeURIComponent(row.dataset.ref || row.dataset.path || row.name)}`}
+      >
+        Train
+      </Link>
       <button
         type="button"
-        disabled={row.archived}
-        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${
-          compact ? 'h-7 w-7' : 'h-8 w-8'
-        }`}
+        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${compact ? 'h-7 w-7' : 'h-8 w-8'}`}
         onClick={() => openRenameDatasetModal(row.dataset)}
         title="Rename dataset"
         aria-label={`Rename ${row.name}`}
@@ -1665,10 +1473,7 @@ export default function Datasets() {
       </button>
       <button
         type="button"
-        disabled={row.archived}
-        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${
-          compact ? 'h-7 w-7' : 'h-8 w-8'
-        }`}
+        className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${compact ? 'h-7 w-7' : 'h-8 w-8'}`}
         onClick={() => handleDeleteDataset(row.dataset)}
         title="Delete dataset"
         aria-label={`Delete ${row.name}`}
@@ -1677,7 +1482,6 @@ export default function Datasets() {
       </button>
     </div>
   );
-
   const renderSourceBadge = (row: DatasetExplorerRow) => (
     <span
       className={`inline-flex max-w-full items-center rounded-sm border px-2 py-0.5 text-xs font-medium ${
@@ -1690,7 +1494,6 @@ export default function Datasets() {
       <span className="truncate">{row.source === 'remote' ? row.worker : 'Local'}</span>
     </span>
   );
-
   const renderTypeBadge = (row: DatasetExplorerRow) => (
     <span
       className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium ${
@@ -1704,16 +1507,6 @@ export default function Datasets() {
       {row.encrypted ? (row.unlocked ? 'Unlocked' : 'Encrypted') : 'Plain'}
     </span>
   );
-
-  const renderWorkspaceBadge = (row: DatasetExplorerRow) => (
-    <div className="flex min-w-0 flex-col items-start gap-1">
-      <ProjectResourceBadge projectID={row.project_id} projectName={row.project_name} />
-      {row.archived ? (
-        <span className="text-[10px] font-medium uppercase tracking-wide text-amber-300">Archived</span>
-      ) : null}
-    </div>
-  );
-
   const renderBrowserState = () => {
     if (status === 'loading') {
       return (
@@ -1725,7 +1518,6 @@ export default function Datasets() {
         </div>
       );
     }
-
     if (status === 'error') {
       return (
         <PageNotice
@@ -1739,7 +1531,6 @@ export default function Datasets() {
         />
       );
     }
-
     if (filteredTableRows.length === 0) {
       return (
         <div className="studio-library-empty operator-panel">
@@ -1756,63 +1547,31 @@ export default function Datasets() {
           <p className="mt-3 max-w-md text-sm leading-6 text-gray-400">
             {datasetFilter
               ? 'Try a different dataset, worker, caption, or type filter.'
-              : aggregateScopeReadOnly
-                ? 'Choose Global or a project workspace to create or import a dataset.'
-                : selectedProjectArchived
-                  ? 'This project is archived. Its datasets are available to browse.'
-                  : 'Create a collection or bring in files you already have.'}
+              : 'Create a collection or bring in files you already have.'}
           </p>
-          <div className="mt-7 flex flex-wrap justify-center gap-3">
-            {datasetFilter ? (
-              <button type="button" className="operator-button" onClick={() => setDatasetFilter('')}>
-                Clear filter
-              </button>
-            ) : (
-              !aggregateScopeReadOnly &&
-              !selectedProjectArchived && (
-                <>
-                  <button
-                    type="button"
-                    className="operator-button-primary h-11 px-5"
-                    onClick={() => openNewDatasetModal()}
-                  >
-                    <Plus className="h-4 w-4" />
-                    Create dataset
-                  </button>
-                  <button
-                    type="button"
-                    className="operator-button h-11 px-5"
-                    onClick={() => setIsFolderImportModalOpen(true)}
-                  >
-                    <FolderPlus className="h-4 w-4" />
-                    Import folders
-                  </button>
-                </>
-              )
-            )}
-          </div>
+          {datasetFilter && (
+            <button type="button" className="operator-button mt-5" onClick={() => setDatasetFilter('')}>
+              Clear filter
+            </button>
+          )}
         </div>
       );
     }
-
     return null;
   };
-
   const renderDetailsView = () => {
     const stateContent = renderBrowserState();
     if (stateContent) return stateContent;
-
     return (
       <div className="overflow-hidden border border-gray-800 bg-gray-950/40">
         <div className="overflow-x-auto">
-          <div className="min-w-[1040px]">
-            <div className="grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_10rem_7rem_7.5rem] border-b border-gray-800 bg-gray-900/85 text-xs uppercase text-gray-500">
+          <div className="min-w-[920px]">
+            <div className="grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_10rem] border-b border-gray-800 bg-gray-900/85 text-xs uppercase text-gray-500">
               <div className="px-3 py-2" />
               <div className="px-3 py-2 font-medium">Name</div>
               <div className="px-3 py-2 font-medium">Items</div>
               <div className="px-3 py-2 font-medium">Captions</div>
               <div className="px-3 py-2 font-medium">Source</div>
-              <div className="px-3 py-2 font-medium">Workspace</div>
               <div className="px-3 py-2 font-medium">Type</div>
               <div className="px-3 py-2 text-right font-medium">Actions</div>
             </div>
@@ -1826,7 +1585,7 @@ export default function Datasets() {
               return (
                 <div
                   key={row.ref}
-                  className={`grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_10rem_7rem_7.5rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
+                  className={`grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_10rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
                 >
                   <div className="flex items-center justify-center px-3 py-2">{renderSelectionCheckbox(row)}</div>
                   <div className="min-w-0 px-3 py-2">
@@ -1855,7 +1614,6 @@ export default function Datasets() {
                     </div>
                   </div>
                   <div className="min-w-0 px-3 py-2">{renderSourceBadge(row)}</div>
-                  <div className="min-w-0 px-3 py-2">{renderWorkspaceBadge(row)}</div>
                   <div className="px-3 py-2">{renderTypeBadge(row)}</div>
                   <div className="px-3 py-2">{renderDatasetActions(row)}</div>
                 </div>
@@ -1866,11 +1624,9 @@ export default function Datasets() {
       </div>
     );
   };
-
   const renderIconView = () => {
     const stateContent = renderBrowserState();
     if (stateContent) return stateContent;
-
     return (
       <div className="grid grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))] gap-3">
         {filteredTableRows.map(row => {
@@ -1904,7 +1660,6 @@ export default function Datasets() {
                 {renderSourceBadge(row)}
                 {renderTypeBadge(row)}
               </div>
-              <div className="mt-1 flex justify-center">{renderWorkspaceBadge(row)}</div>
               <div className="mt-2 text-center text-xs text-gray-500">
                 {datasetMediaLabel(row.dataset, row.unlocked)}
               </div>
@@ -1918,7 +1673,6 @@ export default function Datasets() {
       </div>
     );
   };
-
   return (
     <>
       <TopBar>
@@ -1946,30 +1700,14 @@ export default function Datasets() {
               <span className="hidden sm:inline">Unlock</span>
             </Button>
           )}
-          <Button
-            className="operator-button shrink-0 py-1"
-            disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
-            onClick={() => setIsHfImportModalOpen(true)}
-            title="Import Hugging Face dataset"
-            aria-label="Import Hugging Face dataset"
-          >
-            <CloudDownload className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Import HF</span>
-          </Button>
-          <Button
-            className="operator-button shrink-0 py-1"
-            disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
-            onClick={() => setIsFolderImportModalOpen(true)}
-            title="Import folders"
-            aria-label="Import folders"
-          >
-            <FolderPlus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Import Folders</span>
+          <Button className="operator-button shrink-0" onClick={() => setImportChooserOpen(true)}>
+            <FolderPlus size={16} aria-hidden="true" />
+            Import data
           </Button>
           {selectedDatasets.length > 0 && (
             <Button
               className="operator-button shrink-0 py-1"
-              disabled={!canCombineSelection || Boolean(selectedProjectArchived)}
+              disabled={!canCombineSelection}
               onClick={() => openCombineModal()}
               title="Combine selected datasets"
               aria-label="Combine selected datasets"
@@ -1980,39 +1718,29 @@ export default function Datasets() {
           )}
           <Button
             className="operator-button-primary h-10 shrink-0"
-            disabled={Boolean(selectedProjectArchived) || aggregateScopeReadOnly}
             onClick={() => openNewDatasetModal()}
-            title="New dataset"
-            aria-label="New dataset"
+            title="Create dataset"
+            aria-label="Create dataset"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">New Dataset</span>
+            <span>Create dataset</span>
           </Button>
         </div>
       </TopBar>
 
       <MainContent className="studio-library-page">
+        {returnToTraining && (
+          <div className="mb-5 rounded-lg border border-gray-700 p-4">
+            <p>Your training draft is kept in this tab. Return after preparing your dataset.</p>
+            <Link href={getTrainingReturnPath()} className="studio-text-link mt-2">
+              Return to training setup
+            </Link>
+          </div>
+        )}
         <header className="studio-page-intro">
           <h2>Better models start here.</h2>
           <p>Organize the images, video, and audio your model learns from.</p>
         </header>
-        <div className="studio-library-scope">
-          <ResourceScopeFilter
-            scope={resourceScope.scope}
-            projectID={resourceScope.projectID}
-            projects={resourceScope.projects}
-            projectsEnabled={resourceScope.projectsEnabled}
-            onScopeChange={resourceScope.setScope}
-            onProjectChange={resourceScope.setProjectID}
-          />
-          <div className="text-xs text-gray-500">
-            {resourceScope.scope === 'all'
-              ? 'Showing global and project datasets · choose a workspace to create or import'
-              : resourceScope.scope === 'project'
-                ? `${resourceScope.selectedProject?.name || 'Project'} workspace${selectedProjectArchived ? ' · browse only' : ''}`
-                : 'Global workspace'}
-          </div>
-        </div>
         <div className="my-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-gray-500">
             {filteredTableRows.length} of {tableRows.length} datasets shown
@@ -2063,58 +1791,58 @@ export default function Datasets() {
         </div>
         {errors.length > 0 && (
           <div className="mb-3 rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-sm text-yellow-200">
-            Some workspace datasets could not be loaded:{' '}
-            {errors.map(error => `${error.worker_name}: ${error.error}`).join('; ')}
+            Some datasets could not be loaded: {errors.map(error => `${error.worker_name}: ${error.error}`).join('; ')}
           </div>
         )}
         {datasetView === 'details' ? renderDetailsView() : renderIconView()}
-        {status === 'success' &&
-          tableRows.length === 0 &&
-          !datasetFilter &&
-          !aggregateScopeReadOnly &&
-          !selectedProjectArchived && (
-            <div className="studio-library-starts">
-              <button type="button" onClick={() => openNewDatasetModal()}>
-                <Plus />
-                <span>
-                  <strong>Create a dataset</strong>
-                  <small>Start with an empty collection</small>
-                </span>
-              </button>
-              <button type="button" onClick={() => setIsFolderImportModalOpen(true)}>
-                <FolderPlus />
-                <span>
-                  <strong>Import folders</strong>
-                  <small>Bring in local training files</small>
-                </span>
-              </button>
-              <button type="button" onClick={() => setIsHfImportModalOpen(true)}>
-                <CloudDownload />
-                <span>
-                  <strong>Import from Hugging Face</strong>
-                  <small>Add a dataset from the Hub</small>
-                </span>
-              </button>
-            </div>
-          )}
+
         <footer className="mt-8 flex items-center justify-between border-t border-gray-800 py-5 text-xs text-gray-400">
-          <span>
-            {resourceScope.scope === 'project'
-              ? resourceScope.selectedProject?.name || 'Project workspace'
-              : resourceScope.scope === 'all'
-                ? 'All workspaces'
-                : 'Global workspace'}
-          </span>
+          <span>Dataset library</span>
           <button type="button" className="operator-button" onClick={() => refreshDatasets()}>
             Refresh
           </button>
         </footer>
       </MainContent>
 
+      <Modal isOpen={importChooserOpen} onClose={() => setImportChooserOpen(false)} title="Import data" size="md">
+        <div className="space-y-3">
+          <p className="mb-5 text-gray-400">Choose where your media is coming from.</p>
+          <button
+            type="button"
+            className="operator-button w-full justify-start p-4"
+            onClick={() => {
+              setImportChooserOpen(false);
+              setIsFolderImportModalOpen(true);
+            }}
+          >
+            Import folders from this computer
+          </button>
+          <button
+            type="button"
+            className="operator-button w-full justify-start p-4"
+            onClick={() => {
+              setImportChooserOpen(false);
+              setIsHfImportModalOpen(true);
+            }}
+          >
+            Import from Hugging Face
+          </button>
+          <button
+            type="button"
+            className="operator-button w-full justify-start p-4"
+            onClick={() => {
+              setImportChooserOpen(false);
+              setIsNewDatasetModalOpen(true);
+            }}
+          >
+            Create an empty dataset
+          </button>
+        </div>
+      </Modal>
       <Modal
         isOpen={isNewDatasetModalOpen}
         onClose={() => setIsNewDatasetModalOpen(false)}
-        title="New Dataset"
+        title="Create dataset"
         size="md"
       >
         <div className="space-y-4 text-gray-200">
@@ -2122,6 +1850,10 @@ export default function Datasets() {
             <div className="mt-4">
               <TextInput label="Dataset Name" value={newDatasetName} onChange={value => setNewDatasetName(value)} />
             </div>
+            <p className="mt-4 text-sm text-gray-400">
+              Plain storage keeps files directly accessible. Encrypted storage protects media and captions at rest; you
+              must unlock it to edit or train.
+            </p>
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -2228,7 +1960,7 @@ export default function Datasets() {
                 disabled={isCreatingDataset}
                 className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
-                {isCreatingDataset ? 'Creating...' : 'Confirm'}
+                {isCreatingDataset ? 'Creating...' : 'Create dataset'}
               </button>
             </div>
           </form>
@@ -2292,7 +2024,6 @@ export default function Datasets() {
               const isBusy = status === 'loading' || status === 'unlocking';
               const rowPassword = bulkRowPasswords[ref] || '';
               const rowKeyFile = bulkRowKeyFiles[ref] || null;
-
               return (
                 <div key={ref} className="rounded-md border border-gray-800 bg-gray-950 p-3">
                   <div className="flex items-start justify-between gap-3">
@@ -2485,6 +2216,10 @@ export default function Datasets() {
             }}
           />
 
+          <p className="text-sm text-gray-400">
+            Plain storage keeps files accessible. Encrypted storage protects media and captions at rest and requires
+            unlocking before use.
+          </p>
           {folderImportWorkerOptions.length > 1 && (
             <div>
               <label className="mb-1 block text-sm text-gray-300">Import To</label>
@@ -2756,6 +2491,10 @@ export default function Datasets() {
             </button>
           </div>
 
+          <p className="text-sm text-gray-400">
+            Plain storage keeps files accessible. Encrypted storage protects media and captions at rest and requires
+            unlocking before use.
+          </p>
           {folderImportWorkerOptions.length > 1 && (
             <div>
               <label className="mb-1 block text-sm text-gray-300">Import To</label>

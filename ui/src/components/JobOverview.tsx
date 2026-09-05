@@ -7,11 +7,7 @@ import FilesWidget from '@/components/FilesWidget';
 import TensorBoardLink from '@/components/TensorBoardLink';
 import { JobAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import { getJobConfig, getTotalSteps } from '@/utils/jobs';
-import {
-  buildTrainingPhaseSummary,
-  hasTrainingPhases,
-  type TrainingPhaseSummary,
-} from '@/utils/trainingPhaseSummary';
+import { buildTrainingPhaseSummary, hasTrainingPhases, type TrainingPhaseSummary } from '@/utils/trainingPhaseSummary';
 import { Cpu, HardDrive, Info, Gauge, Layers } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useJobLog from '@/hooks/useJobLog';
@@ -85,9 +81,7 @@ function TrainingPhaseOverview({ summary }: { summary: TrainingPhaseSummary }) {
         <span className="text-gray-500">{phaseStatusText(summary)}</span>
       </div>
 
-      {summary.progress !== null && (
-        <ProgressBar value={summary.progress} />
-      )}
+      {summary.progress !== null && <ProgressBar value={summary.progress} />}
     </div>
   );
 }
@@ -131,6 +125,13 @@ export default function JobOverview({ job }: JobOverviewProps) {
       return null;
     }
   }, [job.job_config, jobType]);
+  const canGenerate = useMemo(() => {
+    try {
+      return ['lora', 'locon', 'lokr', 'lorm'].includes(getJobConfig(job).config.process[0]?.network?.type || '');
+    } catch {
+      return false;
+    }
+  }, [job.job_config]);
   const hasPhaseOverview = jobType === 'train' && hasTrainingPhases(trainConfig);
   const phaseMetricsOptions = useMemo(
     () => ({
@@ -192,7 +193,8 @@ export default function JobOverview({ job }: JobOverviewProps) {
       <div className="col-span-2 flex flex-col overflow-hidden border border-gray-800 bg-gray-900/60">
         <div className="flex items-center justify-between gap-3 border-b border-gray-800 bg-gray-900 px-3 py-2">
           <h2 className="min-w-0 truncate text-gray-100">
-            <Info className="w-5 h-5 mr-2 -mt-1 text-amber-600 dark:text-amber-400 inline-block" /> {job.info}
+            <Info className="w-5 h-5 mr-2 -mt-1 text-amber-600 dark:text-amber-400 inline-block" />{' '}
+            {job.info || 'Run progress'}
           </h2>
           <div className="flex flex-none items-center gap-2">
             {jobType === 'train' && <TensorBoardLink compact />}
@@ -219,9 +221,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
                   {totalSteps ? `Step ${job.step} of ${totalSteps}` : `Step ${job.step}`}
                 </span>
               </div>
-              {progress !== null && (
-                <ProgressBar value={progress} />
-              )}
+              {progress !== null && <ProgressBar value={progress} />}
             </div>
           )}
           {phaseSummary && <TrainingPhaseOverview summary={phaseSummary} />}
@@ -266,7 +266,9 @@ export default function JobOverview({ job }: JobOverviewProps) {
               {statusLog === 'error' && 'Error loading log'}
               {['success', 'refreshing'].includes(statusLog) && (
                 <div>
-                  {logLines.length > 0 ? logLines.map((line, index) => <pre key={index}>{line}</pre>) : 'No log output yet.'}
+                  {logLines.length > 0
+                    ? logLines.map((line, index) => <pre key={index}>{line}</pre>)
+                    : 'No log output yet.'}
                 </div>
               )}
             </div>
@@ -280,7 +282,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
         <div className="mt-4">{isGPUInfoLoaded && gpuList.length > 0 && <GPUWidget gpu={gpuList[0]} />}</div>
         {jobType === 'train' && (
           <div className="mt-4">
-            <FilesWidget jobID={job.id} jobName={job.name} />
+            <FilesWidget jobID={job.id} jobName={job.name} canGenerate={canGenerate} />
           </div>
         )}
       </div>

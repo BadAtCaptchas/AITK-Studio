@@ -12,10 +12,14 @@ function evaluate(source, dependencies = {}) {
     fileName: 'settings.ts',
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
-  new Function('require', 'module', 'exports', code)(name => {
-    assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
-    return dependencies[name];
-  }, evaluatedModule, evaluatedModule.exports);
+  new Function('require', 'module', 'exports', code)(
+    name => {
+      assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
+      return dependencies[name];
+    },
+    evaluatedModule,
+    evaluatedModule.exports,
+  );
   return evaluatedModule.exports;
 }
 
@@ -24,28 +28,52 @@ function settingsFixture() {
   const store = new Map();
   const source = fs.readFileSync(path.join(root, 'src/server/settings.ts'), 'utf8');
   const ast = ts.createSourceFile('settings.ts', source, ts.ScriptTarget.Latest, true);
-  const normalizer = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'normalizeBooleanSetting');
+  const normalizer = ast.statements.find(
+    node => ts.isFunctionDeclaration(node) && node.name?.text === 'normalizeBooleanSetting',
+  );
   assert.ok(normalizer);
   const dependencies = {
+    '@/utils/obsoleteWorkspaceGuard': evaluate(
+      fs.readFileSync(path.join(root, 'src/utils/obsoleteWorkspaceGuard.ts'), 'utf8'),
+    ),
     'next/server': { NextResponse: { json: (body, options) => ({ body, status: options?.status ?? 200 }) } },
-    '@/paths': { defaultTrainFolder: '/training', defaultDatasetsFolder: '/datasets', defaultModelsFolder: '/models', defaultProjectsFolder: '/projects' },
-    '@/server/settings': { ...evaluate(normalizer.getText(ast)), flushCache() {}, PROJECTS_ENABLED_KEY: 'PROJECTS_ENABLED' },
+    '@/paths': { defaultTrainFolder: '/training', defaultDatasetsFolder: '/datasets', defaultModelsFolder: '/models' },
+    '@/server/settings': { ...evaluate(normalizer.getText(ast)), flushCache() {} },
     '@/server/pathContainment': { normalizeStoragePathSetting: async (value, fallback) => value || fallback },
-    '@/server/db': { db: { settings: {
-      list: async () => [...store].map(([key, value]) => ({ key, value })),
-      get: async key => store.has(key) ? { value: store.get(key) } : null,
-      upsertMany: async values => { for (const [key, value] of Object.entries(values)) store.set(key, value); },
-    } } },
+    '@/server/db': {
+      db: {
+        settings: {
+          list: async () => [...store].map(([key, value]) => ({ key, value })),
+          get: async key => (store.has(key) ? { value: store.get(key) } : null),
+          upsertMany: async values => {
+            for (const [key, value] of Object.entries(values)) store.set(key, value);
+          },
+        },
+      },
+    },
     '@/server/encryptedDatasetSecrets': { isEncryptedDatasetSecretSettingKey: () => false },
     '@/server/secureCaptionSettings': { isSecureCaptionSystemPromptSettingKey: () => false },
     '@/server/remoteOllamaWorkers': { isRemoteOllamaWorkersSettingKey: () => false },
     '@/server/datasetWatchers': { isDatasetWatchersSettingKey: () => false },
-    '@/server/networkPolicy': { getOfflineModeState: async () => ({ enabled: false, lockedByEnv: false }), OFFLINE_MODE_SETTING_KEY: 'OFFLINE_MODE' },
-    '@/server/externalComfy': { DEFAULT_EXTERNAL_COMFY_URL: 'http://127.0.0.1:8188', normalizeExternalComfyLoraDir: value => value, normalizeExternalComfyUrl: value => value },
+    '@/server/networkPolicy': {
+      getOfflineModeState: async () => ({ enabled: false, lockedByEnv: false }),
+      OFFLINE_MODE_SETTING_KEY: 'OFFLINE_MODE',
+    },
+    '@/server/externalComfy': {
+      DEFAULT_EXTERNAL_COMFY_URL: 'http://127.0.0.1:8188',
+      normalizeExternalComfyLoraDir: value => value,
+      normalizeExternalComfyUrl: value => value,
+    },
     '@/server/ideogramWorkflowHistory': { IDEOGRAM_WORKFLOW_HISTORY_KEY: 'history' },
     '@/utils/authSession': { isRequestAuthenticated: async () => true },
     '@/utils/telemetry': { TELEMETRY_ENABLED_SETTING_KEY: 'TELEMETRY_ENABLED' },
-    '@/server/modelsPath': { modelsPathFromEnv: () => null, resolveModelsPathState: async ({ defaultRoot, settingValue }) => ({ path: settingValue || defaultRoot, lockedByEnv: false }) },
+    '@/server/modelsPath': {
+      modelsPathFromEnv: () => null,
+      resolveModelsPathState: async ({ defaultRoot, settingValue }) => ({
+        path: settingValue || defaultRoot,
+        lockedByEnv: false,
+      }),
+    },
   };
   const route = evaluate(fs.readFileSync(path.join(root, 'src/app/api/settings/route.ts'), 'utf8'), dependencies);
   return { store, get: () => route.GET({}), post: body => route.POST({ json: async () => body }) };

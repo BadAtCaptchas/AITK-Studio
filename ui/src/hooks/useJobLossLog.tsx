@@ -36,96 +36,99 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
     return [...base].sort();
   }, [keys]);
 
-  const refreshLoss = useCallback(async (signal?: AbortSignal) => {
-    if (!jobID) return;
+  const refreshLoss = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!jobID) return;
 
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
 
-    const loadStatus: 'loading' | 'refreshing' = didInitialLoadRef.current ? 'refreshing' : 'loading';
-    setStatus(loadStatus);
+      const loadStatus: 'loading' | 'refreshing' = didInitialLoadRef.current ? 'refreshing' : 'loading';
+      setStatus(loadStatus);
 
-    try {
-      // Step 1: get key list (we can do this by calling endpoint once; it returns keys)
-      // Keep it cheap: limit=1.
-      const first = await apiClient
-        .get(`/api/jobs/${jobID}/loss`, { params: { key: 'loss', limit: 1 }, signal })
-        .then(res => res.data as { keys?: string[] });
+      try {
+        // Step 1: get key list (we can do this by calling endpoint once; it returns keys)
+        // Keep it cheap: limit=1.
+        const first = await apiClient
+          .get(`/api/jobs/${jobID}/loss`, { params: { key: 'loss', limit: 1 }, signal })
+          .then(res => res.data as { keys?: string[] });
 
-      if (signal?.aborted || activeJobIDRef.current !== jobID) return;
-      const newKeys = first.keys ?? [];
-      setKeys(newKeys);
+        if (signal?.aborted || activeJobIDRef.current !== jobID) return;
+        const newKeys = first.keys ?? [];
+        setKeys(newKeys);
 
-      const wantedKeys = (newKeys.length ? [...newKeys] : ['loss']).sort();
+        const wantedKeys = (newKeys.length ? [...newKeys] : ['loss']).sort();
 
-      // Step 2: fetch each chart key incrementally (since_step per key if polling)
-      const requests = wantedKeys.map(k => {
-        const params: Record<string, any> = { key: k };
+        // Step 2: fetch each chart key incrementally (since_step per key if polling)
+        const requests = wantedKeys.map(k => {
+          const params: Record<string, any> = { key: k };
 
-        if (reloadInterval && lastStepByKeyRef.current[k] != null) {
-          params.since_step = lastStepByKeyRef.current[k];
-        }
-
-        params.limit = 1000000;
-
-        return apiClient
-          .get(`/api/jobs/${jobID}/loss`, { params, signal })
-          .then(res => res.data as { key: string; points?: LossPoint[] });
-      });
-
-      const results = await Promise.all(requests);
-      if (signal?.aborted || activeJobIDRef.current !== jobID) return;
-
-      setSeries(prev => {
-        const next: SeriesMap = { ...prev };
-
-        for (const r of results) {
-          const k = r.key;
-          const newPoints = (r.points ?? []).filter(p => p.value !== null);
-
-          if (!didInitialLoadRef.current) {
-            // initial: replace
-            next[k] = newPoints;
-          } else if (newPoints.length) {
-            const existing = next[k] ?? [];
-            const prevLast = existing.length ? existing[existing.length - 1].step : null;
-            const filtered = prevLast == null ? newPoints : newPoints.filter(p => p.step > prevLast);
-            next[k] = filtered.length ? [...existing, ...filtered] : existing;
-          } else {
-            // no new points: keep existing
-            next[k] = next[k] ?? [];
+          if (reloadInterval && lastStepByKeyRef.current[k] != null) {
+            params.since_step = lastStepByKeyRef.current[k];
           }
 
-          // update last step per key
-          const finalArr = next[k] ?? [];
-          lastStepByKeyRef.current[k] = finalArr.length
-            ? finalArr[finalArr.length - 1].step
-            : (lastStepByKeyRef.current[k] ?? null);
-        }
+          params.limit = 1000000;
 
-        // remove stale chart keys that no longer exist (rare, but keeps UI clean)
-        for (const existingKey of Object.keys(next)) {
-          if (!wantedKeys.includes(existingKey)) {
-            delete next[existingKey];
-            delete lastStepByKeyRef.current[existingKey];
+          return apiClient
+            .get(`/api/jobs/${jobID}/loss`, { params, signal })
+            .then(res => res.data as { key: string; points?: LossPoint[] });
+        });
+
+        const results = await Promise.all(requests);
+        if (signal?.aborted || activeJobIDRef.current !== jobID) return;
+
+        setSeries(prev => {
+          const next: SeriesMap = { ...prev };
+
+          for (const r of results) {
+            const k = r.key;
+            const newPoints = (r.points ?? []).filter(p => p.value !== null);
+
+            if (!didInitialLoadRef.current) {
+              // initial: replace
+              next[k] = newPoints;
+            } else if (newPoints.length) {
+              const existing = next[k] ?? [];
+              const prevLast = existing.length ? existing[existing.length - 1].step : null;
+              const filtered = prevLast == null ? newPoints : newPoints.filter(p => p.step > prevLast);
+              next[k] = filtered.length ? [...existing, ...filtered] : existing;
+            } else {
+              // no new points: keep existing
+              next[k] = next[k] ?? [];
+            }
+
+            // update last step per key
+            const finalArr = next[k] ?? [];
+            lastStepByKeyRef.current[k] = finalArr.length
+              ? finalArr[finalArr.length - 1].step
+              : (lastStepByKeyRef.current[k] ?? null);
           }
+
+          // remove stale chart keys that no longer exist (rare, but keeps UI clean)
+          for (const existingKey of Object.keys(next)) {
+            if (!wantedKeys.includes(existingKey)) {
+              delete next[existingKey];
+              delete lastStepByKeyRef.current[existingKey];
+            }
+          }
+
+          return next;
+        });
+
+        setStatus('success');
+        didInitialLoadRef.current = true;
+      } catch (err) {
+        if (signal?.aborted || activeJobIDRef.current !== jobID) return;
+        console.error('Error fetching loss logs:', err);
+        setStatus('error');
+      } finally {
+        if (activeJobIDRef.current === jobID) {
+          inFlightRef.current = false;
         }
-
-        return next;
-      });
-
-      setStatus('success');
-      didInitialLoadRef.current = true;
-    } catch (err) {
-      if (signal?.aborted || activeJobIDRef.current !== jobID) return;
-      console.error('Error fetching loss logs:', err);
-      setStatus('error');
-    } finally {
-      if (activeJobIDRef.current === jobID) {
-        inFlightRef.current = false;
       }
-    }
-  }, [jobID, reloadInterval]);
+    },
+    [jobID, reloadInterval],
+  );
 
   useEffect(() => {
     // reset when job changes
@@ -136,7 +139,6 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
     setSeries({});
     setKeys([]);
     setStatus('idle');
-
   }, [jobID]);
 
   usePollLoop(signal => refreshLoss(signal), reloadInterval, [jobID]);

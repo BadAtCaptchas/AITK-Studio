@@ -1,10 +1,6 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  JobStartError,
-  prepareJobStart,
-  startJobFromRequest,
-  startPreparedJob,
-} from '@/server/jobStart';
+import { JobStartError, prepareJobStart, startJobFromRequest, startPreparedJob } from '@/server/jobStart';
 import { isLocalWorker } from '@/server/remoteClient';
 import {
   createRemoteStartProgress,
@@ -12,8 +8,7 @@ import {
   updateRemoteStartProgress,
 } from '@/server/remoteStartProgress';
 import type { JobStartRequest } from '@/types';
-import { parseReplicaExecutionAuthorization, ProjectSyncProtocolError } from '@/server/projectSyncProtocol';
-import type { ReplicaExecutionAuthorization } from '@/server/projectSyncWorker';
+
 import { isRequestAuthenticated } from '@/utils/authSession';
 
 async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
@@ -34,17 +29,6 @@ function handleJobStartError(error: unknown) {
     return NextResponse.json(error.payload, { status: error.status });
   }
   throw error;
-}
-
-function getReplicaExecutionAuthorization(request: NextRequest): ReplicaExecutionAuthorization | null {
-  try {
-    return parseReplicaExecutionAuthorization(request.headers, process.env.AI_TOOLKIT_AUTH);
-  } catch (error) {
-    if (error instanceof ProjectSyncProtocolError) {
-      throw new JobStartError({ error: error.message, code: error.code }, error.status);
-    }
-    throw error;
-  }
 }
 
 function runBackgroundRemoteStart(startID: string, prepared: Awaited<ReturnType<typeof prepareJobStart>>) {
@@ -74,13 +58,11 @@ async function handleStart(
   const { jobID } = await params;
 
   try {
-    const replicaExecutionAuthorization = getReplicaExecutionAuthorization(request);
     if (body.background === true) {
       const prepared = await prepareJobStart(
         jobID,
         body.encryptedDatasetKeys,
         body.durableEncryptedDatasetKeys === true,
-        replicaExecutionAuthorization,
       );
       if (!isLocalWorker(prepared.job.worker_id) && prepared.job.job_type === 'train') {
         if (hasActiveRemoteStartForJob(jobID)) {
@@ -99,12 +81,7 @@ async function handleStart(
     }
 
     return NextResponse.json(
-      await startJobFromRequest(
-        jobID,
-        body.encryptedDatasetKeys,
-        body.durableEncryptedDatasetKeys === true,
-        replicaExecutionAuthorization,
-      ),
+      await startJobFromRequest(jobID, body.encryptedDatasetKeys, body.durableEncryptedDatasetKeys === true),
     );
   } catch (error) {
     return handleJobStartError(error);
@@ -118,7 +95,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ job
 export async function POST(request: NextRequest, context: { params: Promise<{ jobID: string }> }) {
   let body: JobStartRequest = {};
   try {
-    body = await request.json();
+    body = assertGlobalPayload(await request.json());
   } catch {
     body = {};
   }

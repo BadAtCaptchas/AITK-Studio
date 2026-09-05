@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   AUTH_SESSION_COOKIE_NAME,
@@ -37,14 +38,13 @@ export async function POST(request: NextRequest) {
 
   let body: unknown;
   try {
-    body = await request.json();
+    body = assertGlobalPayload(await request.json());
   } catch {
     return noStore(NextResponse.json({ error: 'Invalid request body' }, { status: 400 }));
   }
 
-  const tokenValue = body && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>).token
-    : null;
+  const tokenValue =
+    body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).token : null;
   const token = typeof tokenValue === 'string' ? tokenValue : '';
   if (!token || !constantTimeStringEqual(token, expectedToken)) {
     return noStore(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));

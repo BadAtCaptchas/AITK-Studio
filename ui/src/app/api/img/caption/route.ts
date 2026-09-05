@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -9,7 +10,7 @@ import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const { imgPath, caption } = body;
     const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
     if (remoteAsset) {
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { datasetsRoot: datasetsPath } = await resolveDatasetScope(body?.project_id);
+    const { datasetsRoot: datasetsPath } = await resolveDatasetScope();
     const datasetsRoot = path.resolve(datasetsPath);
     const resolvedImagePath = path.resolve(imgPath);
     const relativeImagePath = path.relative(datasetsRoot, resolvedImagePath);
@@ -33,7 +34,10 @@ export async function POST(request: Request) {
     }
 
     if (findEncryptedDatasetRoot(resolvedImagePath, datasetsRoot)) {
-      return NextResponse.json({ error: 'Encrypted captions must be saved through the encrypted dataset API' }, { status: 403 });
+      return NextResponse.json(
+        { error: 'Encrypted captions must be saved through the encrypted dataset API' },
+        { status: 403 },
+      );
     }
 
     // if img doesnt exist, ignore

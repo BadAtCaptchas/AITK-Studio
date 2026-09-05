@@ -1,10 +1,8 @@
 export type DatasetWatcherListItem = {
   id: string;
   datasetName?: string;
-  projectID?: string | null;
   enabled?: boolean;
 };
-
 export type DatasetWatcherStatus = {
   state?: string;
   lastScanAt?: string | null;
@@ -18,23 +16,19 @@ export type DatasetWatcherStatus = {
   lastError?: string | null;
   warnings?: string[];
 };
-
 export type DatasetAutoCaptionProgress = {
   total: number;
   pending: number;
   completed: number;
   activePaths: string[];
 };
-
 function count(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
-
 export function emptyAutoCaptionProgress(): DatasetAutoCaptionProgress {
   return { total: 0, pending: 0, completed: 0, activePaths: [] };
 }
-
 export function aggregateAutoCaptionProgress(
   watchers: DatasetWatcherListItem[],
   statuses: Record<string, DatasetWatcherStatus>,
@@ -53,7 +47,6 @@ export function aggregateAutoCaptionProgress(
   }
   return progress;
 }
-
 export function aggregateAutoCaptionProgressByDataset(
   watchers: DatasetWatcherListItem[],
   statuses: Record<string, DatasetWatcherStatus>,
@@ -72,13 +65,11 @@ export function aggregateAutoCaptionProgressByDataset(
   }
   return byDataset;
 }
-
 export function hasAutoCaptionProgress(
   progress: DatasetAutoCaptionProgress | null | undefined,
 ): progress is DatasetAutoCaptionProgress {
   return Boolean(progress && progress.pending > 0);
 }
-
 export function autoCaptionProgressTitle(progress: DatasetAutoCaptionProgress) {
   const base =
     progress.total > 0

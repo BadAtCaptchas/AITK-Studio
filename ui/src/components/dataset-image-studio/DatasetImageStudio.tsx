@@ -1,5 +1,4 @@
 'use client';
-
 import classNames from 'classnames';
 import {
   Braces,
@@ -153,11 +152,9 @@ import {
   scheduleIdleTask,
   statusForCaption,
 } from './utils';
-
 type RefusalCaptionAuditResponse = {
   refusals?: Record<string, unknown>;
 };
-
 type CaptionHistoryEntry = {
   caption: string;
   selectedElementIndex: number | null;
@@ -165,14 +162,12 @@ type CaptionHistoryEntry = {
   lockedLayerIndexes: number[];
   overlapElementStack: number[];
 };
-
 const ADVANCED_WORKSPACE_TOOLS = [
   { value: 'boxes', label: 'Boxes', icon: ScanLine },
   { value: 'layers', label: 'Layers', icon: Layers3 },
   { value: 'palettes', label: 'Palettes', icon: Palette },
   { value: 'json', label: 'JSON', icon: Braces },
 ] as const;
-
 function paletteLayerLabel(element: unknown, index: number) {
   if (typeof element !== 'object' || element === null) return `Layer ${index + 1}`;
   const record = element as Record<string, unknown>;
@@ -182,25 +177,21 @@ function paletteLayerLabel(element: unknown, index: number) {
   if (firstClause.length <= 34) return firstClause;
   return `${firstClause.slice(0, 31).trimEnd()}…`;
 }
-
 function formatByteSize(bytes?: number | null) {
   if (!bytes || bytes < 1) return '—';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-
 function formatStudioDate(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
 }
-
 export default function DatasetImageStudio({
   datasetName,
   workerID,
-  projectID,
   datasetPath,
   items,
   isAutoCaptioning,
@@ -220,7 +211,6 @@ export default function DatasetImageStudio({
   onSaveEncryptedCaption,
 }: DatasetImageStudioProps) {
   const { workers } = useRemoteOllamaWorkers();
-  const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [captionText, setCaptionText] = useState('');
   const [savedCaption, setSavedCaption] = useState('');
@@ -305,7 +295,6 @@ export default function DatasetImageStudio({
   const recaptionModelRef = useRef(DEFAULT_OPENROUTER_BOX_MODEL);
   const recaptionSystemPromptRef = useRef('');
   const recaptionSystemPromptTouchedRef = useRef(false);
-
   const captureHistoryEntry = useCallback(
     (caption: string): CaptionHistoryEntry => ({
       caption,
@@ -316,7 +305,6 @@ export default function DatasetImageStudio({
     }),
     [hiddenLayerIndexes, lockedLayerIndexes, overlapElementStack, selectedElementIndex],
   );
-
   const restoreHistoryEntry = useCallback((entry: CaptionHistoryEntry) => {
     latestCaptionRef.current = entry.caption;
     setCaptionText(entry.caption);
@@ -329,20 +317,16 @@ export default function DatasetImageStudio({
     setOverlapElementStack(entry.overlapElementStack);
     setActivePaletteSamplerIndex(null);
   }, []);
-
   const writeCaptionCache = useCallback((key: string, entry: CaptionCacheEntry) => {
     captionCacheRef.current.set(key, entry);
     setCaptionCacheVersion(version => version + 1);
   }, []);
-
   const bumpCaptionCacheVersion = useCallback(() => {
     setCaptionCacheVersion(version => version + 1);
   }, []);
-
   useEffect(() => {
     setSelectedIndex(index => clampIndex(index, items.length));
   }, [items.length]);
-
   const selectedItem = items[selectedIndex] || null;
   const selectedKey = selectedItem ? itemKey(selectedItem) : '';
   const selectedName = selectedItem ? itemName(selectedItem) : '';
@@ -360,16 +344,16 @@ export default function DatasetImageStudio({
     [remoteWorkerOptions],
   );
   const recaptionStorageKey = useMemo(
-    () => recaptionSettingsStorageKey({ datasetName, projectID, datasetPath, workerID }),
-    [datasetName, datasetPath, projectID, workerID],
+    () => recaptionSettingsStorageKey({ datasetName, datasetPath, workerID }),
+    [datasetName, datasetPath, null, workerID],
   );
   const recaptionQueueStorageKeyValue = useMemo(
-    () => recaptionQueueStorageKey({ datasetName, projectID, datasetPath, workerID }),
-    [datasetName, datasetPath, projectID, workerID],
+    () => recaptionQueueStorageKey({ datasetName, datasetPath, workerID }),
+    [datasetName, datasetPath, null, workerID],
   );
   const approvalStorageKey = useMemo(
-    () => `caption-studio:approvals:${projectID || 'global'}:${workerID}:${datasetName}`,
-    [datasetName, projectID, workerID],
+    () => `caption-studio:approvals:${'global'}:${workerID}:${datasetName}`,
+    [datasetName, null, workerID],
   );
   const autoBoxProviderLabel = providerLabel(autoBoxProvider);
   const recaptionModelOptions = useMemo(() => {
@@ -496,13 +480,10 @@ export default function DatasetImageStudio({
   const canQueueSelectedRecaption =
     canRecaptionSelectedImage && !selectedRecaptionIsRunning && !selectedRecaptionIsQueued;
   const recaptionFeedback = isRecaptioning
-    ? `Recaptioning${activeRecaptionLabel ? ` ${activeRecaptionLabel}` : ''}${
-        recaptionQueue.length ? `, ${recaptionQueue.length} queued` : ''
-      }.`
+    ? `Recaptioning${activeRecaptionLabel ? ` ${activeRecaptionLabel}` : ''}${recaptionQueue.length ? `, ${recaptionQueue.length} queued` : ''}.`
     : recaptionQueue.length
       ? `${recaptionQueue.length} recaption${recaptionQueue.length === 1 ? '' : 's'} queued.`
       : recaptionMessage;
-
   useEffect(() => {
     try {
       const stored: unknown = JSON.parse(window.localStorage.getItem(approvalStorageKey) || '[]');
@@ -513,7 +494,6 @@ export default function DatasetImageStudio({
       setApprovedKeys(new Set());
     }
   }, [approvalStorageKey]);
-
   useEffect(() => {
     const availableKeys = new Set(items.map(item => itemKey(item)));
     setApprovedKeys(previous => {
@@ -521,7 +501,6 @@ export default function DatasetImageStudio({
       return next.size === previous.size ? previous : next;
     });
   }, [items]);
-
   const persistApprovedKeys = useCallback(
     (next: Set<string>) => {
       setApprovedKeys(next);
@@ -533,56 +512,44 @@ export default function DatasetImageStudio({
     },
     [approvalStorageKey],
   );
-
   useEffect(() => {
     latestCaptionRef.current = captionText;
   }, [captionText]);
-
   useEffect(() => {
     recaptionSystemPromptRef.current = recaptionSystemPrompt;
   }, [recaptionSystemPrompt]);
-
   useEffect(() => {
     recaptionModelRef.current = recaptionModel;
   }, [recaptionModel]);
-
   useEffect(() => {
     isRecaptioningRef.current = isRecaptioning;
   }, [isRecaptioning]);
-
   useEffect(() => {
     recaptionQueueRef.current = recaptionQueue;
   }, [recaptionQueue]);
-
   useEffect(() => {
     hydratedRecaptionQueueKeyRef.current = '';
   }, [canPersistRecaptionState, recaptionQueueStorageKeyValue]);
-
   useEffect(() => {
     purgeLegacyPersistedRecaptionQueues();
   }, []);
-
   useEffect(() => {
     if (!hasEncryptedItems || typeof window === 'undefined') return;
     if (recaptionQueueStorageKeyValue) window.localStorage.removeItem(recaptionQueueStorageKeyValue);
     if (recaptionStorageKey) window.localStorage.removeItem(recaptionStorageKey);
   }, [hasEncryptedItems, recaptionQueueStorageKeyValue, recaptionStorageKey]);
-
   useEffect(() => {
     const storageKey = recaptionQueueStorageKeyValue;
     if (!canPersistRecaptionState) return;
     if (!storageKey || hydratedRecaptionQueueKeyRef.current === storageKey) return;
     if (isRecaptioning || recaptionQueue.length > 0) return;
-
     const persisted = readPersistedRecaptionQueue(storageKey);
     if (!persisted || (!persisted.active && persisted.queue.length === 0)) {
       hydratedRecaptionQueueKeyRef.current = storageKey;
       return;
     }
-
     const itemByKey = new Map(items.map(item => [itemKey(item), item] as const));
     if (itemByKey.size === 0) return;
-
     const seen = new Set<string>();
     const restored = [persisted.active, ...persisted.queue].flatMap(persistedEntry => {
       if (!persistedEntry || seen.has(persistedEntry.key)) return [];
@@ -600,27 +567,22 @@ export default function DatasetImageStudio({
         },
       ];
     });
-
     hydratedRecaptionQueueKeyRef.current = storageKey;
     if (restored.length === 0) {
       window.localStorage.removeItem(storageKey);
       return;
     }
-
     setRecaptionQueue(restored);
     setRecaptionMessage(`Restored ${restored.length} recaption${restored.length === 1 ? '' : 's'} after refresh.`);
   }, [canPersistRecaptionState, isRecaptioning, items, recaptionQueue.length, recaptionQueueStorageKeyValue]);
-
   useEffect(() => {
     const storageKey = recaptionQueueStorageKeyValue;
     if (!canPersistRecaptionState) return;
     if (!storageKey || hydratedRecaptionQueueKeyRef.current !== storageKey || typeof window === 'undefined') return;
-
     if (!activeRecaptionEntry && recaptionQueue.length === 0) {
       window.localStorage.removeItem(storageKey);
       return;
     }
-
     const snapshot: PersistedRecaptionQueue = {
       version: 2,
       active: activeRecaptionEntry ? persistedRecaptionQueueEntry(activeRecaptionEntry, 'running') : null,
@@ -629,20 +591,16 @@ export default function DatasetImageStudio({
     };
     window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
   }, [activeRecaptionEntry, canPersistRecaptionState, recaptionQueue, recaptionQueueStorageKeyValue]);
-
   useEffect(() => {
     savedCaptionRef.current = savedCaption;
     isDirtyRef.current = hasUnsavedChanges;
   }, [hasUnsavedChanges, savedCaption]);
-
   useEffect(() => {
     onUnsavedChange?.(hasUnsavedChanges);
   }, [hasUnsavedChanges, onUnsavedChange]);
-
   useEffect(() => {
     return () => onUnsavedChange?.(false);
   }, [onUnsavedChange]);
-
   useEffect(() => {
     if (!hasUnsavedChanges) return;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -652,12 +610,16 @@ export default function DatasetImageStudio({
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
   }, [hasUnsavedChanges]);
-
   useEffect(() => {
     if (!hasUnsavedChanges) return;
-
-    type NavigationEventLike = Event & { navigationType?: string };
-    const navigation = (window as Window & { navigation?: EventTarget }).navigation;
+    type NavigationEventLike = Event & {
+      navigationType?: string;
+    };
+    const navigation = (
+      window as Window & {
+        navigation?: EventTarget;
+      }
+    ).navigation;
     const confirmTraversal = (event: Event) => {
       if ((event as NavigationEventLike).navigationType !== 'traverse') return;
       const shouldLeave = window.confirm(
@@ -665,12 +627,10 @@ export default function DatasetImageStudio({
       );
       if (!shouldLeave) event.preventDefault();
     };
-
     if (navigation) {
       navigation.addEventListener('navigate', confirmTraversal);
       return () => navigation.removeEventListener('navigate', confirmTraversal);
     }
-
     const restoreAfterCancelledTraversal = () => {
       const shouldLeave = window.confirm(
         'You have unapplied or unsaved caption changes. Leave Caption Studio and discard them?',
@@ -680,7 +640,6 @@ export default function DatasetImageStudio({
     window.addEventListener('popstate', restoreAfterCancelledTraversal);
     return () => window.removeEventListener('popstate', restoreAfterCancelledTraversal);
   }, [hasUnsavedChanges]);
-
   useEffect(() => {
     if (!hasUnsavedChanges) return;
     const confirmInternalLink = (event: MouseEvent) => {
@@ -709,7 +668,6 @@ export default function DatasetImageStudio({
     document.addEventListener('click', confirmInternalLink, true);
     return () => document.removeEventListener('click', confirmInternalLink, true);
   }, [hasUnsavedChanges]);
-
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
     if (isPlainTextCaptionItem(selectedItem)) setCaptionTab('caption');
@@ -726,7 +684,6 @@ export default function DatasetImageStudio({
     setPaletteExtractionMessage('');
     setSelectedImagePaletteColor(null);
   }, [selectedItem, selectedKey]);
-
   useEffect(() => {
     if (advancedMode !== 'json' || !selectedKey || !isCaptionLoaded || jsonDraftKey === selectedKey) return;
     setJsonDraft(captionText);
@@ -739,7 +696,6 @@ export default function DatasetImageStudio({
         : `compositional_deconstruction.elements[${selectedElementIndex}]`,
     );
   }, [advancedMode, captionText, isCaptionLoaded, jsonDraftKey, selectedElementIndex, selectedKey]);
-
   useEffect(() => {
     if (
       advancedMode !== 'json' ||
@@ -752,7 +708,6 @@ export default function DatasetImageStudio({
     setJsonDraft(captionText);
     setJsonDraftBaseCaption(captionText);
   }, [advancedMode, captionText, jsonDraft, jsonDraftBaseCaption, jsonDraftKey, selectedKey]);
-
   useEffect(() => {
     if (advancedMode !== 'json' || selectedElementIndex == null) return;
     const elementPath =
@@ -761,7 +716,6 @@ export default function DatasetImageStudio({
     setJsonSelectedSectionId('elements');
     setJsonSelectedPath(elementPath);
   }, [advancedMode, jsonNavigatorAnalysis.elements, selectedElementIndex]);
-
   useEffect(() => {
     if (imagePaletteColors.length === 0) {
       if (selectedImagePaletteColor !== null) setSelectedImagePaletteColor(null);
@@ -771,11 +725,9 @@ export default function DatasetImageStudio({
       setSelectedImagePaletteColor(null);
     }
   }, [imagePaletteColors, selectedImagePaletteColor]);
-
   useEffect(() => {
     setActivePaletteSamplerIndex(null);
   }, [selectedElementIndex]);
-
   useEffect(() => {
     if (advancedMode !== 'palettes' || !paletteImageElement) return;
     let cancelled = false;
@@ -792,19 +744,16 @@ export default function DatasetImageStudio({
       window.cancelAnimationFrame(animationFrame);
     };
   }, [advancedMode, paletteImageElement, selectedKey]);
-
   useEffect(() => {
     if (autoBoxProvider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
     if (remoteOllamaWorkerId && remoteWorkerOptionValues.has(remoteOllamaWorkerId)) return;
     setRemoteOllamaWorkerId(remoteWorkerOptions[0].value);
   }, [autoBoxProvider, remoteOllamaWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
-
   useEffect(() => {
     if (recaptionProvider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
     if (recaptionRemoteWorkerId && remoteWorkerOptionValues.has(recaptionRemoteWorkerId)) return;
     setRecaptionRemoteWorkerId(remoteWorkerOptions[0].value);
   }, [recaptionProvider, recaptionRemoteWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
-
   const applyRecaptionRootPrompt = useCallback((value: string) => {
     const trimmed = value.trim();
     setRecaptionRootPrompt(trimmed);
@@ -812,31 +761,26 @@ export default function DatasetImageStudio({
     recaptionSystemPromptRef.current = trimmed;
     setRecaptionSystemPrompt(trimmed);
   }, []);
-
   useEffect(() => {
     let cancelled = false;
     recaptionSystemPromptTouchedRef.current = false;
     recaptionSystemPromptRef.current = '';
     setRecaptionRootPrompt('');
     setRecaptionSystemPrompt('');
-
     if (rootCaption !== undefined) {
       const value = rootCaption || '';
       applyRecaptionRootPrompt(value);
       setRecaptionRootPromptStatus(value.trim() ? 'success' : 'idle');
       return;
     }
-
     if (!datasetName || workerID !== 'local') {
       setRecaptionRootPromptStatus('idle');
       return;
     }
-
     setRecaptionRootPromptStatus('loading');
     apiClient
       .post('/api/datasets/root-caption', {
         datasetName,
-        ...projectPayload,
       })
       .then(response => {
         if (cancelled) return;
@@ -852,12 +796,10 @@ export default function DatasetImageStudio({
         console.warn('Could not load dataset root prompt for recaption:', error);
         setRecaptionRootPromptStatus('error');
       });
-
     return () => {
       cancelled = true;
     };
-  }, [applyRecaptionRootPrompt, datasetName, projectPayload, rootCaption, workerID]);
-
+  }, [applyRecaptionRootPrompt, datasetName, rootCaption, workerID]);
   useEffect(() => {
     setHasRecaptionSettingsForDataset(false);
     if (!canPersistRecaptionState) return;
@@ -874,19 +816,16 @@ export default function DatasetImageStudio({
     setRecaptionMaxNewTokens(preset.maxNewTokens);
     setHasRecaptionSettingsForDataset(true);
   }, [canPersistRecaptionState, recaptionStorageKey, rootCaption]);
-
   const useRecaptionRootPrompt = useCallback(() => {
     recaptionSystemPromptTouchedRef.current = true;
     recaptionSystemPromptRef.current = recaptionRootPrompt;
     setRecaptionSystemPrompt(recaptionRootPrompt);
   }, [recaptionRootPrompt]);
-
   const handleRecaptionSystemPromptChange = useCallback((value: string) => {
     recaptionSystemPromptTouchedRef.current = true;
     recaptionSystemPromptRef.current = value;
     setRecaptionSystemPrompt(value);
   }, []);
-
   const loadRecaptionRemoteModels = useCallback(
     async (workerId = recaptionRemoteWorkerId, preferredModel = recaptionModelRef.current) => {
       if (!workerId) return;
@@ -914,18 +853,15 @@ export default function DatasetImageStudio({
     },
     [recaptionRemoteWorkerId],
   );
-
   useEffect(() => {
     if (recaptionProvider !== 'remote_ollama' || !recaptionRemoteWorkerId) return;
     void loadRecaptionRemoteModels(recaptionRemoteWorkerId);
   }, [loadRecaptionRemoteModels, recaptionProvider, recaptionRemoteWorkerId]);
-
   const handleAutoBoxProviderChange = useCallback((value: string) => {
     const nextProvider = normalizeStudioBoxProvider(value);
     setAutoBoxProvider(nextProvider);
     setAutoBoxModel(currentModel => nextAutoBoxModelForProvider(nextProvider, currentModel));
   }, []);
-
   const handleRecaptionProviderChange = useCallback(
     (value: string) => {
       const nextProvider = normalizeRecaptionProvider(value);
@@ -940,13 +876,11 @@ export default function DatasetImageStudio({
     },
     [recaptionRemoteModelOptions],
   );
-
   const handleRecaptionOutputFormatChange = useCallback((value: RecaptionOutputFormat) => {
     setRecaptionOutputFormat(value);
     setRecaptionPrompt(currentPrompt => promptForRecaptionOutputFormat(value, currentPrompt));
     setRecaptionMaxNewTokens(current => maxNewTokensForRecaptionOutputFormat(value, current));
   }, []);
-
   const currentRecaptionSettings = useCallback(
     (): RecaptionSettingsPreset => ({
       provider: recaptionProvider,
@@ -967,7 +901,6 @@ export default function DatasetImageStudio({
       recaptionSystemPrompt,
     ],
   );
-
   const persistRecaptionSettingsForDataset = useCallback(
     (settings: RecaptionSettingsPreset) => {
       if (!canPersistRecaptionState) {
@@ -987,7 +920,6 @@ export default function DatasetImageStudio({
     },
     [canPersistRecaptionState, recaptionStorageKey],
   );
-
   const readCaptionForItem = useCallback(
     async (item: DatasetStudioItem, signal?: AbortSignal) => {
       let text = '';
@@ -998,7 +930,6 @@ export default function DatasetImageStudio({
           {
             imgPath: item.path,
             ...(direct ? { direct: true } : {}),
-            ...projectPayload,
           },
           signal ? { signal } : undefined,
         );
@@ -1008,7 +939,7 @@ export default function DatasetImageStudio({
         if (captionPath) {
           const response = await apiClient.post(
             '/api/datasets/encrypted/object',
-            buildEncryptedObjectRequestBody({ datasetName, workerID, projectID, objectPath: captionPath }),
+            buildEncryptedObjectRequestBody({ datasetName, workerID, objectPath: captionPath }),
             { responseType: 'blob', ...(signal ? { signal } : {}) },
           );
           const decrypted = await decryptEncryptedObjectBlob(encryptedKey, captionPath, response.data as Blob);
@@ -1017,18 +948,15 @@ export default function DatasetImageStudio({
       }
       return text;
     },
-    [datasetName, encryptedKey, projectID, projectPayload, workerID],
+    [datasetName, encryptedKey, null, workerID],
   );
-
   useEffect(() => {
     const activeKeys = new Set(items.map(itemKey));
     let cacheChanged = false;
-
     for (const key of Array.from(captionCacheRef.current.keys())) {
       if (activeKeys.has(key)) continue;
       cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
     }
-
     const selectedKey = selectedKeyRef.current;
     if (selectedKey && !activeKeys.has(selectedKey) && !isDirtyRef.current) {
       latestCaptionRef.current = '';
@@ -1036,10 +964,8 @@ export default function DatasetImageStudio({
       setSavedCaption('');
       setIsCaptionLoaded(false);
     }
-
     if (cacheChanged) bumpCaptionCacheVersion();
   }, [bumpCaptionCacheVersion, items]);
-
   useEffect(() => {
     if (!selectedKey) {
       setCaptionText('');
@@ -1047,7 +973,6 @@ export default function DatasetImageStudio({
       setIsCaptionLoaded(false);
       return;
     }
-
     const cached = captionCacheRef.current.get(selectedKey);
     if (cached?.loaded) {
       setCaptionText(cached.caption);
@@ -1055,12 +980,10 @@ export default function DatasetImageStudio({
       setIsCaptionLoaded(true);
       return;
     }
-
     let cancelled = false;
     setCaptionText('');
     setSavedCaption('');
     setIsCaptionLoaded(false);
-
     async function loadCaption() {
       try {
         if (!selectedItem) return;
@@ -1078,23 +1001,19 @@ export default function DatasetImageStudio({
         }
       }
     }
-
     void loadCaption();
     return () => {
       cancelled = true;
     };
   }, [readCaptionForItem, selectedItem, selectedKey, writeCaptionCache]);
-
   useEffect(() => {
     if (!selectedKey) return;
     writeCaptionCache(selectedKey, { caption: captionText, saved: savedCaption, loaded: isCaptionLoaded });
   }, [captionText, isCaptionLoaded, savedCaption, selectedKey, writeCaptionCache]);
-
   useEffect(() => {
     if (plainAuditItemPaths.length === 0) return;
     const controller = new AbortController();
     let cancelled = false;
-
     const runAudit = async () => {
       try {
         const response = await apiClient.post<RefusalCaptionAuditResponse>(
@@ -1103,22 +1022,18 @@ export default function DatasetImageStudio({
             datasetName,
             worker_id: workerID,
             itemPaths: plainAuditItemPaths,
-            ...projectPayload,
           },
           { signal: controller.signal },
         );
         if (cancelled || controller.signal.aborted) return;
         const refusals = response.data?.refusals || {};
         let cacheChanged = false;
-
         Object.entries(refusals).forEach(([key, captionValue]) => {
           if (typeof captionValue !== 'string') return;
           const previous = captionCacheRef.current.get(key);
           if (previous?.loaded && previous.caption === captionValue && previous.saved === captionValue) return;
-
           captionCacheRef.current.set(key, { caption: captionValue, saved: captionValue, loaded: true });
           cacheChanged = true;
-
           if (selectedKeyRef.current === key && !isDirtyRef.current) {
             latestCaptionRef.current = captionValue;
             setCaptionText(captionValue);
@@ -1128,7 +1043,6 @@ export default function DatasetImageStudio({
             setRedoStack([]);
           }
         });
-
         if (cacheChanged) {
           setCaptionCacheVersion(version => version + 1);
         }
@@ -1138,22 +1052,19 @@ export default function DatasetImageStudio({
         }
       }
     };
-
     const cancelScheduledAudit = scheduleIdleTask(() => void runAudit());
     return () => {
       cancelled = true;
       controller.abort();
       cancelScheduledAudit();
     };
-  }, [datasetName, plainAuditItemPaths, plainAuditKey, projectPayload, workerID]);
-
+  }, [datasetName, plainAuditItemPaths, plainAuditKey, workerID]);
   useEffect(() => {
     const shouldLiveRefreshCaption = isAutoCaptioning || liveCaptionRefresh;
     if (!shouldLiveRefreshCaption || !selectedItem || !selectedKey) return;
     const requestKey = selectedKey;
     const controller = new AbortController();
     let busy = false;
-
     const pollSelectedCaption = async () => {
       if (busy || controller.signal.aborted) return;
       busy = true;
@@ -1180,7 +1091,6 @@ export default function DatasetImageStudio({
         busy = false;
       }
     };
-
     void pollSelectedCaption();
     const interval = window.setInterval(pollSelectedCaption, 5000);
     return () => {
@@ -1188,18 +1098,15 @@ export default function DatasetImageStudio({
       window.clearInterval(interval);
     };
   }, [isAutoCaptioning, liveCaptionRefresh, readCaptionForItem, selectedItem, selectedKey]);
-
   useEffect(() => {
     if (!isAutoCaptioning || !encryptedKey || !onRefresh) return;
     const interval = window.setInterval(() => onRefresh(), 5000);
     return () => window.clearInterval(interval);
   }, [encryptedKey, isAutoCaptioning, onRefresh]);
-
   useEffect(() => {
     if (!isIdeogram || selectedElementIndex == null) return;
     if (!captionParse.elements[selectedElementIndex]) setSelectedElementIndex(null);
   }, [captionParse, isIdeogram, selectedElementIndex]);
-
   useEffect(() => {
     if (!isIdeogram) {
       setHiddenLayerIndexes(new Set());
@@ -1218,14 +1125,12 @@ export default function DatasetImageStudio({
     });
     setOverlapElementStack(previous => previous.filter(elementIndex => elementIndex < elementCount));
   }, [captionParse, isIdeogram]);
-
   useEffect(() => {
     if (!selectedKey || autoSelectKeyRef.current === selectedKey) return;
     if (!isIdeogram || boxes.length === 0) return;
     autoSelectKeyRef.current = selectedKey;
     setSelectedElementIndex(boxes[0].elementIndex);
   }, [boxes, isIdeogram, selectedKey]);
-
   const saveCaptionForItem = useCallback(
     async (targetItem: DatasetStudioItem, targetKey: string, captionValue: string) => {
       const value = isPlainTextCaptionItem(targetItem) ? captionValue : captionValue.trim();
@@ -1234,7 +1139,6 @@ export default function DatasetImageStudio({
           imgPath: targetItem.path,
           caption: value,
           direct: isPlainTextCaptionItem(targetItem),
-          ...projectPayload,
         });
         onPlainItemCaptioned?.(
           targetItem.path,
@@ -1249,7 +1153,6 @@ export default function DatasetImageStudio({
       } else {
         throw new Error('Encrypted dataset is locked.');
       }
-
       if (selectedKeyRef.current === targetKey) {
         latestCaptionRef.current = value;
         setCaptionText(value);
@@ -1257,16 +1160,8 @@ export default function DatasetImageStudio({
       }
       writeCaptionCache(targetKey, { caption: value, saved: value, loaded: true });
     },
-    [
-      encryptedCaptionPaths,
-      encryptedKey,
-      onPlainItemCaptioned,
-      onSaveEncryptedCaption,
-      projectPayload,
-      writeCaptionCache,
-    ],
+    [encryptedCaptionPaths, encryptedKey, onPlainItemCaptioned, onSaveEncryptedCaption, writeCaptionCache],
   );
-
   const saveCaption = useCallback(
     async (captionOverride?: string) => {
       if (!selectedItem || !isCaptionLoaded || isSavingRef.current) return false;
@@ -1291,11 +1186,9 @@ export default function DatasetImageStudio({
     },
     [captionText, isCaptionLoaded, isDirty, savedCaption, saveCaptionForItem, selectedItem, selectedKey],
   );
-
   useEffect(() => {
     saveCaptionRef.current = saveCaption;
   }, [saveCaption]);
-
   const runRecaptionQueueEntry = useCallback(
     async (entry: RecaptionQueueEntry) => {
       const { item, key, name, existingCaption, settings } = entry;
@@ -1311,7 +1204,6 @@ export default function DatasetImageStudio({
         setRecaptionMessage('Unlock the encrypted dataset first.');
         return;
       }
-
       const recaptionProviderLabel = providerLabel(settings.provider);
       setActiveRecaptionEntry(entry);
       setIsRecaptioning(true);
@@ -1338,7 +1230,6 @@ export default function DatasetImageStudio({
               worker_id: workerID,
               remoteWorkerId: settings.remoteWorkerId,
               maxNewTokens: settings.maxNewTokens,
-              ...projectPayload,
             },
             { timeout: 0 },
           );
@@ -1356,7 +1247,6 @@ export default function DatasetImageStudio({
           const formData = await createEncryptedImageFormData({
             datasetName,
             workerID,
-            projectID,
             encryptedKey: encryptedKey as CryptoKey,
             item: item.item,
           });
@@ -1366,7 +1256,6 @@ export default function DatasetImageStudio({
             timeout: 0,
           });
         }
-
         const caption = String(response.data?.caption || '').trim();
         if (!caption) throw new Error('Recaption returned an empty caption.');
         if (selectedKeyRef.current === key) {
@@ -1395,21 +1284,18 @@ export default function DatasetImageStudio({
       datasetName,
       encryptedKey,
       encryptedProviderConfirmations,
-      projectID,
-      projectPayload,
+      null,
       readCaptionForItem,
       saveCaptionForItem,
       workerID,
     ],
   );
-
   useEffect(() => {
     if (isRecaptioning || recaptionQueue.length === 0) return;
     const [nextEntry] = recaptionQueue;
     setRecaptionQueue(previous => previous.slice(1));
     void runRecaptionQueueEntry(nextEntry);
   }, [isRecaptioning, recaptionQueue, runRecaptionQueueEntry]);
-
   const queueSelectedRecaption = useCallback(() => {
     if (!selectedItem || !canRecaptionSelectedImage) return;
     if (selectedRecaptionIsRunning) {
@@ -1436,7 +1322,6 @@ export default function DatasetImageStudio({
       setIsRecaptionModalOpen(true);
       return;
     }
-
     const entry: RecaptionQueueEntry = {
       id: randomId(),
       item: selectedItem,
@@ -1462,12 +1347,10 @@ export default function DatasetImageStudio({
     selectedRecaptionIsQueued,
     selectedRecaptionIsRunning,
   ]);
-
   const openRecaptionSettings = useCallback(() => {
     setRecaptionMessage('');
     setIsRecaptionModalOpen(true);
   }, []);
-
   const handleRecaptionClick = useCallback(() => {
     setRecaptionMessage('');
     if (hasRecaptionSettingsForDataset) {
@@ -1476,13 +1359,11 @@ export default function DatasetImageStudio({
     }
     setIsRecaptionModalOpen(true);
   }, [hasRecaptionSettingsForDataset, queueSelectedRecaption]);
-
   useEffect(() => {
     return () => {
       void saveCaptionRef.current();
     };
   }, []);
-
   const commitSelectedIndex = useCallback(
     (nextIndex: number) => {
       setSelectedIndex(clampIndex(nextIndex, items.length));
@@ -1493,7 +1374,6 @@ export default function DatasetImageStudio({
     },
     [items.length],
   );
-
   const selectIndex = useCallback(
     async (nextIndex: number) => {
       const targetIndex = clampIndex(nextIndex, items.length);
@@ -1506,14 +1386,12 @@ export default function DatasetImageStudio({
     },
     [commitSelectedIndex, items.length, saveCaption, selectedIndex, selectedKey],
   );
-
   const saveAndNext = useCallback(async () => {
     const sourceKey = selectedKey;
     const saved = await saveCaption();
     if (!saved || selectedKeyRef.current !== sourceKey) return;
     if (selectedIndex < items.length - 1) commitSelectedIndex(selectedIndex + 1);
   }, [commitSelectedIndex, items.length, saveCaption, selectedIndex, selectedKey]);
-
   const toggleSelectedApproval = useCallback(async () => {
     if (!selectedKey || !isCaptionLoaded) return;
     const saved = await saveCaption();
@@ -1526,7 +1404,6 @@ export default function DatasetImageStudio({
     }
     persistApprovedKeys(next);
   }, [approvedKeys, isCaptionLoaded, persistApprovedKeys, saveCaption, selectedKey]);
-
   const openAdvancedMode = useCallback(
     (mode: 'boxes' | 'layers' | 'palettes' | 'json') => {
       if (mode === 'json') {
@@ -1549,7 +1426,6 @@ export default function DatasetImageStudio({
     },
     [selectedElementIndex],
   );
-
   const handleWorkbenchResizeStart = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -1568,7 +1444,6 @@ export default function DatasetImageStudio({
     },
     [workbenchHeight],
   );
-
   const imageDeleteResultMessage = useCallback((result: DeleteImagesResult) => {
     const deleted = result.deleted.toLocaleString();
     const requested = result.requested.toLocaleString();
@@ -1582,7 +1457,6 @@ export default function DatasetImageStudio({
     }
     return `${deleted} deleted.`;
   }, []);
-
   const applyImageDeleteResult = useCallback(
     (result: DeleteImagesResult, requestedItems: DatasetStudioItem[]) => {
       const requestedKeys = requestedItems.map(item => itemKey(item));
@@ -1593,14 +1467,12 @@ export default function DatasetImageStudio({
             ? requestedKeys
             : [];
       if (removedKeys.length === 0) return;
-
       const removedKeySet = new Set(removedKeys);
       let cacheChanged = false;
       removedKeySet.forEach(key => {
         cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
       });
       if (cacheChanged) bumpCaptionCacheVersion();
-
       const remainingItems = items.filter(item => !removedKeySet.has(itemKey(item)));
       const currentSelectedKey = selectedKeyRef.current;
       const currentWasDeleted = removedKeySet.has(currentSelectedKey);
@@ -1610,7 +1482,6 @@ export default function DatasetImageStudio({
             0,
             remainingItems.findIndex(item => itemKey(item) === currentSelectedKey),
           );
-
       if (remainingItems.length === 0 || currentWasDeleted) {
         latestCaptionRef.current = '';
         setCaptionText('');
@@ -1623,7 +1494,6 @@ export default function DatasetImageStudio({
     },
     [bumpCaptionCacheVersion, items, selectedIndex],
   );
-
   const handleDeleteImages = useCallback(
     async (targetItems: DatasetStudioItem[], label = 'selected image(s)'): Promise<DeleteImagesResult> => {
       if (!onDeleteImages || isDeletingImages) {
@@ -1631,14 +1501,12 @@ export default function DatasetImageStudio({
       }
       const uniqueItems = Array.from(new Map(targetItems.map(item => [itemKey(item), item] as const)).values());
       if (uniqueItems.length === 0) return { requested: 0, deleted: 0 };
-
       const includesTextFiles = uniqueItems.some(isPlainTextCaptionItem);
       const suffix = includesTextFiles
         ? 'Text files will be deleted directly.'
         : 'Associated captions will be removed too.';
       const confirmed = window.confirm(`Delete ${uniqueItems.length.toLocaleString()} ${label}? ${suffix}`);
       if (!confirmed) return { requested: uniqueItems.length, deleted: 0 };
-
       setIsDeletingImages(true);
       setDeleteMessage('');
       try {
@@ -1659,7 +1527,6 @@ export default function DatasetImageStudio({
     },
     [applyImageDeleteResult, imageDeleteResultMessage, isDeletingImages, onDeleteImages, saveCaption],
   );
-
   const handleDeleteCurrentImage = useCallback(() => {
     if (!selectedItem) return;
     void handleDeleteImages(
@@ -1667,7 +1534,6 @@ export default function DatasetImageStudio({
       isPlainTextCaptionItem(selectedItem) ? 'current text file' : 'current image',
     );
   }, [handleDeleteImages, selectedItem]);
-
   const applyBulkCaptionResult = useCallback(
     (result: BulkCaptionActionResult) => {
       let cacheChanged = false;
@@ -1702,17 +1568,14 @@ export default function DatasetImageStudio({
     },
     [bumpCaptionCacheVersion],
   );
-
   const handleBulkCaptionAction = useCallback(
     async (request: BulkCaptionActionRequest): Promise<BulkCaptionActionResult> => {
       if (request.matches.length === 0) {
         return { action: request.action, found: 0, affected: 0 };
       }
-
       await saveCaption();
       const firstItem = request.matches[0]?.item;
       let result: BulkCaptionActionResult;
-
       if (firstItem?.kind === 'encrypted') {
         if (!onBulkEncryptedCaptionAction) {
           throw new Error('Encrypted bulk actions are not available for this dataset.');
@@ -1723,7 +1586,6 @@ export default function DatasetImageStudio({
         const response = await apiClient.post('/api/datasets/caption-bulk', {
           datasetName,
           worker_id: workerID,
-          ...projectPayload,
           action: request.action,
           query: request.query,
           matchMode: request.matchMode,
@@ -1744,24 +1606,14 @@ export default function DatasetImageStudio({
           removedKeys: Array.isArray(data.removedPaths) ? data.removedPaths : undefined,
         };
       }
-
       applyBulkCaptionResult(result);
       if (request.action === 'delete' || request.action === 'move') {
         onRefresh?.();
       }
       return result;
     },
-    [
-      applyBulkCaptionResult,
-      datasetName,
-      onBulkEncryptedCaptionAction,
-      onRefresh,
-      projectPayload,
-      saveCaption,
-      workerID,
-    ],
+    [applyBulkCaptionResult, datasetName, onBulkEncryptedCaptionAction, onRefresh, saveCaption, workerID],
   );
-
   const mutateCaption = useCallback(
     (mutator: (data: Record<string, any>) => void, nextSelectedElementIndex?: number | null) => {
       const parsed = parseIdeogramCaption(captionText, selectedImageSize ?? undefined);
@@ -1781,7 +1633,6 @@ export default function DatasetImageStudio({
     },
     [captionText, captureHistoryEntry, selectedImageSize],
   );
-
   const mutateLatestCaption = useCallback(
     (mutator: (data: Record<string, any>) => void, nextSelectedElementIndex?: number | null) => {
       const currentCaption = latestCaptionRef.current;
@@ -1803,7 +1654,6 @@ export default function DatasetImageStudio({
     },
     [captureHistoryEntry, selectedImageSize],
   );
-
   const setLayerCaptionMessageForKey = useCallback((requestLayerKey: string, message: string) => {
     setLayerCaptionMessages(previous => {
       if (!requestLayerKey) return previous;
@@ -1816,7 +1666,6 @@ export default function DatasetImageStudio({
       return { ...previous, [requestLayerKey]: message };
     });
   }, []);
-
   const setLayerCaptioningForKey = useCallback((requestLayerKey: string, isPending: boolean) => {
     setCaptioningLayerKeys(previous => {
       if (!requestLayerKey) return previous;
@@ -1829,15 +1678,12 @@ export default function DatasetImageStudio({
       return next;
     });
   }, []);
-
   const handleGenerateAutoBoxes = useCallback(async () => {
     if (!selectedItem || autoBoxDisabledReason || isGeneratingBoxes) return;
-
     const requestCaption = captionText;
     const requestKey = selectedKey;
     const imageWidth = selectedImageSize?.width || null;
     const imageHeight = selectedImageSize?.height || null;
-
     setIsGeneratingBoxes(true);
     setAutoBoxMessage('');
     try {
@@ -1854,7 +1700,6 @@ export default function DatasetImageStudio({
             refine: autoBoxRefine,
             imageWidth,
             imageHeight,
-            ...projectPayload,
           },
           { timeout: 0 },
         );
@@ -1870,11 +1715,9 @@ export default function DatasetImageStudio({
           }
           setEncryptedProviderConfirmations(previous => ({ ...previous, [autoBoxProvider]: true }));
         }
-
         const formData = await createEncryptedImageFormData({
           datasetName,
           workerID,
-          projectID,
           encryptedKey,
           item: selectedItem.item,
         });
@@ -1884,18 +1727,15 @@ export default function DatasetImageStudio({
         formData.append('remoteWorkerId', remoteOllamaWorkerId);
         formData.append('refine', autoBoxRefine ? 'true' : 'false');
         appendImageSizeFields(formData, imageWidth, imageHeight);
-
         response = await apiClient.post('/api/datasets/auto-boxes', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 0,
         });
       }
-
       if (selectedKeyRef.current !== requestKey || latestCaptionRef.current !== requestCaption) {
         setAutoBoxMessage('Caption changed while Auto Boxes was running. Rerun Auto Boxes to apply fresh boxes.');
         return;
       }
-
       const elementCount = captionParse.kind === 'ideogram' ? captionParse.elements.length : 0;
       const patches =
         elementCount > 0 ? normalizeGeneratedBoxPatches({ boxes: response.data?.boxes }, elementCount, 2) : [];
@@ -1906,7 +1746,6 @@ export default function DatasetImageStudio({
       if (patches.length === 0 && generatedElements.length === 0) {
         throw new Error(`${autoBoxProviderLabel} did not return any usable boxes.`);
       }
-
       let appliedCount = 0;
       const nextSelection =
         generatedElements.length > 0 ? elementCount : (selectedElementIndex ?? patches[0]?.elementIndex ?? null);
@@ -1939,8 +1778,7 @@ export default function DatasetImageStudio({
     encryptedProviderConfirmations,
     isGeneratingBoxes,
     mutateCaption,
-    projectID,
-    projectPayload,
+    null,
     remoteOllamaWorkerId,
     selectedElementIndex,
     selectedImageSize,
@@ -1948,7 +1786,6 @@ export default function DatasetImageStudio({
     selectedKey,
     workerID,
   ]);
-
   const handleCaptionSelectedLayer = useCallback(async () => {
     if (
       !selectedItem ||
@@ -1959,7 +1796,6 @@ export default function DatasetImageStudio({
     ) {
       return;
     }
-
     const requestCaption = captionText;
     const requestKey = selectedKey;
     const requestElementIndex = selectedElementIndex;
@@ -1968,7 +1804,6 @@ export default function DatasetImageStudio({
     const requestHadBox = Boolean(selectedBox);
     const imageWidth = selectedImageSize?.width || null;
     const imageHeight = selectedImageSize?.height || null;
-
     setLayerCaptioningForKey(requestLayerKey, true);
     setLayerCaptionMessageForKey(requestLayerKey, '');
     try {
@@ -1985,7 +1820,6 @@ export default function DatasetImageStudio({
             remoteWorkerId: remoteOllamaWorkerId,
             imageWidth,
             imageHeight,
-            ...projectPayload,
           },
           { timeout: 0 },
         );
@@ -2001,11 +1835,9 @@ export default function DatasetImageStudio({
           }
           setEncryptedProviderConfirmations(previous => ({ ...previous, [autoBoxProvider]: true }));
         }
-
         const formData = await createEncryptedImageFormData({
           datasetName,
           workerID,
-          projectID,
           encryptedKey,
           item: selectedItem.item,
         });
@@ -2015,13 +1847,11 @@ export default function DatasetImageStudio({
         formData.append('model', autoBoxModel);
         formData.append('remoteWorkerId', remoteOllamaWorkerId);
         appendImageSizeFields(formData, imageWidth, imageHeight);
-
         response = await apiClient.post('/api/datasets/layer-caption', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 0,
         });
       }
-
       if (selectedKeyRef.current !== requestKey) {
         return;
       }
@@ -2032,7 +1862,6 @@ export default function DatasetImageStudio({
         setLayerCaptionMessageForKey(requestLayerKey, 'Layer changed while Caption Layer was running. Rerun it.');
         return;
       }
-
       const desc = typeof response.data?.desc === 'string' ? response.data.desc.trim() : '';
       const text = typeof response.data?.text === 'string' ? response.data.text.trim() : '';
       const colorPalette = Array.isArray(response.data?.color_palette)
@@ -2046,7 +1875,6 @@ export default function DatasetImageStudio({
       if (!desc) throw new Error(`${autoBoxProviderLabel} did not return a usable layer caption.`);
       if (!currentHasBox && !generatedBox)
         throw new Error(`${autoBoxProviderLabel} did not return a usable layer box.`);
-
       const updated = mutateLatestCaption(data => {
         updateIdeogramElementField(data, requestElementIndex, 'desc', desc);
         if (requestElement?.type === 'text' && text && !String(currentElement?.text || '').trim()) {
@@ -2082,8 +1910,7 @@ export default function DatasetImageStudio({
     encryptedProviderConfirmations,
     layerCaptionDisabledReason,
     mutateLatestCaption,
-    projectID,
-    projectPayload,
+    null,
     remoteOllamaWorkerId,
     selectedElement,
     selectedElementIndex,
@@ -2096,7 +1923,6 @@ export default function DatasetImageStudio({
     setLayerCaptionMessageForKey,
     workerID,
   ]);
-
   const undo = useCallback(() => {
     setUndoStack(previous => {
       const nextEntry = previous[previous.length - 1];
@@ -2106,7 +1932,6 @@ export default function DatasetImageStudio({
       return previous.slice(0, -1);
     });
   }, [captionText, captureHistoryEntry, restoreHistoryEntry]);
-
   const redo = useCallback(() => {
     setRedoStack(previous => {
       const nextEntry = previous[0];
@@ -2119,7 +1944,6 @@ export default function DatasetImageStudio({
       return previous.slice(1);
     });
   }, [captionText, captureHistoryEntry, restoreHistoryEntry]);
-
   const replaceCaptionWithHistory = useCallback(
     (nextCaption: string) => {
       if (nextCaption !== captionText) {
@@ -2138,27 +1962,23 @@ export default function DatasetImageStudio({
     },
     [captionText, captureHistoryEntry, selectedKey],
   );
-
   const applyJsonDraft = useCallback(() => {
     if (jsonDraftKey !== selectedKey) return null;
     const formatted = formatCaptionJsonDraft(jsonDraft);
     if (!formatted.ok) return null;
     return replaceCaptionWithHistory(formatted.value);
   }, [jsonDraft, jsonDraftKey, replaceCaptionWithHistory, selectedKey]);
-
   const saveJsonDraft = useCallback(async () => {
     const nextCaption = applyJsonDraft();
     if (nextCaption == null) return false;
     return saveCaption(nextCaption);
   }, [applyJsonDraft, saveCaption]);
-
   const saveJsonAndNext = useCallback(async () => {
     const sourceKey = selectedKey;
     const saved = await saveJsonDraft();
     if (!saved || selectedKeyRef.current !== sourceKey) return;
     if (selectedIndex < items.length - 1) commitSelectedIndex(selectedIndex + 1);
   }, [commitSelectedIndex, items.length, saveJsonDraft, selectedIndex, selectedKey]);
-
   const updateToolsMenuPosition = useCallback(() => {
     const button = toolsButtonRef.current;
     if (!button) return;
@@ -2174,7 +1994,6 @@ export default function DatasetImageStudio({
         : Math.min(window.innerHeight - menuHeight - viewportPadding, rect.bottom + gap);
     setToolsMenuPosition({ left, top: Math.max(viewportPadding, top) });
   }, []);
-
   useEffect(() => {
     if (!toolsMenuOpen) return;
     updateToolsMenuPosition();
@@ -2202,7 +2021,6 @@ export default function DatasetImageStudio({
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [toolsMenuOpen, updateToolsMenuPosition]);
-
   const selectJsonIndex = useCallback(
     async (nextIndex: number) => {
       const targetIndex = clampIndex(nextIndex, items.length);
@@ -2215,7 +2033,6 @@ export default function DatasetImageStudio({
     },
     [commitSelectedIndex, items.length, saveJsonDraft, selectedIndex, selectedKey],
   );
-
   const toggleJsonApproval = useCallback(async () => {
     if (!selectedKey || !isCaptionLoaded) return;
     const saved = await saveJsonDraft();
@@ -2225,13 +2042,11 @@ export default function DatasetImageStudio({
     else next.add(selectedKey);
     persistApprovedKeys(next);
   }, [approvedKeys, isCaptionLoaded, persistApprovedKeys, saveJsonDraft, selectedKey]);
-
   const formatJsonDraft = useCallback(() => {
     const formatted = formatCaptionJsonDraft(jsonDraft);
     if (!formatted.ok) return;
     setJsonDraft(formatted.value);
   }, [jsonDraft]);
-
   const switchAdvancedMode = useCallback(
     (mode: 'boxes' | 'layers' | 'palettes' | 'json') => {
       if (advancedMode === 'json' && jsonDraftDirty && applyJsonDraft() == null) return;
@@ -2239,29 +2054,24 @@ export default function DatasetImageStudio({
     },
     [advancedMode, applyJsonDraft, jsonDraftDirty, openAdvancedMode],
   );
-
   const closeAdvancedMode = useCallback(() => {
     if (advancedMode === 'json' && jsonDraftDirty && applyJsonDraft() == null) return;
     setAdvancedMode(null);
     setToolsMenuOpen(false);
   }, [advancedMode, applyJsonDraft, jsonDraftDirty]);
-
   useEffect(() => {
     saveCaptionRef.current = advancedMode === 'json' ? saveJsonDraft : saveCaption;
   }, [advancedMode, saveCaption, saveJsonDraft]);
-
   const handleAddLayer = useCallback(
     (type: IdeogramElementType = 'obj') => {
       if (layerStructureDisabledReason) return false;
       const parsed = parseIdeogramCaption(latestCaptionRef.current, selectedImageSize ?? undefined);
       if (parsed.kind !== 'ideogram') return false;
-
       let createdIndex: number | null = null;
       const changed = mutateLatestCaption(data => {
         createdIndex = addIdeogramLayer(data, type);
       });
       if (!changed || createdIndex == null) return false;
-
       autoSelectKeyRef.current = selectedKey;
       setSelectedElementIndex(createdIndex);
       setActiveTool('select');
@@ -2271,7 +2081,6 @@ export default function DatasetImageStudio({
     },
     [layerStructureDisabledReason, mutateLatestCaption, selectedImageSize, selectedKey],
   );
-
   const handleReorderLayer = useCallback(
     (fromIndex: number, toIndex: number) => {
       if (layerStructureDisabledReason) return false;
@@ -2287,14 +2096,12 @@ export default function DatasetImageStudio({
       ) {
         return false;
       }
-
       const nextSelectedIndex =
         selectedElementIndex == null ? null : remapLayerIndexForMove(selectedElementIndex, fromIndex, toIndex);
       const changed = mutateLatestCaption(data => {
         moveIdeogramElement(data, fromIndex, toIndex);
       }, nextSelectedIndex);
       if (!changed) return false;
-
       autoSelectKeyRef.current = selectedKey;
       setHiddenLayerIndexes(previous => remapLayerIndexSetForMove(previous, fromIndex, toIndex));
       setLockedLayerIndexes(previous => remapLayerIndexSetForMove(previous, fromIndex, toIndex));
@@ -2309,7 +2116,6 @@ export default function DatasetImageStudio({
     },
     [layerStructureDisabledReason, mutateLatestCaption, selectedElementIndex, selectedImageSize, selectedKey],
   );
-
   const handleCreateBox = useCallback(
     (type: IdeogramElementType, box: NormalizedBox) => {
       if (layerStructureDisabledReason) return;
@@ -2318,13 +2124,11 @@ export default function DatasetImageStudio({
       const selected = selectedElementIndex == null ? null : (parsed.elements[selectedElementIndex] ?? null);
       const selectedType: IdeogramElementType = selected?.type === 'text' ? 'text' : 'obj';
       const selectedHasBox = parsed.boxes.some(candidate => candidate.elementIndex === selectedElementIndex);
-
       if (selected && selectedElementIndex != null && selectedType === type && !selectedHasBox) {
         mutateLatestCaption(data => updateIdeogramElementBox(data, selectedElementIndex, box), selectedElementIndex);
         setActiveTool('select');
         return;
       }
-
       let createdIndex: number | null = null;
       const changed = mutateLatestCaption(data => {
         createdIndex = addIdeogramElement(data, type, box);
@@ -2337,14 +2141,12 @@ export default function DatasetImageStudio({
     },
     [layerStructureDisabledReason, mutateLatestCaption, selectedElementIndex, selectedImageSize, selectedKey],
   );
-
   const handleChangeBox = useCallback(
     (elementIndex: number, box: NormalizedBox) => {
       mutateCaption(data => updateIdeogramElementBox(data, elementIndex, box));
     },
     [mutateCaption],
   );
-
   const handleToggleLayerHidden = useCallback((elementIndex: number) => {
     setHiddenLayerIndexes(previous => {
       const next = new Set(previous);
@@ -2356,7 +2158,6 @@ export default function DatasetImageStudio({
       return next;
     });
   }, []);
-
   const handleToggleLayerLocked = useCallback((elementIndex: number) => {
     setLockedLayerIndexes(previous => {
       const next = new Set(previous);
@@ -2368,7 +2169,6 @@ export default function DatasetImageStudio({
       return next;
     });
   }, []);
-
   const cycleOverlapSelection = useCallback(
     (direction: 1 | -1) => {
       if (overlapElementStack.length === 0) return;
@@ -2385,7 +2185,6 @@ export default function DatasetImageStudio({
     },
     [overlapElementStack],
   );
-
   const handleDuplicateElement = useCallback(
     (elementIndex: number) => {
       if (layerStructureDisabledReason) return;
@@ -2402,7 +2201,6 @@ export default function DatasetImageStudio({
     },
     [layerStructureDisabledReason, mutateLatestCaption, selectedImageSize],
   );
-
   const handleDeleteElement = useCallback(
     (elementIndex: number) => {
       if (layerStructureDisabledReason) return;
@@ -2428,12 +2226,10 @@ export default function DatasetImageStudio({
     },
     [layerStructureDisabledReason, mutateLatestCaption, selectedElementIndex, selectedImageSize],
   );
-
   const handleDeleteSelectedElement = useCallback(() => {
     if (selectedElementIndex == null) return;
     handleDeleteElement(selectedElementIndex);
   }, [handleDeleteElement, selectedElementIndex]);
-
   const handleSelectedFieldChange = useCallback(
     (field: 'desc' | 'text', value: string) => {
       if (selectedElementIndex == null) return;
@@ -2441,7 +2237,6 @@ export default function DatasetImageStudio({
     },
     [mutateCaption, selectedElementIndex],
   );
-
   const handleSelectedTypeChange = useCallback(
     (type: IdeogramElementType) => {
       if (selectedElementIndex == null) return;
@@ -2449,7 +2244,6 @@ export default function DatasetImageStudio({
     },
     [mutateCaption, selectedElementIndex],
   );
-
   const handleSelectedPaletteChange = useCallback(
     (colors: string[]) => {
       if (selectedElementIndex == null) return;
@@ -2457,7 +2251,6 @@ export default function DatasetImageStudio({
     },
     [mutateCaption, selectedElementIndex],
   );
-
   const handleSelectedPaletteColorChange = useCallback(
     (index: number, color: string) => {
       const normalized = normalizeHexColor(color);
@@ -2468,27 +2261,23 @@ export default function DatasetImageStudio({
     },
     [handleSelectedPaletteChange, selectedPalette],
   );
-
   const handleImagePaletteChange = useCallback(
     (colors: string[]) => {
       mutateCaption(data => updateIdeogramImagePalette(data, colors));
     },
     [mutateCaption],
   );
-
   const handleElementPaletteChange = useCallback(
     (elementIndex: number, colors: string[]) => {
       mutateCaption(data => updateIdeogramElementPalette(data, elementIndex, colors));
     },
     [mutateCaption],
   );
-
   const handleStartPaletteSample = useCallback((index: number) => {
     setActiveImagePaletteSamplerIndex(null);
     setActivePaletteSamplerIndex(index);
     setActiveTool('select');
   }, []);
-
   const handleStartImagePaletteSample = useCallback(
     (index: number) => {
       if (index < 0 || index >= imagePaletteColors.length) return;
@@ -2500,13 +2289,11 @@ export default function DatasetImageStudio({
     },
     [imagePaletteColors],
   );
-
   const handleCancelPaletteSample = useCallback(() => {
     setActivePaletteSamplerIndex(null);
     setActiveImagePaletteSamplerIndex(null);
     setPaletteExtractionMessage('');
   }, []);
-
   const handleSamplePaletteColor = useCallback(
     (color: string) => {
       if (activeImagePaletteSamplerIndex != null) {
@@ -2532,7 +2319,6 @@ export default function DatasetImageStudio({
       imagePaletteColors,
     ],
   );
-
   const handleExtractImagePalette = useCallback(() => {
     if (!paletteImageElement || isExtractingPalette) return;
     setIsExtractingPalette(true);
@@ -2554,7 +2340,6 @@ export default function DatasetImageStudio({
       }
     });
   }, [handleImagePaletteChange, isExtractingPalette, paletteImageElement]);
-
   const handleMergePaletteColors = useCallback(
     (keepColor: string, removeColor: string) => {
       mutateCaption(data => mergeIdeogramPaletteColors(data, keepColor, removeColor));
@@ -2563,7 +2348,6 @@ export default function DatasetImageStudio({
     },
     [mutateCaption],
   );
-
   const handleToggleLayerPaletteColor = useCallback(
     (elementIndex: number, color: string, assigned: boolean) => {
       const layer = paletteLayers.find(candidate => candidate.elementIndex === elementIndex);
@@ -2583,7 +2367,6 @@ export default function DatasetImageStudio({
     },
     [handleElementPaletteChange, paletteLayers],
   );
-
   const handleAssignPaletteColor = useCallback(
     (color: string) => {
       const preferredLayer =
@@ -2603,7 +2386,6 @@ export default function DatasetImageStudio({
     },
     [handleToggleLayerPaletteColor, paletteLayers, selectedElementIndex],
   );
-
   const handleCaptionDescriptionChange = useCallback(
     (value: string) => {
       if (!isIdeogram) {
@@ -2615,7 +2397,6 @@ export default function DatasetImageStudio({
     },
     [isIdeogram, mutateCaption],
   );
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -2723,7 +2504,6 @@ export default function DatasetImageStudio({
     selectedIndex,
     undo,
   ]);
-
   const highLevelDescription =
     isIdeogram && typeof captionParse.data.high_level_description === 'string'
       ? captionParse.data.high_level_description
@@ -2795,7 +2575,6 @@ export default function DatasetImageStudio({
         tone: pair.distance <= PALETTE_DELTA_E_THRESHOLDS.indistinguishable ? 'warning' : 'info',
       };
     });
-
     const assignedSwatches = paletteSwatches
       .filter(swatch => assignedPaletteColors.has(swatch.color) && swatch.coverage != null)
       .sort((left, right) => {
@@ -2829,7 +2608,6 @@ export default function DatasetImageStudio({
     latestCaptionRef.current = value;
     setCaptionText(value);
   }, []);
-
   if (items.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
@@ -2839,9 +2617,7 @@ export default function DatasetImageStudio({
       </div>
     );
   }
-
   if (!selectedItem) return null;
-
   if (presentation === 'legacy')
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-gray-950 text-gray-100">
@@ -2893,7 +2669,6 @@ export default function DatasetImageStudio({
                   item={selectedItem}
                   datasetName={datasetName}
                   workerID={workerID}
-                  projectID={projectID}
                   cryptoKey={encryptedKey}
                   zoom={zoom}
                   onNaturalSizeChange={setSelectedImageSize}
@@ -2922,7 +2697,6 @@ export default function DatasetImageStudio({
                 selectedIndex={selectedIndex}
                 datasetName={datasetName}
                 workerID={workerID}
-                projectID={projectID}
                 encryptedKey={encryptedKey}
                 isAutoCaptioning={isAutoCaptioning}
                 liveCaptionRefresh={liveCaptionRefresh}
@@ -3061,7 +2835,6 @@ export default function DatasetImageStudio({
         />
       </div>
     );
-
   return (
     <>
       <div className="caption-studio relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-gray-950 text-gray-100">
@@ -3070,7 +2843,6 @@ export default function DatasetImageStudio({
           selectedIndex={selectedIndex}
           datasetName={datasetName}
           workerID={workerID}
-          projectID={projectID}
           encryptedKey={encryptedKey}
           isAutoCaptioning={isAutoCaptioning}
           liveCaptionRefresh={liveCaptionRefresh}
@@ -3128,7 +2900,6 @@ export default function DatasetImageStudio({
                       <EncryptedThumb
                         datasetName={datasetName}
                         workerID={workerID}
-                        projectID={projectID}
                         cryptoKey={encryptedKey}
                         item={selectedItem.item}
                         onNaturalSizeChange={setSelectedImageSize}
@@ -3338,7 +3109,6 @@ export default function DatasetImageStudio({
               selectedIndex={selectedIndex}
               datasetName={datasetName}
               workerID={workerID}
-              projectID={projectID}
               encryptedKey={encryptedKey}
               onSelectIndex={advancedMode === 'json' ? index => void selectJsonIndex(index) : selectIndex}
             />
@@ -3380,7 +3150,6 @@ export default function DatasetImageStudio({
                   item={selectedItem}
                   datasetName={datasetName}
                   workerID={workerID}
-                  projectID={projectID}
                   cryptoKey={encryptedKey}
                   zoom={zoom}
                   onNaturalSizeChange={setSelectedImageSize}
@@ -3736,7 +3505,6 @@ export default function DatasetImageStudio({
                         <EncryptedThumb
                           datasetName={datasetName}
                           workerID={workerID}
-                          projectID={projectID}
                           cryptoKey={encryptedKey}
                           item={selectedItem.item}
                           onNaturalSizeChange={setSelectedImageSize}

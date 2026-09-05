@@ -75,9 +75,9 @@ export default function DatasetFolderIcon({
     ? unlocked
       ? 'border-emerald-500/60 bg-emerald-950 text-emerald-200'
       : 'border-cyan-500/50 bg-cyan-950 text-cyan-200'
-      : remote
-        ? 'border-sky-500/50 bg-sky-950 text-sky-200'
-        : 'border-amber-300/40 bg-amber-950 text-amber-100';
+    : remote
+      ? 'border-sky-500/50 bg-sky-950 text-sky-200'
+      : 'border-amber-300/40 bg-amber-950 text-amber-100';
 
   useEffect(() => {
     setPreviewFailed(false);

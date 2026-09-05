@@ -1,18 +1,15 @@
 'use client';
-
 import classNames from 'classnames';
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type { DatasetStudioItem } from './types';
 import { EncryptedThumb, PlainThumb } from './StudioMedia';
 import { itemKey, itemName } from './utils';
-
 export function AdvancedFilmstrip({
   items,
   selectedIndex,
   datasetName,
   workerID,
-  projectID,
   encryptedKey,
   onSelectIndex,
 }: {
@@ -20,13 +17,11 @@ export function AdvancedFilmstrip({
   selectedIndex: number;
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   encryptedKey: CryptoKey | null | undefined;
   onSelectIndex: (index: number) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const selectedRef = useRef<HTMLButtonElement | null>(null);
-
   useEffect(() => {
     const scroller = scrollerRef.current;
     const selected = selectedRef.current;
@@ -34,7 +29,6 @@ export function AdvancedFilmstrip({
     const nextLeft = selected.offsetLeft - Math.max(0, (scroller.clientWidth - selected.clientWidth) / 2);
     scroller.scrollTo({ left: Math.max(0, nextLeft), behavior: 'smooth' });
   }, [selectedIndex]);
-
   return (
     <nav className="flex h-[105px] flex-none border-b border-gray-800 bg-gray-950" aria-label="Dataset filmstrip">
       <button
@@ -70,7 +64,6 @@ export function AdvancedFilmstrip({
                 <EncryptedThumb
                   datasetName={datasetName}
                   workerID={workerID}
-                  projectID={projectID}
                   cryptoKey={encryptedKey}
                   item={item.item}
                 />

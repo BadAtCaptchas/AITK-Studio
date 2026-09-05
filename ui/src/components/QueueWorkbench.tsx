@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, ReactNode } from 'react';
 import Link from 'next/link';
@@ -37,70 +36,53 @@ import useWorkers from '@/hooks/useWorkers';
 import type { Job, Queue } from '@/types';
 import { getAvaliableJobActions, getTotalSteps } from '@/utils/jobs';
 import { reorderQueue, startQueue, stopQueue } from '@/utils/queue';
-import { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
-
 type QueueWorkbenchProps = {
   filterText: string;
   emptyAction?: ReactNode;
   focusGpuIDs?: string | null;
-  scope?: 'global' | 'all' | 'project';
-  projectID?: string | null;
-  includeProjectActive?: boolean;
 };
-
 type TabKey = 'active' | 'history' | 'failed' | 'all';
 type SortKey = 'newest' | 'oldest' | 'name';
-
 type JobGroup = {
   name: string;
   jobs: Job[];
   workerID: string;
   gpuIDs: string | null;
 };
-
 type PendingReorder = {
   laneKey: string;
   workerID: string;
   gpuIDs: string;
   jobIDs: string[];
 };
-
 const activeJobStatuses = new Set(['queued', 'running', 'stopping']);
-
 function getLaneKey(workerID: string, gpuIDs: string | null) {
   return `${workerID}:${gpuIDs || ''}`;
 }
-
 function isQueuedJob(job: Job) {
   return job.status === 'queued';
 }
-
 function hasSameIDs(a: string[], b: string[]) {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every(id => set.has(id));
 }
-
 function applyPendingOrder(group: JobGroup, pending: PendingReorder | null): JobGroup {
   if (!pending || pending.laneKey !== getLaneKey(group.workerID, group.gpuIDs)) return group;
   const queuedJobs = group.jobs.filter(isQueuedJob);
   const queuedIDs = queuedJobs.map(job => job.id);
   if (!hasSameIDs(queuedIDs, pending.jobIDs)) return group;
-
   const queuedByID = new Map(queuedJobs.map(job => [job.id, job]));
   const orderedQueuedJobs = pending.jobIDs.map(id => queuedByID.get(id)).filter(Boolean) as Job[];
   let queuedIndex = 0;
-
   return {
     ...group,
     jobs: group.jobs.map(job => (isQueuedJob(job) ? orderedQueuedJobs[queuedIndex++] || job : job)),
   };
 }
-
 function isRemoteWorker(workerID: string) {
   return workerID !== 'local';
 }
-
 function jobDisplayTitle(row: Job) {
   if (row.job_type === 'caption') {
     const splits = (row.job_ref || '').split(/[/\\]/);
@@ -111,7 +93,6 @@ function jobDisplayTitle(row: Job) {
   }
   return { prefix: 'Train', title: row.name };
 }
-
 function safeTotalSteps(job: Job) {
   if (job.job_type !== 'train') return null;
   try {
@@ -120,13 +101,11 @@ function safeTotalSteps(job: Job) {
     return null;
   }
 }
-
 function getProgress(job: Job) {
   const totalSteps = safeTotalSteps(job);
   if (!totalSteps) return 0;
   return Math.max(0, Math.min(100, (job.step / totalSteps) * 100));
 }
-
 function formatDate(value: Job['updated_at']) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return 'Unknown';
@@ -137,7 +116,6 @@ function formatDate(value: Job['updated_at']) {
     minute: '2-digit',
   });
 }
-
 function formatRelative(value: Job['updated_at']) {
   const date = new Date(value);
   const time = date.getTime();
@@ -150,25 +128,15 @@ function formatRelative(value: Job['updated_at']) {
   const days = Math.round(hours / 24);
   return `${days}d ago`;
 }
-
 function shortID(value: string) {
   return value.length > 10 ? `${value.slice(0, 10)}...` : value;
 }
-
 function jobDetailHref(job: Job) {
-  if (job.project_id) {
-    return `/projects/${encodeURIComponent(job.project_id)}/runs/${encodeURIComponent(job.id)}`;
-  }
   return `/jobs/${encodeURIComponent(job.id)}`;
 }
-
 function jobEditHref(job: Job) {
-  if (job.project_id) {
-    return `/projects/${encodeURIComponent(job.project_id)}/runs/new?id=${encodeURIComponent(job.id)}`;
-  }
   return `/jobs/new?id=${encodeURIComponent(job.id)}`;
 }
-
 function sortHistoryJobs(jobs: Job[], sort: SortKey) {
   const sorted = [...jobs];
   if (sort === 'name') {
@@ -180,7 +148,6 @@ function sortHistoryJobs(jobs: Job[], sort: SortKey) {
     return sort === 'oldest' ? aTime - bTime : bTime - aTime;
   });
 }
-
 function statusAccent(job: Job) {
   if (job.status === 'error' || job.status === 'failed') {
     return 'border-l-rose-500 bg-rose-950/10';
@@ -193,7 +160,6 @@ function statusAccent(job: Job) {
   }
   return 'border-l-gray-800 bg-transparent';
 }
-
 function WorkerHero({
   group,
   queue,
@@ -211,7 +177,6 @@ function WorkerHero({
   const running = group.jobs.filter(job => job.status === 'running').length;
   const queued = group.jobs.filter(job => job.status === 'queued').length;
   const activeTotal = group.jobs.length;
-
   const [togglePending, setTogglePending] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const toggleQueue = async () => {
@@ -228,7 +193,6 @@ function WorkerHero({
       setTogglePending(false);
     }
   };
-
   return (
     <section className="border-b border-gray-800 p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -307,7 +271,6 @@ function WorkerHero({
     </section>
   );
 }
-
 function QueueEmptyState({ queueRunning, action }: { queueRunning: boolean; action?: ReactNode }) {
   return (
     <div className="studio-queue-empty">
@@ -325,7 +288,6 @@ function QueueEmptyState({ queueRunning, action }: { queueRunning: boolean; acti
     </div>
   );
 }
-
 function QueueJobCard({
   job,
   index,
@@ -355,7 +317,6 @@ function QueueJobCard({
   const { prefix, title } = jobDisplayTitle(job);
   const totalSteps = safeTotalSteps(job);
   const canDrag = job.status === 'queued' && !reorderBusy;
-
   return (
     <div
       role="button"
@@ -429,7 +390,6 @@ function QueueJobCard({
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
             <span>Added {formatRelative(job.created_at)}</span>
             <span>ID {shortID(job.id)}</span>
-            <ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} />
           </div>
         </div>
       </div>
@@ -475,7 +435,6 @@ function QueueJobCard({
     </div>
   );
 }
-
 function JobListLane({
   title,
   description,
@@ -498,7 +457,6 @@ function JobListLane({
   onReorder?: (targetJobID: string) => void;
 }) {
   const sortedJobs = sortHistoryJobs(jobs, sort);
-
   if (sortedJobs.length === 0) {
     return (
       <section className="border-t border-gray-900 py-4 text-sm text-gray-400">
@@ -507,7 +465,6 @@ function JobListLane({
       </section>
     );
   }
-
   return (
     <section className="border-t border-gray-900">
       <div className="flex min-w-0 items-start justify-between gap-3 px-3 py-3 sm:items-center">
@@ -539,7 +496,6 @@ function JobListLane({
     </section>
   );
 }
-
 function ActiveQueueLane({
   group,
   emptyAction,
@@ -581,7 +537,6 @@ function ActiveQueueLane({
   const laneKey = getLaneKey(group.workerID, group.gpuIDs);
   const isSavingOrder = reorderBusy === laneKey;
   const hasPendingOrder = pendingReorder?.laneKey === laneKey;
-
   return (
     <div className="operator-panel overflow-hidden">
       <WorkerHero
@@ -652,14 +607,12 @@ function ActiveQueueLane({
     </div>
   );
 }
-
 function EventIcon({ line }: { line: string }) {
   if (/error|failed|exit code/i.test(line)) return <XCircle className="h-4 w-4 text-rose-400" />;
   if (/start|queued|running/i.test(line)) return <Info className="h-4 w-4 text-brand-400" />;
   if (/complete|saved|done/i.test(line)) return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
   return <Clock3 className="h-4 w-4 text-gray-500" />;
 }
-
 function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => void }) {
   const { log, status } = useJobLog(job.id, ['running', 'stopping'].includes(job.status) ? 5000 : null);
   const { prefix, title } = jobDisplayTitle(job);
@@ -672,7 +625,6 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
     .reverse();
   const events = logLines.length > 0 ? logLines : [job.info || 'No recent events available.'];
   const actions = getAvaliableJobActions(job);
-
   return (
     <aside className="sticky top-3 flex max-h-[calc(100dvh-4.5rem)] min-h-[520px] flex-col overflow-hidden border-l border-gray-900 bg-gray-950/45">
       <div className="flex min-w-0 items-start justify-between gap-3 border-b border-gray-900 px-4 py-3">
@@ -695,10 +647,6 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
             <div className="truncate text-gray-100">{job.worker_id === 'local' ? 'Local' : job.worker_id}</div>
             <div className="text-gray-500">GPU</div>
             <div className="text-gray-100">{job.gpu_ids || '-'}</div>
-            <div className="text-gray-500">Workspace</div>
-            <div className="min-w-0">
-              <ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} />
-            </div>
             <div className="text-gray-500">Added</div>
             <div className="text-gray-100">{formatDate(job.created_at)}</div>
             <div className="text-gray-500">ID</div>
@@ -789,21 +737,10 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
     </aside>
   );
 }
-
-export default function QueueWorkbench({
-  filterText,
-  emptyAction,
-  focusGpuIDs,
-  scope = 'global',
-  projectID = null,
-  includeProjectActive = false,
-}: QueueWorkbenchProps) {
+export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }: QueueWorkbenchProps) {
   const router = useRouter();
   const { jobs, status, refreshJobs } = useJobsList({
     reloadInterval: 5000,
-    scope,
-    projectID,
-    includeProjectActive,
   });
   const { queues, status: queueStatus, refreshQueues } = useQueueList(5000);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
@@ -817,12 +754,10 @@ export default function QueueWorkbench({
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [pendingReorder, setPendingReorder] = useState<PendingReorder | null>(null);
   const [hasInlineInspector, setHasInlineInspector] = useState(false);
-
   const refresh = () => {
     refreshJobs();
     refreshQueues();
   };
-
   useEffect(() => {
     const query = window.matchMedia('(min-width: 1280px)');
     const update = () => setHasInlineInspector(query.matches);
@@ -830,7 +765,6 @@ export default function QueueWorkbench({
     query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, []);
-
   const activateJob = (jobID: string) => {
     if (hasInlineInspector) {
       setSelectedJobID(jobID);
@@ -839,20 +773,17 @@ export default function QueueWorkbench({
     const job = jobs.find(candidate => candidate.id === jobID);
     router.push(job ? jobDetailHref(job) : `/jobs/${encodeURIComponent(jobID)}`);
   };
-
   const filteredJobs = useMemo(() => {
     const query = filterText.trim().toLowerCase();
     if (!query) return jobs;
     return jobs.filter(job =>
-      [job.name, job.project_name, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
+      [job.name, null, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
   }, [filterText, jobs]);
-
   const jobsDict = useMemo<Record<string, JobGroup>>(() => {
     if (filteredJobs.length === 0 && gpuList.length === 0 && queues.length === 0) return {};
-
     const groups: Record<string, JobGroup> = {};
     const workerName = (workerID: string) => {
       if (workerID === 'local') return 'Local';
@@ -864,7 +795,10 @@ export default function QueueWorkbench({
       }
       const worker = workers.find(candidate => candidate.id === workerID);
       try {
-        const gpus = JSON.parse(worker?.gpus || '[]') as Array<{ index: number; name: string }>;
+        const gpus = JSON.parse(worker?.gpus || '[]') as Array<{
+          index: number;
+          name: string;
+        }>;
         return gpus.find(gpu => `${gpu.index}` === gpuID)?.name || `GPU #${gpuID}`;
       } catch {
         return `GPU #${gpuID}`;
@@ -882,7 +816,6 @@ export default function QueueWorkbench({
       }
       return groups[key];
     };
-
     gpuList.forEach(gpu => {
       groups[`local:${gpu.index}`] = {
         name: `Local / ${gpu.name}`,
@@ -893,7 +826,6 @@ export default function QueueWorkbench({
     });
     queues.forEach(queue => ensureGroup(queue.worker_id, queue.gpu_ids));
     groups.idle = { name: 'Idle / history', jobs: [], workerID: 'local', gpuIDs: null };
-
     filteredJobs.forEach(job => {
       const workerID = job.worker_id || 'local';
       const gpuIDs = job.gpu_ids || '0';
@@ -908,7 +840,6 @@ export default function QueueWorkbench({
         groups.idle.jobs.push(job);
       }
     });
-
     Object.keys(groups).forEach(key => {
       if (key === 'idle') {
         groups[key].jobs = sortHistoryJobs(groups[key].jobs, sort);
@@ -920,10 +851,8 @@ export default function QueueWorkbench({
         });
       }
     });
-
     return groups;
   }, [filteredJobs, gpuList, isGPUInfoLoaded, queues, sort, workers]);
-
   const activeGroups = useMemo(() => {
     const keys = Object.keys(jobsDict).filter(key => key !== 'idle');
     return keys
@@ -935,7 +864,6 @@ export default function QueueWorkbench({
       })
       .map(key => jobsDict[key]);
   }, [focusGpuIDs, jobsDict]);
-
   useEffect(() => {
     if (!pendingReorder) return;
     const group = jobsDict[pendingReorder.laneKey];
@@ -946,12 +874,10 @@ export default function QueueWorkbench({
     const queuedIDs = group.jobs.filter(isQueuedJob).map(job => job.id);
     if (!hasSameIDs(queuedIDs, pendingReorder.jobIDs)) setPendingReorder(null);
   }, [jobsDict, pendingReorder]);
-
   const idleJobs = jobsDict.idle?.jobs || [];
   const failedJobs = filteredJobs.filter(job => job.status === 'error' || job.status === 'failed');
   const activeJobs = filteredJobs.filter(job => activeJobStatuses.has(job.status));
   const selectedJob = filteredJobs.find(job => job.id === selectedJobID) || null;
-
   const tableError =
     status === 'error'
       ? 'Jobs could not be loaded.'
@@ -960,36 +886,35 @@ export default function QueueWorkbench({
         : workerStatus === 'error'
           ? 'Workers could not be loaded.'
           : null;
-
   let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading';
   if (Object.keys(jobsDict).length > 0) isLoading = false;
-
-  const tabs: Array<{ key: TabKey; label: string; count: number; icon: typeof PlayCircle }> = [
+  const tabs: Array<{
+    key: TabKey;
+    label: string;
+    count: number;
+    icon: typeof PlayCircle;
+  }> = [
     { key: 'active', label: 'Active', count: activeJobs.length, icon: PlayCircle },
     { key: 'history', label: 'History', count: idleJobs.length, icon: History },
     { key: 'failed', label: 'Failed', count: failedJobs.length, icon: AlertTriangle },
     { key: 'all', label: 'All', count: filteredJobs.length, icon: CircleDashed },
   ];
-
   const handleDragStart = (jobID: string) => {
     setReorderError(null);
     setDragJobID(jobID);
   };
-
   const handleDragOver = (jobID: string, event: DragEvent<HTMLDivElement>) => {
     if (!dragJobID || dragJobID === jobID) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     setDragOverJobID(jobID);
   };
-
   const handleDrop = (targetJobID: string, group: JobGroup) => {
     if (!dragJobID || dragJobID === targetJobID || !group.gpuIDs) {
       setDragJobID(null);
       setDragOverJobID(null);
       return;
     }
-
     const queuedJobs = group.jobs.filter(job => job.status === 'queued');
     const fromIndex = queuedJobs.findIndex(job => job.id === dragJobID);
     const toIndex = queuedJobs.findIndex(job => job.id === targetJobID);
@@ -998,7 +923,6 @@ export default function QueueWorkbench({
       setDragOverJobID(null);
       return;
     }
-
     const nextJobs = [...queuedJobs];
     const [moved] = nextJobs.splice(fromIndex, 1);
     nextJobs.splice(toIndex, 0, moved);
@@ -1012,12 +936,10 @@ export default function QueueWorkbench({
     setDragJobID(null);
     setDragOverJobID(null);
   };
-
   const handleApplyReorder = async (group: JobGroup) => {
     if (!group.gpuIDs) return;
     const laneKey = getLaneKey(group.workerID, group.gpuIDs);
     if (!pendingReorder || pendingReorder.laneKey !== laneKey) return;
-
     setReorderBusy(laneKey);
     setReorderError(null);
     try {
@@ -1032,18 +954,15 @@ export default function QueueWorkbench({
       setDragOverJobID(null);
     }
   };
-
   const handleCancelReorder = (laneKey: string) => {
     setPendingReorder(current => (current?.laneKey === laneKey ? null : current));
     setDragJobID(null);
     setDragOverJobID(null);
   };
-
   const handleDragEnd = () => {
     setDragJobID(null);
     setDragOverJobID(null);
   };
-
   if (isLoading && !tableError && Object.keys(jobsDict).length === 0) {
     return (
       <div className="p-3">
@@ -1053,7 +972,6 @@ export default function QueueWorkbench({
       </div>
     );
   }
-
   return (
     <div
       className={classNames('grid gap-5', hasInlineInspector && selectedJob && 'xl:grid-cols-[minmax(0,1fr)_340px]')}

@@ -224,9 +224,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
               />
             </div>
           )}
-          {isVisible && isItAudio && showAudioPlayer && (
-            <AudioPlayer src={mediaUrl} title={displayName} />
-          )}
+          {isVisible && isItAudio && showAudioPlayer && <AudioPlayer src={mediaUrl} title={displayName} />}
           {!isItAudio && blobUrl && (
             <img
               src={blobUrl}

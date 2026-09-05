@@ -234,10 +234,7 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
 
               return (
                 // pb-1 recreates the vertical gap between rows that the original single CSS grid provided via `gap-1`.
-                <div
-                  className="grid gap-1 pb-1"
-                  style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
-                >
+                <div className="grid gap-1 pb-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
                   {row.map(sample => (
                     <SampleImageCard
                       key={sample}

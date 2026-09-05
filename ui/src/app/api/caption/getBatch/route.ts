@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
@@ -10,7 +11,7 @@ import { sanitizeCaptionText } from '@/utils/captionQuality';
 export async function POST(request: NextRequest) {
   let body;
   try {
-    body = await request.json();
+    body = assertGlobalPayload(await request.json());
   } catch {
     return new NextResponse(null, { status: 499 });
   }
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
 
   let datasetsRoot = '';
   try {
-    const scope = await resolveDatasetScope(body?.project_id);
+    const scope = await resolveDatasetScope();
     datasetsRoot = scope.datasetsRoot;
   } catch (error) {
     if (error instanceof DatasetScopeError) {

@@ -1,5 +1,4 @@
 'use client';
-
 import QueueWorkbench from '@/components/QueueWorkbench';
 import { TopBar, MainContent } from '@/components/layout';
 import Link from 'next/link';
@@ -22,12 +21,8 @@ import { SelectInput } from '@/components/formInputs';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { downloadJobModelReferences, importTrainingJob } from '@/utils/jobs';
 import type { Job } from '@/types';
-import ResourceScopeFilter from '@/components/ResourceScopeFilter';
-import useResourceScope from '@/hooks/useResourceScope';
-
 type ImportPhase = 'uploading' | 'processing' | 'completed' | 'failed';
 type ModelDownloadPhase = 'downloading' | 'completed' | 'failed';
-
 type ImportStatus = {
   phase: ImportPhase;
   fileName: string;
@@ -40,14 +35,12 @@ type ImportStatus = {
   warnings: string[];
   error: string | null;
 };
-
 type ModelDownloadStatus = {
   phase: ModelDownloadPhase;
   handledCount: number;
   warnings: string[];
   error: string | null;
 };
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -59,19 +52,24 @@ function formatBytes(bytes: number) {
   }
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
-
 function getApiErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === 'object' && 'response' in error) {
-    const response = (error as { response?: { data?: { error?: string } } }).response;
+    const response = (
+      error as {
+        response?: {
+          data?: {
+            error?: string;
+          };
+        };
+      }
+    ).response;
     if (response?.data?.error) return response.data.error;
   }
   return error instanceof Error ? error.message : fallback;
 }
-
 function getImportErrorMessage(error: unknown) {
   return getApiErrorMessage(error, 'Failed to import training job.');
 }
-
 function getImportProgressPercent(status: ImportStatus) {
   if (status.phase === 'completed') return 100;
   if (status.phase === 'processing') return 72;
@@ -82,14 +80,12 @@ function getImportProgressPercent(status: ImportStatus) {
   if (status.uploadPercent === null) return 8;
   return Math.max(8, Math.round(status.uploadPercent * 0.65));
 }
-
 function getImportTitle(status: ImportStatus) {
   if (status.phase === 'uploading') return 'Uploading training archive';
   if (status.phase === 'processing') return 'Importing job files';
   if (status.phase === 'completed') return 'Training job imported';
   return 'Import failed';
 }
-
 function getImportDetail(status: ImportStatus) {
   if (status.phase === 'uploading') {
     const uploaded = formatBytes(status.loaded);
@@ -106,20 +102,14 @@ function getImportDetail(status: ImportStatus) {
   }
   return status.error || 'Please check the archive and try again.';
 }
-
 function getStageClass(isActive: boolean, isComplete: boolean, isFailed = false) {
   if (isFailed) return 'border-red-500/50 bg-red-500/10 text-red-200';
   if (isComplete) return 'border-green-500/50 bg-green-500/10 text-green-200';
   if (isActive) return 'border-brand-500/60 bg-brand-500/10 text-brand-100';
   return 'border-gray-700 bg-gray-950 text-gray-400';
 }
-
 export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const resourceScope = useResourceScope();
-  const activeProjectID = resourceScope.scope === 'project' ? resourceScope.projectID : null;
-  const selectedProjectArchived = resourceScope.selectedProject?.lifecycle_state === 'archived';
-  const scopeRequiresTarget = resourceScope.scope === 'all';
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
@@ -128,18 +118,15 @@ export default function Dashboard() {
   const [filterText, setFilterText] = useState('');
   const isImporting = importStatus?.phase === 'uploading' || importStatus?.phase === 'processing';
   const isModelDownloading = modelDownloadStatus?.phase === 'downloading';
-
   useEffect(() => {
     if (isGPUInfoLoaded && gpuIDs === null && gpuList.length > 0) {
       setGpuIDs(`${gpuList[0].index}`);
     }
   }, [gpuIDs, gpuList, isGPUInfoLoaded]);
-
   const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file || isImporting) return;
-
     setModelDownloadStatus(null);
     setImportStatus({
       phase: 'uploading',
@@ -154,25 +141,19 @@ export default function Dashboard() {
       error: null,
     });
     try {
-      const result = await importTrainingJob(
-        file,
-        gpuIDs,
-        progress => {
-          setImportStatus(current => {
-            if (!current) return current;
-            const uploadDone = progress.percent !== null && progress.percent >= 100;
-            return {
-              ...current,
-              phase: uploadDone ? 'processing' : 'uploading',
-              loaded: progress.loaded,
-              total: progress.total,
-              uploadPercent: progress.percent,
-            };
-          });
-        },
-        activeProjectID,
-      );
-
+      const result = await importTrainingJob(file, gpuIDs, progress => {
+        setImportStatus(current => {
+          if (!current) return current;
+          const uploadDone = progress.percent !== null && progress.percent >= 100;
+          return {
+            ...current,
+            phase: uploadDone ? 'processing' : 'uploading',
+            loaded: progress.loaded,
+            total: progress.total,
+            uploadPercent: progress.percent,
+          };
+        });
+      });
       setImportStatus(current => ({
         phase: 'completed',
         fileName: current?.fileName || file.name,
@@ -202,11 +183,9 @@ export default function Dashboard() {
       }));
     }
   };
-
   const handleDownloadImportedModels = async () => {
     const job = importStatus?.job;
     if (!job || isModelDownloading) return;
-
     setModelDownloadStatus({ phase: 'downloading', handledCount: 0, warnings: [], error: null });
     try {
       const result = await downloadJobModelReferences(job.id);
@@ -230,7 +209,6 @@ export default function Dashboard() {
       });
     }
   };
-
   const importProgressPercent = importStatus ? getImportProgressPercent(importStatus) : 0;
   const importTarget = importStatus?.gpuIDs ? `GPU #${importStatus.gpuIDs}` : 'Default GPU';
   const importUploadComplete = importStatus
@@ -241,16 +219,12 @@ export default function Dashboard() {
   const importUploadFailed =
     importStatus?.phase === 'failed' && (importStatus.uploadPercent === null || importStatus.uploadPercent < 100);
   const importRestoreFailed = importStatus?.phase === 'failed' && !importUploadFailed;
-
   return (
     <>
       <TopBar>
         <div className="flex shrink-0 items-center gap-2">
           <ListOrdered className="h-4 w-4 text-brand-300" />
-          <h1 className="text-base font-semibold">
-            <span className="hidden text-gray-500 sm:inline">AI Toolkit / </span>
-            Queue
-          </h1>
+          <h1 className="text-base font-semibold">Queue</h1>
         </div>
         <div className="flex-1"></div>
         {gpuList.length > 0 && (
@@ -267,7 +241,7 @@ export default function Dashboard() {
           <Button
             className="operator-button shrink-0 py-1"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isImporting || Boolean(selectedProjectArchived) || scopeRequiresTarget}
+            disabled={isImporting}
             title={isImporting ? 'Importing training job' : 'Import training job'}
             aria-label={isImporting ? 'Importing training job' : 'Import training job'}
           >
@@ -288,22 +262,14 @@ export default function Dashboard() {
         </div>
         <div>
           <Link
-            href={activeProjectID ? `/projects/${encodeURIComponent(activeProjectID)}/runs/new` : '/jobs/new'}
-            className={`operator-button-primary h-10 shrink-0 ${
-              selectedProjectArchived || scopeRequiresTarget ? 'pointer-events-none opacity-40' : ''
-            }`}
-            title={
-              selectedProjectArchived
-                ? 'Archived projects are browse-only'
-                : scopeRequiresTarget
-                  ? 'Choose Global or a Project before creating a job'
-                  : 'New training job'
-            }
+            href={'/jobs/new'}
+            className={`operator-button-primary h-10 shrink-0 ${''}`}
+            title={'New training job'}
             aria-label="New training job"
-            aria-disabled={selectedProjectArchived || scopeRequiresTarget ? true : undefined}
+            aria-disabled={undefined}
           >
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">New Job</span>
+            <span className="hidden sm:inline">New training</span>
           </Link>
         </div>
       </TopBar>
@@ -313,23 +279,6 @@ export default function Dashboard() {
           <h2>Your training, in motion.</h2>
           <p>Manage runs across your local and remote workers.</p>
         </header>
-        <section className="mb-6 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <ResourceScopeFilter
-            scope={resourceScope.scope}
-            projectID={resourceScope.projectID}
-            projects={resourceScope.projects}
-            projectsEnabled={resourceScope.projectsEnabled}
-            onScopeChange={resourceScope.setScope}
-            onProjectChange={resourceScope.setProjectID}
-          />
-          <div className="text-xs text-gray-500">
-            {resourceScope.scope === 'all'
-              ? 'Global and project jobs · choose a workspace to create or import'
-              : resourceScope.scope === 'project'
-                ? `${resourceScope.selectedProject?.name || 'Project'}${selectedProjectArchived ? ' · browse only' : ''}`
-                : 'Global jobs'}
-          </div>
-        </section>
         {importStatus && (
           <section
             role="status"
@@ -399,11 +348,7 @@ export default function Dashboard() {
 
                 <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
                   <div
-                    className={`rounded border px-3 py-2 ${getStageClass(
-                      importStatus.phase === 'uploading',
-                      importUploadComplete,
-                      importUploadFailed,
-                    )}`}
+                    className={`rounded border px-3 py-2 ${getStageClass(importStatus.phase === 'uploading', importUploadComplete, importUploadFailed)}`}
                   >
                     <div className="font-medium">Upload</div>
                     <div className="mt-0.5 opacity-80">
@@ -411,11 +356,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div
-                    className={`rounded border px-3 py-2 ${getStageClass(
-                      importStatus.phase === 'processing',
-                      importProcessingComplete,
-                      importRestoreFailed,
-                    )}`}
+                    className={`rounded border px-3 py-2 ${getStageClass(importStatus.phase === 'processing', importProcessingComplete, importRestoreFailed)}`}
                   >
                     <div className="font-medium">Restore</div>
                     <div className="mt-0.5 opacity-80">
@@ -427,11 +368,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div
-                    className={`rounded border px-3 py-2 ${getStageClass(
-                      false,
-                      importStatus.phase === 'completed',
-                      importStatus.phase === 'failed',
-                    )}`}
+                    className={`rounded border px-3 py-2 ${getStageClass(false, importStatus.phase === 'completed', importStatus.phase === 'failed')}`}
                   >
                     <div className="font-medium">{importStatus.phase === 'failed' ? 'Review' : 'Ready'}</div>
                     <div className="mt-0.5 opacity-80">
@@ -474,11 +411,7 @@ export default function Dashboard() {
                     )}
                     {importStatus.job && (
                       <Link
-                        href={
-                          importStatus.job.project_id
-                            ? `/projects/${encodeURIComponent(importStatus.job.project_id)}/runs/${encodeURIComponent(importStatus.job.id)}`
-                            : `/jobs/${importStatus.job.id}`
-                        }
+                        href={`/jobs/${importStatus.job.id}`}
                         className="inline-flex items-center gap-2 rounded-md bg-brand-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600"
                       >
                         View Job
@@ -540,30 +473,23 @@ export default function Dashboard() {
         <QueueWorkbench
           key={jobsTableKey}
           emptyAction={
-            !selectedProjectArchived && !scopeRequiresTarget ? (
-              <>
-                <Link
-                  href={activeProjectID ? `/projects/${encodeURIComponent(activeProjectID)}/runs/new` : '/jobs/new'}
-                  className="operator-button-primary h-11 px-5"
-                >
-                  <Plus className="h-4 w-4" />
-                  New training job
-                </Link>
-                <button
-                  type="button"
-                  className="operator-button h-11"
-                  disabled={isImporting}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Import a configuration
-                </button>
-              </>
-            ) : undefined
+            <>
+              <Link href={'/jobs/new'} className="operator-button-primary h-11 px-5">
+                <Plus className="h-4 w-4" />
+                New training job
+              </Link>
+              <button
+                type="button"
+                className="operator-button h-11"
+                disabled={isImporting}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Import a configuration
+              </button>
+            </>
           }
           filterText={filterText}
           focusGpuIDs={gpuIDs}
-          scope={resourceScope.scope}
-          projectID={activeProjectID}
         />
       </MainContent>
     </>

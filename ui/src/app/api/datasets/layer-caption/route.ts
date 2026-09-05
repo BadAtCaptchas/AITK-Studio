@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   encryptedOpenRouterUploadImageDataUrl,
@@ -8,7 +9,7 @@ import {
 import { generateOpenRouterLayerCaption } from '@/server/openRouterLayerCaption';
 import { generateOllamaLayerCaption, generateRemoteOllamaLayerCaption } from '@/server/ollamaVision';
 import { getOpenRouterApiKey } from '@/server/settings';
-import { assertProjectScopeEnabled, DatasetScopeError } from '@/server/datasetScope';
+import { DatasetScopeError } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 
@@ -37,8 +38,8 @@ export async function POST(request: NextRequest) {
     let imageDataUrl = '';
 
     if (contentType.includes('multipart/form-data')) {
-      const formData = await request.formData();
-      await assertProjectScopeEnabled(formData.get('project_id'));
+      const formData = assertGlobalPayload(await request.formData());
+
       caption = String(formData.get('caption') || '');
       model = String(formData.get('model') || '');
       provider = normalizeProvider(formData.get('provider'));
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
       }
       imageDataUrl = await encryptedOpenRouterUploadImageDataUrl(formData, 'Caption Layer');
     } else {
-      const body = await request.json();
+      const body = assertGlobalPayload(await request.json());
       caption = typeof body?.caption === 'string' ? body.caption : '';
       model = typeof body?.model === 'string' ? body.model : '';
       provider = normalizeProvider(body?.provider);
@@ -62,12 +63,14 @@ export async function POST(request: NextRequest) {
       if (!imageWidth || !imageHeight) {
         throw new Error('Image width and height are required for Caption Layer.');
       }
-      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Caption Layer', body?.project_id);
+      imageDataUrl = await plainOpenRouterImageDataUrl(body?.imgPath, 'Caption Layer');
     }
 
     const imageSize = { width: imageWidth, height: imageHeight };
     if (provider === 'ollama') {
-      return NextResponse.json(await generateOllamaLayerCaption({ imageDataUrl, caption, elementIndex, model, imageSize }));
+      return NextResponse.json(
+        await generateOllamaLayerCaption({ imageDataUrl, caption, elementIndex, model, imageSize }),
+      );
     }
     if (provider === 'remote_ollama') {
       return NextResponse.json(

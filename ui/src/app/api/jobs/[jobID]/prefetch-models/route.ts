@@ -3,7 +3,6 @@ import { db } from '@/server/db';
 import { collectModelReferences, setConfigPathValue } from '@/server/trainingJobTransfer';
 import { normalizeModelReferenceValue, prefetchModelReferences } from '@/server/hfModelPrefetch';
 import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
-import { assertProjectJobEnabled } from '@/server/projects';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,11 +37,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
   const job = await db.jobs.findById(jobID);
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  }
-  try {
-    await assertProjectJobEnabled(job, 'execute');
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
   }
   if (job.job_type !== 'train') {
     return NextResponse.json({ error: 'Only training jobs can download model references' }, { status: 400 });
@@ -84,20 +78,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
 
   const prefetchedFilePathByValue = getPrefetchedFilePathByValue(result.downloads);
   let updatedConfig = false;
-  if (!job.project_id) {
+  {
     for (const reference of modelReferences) {
       const localModelPath = prefetchedFilePathByValue.get(normalizeModelReferenceValue(reference.value));
       if (!localModelPath) continue;
       setConfigPathValue(jobConfig, reference.configPath, localModelPath);
       updatedConfig = true;
     }
-  } else if (prefetchedFilePathByValue.size > 0) {
-    warnings.push('Project run model references were kept as shared Hugging Face/global model references.');
   }
 
-  const updatedJob = updatedConfig
-    ? await db.jobs.update(job.id, { job_config: JSON.stringify(jobConfig) })
-    : job;
+  const updatedJob = updatedConfig ? await db.jobs.update(job.id, { job_config: JSON.stringify(jobConfig) }) : job;
 
   return NextResponse.json({
     handledValues: result.handledValues,

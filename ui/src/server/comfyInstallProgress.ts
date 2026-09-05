@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { Job } from '@/types';
-import { getJobTrainingRoot } from '@/server/projects';
+import { getJobTrainingRoot } from '@/server/trainingPaths';
 
 export const COMFY_INSTALL_PROGRESS_FILE = '.comfy_install_progress.json';
 
@@ -78,7 +78,12 @@ function isVisible(progress: ComfyInstallProgress) {
   if (!Number.isFinite(updatedMs)) return false;
   const age = Date.now() - updatedMs;
 
-  if (progress.status === 'checking' || progress.status === 'installing' || progress.status === 'launching' || progress.status === 'ready') {
+  if (
+    progress.status === 'checking' ||
+    progress.status === 'installing' ||
+    progress.status === 'launching' ||
+    progress.status === 'ready'
+  ) {
     return age <= ACTIVE_STALE_MS;
   }
   if (progress.status === 'completed') return age <= COMPLETED_GRACE_MS;
@@ -110,7 +115,9 @@ export async function getComfyInstallProgressAtPath(progressPath: string): Promi
   }
 }
 
-export async function withComfyInstallProgress<T extends Job>(job: T): Promise<T & { comfy_install_progress: ComfyInstallProgress | null }> {
+export async function withComfyInstallProgress<T extends Job>(
+  job: T,
+): Promise<T & { comfy_install_progress: ComfyInstallProgress | null }> {
   return {
     ...job,
     comfy_install_progress: await getComfyInstallProgress(job),

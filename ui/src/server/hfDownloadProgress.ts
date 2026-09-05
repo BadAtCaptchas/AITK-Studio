@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { Job } from '@/types';
-import { getJobTrainingRoot } from '@/server/projects';
+import { getJobTrainingRoot } from '@/server/trainingPaths';
 
 export const HF_DOWNLOAD_PROGRESS_FILE = '.hf_download_progress.json';
 
@@ -133,7 +133,9 @@ export async function getHFDownloadProgress(job: Job): Promise<HFDownloadProgres
   }
 }
 
-export async function withHFDownloadProgress<T extends Job>(job: T): Promise<T & { hf_download_progress: HFDownloadProgress | null }> {
+export async function withHFDownloadProgress<T extends Job>(
+  job: T,
+): Promise<T & { hf_download_progress: HFDownloadProgress | null }> {
   return {
     ...job,
     hf_download_progress: await getHFDownloadProgress(job),

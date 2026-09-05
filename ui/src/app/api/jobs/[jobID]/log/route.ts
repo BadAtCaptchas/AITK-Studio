@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
-import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
+import { getJobTrainingRoot } from '@/server/trainingPaths';
 import { getTrainingFolder } from '@/server/settings';
 import {
   getRemoteWorker,
@@ -117,11 +117,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
-  try {
-    await assertProjectJobEnabled(job);
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
-  }
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
@@ -148,14 +143,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const trainingFolder = await getJobTrainingRoot(job);
     let readableLogPath = await resolveReadableJobLogPath(trainingFolder, job.name, jobID);
-    if (!readableLogPath && job.project_id) {
-      const globalTrainingFolder = await getTrainingFolder();
-      if (path.resolve(globalTrainingFolder) !== path.resolve(trainingFolder)) {
-        readableLogPath = await resolveReadableJobLogPath(globalTrainingFolder, job.name, jobID, {
-          requireLaunchJobMatch: true,
-        });
-      }
-    }
     if (!readableLogPath) {
       return NextResponse.json({ log: '', offset: 0, reset: true });
     }

@@ -5,6 +5,7 @@
  * workers share the public port, serve authorized local files with raw Node
  * streams, and proxy every other HTTP/WebSocket request to Next.js.
  */
+import { hasObsoleteWorkspaceScope, hasObsoleteWorkspaceHeaders } from '../src/utils/obsoleteWorkspaceGuard';
 import cluster, { type Worker } from 'cluster';
 import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
@@ -13,11 +14,7 @@ import net from 'net';
 import os from 'os';
 import { pipeline } from 'stream';
 import type { FileResponseResolution } from '../src/server/fileServing';
-import {
-  configureFrontServerTimeouts,
-  proxyRetryDecision,
-  registerWorkerCrash,
-} from './fileServerPolicy';
+import { configureFrontServerTimeouts, proxyRetryDecision, registerWorkerCrash } from './fileServerPolicy';
 
 const isDev = process.argv.includes('dev');
 const UPSTREAM_HOST = '127.0.0.1';
@@ -94,9 +91,7 @@ function sendResolution(
   if (req.destroyed || res.destroyed) return;
   res.writeHead(resolution.status, resolution.headers);
   const bodylessStatus =
-    resolution.status === 204 ||
-    resolution.status === 304 ||
-    (resolution.status >= 100 && resolution.status < 200);
+    resolution.status === 204 || resolution.status === 304 || (resolution.status >= 100 && resolution.status < 200);
   if (req.method === 'HEAD' || bodylessStatus) {
     res.end();
     return;
@@ -129,26 +124,15 @@ function decodePathSuffix(pathname: string, prefix: string) {
   return decodeURIComponent(encoded);
 }
 
-function projectAssetRoute(pathname: string) {
-  const prefix = '/api/project-assets/';
-  if (!pathname.startsWith(prefix)) return null;
-  const remainder = pathname.slice(prefix.length);
-  const separator = remainder.indexOf('/');
-  if (separator <= 0 || separator === remainder.length - 1) throw new URIError('Missing project asset path');
-  return {
-    projectID: decodeURIComponent(remainder.slice(0, separator)),
-    routePath: remainder
-      .slice(separator + 1)
-      .split('/')
-      .map(segment => decodeURIComponent(segment))
-      .join('/'),
-  };
-}
-
 async function tryServeAccelerated(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
 
   const requestUrl = new URL(req.url || '/', `http://localhost:${PUBLIC_PORT}`);
+  if (hasObsoleteWorkspaceScope(requestUrl.searchParams) || hasObsoleteWorkspaceHeaders(requestHeaders(req.headers))) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Project workspaces have been removed.', code: 'PROJECT_WORKSPACES_REMOVED' }));
+    return true;
+  }
   const headers = requestHeaders(req.headers);
   const serving = await getFileServingModule();
   let resolution: FileResponseResolution;
@@ -173,21 +157,7 @@ async function tryServeAccelerated(req: IncomingMessage, res: ServerResponse) {
         );
       }
     } else {
-      const projectAsset = projectAssetRoute(requestUrl.pathname);
-      if (!projectAsset) return false;
-      resolution = await serving.resolveProjectAssetFileRequest({
-        ...projectAsset,
-        searchParams: requestUrl.searchParams,
-        headers,
-      });
-      if (
-        resolution.kind === 'response' &&
-        resolution.status === 403 &&
-        process.env.AI_TOOLKIT_AUTH &&
-        !(await serving.isAcceleratedApiRequestAuthenticated(headers))
-      ) {
-        resolution = serving.unauthorizedFileResponse();
-      }
+      return false;
     }
   } catch (error) {
     if (error instanceof URIError) {
@@ -208,12 +178,7 @@ async function tryServeAccelerated(req: IncomingMessage, res: ServerResponse) {
 
 const upstreamAgent = new http.Agent({ keepAlive: true });
 
-function proxy(
-  req: IncomingMessage,
-  res: ServerResponse,
-  upstreamPort: number,
-  attempt = 0,
-) {
+function proxy(req: IncomingMessage, res: ServerResponse, upstreamPort: number, attempt = 0) {
   const bodyless = req.method === 'GET' || req.method === 'HEAD';
   const upstreamRequest = http.request(
     {
@@ -229,10 +194,7 @@ function proxy(
         upstreamResponse.resume();
         return;
       }
-      res.writeHead(
-        upstreamResponse.statusCode || 502,
-        proxyHeaders(upstreamResponse.headers),
-      );
+      res.writeHead(upstreamResponse.statusCode || 502, proxyHeaders(upstreamResponse.headers));
       pipeline(upstreamResponse, res, error => {
         if (error && !res.destroyed) res.destroy(error);
       });
@@ -279,12 +241,7 @@ function proxy(
   else req.pipe(upstreamRequest);
 }
 
-function proxyUpgrade(
-  req: IncomingMessage,
-  socket: import('stream').Duplex,
-  head: Buffer,
-  upstreamPort: number,
-) {
+function proxyUpgrade(req: IncomingMessage, socket: import('stream').Duplex, head: Buffer, upstreamPort: number) {
   const upstream = net.connect(upstreamPort, UPSTREAM_HOST, () => {
     if (socket.destroyed) {
       upstream.destroy();
@@ -383,31 +340,20 @@ function waitForUpstream(port: number, child: ChildProcess) {
   });
 }
 
-function rewriteChildOutput(
-  stream: NodeJS.ReadableStream,
-  destination: NodeJS.WritableStream,
-  upstreamPort: number,
-) {
-  const internalAddress = new RegExp(
-    `(https?://)?(127\\.0\\.0\\.1|localhost):${upstreamPort}`,
-    'g',
-  );
+function rewriteChildOutput(stream: NodeJS.ReadableStream, destination: NodeJS.WritableStream, upstreamPort: number) {
+  const internalAddress = new RegExp(`(https?://)?(127\\.0\\.0\\.1|localhost):${upstreamPort}`, 'g');
   let buffered = '';
   stream.on('data', chunk => {
     buffered += chunk.toString();
     const lines = buffered.split(/\r?\n/);
     buffered = lines.pop() || '';
     for (const line of lines) {
-      destination.write(
-        `${line.replace(internalAddress, `http://localhost:${PUBLIC_PORT}`)}\n`,
-      );
+      destination.write(`${line.replace(internalAddress, `http://localhost:${PUBLIC_PORT}`)}\n`);
     }
   });
   stream.on('end', () => {
     if (buffered) {
-      destination.write(
-        `${buffered.replace(internalAddress, `http://localhost:${PUBLIC_PORT}`)}\n`,
-      );
+      destination.write(`${buffered.replace(internalAddress, `http://localhost:${PUBLIC_PORT}`)}\n`);
     }
   });
 }
@@ -437,11 +383,7 @@ function waitForWorkerReady(worker: Worker) {
     };
     const onExit = (code: number | null) => {
       cleanup();
-      reject(
-        new Error(
-          `File server worker ${worker.id} exited during startup with code ${code ?? 'unknown'}`,
-        ),
-      );
+      reject(new Error(`File server worker ${worker.id} exited during startup with code ${code ?? 'unknown'}`));
     };
     worker.on('message', onMessage);
     worker.once('exit', onExit);
@@ -548,32 +490,23 @@ async function primaryMain() {
           return;
         }
 
-        const crashDecision = registerWorkerCrash(
-          recentWorkerCrashes,
-          Date.now(),
-          {
-            windowMs: WORKER_CRASH_WINDOW_MS,
-            limit: WORKER_CRASH_LIMIT,
-          },
-        );
+        const crashDecision = registerWorkerCrash(recentWorkerCrashes, Date.now(), {
+          windowMs: WORKER_CRASH_WINDOW_MS,
+          limit: WORKER_CRASH_LIMIT,
+        });
         if (crashDecision.shouldStop) {
           console.error('File server workers are repeatedly crashing; stopping the managed UI.');
           shutdown(1);
           return;
         }
 
-        console.warn(
-          `File server worker ${worker.id} exited; restarting it in ${crashDecision.restartDelayMs}ms.`,
-        );
+        console.warn(`File server worker ${worker.id} exited; restarting it in ${crashDecision.restartDelayMs}ms.`);
         setTimeout(() => {
           if (!shuttingDown) cluster.fork(workerEnvironment);
         }, crashDecision.restartDelayMs);
       });
 
-      const workers = Array.from(
-        { length: numWorkers },
-        () => cluster.fork(workerEnvironment),
-      );
+      const workers = Array.from({ length: numWorkers }, () => cluster.fork(workerEnvironment));
       await Promise.all(workers.map(waitForWorkerReady));
       clusterReady = true;
     }

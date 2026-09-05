@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { normalizeWorkerBaseUrl } from '@/server/remoteClient';
@@ -21,7 +22,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const id = asString(body.id);
     const name = asString(body.name);
     const baseUrl = normalizeWorkerBaseUrl(asString(body.base_url));

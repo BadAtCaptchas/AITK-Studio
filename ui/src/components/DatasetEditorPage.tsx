@@ -1,5 +1,5 @@
 'use client';
-
+import { getTrainingReturnPath } from '@/hooks/useTrainingDraft';
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Ban, ChevronRight, ImageOff, Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -45,21 +45,15 @@ import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/caption
 import ThemeLogo from '@/components/ThemeLogo';
 import DatasetActionBar from '@/components/DatasetActionBar';
 import CaptionMonitor from '@/components/CaptionMonitor';
-
 type DatasetEditorPageProps = {
   datasetName: string;
-  projectID?: string | null;
   datasetRoot?: string | null;
   returnHref?: string | null;
-  projectName?: string | null;
 };
-
 export default function DatasetEditorPage({
   datasetName,
-  projectID = null,
   datasetRoot = null,
   returnHref = null,
-  projectName = null,
 }: DatasetEditorPageProps) {
   const [imgList, setImgList] = useState<DatasetImageListItem[]>([]);
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
@@ -67,7 +61,7 @@ export default function DatasetEditorPage({
   const hasStudioUnsavedChangesRef = useRef(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const workerID = projectID ? 'local' : searchParams.get('worker_id') || 'local';
+  const workerID = searchParams.get('worker_id') || 'local';
   const isRemoteDataset = workerID !== 'local';
   const datasetRef = useMemo(
     () => (isRemoteDataset ? makeRemoteDatasetRef(workerID, datasetName) : null),
@@ -90,30 +84,31 @@ export default function DatasetEditorPage({
   const [datasetActionError, setDatasetActionError] = useState('');
   const [datasetMenuOpen, setDatasetMenuOpen] = useState(false);
   const [defaultWatchSourcePath, setDefaultWatchSourcePath] = useState('');
-
   const handleStudioUnsavedChange = useCallback((hasUnsavedChanges: boolean) => {
     hasStudioUnsavedChangesRef.current = hasUnsavedChanges;
     setHasStudioUnsavedChanges(hasUnsavedChanges);
   }, []);
-
   const confirmDiscardStudioChanges = useCallback(
     () =>
       !hasStudioUnsavedChanges ||
       window.confirm('You have unapplied or unsaved caption changes. Leave Caption Studio and discard them?'),
     [hasStudioUnsavedChanges],
   );
-  const projectPayload = useMemo(() => (projectID ? { project_id: projectID } : {}), [projectID]);
-  const effectiveDatasetRoot = projectID ? datasetRoot || '' : datasetRoot || settings?.DATASETS_FOLDER || '';
+  const effectiveDatasetRoot = datasetRoot || settings?.DATASETS_FOLDER || '';
   const datasetPath = useMemo(
     () => (effectiveDatasetRoot ? pathJoin(effectiveDatasetRoot, datasetName) : datasetName),
     [datasetName, effectiveDatasetRoot],
   );
-  const canUseDatasetCaptionJob = !isRemoteDataset && (!projectID || !!effectiveDatasetRoot);
+  const canUseDatasetCaptionJob = !isRemoteDataset;
   const canUseWatchFolders = !isRemoteDataset && !encryptedManifest;
   const isRefreshingRef = useRef(false);
-
   const refreshImageList = useCallback(
-    (dbName: string, options: { background?: boolean } = {}) => {
+    (
+      dbName: string,
+      options: {
+        background?: boolean;
+      } = {},
+    ) => {
       if (isRefreshingRef.current) return;
       isRefreshingRef.current = true;
       const preserveDirtyStudio = hasStudioUnsavedChangesRef.current && !options.background;
@@ -123,7 +118,6 @@ export default function DatasetEditorPage({
           datasetName: dbName,
           worker_id: workerID,
           compact: true,
-          ...projectPayload,
         })
         .then((res: { data: unknown }) => {
           const data = res.data;
@@ -132,7 +126,6 @@ export default function DatasetEditorPage({
             setStatus('success');
             return;
           }
-
           const record = data as Record<string, unknown>;
           if (record.encrypted) {
             setEncryptedManifest((record.manifest as EncryptedDatasetManifest) ?? null);
@@ -140,7 +133,6 @@ export default function DatasetEditorPage({
             setStatus('success');
             return;
           }
-
           setEncryptedManifest(null);
           setEncryptedCatalog(null);
           setEncryptedKey(null);
@@ -162,13 +154,11 @@ export default function DatasetEditorPage({
           isRefreshingRef.current = false;
         });
     },
-    [projectPayload, workerID],
+    [workerID],
   );
-
   const datasetWatcherLive = useDatasetWatcherLiveRefresh({
     enabled: status === 'success' && canUseWatchFolders,
     datasetName,
-    projectID,
     workerID,
     onRefresh: () => refreshImageList(datasetName, { background: true }),
   });
@@ -177,7 +167,6 @@ export default function DatasetEditorPage({
     () => aggregateAutoCaptionProgress(datasetWatcherLive.watchers, datasetWatcherLive.statuses, datasetName),
     [datasetName, datasetWatcherLive.statuses, datasetWatcherLive.watchers],
   );
-
   const encryptedUploadOptions = useMemo(() => {
     if (!encryptedManifest || !encryptedCatalog || !encryptedKey) return undefined;
     return {
@@ -192,13 +181,10 @@ export default function DatasetEditorPage({
       },
     };
   }, [encryptedCatalog, encryptedKey, encryptedManifest]);
-
   useOpenImagesModalOnDrag(datasetName, () => refreshImageList(datasetName), {
     ...encryptedUploadOptions,
     workerID,
-    projectID,
   });
-
   const unlockEncryptedDataset = async (key: CryptoKey, manifest: EncryptedDatasetManifest) => {
     const catalog = await decryptCatalog(manifest, key);
     const rawKeyB64 = await exportRawAesKey(key);
@@ -206,9 +192,6 @@ export default function DatasetEditorPage({
     setEncryptedCatalog(catalog);
     setEncryptedRawKeyB64(rawKeyB64);
     rememberEncryptedDatasetKey(datasetName, rawKeyB64);
-    if (projectID) {
-      rememberEncryptedDatasetKey(`project:${projectID}:${datasetName}`, rawKeyB64);
-    }
     if (datasetRef) {
       rememberEncryptedDatasetKey(datasetRef, rawKeyB64);
       rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, datasetName), rawKeyB64);
@@ -217,7 +200,6 @@ export default function DatasetEditorPage({
       rememberEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, datasetName), rawKeyB64);
     }
   };
-
   const handleUnlock = async () => {
     if (!encryptedManifest) return;
     setUnlockError(null);
@@ -251,7 +233,6 @@ export default function DatasetEditorPage({
       setUnlockError('Could not decrypt this dataset with the provided secret.');
     }
   };
-
   const plainStudioItems = useMemo<DatasetStudioItem[]>(
     () =>
       imgList.map(img => ({
@@ -264,53 +245,39 @@ export default function DatasetEditorPage({
       })),
     [imgList],
   );
-
   const encryptedStudioItems = useMemo<DatasetStudioItem[]>(
     () => (encryptedCatalog?.items || []).map(item => ({ kind: 'encrypted' as const, item })),
     [encryptedCatalog?.items],
   );
-
   const handlePlainItemCaptioned = useCallback((targetPath: string, captionedAt: string | null) => {
     setImgList(previous =>
       previous.map(image => (image.img_path === targetPath ? { ...image, captioned_at: captionedAt } : image)),
     );
   }, []);
-
   const openJsonConversion = useCallback(() => {
     if (isRemoteDataset) return;
     openCaptionDatasetModal(datasetPath, () => refreshImageList(datasetName), {
       encryptedDatasetKeyB64: encryptedRawKeyB64 || undefined,
-      projectID,
       datasetName,
       rootCaption: encryptedCatalog ? (encryptedCatalog.rootCaption ?? null) : undefined,
       preset: 'ideogram_json',
     });
-  }, [datasetName, datasetPath, encryptedCatalog, encryptedRawKeyB64, isRemoteDataset, projectID, refreshImageList]);
-
+  }, [datasetName, datasetPath, encryptedCatalog, encryptedRawKeyB64, isRemoteDataset, refreshImageList]);
   useEffect(() => {
     if (datasetName) {
       refreshImageList(datasetName);
     }
   }, [datasetName, refreshImageList]);
-
-  useEffect(() => {
-    if (!projectID || !datasetName) return;
-    const refreshTimer = window.setInterval(() => refreshImageList(datasetName, { background: true }), 10 * 60 * 1000);
-    return () => window.clearInterval(refreshTimer);
-  }, [datasetName, projectID, refreshImageList]);
-
   useEffect(() => {
     if (!datasetName || isRemoteDataset) {
       setDefaultWatchSourcePath('');
       return;
     }
-
     let cancelled = false;
     apiClient
       .get('/api/datasets/list', {
         params: {
           worker_id: workerID,
-          ...projectPayload,
         },
       })
       .then(res => {
@@ -326,17 +293,15 @@ export default function DatasetEditorPage({
       .catch(() => {
         if (!cancelled) setDefaultWatchSourcePath('');
       });
-
     return () => {
       cancelled = true;
     };
-  }, [datasetName, isRemoteDataset, projectPayload, workerID]);
-
+  }, [datasetName, isRemoteDataset, workerID]);
   useEffect(() => {
     if (!encryptedManifest || encryptedKey || encryptedCatalog) return;
     const remembered =
       (datasetRef ? getRememberedEncryptedDatasetKey(datasetRef) : null) ||
-      (projectID ? getRememberedEncryptedDatasetKey(`project:${projectID}:${datasetName}`) : null) ||
+      null ||
       getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(workerID, datasetName)) ||
       getRememberedEncryptedDatasetKey(datasetName) ||
       (effectiveDatasetRoot ? getRememberedEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, datasetName)) : null);
@@ -351,10 +316,9 @@ export default function DatasetEditorPage({
     encryptedCatalog,
     encryptedKey,
     encryptedManifest,
-    projectID,
+    null,
     workerID,
   ]);
-
   useEffect(() => {
     if (!encryptedManifest || !encryptedKey) return;
     let cancelled = false;
@@ -369,25 +333,21 @@ export default function DatasetEditorPage({
       cancelled = true;
     };
   }, [encryptedKey, encryptedManifest]);
-
   useEffect(() => {
     if (!isRenameModalOpen) {
       setRenameDatasetName(datasetName);
     }
   }, [datasetName, isRenameModalOpen]);
-
   const openRenameModal = () => {
     setRenameDatasetName(datasetName);
     setRenameDatasetError('');
     setIsRenameModalOpen(true);
   };
-
   const closeRenameModal = () => {
     if (isRenamingDataset) return;
     setIsRenameModalOpen(false);
     setRenameDatasetError('');
   };
-
   const rememberRenamedEncryptedKey = (renamedName: string) => {
     if (!encryptedRawKeyB64) return;
     rememberEncryptedDatasetKey(renamedName, encryptedRawKeyB64);
@@ -395,19 +355,14 @@ export default function DatasetEditorPage({
       rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, renamedName), encryptedRawKeyB64);
       rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, renamedName), encryptedRawKeyB64);
     }
-    if (projectID) {
-      rememberEncryptedDatasetKey(`project:${projectID}:${renamedName}`, encryptedRawKeyB64);
-    }
     if (effectiveDatasetRoot) {
       rememberEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, renamedName), encryptedRawKeyB64);
     }
   };
-
   const handleRenameDataset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isRenamingDataset) return;
     if (!confirmDiscardStudioChanges()) return;
-
     try {
       setIsRenamingDataset(true);
       setRenameDatasetError('');
@@ -415,14 +370,11 @@ export default function DatasetEditorPage({
         name: datasetName,
         newName: renameDatasetName,
         worker_id: workerID,
-        ...projectPayload,
       });
       const renamedName = res.data?.name || renameDatasetName.trim();
       rememberRenamedEncryptedKey(renamedName);
       setIsRenameModalOpen(false);
-      if (projectID) {
-        router.replace(`/projects/${encodeURIComponent(projectID)}/datasets/${encodeURIComponent(renamedName)}`);
-      } else {
+      {
         router.replace(
           isRemoteDataset
             ? `/datasets/${encodeURIComponent(renamedName)}?worker_id=${encodeURIComponent(workerID)}`
@@ -435,7 +387,6 @@ export default function DatasetEditorPage({
       setIsRenamingDataset(false);
     }
   };
-
   const handleDeleteDataset = () => {
     if (isDeletingDataset) return;
     openConfirm({
@@ -450,7 +401,6 @@ export default function DatasetEditorPage({
           await apiClient.post('/api/datasets/delete', {
             name: datasetName,
             worker_id: workerID,
-            ...projectPayload,
           });
           router.replace(returnHref || '/datasets');
         } catch (error: any) {
@@ -461,7 +411,6 @@ export default function DatasetEditorPage({
       },
     });
   };
-
   const PageInfoContent = (() => {
     let icon = null;
     let text = '';
@@ -470,7 +419,6 @@ export default function DatasetEditorPage({
     let bgColor = '';
     let textColor = '';
     let iconColor = '';
-
     if (status == 'loading') {
       icon = <Loader2 className="h-8 w-8 animate-spin" />;
       text = 'Loading Images';
@@ -498,9 +446,7 @@ export default function DatasetEditorPage({
       textColor = 'text-gray-100';
       iconColor = 'text-gray-400';
     }
-
     if (!showIt) return null;
-
     return (
       <div className={`mx-auto mt-10 max-w-xl border border-dashed border-gray-700 px-4 py-6 ${bgColor} ${textColor}`}>
         <div className="flex items-start gap-3">
@@ -516,7 +462,6 @@ export default function DatasetEditorPage({
                     openImagesModal(datasetName, () => refreshImageList(datasetName), {
                       ...encryptedUploadOptions,
                       workerID,
-                      projectID,
                     })
                   }
                 >
@@ -525,7 +470,6 @@ export default function DatasetEditorPage({
                 {canUseWatchFolders && (
                   <DatasetWatchFoldersButton
                     datasetName={datasetName}
-                    projectID={projectID}
                     workerID={workerID}
                     defaultSourcePath={defaultWatchSourcePath}
                     className="operator-button whitespace-nowrap border-brand-800 bg-brand-950/70 text-brand-100"
@@ -539,7 +483,6 @@ export default function DatasetEditorPage({
       </div>
     );
   })();
-
   const saveEncryptedCaption = async (
     item: EncryptedDatasetItem,
     captionPath: string,
@@ -556,7 +499,6 @@ export default function DatasetEditorPage({
     await apiClient.post('/api/datasets/encrypted/update', {
       datasetName,
       worker_id: workerID,
-      ...projectPayload,
       manifest: nextManifest,
       objects: [
         {
@@ -568,7 +510,6 @@ export default function DatasetEditorPage({
     setEncryptedManifest(nextManifest);
     setEncryptedCatalog(nextCatalog);
   };
-
   const handleDeleteImages = async (targetItems: DatasetStudioItem[]): Promise<DeleteImagesResult> => {
     const uniqueItems = Array.from(
       new Map(targetItems.map(item => [item.kind === 'plain' ? item.path : item.item.id, item] as const)).values(),
@@ -579,9 +520,8 @@ export default function DatasetEditorPage({
     let deleted = 0;
     let skipped = 0;
     let failed = 0;
-
     if (plainPaths.length > 0) {
-      const response = await apiClient.post('/api/img/delete-bulk', { imgPaths: plainPaths, ...projectPayload });
+      const response = await apiClient.post('/api/img/delete-bulk', { imgPaths: plainPaths });
       const data = response.data || {};
       const removedPaths = Array.isArray(data.removedPaths)
         ? data.removedPaths.filter((value: unknown): value is string => typeof value === 'string')
@@ -595,7 +535,6 @@ export default function DatasetEditorPage({
         setImgList(previous => previous.filter(image => !removedPathSet.has(image.img_path)));
       }
     }
-
     if (encryptedItems.length > 0) {
       if (!encryptedManifest || !encryptedCatalog || !encryptedKey) {
         throw new Error('Unlock the encrypted dataset first.');
@@ -609,7 +548,6 @@ export default function DatasetEditorPage({
       await apiClient.post('/api/datasets/encrypted/update', {
         datasetName,
         worker_id: workerID,
-        ...projectPayload,
         manifest: nextManifest,
         deleteObjects: encryptedItems.flatMap(item =>
           [item.objectPath, item.captionObjectPath].filter((value): value is string => Boolean(value)),
@@ -620,7 +558,6 @@ export default function DatasetEditorPage({
       deleted += encryptedItems.length;
       removedKeys.push(...encryptedItems.map(item => item.id));
     }
-
     return {
       requested: uniqueItems.length,
       deleted,
@@ -629,24 +566,21 @@ export default function DatasetEditorPage({
       removedKeys,
     };
   };
-
   const encryptedObjectUpdate = async (objectPath: string) => {
     const response = await apiClient.post(
       '/api/datasets/encrypted/object',
-      buildEncryptedObjectRequestBody({ datasetName, workerID, projectID, objectPath }),
+      buildEncryptedObjectRequestBody({ datasetName, workerID, objectPath }),
       { responseType: 'blob' },
     );
     const bytes = await (response.data as Blob).arrayBuffer();
     return { objectPath, dataBase64: arrayBufferToBase64(bytes) };
   };
-
   const handleBulkEncryptedCaptionAction = async (
     request: BulkCaptionActionRequest,
   ): Promise<BulkCaptionActionResult> => {
     if (!encryptedManifest || !encryptedCatalog || !encryptedKey) {
       throw new Error('Unlock the encrypted dataset first.');
     }
-
     const matches = request.matches.flatMap(match =>
       match.item.kind === 'encrypted' ? [{ ...match, encryptedItem: match.item.item }] : [],
     );
@@ -657,7 +591,6 @@ export default function DatasetEditorPage({
     );
     const matchedIDs = new Set(matchedItems.map(item => item.id));
     const now = new Date().toISOString();
-
     if (request.action === 'delete') {
       const nextCatalog: EncryptedDatasetCatalog = {
         ...encryptedCatalog,
@@ -667,7 +600,6 @@ export default function DatasetEditorPage({
       await apiClient.post('/api/datasets/encrypted/update', {
         datasetName,
         worker_id: workerID,
-        ...projectPayload,
         manifest: nextManifest,
         deleteObjects: matchedItems.flatMap(item => [item.objectPath, item.captionObjectPath].filter(Boolean)),
       });
@@ -681,11 +613,9 @@ export default function DatasetEditorPage({
         removedKeys: matchedItems.map(item => item.id),
       };
     }
-
     if (request.action === 'move') {
       const destinationName = request.destinationName?.trim();
       if (!destinationName) throw new Error('Destination dataset name is required.');
-
       const { manifest: emptyManifest } = await encryptCatalog(
         { version: 1, items: [] },
         encryptedKey,
@@ -694,18 +624,15 @@ export default function DatasetEditorPage({
       const createResponse = await apiClient.post('/api/datasets/create', {
         name: destinationName,
         worker_id: workerID,
-        ...projectPayload,
         encrypted: true,
         encryptedManifest: emptyManifest,
       });
       const createdName = createResponse.data?.name || destinationName;
-
       const objects = [];
       for (const item of matchedItems) {
         objects.push(await encryptedObjectUpdate(item.objectPath));
         if (item.captionObjectPath) objects.push(await encryptedObjectUpdate(item.captionObjectPath));
       }
-
       const targetCatalog: EncryptedDatasetCatalog = {
         version: 1,
         items: matchedItems.map(item => ({ ...item, updatedAt: now })),
@@ -714,11 +641,9 @@ export default function DatasetEditorPage({
       await apiClient.post('/api/datasets/encrypted/update', {
         datasetName: createdName,
         worker_id: workerID,
-        ...projectPayload,
         manifest: targetManifest,
         objects,
       });
-
       const nextCatalog: EncryptedDatasetCatalog = {
         ...encryptedCatalog,
         items: encryptedCatalog.items.filter(item => !matchedIDs.has(item.id)),
@@ -727,7 +652,6 @@ export default function DatasetEditorPage({
       await apiClient.post('/api/datasets/encrypted/update', {
         datasetName,
         worker_id: workerID,
-        ...projectPayload,
         manifest: nextManifest,
         deleteObjects: matchedItems.flatMap(item => [item.objectPath, item.captionObjectPath].filter(Boolean)),
       });
@@ -735,9 +659,6 @@ export default function DatasetEditorPage({
       setEncryptedCatalog(nextCatalog);
       if (encryptedRawKeyB64) {
         rememberEncryptedDatasetKey(createdName, encryptedRawKeyB64);
-        if (projectID) {
-          rememberEncryptedDatasetKey(`project:${projectID}:${createdName}`, encryptedRawKeyB64);
-        }
         if (effectiveDatasetRoot) {
           rememberEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, createdName), encryptedRawKeyB64);
         }
@@ -746,7 +667,6 @@ export default function DatasetEditorPage({
           rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, createdName), encryptedRawKeyB64);
         }
       }
-
       return {
         action: request.action,
         found: matches.length,
@@ -756,13 +676,14 @@ export default function DatasetEditorPage({
         removedKeys: matchedItems.map(item => item.id),
       };
     }
-
     const updatedCaptions: Record<string, string> = {};
     const updatedItems = new Map<string, EncryptedDatasetItem>();
-    const objects: Array<{ objectPath: string; dataBase64: string }> = [];
+    const objects: Array<{
+      objectPath: string;
+      dataBase64: string;
+    }> = [];
     let removedWords = 0;
     const terms = parseCaptionKeywordQuery(request.query);
-
     for (const match of matches) {
       const result = removeCaptionKeywords(match.caption, terms, request.matchMode);
       if (!result.changed) continue;
@@ -777,11 +698,9 @@ export default function DatasetEditorPage({
       updatedCaptions[item.id] = result.caption;
       removedWords += result.removedCount;
     }
-
     if (updatedItems.size === 0) {
       return { action: request.action, found: matches.length, affected: 0, updated: 0, removedWords: 0 };
     }
-
     const nextCatalog: EncryptedDatasetCatalog = {
       ...encryptedCatalog,
       items: encryptedCatalog.items.map(item => updatedItems.get(item.id) || item),
@@ -790,13 +709,11 @@ export default function DatasetEditorPage({
     await apiClient.post('/api/datasets/encrypted/update', {
       datasetName,
       worker_id: workerID,
-      ...projectPayload,
       manifest: nextManifest,
       objects,
     });
     setEncryptedManifest(nextManifest);
     setEncryptedCatalog(nextCatalog);
-
     return {
       action: request.action,
       found: matches.length,
@@ -806,12 +723,10 @@ export default function DatasetEditorPage({
       updatedCaptions,
     };
   };
-
   const captionToolbarAction = canUseDatasetCaptionJob ? (
     <AutoCaptionButton
       datasetPath={datasetPath}
       datasetName={datasetName}
-      projectID={projectID}
       setIsAutoCaptioning={setIsAutoCaptioning}
       encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
       rootCaption={encryptedCatalog ? (encryptedCatalog.rootCaption ?? null) : undefined}
@@ -819,7 +734,6 @@ export default function DatasetEditorPage({
       className="h-[34px] flex-shrink-0 !rounded-[4px] !bg-brand-400 !px-3 !py-0 !text-[12px] !font-semibold !text-[var(--brand-ink)] hover:!bg-brand-300"
     />
   ) : null;
-
   return (
     <>
       <TopBar className="h-[69px] gap-3 border-gray-800 bg-gray-950 px-4">
@@ -849,16 +763,12 @@ export default function DatasetEditorPage({
         </button>
 
         <div className="ml-2 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[12px]">
-          <span className="max-w-[180px] truncate text-gray-600">{projectName || 'Global datasets'}</span>
+          <span className="max-w-[180px] truncate text-gray-600">{'Global datasets'}</span>
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-800" />
           <span className="text-gray-500">Datasets</span>
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-800" />
           <span className="truncate font-medium text-gray-200">{datasetName}</span>
-          {projectID && (
-            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-brand-900/80 bg-brand-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-300">
-              Project
-            </span>
-          )}
+
           {isRemoteDataset && (
             <span className="ml-1 flex-shrink-0 rounded-[3px] border border-brand-900/80 bg-brand-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-300">
               Remote
@@ -872,6 +782,19 @@ export default function DatasetEditorPage({
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2">
+          <button
+            type="button"
+            className="operator-button h-8 px-3 text-xs"
+            onClick={() => {
+              if (!confirmDiscardStudioChanges()) return;
+              const [pathname, query = ''] = getTrainingReturnPath().split('?');
+              const params = new URLSearchParams(query);
+              params.set('dataset', datasetRef || datasetPath);
+              router.push(`${pathname}?${params.toString()}`);
+            }}
+          >
+            Train
+          </button>
           {isAutoCaptioning && (
             <span className="hidden items-center gap-1.5 text-[11px] text-brand-300 sm:inline-flex">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing queue
@@ -880,9 +803,7 @@ export default function DatasetEditorPage({
           {!isRemoteDataset && !encryptedManifest && (
             <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden md:inline-flex" />
           )}
-          {!isRemoteDataset && !encryptedManifest && (
-            <DatasetActionBar datasetName={datasetName} projectID={projectID} />
-          )}
+          {!isRemoteDataset && !encryptedManifest && <DatasetActionBar datasetName={datasetName} />}
           <button
             type="button"
             onClick={() => setDatasetMenuOpen(open => !open)}
@@ -911,7 +832,6 @@ export default function DatasetEditorPage({
           {canUseWatchFolders && (
             <DatasetWatchFoldersButton
               datasetName={datasetName}
-              projectID={projectID}
               workerID={workerID}
               defaultSourcePath={defaultWatchSourcePath}
               label="Watch folders"
@@ -987,7 +907,6 @@ export default function DatasetEditorPage({
           <DatasetImageStudio
             datasetName={datasetName}
             workerID={workerID}
-            projectID={projectID}
             datasetPath={!isRemoteDataset ? datasetPath : null}
             items={plainStudioItems}
             isAutoCaptioning={isAutoCaptioning}
@@ -999,7 +918,6 @@ export default function DatasetEditorPage({
               openImagesModal(datasetName, () => refreshImageList(datasetName), {
                 ...encryptedUploadOptions,
                 workerID,
-                projectID,
               })
             }
             onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
@@ -1011,7 +929,6 @@ export default function DatasetEditorPage({
           <DatasetImageStudio
             datasetName={datasetName}
             workerID={workerID}
-            projectID={projectID}
             datasetPath={!isRemoteDataset ? datasetPath : null}
             items={encryptedStudioItems}
             isAutoCaptioning={isAutoCaptioning}
@@ -1025,7 +942,6 @@ export default function DatasetEditorPage({
               openImagesModal(datasetName, () => refreshImageList(datasetName), {
                 ...encryptedUploadOptions,
                 workerID,
-                projectID,
               })
             }
             onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
@@ -1035,9 +951,7 @@ export default function DatasetEditorPage({
           />
         )}
       </MainContent>
-      {!isRemoteDataset && !encryptedManifest && (
-        <CaptionMonitor datasetPath={datasetPath} projectID={projectID} />
-      )}
+      {!isRemoteDataset && !encryptedManifest && <CaptionMonitor datasetPath={datasetPath} />}
       <Modal
         isOpen={isRenameModalOpen}
         onClose={closeRenameModal}

@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -222,18 +223,17 @@ function scanDatasetFolder(
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const datasets = Array.isArray(body?.datasets) ? (body.datasets as DatasetPromptRequest[]) : [];
     const encryptedDatasetKeys = Array.isArray(body?.encryptedDatasetKeys)
       ? (body.encryptedDatasetKeys as EncryptedDatasetStartKey[])
       : [];
-    const projectID = body?.project_id;
 
     if (datasets.length === 0) {
       return NextResponse.json({ error: 'No datasets were provided.' }, { status: 400 });
     }
 
-    const { datasetsRoot: rawDatasetsRoot } = await resolveDatasetScope(projectID);
+    const { datasetsRoot: rawDatasetsRoot } = await resolveDatasetScope();
     const datasetsRoot = path.resolve(rawDatasetsRoot);
     const encryptedKeyMap = normalizeEncryptedKeyMap(encryptedDatasetKeys);
     const state: RandomPromptState = {

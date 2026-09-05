@@ -6,7 +6,7 @@ import fs from 'fs';
 import { TOOLKIT_ROOT, getHFToken, getModelsRoot, getOpenRouterApiKey } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
 import { getToolkitPythonPath } from '../../src/server/pythonPath';
-import { getJobTrainingRoot } from '../../src/server/projects';
+import { getJobTrainingRoot } from '../../src/server/trainingPaths';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
 import {
   getEncryptedDatasetsForJobConfig,

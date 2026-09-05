@@ -4,13 +4,7 @@ import path from 'path';
 import type { Stats } from 'fs';
 import { findEncryptedDatasetRoot } from './encryptedDatasets';
 import { isPathWithinRoot } from './pathContainment';
-import {
-  normalizeProjectAssetPath,
-  verifyProjectAssetSignature,
-  type ProjectAssetDisposition,
-} from './projectAssetUrls';
-import { isRegisteredProjectPath } from './projectMediaSecurity';
-import { getProjectRoots, isPathInside, resolveProject } from './projects';
+
 import { flushCache as flushSettingsCache, getDataRoot, getDatasetsRoot, getTrainingFolder } from './settings';
 import { isRequestAuthenticated } from '../utils/authSession';
 import { parseRemoteDatasetAssetRef } from '../utils/remoteDatasetRefs';
@@ -38,13 +32,6 @@ export type FileResponseResolution =
         end?: number;
       };
     };
-
-export type ProjectAssetRequest = {
-  projectID: string;
-  routePath: string;
-  searchParams: URLSearchParams;
-  headers: Headers;
-};
 
 const DOWNLOAD_CONTENT_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
@@ -91,24 +78,6 @@ const MEDIA_CONTENT_TYPES: Record<string, string> = {
   '.ogg': 'audio/ogg',
 };
 
-const PROJECT_ASSET_CONTENT_TYPES: Record<string, string> = {
-  ...MEDIA_CONTENT_TYPES,
-  '.avif': 'image/avif',
-  '.webm': 'video/webm',
-  '.m4a': 'audio/mp4',
-  '.txt': 'text/plain; charset=utf-8',
-  '.json': 'application/json',
-  '.yaml': 'text/yaml; charset=utf-8',
-  '.yml': 'text/yaml; charset=utf-8',
-  '.md': 'text/markdown; charset=utf-8',
-  '.safetensors': 'application/octet-stream',
-  '.ckpt': 'application/octet-stream',
-  '.pt': 'application/octet-stream',
-  '.pth': 'application/octet-stream',
-  '.bin': 'application/octet-stream',
-  '.gguf': 'application/octet-stream',
-};
-
 let storageSettingsCacheExpiresAt = 0;
 
 function refreshStorageSettingsCachePeriodically() {
@@ -118,11 +87,7 @@ function refreshStorageSettingsCachePeriodically() {
   storageSettingsCacheExpiresAt = now + 10_000;
 }
 
-function response(
-  status: number,
-  body: string | null,
-  headers: Record<string, string> = {},
-): FileResponseResolution {
+function response(status: number, body: string | null, headers: Record<string, string> = {}): FileResponseResolution {
   return { kind: 'response', status, body, headers };
 }
 
@@ -162,13 +127,7 @@ export function parseSingleByteRange(value: string | null | undefined, size: num
     end = match[2] ? Number(match[2]) : size - 1;
   }
 
-  if (
-    !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(end) ||
-    start < 0 ||
-    end < start ||
-    start >= size
-  ) {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
     return 'invalid';
   }
 
@@ -247,9 +206,6 @@ export async function resolveDownloadFileRequest(
 
   const canonicalPath = await realpathIfExists(decodedFilePath);
   if (!canonicalPath) return response(404, 'File not found');
-  if (await isRegisteredProjectPath(canonicalPath)) {
-    return response(403, 'Project files require a signed project-relative URL');
-  }
   if (!allowedRoots.some(root => isPathWithinRoot(root, canonicalPath))) {
     return response(403, 'Access denied');
   }
@@ -286,15 +242,10 @@ export async function resolveLocalMediaRequest(
   const [canonicalDatasetRoot, canonicalTrainingRoot, canonicalDataRoot] = await Promise.all(
     [datasetRoot, trainingRoot, dataRoot].map(resolveExistingDir),
   );
-  const generalAllowedRoots = [canonicalDatasetRoot, canonicalDataRoot].filter(
-    (root): root is string => root !== null,
-  );
+  const generalAllowedRoots = [canonicalDatasetRoot, canonicalDataRoot].filter((root): root is string => root !== null);
 
   const canonicalPath = await realpathIfExists(filepath);
   if (!canonicalPath) return response(404, 'File not found');
-  if (await isRegisteredProjectPath(canonicalPath)) {
-    return response(403, 'Project media requires a signed project-relative URL');
-  }
 
   const contentType = MEDIA_CONTENT_TYPES[path.extname(canonicalPath).toLowerCase()];
   if (!contentType) return response(415, 'Unsupported media type');
@@ -304,10 +255,8 @@ export async function resolveLocalMediaRequest(
       ? path.relative(canonicalTrainingRoot, canonicalPath)
       : null;
   const isGeneralMedia =
-    trainingRelativePath === null &&
-    generalAllowedRoots.some(root => isPathWithinRoot(root, canonicalPath));
-  const isTrainingSample =
-    trainingRelativePath !== null && trainingRelativePath.split(path.sep).includes('samples');
+    trainingRelativePath === null && generalAllowedRoots.some(root => isPathWithinRoot(root, canonicalPath));
+  const isTrainingSample = trainingRelativePath !== null && trainingRelativePath.split(path.sep).includes('samples');
   if (!isGeneralMedia && !isTrainingSample) return response(403, 'Access denied');
 
   if (canonicalDatasetRoot && findEncryptedDatasetRoot(canonicalPath, canonicalDatasetRoot)) {
@@ -323,70 +272,4 @@ export async function resolveLocalMediaRequest(
     'Cache-Control': PRIVATE_MEDIA_CACHE_CONTROL,
     'X-Content-Type-Options': 'nosniff',
   });
-}
-
-export async function resolveProjectAssetFileRequest(
-  request: ProjectAssetRequest,
-): Promise<FileResponseResolution> {
-  refreshStorageSettingsCachePeriodically();
-
-  let queryPath: string;
-  let routePath: string;
-  try {
-    queryPath = normalizeProjectAssetPath(request.searchParams.get('path') || '');
-    routePath = normalizeProjectAssetPath(request.routePath);
-  } catch {
-    return response(403, 'Invalid or expired project asset link');
-  }
-
-  const queryProjectID = request.searchParams.get('project_id') || '';
-  const dispositionValue = request.searchParams.get('disposition');
-  const disposition: ProjectAssetDisposition =
-    dispositionValue === 'attachment' ? 'attachment' : 'inline';
-  const expires = Number(request.searchParams.get('expires') || '');
-  const signature = request.searchParams.get('sig') || '';
-  if (
-    queryProjectID !== request.projectID ||
-    queryPath !== routePath ||
-    (dispositionValue !== 'inline' && dispositionValue !== 'attachment') ||
-    !verifyProjectAssetSignature({
-      projectID: request.projectID,
-      relativePath: queryPath,
-      disposition,
-      expires,
-      signature,
-    })
-  ) {
-    return response(403, 'Invalid or expired project asset link');
-  }
-
-  try {
-    const project = await resolveProject(request.projectID, { intent: 'read' });
-    const roots = await getProjectRoots(project);
-    const root = await fsp.realpath(roots.root);
-    const candidate = path.resolve(root, ...queryPath.split('/'));
-    const [target, lstat] = await Promise.all([
-      fsp.realpath(candidate).catch(() => null),
-      fsp.lstat(candidate).catch(() => null),
-    ]);
-    if (!target || !lstat || lstat.isSymbolicLink() || !isPathInside(root, target) || target === root) {
-      return response(404, 'Project asset not found');
-    }
-
-    const stat = await fsp.stat(target).catch(() => null);
-    if (!stat || !stat.isFile()) return response(404, 'Project asset not found');
-
-    const contentType =
-      PROJECT_ASSET_CONTENT_TYPES[path.extname(target).toLowerCase()] || 'application/octet-stream';
-    const filename = cleanDispositionFilename(target);
-    return resolveFileResponse(target, stat, request.headers, {
-      'Content-Type': contentType,
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'private, max-age=300',
-      'Content-Disposition': `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      'X-Content-Type-Options': 'nosniff',
-    });
-  } catch {
-    return response(404, 'Project asset not found');
-  }
 }

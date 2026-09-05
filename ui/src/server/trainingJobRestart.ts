@@ -3,7 +3,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { db, type JobUpdateInput } from './db';
 import { getTrainingFolder } from './settings';
-import { getJobTrainingRoot } from './projects';
+import { getJobTrainingRoot } from './trainingPaths';
 import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from './remoteClient';
 import {
   assertPreparedJobCanStart,
@@ -108,7 +108,7 @@ function assertRestartableTrainingJob(job: Job) {
 }
 
 async function clearLocalTrainingState(job: Job, deps: TrainingJobRestartDeps) {
-  const trainingRoot = job.project_id ? await getJobTrainingRoot(job) : await deps.getTrainingFolder();
+  const trainingRoot = await deps.getTrainingFolder();
   const trainingFolder = resolveWithinRoot(trainingRoot, job.name);
   if (!trainingFolder) {
     failRestart('Invalid job path', 400);
@@ -135,10 +135,7 @@ function resetJobPatch(): JobUpdateInput {
   };
 }
 
-async function restartRemoteExistingJob(
-  prepared: PreparedJobStart,
-  deps: TrainingJobRestartDeps,
-) {
+async function restartRemoteExistingJob(prepared: PreparedJobStart, deps: TrainingJobRestartDeps) {
   const { job, requiredEncryptedDatasets, encryptedKeysForLaunch, useDurableEncryptedKeys } = prepared;
   if (!job.remote_job_id) return null;
 

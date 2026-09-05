@@ -4,13 +4,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getDatasetImageMediaUrl, normalizeDatasetImageListItem } from '../dist/src/utils/datasetMedia.js';
 
-test('project dataset entries keep operational paths separate from signed media URLs', () => {
-  const root = 'E:\\projects\\project-1\\datasets\\cats\\';
-  const signed = '/api/project-assets/project-1/datasets/cats/image.png?sig=test';
-  const item = normalizeDatasetImageListItem(
-    { img_path: 'image.png', media_url: signed, size_bytes: 123 },
-    root,
-  );
+test('remote dataset entries keep operational paths separate from signed media URLs', () => {
+  const root = 'E:\\datasets\\cats\\';
+  const signed = '/api/remote-datasets/assets?worker_id=worker-1&path=cats/image.png&sig=test';
+  const item = normalizeDatasetImageListItem({ img_path: 'image.png', media_url: signed, size_bytes: 123 }, root);
 
   assert.equal(item?.img_path, `${root}image.png`);
   assert.equal(item?.media_url, signed);

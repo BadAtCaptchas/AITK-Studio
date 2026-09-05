@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -10,7 +11,7 @@ import {
   writeEncryptedManifest,
 } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
-import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 type EncryptedObjectUpdate = {
   objectPath: string;
@@ -19,15 +20,13 @@ type EncryptedObjectUpdate = {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { datasetName, manifest, objects, deleteObjects, worker_id, project_id } = body;
+    const body = assertGlobalPayload(await request.json());
+    const { datasetName, manifest, objects, deleteObjects, worker_id } = body;
     if (typeof datasetName !== 'string') {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
-    await assertProjectScopeEnabled(project_id);
 
     if (!isLocalWorker(worker_id)) {
-      rejectRemoteProjectScope(worker_id, project_id);
       const worker = await getRemoteWorker(worker_id);
       return NextResponse.json(
         await remoteJson(worker, '/api/datasets/encrypted/update', {
@@ -37,7 +36,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { datasetsRoot } = await resolveDatasetScope(project_id);
+    const { datasetsRoot } = await resolveDatasetScope();
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     if (!isEncryptedDatasetFolder(datasetFolder)) {
       return NextResponse.json({ error: 'Encrypted dataset not found' }, { status: 404 });

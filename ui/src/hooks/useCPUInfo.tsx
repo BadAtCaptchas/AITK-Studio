@@ -15,24 +15,27 @@ export default function useCPUInfo(reloadInterval: null | number = null, workerI
   const useLocalMonitor = workerID === 'local';
   activeWorkerRef.current = workerID;
 
-  const fetchCpuInfo = useCallback(async (signal?: AbortSignal) => {
-    const requestWorkerID = workerID;
-    setStatus('loading');
-    try {
-      const data: CpuInfo = await apiClient
-        .get('/api/cpu', { params: { worker_id: workerID }, signal })
-        .then(res => res.data);
-      if (signal?.aborted || activeWorkerRef.current !== requestWorkerID) return;
-      setCpuInfo(data);
-      setStatus('success');
-    } catch (err) {
-      if (signal?.aborted || activeWorkerRef.current !== requestWorkerID) return;
-      console.error(`Failed to fetch CPU data: ${err instanceof Error ? err.message : String(err)}`);
-      setStatus('error');
-    } finally {
-      if (!signal?.aborted && activeWorkerRef.current === requestWorkerID) setIsLoaded(true);
-    }
-  }, [workerID]);
+  const fetchCpuInfo = useCallback(
+    async (signal?: AbortSignal) => {
+      const requestWorkerID = workerID;
+      setStatus('loading');
+      try {
+        const data: CpuInfo = await apiClient
+          .get('/api/cpu', { params: { worker_id: workerID }, signal })
+          .then(res => res.data);
+        if (signal?.aborted || activeWorkerRef.current !== requestWorkerID) return;
+        setCpuInfo(data);
+        setStatus('success');
+      } catch (err) {
+        if (signal?.aborted || activeWorkerRef.current !== requestWorkerID) return;
+        console.error(`Failed to fetch CPU data: ${err instanceof Error ? err.message : String(err)}`);
+        setStatus('error');
+      } finally {
+        if (!signal?.aborted && activeWorkerRef.current === requestWorkerID) setIsLoaded(true);
+      }
+    },
+    [workerID],
+  );
 
   useEffect(() => {
     setCpuInfo(null);
@@ -49,5 +52,10 @@ export default function useCPUInfo(reloadInterval: null | number = null, workerI
 
   usePollLoop(signal => fetchCpuInfo(signal), useLocalMonitor ? null : reloadInterval, [workerID, useLocalMonitor]);
 
-  return { cpuInfo, isCPUInfoLoaded, status, refreshCpuInfo: () => useLocalMonitor ? Promise.resolve() : fetchCpuInfo() };
+  return {
+    cpuInfo,
+    isCPUInfoLoaded,
+    status,
+    refreshCpuInfo: () => (useLocalMonitor ? Promise.resolve() : fetchCpuInfo()),
+  };
 }

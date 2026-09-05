@@ -4,21 +4,11 @@ import path from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { db, type JobUpdateInput } from './db';
-import {
-  getKeyForRequiredDataset,
-  normalizeEncryptedKeyMap,
-} from './encryptedDatasets';
-import {
-  clearDurableEncryptedDatasetKeys,
-  getDurableEncryptedDatasetKeys,
-} from './encryptedDatasetSecrets';
-import { areProjectsEnabled, getDatasetsRoot } from './settings';
+import { getKeyForRequiredDataset, normalizeEncryptedKeyMap } from './encryptedDatasets';
+import { clearDurableEncryptedDatasetKeys, getDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
+import { getDatasetsRoot } from './settings';
 import { resolveDatasetDirectoryInsideRoot } from './remoteCaptionSecurity';
-import {
-  extractZipSafely,
-  getExtractedDatasetPath,
-  readDatasetExportManifest,
-} from './datasetTransfer';
+import { extractZipSafely, getExtractedDatasetPath, readDatasetExportManifest } from './datasetTransfer';
 import {
   getRemoteBackgroundPollEligibility,
   getRemoteWorker,
@@ -35,13 +25,8 @@ import {
   patchRemoteCaptionState,
   type RemoteCaptionState,
 } from './remoteCaptionJobs';
-import {
-  mergeEncryptedCaptionDataset,
-  mergePlainCaptionDataset,
-} from './remoteCaptionMerge';
-import {
-  nextAvailablePath,
-} from './trainingJobTransfer';
+import { mergeEncryptedCaptionDataset, mergePlainCaptionDataset } from './remoteCaptionMerge';
+import { nextAvailablePath } from './trainingJobTransfer';
 import type { Job } from '../types';
 
 declare global {
@@ -74,7 +59,11 @@ async function writeResponseBodyToFile(response: Response, targetPath: string) {
   await pipeline(Readable.fromWeb(response.body as any), fs.createWriteStream(targetPath));
 }
 
-async function updateRemoteCaptionState(job: Job, patch: Partial<RemoteCaptionState>, extraJobPatch: JobUpdateInput = {}) {
+async function updateRemoteCaptionState(
+  job: Job,
+  patch: Partial<RemoteCaptionState>,
+  extraJobPatch: JobUpdateInput = {},
+) {
   const jobConfig = JSON.parse(job.job_config);
   const nextConfig = patchRemoteCaptionState(jobConfig, patch);
   return db.jobs.update(job.id, {
@@ -83,7 +72,6 @@ async function updateRemoteCaptionState(job: Job, patch: Partial<RemoteCaptionSt
     remote_sync_at: new Date(),
   });
 }
-
 
 async function durableKeyForRemoteCaption(job: Job, state: RemoteCaptionState) {
   const durableKeys = await getDurableEncryptedDatasetKeys(job.id);
@@ -244,15 +232,11 @@ export async function syncRemoteCaptionResultForJob(
     }
 
     const currentState = getRemoteCaptionState(JSON.parse(workingJob.job_config)) || state;
-    const merged = await mergeRemoteCaptionDataset(
-      workingJob,
-      currentState,
-      datasetSource,
-      manifest.dataset.name,
-    );
+    const merged = await mergeRemoteCaptionDataset(workingJob, currentState, datasetSource, manifest.dataset.name);
     const cleanupError = await cleanupRemoteDataset(workingJob, currentState);
     const mergedAt = nowIso();
-    const importedFallbackPath = 'importedFallbackPath' in merged.statePatch ? merged.statePatch.importedFallbackPath : '';
+    const importedFallbackPath =
+      'importedFallbackPath' in merged.statePatch ? merged.statePatch.importedFallbackPath : '';
     const usedFallback = 'fallback' in merged.mergeStats && merged.mergeStats.fallback === true;
     const updated = await updateRemoteCaptionState(
       workingJob,
@@ -284,14 +268,18 @@ export async function syncRemoteCaptionResultForJob(
     if (latest && latestState?.downloadStatus === 'merged') {
       return latest;
     }
-    return updateRemoteCaptionState(workingJob, {
-      downloadStatus: 'failed',
-      downloadStartedAt: undefined,
-      lastError: message,
-    }, {
-      info: `Remote caption sync failed: ${message}`,
-      remote_error: message,
-    });
+    return updateRemoteCaptionState(
+      workingJob,
+      {
+        downloadStatus: 'failed',
+        downloadStartedAt: undefined,
+        lastError: message,
+      },
+      {
+        info: `Remote caption sync failed: ${message}`,
+        remote_error: message,
+      },
+    );
   } finally {
     syncs.delete(job.id);
     if (workRoot) {
@@ -302,10 +290,8 @@ export async function syncRemoteCaptionResultForJob(
 
 export async function syncRemoteCaptionResults() {
   const jobs = await db.jobs.list({ job_type: 'caption' });
-  const includeProjectJobs = await areProjectsEnabled();
   const results: Job[] = [];
   for (const job of jobs) {
-    if (job.project_id && !includeProjectJobs) continue;
     if (isLocalWorker(job.worker_id) || !job.remote_job_id || !getJobRemoteCaptionState(job)) continue;
     const synced = await syncRemoteJob(job);
     results.push(await syncRemoteCaptionResultForJob(synced));

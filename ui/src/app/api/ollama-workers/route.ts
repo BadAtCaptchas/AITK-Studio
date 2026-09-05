@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   listRemoteOllamaWorkers,
@@ -15,14 +16,11 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const worker = await saveRemoteOllamaWorker(body || {});
     return NextResponse.json(toPublicRemoteOllamaWorker(worker));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to save Remote Ollama worker';
-    return NextResponse.json(
-      { error: message },
-      { status: /already exists/i.test(message) ? 409 : 400 },
-    );
+    return NextResponse.json({ error: message }, { status: /already exists/i.test(message) ? 409 : 400 });
   }
 }

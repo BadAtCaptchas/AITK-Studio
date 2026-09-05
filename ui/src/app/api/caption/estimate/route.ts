@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -18,12 +19,7 @@ function normalizeMediaExtensions(value: unknown) {
   return normalized.length > 0 ? normalized : ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'jxl'];
 }
 
-function countCaptionTargets(
-  datasetPath: string,
-  extensions: string[],
-  captionExtension: string,
-  recaption: boolean,
-) {
+function countCaptionTargets(datasetPath: string, extensions: string[], captionExtension: string, recaption: boolean) {
   const mediaExts = new Set(extensions.map(ext => `.${ext}`));
   let count = 0;
 
@@ -53,7 +49,7 @@ function countCaptionTargets(
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const datasetPath = typeof body?.datasetPath === 'string' ? body.datasetPath : '';
     if (!datasetPath.trim()) {
       return NextResponse.json({ error: 'datasetPath is required' }, { status: 400 });
@@ -101,7 +97,8 @@ export async function POST(request: Request) {
     const outputFormat = typeof body?.outputFormat === 'string' ? body.outputFormat : 'text';
     const isJson = outputFormat === 'ideogram_json' || outputFormat === 'json';
     const maxNewTokens = Number(body?.maxNewTokens);
-    const outputTokensPerFile = Number.isFinite(maxNewTokens) && maxNewTokens > 0 ? Math.round(maxNewTokens) : isJson ? 900 : 180;
+    const outputTokensPerFile =
+      Number.isFinite(maxNewTokens) && maxNewTokens > 0 ? Math.round(maxNewTokens) : isJson ? 900 : 180;
     const promptTokensPerFile = isJson ? 650 : 220;
     const sourceCaptionTokensPerFile = isJson ? 150 : 0;
     const imageTokensPerFile = 900;

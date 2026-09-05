@@ -137,7 +137,9 @@ const CaptionSimpleJob: React.FC<Props> = ({
           setEstimateStatus('success');
         })
         .catch(error => {
-          setEstimate(error?.response?.data || { error: 'Estimate unavailable', mediaCount: null, estimatedCostUsd: null });
+          setEstimate(
+            error?.response?.data || { error: 'Estimate unavailable', mediaCount: null, estimatedCostUsd: null },
+          );
           setEstimateStatus('error');
         });
     }, 250);
@@ -215,7 +217,8 @@ const CaptionSimpleJob: React.FC<Props> = ({
       </div>
       {usesOpenRouter && encryptedDatasetKeyB64 && (
         <div className="mt-4 rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
-          OpenRouter cannot caption encrypted datasets. Use a copied unencrypted dataset, then encrypt the completed result.
+          OpenRouter cannot caption encrypted datasets. Use a copied unencrypted dataset, then encrypt the completed
+          result.
         </div>
       )}
       {additionalSections.includes('caption.remote_ollama_worker_id') && (
@@ -263,7 +266,8 @@ const CaptionSimpleJob: React.FC<Props> = ({
       </div>
       {isJsonOutput && (
         <div className="mt-4 rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
-          Convert to JSON requires a vision model. Smaller models may produce invalid JSON, miss NSFW details, or create weak boxes.
+          Convert to JSON requires a vision model. Smaller models may produce invalid JSON, miss NSFW details, or create
+          weak boxes.
         </div>
       )}
       {isJsonOutput && (
@@ -277,7 +281,9 @@ const CaptionSimpleJob: React.FC<Props> = ({
           <TextInput
             label="Source Extension"
             value={captionConfig.source_caption_extension || 'txt'}
-            onChange={value => setJobConfig(value.replace(/^\.+/, ''), 'config.process[0].caption.source_caption_extension')}
+            onChange={value =>
+              setJobConfig(value.replace(/^\.+/, ''), 'config.process[0].caption.source_caption_extension')
+            }
           />
           <div className="pt-7">
             <Checkbox
@@ -487,7 +493,9 @@ const CaptionSimpleJob: React.FC<Props> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>
               Dataset estimate:{' '}
-              {estimate?.mediaCount == null ? 'unknown count' : `${estimate.mediaCount} file${estimate.mediaCount === 1 ? '' : 's'}`}
+              {estimate?.mediaCount == null
+                ? 'unknown count'
+                : `${estimate.mediaCount} file${estimate.mediaCount === 1 ? '' : 's'}`}
             </span>
             <span className="font-medium text-gray-100">
               {estimateStatus === 'loading' ? 'Estimating...' : formatUsd(estimate?.estimatedCostUsd)}
@@ -501,7 +509,8 @@ const CaptionSimpleJob: React.FC<Props> = ({
           )}
           {estimate?.assumptions && (
             <div className="mt-1 text-xs text-gray-500">
-              Assumes about {estimate.assumptions.inputTokensPerFile} input and {estimate.assumptions.outputTokensPerFile} output tokens per file.
+              Assumes about {estimate.assumptions.inputTokensPerFile} input and{' '}
+              {estimate.assumptions.outputTokensPerFile} output tokens per file.
             </div>
           )}
           {estimate?.error && <div className="mt-1 text-xs text-amber-300">{estimate.error}</div>}

@@ -8,10 +8,10 @@ const read = relativePath => fs.readFileSync(path.join(repoRoot, relativePath), 
 
 const jobConfig = read('src/app/jobs/new/jobConfig.ts');
 const simpleJob = read('src/app/jobs/new/SimpleJob.tsx');
-const trainingForm = read('src/app/jobs/new/TrainingFormContent.tsx');
+const trainingForm = read('src/utils/trainingValidation.ts');
 const checkerPage = read('src/app/watermark/page.tsx');
 const checkerRoute = read('src/app/api/watermark/check/route.ts');
-const sidebar = read('src/components/Sidebar.tsx');
+const sidebar = read('src/app/tools/page.tsx');
 const codecUtils = read('src/utils/authenloraCodecs.ts');
 const types = read('src/types.ts');
 
@@ -49,7 +49,7 @@ test('save validation blocks invalid AuthenLoRA configs', () => {
 });
 
 test('watermark checker page and API route are wired', () => {
-  assert.match(sidebar, /Watermark/);
+  assert.match(sidebar, /[Ww]atermark/);
   assert.match(sidebar, /href: '\/watermark'/);
   assert.match(checkerPage, /Watermark Checker/);
   assert.match(checkerPage, /\/api\/watermark\/check/);

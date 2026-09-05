@@ -188,7 +188,8 @@ test('listDatasetSummaries exposes local folder import source metadata', async (
 
   assert.equal(summary.importSourcePath, sourcePath);
   assert.equal(
-    JSON.parse(await fs.readFile(path.join(datasetPath, encryptedDatasets.DATASET_METADATA_FILE), 'utf8')).importSourcePath,
+    JSON.parse(await fs.readFile(path.join(datasetPath, encryptedDatasets.DATASET_METADATA_FILE), 'utf8'))
+      .importSourcePath,
     sourcePath,
   );
 });
@@ -295,7 +296,11 @@ test('validateEncryptedManifest rejects malformed WebAuthn PRF credentials', () 
 test('mocked WebAuthn PRF output wraps and unwraps a dataset key', async () => {
   const rawDatasetKey = crypto.randomBytes(32);
   const prfOutput = crypto.randomBytes(32);
-  const aad = webauthnPrfCrypto.webAuthnPrfWrappedKeyAad('localhost', 'mockCredentialId', crypto.randomBytes(32).toString('base64'));
+  const aad = webauthnPrfCrypto.webAuthnPrfWrappedKeyAad(
+    'localhost',
+    'mockCredentialId',
+    crypto.randomBytes(32).toString('base64'),
+  );
 
   const wrapped = await webauthnPrfCrypto.encryptWithWebAuthnPrfKey(prfOutput, rawDatasetKey, aad);
   const unwrapped = await webauthnPrfCrypto.decryptWithWebAuthnPrfKey(prfOutput, wrapped.nonce, wrapped.data, aad);
@@ -307,7 +312,11 @@ test('mocked WebAuthn PRF output rejects the wrong security key result', async (
   const rawDatasetKey = crypto.randomBytes(32);
   const prfOutput = crypto.randomBytes(32);
   const wrongPrfOutput = crypto.randomBytes(32);
-  const aad = webauthnPrfCrypto.webAuthnPrfWrappedKeyAad('localhost', 'mockCredentialId', crypto.randomBytes(32).toString('base64'));
+  const aad = webauthnPrfCrypto.webAuthnPrfWrappedKeyAad(
+    'localhost',
+    'mockCredentialId',
+    crypto.randomBytes(32).toString('base64'),
+  );
 
   const wrapped = await webauthnPrfCrypto.encryptWithWebAuthnPrfKey(prfOutput, rawDatasetKey, aad);
   await assert.rejects(
@@ -329,26 +338,25 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-test('encrypted object request bodies keep project scope local-only', () => {
+test('encrypted object requests identify the global dataset and worker', () => {
   assert.deepEqual(
     encryptedObjectMediaCache.buildEncryptedObjectRequestBody({
       datasetName: 'locked',
       workerID: 'local',
-      projectID: 'project-1',
+
       objectPath: 'objects/a.bin',
     }),
     {
       datasetName: 'locked',
       objectPath: 'objects/a.bin',
       worker_id: 'local',
-      project_id: 'project-1',
     },
   );
   assert.deepEqual(
     encryptedObjectMediaCache.buildEncryptedObjectRequestBody({
       datasetName: 'locked',
       workerID: 'worker-1',
-      projectID: 'project-1',
+
       objectPath: 'objects/a.bin',
     }),
     {
@@ -497,7 +505,7 @@ test('encrypted object media cache limits parallel remote loads', async () => {
   }
 });
 
-test('encrypted object media cache keys include worker, local project, dataset, crypto key, object, update time, and MIME type', async () => {
+test('encrypted object media cache keys include worker, dataset, crypto key, object, update time, and MIME type', async () => {
   encryptedObjectMediaCache.clearEncryptedObjectMediaCache();
   const bodies = [];
   let urlID = 0;
@@ -506,7 +514,7 @@ test('encrypted object media cache keys include worker, local project, dataset, 
   const base = {
     datasetName: 'locked',
     workerID: 'local',
-    projectID: 'project-a',
+
     cryptoKey: cryptoKeyA,
     item: encryptedMediaItem('objects/same.bin'),
     loadEncryptedObject: async body => {
@@ -525,11 +533,13 @@ test('encrypted object media cache keys include worker, local project, dataset, 
   try {
     const first = await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(base);
     assert.equal(await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl(base), first);
-    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, workerID: 'worker-1', projectID: 'project-a' });
-    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, projectID: 'project-b' });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, workerID: 'worker-1' });
     await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, datasetName: 'other-locked' });
     await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, cryptoKey: cryptoKeyB });
-    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({ ...base, item: encryptedMediaItem('objects/changed.bin') });
+    await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({
+      ...base,
+      item: encryptedMediaItem('objects/changed.bin'),
+    });
     await encryptedObjectMediaCache.loadEncryptedObjectMediaUrl({
       ...base,
       item: encryptedMediaItem('objects/same.bin', { updatedAt: '2026-06-18T01:00:00.000Z' }),
@@ -539,12 +549,11 @@ test('encrypted object media cache keys include worker, local project, dataset, 
       item: encryptedMediaItem('objects/same.bin', { mimeType: 'image/webp' }),
     });
 
-    assert.equal(bodies.length, 8);
+    assert.equal(bodies.length, 7);
     assert.deepEqual(bodies[0], {
       datasetName: 'locked',
       objectPath: 'objects/same.bin',
       worker_id: 'local',
-      project_id: 'project-a',
     });
     assert.deepEqual(bodies[1], {
       datasetName: 'locked',

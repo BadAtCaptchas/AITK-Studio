@@ -1,7 +1,8 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { db } from '@/server/db';
-import { assertProjectJobEnabled, getJobTrainingRoot } from '@/server/projects';
+import { getJobTrainingRoot } from '@/server/trainingPaths';
 import {
   getRemoteWorker,
   isLocalWorker,
@@ -18,11 +19,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const job = await db.jobs.findById(jobID);
   if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  try {
-    await assertProjectJobEnabled(job);
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message || 'Project spaces are disabled' }, { status: error?.status || 403 });
-  }
 
   const url = new URL(request.url);
   if (!isLocalWorker(job.worker_id)) {
@@ -63,26 +59,19 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const job = await db.jobs.findById(jobID);
   if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
 
-  try {
-    await assertProjectJobEnabled(job, 'write');
-  } catch (error: unknown) {
-    const projectError = error as { message?: string; status?: number };
-    return NextResponse.json(
-      { error: projectError.message || 'Project spaces are disabled' },
-      { status: projectError.status || 403 },
-    );
-  }
-
   let body: { min_step?: unknown; max_step?: unknown } = {};
   try {
-    body = await request.json();
+    body = assertGlobalPayload(await request.json());
   } catch {
     // fall through to validation below
   }
   const minStep = Number(body.min_step);
   const maxStep = Number(body.max_step);
   if (!Number.isFinite(minStep) || !Number.isFinite(maxStep) || minStep > maxStep) {
-    return NextResponse.json({ error: 'min_step and max_step must be numbers with min_step <= max_step' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'min_step and max_step must be numbers with min_step <= max_step' },
+      { status: 400 },
+    );
   }
 
   if (!isLocalWorker(job.worker_id)) {

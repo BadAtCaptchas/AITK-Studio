@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   decodeRemoteCaptionBulkPaths,
@@ -8,19 +9,17 @@ import {
   type DatasetCaptionBulkResult,
 } from '@/server/datasetCaptionBulk';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
-import { assertProjectScopeEnabled, DatasetScopeError, rejectRemoteProjectScope, resolveDatasetScope } from '@/server/datasetScope';
+import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as DatasetCaptionBulkRequest & { worker_id?: string; project_id?: string };
+    const body = assertGlobalPayload(await request.json()) as DatasetCaptionBulkRequest & { worker_id?: string };
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
-    await assertProjectScopeEnabled(body.project_id);
 
     if (!isLocalWorker(workerID)) {
-      rejectRemoteProjectScope(workerID, body.project_id);
       const worker = await getRemoteWorker(workerID);
       const imgPaths = Array.isArray(body.imgPaths) ? body.imgPaths : [];
       const decoded = decodeRemoteCaptionBulkPaths(imgPaths, workerID);
@@ -35,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(mapRemoteCaptionBulkResult(remoteResult, decoded.refByRemotePath));
     }
 
-    const { datasetsRoot } = await resolveDatasetScope(body.project_id);
+    const { datasetsRoot } = await resolveDatasetScope();
     const result = await performPlainDatasetCaptionBulkAction(datasetsRoot, body);
     return NextResponse.json(result);
   } catch (error) {

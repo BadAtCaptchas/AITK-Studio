@@ -1,26 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
-import {
-  getRemoteWorker,
-  isLocalWorker,
-  remoteJson,
-  syncRemoteJob,
-} from '@/server/remoteClient';
-import { assertProjectJobEnabled } from '@/server/projects';
+import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
+
 import { isRequestAuthenticated } from '@/utils/authSession';
 
 function errorDetails(error: unknown) {
   const value = error as { message?: unknown; status?: unknown };
   return {
-    message: typeof value?.message === 'string' ? value.message : 'Project spaces are disabled',
+    message: typeof value?.message === 'string' ? value.message : 'Unable to request a sample',
     status: typeof value?.status === 'number' ? value.status : 403,
   };
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ jobID: string }> },
-) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   if (!(await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -31,16 +23,12 @@ export async function POST(
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
   try {
-    await assertProjectJobEnabled(job, 'write');
   } catch (error) {
     const details = errorDetails(error);
     return NextResponse.json({ error: details.message }, { status: details.status });
   }
   if (job.job_type !== 'train') {
-    return NextResponse.json(
-      { error: 'Only training jobs can sample on demand' },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: 'Only training jobs can sample on demand' }, { status: 400 });
   }
   if (job.status !== 'running') {
     return NextResponse.json({ error: 'Job is not running' }, { status: 409 });
@@ -48,25 +36,15 @@ export async function POST(
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
-      return NextResponse.json(
-        { error: 'Remote job has not been uploaded yet' },
-        { status: 409 },
-      );
+      return NextResponse.json({ error: 'Remote job has not been uploaded yet' }, { status: 409 });
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      await remoteJson(
-        worker,
-        `/api/jobs/${encodeURIComponent(job.remote_job_id)}/sample_now`,
-        { method: 'POST' },
-      );
+      await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/sample_now`, { method: 'POST' });
       return NextResponse.json(await syncRemoteJob(job));
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to request remote sample';
-      await db.jobs
-        .update(jobID, { remote_error: message, remote_sync_at: new Date() })
-        .catch(() => undefined);
+      const message = error instanceof Error ? error.message : 'Failed to request remote sample';
+      await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
       return NextResponse.json({ error: message }, { status: 502 });
     }
   }

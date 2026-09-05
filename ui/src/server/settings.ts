@@ -1,23 +1,11 @@
 import path from 'path';
-import { defaultDatasetsFolder, defaultDataRoot, defaultModelsFolder, defaultProjectsFolder, defaultTrainFolder } from '../paths';
+import { defaultDatasetsFolder, defaultDataRoot, defaultModelsFolder, defaultTrainFolder } from '../paths';
 import NodeCache from 'node-cache';
 import { db } from './db';
 import { normalizeStoragePathSetting } from './pathContainment';
 import { modelsPathFromEnv, resolveModelsPathState } from './modelsPath';
 
 const myCache = new NodeCache();
-export const PROJECTS_ENABLED_KEY = 'PROJECTS_ENABLED';
-export const PROJECT_SPACES_DISABLED_MESSAGE = 'Project spaces are disabled';
-
-export class ProjectSpacesDisabledError extends Error {
-  status = 403;
-
-  constructor() {
-    super(PROJECT_SPACES_DISABLED_MESSAGE);
-    this.name = 'ProjectSpacesDisabledError';
-  }
-}
-
 export function normalizeBooleanSetting(value: unknown, defaultValue: boolean) {
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'string') {
@@ -28,31 +16,8 @@ export function normalizeBooleanSetting(value: unknown, defaultValue: boolean) {
   return defaultValue ? 'true' : 'false';
 }
 
-export function isProjectSpacesDisabledError(error: unknown) {
-  return (
-    error instanceof ProjectSpacesDisabledError ||
-    ((error as any)?.name === 'ProjectSpacesDisabledError' && (error as any)?.status === 403)
-  );
-}
-
 export const flushCache = () => {
   myCache.flushAll();
-};
-
-export const areProjectsEnabled = async () => {
-  const cached = myCache.get(PROJECTS_ENABLED_KEY) as string | undefined;
-  if (typeof cached === 'string') return cached === 'true';
-
-  const row = await db.settings.get(PROJECTS_ENABLED_KEY);
-  const normalized = normalizeBooleanSetting(row?.value, false);
-  myCache.set(PROJECTS_ENABLED_KEY, normalized);
-  return normalized === 'true';
-};
-
-export const assertProjectsEnabled = async () => {
-  if (!(await areProjectsEnabled())) {
-    throw new ProjectSpacesDisabledError();
-  }
 };
 
 export const getDatasetsRoot = async () => {
@@ -142,24 +107,6 @@ export const getDataRoot = async () => {
   dataRoot = path.resolve(dataRoot);
   myCache.set(key, dataRoot);
   return dataRoot;
-};
-
-export const getProjectsRoot = async () => {
-  const key = 'PROJECTS_FOLDER';
-  let projectsRoot = myCache.get(key) as string;
-  if (projectsRoot) {
-    return projectsRoot;
-  }
-  const row = await db.settings.get(key);
-  projectsRoot = defaultProjectsFolder;
-  const normalizedProjectsRoot = await normalizeStoragePathSetting(row?.value, defaultProjectsFolder, {
-    allowExternal: Boolean(process.env.AI_TOOLKIT_AUTH),
-  });
-  if (normalizedProjectsRoot) {
-    projectsRoot = normalizedProjectsRoot;
-  }
-  myCache.set(key, projectsRoot);
-  return projectsRoot;
 };
 
 export const getModelsRoot = async () => {

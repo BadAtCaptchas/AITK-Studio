@@ -1,10 +1,10 @@
+import { getDatasetsRoot } from '@/server/settings';
 import { NextRequest, NextResponse } from 'next/server';
 import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { assertProjectsEnabled, getDatasetsRoot } from '@/server/settings';
-import { getJobTrainingRoot, getProjectRoots } from '@/server/projects';
+import { getJobTrainingRoot } from '@/server/trainingPaths';
 import {
   TRAINING_JOB_EXPORT_FORMAT,
   TRAINING_JOB_EXPORT_VERSION,
@@ -182,9 +182,6 @@ async function performTrainingJobExport(
     (error as any).status = 404;
     throw error;
   }
-  if (job.project_id) {
-    await assertProjectsEnabled();
-  }
   if (job.job_type !== 'train') {
     const error = new Error('Only training jobs can be exported');
     (error as any).status = 400;
@@ -209,7 +206,9 @@ async function performTrainingJobExport(
   if (job.status === 'running') {
     warnings.push('Job is running; export includes only the latest checkpoint and optimizer already saved to disk.');
     if (latestCheckpoint.step !== null && job.step > latestCheckpoint.step) {
-      warnings.push(`Current DB step is ${job.step}, but the latest detected checkpoint step is ${latestCheckpoint.step}.`);
+      warnings.push(
+        `Current DB step is ${job.step}, but the latest detected checkpoint step is ${latestCheckpoint.step}.`,
+      );
     }
   }
   if (!latestCheckpoint.relativePath) {
@@ -219,8 +218,7 @@ async function performTrainingJobExport(
     warnings.push('No optimizer.pt file was found; the imported job may resume without optimizer state.');
   }
 
-  const project = job.project_id ? await db.projects.findById(job.project_id) : null;
-  const datasetsRoot = project ? (await getProjectRoots(project)).datasets : await getDatasetsRoot();
+  const datasetsRoot = await getDatasetsRoot();
   const { mappings: datasetMappings, warnings: datasetWarnings } = await collectDatasetArchiveMappings(
     jobConfig,
     includeDatasets,
@@ -249,7 +247,9 @@ async function performTrainingJobExport(
     training: {
       archivePath: 'training',
       dbStep: job.step,
-      latestCheckpointPath: latestCheckpointRelativePath ? path.posix.join('training', latestCheckpointRelativePath) : null,
+      latestCheckpointPath: latestCheckpointRelativePath
+        ? path.posix.join('training', latestCheckpointRelativePath)
+        : null,
       latestCheckpointStep: latestCheckpoint.step,
       optimizerIncluded,
       status: job.status,
@@ -385,11 +385,7 @@ async function performTrainingJobExport(
         const entriesProcessed = Math.min(progress.entries.processed, totalEntries);
         const bytesProcessed = Math.min(progress.fs.processedBytes, totalBytes);
         const ratio =
-          totalBytes > 0
-            ? bytesProcessed / totalBytes
-            : totalEntries > 0
-              ? entriesProcessed / totalEntries
-              : 1;
+          totalBytes > 0 ? bytesProcessed / totalBytes : totalEntries > 0 ? entriesProcessed / totalEntries : 1;
         const percent = Math.min(95, Math.max(8, Math.round(8 + ratio * 87)));
 
         onProgress?.({
@@ -524,9 +520,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const checkpointMode = parseCheckpointMode(body.checkpointMode);
     const background = body.background === true;
     const currentJob = await db.jobs.findById(jobID);
-    if (currentJob?.project_id) {
-      await assertProjectsEnabled();
-    }
 
     if (currentJob && !isLocalWorker(currentJob.worker_id)) {
       if (!currentJob.remote_job_id) {
@@ -535,10 +528,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       const worker = await getRemoteWorker(currentJob.worker_id);
       if (!background) {
-        const remoteResult = await remoteJson<any>(worker, `/api/jobs/${encodeURIComponent(currentJob.remote_job_id)}/export`, {
-          method: 'POST',
-          body: JSON.stringify({ includeDatasets, checkpointMode }),
-        });
+        const remoteResult = await remoteJson<any>(
+          worker,
+          `/api/jobs/${encodeURIComponent(currentJob.remote_job_id)}/export`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ includeDatasets, checkpointMode }),
+          },
+        );
         return NextResponse.json({
           ...remoteResult,
           zipPath: remoteResult.zipPath
@@ -551,10 +548,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         return NextResponse.json({ error: 'An export is already running for this job' }, { status: 409 });
       }
       const localProgress = createTrainingJobExportProgress(jobID, includeDatasets, checkpointMode);
-      const remoteStarted = await remoteJson<any>(worker, `/api/jobs/${encodeURIComponent(currentJob.remote_job_id)}/export`, {
-        method: 'POST',
-        body: JSON.stringify({ includeDatasets, checkpointMode, background: true }),
-      });
+      const remoteStarted = await remoteJson<any>(
+        worker,
+        `/api/jobs/${encodeURIComponent(currentJob.remote_job_id)}/export`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ includeDatasets, checkpointMode, background: true }),
+        },
+      );
       registerRemoteTrainingJobExport(localProgress.exportID, {
         jobID,
         workerID: currentJob.worker_id,

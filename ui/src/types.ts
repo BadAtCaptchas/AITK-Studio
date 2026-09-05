@@ -96,10 +96,6 @@ export interface DatasetSummary {
   ref?: string;
   path?: string;
   importSourcePath?: string | null;
-  project_id?: string | null;
-  project_name?: string | null;
-  project_slug?: string | null;
-  project_lifecycle_state?: ProjectLifecycleState | null;
 }
 
 export interface EncryptedDatasetStartKey {
@@ -158,172 +154,16 @@ export interface WorkerNode {
   updated_at: DbDate;
 }
 
-export interface Project {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  badge_asset: string | null;
-  root_path: string;
-  storage_root_path: string;
-  lifecycle_state: ProjectLifecycleState;
-  archived_at: DbDate | null;
-  revision: number;
-  operation_started_at: DbDate | null;
-  operation_error: string | null;
-  home_worker_id: string;
-  home_instance_id: string;
-  created_at: DbDate;
-  updated_at: DbDate;
-}
-
-export const PROJECT_LIFECYCLE_STATES = ['creating', 'active', 'archived', 'relocating', 'purging'] as const;
-
-export type ProjectLifecycleState = (typeof PROJECT_LIFECYCLE_STATES)[number];
-export type ProjectScopeIntent = 'read' | 'write' | 'execute' | 'lifecycle';
-
-export const PROJECT_ERROR_CODES = [
-  'PROJECT_ARCHIVED',
-  'PROJECT_BUSY',
-  'PROJECT_REVISION_CONFLICT',
-  'PROJECT_OPERATION_IN_PROGRESS',
-  'PROJECT_ROOT_MISSING',
-  'PROJECT_ROOT_INVALID',
-  'PROJECT_PATH_COLLISION',
-  'PROJECT_EXTERNAL_ROOT_REQUIRES_AUTH',
-  'PROJECT_PURGE_CONFIRMATION_MISMATCH',
-  'PROJECT_REPLICA_READ_ONLY',
-] as const;
-
-export type ProjectErrorCode = (typeof PROJECT_ERROR_CODES)[number];
-
-export type ProjectReplicaRole = 'home' | 'execution';
-export type ProjectReplicaStatus =
-  | 'creating'
-  | 'syncing'
-  | 'in_sync'
-  | 'dirty'
-  | 'conflict'
-  | 'waiting_for_job'
-  | 'waiting_for_worker'
-  | 'offline'
-  | 'incompatible'
-  | 'error'
-  | 'detached';
-
-export interface ProjectReplicaState {
-  id: string;
-  project_id: string;
-  worker_id: string;
-  remote_project_id: string | null;
-  remote_instance_id: string | null;
-  role: ProjectReplicaRole;
-  state: ProjectReplicaStatus;
-  base_manifest_hash: string | null;
-  local_manifest_hash: string | null;
-  remote_manifest_hash: string | null;
-  last_synced_at: DbDate | null;
-  last_error: string | null;
-  auto_pull_results: boolean;
-  created_at: DbDate;
-  updated_at: DbDate;
-}
-
 export interface JobReplica {
   id: string;
   job_id: string;
   worker_id: string;
   remote_job_id: string;
-  remote_project_id: string | null;
-  role: ProjectReplicaRole;
+  role: 'home' | 'execution';
   last_synced_at: DbDate | null;
   last_error: string | null;
   created_at: DbDate;
   updated_at: DbDate;
-}
-
-export type ProjectSyncProfile = 'full' | 'launch' | 'results';
-export type ProjectSyncStatus =
-  | 'queued'
-  | 'running'
-  | 'waiting_for_job'
-  | 'waiting_for_worker'
-  | 'conflict'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
-export interface ProjectSyncOperation {
-  id: string;
-  project_id: string;
-  worker_id: string;
-  profile: ProjectSyncProfile;
-  status: ProjectSyncStatus;
-  phase: string;
-  files_total: number;
-  files_done: number;
-  bytes_total: number;
-  bytes_done: number;
-  retry_count: number;
-  retry_at: DbDate | null;
-  base_manifest_hash: string | null;
-  source_manifest_hash: string | null;
-  target_manifest_hash: string | null;
-  conflicts: string;
-  error: string | null;
-  created_at: DbDate;
-  updated_at: DbDate;
-}
-
-export interface ProjectCardSummary {
-  project: Project;
-  workflow_stage: 'prepare' | 'train' | 'review';
-  dataset_count: number;
-  run_count: number;
-  output_count: number;
-  model_count: number;
-  total_bytes: number;
-  active_job: Job | null;
-  latest_output: ProjectArtifact | null;
-  replica_warnings: number;
-}
-
-export type ProjectArtifactKind = 'image' | 'video' | 'audio' | 'model' | 'file';
-
-export interface ProjectArtifact {
-  id: string;
-  project_id: string;
-  zone: 'outputs' | 'models' | 'runs' | 'assets';
-  kind: ProjectArtifactKind;
-  name: string;
-  relative_path: string;
-  size: number;
-  modified_at: DbDate;
-  source_job_id: string | null;
-  worker_id: string;
-  availability: 'local' | 'remote' | 'syncing' | 'offline';
-  preview_url: string | null;
-  download_url: string;
-}
-
-export interface ProjectOverview {
-  project: Project;
-  dataset: {
-    count: number;
-    item_count: number;
-    captioned_count: number;
-    missing_caption_count: number;
-    watcher_errors: number;
-  };
-  training: {
-    active_jobs: Job[];
-    latest_job: Job | null;
-  };
-  review: {
-    recent_outputs: ProjectArtifact[];
-    model_count: number;
-  };
-  replicas: ProjectReplicaState[];
 }
 
 export interface RemoteOllamaWorker {
@@ -343,7 +183,6 @@ export interface RemoteOllamaWorker {
 export interface Job {
   id: string;
   name: string;
-  project_id: string | null;
   worker_id: string;
   remote_job_id: string | null;
   remote_sync_at: DbDate | null;
@@ -364,9 +203,6 @@ export interface Job {
   job_ref: string | null;
   save_now: boolean;
   sample_now: boolean;
-  project_name?: string | null;
-  project_slug?: string | null;
-  project_lifecycle_state?: ProjectLifecycleState | null;
   hf_download_progress?: HFDownloadProgress | null;
   comfy_install_progress?: ComfyInstallProgress | null;
 }
@@ -417,14 +253,7 @@ export interface ComfyInstallProgress {
 
 export type AdvisorSeverity = 'critical' | 'warning' | 'info';
 export type AdvisorStage = 'preflight' | 'live';
-export type AdvisorCategory =
-  | 'dataset'
-  | 'config'
-  | 'sampling'
-  | 'stability'
-  | 'performance'
-  | 'phases'
-  | 'metrics';
+export type AdvisorCategory = 'dataset' | 'config' | 'sampling' | 'stability' | 'performance' | 'phases' | 'metrics';
 
 export interface AdvisorFinding {
   id: string;
@@ -961,7 +790,7 @@ export interface CaptionProcessConfig {
     convert_destination?: 'current' | 'copy' | string;
     caption_extension?: string;
     temperature?: number;
-  }
+  };
 }
 
 export interface CaptionConfigObject {

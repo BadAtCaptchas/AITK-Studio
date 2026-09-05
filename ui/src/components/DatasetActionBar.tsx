@@ -1,31 +1,25 @@
 'use client';
-
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useState } from 'react';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import { Cog, Download, Captions } from 'lucide-react';
 import { LuLoader } from 'react-icons/lu';
 import { apiClient } from '@/utils/api';
 import { getDownloadUrl } from '@/utils/media';
-
 type DatasetZipTarget = 'dataset' | 'dataset_captions';
-
 interface DatasetActionBarProps {
   datasetName: string;
-  projectID?: string | null;
   className?: string;
 }
-
-export default function DatasetActionBar({ datasetName, projectID = null, className }: DatasetActionBarProps) {
+export default function DatasetActionBar({ datasetName, className }: DatasetActionBarProps) {
   const [zipping, setZipping] = useState<DatasetZipTarget | null>(null);
-
   const downloadZip = async (zipTarget: DatasetZipTarget) => {
     if (zipping) return;
     setZipping(zipTarget);
     try {
-      const res = await apiClient.post('/api/zip', { zipTarget, datasetName, project_id: projectID });
+      const res = await apiClient.post('/api/zip', { zipTarget, datasetName });
       const zipPath = res.data.zipPath;
       if (!zipPath) throw new Error('No zipPath in response');
-
       // Cache-buster: /api/files serves with a long max-age, and the zip is rebuilt
       // at the same path every time, so a bare URL could hand back a stale download.
       const rawDownloadPath = res.data.downloadUrl || getDownloadUrl(zipPath);
@@ -38,16 +32,16 @@ export default function DatasetActionBar({ datasetName, projectID = null, classN
       a.remove();
     } catch (err) {
       console.error('Error downloading zip:', err);
+      reportWorkflowError('Could not create the download. Try again from Dataset downloads.');
     } finally {
       setZipping(null);
     }
   };
-
   const iconSizeClass = 'w-5 h-5 sm:w-6 sm:h-6';
   return (
     <div className={`flex items-center flex-shrink-0 ${className ?? ''}`}>
       <Menu>
-        <MenuButton className={'ml-1 sm:ml-2'}>
+        <MenuButton className={'ml-1 sm:ml-2'} aria-label="Dataset downloads" title="Dataset downloads">
           {zipping ? <LuLoader className={`${iconSizeClass} animate-spin`} /> : <Cog className={iconSizeClass} />}
         </MenuButton>
         <MenuItems
@@ -77,4 +71,3 @@ export default function DatasetActionBar({ datasetName, projectID = null, classN
     </div>
   );
 }
-

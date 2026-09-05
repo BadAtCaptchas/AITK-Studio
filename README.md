@@ -15,7 +15,7 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 ## Highlights
 
 - Web UI for training jobs, datasets, generation, TensorBoard, queue management, and exports.
-- Project workspaces keep datasets, runs, outputs, notes, and files isolated under their own project folders.
+- One global library connects datasets, training runs, models, and generation.
 - CLI-first training still works for config-driven workflows and automation.
 - Supports LoRA, LoKr, full fine-tuning paths for selected models, training phases, and auto-learn profiles.
 - Includes encrypted dataset workflows with password, key-file, and YubiKey-backed unlock modes.
@@ -27,7 +27,7 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 - [Supported Models](#supported-models)
 - [Quick Start](#quick-start)
 - [Web UI](#web-ui)
-- [Project Workspaces](#project-workspaces)
+- [Training workspace](#training-workspace)
 - [Developer Utilities](#developer-utilities)
 - [Generation](#generation)
 - [Monitoring and Storage](#monitoring-and-storage)
@@ -274,25 +274,19 @@ The AITK Studio UI is the main control surface for creating datasets, starting a
 
 Hugging Face and Diffusers usage telemetry is disabled by default. Opt in for new UI-launched training, generation, and import processes with **Settings → Library telemetry**. Direct CLI and Modal runs can opt in with `AITK_TELEMETRY_ENABLED=1`.
 
-### Project Workspaces
+### Training workspace
 
-Projects are opt-in, isolated production workspaces for keeping related training work together. Enable **Project Workspaces** in Settings, open **Projects** to create or switch workspaces, and use the Overview's **Prepare Dataset → Train Model → Review Output** stages to move work forward. Each new project gets its own registered sandbox under `PROJECTS_FOLDER` (default: `projects/`) with separate `datasets/`, `configs/`, `runs/`, `outputs/`, `models/`, `assets/`, `notes/`, and `cache/` folders. Existing projects keep their registered storage root if `PROJECTS_FOLDER` later changes.
+Use **Home → Datasets → Training → Models → Generate** to prepare data, train, and review the results. Home chooses its next action from loaded run and dataset state. Caption counts describe completeness; they do not establish training quality. Dataset actions can preselect training data, and **Try this model** loads a checkpoint and its model settings in Generate. Workflow and watermark utilities are under **Tools**.
 
-Projects use the normal application rail plus a project header and tab bar:
+Training starts with guided steps. Expand the labeled options for caching, repeats, augmentation, and specialist settings, or use the raw configuration editor. Unsaved drafts stay in the current browser tab during a dataset-preparation detour; reloading the tab discards them.
 
-- **Overview** reports dataset and caption readiness, the current or latest run, real outputs, model readiness, recent runs, and activity. A stopped or failed run can be resumed in place so checkpoint state and the existing job identity are retained.
-- **Datasets** is the scoped dataset library, including readiness filters, watcher/encryption state, the full dataset editor, and explicit copy-first transfers between Global and project workspaces.
-- **Runs** is project-focused history with status/type filters, queue actions, existing run details, and resume/restart controls.
-- **Outputs** indexes real training samples and generated image, video, and audio files with previews, filters, an inspector, downloads, and guarded deletion.
-- **Models** indexes project checkpoints and model files, exposes metadata and source runs, and can preselect a model in project Generate.
-- **Files** lazily browses the project by managed zone, with search, breadcrumbs, media/text previews, and guarded rename/delete operations. Dataset, run, and model roots remain protected from destructive generic file operations.
-- **Settings** manages identity, archive/restore, relocation, storage details, compatible execution replicas, synchronization conflicts, rehoming, and guarded permanent purge.
+Storage uses the configured dataset, training, and model roots in **Settings → Storage**. Global remote workers remain available in **Settings → Compute**.
 
-Archive is the normal removal action. Archived projects remain browseable and downloadable but cannot be edited, executed, or used for imports until restored. Permanent purge requires an archive first, a current revision, blocker checks, and typed slug confirmation. Project URLs use immutable project IDs; older slug URLs continue to resolve and redirect to the canonical route.
+#### Upgrading from workspace releases
 
-Global Dashboard, Jobs, Datasets, and Generate still work as before when no `project_id` is used. Existing global datasets and outputs are not moved automatically; when a global dataset is used inside a project job, AITK Studio copies it into the project sandbox by default so project configs can use local project paths.
+Stop the application and its workers before upgrading. Startup retains the existing SQLite backup mechanism and checks for obsolete records before modifying the database. Empty legacy structures are removed and global run-name uniqueness is restored. Nonempty legacy workspace records, associated jobs, saved scoped watchers, or conflicting run names stop the upgrade and require manual migration. The upgrade never moves or deletes dataset, model, output, or former workspace folders. Keep those folders and backups until you have reviewed any manual migration.
 
-Remote project execution uses the negotiated `project-sync-v1` protocol and one authoritative home instance. Compatible workers can be linked as execution replicas from project Settings. A **full** sync initializes a replica and is required before rehoming; **launch** sends only the inputs, configuration, and checkpoint state required by a run; **results** pulls artifacts, outputs, models, logs, metrics, and samples back to the home. Transfers use portable `aitk-project://` references, SHA-256 manifests, and resumable 8 MiB chunks. Files changed independently on both sides stop in a conflict state until you choose keep-home, keep-worker, or deterministic keep-both. Legacy global remote jobs continue to work without project synchronization.
+Obsolete scoped API requests are rejected explicitly; removed workspace routes are unavailable. Older workers' scoped jobs are excluded from global run discovery.
 
 ### Run the UI
 
@@ -381,7 +375,7 @@ docker compose up --build
 
 Set `AITK_IMAGE` to use a prebuilt image instead, then run `docker compose pull` and `docker compose up --no-build`. Avoid floating tags for production deployments.
 
-Compose persists `data/`, `datasets/`, `output/`, `config/`, `models/`, and `projects/` on the host. SQLite is stored at `data/aitk_db.db`; using a directory mount avoids Docker creating a directory when a database file does not exist yet. If you used an older version of this Compose file, move the existing database once before starting the new deployment:
+Compose persists `data/`, `datasets/`, `output/`, `config/`, `models/` on the host. SQLite is stored at `data/aitk_db.db`; using a directory mount avoids Docker creating a directory when a database file does not exist yet. If you used an older version of this Compose file, move the existing database once before starting the new deployment:
 
 ```bash
 mkdir -p data

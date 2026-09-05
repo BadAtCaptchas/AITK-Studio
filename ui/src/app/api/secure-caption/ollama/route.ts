@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   decryptSecureCaptionJson,
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const envelope = (await request.json()) as SecureCaptionEnvelope;
+    const envelope = assertGlobalPayload(await request.json()) as SecureCaptionEnvelope;
     const payload = decryptSecureCaptionJson<SecureOllamaCaptionRequest>(token, 'request', envelope);
     const caption = await generateOllamaImageCaption({
       model: payload.model,

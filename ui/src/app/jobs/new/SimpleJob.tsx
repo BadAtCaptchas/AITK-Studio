@@ -1,5 +1,7 @@
 'use client';
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import Link from 'next/link';
+import type { ValidationMessage, TrainingFieldTarget } from '@/utils/trainingValidation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -85,7 +87,6 @@ import {
 } from '@/utils/authenloraCodecs';
 import { uploadLoraFile } from '@/utils/streamedUploads';
 import { openDoc } from '@/components/DocModal';
-
 type Props = {
   legacyView?: boolean;
   jobConfig: JobConfig;
@@ -106,7 +107,9 @@ type Props = {
       detectedCaptionExt?: string | null;
     }
   >;
-  validationMessages?: Array<{ level: 'error' | 'warning'; message: string }>;
+  validationMessages?: ValidationMessage[];
+  focusTarget?: (TrainingFieldTarget & { nonce: number }) | null;
+  onRevealFinding?: (message: ValidationMessage) => void;
   workerLabel?: string;
   computeControls?: ReactNode;
   trainerLabel?: string;
@@ -114,32 +117,26 @@ type Props = {
   onOpenRawConfig?: () => void;
   isLoading?: boolean;
   comfyAutoInstall?: boolean;
-  projectID?: string | null;
 };
-
 const isDev = process.env.NODE_ENV === 'development';
 const segaDistillArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'zimage']);
 const layerOffloadingBackendOptions: SelectOption[] = [
   { value: 'block', label: 'Block' },
   { value: 'legacy', label: 'Legacy' },
 ];
-
 const generationBackendOptions: SelectOption[] = [
   { value: 'native', label: 'Native' },
   { value: 'comfy', label: 'ComfyUI' },
 ];
-
 const comfyModeOptions: SelectOption[] = [
   { value: 'external', label: 'External' },
   { value: 'managed', label: 'Managed' },
 ];
-
 const comfyOnErrorOptions: SelectOption[] = [
   { value: 'fail', label: 'Fail' },
   { value: 'native', label: 'Native fallback' },
   { value: 'skip', label: 'Skip' },
 ];
-
 const guidedStepItems = [
   { id: 'job-basics', title: 'Basics', detail: 'Name your job and choose a model.' },
   { id: 'job-dataset', title: 'Dataset', detail: 'Add the dataset you want to train on.' },
@@ -148,7 +145,6 @@ const guidedStepItems = [
   { id: 'job-validation', title: 'Validation', detail: 'Track deterministic loss on held-out images.' },
   { id: 'job-review', title: 'Review', detail: 'Review settings before starting.' },
 ];
-
 export default function SimpleJob({
   legacyView = false,
   jobConfig,
@@ -161,6 +157,8 @@ export default function SimpleJob({
   gpuList,
   datasetOptions,
   validationMessages = [],
+  focusTarget,
+  onRevealFinding,
   workerLabel = 'Local worker',
   computeControls,
   trainerLabel = 'LoRA Trainer',
@@ -168,22 +166,23 @@ export default function SimpleJob({
   onOpenRawConfig,
   isLoading,
   comfyAutoInstall = false,
-  projectID = null,
 }: Props) {
+  const fieldError = (label: string, index?: number) =>
+    validationMessages.find(
+      item =>
+        item.level === 'error' && item.target.label === label && (index === undefined || item.target.index === index),
+    )?.message;
   const [randomPromptLoadingIndex, setRandomPromptLoadingIndex] = useState<number | null>(null);
   const [encryptedKeyRefreshKey, setEncryptedKeyRefreshKey] = useState(0);
   const baseLoraFileInputRef = useRef<HTMLInputElement | null>(null);
   const [baseLoraUploadStatus, setBaseLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [baseLoraUploadMessage, setBaseLoraUploadMessage] = useState('');
-
   const modelArch = useMemo(() => {
     return modelArchs.find(a => a.name === jobConfig.config.process[0].model.arch) as ModelArch;
   }, [jobConfig.config.process[0].model.arch]);
-
   const jobType = useMemo(() => {
     return jobTypeOptions.find(j => j.value === jobConfig.config.process[0].type);
   }, [jobConfig.config.process[0].type]);
-
   const disableSections = useMemo(() => {
     let sections: string[] = [];
     if (modelArch?.disableSections) {
@@ -194,7 +193,6 @@ export default function SimpleJob({
     }
     return sections;
   }, [modelArch, jobType]);
-
   const isVideoModel = Boolean(modelArch?.isVideoModel || modelArch?.group === 'video');
   const networkConfig = jobConfig.config.process[0].network;
   const networkType = networkConfig?.type ?? 'lora';
@@ -220,7 +218,6 @@ export default function SimpleJob({
     ['lora', 'locon', 'lycoris', 'lokr'].includes(normalizedNetworkType) &&
     trainConfig.loss_type !== 'mean_flow' &&
     !trainConfig.do_guidance_loss;
-
   const setSegaDefaults = () => {
     if (trainConfig.sega_distill_weight === undefined) setJobConfig(1.0, 'config.process[0].train.sega_distill_weight');
     if (trainConfig.sega_distill_base_resolution === undefined) {
@@ -235,7 +232,6 @@ export default function SimpleJob({
     if (trainConfig.sega_distill_on_reg === undefined)
       setJobConfig(false, 'config.process[0].train.sega_distill_on_reg');
   };
-
   const handleSegaDistillToggle = (enabled: boolean) => {
     if (enabled && !canEnableSegaDistill) return;
     setJobConfig(enabled, 'config.process[0].train.sega_distill');
@@ -247,7 +243,6 @@ export default function SimpleJob({
     setJobConfig(undefined, 'config.process[0].train.differential_guidance_scale');
     setJobConfig(undefined, 'config.process[0].train.do_guidance_loss');
   };
-
   const handleWatermarkToggle = (enabled: boolean) => {
     if (enabled && !canEnableWatermark) return;
     if (!jobConfig.config.process[0].watermark) {
@@ -257,7 +252,6 @@ export default function SimpleJob({
     setJobConfig(enabled, 'config.process[0].watermark.enabled');
     setJobConfig('authenlora', 'config.process[0].watermark.method');
   };
-
   const handleWatermarkCodecChange = (value: string) => {
     if (value === 'custom') {
       if (selectedAuthenloraCodec !== 'custom') {
@@ -271,7 +265,6 @@ export default function SimpleJob({
       setJobConfig(msgBits, 'config.process[0].watermark.msg_bits');
     }
   };
-
   const handleTrainingStepsChange = (value: number | null) => {
     if (autoTrain) return;
     const requestedSteps = Math.max(1, Number(value ?? 1));
@@ -280,7 +273,6 @@ export default function SimpleJob({
       setJobConfig(requestedSteps, 'config.process[0].train.steps');
       return;
     }
-
     const nextPhases: TrainingPhaseConfig[] = phases.map(phase => ({
       ...phase,
       optimizer_params: phase.optimizer_params ? { ...phase.optimizer_params } : undefined,
@@ -294,7 +286,6 @@ export default function SimpleJob({
     setJobConfig(nextPhases, 'config.process[0].train.phases');
     setJobConfig(synchronizedTotal, 'config.process[0].train.steps');
   };
-
   const taggedSampleArr: Record<string, any>[] | null = useMemo(() => {
     if (!modelArch) return null;
     if (!modelArch.sampleTags) return null;
@@ -307,7 +298,6 @@ export default function SimpleJob({
     }
     return sampleArr;
   }, [modelArch, jobConfig.config.process[0].sample.samples]);
-
   const modelArchTagSections: SampleTags[] | null = useMemo(() => {
     if (!modelArch?.sampleTags) return null;
     const maxPerGroup = 5;
@@ -331,7 +321,6 @@ export default function SimpleJob({
     }
     return sections.length > 0 ? sections : null;
   }, [modelArch]);
-
   const randomPromptDatasets = useMemo(() => {
     return jobConfig.config.process[0].datasets
       .map(dataset => {
@@ -342,7 +331,6 @@ export default function SimpleJob({
           ? getRememberedEncryptedDatasetKey(dataset.folder_path) ||
             (option?.name ? getRememberedEncryptedDatasetKey(option.name) : null)
           : null;
-
         return {
           folderPath: dataset.folder_path,
           captionExt: dataset.caption_ext,
@@ -357,12 +345,10 @@ export default function SimpleJob({
         dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path && !dataset.remote,
       );
   }, [datasetOptions, encryptedKeyRefreshKey, jobConfig.config.process[0].datasets]);
-
   const accessibleRandomPromptDatasets = useMemo(
     () => randomPromptDatasets.filter(dataset => !dataset.encrypted || dataset.keyB64),
     [randomPromptDatasets],
   );
-
   const randomPromptDisabledReason = useMemo(() => {
     if (randomPromptDatasets.length === 0) return 'Select a dataset before importing a random prompt';
     if (accessibleRandomPromptDatasets.length === 0) {
@@ -370,9 +356,7 @@ export default function SimpleJob({
     }
     return 'Import random prompt from dataset';
   }, [accessibleRandomPromptDatasets.length, randomPromptDatasets.length]);
-
   const canImportRandomPrompt = randomPromptDatasets.length > 0 && accessibleRandomPromptDatasets.length > 0;
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const refreshRememberedKeys = () => setEncryptedKeyRefreshKey(value => value + 1);
@@ -383,7 +367,6 @@ export default function SimpleJob({
       document.removeEventListener('visibilitychange', refreshRememberedKeys);
     };
   }, []);
-
   useEffect(() => {
     if (!textEncoderTrainingEnabled) return;
     if (trainConfig.unload_text_encoder) {
@@ -406,7 +389,6 @@ export default function SimpleJob({
     trainConfig.cache_text_embeddings,
     trainConfig.unload_text_encoder,
   ]);
-
   const {
     arch: orbitProfileArch,
     low_vram: orbitProfileLowVram,
@@ -418,7 +400,6 @@ export default function SimpleJob({
   // Existing jobs count as already configured. A profile selected in this
   // editor receives the full defaults once, after which manual edits win.
   const orbitProfileAppliedRef = useRef(isOrbit4LowVramProfile(jobConfig));
-
   useEffect(() => {
     if (orbitProfileAppliedRef.current || !isOrbit4LowVramProfile(jobConfig)) return;
     orbitProfileAppliedRef.current = true;
@@ -433,14 +414,12 @@ export default function SimpleJob({
     orbitProfileQuantizeTextEncoder,
     setJobConfig,
   ]);
-
   const setSamplePromptValue = (sampleIndex: number, prompt: string) => {
     if (modelArch?.sampleTags && taggedSampleArr?.[sampleIndex]) {
       const tagKey =
         (modelArch.sampleTags.CAPTION && 'CAPTION') ||
         (modelArch.sampleTags.PROMPT && 'PROMPT') ||
         Object.entries(modelArch.sampleTags).find(([, tag]) => tag.type === 'text' || tag.type === 'multiline')?.[0];
-
       if (tagKey) {
         setJobConfig(
           objToTags({ ...taggedSampleArr[sampleIndex], [tagKey]: prompt }),
@@ -449,10 +428,8 @@ export default function SimpleJob({
         return;
       }
     }
-
     setJobConfig(prompt, `config.process[0].sample.samples[${sampleIndex}].prompt`);
   };
-
   const importRandomPromptFromDataset = async (sampleIndex: number) => {
     const datasets = accessibleRandomPromptDatasets.map(dataset => ({
       folderPath: dataset.folderPath,
@@ -465,36 +442,31 @@ export default function SimpleJob({
         datasetPath: dataset.folderPath,
         keyB64: dataset.keyB64 as string,
       }));
-
     if (datasets.length === 0) {
-      alert(randomPromptDisabledReason);
+      reportWorkflowError(randomPromptDisabledReason);
       return;
     }
-
     setRandomPromptLoadingIndex(sampleIndex);
     try {
       const response = await apiClient.post('/api/datasets/randomPrompt', {
         datasets,
         encryptedDatasetKeys,
-        ...(projectID ? { project_id: projectID } : {}),
       });
       const prompt = typeof response.data?.prompt === 'string' ? response.data.prompt.trim() : '';
       if (!prompt) {
-        alert('No captions were found in the configured datasets.');
+        reportWorkflowError('No captions were found in the configured datasets.');
         return;
       }
       setSamplePromptValue(sampleIndex, prompt);
     } catch (error: any) {
-      alert(error?.response?.data?.error || 'Could not import a random prompt from the dataset.');
+      reportWorkflowError(error?.response?.data?.error || 'Could not import a random prompt from the dataset.');
     } finally {
       setRandomPromptLoadingIndex(current => (current === sampleIndex ? null : current));
     }
   };
-
   const setDatasetPath = (datasetIndex: number, value: string) => {
     const selectedOption = datasetOptions.find(option => option.value === value);
     const detectedCaptionExt = normalizeDetectedCaptionExt(selectedOption?.detectedCaptionExt);
-
     setJobConfig((previous: JobConfig) => {
       let next = setNestedValue(previous, value, `config.process[0].datasets[${datasetIndex}].folder_path`);
       if (detectedCaptionExt) {
@@ -503,14 +475,12 @@ export default function SimpleJob({
       return next;
     });
   };
-
   const handleBaseLoraUpload = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.safetensors')) {
       setBaseLoraUploadStatus('error');
       setBaseLoraUploadMessage('Base LoRA upload must be a .safetensors file.');
       return;
     }
-
     setBaseLoraUploadStatus('uploading');
     setBaseLoraUploadMessage('');
     try {
@@ -537,7 +507,6 @@ export default function SimpleJob({
       }
     }
   };
-
   const numTrainingCols = useMemo(() => {
     let count = 4;
     if (!disableSections.includes('train.diff_output_preservation')) {
@@ -548,16 +517,13 @@ export default function SimpleJob({
     }
     return count;
   }, [disableSections, showSegaDistill]);
-
   let trainingBarClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4';
-
   if (numTrainingCols == 5) {
     trainingBarClass = 'grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5';
   }
   if (numTrainingCols == 6) {
     trainingBarClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6';
   }
-
   const transformerQuantizationOptions: GroupedSelectOption[] | SelectOption[] = useMemo(() => {
     const hasARA = modelArch?.accuracyRecoveryAdapters && Object.keys(modelArch.accuracyRecoveryAdapters).length > 0;
     if (!hasARA) {
@@ -569,7 +535,6 @@ export default function SimpleJob({
         options: [quantizationOptions[0], quantizationOptions[1]],
       },
     ];
-
     // add ARAs if they exist for the model
     const ARAs: SelectOption[] = [];
     if (modelArch.accuracyRecoveryAdapters) {
@@ -583,7 +548,6 @@ export default function SimpleJob({
         options: ARAs,
       });
     }
-
     const additionalQuantizationOptions: SelectOption[] = [];
     // add the quantization options if they are not already included
     for (let i = 2; i < quantizationOptions.length; i++) {
@@ -598,14 +562,11 @@ export default function SimpleJob({
     }
     return newQuantizationOptions;
   }, [modelArch]);
-
   const layerOffloadingMemoryProfile = useMemo(
     () => getLayerOffloadingMemoryProfile(jobConfig.config.process[0].model.arch),
     [jobConfig.config.process[0].model.arch],
   );
-
   const showGPUSelect = !isMac();
-
   let numDatasetCols = 4;
   let numSampleTopCols = 4;
   let datasetStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4';
@@ -626,7 +587,6 @@ export default function SimpleJob({
   if (numSampleTopCols == 3) {
     sampleTopStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3';
   }
-
   const processConfig = jobConfig.config.process[0];
   const datasetsConfig = processConfig.datasets || [];
   const sampleConfig = processConfig.sample;
@@ -644,26 +604,7 @@ export default function SimpleJob({
     !datasetsConfig.length ||
     !firstDataset.folder_path ||
     firstDataset.folder_path === defaultDatasetConfig.folder_path;
-  const localReadinessMessages = [
-    ...(unresolvedDataset
-      ? [{ level: 'error' as const, message: 'Select a target dataset before creating this job.' }]
-      : []),
-    ...(samplePromptBlank
-      ? [{ level: 'warning' as const, message: 'No sample prompt is configured. Add one in Basics or Samples.' }]
-      : []),
-    ...(validationConfig && validationItems.length === 0
-      ? [{ level: 'error' as const, message: 'Add at least one held-out image before enabling validation loss.' }]
-      : []),
-    ...(incompleteValidationItems > 0
-      ? [
-          {
-            level: 'error' as const,
-            message: `${incompleteValidationItems} validation item${incompleteValidationItems === 1 ? '' : 's'} still need an image.`,
-          },
-        ]
-      : []),
-  ];
-  const readinessMessages = validationMessages.length > 0 ? validationMessages : localReadinessMessages;
+  const readinessMessages = validationMessages;
   const readinessErrors = readinessMessages.filter(message => message.level === 'error');
   const readinessWarnings = readinessMessages.filter(message => message.level === 'warning');
   const stepItems = guidedStepItems;
@@ -707,7 +648,6 @@ export default function SimpleJob({
     { value: 'dora', label: 'DoRA' },
     { value: 'lokr', label: 'LoKr' },
   ].filter(option => !modelArch?.allowedNetworkTypes || modelArch.allowedNetworkTypes.includes(option.value));
-
   const formatNumber = (value: number | null | undefined) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
     return Number(value).toLocaleString();
@@ -724,7 +664,6 @@ export default function SimpleJob({
   const selectedGpuMemory = selectedGpu?.memory
     ? `${formatMemory(selectedGpu.memory.free)} free / ${formatMemory(selectedGpu.memory.total)}`
     : 'Telemetry loading';
-
   const setPrimarySamplePrompt = (prompt: string) => {
     if (!sampleConfig.samples?.length) {
       setJobConfig([{ prompt }], 'config.process[0].sample.samples');
@@ -732,27 +671,23 @@ export default function SimpleJob({
     }
     setSamplePromptValue(0, prompt);
   };
-
   const addDataset = () => {
     const newDataset = applySelectedDatasetDefaults(objectCopy(defaultDatasetConfig), modelArch?.defaults);
     newDataset.controls = modelArch?.controls ?? [];
     setJobConfig([...datasetsConfig, newDataset], 'config.process[0].datasets');
   };
-
   const duplicateDataset = (datasetIndex: number) => {
     const duplicated = objectCopy(datasetsConfig[datasetIndex]);
     const nextDatasets = [...datasetsConfig];
     nextDatasets.splice(datasetIndex + 1, 0, duplicated);
     setJobConfig(nextDatasets, 'config.process[0].datasets');
   };
-
   const removeDataset = (datasetIndex: number) => {
     setJobConfig(
       datasetsConfig.filter((_, index) => index !== datasetIndex),
       'config.process[0].datasets',
     );
   };
-
   const renderSectionIntro = (title: string, detail: string) => (
     <div className="mb-5 border-b border-gray-900 pb-4">
       <h2 tabIndex={-1} className="text-2xl font-semibold text-gray-100 outline-none">
@@ -761,7 +696,6 @@ export default function SimpleJob({
       <p className="mt-1 text-sm text-gray-500">{detail}</p>
     </div>
   );
-
   const renderDisclosure = (
     id: string,
     title: string,
@@ -791,7 +725,6 @@ export default function SimpleJob({
         <div className="border-t border-gray-900 px-4 pb-5 pt-2">{children}</div>
       </details>
     );
-
   const activeStepIndex = stepItems.findIndex(step => step.id === activeStepId);
   const formRef = useRef<HTMLFormElement>(null);
   const didSelectStep = useRef(false);
@@ -800,6 +733,31 @@ export default function SimpleJob({
     setActiveStepId(id);
     window.history.replaceState(null, '', `#${id}`);
   };
+  useEffect(() => {
+    if (!focusTarget) return;
+    didSelectStep.current = false;
+    setActiveStepId(focusTarget.step);
+  }, [focusTarget]);
+  useEffect(() => {
+    if (!focusTarget || focusTarget.step !== activeStepId) return;
+    const candidates = Array.from(formRef.current?.querySelectorAll<HTMLElement>('[data-field-label]') || []).filter(
+      element => element.dataset.fieldLabel === focusTarget.label,
+    );
+    const wrapper = candidates[focusTarget.index ?? 0];
+    let ancestor = wrapper?.parentElement;
+    while (ancestor) {
+      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+      ancestor = ancestor.parentElement;
+    }
+    const control =
+      wrapper?.querySelector<HTMLElement>(
+        'input:not([type="file"]), select, textarea, [role="switch"], [role="combobox"], [role="button"]',
+      ) ||
+      wrapper?.querySelector<HTMLElement>('button') ||
+      formRef.current?.querySelector<HTMLElement>(`#${focusTarget.step} h2`);
+    control?.focus({ preventScroll: true });
+    control?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focusTarget, activeStepId]);
   const nextStep = () => {
     if (formRef.current && !formRef.current.reportValidity()) return;
     const next = stepItems[activeStepIndex + 1];
@@ -820,7 +778,6 @@ export default function SimpleJob({
     heading?.focus({ preventScroll: true });
     document.getElementById('training-step-navigation')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [activeStepId]);
-
   return (
     <>
       <form
@@ -883,7 +840,7 @@ export default function SimpleJob({
           </nav>
         )}
         <div className="studio-training-layout">
-          <div className="studio-training-sections min-w-0">
+          <div className="studio-training-sections training-form-area min-w-0">
             <fieldset
               id="job-basics"
               hidden={!legacyView && activeStepId !== 'job-basics'}
@@ -902,6 +859,7 @@ export default function SimpleJob({
                 <div className="max-w-2xl">
                   <TextInput
                     label="Training name"
+                    error={fieldError('Training name')}
                     value={jobConfig.config.name}
                     docKey="config.name"
                     onChange={value => setJobConfig(value, 'config.name')}
@@ -940,6 +898,7 @@ export default function SimpleJob({
 
                 <TextInput
                   label="Model path"
+                  error={fieldError('Model path')}
                   value={processConfig.model.name_or_path}
                   docKey="config.process[0].model.name_or_path"
                   onChange={(value: string | null) => {
@@ -1146,6 +1105,7 @@ export default function SimpleJob({
                     {!autoTrain && (
                       <NumberInput
                         label="Steps"
+                        error={fieldError('Steps')}
                         value={processConfig.train.steps}
                         onChange={handleTrainingStepsChange}
                         placeholder="3000"
@@ -1155,6 +1115,7 @@ export default function SimpleJob({
                     )}
                     <NumberInput
                       label="Batch size"
+                      error={fieldError('Batch size')}
                       value={processConfig.train.batch_size}
                       onChange={value => setJobConfig(value, 'config.process[0].train.batch_size')}
                       placeholder="1"
@@ -1163,6 +1124,7 @@ export default function SimpleJob({
                     />
                     <NumberInput
                       label="Gradient accumulation"
+                      error={fieldError('Gradient accumulation')}
                       value={processConfig.train.gradient_accumulation}
                       onChange={value => setJobConfig(value, 'config.process[0].train.gradient_accumulation')}
                       placeholder="1"
@@ -1171,6 +1133,7 @@ export default function SimpleJob({
                     />
                     <NumberInput
                       label="Learning rate"
+                      error={fieldError('Learning rate')}
                       value={processConfig.train.lr}
                       onChange={value => setJobConfig(value, 'config.process[0].train.lr')}
                       placeholder="0.0001"
@@ -1774,7 +1737,15 @@ export default function SimpleJob({
             >
               {renderSectionIntro(
                 'Dataset',
-                'Choose what the model learns from and tune repeats, captions, and resolutions.',
+                'Choose your media and resolutions. Expand data options when you need them.',
+              )}
+              {datasetOptions.length === 0 && (
+                <div className="mb-5 rounded-lg border border-gray-700 p-4" role="status">
+                  <p>No datasets are available. Create or import one, then return to your saved training draft.</p>
+                  <Link className="studio-primary mt-4" href="/datasets?action=import&returnTo=training">
+                    Create or import data
+                  </Link>
+                </div>
               )}
               <div className="space-y-3">
                 {datasetsConfig.map((dataset, i) => (
@@ -1808,98 +1779,6 @@ export default function SimpleJob({
                           onChange={value => setDatasetPath(i, value)}
                           options={datasetOptions}
                         />
-                        <NumberInput
-                          label="LoRA weight"
-                          value={dataset.network_weight}
-                          className="pt-2"
-                          onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].network_weight`)}
-                          placeholder="1.0"
-                        />
-                        <NumberInput
-                          label="Num repeats"
-                          value={dataset.num_repeats || 1}
-                          className="pt-2"
-                          onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].num_repeats`)}
-                          placeholder="1"
-                          docKey={'dataset.num_repeats'}
-                        />
-                        <NumberInput
-                          label="Dataset batch size"
-                          value={dataset.batch_size ?? null}
-                          className="pt-2"
-                          onChange={value =>
-                            setJobConfig(value ?? undefined, `config.process[0].datasets[${i}].batch_size`)
-                          }
-                          placeholder={`${processConfig.train.batch_size}`}
-                          min={1}
-                          allowEmpty
-                        />
-                      </div>
-                      <div>
-                        <TextInput
-                          label="Default caption"
-                          value={dataset.default_caption}
-                          onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].default_caption`)}
-                          placeholder="A photo of a cat"
-                        />
-                        <NumberInput
-                          label="Caption dropout"
-                          className="pt-2"
-                          value={dataset.caption_dropout_rate}
-                          onChange={value =>
-                            setJobConfig(value, `config.process[0].datasets[${i}].caption_dropout_rate`)
-                          }
-                          placeholder="0.05"
-                          min={0}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <FormGroup label="Settings">
-                          <Checkbox
-                            label="Cache latents"
-                            checked={dataset.cache_latents_to_disk || false}
-                            onChange={value =>
-                              setJobConfig(value, `config.process[0].datasets[${i}].cache_latents_to_disk`)
-                            }
-                          />
-                          <Checkbox
-                            label="Cache raw tensors"
-                            checked={dataset.cache_tensors_to_disk || false}
-                            onChange={value =>
-                              setJobConfig(value, `config.process[0].datasets[${i}].cache_tensors_to_disk`)
-                            }
-                          />
-                          {modelArch?.additionalSections?.includes('datasets.include_images_in_video_dataset') && (
-                            <Checkbox
-                              label="Include images with videos"
-                              docKey="datasets.include_images_in_video_dataset"
-                              checked={dataset.include_images_in_video_dataset || false}
-                              onChange={value =>
-                                setJobConfig(value, `config.process[0].datasets[${i}].include_images_in_video_dataset`)
-                              }
-                            />
-                          )}
-                          <Checkbox
-                            label="Is regularization"
-                            checked={dataset.is_reg || false}
-                            onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].is_reg`)}
-                          />
-                          {!isAudioModel && (
-                            <>
-                              <Checkbox
-                                label="Flip X"
-                                checked={dataset.flip_x || false}
-                                onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_x`)}
-                              />
-                              <Checkbox
-                                label="Flip Y"
-                                checked={dataset.flip_y || false}
-                                onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_y`)}
-                              />
-                            </>
-                          )}
-                        </FormGroup>
                       </div>
                       {!isAudioModel && (
                         <div>
@@ -1922,6 +1801,110 @@ export default function SimpleJob({
                           </FormGroup>
                         </div>
                       )}
+                      <details className="training-options">
+                        <summary>Repeats, captions, caching & augmentation</summary>
+                        <div className="grid gap-4">
+                          <div>
+                            <NumberInput
+                              label="LoRA weight"
+                              value={dataset.network_weight}
+                              className="pt-2"
+                              onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].network_weight`)}
+                              placeholder="1.0"
+                            />
+                            <NumberInput
+                              label="Num repeats"
+                              error={fieldError('Num repeats', i)}
+                              value={dataset.num_repeats || 1}
+                              className="pt-2"
+                              onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].num_repeats`)}
+                              placeholder="1"
+                              docKey={'dataset.num_repeats'}
+                            />
+                            <NumberInput
+                              label="Dataset batch size"
+                              value={dataset.batch_size ?? null}
+                              className="pt-2"
+                              onChange={value =>
+                                setJobConfig(value ?? undefined, `config.process[0].datasets[${i}].batch_size`)
+                              }
+                              placeholder={`${processConfig.train.batch_size}`}
+                              min={1}
+                              allowEmpty
+                            />
+
+                            <TextInput
+                              label="Default caption"
+                              value={dataset.default_caption}
+                              onChange={value =>
+                                setJobConfig(value, `config.process[0].datasets[${i}].default_caption`)
+                              }
+                              placeholder="A photo of a cat"
+                            />
+                            <NumberInput
+                              label="Caption dropout"
+                              className="pt-2"
+                              value={dataset.caption_dropout_rate}
+                              onChange={value =>
+                                setJobConfig(value, `config.process[0].datasets[${i}].caption_dropout_rate`)
+                              }
+                              placeholder="0.05"
+                              min={0}
+                              required
+                            />
+                          </div>
+                          <div>
+                            <FormGroup label="Settings">
+                              <Checkbox
+                                label="Cache latents"
+                                checked={dataset.cache_latents_to_disk || false}
+                                onChange={value =>
+                                  setJobConfig(value, `config.process[0].datasets[${i}].cache_latents_to_disk`)
+                                }
+                              />
+                              <Checkbox
+                                label="Cache raw tensors"
+                                checked={dataset.cache_tensors_to_disk || false}
+                                onChange={value =>
+                                  setJobConfig(value, `config.process[0].datasets[${i}].cache_tensors_to_disk`)
+                                }
+                              />
+                              {modelArch?.additionalSections?.includes('datasets.include_images_in_video_dataset') && (
+                                <Checkbox
+                                  label="Include images with videos"
+                                  docKey="datasets.include_images_in_video_dataset"
+                                  checked={dataset.include_images_in_video_dataset || false}
+                                  onChange={value =>
+                                    setJobConfig(
+                                      value,
+                                      `config.process[0].datasets[${i}].include_images_in_video_dataset`,
+                                    )
+                                  }
+                                />
+                              )}
+                              <Checkbox
+                                label="Is regularization"
+                                checked={dataset.is_reg || false}
+                                onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].is_reg`)}
+                              />
+                              {!isAudioModel && (
+                                <>
+                                  <Checkbox
+                                    label="Flip X"
+                                    checked={dataset.flip_x || false}
+                                    onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_x`)}
+                                  />
+                                  <Checkbox
+                                    label="Flip Y"
+                                    checked={dataset.flip_y || false}
+                                    onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].flip_y`)}
+                                  />
+                                </>
+                              )}
+                            </FormGroup>
+                          </div>
+                        </div>
+                      </details>{' '}
                     </div>
                   </div>
                 ))}
@@ -2097,6 +2080,7 @@ export default function SimpleJob({
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                     <NumberInput
                       label="Validate every"
+                      error={fieldError('Validate every')}
                       value={validationConfig.validate_every_n_steps}
                       onChange={value =>
                         setJobConfig(
@@ -2110,6 +2094,7 @@ export default function SimpleJob({
                     />
                     <NumberInput
                       label="Validation resolution"
+                      error={fieldError('Validation resolution')}
                       value={validationConfig.resolution}
                       onChange={value =>
                         setJobConfig(
@@ -2145,7 +2130,7 @@ export default function SimpleJob({
                     />
                   </div>
 
-                  <div>
+                  <div data-field-label="Held-out images">
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Held-out images ({validationItems.length})
                     </div>
@@ -2158,7 +2143,6 @@ export default function SimpleJob({
                           <SampleControlImage
                             instruction="Add image"
                             src={typeof item.image_path === 'string' ? item.image_path || null : null}
-                            projectID={projectID}
                             onNewImageSelected={imagePath =>
                               setJobConfig(
                                 imagePath ?? '',
@@ -2283,21 +2267,29 @@ export default function SimpleJob({
                 </div>
                 {readinessMessages.length > 0 ? (
                   <div className="space-y-2">
-                    {readinessMessages.slice(0, 4).map((message, index) => (
-                      <div
+                    {readinessMessages.map((message, index) => (
+                      <button
+                        type="button"
+                        onClick={() => onRevealFinding?.(message)}
                         key={`${message.level}-${index}`}
                         className={`border px-2 py-2 text-xs ${message.level === 'error' ? 'border-rose-900 bg-rose-950/25 text-rose-200' : 'border-amber-900 bg-amber-950/20 text-amber-200'}`}
                       >
                         {message.message}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-500">Your setup is ready to be queued.</p>
+                  <p className="text-xs text-gray-500">
+                    Configuration checks passed. Review data quality and available memory before starting.
+                  </p>
                 )}
               </div>
 
-              <button type="submit" disabled={status === 'saving'} className="operator-button-primary mt-5 h-11 w-full">
+              <button
+                type="submit"
+                disabled={status === 'saving' || readinessErrors.length > 0}
+                className="operator-button-primary mt-5 h-11 w-full"
+              >
                 <Sparkles className="h-4 w-4" />
                 {status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}
               </button>

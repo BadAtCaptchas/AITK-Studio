@@ -1,4 +1,5 @@
 'use client';
+import WorkflowFeedback from './WorkflowFeedback';
 
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
@@ -41,11 +42,7 @@ export function Modal({
   }, [closeOnOverlayClick, isOpen, onClose]);
 
   return (
-    <Dialog
-      open={isOpen}
-      onClose={closeOnOverlayClick ? onClose : () => undefined}
-      className="relative z-50"
-    >
+    <Dialog open={isOpen} onClose={closeOnOverlayClick ? onClose : () => undefined} className="relative z-50">
       <DialogBackdrop className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm transition-opacity" />
       <div className="fixed inset-0 flex w-screen items-center justify-center overflow-y-auto p-4">
         <DialogPanel
@@ -53,9 +50,7 @@ export function Modal({
         >
           {(title || showCloseButton) && (
             <div className="flex items-center justify-between rounded-t-xl border-b border-gray-800 px-6 py-5">
-              {title ? (
-                <DialogTitle className="text-xl font-semibold text-gray-100">{title}</DialogTitle>
-              ) : null}
+              {title ? <DialogTitle className="text-xl font-semibold text-gray-100">{title}</DialogTitle> : null}
               {showCloseButton ? (
                 <button
                   type="button"
@@ -68,7 +63,10 @@ export function Modal({
               ) : null}
             </div>
           )}
-          <div className="px-6 py-4">{children}</div>
+          <div className="px-6 py-4">
+            <WorkflowFeedback />
+            {children}
+          </div>
         </DialogPanel>
       </div>
     </Dialog>

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { db } from './db';
-import { getJobTrainingRoot, getProjectRoots } from './projects';
+import { getJobTrainingRoot } from './trainingPaths';
 import { resolveSampleThumbnail } from './sampleThumbnails';
 import type { Job } from '@/types';
 
@@ -64,17 +64,6 @@ async function getAllowedSampleParents(job: Job, trainingFolder: string) {
   const canonicalTrainingFolder = await realpathIfExists(trainingFolder);
   if (canonicalTrainingFolder) {
     parents.push(canonicalTrainingFolder);
-  }
-
-  if (job.project_id) {
-    const project = await db.projects.findById(job.project_id);
-    if (project) {
-      const roots = await getProjectRoots(project);
-      const canonicalProjectRoot = await realpathIfExists(roots.root);
-      if (canonicalProjectRoot) {
-        parents.push(canonicalProjectRoot);
-      }
-    }
   }
 
   return parents;

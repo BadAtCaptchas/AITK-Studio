@@ -14,35 +14,26 @@ import { ComfyInstallProgressInline } from '@/components/ComfyInstallProgress';
 import useWorkers from '@/hooks/useWorkers';
 import { getTotalSteps } from '@/utils/jobs';
 import { PageNotice, ProgressBar, QueueStateBadge, StatusBadge } from '@/components/OperatorPrimitives';
-import { ProjectResourceBadge } from '@/components/ResourceScopeFilter';
-
 export type JobsViewStatus = 'loading' | 'ready' | 'error';
-
 interface JobsTableProps {
   variant?: 'default' | 'dashboard';
   autoStartQueue?: boolean;
   onlyActive?: boolean;
   job_type?: string | null;
-  projectID?: string | null;
-  includeProjectActive?: boolean;
   onJobsChange?: (jobs: Job[]) => void;
   onQueuesChange?: (queues: Queue[]) => void;
   onStatusChange?: (status: JobsViewStatus) => void;
 }
-
 type JobGroup = {
   name: string;
   jobs: Job[];
   workerID: string;
   gpuIDs: string | null;
 };
-
 const activeJobStatuses = new Set(['queued', 'running', 'stopping']);
-
 function isRemoteWorker(workerID: string) {
   return workerID !== 'local';
 }
-
 function jobDisplayTitle(row: Job) {
   if (row.job_type === 'caption') {
     const splits = (row.job_ref || '').split(/[/\\]/);
@@ -53,15 +44,9 @@ function jobDisplayTitle(row: Job) {
   }
   return { prefix: 'Train', title: row.name };
 }
-
-function jobDetailHref(job: Job, projectID: string | null) {
-  const routeProjectID = projectID || job.project_id;
-  if (routeProjectID) {
-    return `/projects/${encodeURIComponent(routeProjectID)}/runs/${encodeURIComponent(job.id)}`;
-  }
+function jobDetailHref(job: Job) {
   return `/jobs/${encodeURIComponent(job.id)}`;
 }
-
 interface DashboardQueueGroupProps {
   group: JobGroup;
   queue: Queue | undefined;
@@ -70,11 +55,9 @@ interface DashboardQueueGroupProps {
   jobsUnavailable: boolean;
   queueAvailable: boolean;
   queueError: boolean;
-  projectID: string | null;
   onRefresh: () => void;
   onRefreshJobs: () => void;
 }
-
 function DashboardQueueGroup({
   group,
   queue,
@@ -83,7 +66,6 @@ function DashboardQueueGroup({
   jobsUnavailable,
   queueAvailable,
   queueError,
-  projectID,
   onRefresh,
   onRefreshJobs,
 }: DashboardQueueGroupProps) {
@@ -169,16 +151,13 @@ function DashboardQueueGroup({
               <li key={job.id}>
                 <div className="studio-job-title-row">
                   <div className="min-w-0 flex-1">
-                    <Link href={jobDetailHref(job, projectID)} className="studio-job-title">
+                    <Link href={jobDetailHref(job)} className="studio-job-title">
                       {title}
                     </Link>
                     <div className="studio-job-meta">
                       <span>
                         {prefix} · GPU {job.gpu_ids}
                       </span>
-                      {job.project_id && (
-                        <ProjectResourceBadge projectID={job.project_id} projectName={job.project_name} />
-                      )}
                     </div>
                   </div>
                   <StatusBadge status={job.status} />
@@ -209,13 +188,10 @@ function DashboardQueueGroup({
     </div>
   );
 }
-
 export default function JobsTable({
   variant = 'default',
   onlyActive = false,
   job_type = null,
-  projectID = null,
-  includeProjectActive = false,
   onJobsChange,
   onQueuesChange,
   onStatusChange,
@@ -224,15 +200,12 @@ export default function JobsTable({
     onlyActive,
     reloadInterval: 5000,
     job_type,
-    projectID,
-    includeProjectActive,
   });
   const { queues, status: queueStatus, refreshQueues } = useQueueList(variant === 'dashboard' ? 5000 : null);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus, refreshWorkers } = useWorkers();
   const [filterText, setFilterText] = useState('');
   const [hasJobsLoaded, setHasJobsLoaded] = useState(false);
-
   const viewStatus: JobsViewStatus =
     status === 'error' || queueStatus === 'error' || workerStatus === 'error'
       ? 'error'
@@ -245,27 +218,23 @@ export default function JobsTable({
   useEffect(() => {
     onStatusChange?.(viewStatus);
   }, [onStatusChange, viewStatus]);
-
   useEffect(() => {
     onJobsChange?.(jobs);
   }, [jobs, onJobsChange]);
-
   useEffect(() => {
     onQueuesChange?.(queues);
   }, [onQueuesChange, queues]);
-
   const refresh = () => {
     refreshJobs();
     refreshQueues();
   };
-
   const columns: TableColumn[] = [
     {
       title: 'Name',
       key: 'name',
       render: row => {
         const { prefix, title } = jobDisplayTitle(row);
-        const jobHref = jobDetailHref(row, projectID);
+        const jobHref = jobDetailHref(row);
         return (
           <Link href={jobHref} className="flex min-w-0 items-center gap-2 font-medium text-gray-100">
             {['running', 'stopping'].includes(row.status) ? (
@@ -275,7 +244,6 @@ export default function JobsTable({
               {prefix}
             </span>
             <span className="truncate">{title}</span>
-            {row.project_id ? <ProjectResourceBadge projectID={row.project_id} projectName={row.project_name} /> : null}
           </Link>
         );
       },
@@ -287,7 +255,6 @@ export default function JobsTable({
       render: row => {
         if (row.job_type !== 'train') return <span className="text-gray-600">-</span>;
         const totalSteps = getTotalSteps(row);
-
         return (
           <div>
             <div className="text-xs text-gray-400">
@@ -336,22 +303,21 @@ export default function JobsTable({
       render: row => <JobActionBar job={row} onRefresh={refreshJobs} autoStartQueue={false} />,
     },
   ];
-
   const filteredJobs = useMemo(() => {
     const query = filterText.trim().toLowerCase();
     if (!query) return jobs;
     return jobs.filter(job =>
-      [job.name, job.project_name, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
+      [job.name, null, job.status, job.info, job.job_type, job.job_ref, job.gpu_ids, job.worker_id]
         .filter(Boolean)
         .some(value => `${value}`.toLowerCase().includes(query)),
     );
   }, [filterText, jobs]);
-
   const jobsDict = useMemo<Record<string, JobGroup>>(() => {
     if (!isGPUInfoLoaded && variant !== 'dashboard') return {};
     if (filteredJobs.length === 0 && gpuList.length === 0 && queues.length === 0) return {};
-
-    const jd: { [key: string]: JobGroup } = {};
+    const jd: {
+      [key: string]: JobGroup;
+    } = {};
     const workerName = (workerID: string) => {
       if (workerID === 'local') return 'Local';
       return workers.find(worker => worker.id === workerID)?.name || 'Remote';
@@ -362,7 +328,10 @@ export default function JobsTable({
       }
       const worker = workers.find(worker => worker.id === workerID);
       try {
-        const gpus = JSON.parse(worker?.gpus || '[]') as Array<{ index: number; name: string }>;
+        const gpus = JSON.parse(worker?.gpus || '[]') as Array<{
+          index: number;
+          name: string;
+        }>;
         return gpus.find(gpu => `${gpu.index}` === gpuID)?.name || `GPU #${gpuID}`;
       } catch {
         return `GPU #${gpuID}`;
@@ -380,7 +349,6 @@ export default function JobsTable({
       }
       return jd[key];
     };
-
     gpuList.forEach(gpu => {
       jd[`local:${gpu.index}`] = {
         name: `Local / ${gpu.name}`,
@@ -405,7 +373,6 @@ export default function JobsTable({
         jd.idle.jobs.push(job);
       }
     });
-
     Object.keys(jd).forEach(key => {
       if (key === 'idle') {
         jd[key].jobs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
@@ -419,10 +386,8 @@ export default function JobsTable({
     });
     return jd;
   }, [filteredJobs, gpuList, isGPUInfoLoaded, queues, variant, workers]);
-
   let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading' || !isGPUInfoLoaded;
   if (Object.keys(jobsDict).length > 0) isLoading = false;
-
   const tableError =
     status === 'error'
       ? 'Jobs could not be loaded.'
@@ -431,7 +396,6 @@ export default function JobsTable({
         : workerStatus === 'error'
           ? 'Workers could not be loaded.'
           : null;
-
   if (variant === 'dashboard') {
     const groups = Object.entries(jobsDict)
       .filter(([key]) => key !== 'idle')
@@ -468,7 +432,6 @@ export default function JobsTable({
             jobsUnavailable={status === 'error'}
             queueAvailable={queueStatus === 'success' || (queueStatus === 'loading' && queues.length > 0)}
             queueError={queueStatus === 'error'}
-            projectID={projectID}
             onRefresh={refresh}
             onRefreshJobs={refreshJobs}
           />
@@ -502,7 +465,6 @@ export default function JobsTable({
       </div>
     );
   }
-
   if (isLoading && Object.keys(jobsDict).length === 0) {
     return (
       <div className="operator-surface p-3">
@@ -512,11 +474,9 @@ export default function JobsTable({
       </div>
     );
   }
-
   const activeGroups = Object.keys(jobsDict)
     .sort()
     .filter(key => key !== 'idle');
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

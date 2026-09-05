@@ -5,16 +5,7 @@ import useJobMetrics, { type MetricPoint } from '@/hooks/useJobMetrics';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { getTotalSteps } from '@/utils/jobs';
 import { assignSeriesColors } from '@/utils/seriesColors';
-import {
-  Activity,
-  Clock,
-  Gauge,
-  Image as ImageIcon,
-  RotateCcw,
-  Save,
-  TrendingDown,
-  Zap,
-} from 'lucide-react';
+import { Activity, Clock, Gauge, Image as ImageIcon, RotateCcw, Save, TrendingDown, Zap } from 'lucide-react';
 import {
   useCallback,
   useDeferredValue,
@@ -624,20 +615,18 @@ function buildChartData({
 }
 
 export default function JobLossGraph({ job }: Props) {
-  const {
-    series,
-    latest,
-    lossKeys,
-    phasePoints,
-    phaseNamePoints,
-    status,
-    version,
-    refreshMetrics,
-  } = useJobMetrics(job.id, job.stop && job.status === 'running' ? 'stopping' : job.status, CHART_MAX_POINTS);
+  const { series, latest, lossKeys, phasePoints, phaseNamePoints, status, version, refreshMetrics } = useJobMetrics(
+    job.id,
+    job.stop && job.status === 'running' ? 'stopping' : job.status,
+    CHART_MAX_POINTS,
+  );
 
   const gpuIds = useMemo(() => getGpuIds(job), [job.gpu_ids]);
   const gpuPollInterval =
-    job.status === 'queued' || job.status === 'running' || job.status === 'stopping' || (job.stop && job.status === 'running')
+    job.status === 'queued' ||
+    job.status === 'running' ||
+    job.status === 'stopping' ||
+    (job.stop && job.status === 'running')
       ? 5000
       : null;
   const { gpuList } = useGPUInfo(gpuIds, gpuPollInterval);
@@ -678,7 +667,10 @@ export default function JobLossGraph({ job }: Props) {
       const raw = localStorage.getItem(key);
       if (raw) {
         const settings = JSON.parse(raw) as Partial<PersistedGraphSettings>;
-        if (settings.chartTab && ['loss', 'learning_rate', 'throughput', 'timesteps', 'gradients', 'memory'].includes(settings.chartTab)) {
+        if (
+          settings.chartTab &&
+          ['loss', 'learning_rate', 'throughput', 'timesteps', 'gradients', 'memory'].includes(settings.chartTab)
+        ) {
           setChartTab(settings.chartTab);
         }
         if (typeof settings.useLogScale === 'boolean') setUseLogScale(settings.useLogScale);
@@ -745,12 +737,12 @@ export default function JobLossGraph({ job }: Props) {
     () => lossKeys.filter(key => enabledLoss[key] !== false && (series[key]?.length ?? 0) > 0),
     [enabledLoss, lossKeys, series],
   );
-  const colorByLossKey = useMemo(
-    () => assignSeriesColors(lossKeys, LOSS_PALETTE),
-    [lossKeys],
-  );
+  const colorByLossKey = useMemo(() => assignSeriesColors(lossKeys, LOSS_PALETTE), [lossKeys]);
   const learningRateKeys = useMemo(
-    () => Object.keys(series).filter(key => isLearningRateKey(key) && (series[key]?.length ?? 0) > 0).sort(),
+    () =>
+      Object.keys(series)
+        .filter(key => isLearningRateKey(key) && (series[key]?.length ?? 0) > 0)
+        .sort(),
     [series],
   );
 
@@ -762,15 +754,18 @@ export default function JobLossGraph({ job }: Props) {
     const points = sortedNumericPoints(series[primaryLossKey]);
     if (!points.length) return { current: null as number | null, deltaPct: null as number | null };
     const alpha = 1 - clamp(deferredSmoothing / 100, 0, 1) * 0.98;
-    const smoothed = emaWithNulls(points.map(point => point.value as number), alpha).filter(
-      value => value != null && Number.isFinite(value),
-    ) as number[];
+    const smoothed = emaWithNulls(
+      points.map(point => point.value as number),
+      alpha,
+    ).filter(value => value != null && Number.isFinite(value)) as number[];
     if (!smoothed.length) return { current: null, deltaPct: null };
     const current = smoothed[smoothed.length - 1];
     const compareIndex = Math.max(0, smoothed.length - Math.max(20, Math.floor(smoothed.length * 0.12)));
     const previous = smoothed[compareIndex];
     const deltaPct =
-      previous != null && previous !== 0 && Number.isFinite(previous) ? ((current - previous) / Math.abs(previous)) * 100 : null;
+      previous != null && previous !== 0 && Number.isFinite(previous)
+        ? ((current - previous) / Math.abs(previous)) * 100
+        : null;
     return { current, deltaPct };
   }, [deferredSmoothing, primaryLossKey, series]);
 
@@ -801,7 +796,8 @@ export default function JobLossGraph({ job }: Props) {
   const latestGradNorm = latestMetricValue(latest, series, 'train/grad_norm');
   const latestGradLimit = latestMetricValue(latest, series, 'train/grad_norm_limit');
   const latestTrainVramGb =
-    latestMetricValue(latest, series, 'train/gpu_mem_allocated_gb') ?? latestMetricValue(latest, series, 'train/gpu_mem_reserved_gb');
+    latestMetricValue(latest, series, 'train/gpu_mem_allocated_gb') ??
+    latestMetricValue(latest, series, 'train/gpu_mem_reserved_gb');
   const latestTrainReservedGb = latestMetricValue(latest, series, 'train/gpu_mem_reserved_gb');
   const latestLossFinal = latestMetricValue(latest, series, 'train/loss_final');
   const latestLossUnclipped = latestMetricValue(latest, series, 'train/loss_unclipped');
@@ -1126,7 +1122,11 @@ export default function JobLossGraph({ job }: Props) {
           <KpiCard
             icon={<Activity className="h-4 w-4 text-emerald-400" />}
             label="Progress"
-            value={totalSteps ? `${formatCompact(job.step)} / ${formatCompact(totalSteps)}` : `Step ${formatCompact(job.step)}`}
+            value={
+              totalSteps
+                ? `${formatCompact(job.step)} / ${formatCompact(totalSteps)}`
+                : `Step ${formatCompact(job.step)}`
+            }
             detail={progressPercent == null ? 'total steps unknown' : `${formatPercent(progressPercent)} complete`}
             accent="emerald"
             progress={progressPercent}
@@ -1186,13 +1186,19 @@ export default function JobLossGraph({ job }: Props) {
             label="Grad norm"
             value={formatNum(latestGradNorm, 3)}
             detail={latestGradLimit == null ? 'clip limit unknown' : `clip ${formatNum(latestGradLimit, 3)}`}
-            accent={latestGradNorm != null && latestGradLimit != null && latestGradNorm > latestGradLimit ? 'rose' : 'emerald'}
+            accent={
+              latestGradNorm != null && latestGradLimit != null && latestGradNorm > latestGradLimit ? 'rose' : 'emerald'
+            }
           />
           <KpiCard
             icon={<Zap className="h-4 w-4 text-amber-400" />}
             label="Train VRAM"
             value={latestTrainVramGb == null ? '--' : `${formatNum(latestTrainVramGb, 3)} GB`}
-            detail={latestTrainReservedGb == null ? 'backend memory not logged yet' : `reserved ${formatNum(latestTrainReservedGb, 3)} GB`}
+            detail={
+              latestTrainReservedGb == null
+                ? 'backend memory not logged yet'
+                : `reserved ${formatNum(latestTrainReservedGb, 3)} GB`
+            }
             accent="amber"
           />
         </div>
@@ -1222,11 +1228,7 @@ export default function JobLossGraph({ job }: Props) {
                   onClick={() => setChartTab('gradients')}
                   label="Gradients"
                 />
-                <ChartTabButton
-                  active={chartTab === 'memory'}
-                  onClick={() => setChartTab('memory')}
-                  label="Memory"
-                />
+                <ChartTabButton active={chartTab === 'memory'} onClick={() => setChartTab('memory')} label="Memory" />
               </div>
 
               <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -1327,13 +1329,22 @@ export default function JobLossGraph({ job }: Props) {
               <div className="space-y-1.5">
                 <StatRow label="loss final" value={formatNum(latestLossFinal)} />
                 <StatRow label="loss unclipped" value={formatNum(latestLossUnclipped)} />
-                <StatRow label="batch" value={`${formatNum(latestBatchSize, 3)} / eff ${formatNum(latestEffectiveBatch, 3)}`} />
+                <StatRow
+                  label="batch"
+                  value={`${formatNum(latestBatchSize, 3)} / eff ${formatNum(latestEffectiveBatch, 3)}`}
+                />
                 <StatRow label="pred std" value={formatNum(latestNoisePredStd, 3)} />
                 <StatRow label="target std" value={formatNum(latestTargetStd, 3)} />
                 <StatRow label="sigma" value={formatNum(latestSigmaMean, 3)} />
-                {latestSegaSupervisedLoss != null && <StatRow label="sega supervised" value={formatNum(latestSegaSupervisedLoss, 4)} />}
-                {latestSegaDistillLoss != null && <StatRow label="sega loss" value={formatNum(latestSegaDistillLoss, 4)} />}
-                {latestSegaWeightedLoss != null && <StatRow label="sega weighted" value={formatNum(latestSegaWeightedLoss, 4)} />}
+                {latestSegaSupervisedLoss != null && (
+                  <StatRow label="sega supervised" value={formatNum(latestSegaSupervisedLoss, 4)} />
+                )}
+                {latestSegaDistillLoss != null && (
+                  <StatRow label="sega loss" value={formatNum(latestSegaDistillLoss, 4)} />
+                )}
+                {latestSegaWeightedLoss != null && (
+                  <StatRow label="sega weighted" value={formatNum(latestSegaWeightedLoss, 4)} />
+                )}
                 {latestSegaScaleMean != null && (
                   <StatRow
                     label="sega scale"
@@ -1349,7 +1360,9 @@ export default function JobLossGraph({ job }: Props) {
                 {currentPhase ? currentPhase.name || `Phase ${currentPhase.index + 1}` : 'No phase data'}
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                {currentPhase ? `started at step ${formatCompact(currentPhase.step)}` : 'Old jobs may not include phases.'}
+                {currentPhase
+                  ? `started at step ${formatCompact(currentPhase.step)}`
+                  : 'Old jobs may not include phases.'}
               </div>
             </div>
           </div>
@@ -1370,7 +1383,10 @@ export default function JobLossGraph({ job }: Props) {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
               {recentTimeline.map((item, index) => (
-                <div key={`${item.detail}-${item.step}-${index}`} className="flex items-center gap-2 rounded-md bg-gray-900/70 border border-gray-800 px-3 py-2 min-w-0">
+                <div
+                  key={`${item.detail}-${item.step}-${index}`}
+                  className="flex items-center gap-2 rounded-md bg-gray-900/70 border border-gray-800 px-3 py-2 min-w-0"
+                >
                   <span className={`h-2 w-2 rounded-full shrink-0 ${item.color}`} />
                   <div className="min-w-0">
                     <div className="text-xs text-gray-200 truncate">{item.label}</div>
@@ -1416,7 +1432,13 @@ function KpiCard({
   progress?: number | null;
 }) {
   const barColor =
-    accent === 'emerald' ? 'bg-emerald-500' : accent === 'amber' ? 'bg-amber-500' : accent === 'rose' ? 'bg-rose-500' : 'bg-blue-500';
+    accent === 'emerald'
+      ? 'bg-emerald-500'
+      : accent === 'amber'
+        ? 'bg-amber-500'
+        : accent === 'rose'
+          ? 'bg-rose-500'
+          : 'bg-blue-500';
 
   return (
     <div className="min-w-0 border border-gray-800 bg-gray-950 p-3">

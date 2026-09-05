@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -29,7 +30,7 @@ async function isInsideRoot(root: string, target: string) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const { filePath } = body;
 
     if (!filePath || typeof filePath !== 'string') {

@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import {
   deleteIdeogramWorkflowHistoryEntry,
@@ -15,7 +16,10 @@ function isRecord(value: unknown): value is Record<string, any> {
 }
 
 function errorResponse(error: unknown) {
-  return NextResponse.json({ error: error instanceof Error ? error.message : 'Ideogram workflow history failed.' }, { status: 500 });
+  return NextResponse.json(
+    { error: error instanceof Error ? error.message : 'Ideogram workflow history failed.' },
+    { status: 500 },
+  );
 }
 
 export async function GET() {
@@ -28,7 +32,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     if (!isRecord(body?.state)) {
       return NextResponse.json({ error: 'state is required.' }, { status: 400 });
     }
@@ -37,8 +41,18 @@ export async function POST(request: Request) {
     const result = await upsertIdeogramWorkflowHistoryEntry({
       id: typeof body?.id === 'string' ? body.id : undefined,
       title: typeof body?.title === 'string' ? body.title : undefined,
-      promptId: typeof body?.promptId === 'string' ? body.promptId : typeof body?.prompt_id === 'string' ? body.prompt_id : undefined,
-      serverUrl: typeof body?.serverUrl === 'string' ? body.serverUrl : typeof body?.server_url === 'string' ? body.server_url : undefined,
+      promptId:
+        typeof body?.promptId === 'string'
+          ? body.promptId
+          : typeof body?.prompt_id === 'string'
+            ? body.prompt_id
+            : undefined,
+      serverUrl:
+        typeof body?.serverUrl === 'string'
+          ? body.serverUrl
+          : typeof body?.server_url === 'string'
+            ? body.server_url
+            : undefined,
       state,
       workflow,
       images: Array.isArray(body?.images) ? body.images : [],
@@ -53,7 +67,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const body = await request.json();
+    const body = assertGlobalPayload(await request.json());
     const id = typeof body?.id === 'string' ? body.id.trim() : '';
     if (!id) return NextResponse.json({ error: 'id is required.' }, { status: 400 });
     const result = await setIdeogramWorkflowHistoryFavorite(id, Boolean(body?.favorite));

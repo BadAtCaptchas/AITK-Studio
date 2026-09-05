@@ -1,6 +1,5 @@
 import type { EncryptedDatasetItem } from '@/types';
 import type { ReactNode } from 'react';
-
 export type DatasetStudioItem =
   | {
       kind: 'plain';
@@ -14,23 +13,36 @@ export type DatasetStudioItem =
       kind: 'encrypted';
       item: EncryptedDatasetItem;
     };
-
 export type ToolMode = 'box' | 'text' | 'select' | 'move' | 'pan';
 export type CaptionTab = 'caption' | 'json';
-export type ImageSize = { width: number; height: number };
-export type BoxRect = { x: number; y: number; w: number; h: number };
-export type CaptionStatus = { dot: string; label: string; title: string };
-export type CaptionCacheEntry = { caption: string; saved: string; loaded: boolean };
+export type ImageSize = {
+  width: number;
+  height: number;
+};
+export type BoxRect = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+export type CaptionStatus = {
+  dot: string;
+  label: string;
+  title: string;
+};
+export type CaptionCacheEntry = {
+  caption: string;
+  saved: string;
+  loaded: boolean;
+};
 export type CaptionKeywordMatchMode = 'whole-word' | 'partial';
 export type BulkCaptionAction = 'delete' | 'move' | 'remove_words';
-
 export type BulkCaptionMatch = {
   key: string;
   index: number;
   item: DatasetStudioItem;
   caption: string;
 };
-
 export type BulkCaptionActionRequest = {
   action: BulkCaptionAction;
   query: string;
@@ -38,7 +50,6 @@ export type BulkCaptionActionRequest = {
   destinationName?: string;
   matches: BulkCaptionMatch[];
 };
-
 export type BulkCaptionActionResult = {
   action: BulkCaptionAction;
   found: number;
@@ -51,7 +62,6 @@ export type BulkCaptionActionResult = {
   updatedCaptions?: Record<string, string>;
   removedKeys?: string[];
 };
-
 export type DeleteImagesResult = {
   requested: number;
   deleted: number;
@@ -60,11 +70,9 @@ export type DeleteImagesResult = {
   removedKeys?: string[];
   message?: string;
 };
-
 export type DatasetImageStudioProps = {
   datasetName: string;
   workerID: string;
-  projectID?: string | null;
   datasetPath?: string | null;
   items: DatasetStudioItem[];
   isAutoCaptioning: boolean;

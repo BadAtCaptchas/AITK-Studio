@@ -1,95 +1,58 @@
 'use client';
-
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import classNames from 'classnames';
 import { useDropzone } from 'react-dropzone';
 import { FaUpload, FaImage, FaTimes } from 'react-icons/fa';
 import { uploadTemporaryMediaFile } from '@/utils/streamedUploads';
 import { apiClient } from '@/utils/api';
-
 const VIDEO_EXTS = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v', '.wmv', '.flv'];
 const isVideoPath = (p: string) => VIDEO_EXTS.some(ext => p.toLowerCase().endsWith(ext));
-
 interface Props {
   src: string | null | undefined;
   className?: string;
   instruction?: string;
-  projectID?: string | null;
   onNewImageSelected: (imagePath: string | null) => void;
 }
-
 export default function SampleControlImage({
   src,
   className,
   instruction = 'Add Control Image',
-  projectID = null,
   onNewImageSelected,
 }: Props) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [localPreview, setLocalPreview] = useState<string | null>(null);
-  const [projectPreview, setProjectPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    setProjectPreview(null);
-    if (!projectID || !src) return;
-
-    const controller = new AbortController();
-    apiClient
-      .get(`/api/projects/${encodeURIComponent(projectID)}/files`, {
-        params: { path: src },
-        signal: controller.signal,
-      })
-      .then(response => {
-        const data: unknown = response.data;
-        if (!data || typeof data !== 'object') return;
-        const mediaUrl = (data as Record<string, unknown>).mediaUrl;
-        if (typeof mediaUrl === 'string' && mediaUrl) {
-          setProjectPreview(mediaUrl);
-        }
-      })
-      .catch(error => {
-        if (!controller.signal.aborted) {
-          console.error('Could not load project validation preview:', error);
-        }
-      });
-
-    return () => controller.abort();
-  }, [projectID, src]);
-
   const backgroundUrl = useMemo(() => {
     if (localPreview) return localPreview;
-    if (projectID) return projectPreview;
     if (src) return `/api/img/${encodeURIComponent(src)}`;
     return null;
-  }, [localPreview, projectID, projectPreview, src]);
-
+  }, [localPreview, src]);
   const handleUpload = useCallback(
     async (file: File) => {
       if (!file) return;
       setIsUploading(true);
       setUploadProgress(0);
-
       // an object URL only works as a background preview for images; video
       // previews come from the server thumbnail after the upload lands
       const objectUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
       if (objectUrl) setLocalPreview(objectUrl);
-
       try {
         const resp = await uploadTemporaryMediaFile(file, {
-          projectID,
           onUploadProgress: evt => {
             const total = evt.total ?? 100;
             const loaded = evt.loaded ?? 0;
             setUploadProgress(Math.round((loaded * 100) / total));
           },
         });
-
         const data: unknown = resp?.data;
         const files =
           data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).files)
-            ? (data as { files: unknown[] }).files
+            ? (
+                data as {
+                  files: unknown[];
+                }
+              ).files
             : [];
         const uploaded = typeof files[0] === 'string' ? files[0] : null;
         onNewImageSelected(uploaded);
@@ -104,9 +67,8 @@ export default function SampleControlImage({
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     },
-    [onNewImageSelected, projectID],
+    [onNewImageSelected],
   );
-
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return;
@@ -114,7 +76,6 @@ export default function SampleControlImage({
     },
     [handleUpload],
   );
-
   const clearImage = useCallback(
     (e?: React.MouseEvent) => {
       if (e) {
@@ -127,7 +88,6 @@ export default function SampleControlImage({
     },
     [onNewImageSelected],
   );
-
   // Drag & drop only; click handled via our own hidden input
   const { getRootProps, isDragActive } = useDropzone({
     onDrop,
@@ -136,12 +96,19 @@ export default function SampleControlImage({
     noClick: true,
     noKeyboard: true,
   });
-
   const rootProps = getRootProps();
-
   return (
     <div
       {...rootProps}
+      role="button"
+      tabIndex={0}
+      aria-label={backgroundUrl ? 'Replace control image' : instruction}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          if (!isUploading) fileInputRef.current?.click();
+        }
+      }}
       className={classNames(
         'group relative flex items-center justify-center rounded-xl cursor-pointer ring-1 ring-inset',
         'transition-all duration-200 select-none overflow-hidden text-center',

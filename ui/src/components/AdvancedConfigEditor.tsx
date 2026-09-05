@@ -7,6 +7,7 @@ import { useTheme } from '@/components/ThemeProvider';
 
 type Props<T> = {
   config: T;
+  onValidityChange?: (valid: boolean) => void;
   setConfig: (value: any, key?: string) => void;
   transformOnParse?: (parsed: any) => any;
 };
@@ -35,10 +36,14 @@ function toYaml(obj: any): string {
   return doc.toString(yamlConfig);
 }
 
-export default function AdvancedConfigEditor<T>({ config, setConfig, transformOnParse }: Props<T>) {
+export default function AdvancedConfigEditor<T>({ config, setConfig, transformOnParse, onValidityChange }: Props<T>) {
   const { theme } = useTheme();
   const [editorValue, setEditorValue] = useState<string>('');
   const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  useEffect(() => {
+    onValidityChange?.(!hasError);
+  }, [hasError, onValidityChange]);
   const lastConfigUpdateStringRef = useRef('');
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<any>(null);
@@ -135,6 +140,7 @@ export default function AdvancedConfigEditor<T>({ config, setConfig, transformOn
       }
     } catch (e: any) {
       setHasError(true);
+      setErrorMessage(e instanceof Error ? e.message : 'Invalid YAML');
       const line = e?.linePos?.[0]?.line ?? e?.linePos?.line ?? 1;
       setMarkers([{ message: e?.message ?? 'Invalid YAML', line }]);
     }
@@ -147,6 +153,14 @@ export default function AdvancedConfigEditor<T>({ config, setConfig, transformOn
           className="absolute inset-0 z-10 pointer-events-none rounded-sm"
           style={{ boxShadow: 'inset 0 0 12px 2px rgba(239, 68, 68, 0.5)' }}
         />
+      )}
+      {hasError && (
+        <div
+          role="alert"
+          className="absolute bottom-3 left-3 right-3 z-20 rounded-lg border border-rose-700 bg-gray-950 p-3 text-sm text-rose-300"
+        >
+          {errorMessage} Your last valid configuration is retained.
+        </div>
       )}
       <Editor
         height="100%"

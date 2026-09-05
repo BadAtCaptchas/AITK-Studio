@@ -20,15 +20,13 @@ type FetchGpuInfoOptions = {
 };
 
 const gpuCache = new Map<string, { data: GPUApiResponse; fetchedAt: number }>();
-const gpuRequestPool = new SharedAbortableRequestPool<string, GPUApiResponse>(
-  async (workerID, signal) => {
-    const data = await apiClient
-      .get('/api/gpu', { params: { worker_id: workerID }, signal })
-      .then(res => res.data as GPUApiResponse);
-    gpuCache.set(workerID, { data, fetchedAt: Date.now() });
-    return data;
-  },
-);
+const gpuRequestPool = new SharedAbortableRequestPool<string, GPUApiResponse>(async (workerID, signal) => {
+  const data = await apiClient
+    .get('/api/gpu', { params: { worker_id: workerID }, signal })
+    .then(res => res.data as GPUApiResponse);
+  gpuCache.set(workerID, { data, fetchedAt: Date.now() });
+  return data;
+});
 
 async function loadGpuInfo(workerID: string, cacheTtlMs: number, signal?: AbortSignal) {
   const cacheKey = workerID || 'local';
@@ -59,39 +57,38 @@ export default function useGPUInfo(
   const useLocalMonitor = workerID === 'local';
   activeScopeRef.current = `${enabled}:${workerID}:${gpuIDsKey}`;
 
-  const fetchGpuInfo = useCallback(async (fetchOptions?: FetchGpuInfoOptions) => {
-    if (!enabled) {
-      setStatus('idle');
-      return;
-    }
-    const requestScope = `${enabled}:${workerID}:${gpuIDsKey}`;
-    setStatus('loading');
-    try {
-      const data = await loadGpuInfo(
-        workerID,
-        fetchOptions?.force ? 0 : cacheTtlMs,
-        fetchOptions?.signal,
-      );
-      if (fetchOptions?.signal?.aborted) return;
-      if (activeScopeRef.current !== requestScope) return;
-      setGpuData(data);
-      let gpus = [...data.gpus].sort((a, b) => a.index - b.index);
-      if (gpuIds) {
-        gpus = gpus.filter(gpu => gpuIds.includes(gpu.index));
+  const fetchGpuInfo = useCallback(
+    async (fetchOptions?: FetchGpuInfoOptions) => {
+      if (!enabled) {
+        setStatus('idle');
+        return;
       }
-      setGpuList(gpus);
-      setStatus('success');
-    } catch (err) {
-      if (fetchOptions?.signal?.aborted) return;
-      if (activeScopeRef.current !== requestScope) return;
-      console.error(`Failed to fetch GPU data: ${err instanceof Error ? err.message : String(err)}`);
-      setStatus('error');
-    } finally {
-      if (!fetchOptions?.signal?.aborted && activeScopeRef.current === requestScope) {
-        setIsLoaded(true);
+      const requestScope = `${enabled}:${workerID}:${gpuIDsKey}`;
+      setStatus('loading');
+      try {
+        const data = await loadGpuInfo(workerID, fetchOptions?.force ? 0 : cacheTtlMs, fetchOptions?.signal);
+        if (fetchOptions?.signal?.aborted) return;
+        if (activeScopeRef.current !== requestScope) return;
+        setGpuData(data);
+        let gpus = [...data.gpus].sort((a, b) => a.index - b.index);
+        if (gpuIds) {
+          gpus = gpus.filter(gpu => gpuIds.includes(gpu.index));
+        }
+        setGpuList(gpus);
+        setStatus('success');
+      } catch (err) {
+        if (fetchOptions?.signal?.aborted) return;
+        if (activeScopeRef.current !== requestScope) return;
+        console.error(`Failed to fetch GPU data: ${err instanceof Error ? err.message : String(err)}`);
+        setStatus('error');
+      } finally {
+        if (!fetchOptions?.signal?.aborted && activeScopeRef.current === requestScope) {
+          setIsLoaded(true);
+        }
       }
-    }
-  }, [cacheTtlMs, enabled, gpuIDsKey, gpuIds, workerID]);
+    },
+    [cacheTtlMs, enabled, gpuIDsKey, gpuIds, workerID],
+  );
 
   useEffect(() => {
     setGpuList([]);
@@ -111,11 +108,12 @@ export default function useGPUInfo(
     setStatus('success');
   }, [enabled, gpuIDsKey, gpuIds, monitor.gpu, useLocalMonitor]);
 
-  usePollLoop(
-    signal => fetchGpuInfo({ signal }),
-    enabled && !useLocalMonitor ? reloadInterval : null,
-    [enabled, workerID, cacheTtlMs, gpuIDsKey],
-  );
+  usePollLoop(signal => fetchGpuInfo({ signal }), enabled && !useLocalMonitor ? reloadInterval : null, [
+    enabled,
+    workerID,
+    cacheTtlMs,
+    gpuIDsKey,
+  ]);
 
   return {
     gpuData,

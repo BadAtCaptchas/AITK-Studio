@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import React from 'react';
 import useFilesList from '@/hooks/useFilesList';
 import { Loader2, AlertCircle, Download, Box, Brain, Trash2, SlidersHorizontal } from 'lucide-react';
@@ -9,7 +11,15 @@ import { apiClient } from '@/utils/api';
 const getFilename = (filePath: string) => getDisplayPath(filePath).split(/[\\/]/).pop() || '';
 const getFoldername = (filePath: string) => filePath.replace(/[\\/][^\\/]*$/, '');
 
-export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName?: string }) {
+export default function FilesWidget({
+  jobID,
+  jobName,
+  canGenerate = false,
+}: {
+  jobID: string;
+  jobName?: string;
+  canGenerate?: boolean;
+}) {
   const { files, status, refreshFiles } = useFilesList(jobID, 5000);
   const localFiles = files.filter(file => !parseRemoteAssetRef(file.path));
 
@@ -43,7 +53,7 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
           refreshFiles();
         } catch (error) {
           console.error('Error deleting checkpoint:', error);
-          alert('Failed to delete checkpoint. Please try again.');
+          reportWorkflowError('Failed to delete checkpoint. Please try again.');
         }
       },
     });
@@ -92,6 +102,9 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
           <div className="flex items-center justify-center py-4 text-rose-400 space-x-2">
             <AlertCircle className="w-4 h-4" />
             <span className="text-sm">Error loading checkpoints</span>
+            <button className="underline" onClick={() => refreshFiles()}>
+              Retry
+            </button>
           </div>
         )}
 
@@ -120,6 +133,14 @@ export default function FilesWidget({ jobID, jobName }: { jobID: string; jobName
                   </a>
                   <div className="flex items-center space-x-3 flex-shrink-0">
                     <span className="text-xs text-gray-400">{cleanSize(file.size)}</span>
+                    {!isRemote && canGenerate && fileName.endsWith('.safetensors') && (
+                      <Link
+                        className="studio-text-link text-xs"
+                        href={`/generate?model_ref=${encodeURIComponent(`${jobID}:${fileName}`)}`}
+                      >
+                        Try this model
+                      </Link>
+                    )}
                     <a
                       target="_blank"
                       href={downloadUrl}

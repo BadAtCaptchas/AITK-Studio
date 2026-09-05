@@ -1,3 +1,4 @@
+import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
@@ -10,7 +11,7 @@ import { sanitizeCaptionText } from '@/utils/captionQuality';
 export async function POST(request: NextRequest) {
   let body;
   try {
-    body = await request.json();
+    body = assertGlobalPayload(await request.json());
   } catch {
     // Client aborted the request before body was fully sent
     return new NextResponse(null, { status: 499 });
@@ -52,12 +53,13 @@ export async function POST(request: NextRequest) {
     const filepath = imgPath;
 
     // Get allowed directories
-    const { datasetsRoot: allowedDir } = await resolveDatasetScope(body?.project_id);
+    const { datasetsRoot: allowedDir } = await resolveDatasetScope();
 
     const resolvedFilePath = path.resolve(filepath);
     const allowedRoot = path.resolve(allowedDir);
     const relativeFilePath = path.relative(allowedRoot, resolvedFilePath);
-    const isAllowed = relativeFilePath !== '' && !relativeFilePath.startsWith('..') && !path.isAbsolute(relativeFilePath);
+    const isAllowed =
+      relativeFilePath !== '' && !relativeFilePath.startsWith('..') && !path.isAbsolute(relativeFilePath);
 
     if (!isAllowed) {
       console.warn(`Access denied: ${filepath} not in ${allowedDir}`);

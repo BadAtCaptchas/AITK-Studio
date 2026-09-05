@@ -1,10 +1,16 @@
 'use client';
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
 import { Eye, FolderSync, Loader2, Play, Plus, Save, Trash2, X } from 'lucide-react';
 import { Modal } from '@/components/Modal';
-import { Checkbox, CreatableSelectInput, NumberInput, SelectInput, TextAreaInput, TextInput } from '@/components/formInputs';
+import {
+  Checkbox,
+  CreatableSelectInput,
+  NumberInput,
+  SelectInput,
+  TextAreaInput,
+  TextInput,
+} from '@/components/formInputs';
 import { StatusBadge } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
@@ -16,10 +22,8 @@ import {
   OLLAMA_VISION_MODELS,
   OPENROUTER_BOX_MODELS,
 } from '@/components/dataset-image-studio/constants';
-
 type RecaptionProvider = 'openrouter' | 'ollama' | 'remote_ollama';
 type RecaptionOutputFormat = 'text' | 'ideogram_json';
-
 type DatasetWatcherAutoCaption = {
   enabled: boolean;
   provider: RecaptionProvider;
@@ -30,11 +34,9 @@ type DatasetWatcherAutoCaption = {
   maxNewTokens?: number | null;
   remoteWorkerId?: string;
 };
-
 type DatasetWatcher = {
   id: string;
   datasetName: string;
-  projectID: string | null;
   enabled: boolean;
   sourcePath: string;
   includeSubfolders: boolean;
@@ -43,7 +45,6 @@ type DatasetWatcher = {
   createdAt: string;
   updatedAt: string;
 };
-
 type DatasetWatcherStatus = {
   state: string;
   lastScanAt: string | null;
@@ -57,7 +58,6 @@ type DatasetWatcherStatus = {
   lastError: string | null;
   warnings: string[];
 };
-
 type DatasetWatcherForm = {
   id: string | null;
   enabled: boolean;
@@ -73,10 +73,8 @@ type DatasetWatcherForm = {
   maxNewTokens: number | null;
   remoteWorkerId: string;
 };
-
 type Props = {
   datasetName: string;
-  projectID?: string | null;
   workerID?: string;
   defaultSourcePath?: string | null;
   label?: string;
@@ -85,7 +83,6 @@ type Props = {
   iconOnly?: boolean;
   onRefresh?: () => void;
 };
-
 const emptyForm = (defaultSourcePath = ''): DatasetWatcherForm => ({
   id: null,
   enabled: true,
@@ -101,16 +98,13 @@ const emptyForm = (defaultSourcePath = ''): DatasetWatcherForm => ({
   maxNewTokens: 256,
   remoteWorkerId: '',
 });
-
 const outputFormatOptions = [
   { value: 'text', label: 'Text captions' },
   { value: 'ideogram_json', label: 'Ideogram JSON' },
 ];
-
 function providerOptions() {
   return AUTO_BOX_PROVIDERS.map(provider => ({ value: provider.value, label: provider.label }));
 }
-
 function stateLabel(status?: DatasetWatcherStatus) {
   if (!status) return 'Idle';
   if (status.state === 'captioning') return 'Captioning';
@@ -120,7 +114,6 @@ function stateLabel(status?: DatasetWatcherStatus) {
   if (status.state === 'error') return 'Error';
   return 'Idle';
 }
-
 function stateForBadge(status?: DatasetWatcherStatus) {
   if (!status) return 'stopped';
   if (status.state === 'error') return 'error';
@@ -128,13 +121,11 @@ function stateForBadge(status?: DatasetWatcherStatus) {
   if (status.state === 'captioning' || status.state === 'importing' || status.state === 'scanning') return 'running';
   return 'completed';
 }
-
 function formatDate(value: string | null | undefined) {
   if (!value) return 'Never';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'Never' : date.toLocaleString();
 }
-
 function watcherAutoCaptionLabel(status?: DatasetWatcherStatus) {
   const pending = Math.max(0, Math.floor(Number(status?.autoCaptionPendingCount || 0)));
   if (pending <= 0) return '';
@@ -143,12 +134,10 @@ function watcherAutoCaptionLabel(status?: DatasetWatcherStatus) {
   const progress = total > 0 ? `${completed.toLocaleString()}/${total.toLocaleString()}` : completed.toLocaleString();
   return `Captioning ${progress}, ${pending.toLocaleString()} left`;
 }
-
 function watcherAutoCaptionTitle(status?: DatasetWatcherStatus) {
   const activePath = status?.autoCaptionActivePath;
   return activePath ? `Auto-captioning ${activePath}` : 'Auto-captioning imported images';
 }
-
 function formFromWatcher(watcher: DatasetWatcher): DatasetWatcherForm {
   return {
     id: watcher.id,
@@ -166,10 +155,8 @@ function formFromWatcher(watcher: DatasetWatcher): DatasetWatcherForm {
     remoteWorkerId: watcher.autoCaption?.remoteWorkerId || '',
   };
 }
-
 export default function DatasetWatchFoldersButton({
   datasetName,
-  projectID = null,
   workerID = 'local',
   defaultSourcePath = '',
   label = 'Watch Folders',
@@ -190,7 +177,6 @@ export default function DatasetWatchFoldersButton({
   const autoSystemPromptRef = useRef('');
   const rootCaptionSourceRef = useRef('');
   const { workers } = useRemoteOllamaWorkers({ enabled: open });
-
   const remoteWorkerOptions = useMemo(
     () => workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
     [workers],
@@ -203,11 +189,9 @@ export default function DatasetWatchFoldersButton({
     if (form.provider === 'openrouter') return OPENROUTER_BOX_MODELS.map(option => ({ ...option }));
     return OLLAMA_VISION_MODELS.map(option => ({ ...option }));
   }, [form.provider]);
-
   useEffect(() => {
     statusRefreshSignatureRef.current = '';
-  }, [datasetName, projectID, workerID]);
-
+  }, [datasetName, null, workerID]);
   useEffect(() => {
     if (form.provider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
     if (form.remoteWorkerId && remoteWorkerOptionValues.has(form.remoteWorkerId)) return;
@@ -218,7 +202,6 @@ export default function DatasetWatchFoldersButton({
         : current,
     );
   }, [form.provider, form.remoteWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
-
   const loadWatchers = useCallback(async () => {
     if (!open) return;
     setIsLoading(true);
@@ -228,7 +211,6 @@ export default function DatasetWatchFoldersButton({
         params: {
           datasetName,
           worker_id: workerID,
-          ...(projectID ? { project_id: projectID } : {}),
         },
       });
       setWatchers(res.data?.watchers || []);
@@ -272,33 +254,29 @@ export default function DatasetWatchFoldersButton({
     } finally {
       setIsLoading(false);
     }
-  }, [datasetName, onRefresh, open, projectID, workerID]);
-
+  }, [datasetName, onRefresh, open, null, workerID]);
   useEffect(() => {
     void loadWatchers();
   }, [loadWatchers]);
-
   useEffect(() => {
     if (!open) return;
     const interval = window.setInterval(() => void loadWatchers(), 5000);
     return () => window.clearInterval(interval);
   }, [loadWatchers, open]);
-
   useEffect(() => {
     if (!defaultSourcePath) return;
-    setForm(current => (current.id || current.sourcePath.trim() ? current : { ...current, sourcePath: defaultSourcePath }));
+    setForm(current =>
+      current.id || current.sourcePath.trim() ? current : { ...current, sourcePath: defaultSourcePath },
+    );
   }, [defaultSourcePath]);
-
   useEffect(() => {
     if (!open || !form.autoCaptionEnabled) return;
     const sourcePath = form.sourcePath.trim();
     if (!sourcePath || systemPromptTouchedRef.current) return;
     if (form.systemPrompt.trim() && form.systemPrompt !== autoSystemPromptRef.current) return;
-
-    const sourceSignature = [workerID, projectID || '', sourcePath].join('\n');
+    const sourceSignature = [workerID, '', sourcePath].join('\n');
     if (rootCaptionSourceRef.current === sourceSignature) return;
     rootCaptionSourceRef.current = sourceSignature;
-
     let cancelled = false;
     const timer = window.setTimeout(() => {
       apiClient
@@ -307,7 +285,6 @@ export default function DatasetWatchFoldersButton({
             action: 'root-caption',
             sourcePath,
             worker_id: workerID,
-            ...(projectID ? { project_id: projectID } : {}),
           },
         })
         .then(res => {
@@ -331,13 +308,11 @@ export default function DatasetWatchFoldersButton({
           if (!cancelled) console.warn('Could not load watch folder ROOT_CAPTION.txt:', requestError);
         });
     }, 300);
-
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [form.autoCaptionEnabled, form.sourcePath, form.systemPrompt, open, projectID, workerID]);
-
+  }, [form.autoCaptionEnabled, form.sourcePath, form.systemPrompt, open, null, workerID]);
   const updateForm = <K extends keyof DatasetWatcherForm>(key: K, value: DatasetWatcherForm[K]) => {
     if (key === 'systemPrompt') {
       systemPromptTouchedRef.current = true;
@@ -362,7 +337,6 @@ export default function DatasetWatchFoldersButton({
       return { ...current, [key]: value };
     });
   };
-
   const handleProviderChange = (value: string) => {
     const provider = value === 'ollama' || value === 'remote_ollama' ? value : 'openrouter';
     setForm(current => ({
@@ -384,14 +358,12 @@ export default function DatasetWatchFoldersButton({
           : current.remoteWorkerId,
     }));
   };
-
   const resetForm = () => {
     systemPromptTouchedRef.current = false;
     autoSystemPromptRef.current = '';
     rootCaptionSourceRef.current = '';
     setForm(emptyForm(defaultSourcePath || ''));
   };
-
   const saveWatcher = async () => {
     setIsSaving(true);
     setError('');
@@ -399,7 +371,6 @@ export default function DatasetWatchFoldersButton({
       const payload = {
         id: form.id || undefined,
         datasetName,
-        projectID,
         worker_id: workerID,
         enabled: form.enabled,
         sourcePath: form.sourcePath,
@@ -436,7 +407,6 @@ export default function DatasetWatchFoldersButton({
       setIsSaving(false);
     }
   };
-
   const deleteWatcher = async (watcher: DatasetWatcher) => {
     setIsSaving(true);
     setError('');
@@ -445,7 +415,6 @@ export default function DatasetWatchFoldersButton({
         data: {
           id: watcher.id,
           worker_id: workerID,
-          ...(projectID ? { project_id: projectID } : {}),
         },
       });
       if (form.id === watcher.id) resetForm();
@@ -456,7 +425,6 @@ export default function DatasetWatchFoldersButton({
       setIsSaving(false);
     }
   };
-
   const runWatcher = async (watcher: DatasetWatcher) => {
     setIsSaving(true);
     setError('');
@@ -465,7 +433,6 @@ export default function DatasetWatchFoldersButton({
         action: 'run',
         id: watcher.id,
         worker_id: workerID,
-        ...(projectID ? { project_id: projectID } : {}),
       });
       await loadWatchers();
       onRefresh?.();
@@ -476,7 +443,6 @@ export default function DatasetWatchFoldersButton({
     }
   };
   const TriggerIcon = icon === 'eye' ? Eye : FolderSync;
-
   return (
     <>
       <Button className={className} onClick={() => setOpen(true)} title={label} aria-label={label}>
@@ -493,9 +459,7 @@ export default function DatasetWatchFoldersButton({
                 {isLoading && <Loader2 className="h-4 w-4 animate-spin text-gray-500" />}
               </div>
               <div className="max-h-[54vh] overflow-y-auto border border-gray-800">
-                {watchers.length === 0 && (
-                  <div className="px-3 py-4 text-sm text-gray-500">No watch folders.</div>
-                )}
+                {watchers.length === 0 && <div className="px-3 py-4 text-sm text-gray-500">No watch folders.</div>}
                 {watchers.map(watcher => {
                   const status = statuses[watcher.id];
                   const autoCaptionLabel = watcherAutoCaptionLabel(status);
@@ -515,7 +479,9 @@ export default function DatasetWatchFoldersButton({
                             )}
                           </div>
                           <div className="mt-1 text-xs text-gray-500">Last scan: {formatDate(status?.lastScanAt)}</div>
-                          {status?.lastError && <div className="mt-1 truncate text-xs text-red-400">{status.lastError}</div>}
+                          {status?.lastError && (
+                            <div className="mt-1 truncate text-xs text-red-400">{status.lastError}</div>
+                          )}
                         </div>
                         <div className="flex flex-none gap-1">
                           <button
@@ -568,7 +534,11 @@ export default function DatasetWatchFoldersButton({
                   </button>
                 )}
               </div>
-              <TextInput label="Folder Path" value={form.sourcePath} onChange={value => updateForm('sourcePath', value)} />
+              <TextInput
+                label="Folder Path"
+                value={form.sourcePath}
+                onChange={value => updateForm('sourcePath', value)}
+              />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Checkbox label="Enabled" checked={form.enabled} onChange={value => updateForm('enabled', value)} />
                 <Checkbox
@@ -599,7 +569,9 @@ export default function DatasetWatchFoldersButton({
                     <SelectInput
                       label="Output"
                       value={form.outputFormat}
-                      onChange={value => updateForm('outputFormat', value === 'ideogram_json' ? 'ideogram_json' : 'text')}
+                      onChange={value =>
+                        updateForm('outputFormat', value === 'ideogram_json' ? 'ideogram_json' : 'text')
+                      }
                       options={outputFormatOptions}
                     />
                   </div>
@@ -624,7 +596,12 @@ export default function DatasetWatchFoldersButton({
                     min={1}
                     onChange={value => updateForm('maxNewTokens', value)}
                   />
-                  <TextAreaInput label="Prompt" value={form.prompt} onChange={value => updateForm('prompt', value)} rows={4} />
+                  <TextAreaInput
+                    label="Prompt"
+                    value={form.prompt}
+                    onChange={value => updateForm('prompt', value)}
+                    rows={4}
+                  />
                   <TextAreaInput
                     label="System Prompt"
                     value={form.systemPrompt}
@@ -638,7 +615,12 @@ export default function DatasetWatchFoldersButton({
                   <X className="h-3.5 w-3.5" />
                   Clear
                 </button>
-                <button type="button" className="operator-button border-brand-800 bg-brand-950/70 text-brand-100" onClick={saveWatcher} disabled={isSaving}>
+                <button
+                  type="button"
+                  className="operator-button border-brand-800 bg-brand-950/70 text-brand-100"
+                  onClick={saveWatcher}
+                  disabled={isSaving}
+                >
                   {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                   Save
                 </button>

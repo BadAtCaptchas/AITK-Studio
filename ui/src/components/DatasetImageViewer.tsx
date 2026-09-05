@@ -11,11 +11,7 @@ import { isVideo, isAudio, encodeFilePathForUrl } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
-import BoundingBoxOverlay, {
-  BoundingBoxEditor,
-  extractEditableBoxes,
-  parseBoundingBoxes,
-} from './BoundingBoxOverlay';
+import BoundingBoxOverlay, { BoundingBoxEditor, extractEditableBoxes, parseBoundingBoxes } from './BoundingBoxOverlay';
 import type { BoxCoords } from './BoundingBoxOverlay';
 
 function parseJsonCaption(text: string): any | null {
@@ -340,16 +336,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    isOpen,
-    onCancel,
-    handlePrev,
-    handleNext,
-    handleDelete,
-    handleDeleteBox,
-    isEditingBoxes,
-    selectedBoxIndex,
-  ]);
+  }, [isOpen, onCancel, handlePrev, handleNext, handleDelete, handleDeleteBox, isEditingBoxes, selectedBoxIndex]);
 
   // Touch swipe navigation
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -409,10 +396,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
   };
 
   const parsedCaptionData = useMemo(() => parseJsonCaption(caption), [caption]);
-  const boundingBoxes = useMemo(
-    () => parseBoundingBoxes(caption, imageSize ?? undefined),
-    [caption, imageSize],
-  );
+  const boundingBoxes = useMemo(() => parseBoundingBoxes(caption, imageSize ?? undefined), [caption, imageSize]);
   const editBoxes = useMemo(
     () => extractEditableBoxes(parsedCaptionData, imageSize ?? undefined),
     [parsedCaptionData, imageSize],

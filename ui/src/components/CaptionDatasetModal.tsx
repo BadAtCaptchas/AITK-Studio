@@ -1,4 +1,5 @@
 'use client';
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from '@/components/Modal';
 import { createGlobalState } from 'react-global-hooks';
@@ -18,10 +19,8 @@ import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import { SelectInput } from '@/components/formInputs';
 import { Loader2 } from 'lucide-react';
 import { defaultIdeogramJsonCaptionPrompt } from '@/helpers/captionOptions';
-
 export interface CaptionDatasetModalState {
   datasetPath: string;
-  projectID?: string | null;
   jobId?: string | null;
   cloneId?: string | null;
   encryptedDatasetKeyB64?: string | null;
@@ -30,14 +29,11 @@ export interface CaptionDatasetModalState {
   preset?: 'ideogram_json' | null;
   onClose?: () => void;
 }
-
 export const captionDatasetModalState = createGlobalState<CaptionDatasetModalState | null>(null);
-
 export const openCaptionDatasetModal = (
   datasetPath: string,
   onClose?: () => void,
   options?: {
-    projectID?: string | null;
     jobId?: string | null;
     cloneId?: string | null;
     encryptedDatasetKeyB64?: string | null;
@@ -48,17 +44,15 @@ export const openCaptionDatasetModal = (
 ) => {
   captionDatasetModalState.set({
     datasetPath,
-    projectID: options?.projectID ?? null,
     onClose,
     jobId: options?.jobId ?? null,
     cloneId: options?.cloneId ?? null,
     encryptedDatasetKeyB64: options?.encryptedDatasetKeyB64 ?? null,
     datasetName: options?.datasetName ?? null,
-    rootCaption: options?.rootCaption !== undefined ? options.rootCaption ?? '' : undefined,
+    rootCaption: options?.rootCaption !== undefined ? (options.rootCaption ?? '') : undefined,
     preset: options?.preset ?? null,
   });
 };
-
 export const CaptionDatasetModal: React.FC = () => {
   const [modalInfo, setModalInfo] = captionDatasetModalState.use();
   const [jobConfig, setJobConfig] = useNestedState<CaptionJobConfig>(objectCopy(defaultCaptionJobConfig));
@@ -76,7 +70,6 @@ export const CaptionDatasetModal: React.FC = () => {
   const showGPUSelect = !isMac();
   const isLoadingExistingJob = !!(modalInfo?.jobId || modalInfo?.cloneId) && !hasLoadedExistingJob;
   const showLoadingOverlay = isLoadingExistingJob || isSaving;
-
   useFromNull(() => {
     // reset the state
     setJobConfig(objectCopy(defaultCaptionJobConfig));
@@ -98,7 +91,6 @@ export const CaptionDatasetModal: React.FC = () => {
       setJobConfig(2048, 'config.process[0].caption.max_new_tokens');
     }
   }, [modalInfo]);
-
   const applyRootCaption = useCallback(
     (systemPrompt: string | null | undefined) => {
       if (!modalInfo || modalInfo.jobId || modalInfo.cloneId || systemPromptTouchedRef.current) return;
@@ -107,22 +99,17 @@ export const CaptionDatasetModal: React.FC = () => {
     },
     [modalInfo, setJobConfig],
   );
-
   useEffect(() => {
     if (!modalInfo || modalInfo.jobId || modalInfo.cloneId) return;
     const requestId = ++rootCaptionRequestRef.current;
-
     if (modalInfo.rootCaption !== undefined) {
       applyRootCaption(modalInfo.rootCaption);
       return;
     }
-
     if (!modalInfo.datasetName) return;
-
     apiClient
       .post('/api/datasets/root-caption', {
         datasetName: modalInfo.datasetName,
-        project_id: modalInfo.projectID || undefined,
       })
       .then(res => {
         if (rootCaptionRequestRef.current !== requestId) return;
@@ -134,7 +121,6 @@ export const CaptionDatasetModal: React.FC = () => {
         console.warn('Could not load dataset root caption:', error);
       });
   }, [applyRootCaption, modalInfo]);
-
   // clone existing caption job
   useEffect(() => {
     if (modalInfo?.cloneId) {
@@ -151,7 +137,6 @@ export const CaptionDatasetModal: React.FC = () => {
         .finally(() => setHasLoadedExistingJob(true));
     }
   }, [modalInfo?.cloneId]);
-
   // load existing caption job for editing
   useEffect(() => {
     if (modalInfo?.jobId) {
@@ -167,7 +152,6 @@ export const CaptionDatasetModal: React.FC = () => {
         .finally(() => setHasLoadedExistingJob(true));
     }
   }, [modalInfo?.jobId]);
-
   useEffect(() => {
     if (isGPUInfoLoaded) {
       if (gpuIDs === null && gpuList.length > 0) {
@@ -175,7 +159,6 @@ export const CaptionDatasetModal: React.FC = () => {
       }
     }
   }, [gpuList, isGPUInfoLoaded]);
-
   const handleClose = () => {
     if (modalInfo?.onClose) {
       modalInfo.onClose();
@@ -183,24 +166,23 @@ export const CaptionDatasetModal: React.FC = () => {
     setHasLoadedExistingJob(false);
     setModalInfo(null);
   };
-
   const saveJob = async () => {
     if (isSavingRef.current) return;
     if (!modalInfo?.datasetPath) {
-      alert('Dataset path is missing. Please try again.');
+      reportWorkflowError('Dataset path is missing. Please try again.');
       return;
     }
     if (jobConfig.config.process[0].type === 'OpenRouterCaptioner' && modalInfo.encryptedDatasetKeyB64) {
-      alert('OpenRouter captioning is not supported for encrypted datasets. Caption an unencrypted copy, then encrypt it afterward if needed.');
+      reportWorkflowError(
+        'OpenRouter captioning is not supported for encrypted datasets. Caption an unencrypted copy, then encrypt it afterward if needed.',
+      );
       return;
     }
     isSavingRef.current = true;
     setIsSaving(true);
-
     const isEdit = !!modalInfo.jobId;
     const jobConfigToSave = objectCopy(jobConfig);
     let jobRef = modalInfo.datasetPath;
-
     try {
       const captionConfig = jobConfigToSave.config.process[0].caption;
       const outputFormat = captionConfig.output_format || 'text';
@@ -212,7 +194,6 @@ export const CaptionDatasetModal: React.FC = () => {
         const copied = await apiClient
           .post('/api/datasets/copy', {
             datasetPath: modalInfo.datasetPath,
-            project_id: modalInfo.projectID || undefined,
             suffix: 'json_captions',
           })
           .then(res => res.data);
@@ -223,12 +204,11 @@ export const CaptionDatasetModal: React.FC = () => {
         jobRef = copied.path;
       }
     } catch (error: any) {
-      alert(error?.response?.data?.error || error?.message || 'Failed to prepare caption dataset.');
+      reportWorkflowError(error?.response?.data?.error || error?.message || 'Failed to prepare caption dataset.');
       isSavingRef.current = false;
       setIsSaving(false);
       return;
     }
-
     apiClient
       .post('/api/jobs', {
         id: isEdit ? modalInfo.jobId : null,
@@ -237,7 +217,6 @@ export const CaptionDatasetModal: React.FC = () => {
         job_config: jobConfigToSave,
         job_type: 'caption',
         job_ref: jobRef,
-        project_id: modalInfo.projectID || undefined,
       })
       .then(async res => {
         const jobId = res.data.id;
@@ -256,23 +235,21 @@ export const CaptionDatasetModal: React.FC = () => {
       })
       .catch(error => {
         if (error.response?.status === 409) {
-          alert('A caption job for this dataset already exists. Please check your jobs list.');
+          reportWorkflowError('A caption job for this dataset already exists. Please check your jobs list.');
         } else {
-          alert('Failed to save job. Please try again.');
+          reportWorkflowError('Failed to save job. Please try again.');
         }
         console.log('Error saving training:', error);
         isSavingRef.current = false;
         setIsSaving(false);
       });
   };
-
   const tabButtonClass = (tab: 'simple' | 'advanced') =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
       activeTab === tab
         ? 'border-brand-500 text-brand-400'
         : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600'
     }`;
-
   return (
     <Modal isOpen={open} onClose={handleClose} title="Caption Dataset" size={activeTab === 'advanced' ? 'xl' : 'lg'}>
       <div className="relative space-y-4 text-gray-200">

@@ -4,6 +4,7 @@ import random
 
 import torch
 from .manager_modules import LinearLayerMemoryManager, ConvLayerMemoryManager, _DEVICE_STATE
+from .manager_modules import _move_own_param, _storage_device
 
 LINEAR_MODULES = [
     "Linear",
@@ -247,12 +248,15 @@ class MemoryManager:
         # on cpu and the first forward explodes on a device mismatch. Managed
         # layers (pinned-cpu weights, cpu-resident bouncing embeddings) are
         # skipped via their _layer_memory_manager.
+        moved_params = {}
         for sub in module.modules():
             if hasattr(sub, "_layer_memory_manager"):
                 continue
-            for p in sub.parameters(recurse=False):
-                if p is not None and p.device != device:
-                    p.data = p.data.to(device)
+            for name, p in list(sub.named_parameters(recurse=False, remove_duplicate=False)):
+                if id(p) in moved_params:
+                    setattr(sub, name, moved_params[id(p)])
+                elif _storage_device(p) != device:
+                    moved_params[id(p)] = _move_own_param(sub, name, p, device)
             for name, b in sub._buffers.items():
                 if b is not None and b.device != device:
                     sub._buffers[name] = b.to(device)

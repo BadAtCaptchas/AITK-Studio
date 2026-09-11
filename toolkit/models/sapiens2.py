@@ -107,14 +107,14 @@ class RopePositionEmbedding(nn.Module):
 
         # Jitter coords by multiplying the range [-1, 1] by a log-uniform value in [1/jitter, jitter]
         if self.training and self.jitter_coords is not None:
-            jitter_max = np.log(self.jitter_coords)
+            jitter_max = math.log(self.jitter_coords)
             jitter_min = -jitter_max
             jitter_hw = torch.empty(2, **dd).uniform_(jitter_min, jitter_max).exp()
             coords *= jitter_hw[None, :]
 
         # Rescale coords by multiplying the range [-1, 1] by a log-uniform value in [1/rescale, rescale]
         if self.training and self.rescale_coords is not None:
-            rescale_max = np.log(self.rescale_coords)
+            rescale_max = math.log(self.rescale_coords)
             rescale_min = -rescale_max
             rescale_hw = torch.empty(1, **dd).uniform_(rescale_min, rescale_max).exp()
             coords *= rescale_hw
@@ -766,7 +766,7 @@ class Sapiens2(nn.Module):
         rope_sincos = self.rope_embed(H=patch_resolution[0], W=patch_resolution[1])
         outs = []
         for i, layer in enumerate(self.blocks):
-            if self.gradient_checkpointing and self.training:
+            if self.gradient_checkpointing and torch.is_grad_enabled():
                 x = checkpoint(layer, x, rope_sincos, use_reentrant=False)
             else:
                 x = layer(x, rope=rope_sincos)

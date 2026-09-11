@@ -27,6 +27,14 @@ ComfyOnError = Literal['fail', 'native', 'skip']
 MAX_OPTIMAL_NOISE_PAIRING_SAMPLES = 16
 
 
+def _validate_probability(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number between 0 and 1")
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be a finite number between 0 and 1")
+    return float(value)
+
+
 def _validate_optimal_noise_pairing_samples(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(
@@ -568,6 +576,8 @@ class TrainConfig:
         self.adapter_lr = kwargs.get('adapter_lr', self.lr)
         self.optimizer = kwargs.get('optimizer', 'adamw')
         self.optimizer_params = kwargs.get('optimizer_params', {})
+        if self.optimizer.lower() == 'adamconvrot' and self.optimizer_params.get('fused', False):
+            raise ValueError("AdamConvRot fused=True is incompatible with training gradient clipping and OOM recovery")
         self.lr_scheduler = kwargs.get('lr_scheduler', 'constant')
         self.lr_scheduler_params = kwargs.get('lr_scheduler_params', {})
         self.min_denoising_steps: int = kwargs.get('min_denoising_steps', 0)
@@ -620,6 +630,9 @@ class TrainConfig:
         # multiplier applied to loos on regularization images
         self.reg_weight = kwargs.get('reg_weight', 1.0)
         self.num_train_timesteps = kwargs.get('num_train_timesteps', 1000)
+        self.first_timestep_chance = _validate_probability(
+            kwargs.get('first_timestep_chance', 0.0), 'first_timestep_chance'
+        )
         # automatically adapte the vae scaling based on the image norm
         self.adaptive_scaling_factor = kwargs.get('adaptive_scaling_factor', False)
 
@@ -1199,6 +1212,9 @@ class EMAConfig:
         self.ema_decay: float = kwargs.get('ema_decay', 0.999)
         # feeds back the decay difference into the parameter
         self.use_feedback: bool = kwargs.get('use_feedback', False)
+        self.feedback_rate = _validate_probability(
+            kwargs.get('feedback_rate', 0.001), 'ema_config.feedback_rate'
+        )
         
         # every update, the params are multiplied by this amount
         # only use for things without a bias like lora
@@ -1409,6 +1425,10 @@ class DatasetConfig:
 
         self.num_workers: int = kwargs.get('num_workers', 2)
         self.prefetch_factor: int = kwargs.get('prefetch_factor', 2)
+        # Opt-in: pinned RAM can hurt Windows VRAM-overflow performance.
+        self.pin_memory = kwargs.get('pin_memory', False)
+        if not isinstance(self.pin_memory, bool):
+            raise ValueError("dataset.pin_memory must be a boolean")
         self.extra_values: List[float] = kwargs.get('extra_values', [])
         self.square_crop: bool = kwargs.get('square_crop', False)
         # apply same augmentations to control images. Usually want this true unless special case

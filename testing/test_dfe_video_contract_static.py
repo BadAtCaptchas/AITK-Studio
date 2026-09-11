@@ -1,83 +1,112 @@
-import ast
+"""Behavioral replacement for old assertions that folded video before VAE decode."""
 import unittest
-from pathlib import Path
+from types import SimpleNamespace
+
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+from toolkit.models import diffusion_feature_extraction as features
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DFE_PATH = ROOT / "toolkit" / "models" / "diffusion_feature_extraction.py"
-
-
-class DFEVideoContractStaticTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.source = DFE_PATH.read_text(encoding="utf-8")
-        cls.tree = ast.parse(cls.source)
-
-    def class_forward_source(self, class_name):
-        class_node = next(
-            node for node in self.tree.body if isinstance(node, ast.ClassDef) and node.name == class_name
-        )
-        forward_node = next(
-            node for node in class_node.body if isinstance(node, ast.FunctionDef) and node.name == "forward"
-        )
-        return ast.get_source_segment(self.source, forward_node)
-
-    def test_all_video_dfe_paths_fold_frames_and_repeat_timesteps(self):
-        for class_name in (
-            "DiffusionFeatureExtractor4",
-            "DiffusionFeatureExtractor6",
-            "DiffusionFeatureExtractor7",
-            "DiffusionFeatureExtractor9",
-            "DiffusionFeatureExtractor10",
-        ):
-            with self.subTest(class_name=class_name):
-                forward = self.class_forward_source(class_name)
-                self.assertIn("_fold_frames_to_batch(noise_pred)", forward)
-                self.assertIn("timesteps.repeat_interleave(num_frames)", forward)
-                self.assertIn("tensors.reshape(-1, *tensors.shape[2:])", forward)
-
-    def test_x0_and_partial_video_contracts_are_present(self):
-        for class_name in (
-            "DiffusionFeatureExtractor7",
-            "DiffusionFeatureExtractor9",
-            "DiffusionFeatureExtractor10",
-        ):
-            with self.subTest(class_name=class_name):
-                forward = self.class_forward_source(class_name)
-                self.assertIn('"x0_pred"', forward)
-                self.assertIn("_fold_frames_to_batch(target_latents)", forward)
-
-        for class_name in (
-            "DiffusionFeatureExtractor3",
-            "DiffusionFeatureExtractor4",
-            "DiffusionFeatureExtractor6",
-        ):
-            with self.subTest(class_name=class_name):
-                self.assertIn("'x0_pred'", self.class_forward_source(class_name))
-
-        self.assertIn(
-            "self.x0_pred = False",
-            (ROOT / "toolkit" / "models" / "base_model.py").read_text(encoding="utf-8"),
-        )
-        self.assertIn(
-            "self.x0_pred = True",
-            (
-                ROOT
-                / "extensions_built_in"
-                / "diffusion_models"
-                / "prx_pixel_t2i"
-                / "prx_pixel_t2i.py"
-            ).read_text(encoding="utf-8"),
-        )
-        self.assertIn(
-            "if self.sd.x0_pred:",
-            (ROOT / "extensions_built_in" / "sd_trainer" / "SDTrainer.py").read_text(encoding="utf-8"),
-        )
-        self.assertIn(
-            "model=self.sd",
-            (ROOT / "extensions_built_in" / "sd_trainer" / "SDTrainer.py").read_text(encoding="utf-8"),
+class VideoModel:
+    def __init__(self, x0_pred=False):
+        self.x0_pred = x0_pred
+        self.noise_scale = 2.0 if x0_pred else 1.0
+        self.decoded_inputs = []
+        self.vae = SimpleNamespace(
+            device=torch.device('cpu'), dtype=torch.float32,
+            config=SimpleNamespace(scaling_factor=1.0, shift_factor=0.0),
+            decode=self.decode_latents,
         )
 
+    def decode_latents(self, latents):
+        self.decoded_inputs.append(latents.detach().clone())
+        if latents.ndim != 5:
+            raise AssertionError('Video VAE must receive full clips')
+        return F.interpolate(latents, size=(5, 2, 2), mode='nearest')
 
-if __name__ == "__main__":
+
+class TinyDino(nn.Module):
+    def forward(self, pixel_values):
+        patches = pixel_values.flatten(2).transpose(1, 2)
+        cls = patches.mean(dim=1, keepdim=True)
+        register = torch.full_like(cls, 10000)
+        return SimpleNamespace(last_hidden_state=torch.cat([cls, register, patches], dim=1))
+
+
+def make_dfe(version, model, partial=False):
+    cls = getattr(features, f'DiffusionFeatureExtractor{version}')
+    dfe = cls.__new__(cls)
+    nn.Module.__init__(dfe)
+    dfe.sd_ref = lambda: model
+    dfe.vae = model.vae
+    dfe.model = SimpleNamespace(device=torch.device('cpu'), dtype=torch.float32)
+    dfe.losses = {}
+    dfe.step = 0
+    dfe.log_every = 100
+    dfe.do_partial_step = partial
+    if version == 4:
+        dfe.get_siglip_features = lambda x: x
+    elif version == 6:
+        dfe.model = TinyDino()
+        dfe.num_prefix_tokens = 2
+        dfe.cls_weight = 0.1
+        dfe.prepare_inputs = lambda x: {'pixel_values': x}
+    elif version == 7:
+        dfe.get_pred = lambda x: SimpleNamespace(head=x, depth=x, normals=x, segmentation=x)
+    elif version == 9:
+        dfe.get_pred = lambda x: x
+    elif version == 10:
+        dfe.get_lpips_features = lambda x: [x, x * 2]
+    return dfe
+
+
+class DFEVideoContractTests(unittest.TestCase):
+    def test_video_decode_keeps_clips_and_backpropagates_to_every_latent_frame(self):
+        for version in (4, 6, 7, 9, 10):
+            for x0 in (False, True):
+                with self.subTest(version=version, x0=x0):
+                    torch.manual_seed(4)
+                    model = VideoModel(x0)
+                    dfe = make_dfe(version, model)
+                    pred = torch.randn(2, 3, 2, 2, 2, requires_grad=True)
+                    loss = dfe(
+                        noise=torch.ones_like(pred), noise_pred=pred,
+                        noisy_latents=torch.ones_like(pred), timesteps=torch.tensor([100., 700.]),
+                        batch=SimpleNamespace(tensor=torch.zeros(2, 5, 3, 2, 2), latents=torch.zeros_like(pred)),
+                        scheduler=None,
+                    ).mean()
+                    self.assertTrue(torch.isfinite(loss))
+                    self.assertTrue(all(tuple(x.shape) == (2, 3, 2, 2, 2) for x in model.decoded_inputs))
+                    if x0:
+                        torch.testing.assert_close(model.decoded_inputs[-1], pred.detach())
+                    loss.backward()
+                    self.assertTrue((pred.grad.abs().sum(dim=(1, 3, 4)) > 0).all())
+
+    def test_partial_x0_steps_reconstruct_the_same_target_with_scaled_noise(self):
+        for version in (7, 9, 10):
+            with self.subTest(version=version):
+                model = VideoModel(True)
+                dfe = make_dfe(version, model, partial=True)
+                clean = torch.full((2, 3, 2, 2, 2), 0.25)
+                noise = torch.ones_like(clean)
+                tv = torch.tensor([0.5, 0.75]).view(2, 1, 1, 1, 1)
+                noisy = (1 - tv) * clean + tv * noise * model.noise_scale
+                dfe(noise=noise, noise_pred=clean, noisy_latents=noisy,
+                    timesteps=tv.flatten() * 1000,
+                    batch=SimpleNamespace(tensor=torch.zeros(2, 5, 3, 2, 2), latents=clean), scheduler=None)
+                self.assertEqual(len(model.decoded_inputs), 2)
+                torch.testing.assert_close(model.decoded_inputs[0], model.decoded_inputs[1])
+
+    def test_dino_excludes_register_tokens(self):
+        dfe = make_dfe(6, VideoModel(True))
+        pixels = torch.ones(2, 3, 2, 2)
+        cls, patches = dfe._dino_features({'pixel_values': pixels})
+        self.assertEqual(tuple(patches.shape), (2, 4, 3))
+        self.assertTrue(torch.equal(patches, torch.ones_like(patches)))
+        self.assertTrue(torch.equal(cls, torch.ones_like(cls)))
+
+
+if __name__ == '__main__':
     unittest.main()

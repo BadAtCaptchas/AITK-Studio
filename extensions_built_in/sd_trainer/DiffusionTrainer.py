@@ -143,7 +143,7 @@ class DiffusionTrainer(SDTrainer):
         if self.progress_bar is not None:
             self.progress_bar.pause()
         print_acc(f"\nSaving at step {self.step_num}")
-        if self.optimizer is not None:
+        if self.optimizer is not None and not getattr(self, '_accumulated_microbatches', 0):
             self.optimizer.zero_grad()
         self.save(self.step_num)
         self.ensure_params_requires_grad()
@@ -161,7 +161,7 @@ class DiffusionTrainer(SDTrainer):
             self.progress_bar.pause()
         try:
             print_acc(f"\nSampling at step {self.step_num}")
-            if self.optimizer is not None:
+            if self.optimizer is not None and not getattr(self, '_accumulated_microbatches', 0):
                 self.optimizer.zero_grad()
             if self.train_config.free_u:
                 self.sd.pipeline.disable_freeu()

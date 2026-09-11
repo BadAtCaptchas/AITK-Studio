@@ -645,6 +645,38 @@ class DataLoaderBatchDTO:
             print(e)
             raise e
 
+    def pin_memory(self):
+        """Pin batch-owned payloads without traversing or mutating file caches."""
+        if not self.file_items or not all(
+            getattr(item.dataset_config, 'pin_memory', False) for item in self.file_items
+        ):
+            return self
+
+        def pin(value):
+            if isinstance(value, DTO):
+                return DTO(pin(value.tensor), **{key: pin(v) for key, v in value.extras.items()})
+            if isinstance(value, torch.Tensor):
+                if value.device.type == 'cpu' and value.layout == torch.strided:
+                    return value.pin_memory()
+                return value
+            if isinstance(value, dict):
+                return {key: pin(v) for key, v in value.items()}
+            if isinstance(value, list):
+                return [pin(v) for v in value]
+            if isinstance(value, tuple):
+                return tuple(pin(v) for v in value)
+            return value
+
+        for name in (
+            'tensor', 'latents', 'control_tensor', 'control_tensor_list',
+            'clip_image_tensor', 'mask_tensor', 'unaugmented_tensor',
+            'unconditional_tensor', 'unconditional_latents', 'extra_values',
+            'clip_image_embeds', 'clip_image_embeds_unconditional',
+            'audio_data', 'audio_tensor', 'first_frame_latents', '_audio_latents',
+        ):
+            setattr(self, name, pin(getattr(self, name, None)))
+        return self
+
     def get_is_reg_list(self):
         return [x.is_reg for x in self.file_items]
 

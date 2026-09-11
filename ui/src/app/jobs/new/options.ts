@@ -1804,7 +1804,7 @@ export const modelArchs: ModelArch[] = [
       'config.process[0].train.optimizer': ['adamw8bit', 'adamw8bit'],
       'config.process[0].train.lr': [0.00003, 0.0001],
       'config.process[0].train.optimizer_params.weight_decay': [0.0001, 0.0001],
-      'config.process[0].train.timestep_type': ['sigmoid', 'sigmoid'],
+      'config.process[0].train.timestep_type': ['weighted', 'sigmoid'],
       'config.process[0].train.content_or_style': ['balanced', 'balanced'],
       'config.process[0].train.loss_type': ['mse', 'mse'],
       'config.process[0].network.conv': [undefined, 16],

@@ -484,22 +484,22 @@ class SDTrainer(BaseSDTrainProcess):
                 sd=self.sd
             )
             self.dfe.to(self.device_torch)
-            if hasattr(self.dfe, 'vision_encoder') and self.train_config.gradient_checkpointing:
+            if hasattr(self.dfe, 'vision_encoder'):
                 # must be set to train for gradient checkpointing to work
                 self.dfe.vision_encoder.train()
                 self.dfe.vision_encoder.gradient_checkpointing = True
-            elif hasattr(self.dfe, 'model') and self.train_config.gradient_checkpointing:
+            elif hasattr(self.dfe, 'model'):
                 if hasattr(self.dfe.model, 'enable_gradient_checkpointing'):
-                    self.dfe.model.train()
                     self.dfe.model.enable_gradient_checkpointing()
                 elif hasattr(self.dfe.model, 'gradient_checkpointing_enable'):
-                    self.dfe.model.train()
                     self.dfe.model.gradient_checkpointing_enable()
                 elif hasattr(self.dfe.model, 'gradient_checkpointing'):
-                    self.dfe.model.train()
                     self.dfe.model.gradient_checkpointing = True
                 else:
                     print_acc("Warning: Could not enable gradient checkpointing on diffusion feature extractor model.")
+                # Transformers gates checkpointing on training; native Sapiens/TIPS
+                # now gates on autograd and can keep evaluation-mode behavior.
+                self.dfe.model.train(self.dfe.model.__class__.__module__.startswith('transformers.'))
             else:
                 self.dfe.eval()
                 
@@ -740,7 +740,7 @@ class SDTrainer(BaseSDTrainProcess):
                 while len(nas.shape) < len(noise.shape):
                     nas = nas.unsqueeze(-1)
                 aug = batch.latents * nas
-                target = noise - (batch.latents + aug)
+                target = batch.latents + aug if self.sd.x0_pred else noise - (batch.latents + aug)
                 target = target.detach()
         elif hasattr(self.sd, 'get_loss_target'):
             target = self.sd.get_loss_target(
@@ -760,7 +760,9 @@ class SDTrainer(BaseSDTrainProcess):
         if self.dfe is not None:
             if self.dfe.version == 1:
                 model = self.sd
-                if model is not None and hasattr(model, 'get_stepped_pred'):
+                if self.sd.x0_pred:
+                    stepped_latents = noise_pred
+                elif model is not None and hasattr(model, 'get_stepped_pred'):
                     stepped_latents = model.get_stepped_pred(noise_pred, noise)
                 else:
                     # stepped_latents = noise - noise_pred
@@ -812,10 +814,18 @@ class SDTrainer(BaseSDTrainProcess):
                 # do diffusion feature extraction on target
                 with torch.no_grad():
                     rectified_flow_target = noise.float() - batch.latents.float()
+                    if self.sd.x0_pred:
+                        rectified_flow_target = noise.float() * getattr(self.sd, 'noise_scale', 1.0) - batch.latents.float()
                     target_feature_list = self.dfe(torch.cat([rectified_flow_target, noise.float()], dim=1))
                 
                 # do diffusion feature extraction on prediction
-                pred_feature_list = self.dfe(torch.cat([noise_pred.float(), noise.float()], dim=1))
+                feature_pred = noise_pred.float()
+                if self.sd.x0_pred:
+                    sigma = timesteps.to(noise_pred.device, dtype=torch.float32) / 1000.0
+                    while sigma.dim() < noise_pred.dim():
+                        sigma = sigma.unsqueeze(-1)
+                    feature_pred = (noisy_latents.float() - feature_pred) / sigma.clamp_min(1e-6)
+                pred_feature_list = self.dfe(torch.cat([feature_pred, noise.float()], dim=1))
                 
                 dfe_loss = 0.0
                 for i in range(len(target_feature_list)):
@@ -832,6 +842,8 @@ class SDTrainer(BaseSDTrainProcess):
                     scheduler=self.sd.noise_scheduler,
                     model=self.sd,
                 )
+                dfe_loss = dfe_loss.mean()
+                self.additional_logs['loss/dfe'] = dfe_loss.item()
                 additional_loss += dfe_loss * self.train_config.diffusion_feature_extractor_weight 
             else:
                 raise ValueError(f"Unknown diffusion feature extractor version {self.dfe.version}")
@@ -962,7 +974,7 @@ class SDTrainer(BaseSDTrainProcess):
                 raise ValueError("Batch sigmas is None. This should not happen")
 
             # src https://github.com/huggingface/diffusers/blob/324d18fba23f6c9d7475b0ff7c777685f7128d40/examples/t2i_adapter/train_t2i_adapter_sdxl.py#L1190
-            denoised_latents = noise_pred * (-batch.sigmas) + noisy_latents
+            denoised_latents = noise_pred if self.sd.x0_pred else noise_pred * (-batch.sigmas) + noisy_latents
             weighing = batch.sigmas ** -2.0
             if loss_target == 'source':
                 # denoise the latent and compare to the latent in the batch
@@ -975,7 +987,7 @@ class SDTrainer(BaseSDTrainProcess):
                     target = unaugmented_latents.detach()
 
                 # Get the target for loss depending on the prediction type
-                if self.sd.noise_scheduler.config.prediction_type == "epsilon":
+                if self.sd.x0_pred or self.sd.noise_scheduler.config.prediction_type == "epsilon":
                     target = target  # we are computing loss against denoise latents
                 elif self.sd.noise_scheduler.config.prediction_type == "v_prediction":
                     target = self.sd.noise_scheduler.get_velocity(target, noise, timesteps)
@@ -1021,7 +1033,9 @@ class SDTrainer(BaseSDTrainProcess):
                     if self.train_config.do_fft_velocity_equiv_weight:
                         velocity_equiv_weight = (1.0 / torch.clamp(tv, min=0.1) ** 2)
                         fft_loss = fft_loss * velocity_equiv_weight
-                    additional_loss += fft_loss.mean()
+                    fft_loss = fft_loss.mean()
+                    self.additional_logs['loss/fft'] = fft_loss.item()
+                    additional_loss += fft_loss
             if self.train_config.loss_type == "pseudo_huber":
                 diff = pred.float() - target.float()
                 c=0.01
@@ -1053,7 +1067,8 @@ class SDTrainer(BaseSDTrainProcess):
                 timestep_weight = self.sd.noise_scheduler.get_weights_for_timesteps(
                     timesteps,
                     v2=self.train_config.linear_timesteps2,
-                    timestep_type=self.train_config.timestep_type
+                    timestep_type=self.train_config.timestep_type,
+                    x0_pred=self.sd.x0_pred,
                 ).to(loss.device, dtype=loss.dtype)
                 if len(loss.shape) == 4:
                     timestep_weight = timestep_weight.view(-1, 1, 1, 1).detach()
@@ -1244,6 +1259,7 @@ class SDTrainer(BaseSDTrainProcess):
             if additional_model_loss is not None:
                 loss = loss + additional_model_loss
                 self.additional_logs["additional_model_loss"] = additional_model_loss.item()
+            self.additional_logs.update(getattr(self.sd, 'additional_loss_logs', None) or {})
         
         if self.train_config.max_loss_debug and self.train_config.max_loss is not None:
             if loss.item() > self.train_config.max_loss:
@@ -2805,7 +2821,9 @@ class SDTrainer(BaseSDTrainProcess):
         self._record_monitor_metric('train/accumulation_batches', len(batch_list))
         self._record_monitor_metric('train/optimizer_step', 0.0 if self.is_grad_accumulation_step else 1.0)
         total_loss = None
-        self.optimizer.zero_grad()
+        if getattr(self, '_accumulated_microbatches', 0) == 0:
+            self.optimizer.zero_grad()
+        self._accumulated_microbatches = getattr(self, '_accumulated_microbatches', 0)
         for batch in batch_list:
             if self.sd.is_multistage:
                 # handle multistage switching
@@ -2820,6 +2838,7 @@ class SDTrainer(BaseSDTrainProcess):
                             # if this boundary is trainable, we can stop looking
                             break
             loss = self.train_single_accumulation(batch)
+            self._accumulated_microbatches += 1
             self.steps_this_boundary += 1
             if total_loss is None:
                 total_loss = loss
@@ -2833,6 +2852,32 @@ class SDTrainer(BaseSDTrainProcess):
             # CPU gradient clipping and optimizers must not read host gradients
             # while the asynchronous D2H staging stream is still writing them.
             sync_grad_transfers()
+            optimizer = getattr(self.optimizer, 'optimizer', self.optimizer)
+            prepare_gradients = getattr(optimizer, 'prepare_gradients', None)
+            if callable(prepare_gradients):
+                prepare_gradients()
+            # Older stochastic optimizers use the same private-buffer contract.
+            # Materialize it before normalization/clipping, rather than inside step().
+            for group in self.optimizer.param_groups:
+                for param in group['params']:
+                    accum = getattr(param, '_accum_grad', None)
+                    if accum is not None:
+                        if param.grad is None:
+                            param.grad = accum
+                        else:
+                            param.grad.add_(accum)
+                        del param._accum_grad
+            # Normalize once at the update boundary, including alternate backward
+            # paths and short final windows. Keep legacy whole-epoch sums intact.
+            if self.train_config.gradient_accumulation_steps != -1:
+                divisor = self._accumulated_microbatches
+                if divisor > 1:
+                    seen = set()
+                    for group in self.optimizer.param_groups:
+                        for param in group['params']:
+                            if param.grad is not None and id(param) not in seen:
+                                param.grad.div_(divisor)
+                                seen.add(id(param))
             # fix this for multi params
             if self.train_config.optimizer != 'adafactor':
                 grad_norm_values = []
@@ -2856,6 +2901,7 @@ class SDTrainer(BaseSDTrainProcess):
                     self.optimizer.step()
 
                     self.optimizer.zero_grad(set_to_none=True)
+                    self._accumulated_microbatches = 0
                     if self.adapter and isinstance(self.adapter, CustomAdapter):
                         self.adapter.post_weight_update()
             if self.ema is not None:

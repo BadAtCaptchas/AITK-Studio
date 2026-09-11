@@ -689,6 +689,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # must restart rather than pretending that work was committed.
         self.grad_accumulation_step = 1
         self.is_grad_accumulation_step = True
+        self._accumulated_microbatches = 0
         self.current_boundary_index = boundary_index
         self.steps_this_boundary = boundary_steps
         self.num_consecutive_oom += 1
@@ -1035,6 +1036,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 params,
                 decay=self.train_config.ema_config.ema_decay,
                 use_feedback=self.train_config.ema_config.use_feedback,
+                feedback_rate=self.train_config.ema_config.feedback_rate,
                 param_multiplier=self.train_config.ema_config.param_multiplier,
             )
 
@@ -1652,6 +1654,19 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     timestep_indices = timestep_indices.long()
                 else:
                     raise ValueError(f"Unknown content_or_style {content_or_style}")
+                if self.train_config.first_timestep_chance > 0.0 and (not self.sd.is_multistage or min_noise_steps == 0):
+                    from toolkit.samplers.custom_flowmatch_sampler import force_first_timestep_indices
+                    # One shared draw must update both representations. Continuous
+                    # timesteps otherwise bypass the forced index below. Do not
+                    # send full-noise samples to a low-noise multistage expert.
+                    force_first = force_first_timestep_indices(
+                        torch.ones_like(timestep_indices), self.train_config.first_timestep_chance
+                    ) == 0
+                    timestep_indices = torch.where(force_first, 0, timestep_indices)
+                    if direct_timesteps is not None:
+                        direct_timesteps = torch.where(
+                            force_first, self.sd.noise_scheduler.timesteps[0], direct_timesteps
+                        )
             with self.timer('convert_timestep_indices_to_timesteps'):
                 # convert the timestep_indices to a timestep
                 if direct_timesteps is not None:
@@ -3061,6 +3076,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         # zero any gradients
         self.optimizer.zero_grad()
+        self._accumulated_microbatches = 0
 
         initial_scheduler_step = self.phase_manager.get_phase_local_step(self.step_num) if self.phase_manager.enabled else self.step_num
         self.lr_scheduler.step(initial_scheduler_step)
@@ -3168,6 +3184,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     self.is_grad_accumulation_step = not is_optimizer_step
                     if is_optimizer_step:
                         self.grad_accumulation_step = 0
+
+                # Commit a short final accumulation window instead of dropping it.
+                if not self.train_config.auto_train and step + 1 >= self.train_config.steps:
+                    self.is_grad_accumulation_step = False
 
             # flush()
             ### HOOK ###
@@ -3327,8 +3347,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         print_acc(f"\nSaving at step {self.step_num}")
                         self.save(self.step_num)
                         self.ensure_params_requires_grad()
-                        # clear any grads
-                        self.optimizer.zero_grad()
+                        # Saving between legacy accumulation calls must retain
+                        # the gradients belonging to the pending update.
+                        if not self.is_grad_accumulation_step:
+                            self.optimizer.zero_grad()
                         flush()
                         flush_next = True
                         if self.progress_bar is not None:

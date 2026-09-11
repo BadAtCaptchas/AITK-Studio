@@ -4,7 +4,17 @@ from torch.distributions import LogNormal
 from diffusers import FlowMatchEulerDiscreteScheduler
 import torch
 import numpy as np
-from toolkit.timestep_weighing.default_weighing_scheme import default_weighing_scheme
+from toolkit.timestep_weighing.default_weighing_scheme import default_weighing_scheme, x0_weighing_scheme
+
+
+def force_first_timestep_indices(indices: torch.Tensor, chance: float) -> torch.Tensor:
+    """Opt-in per-sample full-noise draws; disabled mode consumes no RNG."""
+    if chance == 0.0:
+        return indices
+    if chance == 1.0:
+        return torch.zeros_like(indices)
+    force_first = torch.rand(indices.shape, device=indices.device) < chance
+    return torch.where(force_first, 0, indices)
 
 
 def get_shift_for_sequence_length(
@@ -106,15 +116,16 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
             self.linear_timesteps_weights2 = hbsmntw_weighing
             pass
 
-    def get_weights_for_timesteps(self, timesteps: torch.Tensor, v2=False, timestep_type="linear") -> torch.Tensor:
+    def get_weights_for_timesteps(self, timesteps: torch.Tensor, v2=False, timestep_type="linear", x0_pred=False) -> torch.Tensor:
         # Get the indices of the timesteps
         step_indices = [(self.timesteps == t).nonzero().item()
                         for t in timesteps]
 
         # Get the weights for the timesteps
         if timestep_type == "weighted":
+            weighing_scheme = x0_weighing_scheme if x0_pred else default_weighing_scheme
             weights = torch.tensor(
-                [default_weighing_scheme[i] for i in step_indices],
+                [weighing_scheme[i] for i in step_indices],
                 device=timesteps.device,
                 dtype=timesteps.dtype
             )

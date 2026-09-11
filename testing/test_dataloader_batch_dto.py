@@ -33,6 +33,7 @@ def make_file_item(
         clip_image_embeds=None,
         clip_image_embeds_unconditional=None,
         prompt_embeds=None,
+        dop_prompt_embeds=None,
         audio_tensor=audio_tensor,
     )
 

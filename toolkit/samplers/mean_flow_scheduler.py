@@ -1,7 +1,7 @@
 from typing import Union
 from diffusers import FlowMatchEulerDiscreteScheduler
 import torch
-from toolkit.timestep_weighing.default_weighing_scheme import default_weighing_scheme
+from toolkit.timestep_weighing.default_weighing_scheme import default_weighing_scheme, x0_weighing_scheme
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -39,17 +39,18 @@ class MeanFlowScheduler(FlowMatchEulerDiscreteScheduler):
             pass
 
     def get_weights_for_timesteps(
-        self, timesteps: torch.Tensor, v2=False, timestep_type="linear"
+        self, timesteps: torch.Tensor, v2=False, timestep_type="linear", x0_pred=False
     ) -> torch.Tensor:
         # Get the indices of the timesteps
         step_indices = [(self.timesteps == t).nonzero().item() for t in timesteps]
 
-        weights = 1.0
+        weights = torch.ones_like(timesteps)
 
         # Get the weights for the timesteps
         if timestep_type == "weighted":
+            weighing_scheme = x0_weighing_scheme if x0_pred else default_weighing_scheme
             weights = torch.tensor(
-                [default_weighing_scheme[i] for i in step_indices],
+                [weighing_scheme[i] for i in step_indices],
                 device=timesteps.device,
                 dtype=timesteps.dtype,
             )

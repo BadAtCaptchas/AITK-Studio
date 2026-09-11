@@ -94,6 +94,13 @@ def get_optimizer(
         if 'warmup_init' not in optimizer_params:
             optimizer_params['warmup_init'] = False
         optimizer = Adafactor(params, lr=float(learning_rate), **optimizer_params)
+    elif lower_type == 'adamconvrot':
+        from toolkit.optimizers.adamconvrot import AdamConvRot
+        if optimizer_params.get('fused', False):
+            raise ValueError("AdamConvRot fused=True is incompatible with training gradient clipping and OOM recovery")
+        optimizer_params = dict(optimizer_params)
+        optimizer_params.setdefault('eps', 1e-6)
+        optimizer = AdamConvRot(params, lr=float(learning_rate), **optimizer_params)
     elif lower_type == 'automagic':
         from toolkit.optimizers.automagic import Automagic
         optimizer = Automagic(params, lr=float(learning_rate), **optimizer_params)

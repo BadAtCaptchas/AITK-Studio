@@ -1,4 +1,5 @@
 from accelerate import Accelerator
+from accelerate.utils import GradientAccumulationPlugin
 from diffusers.utils.torch_utils import is_compiled_module
 
 global_accelerator = None
@@ -7,7 +8,11 @@ global_accelerator = None
 def get_accelerator() -> Accelerator:
     global global_accelerator
     if global_accelerator is None:
-        global_accelerator = Accelerator()
+        # Toolkit owns accumulation windows and loss normalization. An external
+        # Accelerate setting must not divide losses again or skip our updates.
+        global_accelerator = Accelerator(
+            gradient_accumulation_plugin=GradientAccumulationPlugin(num_steps=1)
+        )
     return global_accelerator
 
 def unwrap_model(model):

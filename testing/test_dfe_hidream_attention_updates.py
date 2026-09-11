@@ -281,7 +281,7 @@ class DFE7VelocityWeightingTest(unittest.TestCase):
             pred,
             target,
             repeated_tv.clamp(min=0.001),
-            weighted=True,
+            weighted=False,
         )
 
         self.assertTrue(torch.allclose(actual, expected, rtol=1e-5, atol=1e-6))

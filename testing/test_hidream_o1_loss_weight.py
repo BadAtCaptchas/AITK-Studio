@@ -63,22 +63,14 @@ class HidreamO1LossWeightTest(unittest.TestCase):
         )
         self.model = model_cls()
 
-    def test_velocity_fallback_sigma_squared_weights_shrink_low_timestep_spikes(self):
+    def test_native_x0_does_not_apply_velocity_compensation(self):
         timesteps = torch.tensor([1.0, 1000.0])
         weights = self.model.get_loss_weight(
             timesteps=timesteps,
             loss=torch.ones((2, 3, 4, 4)),
         )
 
-        self.assertEqual(weights.shape, (2,))
-        self.assertAlmostEqual(weights[0].item(), 1e-6, places=12)
-        self.assertAlmostEqual(weights[1].item(), 1.0, places=7)
-
-        raw_loss = torch.tensor([1_000_000.0, 1.0]).view(2, 1, 1, 1)
-        weighted_loss = raw_loss * weights.view(2, 1, 1, 1)
-
-        self.assertAlmostEqual(weighted_loss[0].item(), 1.0, places=5)
-        self.assertAlmostEqual(weighted_loss[1].item(), 1.0, places=7)
+        self.assertIsNone(weights)
 
     def test_skips_non_velocity_loss_contexts(self):
         timesteps = torch.tensor([1.0])
@@ -151,7 +143,7 @@ class HidreamO1DefaultConfigTest(unittest.TestCase):
         self.assertIn("'config.process[0].train.optimizer': ['adamw8bit', 'adamw8bit']", hidream_o1_block)
         self.assertIn("'config.process[0].train.lr': [0.00003, 0.0001]", hidream_o1_block)
         self.assertIn("'config.process[0].train.optimizer_params.weight_decay': [0.0001, 0.0001]", hidream_o1_block)
-        self.assertIn("'config.process[0].train.timestep_type': ['sigmoid', 'sigmoid']", hidream_o1_block)
+        self.assertIn("'config.process[0].train.timestep_type': ['weighted', 'sigmoid']", hidream_o1_block)
         self.assertIn("'config.process[0].train.content_or_style': ['balanced', 'balanced']", hidream_o1_block)
         self.assertIn("'config.process[0].train.loss_type': ['mse', 'mse']", hidream_o1_block)
         self.assertIn("'config.process[0].train.t0_loss_target': [true, undefined]", hidream_o1_block)

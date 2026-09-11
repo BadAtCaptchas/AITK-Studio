@@ -766,6 +766,10 @@ def get_dataloader_from_datasets(
     # check if is caching latents
 
     dataloader_kwargs = {}
+    # The DTO checks every contributing dataset, including mixed batches.
+    dataloader_kwargs['pin_memory'] = torch.cuda.is_available() and any(
+        config.pin_memory for config in dataset_config_list
+    )
     
     if is_native_windows() or is_macos():
         dataloader_kwargs['num_workers'] = 0

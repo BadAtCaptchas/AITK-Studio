@@ -425,6 +425,34 @@ def _ensure_cpu_pinned(t: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     return t
 
 
+def _storage_device(t: torch.Tensor) -> torch.device:
+    """Inspect wrapper storage; its outer device metadata can be stale."""
+    seen = set()
+    while id(t) not in seen:
+        seen.add(id(t))
+        try:
+            names, _ = t.__tensor_flatten__()
+        except (AttributeError, NotImplementedError):
+            return t.device
+        inner = next((getattr(t, name) for name in names if isinstance(getattr(t, name, None), torch.Tensor)), None)
+        if inner is None:
+            return t.device
+        t = inner
+    return t.device
+
+
+def _move_own_param(module: nn.Module, name: str, param: nn.Parameter, device) -> nn.Parameter:
+    """TorchAO wrappers need replacement: .data assignment leaves storage behind."""
+    with torch.no_grad():
+        moved = param.data.to(device)
+        if _is_ao_quantized_tensor(param):
+            replacement = nn.Parameter(moved, requires_grad=param.requires_grad)
+            setattr(module, name, replacement)
+            return replacement
+        param.data = moved
+        return param
+
+
 def _move_params_to_cpu_and_pin(module: nn.Module):
     """Force parameters/buffers to CPU (+pinned) so we can bounce them per call."""
     with torch.no_grad():

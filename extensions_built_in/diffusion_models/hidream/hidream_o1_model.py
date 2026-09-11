@@ -27,7 +27,7 @@ from toolkit.cuda_compat import (
 from transformers import AutoProcessor
 from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
 from .src.hidream_o1.qwen3_vl_transformers import Qwen3VLForConditionalGeneration
-from .src.hidream_o1.pipeline import HiDreamO1Pipeline, DEFAULT_NOISE_SCALE, T_EPS
+from .src.hidream_o1.pipeline import HiDreamO1Pipeline, DEFAULT_NOISE_SCALE
 from toolkit.models.FakeVAE import FakeVAE
 from typing import TYPE_CHECKING
 from .src.hidream_o1.model_config import model_config
@@ -152,6 +152,7 @@ class HidreamO1Model(BaseModel):
         if is_hidream_o1_torch_not_recommended(torch):
             warnings.warn(format_hidream_o1_torch_warning(torch), RuntimeWarning, stacklevel=2)
         self.is_flow_matching = True
+        self.x0_pred = True
         self.is_transformer = True
         self.target_lora_modules = [
             "Qwen3VLForConditionalGeneration",
@@ -362,7 +363,7 @@ class HidreamO1Model(BaseModel):
         **kwargs,
     ):
         import einops
-        from .src.hidream_o1.pipeline import PATCH_SIZE, T_EPS
+        from .src.hidream_o1.pipeline import PATCH_SIZE
 
         if self.model.device == torch.device("cpu"):
             self.model.to(self.device_torch)
@@ -496,13 +497,8 @@ class HidreamO1Model(BaseModel):
             p2=PATCH_SIZE,
         )
 
-        # Model emits an x0-prediction; convert to flow-matching velocity
-        # (x_1 - x_0) so it matches the loss target from get_loss_target.
-        sigma = (timestep.float() / 1000.0).clamp_min(T_EPS).to(device)
-        while sigma.dim() < latent_model_input.dim():
-            sigma = sigma.unsqueeze(-1)
-        pred = (latent_model_input.float().to(device) - x0_pred.float()) / sigma
-        return pred.to(in_dtype)
+        # Keep the model's native clean-image prediction throughout training.
+        return x0_pred.to(in_dtype)
 
     def get_prompt_embeds(self, prompt: list) -> AdvancedPromptEmbeds:
         if not isinstance(prompt, list):
@@ -522,13 +518,13 @@ class HidreamO1Model(BaseModel):
     def save_model(self, output_path, meta, save_dtype):
         from toolkit.util.quantize import dequantize_if_quantized
         transformer: Qwen3VLForConditionalGeneration = unwrap_model(self.model)
+        save_dict = {
+            '.'.join(part for part in key.split('.') if part != '_orig_mod'):
+                dequantize_if_quantized(value).detach().to('cpu', dtype=save_dtype).clone()
+            for key, value in transformer.state_dict().items()
+        }
         if self.is_comfy_weight:
-            sd = transformer.state_dict()
-            save_dict = {}
-            for key, value in sd.items():
-                if "lm_head.weight" in key:
-                    continue  # comfy checkpoint doesnt have the lm head, so skip it
-                save_dict[key] = dequantize_if_quantized(value).clone().to("cpu", dtype=save_dtype)
+            save_dict = {key: value for key, value in save_dict.items() if 'lm_head.weight' not in key}
             
             if not output_path.endswith(".safetensors"):
                 output_path += ".safetensors"
@@ -537,6 +533,7 @@ class HidreamO1Model(BaseModel):
         else:
             transformer.save_pretrained(
                 save_directory=output_path,
+                state_dict=save_dict,
                 safe_serialization=True,
             )
 
@@ -548,19 +545,12 @@ class HidreamO1Model(BaseModel):
                 yaml.dump(meta, f)
 
     def get_loss_target(self, *args, **kwargs):
-        noise = kwargs.get("noise")
         batch = kwargs.get("batch")
-        noise_scale = self.noise_scale
-        return (noise * noise_scale - batch.latents).detach()
+        return batch.latents.detach()
 
     def get_loss_weight(self, timesteps: torch.Tensor, loss: torch.Tensor, **kwargs):
-        if kwargs.get("t0_loss_target", False):
-            return None
-        if kwargs.get("loss_target") in ("source", "unaugmented"):
-            return None
-
-        sigma = (timesteps.float() / 1000.0).clamp_min(T_EPS)
-        return sigma.pow(2)
+        # Native x0 loss no longer needs the old velocity-to-x0 compensation.
+        return None
 
     def get_base_model_version(self):
         return self.arch

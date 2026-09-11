@@ -16,6 +16,8 @@
 - `npm run start` starts the managed app stack on port `8675` after DB prep; TensorBoard may use port `6006` when enabled.
 - `npm run build` compiles the worker with `tsconfig.worker.json` and then runs `next build`, which enforces UI route/page type errors. Prefer `npm run typecheck` when you need the explicit app-and-worker type gate without producing a build.
 - Prefer the narrowest relevant verification: run the matching `npm run test:<area>` script for touched UI/server utilities, and use `python -m py_compile` or focused Python tests/checks for Python-only changes.
+- Run Python checks with the existing project environment (`.venv` first, then `venv`) rather than assuming the system `python` has the training dependencies. On Windows, invoke `.\.venv\Scripts\python.exe`; on Linux/macOS, use `.venv/bin/python`.
+- For Python changes involving imports, model classes, mixins, or moved symbols, require a runtime import smoke check of the affected modules and public classes; `py_compile` alone does not catch missing imports or undefined names. For diffusion-model changes, also import `extensions_built_in.diffusion_models` to exercise registry initialization. Use the real dependencies, without downloading model weights or starting training. Check symbols used only inside functions with focused tests or an undefined-name lint check, since importing alone does not execute those paths. If dependencies prevent these checks, report the blocker and leave runtime verification explicitly incomplete.
 - After completing any local server-based testing, stop all servers and background helper processes started for the test before handing work back to the user. Verify the relevant localhost ports or processes are closed when practical.
 
 ## TypeScript Guidance

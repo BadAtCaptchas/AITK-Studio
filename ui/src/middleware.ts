@@ -70,6 +70,33 @@ export async function middleware(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
+  const { pathname } = request.nextUrl;
+
+  if (tokenToUse && pathname.startsWith('/api/')) {
+    // The auth endpoint validates login credentials itself and must be reachable
+    // before a session exists. GET and DELETE are also validated in the handler.
+    if (pathname === '/api/auth') {
+      return NextResponse.next();
+    }
+
+    if (
+      publicReadMethods.has(request.method) &&
+      pathname === remoteDatasetAssetsRoute &&
+      (await signedRemoteDatasetAssetRequest(request.nextUrl.searchParams, tokenToUse))
+    ) {
+      return NextResponse.next();
+    }
+
+    if (!(await isRequestAuthenticated(request, tokenToUse))) {
+      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   if (request.headers.get('content-type')?.includes('application/json')) {
     const payload: unknown = await request
       .clone()
@@ -81,37 +108,6 @@ export async function middleware(request: NextRequest) {
         { status: 400 },
       );
     }
-  }
-  const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
-  if (!tokenToUse) {
-    return NextResponse.next();
-  }
-
-  const { pathname } = request.nextUrl;
-
-  // The auth endpoint validates login credentials itself and must be reachable
-  // before a session exists. GET and DELETE are also validated in the handler.
-  if (pathname === '/api/auth') {
-    return NextResponse.next();
-  }
-
-  if (
-    publicReadMethods.has(request.method) &&
-    pathname === remoteDatasetAssetsRoute &&
-    (await signedRemoteDatasetAssetRequest(request.nextUrl.searchParams, tokenToUse))
-  ) {
-    return NextResponse.next();
-  }
-
-  if (pathname.startsWith('/api/')) {
-    if (!(await isRequestAuthenticated(request, tokenToUse))) {
-      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return NextResponse.next();
   }
 
   return NextResponse.next();

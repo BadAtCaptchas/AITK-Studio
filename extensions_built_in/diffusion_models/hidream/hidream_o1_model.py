@@ -7,6 +7,7 @@ import yaml
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.models.base_model import BaseModel
+from toolkit.models.v2._mixin import OstrisTransformersMixin
 from toolkit.basic import flush
 from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
 from toolkit.prompt_utils import PromptEmbeds

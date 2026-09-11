@@ -21,11 +21,11 @@ from safetensors.torch import load_file
 
 from diffusers import (
     QwenImagePipeline,
-    AutoencoderKLQwenImage,
 )
 from transformers import Qwen2VLProcessor
 from toolkit.models.v2.diffusion_models.qwen_image import QwenImageTransformer2DModel
 from toolkit.models.v2.text_encoders.qwen25_vl import Qwen25VLTextEncoder
+from toolkit.models.v2.vae.qwen_image import QwenImageVAE, QwenImageVAEHolderMixin
 from tqdm import tqdm
 from toolkit.util.qwen_vae_gradient_checkpointing import (
     patch_qwen_vae_gradient_checkpointing,

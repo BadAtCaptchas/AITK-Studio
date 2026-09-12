@@ -3,7 +3,14 @@ import logging
 
 
 def force_hf_hub_progress_bars():
-    hf_tqdm = importlib.import_module("huggingface_hub.utils.tqdm")
+    try:
+        hf_tqdm = importlib.import_module("huggingface_hub.utils.tqdm")
+    except ModuleNotFoundError as error:
+        # CLI, database, and model discovery helpers also run without the
+        # training dependencies. Do not hide a broken installed Hub package.
+        if error.name == "huggingface_hub":
+            return
+        raise
 
     original_is_tqdm_disabled = hf_tqdm.is_tqdm_disabled
     if getattr(original_is_tqdm_disabled, "_aitk_forced_progress", False):

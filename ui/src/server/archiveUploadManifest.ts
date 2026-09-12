@@ -110,6 +110,16 @@ function manifest(value: unknown): UploadManifest {
 export async function ensureUploadDirectory(root: string, id: string, chunks = false): Promise<string> {
   uploadRecordKey(root, id);
   let directory = path.resolve(root);
+  await fs.mkdir(directory, { recursive: true });
+  // Check ancestors explicitly: Windows short names are valid directory aliases,
+  // while symlinks and junctions must still be rejected throughout staging.
+  for (let ancestor = directory; ; ancestor = path.dirname(ancestor)) {
+    const stat = await fs.lstat(ancestor);
+    if (!stat.isDirectory() || stat.isSymbolicLink())
+      throw new UploadConflictError('Upload staging must use canonical private directories');
+    if (ancestor === path.dirname(ancestor)) break;
+  }
+  directory = await fs.realpath(directory);
   for (const component of ['', id, ...(chunks ? ['chunks'] : [])]) {
     if (component) directory = path.join(directory, component);
     await fs.mkdir(directory, { recursive: true });
@@ -117,7 +127,8 @@ export async function ensureUploadDirectory(root: string, id: string, chunks = f
     if (!stat.isDirectory() || stat.isSymbolicLink() || path.resolve(await fs.realpath(directory)) !== directory)
       throw new UploadConflictError('Upload staging must use canonical private directories');
   }
-  return directory;
+  // Preserve the caller's spelling for manifest identity and destination checks.
+  return path.resolve(root, id, ...(chunks ? ['chunks'] : []));
 }
 export async function getUploadManifest(root: string, id: string): Promise<UploadManifest | null> {
   const row = await db.runtime.get(uploadRecordKey(root, id));

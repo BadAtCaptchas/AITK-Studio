@@ -207,7 +207,8 @@ test('watcher creation accepts env import roots split by platform delimiter', as
     sourcePath: source,
   });
 
-  assert.equal(watcher.sourcePath, await fs.realpath(source));
+  assert.equal(watcher.sourcePath, source);
+  assert.equal(await fs.realpath(watcher.sourcePath), await fs.realpath(source));
 });
 
 test('watcher copies only new media, skips caption sidecars, and preserves relative paths', async () => {

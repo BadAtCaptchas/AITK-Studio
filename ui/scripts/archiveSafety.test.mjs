@@ -10,9 +10,30 @@ import {
   receiveManifestChunk,
   assembleManifestChunks,
   getUploadManifest,
+  ensureUploadDirectory,
 } from '../dist/src/server/archiveUploadManifest.js';
 import { extractZipSafely } from '../dist/src/server/safeArchive.js';
 const request = value => new Request('http://localhost/upload', { method: 'POST', body: value });
+
+test('upload staging rejects symlinks at the root, ancestors, upload, and chunks directories', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-staging-paths-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const outside = path.join(root, 'outside');
+  await fs.mkdir(outside);
+  for (const location of ['root', 'ancestor', 'upload', 'chunks']) {
+    const staging = path.join(root, location);
+    const id = 'path-test-upload';
+    const link = location === 'upload' ? path.join(staging, id)
+      : location === 'chunks' ? path.join(staging, id, 'chunks') : staging;
+    await fs.mkdir(path.dirname(link), { recursive: true });
+    await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(
+      ensureUploadDirectory(location === 'ancestor' ? path.join(staging, 'nested') : staging, id, true),
+      /canonical private directories/,
+      location,
+    );
+  }
+});
 test('chunk retries are identical, aggregate bytes are capped, and finalization freezes input', async () => {
   const fixture = installMemoryRuntime(),
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-quota-test-'));

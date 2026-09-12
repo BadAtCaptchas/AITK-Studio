@@ -10,6 +10,22 @@ class ModelRegistryTests(unittest.TestCase):
     def test_discovery_is_weight_free(self):
         subprocess.run([sys.executable, '-c', "import sys; import extensions_built_in.diffusion_models as registry; assert len(registry.AI_TOOLKIT_MODELS)>30; assert 'torch' not in sys.modules"], check=True)
 
+    def test_discovery_without_training_site_packages(self):
+        subprocess.run([
+            sys.executable, '-S', '-c',
+            "import toolkit.ui_database; import toolkit.config_contract; "
+            "import extensions_built_in.diffusion_models as registry; "
+            "assert len(registry.AI_TOOLKIT_MODELS) > 30",
+        ], check=True)
+
+    def test_toolkit_does_not_hide_broken_hub_dependencies(self):
+        from toolkit import force_hf_hub_progress_bars
+
+        error = ModuleNotFoundError('missing Hub dependency', name='huggingface_hub.utils')
+        with patch('toolkit.importlib.import_module', side_effect=error):
+            with self.assertRaises(ModuleNotFoundError):
+                force_hf_hub_progress_bars()
+
     def test_missing_extra_and_broken_integration_are_distinct(self):
         descriptor = ModelDescriptor('test', 'test.model', 'Model', ('optional_extra',))
         with patch('toolkit.model_registry.import_module', side_effect=ModuleNotFoundError('missing', name='optional_extra')):

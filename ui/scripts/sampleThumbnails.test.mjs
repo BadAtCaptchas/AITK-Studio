@@ -20,7 +20,7 @@ test('sample thumbnails resolve inside the authorized root and use jpeg content 
   await fs.writeFile(thumbnail, 'jpeg');
 
   const resolved = await resolveSampleThumbnail(root, 'sample.mp4');
-  assert.equal(resolved?.path, thumbnail);
+  assert.equal(resolved?.path, await fs.realpath(thumbnail));
   assert.equal(resolved?.contentType, 'image/jpeg');
   assert.equal(resolved?.stat.isFile(), true);
   assert.equal(await resolveSampleThumbnail(root, 'older-sample.mp4'), null);

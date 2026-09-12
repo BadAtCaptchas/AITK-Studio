@@ -1313,8 +1313,7 @@
             <div class="console-line">git clone https://github.com/BadAtCaptchas/AITK-Studio.git</div>
             <div class="console-line">cd AITK-Studio</div>
             <div class="console-line">python3 -m venv venv &amp;&amp; source venv/bin/activate</div>
-            <div class="console-line">pip3 install -r requirements_torch_legacy_cu128.txt</div>
-            <div class="console-line">pip3 install -r requirements.txt</div>
+            <div class="console-line">python scripts/install_runtime.py</div>
           </div>
         </div>
       </div>
@@ -1408,8 +1407,7 @@
       'git clone https://github.com/BadAtCaptchas/AITK-Studio.git',
       'cd AITK-Studio',
       'python3 -m venv venv && source venv/bin/activate',
-      'pip3 install -r requirements_torch_legacy_cu128.txt',
-      'pip3 install -r requirements.txt',
+      'python scripts/install_runtime.py',
     ].join('\n');
 
     const fallbackCopy = text => {

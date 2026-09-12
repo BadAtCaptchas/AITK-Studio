@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM nvidia/cuda:12.8.1-devel-ubuntu24.04
+FROM nvidia/cuda:13.0.2-devel-ubuntu24.04
 
 ARG AITK_VERSION=1.5.0
 ARG GIT_COMMIT=unknown
@@ -70,11 +70,11 @@ WORKDIR /app/ai-toolkit
 # Install large dependencies before copying frequently changing application code.
 RUN python -m pip install --no-cache-dir --break-system-packages \
       torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 torchcodec==0.10.0 \
-      --index-url https://download.pytorch.org/whl/cu128 \
+      --index-url https://download.pytorch.org/whl/cu130 \
       --extra-index-url https://pypi.org/simple
 
-COPY requirements_torch_blackwell_cu128.txt requirements_base.txt requirements.txt ./
-RUN python -m pip install --no-cache-dir --break-system-packages -r requirements.txt -r requirements_torch_blackwell_cu128.txt \
+COPY requirements_torch_blackwell_cu130.txt requirements_base.txt requirements.txt ./
+RUN python -m pip install --no-cache-dir --break-system-packages -r requirements.txt -r requirements_torch_blackwell_cu130.txt \
     && python -m pip check
 
 COPY ui/package.json ui/package-lock.json ./ui/

@@ -7,6 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from toolkit.cuda_compat import (
     format_cuda_compatibility_warnings,
+    format_hidream_o1_torch_warning,
     check_blackwell_cuda_compatibility,
     get_cuda_compatibility_report,
     is_hidream_o1_torch_not_recommended,
@@ -80,7 +81,7 @@ class CudaCompatTest(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("Blackwell", message)
         self.assertIn("torch==2.10.0", message)
-        self.assertIn("cu128", message)
+        self.assertIn("cu130", message)
 
     def test_blackwell_with_cuda_128_and_sm120_passes(self):
         torch_module = _FakeTorch("12.8", arch_list=["sm_90", "sm_120"])
@@ -95,7 +96,18 @@ class CudaCompatTest(unittest.TestCase):
         self.assertEqual(get_cuda_compatibility_report(non_blackwell)["problems"], [])
         self.assertEqual(get_cuda_compatibility_report(no_cuda)["problems"], [])
 
-    def test_non_blackwell_alternate_torch_warns_without_blocking(self):
+    def test_blackwell_with_cuda_130_and_sm120_passes(self):
+        report = check_blackwell_cuda_compatibility(
+            _FakeTorch("13.0", arch_list=["sm_90", "sm_120"])
+        )
+        self.assertEqual(report["problems"], [])
+        self.assertEqual(report["warnings"], [])
+
+    def test_blackwell_with_cuda_130_but_missing_sm120_fails(self):
+        with self.assertRaisesRegex(RuntimeError, "incompatible PyTorch/CUDA"):
+            check_blackwell_cuda_compatibility(_FakeTorch("13.0", arch_list=["sm_90"]))
+
+    def test_non_blackwell_default_torch_does_not_warn(self):
         torch_module = _FakeTorch(
             "13.0",
             capability=(8, 9),
@@ -108,8 +120,9 @@ class CudaCompatTest(unittest.TestCase):
             report = check_blackwell_cuda_compatibility(torch_module)
 
         self.assertEqual(report["problems"], [])
-        self.assertEqual(report["warnings"][0]["type"], "older_gpu_alternate_torch")
-        self.assertIn("torch==2.8.0", str(caught[0].message))
+        self.assertEqual(report["warnings"], [])
+        self.assertEqual(format_cuda_compatibility_warnings(report), [])
+        self.assertEqual(caught, [])
 
     def test_non_blackwell_legacy_torch_does_not_warn(self):
         torch_module = _FakeTorch(
@@ -132,6 +145,11 @@ class CudaCompatTest(unittest.TestCase):
         )
 
         self.assertTrue(is_hidream_o1_torch_not_recommended(torch_module))
+        self.assertIn("does not recommend PyTorch 2.9.x", format_hidream_o1_torch_warning(torch_module))
+        self.assertIn("default CUDA 13.0 stack", format_hidream_o1_torch_warning(torch_module))
+
+    def test_hidream_o1_accepts_default_torch(self):
+        self.assertFalse(is_hidream_o1_torch_not_recommended(_FakeTorch("13.0")))
 
 
 if __name__ == "__main__":

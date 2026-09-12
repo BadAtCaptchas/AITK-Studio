@@ -138,7 +138,7 @@ git clone https://github.com/BadAtCaptchas/AITK-Studio.git
 cd AITK-Studio
 python3 -m venv venv
 source venv/bin/activate
-python scripts/install_runtime.py --profile legacy-cu128
+python scripts/install_runtime.py
 ```
 
 For devices running **DGX OS** (including DGX Spark), follow [these](dgx_instructions.md) instructions.
@@ -151,7 +151,7 @@ git clone https://github.com/BadAtCaptchas/AITK-Studio.git
 cd AITK-Studio
 python -m venv venv
 .\venv\Scripts\activate
-python scripts/install_runtime.py --profile legacy-cu128
+python scripts/install_runtime.py
 ```
 
 ### macOS
@@ -169,13 +169,15 @@ chmod +x run_mac.zsh
 
 Blackwell GPUs such as the RTX 50-series require a PyTorch build with CUDA 12.8 or newer and `sm_120` kernels. If an older CUDA wheel is installed, PyTorch may still report that CUDA is available, but model loading or training can fail or run poorly once kernels are used.
 
-Use the Blackwell Torch stack on Windows and standard Linux systems:
+The default installer uses CUDA 13.0 (`cu130`) on Windows and standard Linux, including Blackwell GPUs:
 
 ```bash
-python scripts/install_runtime.py --profile blackwell-cu128
+python scripts/install_runtime.py
 ```
 
 DGX OS users should use the CUDA 13.0 stack in `dgx_instructions.md`.
+
+The default profile is `blackwell-cu130`: Torch 2.10.0, torchvision 0.25.0, torchaudio 2.10.0, and TorchCodec 0.10.0. It requires a CUDA 13-capable NVIDIA driver. For CUDA 12 compatibility, explicitly select `--profile blackwell-cu128`, or `--profile legacy-cu128` for the older-GPU Torch 2.8.0 stack. Blackwell still supports CUDA 12.8 wheels that include `sm_120` kernels. These profiles remain available as compatibility alternatives.
 
 You can verify the active environment with:
 
@@ -183,11 +185,11 @@ You can verify the active environment with:
 python scripts/check_blackwell_cuda.py
 ```
 
-AITK Studio also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Non-Blackwell GPUs continue with a warning if the active Torch version is outside the older-GPU known-good stack. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
+AITK Studio also checks this at startup and will fail early with the recommended install command if it detects a Blackwell GPU with an incompatible PyTorch wheel. Non-Blackwell GPUs do not trigger a Torch downgrade recommendation solely because of their GPU generation. Set `AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1` only for a custom PyTorch build that you know includes Blackwell support.
 
 ### HiDream-O1 PyTorch note
 
-The HiDream-O1 model card currently warns against PyTorch 2.9.x. For older GPUs such as L40, use `requirements_torch_legacy_cu128.txt` (`torch==2.8.0`, `torchcodec==0.7.0`). For Blackwell, use `requirements_torch_blackwell_cu128.txt` or the DGX CUDA 13.0 stack (`torch==2.10.0`, `torchcodec==0.10.0`). AITK Studio warns at runtime when HiDream-O1 is started on PyTorch 2.9.x.
+The HiDream-O1 model card currently warns against PyTorch 2.9.x. The default CUDA 13.0 profile uses `torch==2.10.0` and `torchcodec==0.10.0`. The explicit `legacy-cu128` profile remains an alternative for compatible older GPUs (`torch==2.8.0`, `torchcodec==0.7.0`); `blackwell-cu128` provides a CUDA 12.8 alternative for Blackwell. DGX users should follow the DGX CUDA 13.0 instructions. AITK Studio warns at runtime when HiDream-O1 is started on PyTorch 2.9.x.
 
 ### Quantized model cache
 
@@ -731,7 +733,7 @@ cd AITK-Studio
 git submodule update --init --recursive
 python -m venv venv
 source venv/bin/activate
-python scripts/install_runtime.py --profile legacy-cu128
+python scripts/install_runtime.py
 python scripts/environment_doctor.py
 ```
 

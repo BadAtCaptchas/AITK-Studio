@@ -14,6 +14,7 @@ jobs:
           - { os: ubuntu-latest, python: '3.12', profile: legacy-cu128 }
           - { os: windows-latest, python: '3.12', profile: legacy-cu128 }
           - { os: ubuntu-latest, python: '3.12', profile: blackwell-cu128 }
+          - { os: ubuntu-latest, python: '3.12', profile: blackwell-cu130 }
           - { os: windows-latest, python: '3.12', profile: blackwell-cu130 }
           - { os: ubuntu-24.04-arm, python: '3.11', profile: dgx-cu130 }
           - { os: macos-14, python: '3.12', profile: macos }

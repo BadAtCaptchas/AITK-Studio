@@ -33,7 +33,8 @@ def check_interpreter(version=None, isolated=None):
 def main():
     """Resolve one hardware profile and check the resulting package dependencies."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--profile', choices=PROFILES, required=True)
+    parser.add_argument('--profile', choices=PROFILES, default='blackwell-cu130',
+                        help='Runtime profile (default: blackwell-cu130, CUDA 13.0).')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--report', type=Path)
     args = parser.parse_args()

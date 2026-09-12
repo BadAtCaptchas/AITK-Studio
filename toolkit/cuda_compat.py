@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 BLACKWELL_MIN_CUDA = (12, 8)
-OLDER_GPU_RECOMMENDED_TORCH = (2, 8)
 BLACKWELL_RECOMMENDED_TORCH = (2, 10)
 HIDREAM_O1_NOT_RECOMMENDED_TORCH = (2, 9)
 OLDER_GPU_INSTALL_COMMAND = (
@@ -17,7 +16,7 @@ OLDER_GPU_INSTALL_COMMAND = (
 BLACKWELL_INSTALL_COMMAND = (
     "pip install --no-cache-dir torch==2.10.0 torchvision==0.25.0 "
     "torchaudio==2.10.0 torchcodec==0.10.0 "
-    "--index-url https://download.pytorch.org/whl/cu128 "
+    "--index-url https://download.pytorch.org/whl/cu130 "
     "--extra-index-url https://pypi.org/simple"
 )
 
@@ -54,8 +53,8 @@ def format_hidream_o1_torch_warning(torch_module: Any = None) -> str:
     return (
         "HiDream-O1-Image does not recommend PyTorch 2.9.x. "
         f"Installed torch: {torch_version}. "
-        "Use the older-GPU stack with torch==2.8.0, or the Blackwell stack "
-        "with torch==2.10.0 when your GPU requires Blackwell CUDA kernels."
+        "Use the default CUDA 13.0 stack with torch==2.10.0, or the legacy "
+        "CUDA 12.8 stack with torch==2.8.0 for compatible older GPUs."
     )
 
 
@@ -96,9 +95,7 @@ def get_cuda_compatibility_report(torch_module: Any = None) -> Dict[str, Any]:
 
     report["arch_list"] = _get_supported_arch_list(torch_module)
     cuda_version = parse_cuda_version(report["torch_cuda"])
-    torch_version = parse_torch_version(report["torch_version"])
     device_count = cuda.device_count()
-    has_blackwell = False
 
     for device_idx in range(device_count):
         name = cuda.get_device_name(device_idx)
@@ -114,7 +111,6 @@ def get_cuda_compatibility_report(torch_module: Any = None) -> Dict[str, Any]:
 
         if not _is_blackwell_capability(capability):
             continue
-        has_blackwell = True
 
         cuda_too_old = cuda_version is None or cuda_version < BLACKWELL_MIN_CUDA
         arch_missing = bool(report["arch_list"]) and arch_name not in report["arch_list"]
@@ -126,19 +122,6 @@ def get_cuda_compatibility_report(torch_module: Any = None) -> Dict[str, Any]:
                     "arch_missing": arch_missing,
                 }
             )
-
-    if (
-        not has_blackwell
-        and torch_version is not None
-        and torch_version != OLDER_GPU_RECOMMENDED_TORCH
-    ):
-        report["warnings"].append(
-            {
-                "type": "older_gpu_alternate_torch",
-                "installed_torch": report["torch_version"],
-                "recommended_torch": "2.8.x",
-            }
-        )
 
     return report
 
@@ -160,7 +143,7 @@ def format_cuda_compatibility_error(report: Dict[str, Any]) -> str:
         f"Installed torch CUDA: {report.get('torch_cuda')}\n"
         f"Compiled CUDA arches: {supported_arches}\n"
         + "\n".join(problem_lines)
-        + "\n\nInstall a CUDA 12.8+ PyTorch build with:\n"
+        + "\n\nInstall the default CUDA 13.0 PyTorch build with:\n"
         f"{BLACKWELL_INSTALL_COMMAND}\n\n"
         "Set AI_TOOLKIT_SKIP_CUDA_COMPAT_CHECK=1 only if you are using a custom "
         "PyTorch build that you know includes Blackwell sm_120 kernels."

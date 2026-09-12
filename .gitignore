@@ -199,3 +199,4 @@ aitk_db.db-shm
 
 # Isolated compilation/test artifacts.
 ui/.review-build/
+/testing/.model_test_outputs/

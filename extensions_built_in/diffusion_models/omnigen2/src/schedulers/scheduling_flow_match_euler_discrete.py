@@ -112,7 +112,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
         pos = 1 if len(indices) > 1 else 0
 
         return indices[pos].item()
-    
+
     # def time_shift(self, mu: float, sigma: float, t: torch.Tensor):
     #     return math.exp(mu) / (math.exp(mu) + (1 / t - 1) ** sigma)
 
@@ -142,7 +142,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin):
 
         timesteps = torch.from_numpy(timesteps).to(dtype=torch.float32, device=device)
         _timesteps = torch.cat([timesteps, torch.ones(1, device=timesteps.device)])
-        
+
         self.timesteps = timesteps
         self._timesteps = _timesteps
         self._step_index = None

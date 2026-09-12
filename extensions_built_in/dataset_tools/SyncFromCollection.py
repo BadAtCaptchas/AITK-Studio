@@ -109,8 +109,9 @@ class SyncFromCollection(BaseExtensionProcess):
                 self.print_results(results)
             except Exception as e:
                 print(f" - FAILED: {e}")
-                if 'response' in e.__dict__:
-                    error = f"{e.response.status_code}: {e.response.text}"
+                response = getattr(e, 'response', None)
+                if response is not None:
+                    error = f"{response.status_code}: {response.text}"
                     print(f"   - {error}")
                     failed_datasets.append({'dataset': dataset_config, 'error': error})
                 else:

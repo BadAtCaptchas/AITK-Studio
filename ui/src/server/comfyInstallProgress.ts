@@ -1,7 +1,8 @@
+import { jobStorageKey } from '../utils/jobIdentity';
 import fs from 'fs/promises';
 import path from 'path';
 import type { Job } from '@/types';
-import { getJobTrainingRoot } from '@/server/trainingPaths';
+import { getJobTrainingRoot } from './trainingPaths';
 
 export const COMFY_INSTALL_PROGRESS_FILE = '.comfy_install_progress.json';
 
@@ -93,7 +94,7 @@ function isVisible(progress: ComfyInstallProgress) {
 
 export async function getComfyInstallProgress(job: Job): Promise<ComfyInstallProgress | null> {
   const trainingRoot = await getJobTrainingRoot(job);
-  const jobFolder = path.resolve(trainingRoot, job.name);
+  const jobFolder = path.resolve(trainingRoot, jobStorageKey(job));
   if (!isPathWithin(trainingRoot, jobFolder)) return null;
 
   const progressPath = path.join(jobFolder, COMFY_INSTALL_PROGRESS_FILE);

@@ -139,7 +139,14 @@ function getDefaultRepoWebUrl() {
   return `https://github.com/${owner}/${name}`;
 }
 
+let sourceRemoteCache: { expires: number; promise: Promise<string | null> } | undefined;
 async function readLiveSourceRemote() {
+  if (sourceRemoteCache && sourceRemoteCache.expires > Date.now()) return sourceRemoteCache.promise;
+  const promise = readSourceRemoteUncached();
+  sourceRemoteCache = { expires: Date.now() + 60_000, promise };
+  return promise;
+}
+async function readSourceRemoteUncached() {
   try {
     const result = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
       cwd: TOOLKIT_ROOT,

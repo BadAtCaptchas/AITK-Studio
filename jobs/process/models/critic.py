@@ -220,7 +220,7 @@ class Critic:
 
         return float(np.mean(critic_losses))
 
-    def get_lr(self):    
+    def get_lr(self):
         if hasattr(self.optimizer, 'get_avg_learning_rate'):
             learning_rate = self.optimizer.get_avg_learning_rate()
         elif self.optimizer_type.startswith('dadaptation') or \

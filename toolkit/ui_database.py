@@ -28,6 +28,29 @@ class DatabaseConfigError(RuntimeError):
     pass
 
 
+class FencedJobCursor(sqlite3.Cursor):
+    """Scope UI job SQL to the generation captured by this connection."""
+    def execute(self, sql, parameters=()):
+        if self.connection.fenced and 'WHERE id = ?' in sql:
+            sql = sql.replace('WHERE id = ?', 'WHERE id = ? AND attempt_id IS ?')
+            parameters = (*parameters, self.connection.attempt_id)
+        return super().execute(sql, parameters)
+
+
+class FencedJobConnection(sqlite3.Connection):
+    fenced = False
+    attempt_id = None
+
+    def cursor(self, factory=FencedJobCursor):
+        return super().cursor(factory)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def get_database_provider() -> str:
     provider = os.environ.get(DB_PROVIDER_ENV, "sqlite").strip().lower()
     if provider not in {"sqlite", "mongodb"}:
@@ -50,6 +73,8 @@ def get_mongodb_config() -> tuple[str, str]:
 class UIJobStore:
     def __init__(self, job_id: Optional[str], sqlite_db_path: str):
         self.job_id = job_id.strip() if job_id else None
+        self.attempt_id = os.environ.get('AITK_ATTEMPT_ID') or None
+        self.identity = {"id": self.job_id, "attempt_id": self.attempt_id}
         self.sqlite_db_path = os.environ.get(SQLITE_PATH_ENV, sqlite_db_path)
         self.provider = get_database_provider()
         self._client = None
@@ -87,8 +112,13 @@ class UIJobStore:
             self._jobs = None
 
     def _db_connect(self):
-        conn = sqlite3.connect(self.sqlite_db_path, timeout=30.0)
+        conn = sqlite3.connect(self.sqlite_db_path, timeout=30.0, factory=FencedJobConnection)
         conn.isolation_level = None
+        conn.attempt_id = self.attempt_id
+        conn.fenced = any(row[1] == 'attempt_id' for row in conn.execute('PRAGMA table_info(Job)'))
+        if self.attempt_id and not conn.fenced:
+            conn.close()
+            raise DatabaseConfigError('The database has not been upgraded for job attempts.')
         return conn
 
     def _retry_sqlite_operation(
@@ -124,15 +154,15 @@ class UIJobStore:
 
         if self.provider == "mongodb":
             assert self._jobs is not None
-            row = self._jobs.find_one({"id": self.job_id}, {"_id": 0, "stop": 1})
-            return bool(row.get("stop")) if row else False
+            row = self._jobs.find_one(self.identity, {"_id": 0, "stop": 1})
+            return bool(row.get("stop")) if row else True
 
         def _check_stop():
             with self._db_connect() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT stop FROM Job WHERE id = ?", (self.job_id,))
                 stop = cursor.fetchone()
-                return False if stop is None else stop[0] == 1
+                return True if stop is None else stop[0] == 1
 
         return bool(self._retry_sqlite_operation(_check_stop))
 
@@ -143,7 +173,7 @@ class UIJobStore:
         if self.provider == "mongodb":
             assert self._jobs is not None
             row = self._jobs.find_one(
-                {"id": self.job_id}, {"_id": 0, "return_to_queue": 1}
+                self.identity, {"_id": 0, "return_to_queue": 1}
             )
             return bool(row.get("return_to_queue")) if row else False
 
@@ -164,7 +194,7 @@ class UIJobStore:
 
         if self.provider == "mongodb":
             assert self._jobs is not None
-            row = self._jobs.find_one({"id": self.job_id}, {"_id": 0, "save_now": 1})
+            row = self._jobs.find_one(self.identity, {"_id": 0, "save_now": 1})
             return bool(row.get("save_now")) if row else False
 
         def _check_save():
@@ -184,7 +214,7 @@ class UIJobStore:
         if self.provider == "mongodb":
             assert self._jobs is not None
             row = self._jobs.find_one_and_update(
-                {"id": self.job_id, "sample_now": True},
+                {**self.identity, "sample_now": True},
                 {
                     "$set": {"sample_now": False},
                     "$currentDate": {"updated_at": True},
@@ -224,7 +254,7 @@ class UIJobStore:
         if self.provider == "mongodb":
             assert self._jobs is not None
             self._jobs.update_one(
-                {"id": self.job_id},
+                self.identity,
                 {"$set": {key: value}, "$currentDate": {"updated_at": True}},
             )
             return
@@ -257,10 +287,10 @@ class UIJobStore:
             patch = {"status": status}
             if info is not None:
                 patch["info"] = info
-            if status in {"stopped", "error", "completed"}:
+            if not self.attempt_id and status in {"stopped", "error", "completed"}:
                 patch["pid"] = None
             self._jobs.update_one(
-                {"id": self.job_id},
+                self.identity,
                 {"$set": patch, "$currentDate": {"updated_at": True}},
             )
             return
@@ -270,7 +300,9 @@ class UIJobStore:
                 cursor = conn.cursor()
                 cursor.execute("BEGIN IMMEDIATE")
                 try:
-                    clear_pid = status in {"stopped", "error", "completed"}
+                    # A reported result is not proof the OS process has exited.
+                    # Attempt ownership is released by the supervisor after exit.
+                    clear_pid = not self.attempt_id and status in {"stopped", "error", "completed"}
                     if info is not None:
                         if clear_pid:
                             cursor.execute(

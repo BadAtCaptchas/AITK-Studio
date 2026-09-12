@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
@@ -9,14 +10,14 @@ import { deleteCaptionSidecarsAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { isRequestAuthenticated } from '@/utils/authSession';
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
     const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
     if (!(await isRequestAuthenticated(request, tokenToUse))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const { imgPath } = body;
     if (typeof imgPath !== 'string') {
       return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
@@ -76,3 +77,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to create dataset' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

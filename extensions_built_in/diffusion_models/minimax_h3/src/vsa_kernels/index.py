@@ -286,5 +286,3 @@ def invert_indices(
     )
 
     return k2q_idx, k2q_num
-
-

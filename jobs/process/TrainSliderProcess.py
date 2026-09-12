@@ -102,7 +102,7 @@ class TrainSliderProcess(BaseSDTrainProcess):
                 # trim list to our max steps
 
         cache = PromptEmbedsCache()
-        print(f"Building prompt cache")
+        print('Building prompt cache')
 
         # get encoded latents for our prompts
         with torch.no_grad():
@@ -214,7 +214,7 @@ class TrainSliderProcess(BaseSDTrainProcess):
 
     def before_dataset_load(self):
         if self.slider_config.use_adapter == 'depth':
-            print(f"Loading T2I Adapter for depth")
+            print('Loading T2I Adapter for depth')
             # called before LoRA network is loaded but after model is loaded
             # attach the adapter here so it is there before we load the network
             adapter_path = 'TencentARC/t2iadapter_depth_sd15v2'
@@ -373,16 +373,16 @@ class TrainSliderProcess(BaseSDTrainProcess):
                         self.train_config.linear_timesteps2,
                         self.train_config.timestep_type == 'linear',
                     ])
-                    
+
                     timestep_type = 'linear' if linear_timesteps else None
                     if timestep_type is None:
                         timestep_type = self.train_config.timestep_type
-                    
+
                     # make fake latents
                     l = torch.randn(
                         true_batch_size, 16, height, width
                     ).to(self.device_torch, dtype=dtype)
-                    
+
                     self.sd.noise_scheduler.set_train_timesteps(
                         self.train_config.max_denoising_steps,
                         device=self.device_torch,
@@ -496,7 +496,7 @@ class TrainSliderProcess(BaseSDTrainProcess):
             # )
             # unconditional_latents = unconditional_latents.detach()
             # unconditional_latents.requires_grad = False
-            
+
             # we just need positive target, negative target, and empty prompt to calculate all
             # since we are in no grad, we can easily do it in a single step
             embeddings = train_tools.concat_prompt_embeddings(
@@ -517,12 +517,12 @@ class TrainSliderProcess(BaseSDTrainProcess):
             all_pred = all_pred.detach()
             all_pred.requires_grad = False
             positive_pred, neutral_pred, unconditional_pred = torch.chunk(all_pred, 3, dim=0)
-            
+
             # doing them backward here as it was originally for erasing
             positive_latents = unconditional_pred
             neutral_latents = neutral_pred
             unconditional_latents = positive_pred
-            
+
 
             denoised_latents = denoised_latents.detach()
 
@@ -532,7 +532,7 @@ class TrainSliderProcess(BaseSDTrainProcess):
         self.optimizer.zero_grad(set_to_none=True)
 
         anchor_loss_float = None
-        
+
         with torch.no_grad():
             if self.slider_config.low_ram:
                 prompt_pair_chunks = split_prompt_pairs(prompt_pair.detach(), self.prompt_chunk_size)
@@ -582,7 +582,7 @@ class TrainSliderProcess(BaseSDTrainProcess):
                 unmasked_target_chunks
             ):
                 self.network.multiplier = prompt_pair_chunk.multiplier_list
-                
+
                 target_latents = self.sd.predict_noise(
                     latents=denoised_latent_chunk.detach(),
                     text_embeddings=prompt_pair_chunk.target_class,

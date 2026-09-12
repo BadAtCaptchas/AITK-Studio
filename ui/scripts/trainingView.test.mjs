@@ -38,6 +38,7 @@ function settingsFixture() {
     ),
     'next/server': { NextResponse: { json: (body, options) => ({ body, status: options?.status ?? 200 }) } },
     '@/paths': { defaultTrainFolder: '/training', defaultDatasetsFolder: '/datasets', defaultModelsFolder: '/models' },
+    '@/server/commandInput': { readJsonCommand: request => request.json(), withCommandBoundary: handler => handler, commandError: () => null },
     '@/server/settings': { ...evaluate(normalizer.getText(ast)), flushCache() {} },
     '@/server/pathContainment': { normalizeStoragePathSetting: async (value, fallback) => value || fallback },
     '@/server/db': {

@@ -1,3 +1,5 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { getDatasetsRoot } from '@/server/settings';
 import { NextRequest, NextResponse } from 'next/server';
 import archiver from 'archiver';
@@ -192,7 +194,7 @@ async function performTrainingJobExport(
   const jobConfig = JSON.parse(job.job_config);
   const trainingRoot = await getJobTrainingRoot(job);
   throwIfExportCanceled(shouldCancel);
-  const jobFolder = path.join(trainingRoot, job.name);
+  const jobFolder = path.join(trainingRoot, jobStorageKey(job));
   if (!fs.existsSync(jobFolder)) {
     const error = new Error('Training folder not found');
     (error as any).status = 404;
@@ -511,11 +513,11 @@ async function runBackgroundExport(
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function postCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   try {
-    const body = ((await request.json().catch(() => ({}))) || {}) as ExportBody;
+    const body = ((await readJsonCommand(request)) || {}) as ExportBody;
     const includeDatasets = body.includeDatasets === true;
     const checkpointMode = parseCheckpointMode(body.checkpointMode);
     const background = body.background === true;
@@ -616,3 +618,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: message }, { status });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

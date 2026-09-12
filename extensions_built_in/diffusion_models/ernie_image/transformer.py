@@ -350,7 +350,7 @@ class ErnieImageTransformer2DModel(ModelMixin, ConfigMixin, OstrisModelMixin):
         nn.init.zeros_(self.final_linear.bias)
         self.gradient_checkpointing = False
         self.onload_device = None
-    
+
     @property
     def device(self):
         # use self.x_embeddersince we ignore it in memory management
@@ -365,7 +365,7 @@ class ErnieImageTransformer2DModel(ModelMixin, ConfigMixin, OstrisModelMixin):
         text_lens: torch.Tensor,
         return_dict: bool = True,
     ):
-        device = self.device 
+        device = self.device
         dtype = self.dtype
         B, C, H, W = hidden_states.shape
         p, Hp, Wp = self.patch_size, H // self.patch_size, W // self.patch_size

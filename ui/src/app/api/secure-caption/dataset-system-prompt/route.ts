@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -25,9 +26,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const dataset = await validateSecureCaptionDataset(String(body?.datasetName || ''));
     const systemPrompt = await setSecureCaptionSystemPrompt(
       dataset.datasetName,
@@ -38,3 +39,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

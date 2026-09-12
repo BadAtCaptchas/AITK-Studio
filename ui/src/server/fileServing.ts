@@ -134,19 +134,32 @@ export function parseSingleByteRange(value: string | null | undefined, size: num
   return { start, end: Math.min(end, size - 1) };
 }
 
-function resolveFileResponse(
+export function resolveFileResponse(
   filePath: string,
   stat: Stats,
   requestHeaders: Headers,
   baseHeaders: Record<string, string>,
 ): FileResponseResolution {
   const etag = weakEtag(stat);
-  const headers = { ...baseHeaders, ETag: etag };
-  if (requestHeaders.get('if-none-match') === etag) {
+  const modifiedAt = Math.floor(stat.mtimeMs / 1000) * 1000;
+  const headers = { ...baseHeaders, ETag: etag, 'Last-Modified': new Date(modifiedAt).toUTCString() };
+  // If-Match uses strong comparison. Mutable stat validators are deliberately weak.
+  const ifMatch = requestHeaders.get('if-match');
+  if (ifMatch && ifMatch.trim() !== '*') return response(412, null, headers);
+  const unmodified = Date.parse(requestHeaders.get('if-unmodified-since') || '');
+  if (!ifMatch && Number.isFinite(unmodified) && modifiedAt > unmodified) return response(412, null, headers);
+  const ifNoneMatch = requestHeaders.get('if-none-match');
+  const matches = ifNoneMatch?.split(',').some(value => value.trim() === '*' || value.trim().replace(/^W\//, '') === etag.replace(/^W\//, ''));
+  const modifiedSince = Date.parse(requestHeaders.get('if-modified-since') || '');
+  if (matches || (!ifNoneMatch && Number.isFinite(modifiedSince) && modifiedAt <= modifiedSince)) {
     return response(304, null, headers);
   }
 
-  const requestedRange = parseSingleByteRange(requestHeaders.get('range'), stat.size);
+  // Our stat-based validator is weak: it can never satisfy strong If-Range.
+  // Conservatively send a complete representation for every If-Range request.
+  const requestedRange = requestHeaders.has('if-range')
+    ? null
+    : parseSingleByteRange(requestHeaders.get('range'), stat.size);
   if (requestedRange === 'invalid') {
     return response(416, null, {
       ...headers,
@@ -210,6 +223,8 @@ export async function resolveDownloadFileRequest(
     return response(403, 'Access denied');
   }
 
+  const canonicalDatasetRoot = await resolveExistingDir(datasetRoot);
+  if (canonicalDatasetRoot && findEncryptedDatasetRoot(canonicalPath, canonicalDatasetRoot)) return response(403, 'Encrypted dataset files require the encrypted dataset API');
   const stat = await fsp.stat(canonicalPath).catch(() => null);
   if (!stat || !stat.isFile()) return response(400, 'Not a file');
 

@@ -1,7 +1,10 @@
+import { jobStorageKey } from '../utils/jobIdentity';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { db, type JobUpdateInput } from './db';
+import { claimJobMaintenance } from './jobAttempts';
+import { isPathWithinRoot } from './pathContainment';
 import { getTrainingFolder } from './settings';
 import { getJobTrainingRoot } from './trainingPaths';
 import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from './remoteClient';
@@ -26,6 +29,8 @@ export type TrainingJobRestartOptions = {
 export type TrainingJobRestartDeps = {
   findJobById: (jobID: string) => Promise<Job | null>;
   updateJob: (jobID: string, data: JobUpdateInput) => Promise<Job>;
+  claimMaintenance: typeof claimJobMaintenance;
+  updateOwnedJob: typeof db.jobs.updateIf;
   getTrainingFolder: () => Promise<string>;
   pathExists: (targetPath: string) => boolean;
   rmPath: typeof fsp.rm;
@@ -84,6 +89,8 @@ async function ensureQueueRunning(gpuIds: string, workerId: string) {
 const defaultDeps: TrainingJobRestartDeps = {
   findJobById: jobID => db.jobs.findById(jobID),
   updateJob: (jobID, data) => db.jobs.update(jobID, data),
+  claimMaintenance: claimJobMaintenance,
+  updateOwnedJob: (jobID, expected, data) => db.jobs.updateIf(jobID, expected, data),
   getTrainingFolder,
   pathExists: targetPath => fs.existsSync(targetPath),
   rmPath: (targetPath, options) => fsp.rm(targetPath, options),
@@ -109,12 +116,14 @@ function assertRestartableTrainingJob(job: Job) {
 
 async function clearLocalTrainingState(job: Job, deps: TrainingJobRestartDeps) {
   const trainingRoot = await deps.getTrainingFolder();
-  const trainingFolder = resolveWithinRoot(trainingRoot, job.name);
+  const trainingFolder = resolveWithinRoot(trainingRoot, jobStorageKey(job));
   if (!trainingFolder) {
     failRestart('Invalid job path', 400);
   }
 
   if (deps.pathExists(trainingFolder)) {
+    const [canonicalRoot, canonicalFolder] = await Promise.all([fsp.realpath(trainingRoot), fsp.realpath(trainingFolder)]);
+    if (canonicalFolder === canonicalRoot || !isPathWithinRoot(canonicalRoot, canonicalFolder)) failRestart('Job folder escapes the training root', 400);
     await deps.rmPath(trainingFolder, { recursive: true, force: true });
   }
 
@@ -141,6 +150,8 @@ async function restartRemoteExistingJob(prepared: PreparedJobStart, deps: Traini
 
   await deps.assertPreparedJobCanStart(prepared);
 
+  const owned = await deps.claimMaintenance(job, 'restarting');
+  if (!owned) failRestart('Job changed before remote restart', 409);
   try {
     const worker = await deps.getRemoteWorker(job.worker_id);
     await deps.remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/restart-from-scratch`, {
@@ -151,11 +162,12 @@ async function restartRemoteExistingJob(prepared: PreparedJobStart, deps: Traini
       }),
     });
     await deps.ensureQueueRunning(job.gpu_ids, job.worker_id);
-    return deps.syncRemoteJob(job);
+    const released = await deps.updateOwnedJob(job.id, { attempt_id: owned.attempt_id ?? null, status: 'restarting' }, { status: job.status });
+    return deps.syncRemoteJob(released || owned);
   } catch (error) {
     if (error instanceof JobStartError) throw error;
     const message = error instanceof Error ? error.message : 'Failed to restart remote job from scratch';
-    await deps.updateJob(job.id, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
+    await deps.updateOwnedJob(job.id, { attempt_id: owned.attempt_id ?? null, status: 'restarting' }, { status: job.status, remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
     throw new JobStartError({ error: message }, 502);
   }
 }
@@ -179,6 +191,7 @@ export async function restartTrainingJobFromScratch(
     jobID,
     options.encryptedDatasetKeys,
     options.durableEncryptedDatasetKeys === true,
+    { allowQueued: true },
   );
   assertRestartableTrainingJob(prepared.job);
 
@@ -188,8 +201,18 @@ export async function restartTrainingJobFromScratch(
   }
 
   await deps.assertPreparedJobCanStart(prepared);
-  await clearLocalTrainingState(prepared.job, deps);
-  const resetJob = await deps.updateJob(jobID, resetJobPatch());
+  const owned = await deps.claimMaintenance(prepared.job, 'restarting');
+  if (!owned) failRestart('Job changed or its process has not exited. Refresh and retry.', 409);
+  let resetJob: Job;
+  try {
+    await clearLocalTrainingState(owned, deps);
+    const reset = await deps.updateOwnedJob(jobID, { attempt_id: owned.attempt_id ?? null, status: 'restarting' }, resetJobPatch());
+    if (!reset) failRestart('Restart ownership changed', 409);
+    resetJob = reset;
+  } catch (error) {
+    await deps.updateOwnedJob(jobID, { attempt_id: owned.attempt_id ?? null, status: 'restarting' }, { status: 'error', info: 'Restart preparation failed. Review the error before retrying.' });
+    throw error;
+  }
 
   return deps.startPreparedJob(
     {

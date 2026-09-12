@@ -106,7 +106,7 @@ class Ideogram4MRoPE(nn.Module):
         # position_ids: (B, L, 3) of int.
         assert position_ids.ndim == 3 and position_ids.shape[-1] == 3
         batch_size, seq_len, _ = position_ids.shape
-        
+
         if self.inv_freq.device == torch.device("cpu"):
             # sometimes it gets stuck on CPU
             self.inv_freq = self.inv_freq.to(position_ids.device)
@@ -545,5 +545,3 @@ class Ideogram4Transformer2DModel(nn.Module, OstrisModelMixin):
 
         out = self.final_layer(h, c=adaln_input)
         return out.to(torch.float32)
-
-

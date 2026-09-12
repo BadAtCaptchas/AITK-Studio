@@ -29,7 +29,7 @@ if is_triton_available():
 else:
     from torch.nn import RMSNorm
     warnings.warn("Cannot import triton, install triton to use fused RMSNorm for better performance")
-    
+
 if is_flash_attn_available():
     from flash_attn.ops.activations import swiglu
 else:
@@ -40,10 +40,10 @@ else:
 #     from flash_attn.ops.activations import swiglu as fused_swiglu
 #     FUSEDSWIGLU_AVALIBLE = True
 # except ImportError:
-    
+
 #     FUSEDSWIGLU_AVALIBLE = False
 #     warnings.warn("Cannot import apex RMSNorm, switch to vanilla implementation")
-        
+
 class LuminaRMSNormZero(nn.Module):
     """
     Norm layer adaptive RMS normalization zero.
@@ -65,7 +65,7 @@ class LuminaRMSNormZero(nn.Module):
             4 * embedding_dim,
             bias=True,
         )
-        
+
         self.norm = RMSNorm(embedding_dim, eps=norm_eps)
 
     def forward(
@@ -77,7 +77,7 @@ class LuminaRMSNormZero(nn.Module):
         scale_msa, gate_msa, scale_mlp, gate_mlp = emb.chunk(4, dim=1)
         x = self.norm(x) * (1 + scale_msa[:, None])
         return x, gate_msa, scale_mlp, gate_mlp
-    
+
 
 class LuminaLayerNormContinuous(nn.Module):
     def __init__(
@@ -126,7 +126,7 @@ class LuminaLayerNormContinuous(nn.Module):
             x = self.linear_2(x)
 
         return x
-    
+
 
 class LuminaFeedForward(nn.Module):
     r"""
@@ -152,7 +152,7 @@ class LuminaFeedForward(nn.Module):
     ):
         super().__init__()
         self.swiglu = swiglu
-        
+
         # custom hidden_size factor multiplier
         if ffn_dim_multiplier is not None:
             inner_dim = int(ffn_dim_multiplier * inner_dim)
@@ -202,7 +202,7 @@ class Lumina2CombinedTimestepCaptionEmbedding(nn.Module):
             RMSNorm(text_feat_dim, eps=norm_eps),
             nn.Linear(text_feat_dim, hidden_size, bias=True),
         )
-        
+
         self._initialize_weights()
 
     def _initialize_weights(self):

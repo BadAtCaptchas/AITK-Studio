@@ -174,7 +174,7 @@ class SuperTagger(BaseExtensionProcess):
                 imgs_to_process.append(raw_image_path)
 
         if len(imgs_to_process) == 0:
-            print(f"No images to process")
+            print('No images to process')
         else:
             print(f"Found {len(imgs_to_process)} to process")
 

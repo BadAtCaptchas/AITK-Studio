@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -19,14 +20,14 @@ type SecureOllamaCaptionRequest = {
   maxNewTokens?: number;
 };
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
     const token = getSecureCaptionBearerToken(request);
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const envelope = assertGlobalPayload(await request.json()) as SecureCaptionEnvelope;
+    const envelope = assertGlobalPayload(await readJsonCommand(request)) as SecureCaptionEnvelope;
     const payload = decryptSecureCaptionJson<SecureOllamaCaptionRequest>(token, 'request', envelope);
     const caption = await generateOllamaImageCaption({
       model: payload.model,
@@ -47,3 +48,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

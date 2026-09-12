@@ -142,5 +142,3 @@ def block_sparse_attn(
     )
     o, _ = _block_sparse_attn_triton(q, k, v, q2k_idx, q2k_num, variable_block_sizes)
     return o
-
-

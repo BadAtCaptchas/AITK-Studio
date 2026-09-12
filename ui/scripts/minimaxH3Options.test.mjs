@@ -16,7 +16,7 @@ function archBlock(source, name) {
 }
 
 test('MiniMax H3 preset exposes current checkpoints and distillation choices', () => {
-  const options = readSource('src/app/jobs/new/options.ts');
+  const options = readSource('src/domain/modelOptions.ts');
   const block = archBlock(options, 'minimax_h3');
   assert.match(block, /group: 'experimental'/);
   assert.match(block, /isVideoModel: true/);
@@ -42,7 +42,7 @@ test('MiniMax H3 preset exposes current checkpoints and distillation choices', (
 });
 
 test('H3 notes and mixed-media control use typed plain option data', () => {
-  const options = readSource('src/app/jobs/new/options.ts');
+  const options = readSource('src/domain/modelOptions.ts');
   const simpleJob = readSource('src/app/jobs/new/SimpleJob.tsx');
   const trainingForm = readSource('src/utils/trainingValidation.ts');
   const types = readSource('src/types.ts');
@@ -57,7 +57,7 @@ test('H3 notes and mixed-media control use typed plain option data', () => {
 });
 
 test('Ref2VA and LTX 2.5 are registered with current controls', () => {
-  const options = readSource('src/app/jobs/new/options.ts');
+  const options = readSource('src/domain/modelOptions.ts');
   const ref2va = archBlock(options, 'minimax_h3_ref2va');
   assert.match(ref2va, /minimax_h3_ref2va_training_adapter_v1\.safetensors/);
   assert.match(ref2va, /D-OPSD self-distillation/);

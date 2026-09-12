@@ -15,7 +15,7 @@ import gc
 from toolkit import train_tools
 import torch
 from jobs.process import BaseSDTrainProcess
-import random
+
 from toolkit.basic import value_map
 
 
@@ -46,7 +46,7 @@ class ImageReferenceSliderTrainerProcess(BaseSDTrainProcess):
 
     def load_datasets(self):
         if self.data_loader is None:
-            print(f"Loading datasets")
+            print('Loading datasets')
             datasets = []
             for dataset in self.slider_config.datasets:
                 print(f" - Dataset: {dataset.pair_folder}")

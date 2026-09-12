@@ -26,7 +26,7 @@ class DiffusionTrainer(SDTrainer):
         if self.is_ui_trainer:
             print(f"Using {self.ui_job_store.description}")
             print(f"Job ID: \"{self.job_id}\"")
-        
+
         if self.is_ui_trainer:
             self.is_stopping = False
             # Create a thread pool for database operations
@@ -37,7 +37,7 @@ class DiffusionTrainer(SDTrainer):
             self._run_async_operation(self._update_status("running", "Starting"))
             self._stop_watcher_started = False
             # self.start_stop_watcher(interval_sec=2.0)
-    
+
     def start_stop_watcher(self, interval_sec: float = 5.0):
         """
         Start a daemon thread that periodically checks should_stop()

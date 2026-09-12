@@ -6,6 +6,7 @@ import path from 'path';
 import { MongoClient } from 'mongodb';
 import sqlite3 from 'sqlite3';
 import { backupExistingSqliteDatabase } from './sqlite-backup.mjs';
+import { beginSqlitePreparation, beginMongoPreparation, schemaChecksum, SCHEMA_VERSION } from './schema-migrations.mjs';
 import {
   preflightSqliteGlobalUpgrade,
   upgradeSqliteGlobalWorkspace,
@@ -261,7 +262,7 @@ if (!['sqlite', 'mongodb'].includes(provider)) {
 process.env.DATABASE_URL = `file:${sqlitePath.replace(/\\/g, '/')}`;
 
 const generatedPrismaClient = path.resolve(process.cwd(), 'src', 'generated', 'prisma', 'client.ts');
-const skipPrismaGenerate = process.env.AITK_SKIP_PRISMA_GENERATE === '1' && fs.existsSync(generatedPrismaClient);
+const skipPrismaGenerate = fs.existsSync(generatedPrismaClient);
 
 if (skipPrismaGenerate) {
   console.log('Using the existing generated Prisma client.');
@@ -270,7 +271,10 @@ if (skipPrismaGenerate) {
   runPrisma(['generate']);
 }
 
-if (provider === 'sqlite') {
+async function prepareSqlite() {
+  const preparation = await beginSqlitePreparation(sqlitePath, schemaChecksum(process.cwd()));
+  try {
+  if (preparation.completed) { console.log('SQLite schema is current.'); return; }
   console.log('Preparing SQLite database...');
   fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
   if (fs.existsSync(sqlitePath)) {
@@ -281,7 +285,7 @@ if (provider === 'sqlite') {
       await new Promise(resolve => preflight.close(resolve));
     }
   }
-  await backupExistingSqliteDatabase(sqlitePath);
+  await backupExistingSqliteDatabase(sqlitePath, undefined, SCHEMA_VERSION);
   fs.closeSync(fs.openSync(sqlitePath, 'a'));
   const upgrade = new sqlite3.Database(sqlitePath);
   try {
@@ -301,21 +305,38 @@ if (provider === 'sqlite') {
     }
   }
   await applySqliteCompatibilitySchema(sqlitePath);
+  const additive = new sqlite3.Database(sqlitePath);
+  try {
+    await ensureColumn(additive, 'Job', 'storage_key', 'TEXT');
+    await ensureColumn(additive, 'Job', 'attempt_id', 'TEXT');
+    await ensureColumn(additive, 'Job', 'process_started_at', 'REAL');
+    await sqliteRun(additive, 'UPDATE Job SET storage_key=name WHERE storage_key IS NULL');
+    await sqliteRun(additive, 'CREATE INDEX IF NOT EXISTS Job_created_at_id_idx ON Job(created_at, id)');
+    await sqliteRun(additive, 'CREATE INDEX IF NOT EXISTS Job_worker_id_status_queue_position_id_idx ON Job(worker_id, status, queue_position, id)');
+    await sqliteRun(additive, 'CREATE INDEX IF NOT EXISTS Job_job_type_status_created_at_id_idx ON Job(job_type, status, created_at, id)');
+    await sqliteRun(additive, 'CREATE TABLE IF NOT EXISTS RuntimeRecord (key TEXT PRIMARY KEY, value TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+  } finally { await new Promise(resolve => additive.close(resolve)); }
   await configureSqliteDatabase(sqlitePath);
-  process.exit(0);
+  await preparation.finish();
+  } finally { await preparation.close(); }
 }
 
+async function prepareMongo() {
 if (!mongoUri) {
   throw new Error('AITK_MONGODB_URI is required when AITK_DB_PROVIDER=mongodb.');
 }
 
 console.log(`Preparing MongoDB database "${mongoDbName}"...`);
 const client = new MongoClient(mongoUri);
+let preparation;
 try {
   await client.connect();
   const db = client.db(mongoDbName);
+  preparation = await beginMongoPreparation(db, schemaChecksum(process.cwd()));
+  if (preparation.completed) { console.log('MongoDB schema is current.'); return; }
   await upgradeMongoGlobalWorkspace(db);
   await db.collection('jobs').updateMany({ sample_now: { $exists: false } }, { $set: { sample_now: false } });
+  await db.collection('jobs').updateMany({ storage_key: { $exists: false } }, [{ $set: { storage_key: '$name', attempt_id: null, process_started_at: null } }]);
   const configuredInstanceID = process.env.AITK_INSTANCE_ID?.trim();
   const existingInstance = await db.collection('settings').findOne({ key: 'AITK_INSTANCE_ID' });
   const instanceID = configuredInstanceID || String(existingInstance?.value || randomUUID());
@@ -357,6 +378,9 @@ try {
         { key: { id: 1 }, unique: true },
         { key: { name: 1 }, unique: true },
         { key: { status: 1 } },
+        { key: { created_at: -1, id: -1 } },
+        { key: { worker_id: 1, status: 1, queue_position: 1, id: 1 } },
+        { key: { job_type: 1, status: 1, created_at: -1, id: -1 } },
         { key: { worker_id: 1 } },
         { key: { remote_job_id: 1 } },
         { key: { gpu_ids: 1 } },
@@ -384,6 +408,7 @@ try {
     db
       .collection('worker_nodes')
       .createIndexes([{ key: { id: 1 }, unique: true }, { key: { name: 1 }, unique: true }, { key: { enabled: 1 } }]),
+    db.collection('runtime_records').createIndexes([{ key: { key: 1 }, unique: true }]),
     db.collection('settings').createIndexes([{ key: { key: 1 }, unique: true }]),
     db
       .collection('metrics')
@@ -391,6 +416,12 @@ try {
     db.collection('metric_keys').createIndexes([{ key: { job_id: 1, key: 1 }, unique: true }]),
   ]);
   console.log('MongoDB indexes are ready.');
+  await preparation.finish();
 } finally {
+  await preparation?.close();
   await client.close();
 }
+}
+
+if (provider === 'sqlite') await prepareSqlite();
+else await prepareMongo();

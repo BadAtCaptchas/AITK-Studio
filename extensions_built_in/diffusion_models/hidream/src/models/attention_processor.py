@@ -37,17 +37,17 @@ def attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         query = query.transpose(1, 2)  # [batch, heads, seq_len, head_dim]
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
-        
+
         hidden_states = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, 
-            attn_mask=None, 
-            dropout_p=0.0, 
+            query, key, value,
+            attn_mask=None,
+            dropout_p=0.0,
             is_causal=False
         )
-        
+
         # Restore original shape
         hidden_states = hidden_states.transpose(1, 2)  # [batch, seq_len, heads, head_dim]
-    
+
     hidden_states = hidden_states.flatten(-2)
     hidden_states = hidden_states.to(query.dtype)
     return hidden_states
@@ -99,7 +99,7 @@ class HiDreamAttnProcessor_flashattn:
             query = query_i
             key = key_i
             value = value_i
-        
+
         if query.shape[-1] == rope.shape[-3] * 2:
             query, key = apply_rope(query, key, rope)
         else:

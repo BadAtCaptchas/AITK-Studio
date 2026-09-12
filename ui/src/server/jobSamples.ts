@@ -1,3 +1,4 @@
+import { jobStorageKey } from '../utils/jobIdentity';
 import fs from 'fs';
 import path from 'path';
 import { db } from './db';
@@ -75,7 +76,7 @@ export async function getJobSampleRoots(job: Job) {
   if (allowedParents.length === 0) return [];
 
   const candidates = [
-    path.join(trainingFolder, job.name, 'samples'),
+    path.join(trainingFolder, jobStorageKey(job), 'samples'),
     ...configuredOutputFolderCandidates(job.job_config),
   ];
 

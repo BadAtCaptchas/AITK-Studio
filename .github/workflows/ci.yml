@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,44 +14,114 @@ concurrency:
 
 jobs:
   ui:
-    name: UI typecheck, tests, and build
-    runs-on: ubuntu-latest
+    name: UI and browser (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: 22 }
+          - { os: windows-latest, node: 24 }
+          - { os: ubuntu-latest, node: 26 }
+    runs-on: ${{ matrix.os }}
     env:
       AITK_SQLITE_PATH: ${{ github.workspace }}/.tmp/aitk-ci.db
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+      NO_ALBUMENTATIONS_UPDATE: '1'
     defaults:
       run:
         working-directory: ui
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: ui/package-lock.json
-
-      - name: Install locked dependencies
-        run: npm ci
-
-      - name: Prepare isolated CI database
-        run: npm run update_db
-
-      - name: Run UI quality gates
-        run: npm run ci
-
-  python-syntax:
-    name: Python syntax
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
+      - name: Install process-identity test dependency
+        run: python -m pip install psutil pyyaml
+      - run: npm ci
+      - run: npm run update_db
+      - run: npm run ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Verify compiled stack without development dependencies
+        run: |
+          npm prune --omit=dev
+          node scripts/production-stack-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-${{ matrix.os }}-${{ matrix.node }}
+          path: ui/.review-build/browser-results
+          if-no-files-found: ignore
 
-      - name: Compile tracked Python packages
-        run: python -m compileall -q run.py toolkit extensions extensions_built_in scripts tests
+  python-behavior:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install psutil pyyaml
+      - run: python -m unittest tests.test_cli_batch tests.test_attempt_process tests.test_model_registry tests.test_config_contract tests.test_runtime_profiles
+      - run: python -m compileall -q run.py toolkit extensions extensions_built_in scripts tests
+
+  python-runtime:
+    name: Real legacy CUDA profile and every public model import
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PIP_NO_CACHE_DIR: '1'
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+      NO_ALBUMENTATIONS_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m venv .venv
+      - run: .venv/bin/python scripts/install_runtime.py --profile legacy-cu128 --report runtime-resolution.json
+      - run: .venv/bin/python -c "import run, toolkit.job, toolkit.attempt_process, extensions_built_in.diffusion_models"
+      - run: .venv/bin/python scripts/check_model_imports.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-resolution
+          path: runtime-resolution.json
+          if-no-files-found: ignore
+
+  mongodb:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8.0
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npm run generate:prisma
+      - run: node node_modules/typescript/bin/tsc -p tsconfig.worker.json
+      - run: node --test scripts/mongoPersistence.test.mjs
+        env:
+          AITK_TEST_MONGODB_URI: mongodb://127.0.0.1:27017

@@ -57,7 +57,7 @@ class MoEGate(nn.Module):
     def reset_parameters(self) -> None:
         import torch.nn.init  as init
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-    
+
     def _load_balancing_loss(self, scores, topk_idx, bsz, seq_len):
         if self.alpha <= 0.0:
             self.last_routing_stats = None
@@ -120,10 +120,10 @@ class MoEGate(nn.Module):
             scores = logits.softmax(dim=-1)
         else:
             raise NotImplementedError(f'insupportable scoring function for MoE gating: {self.scoring_func}')
-        
+
         ### select top-k experts
         topk_weight, topk_idx = torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
-        
+
         ### norm gate to sum 1
         if self.top_k > 1 and self.norm_topk_prob:
             denominator = topk_weight.sum(dim=-1, keepdim=True) + 1e-20
@@ -145,8 +145,8 @@ class MOEFeedForwardSwiGLU(nn.Module):
         self.shared_experts = FeedForwardSwiGLU(dim, hidden_dim // 2)
         self.experts = nn.ModuleList([FeedForwardSwiGLU(dim, hidden_dim) for i in range(num_routed_experts)])
         self.gate = MoEGate(
-            embed_dim = dim, 
-            num_routed_experts = num_routed_experts, 
+            embed_dim = dim,
+            num_routed_experts = num_routed_experts,
             num_activated_experts = num_activated_experts
         )
         self.num_activated_experts = num_activated_experts
@@ -154,7 +154,7 @@ class MOEFeedForwardSwiGLU(nn.Module):
     def forward(self, x):
         identity = x
         orig_shape = x.shape
-        topk_idx, topk_weight, aux_loss = self.gate(x) 
+        topk_idx, topk_weight, aux_loss = self.gate(x)
         x = x.view(-1, x.shape[-1])
         flat_topk_idx = topk_idx.view(-1)
         y = self.moe_infer(x, flat_topk_idx, topk_weight.view(-1, 1)).view(*orig_shape)
@@ -162,15 +162,15 @@ class MOEFeedForwardSwiGLU(nn.Module):
         if aux_loss is not None:
             y = AddAuxiliaryLoss.apply(y, aux_loss)
         return y
-    
+
     # @torch.no_grad()
     def moe_infer(self, x, flat_expert_indices, flat_expert_weights):
-        expert_cache = torch.zeros_like(x) 
+        expert_cache = torch.zeros_like(x)
         idxs = flat_expert_indices.argsort()
         tokens_per_expert = flat_expert_indices.bincount(
             minlength=len(self.experts)
         ).cpu().numpy().cumsum(0)
-        token_idxs = idxs // self.num_activated_experts 
+        token_idxs = idxs // self.num_activated_experts
         for i, end_idx in enumerate(tokens_per_expert):
             start_idx = 0 if i == 0 else tokens_per_expert[i-1]
             if start_idx == end_idx:
@@ -180,7 +180,7 @@ class MOEFeedForwardSwiGLU(nn.Module):
             expert_tokens = x[exp_token_idx]
             expert_out = expert(expert_tokens)
             expert_out = expert_out * flat_expert_weights[idxs[start_idx:end_idx]]
-            
+
             # for fp16 and other dtype
             if expert_cache.dtype != expert_out.dtype:
                 expert_cache = expert_cache.to(expert_out.dtype)

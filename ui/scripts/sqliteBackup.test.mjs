@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { backupExistingSqliteDatabase, getSqliteBackupRetention } from './sqlite-backup.mjs';
@@ -49,7 +50,7 @@ test('SQLite backup retention is bounded and validates configuration', () => {
 });
 
 test('pre-migration backups are consistent and prune expired snapshots', async () => {
-  const testTempRoot = path.join(process.cwd(), '.test-tmp');
+  const testTempRoot = os.tmpdir();
   fs.mkdirSync(testTempRoot, { recursive: true });
   const temporaryDirectory = fs.mkdtempSync(path.join(testTempRoot, 'aitk-sqlite-backup-'));
   const databasePath = path.join(temporaryDirectory, 'fixture.db');

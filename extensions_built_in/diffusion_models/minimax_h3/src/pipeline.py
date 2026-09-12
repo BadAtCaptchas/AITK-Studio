@@ -115,6 +115,18 @@ class MiniMaxH3Pipeline:
             ctrl_img is not None and model._uses_latent_keyframe_conditioning()
         )
         anchors = ("first",) if use_latent_keyframe else ()
+        ref_blocks = []
+        if not use_latent_keyframe:
+            for reference in ref_images or ():
+                if isinstance(reference, dict):
+                    latent = reference["latent"]
+                    audio = reference.get("audio_rows")
+                    audio_frames = 0 if audio is None else audio.shape[-2] // AUDIO_CHANNELS
+                    ref_blocks.append((*latent.shape[-3:], audio_frames))
+                elif isinstance(reference, torch.Tensor):
+                    ref_blocks.append((*reference.shape[-3:], 0))
+                else:
+                    ref_blocks.append((1, reference.height // 16, reference.width // 16, 0))
         layout = build_packed_sequence(
             text_token_tags=token_tags,
             num_latent_frames=t_lat,
@@ -127,8 +139,7 @@ class MiniMaxH3Pipeline:
         num_cond = layout.num_condition_video_rows
 
         # --- conditioning rows (draw order: condition noise, video, audio) --
-        cond_rows = None
-        if use_latent_keyframe:
+        def encode_condition_image(img: Image.Image) -> torch.Tensor:
             cond_noise = randn_tensor(
                 (1, 24, 1, img.size[1] // 16, img.size[0] // 16),
                 generator=generator,
@@ -157,7 +168,7 @@ class MiniMaxH3Pipeline:
 
         cond_rows = None
         cond_audio_rows = None
-        if ctrl_img is not None:
+        if use_latent_keyframe:
             cond_rows = encode_condition_image(ctrl_img)
         elif ref_images:
             parts = []

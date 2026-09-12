@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -25,9 +26,9 @@ function decorateRemoteDataset(worker: { id: string; name: string }, dataset: Da
   };
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json()) as DatasetCombineRequest & { worker_id?: string };
+    const body = assertGlobalPayload(await readJsonCommand(request)) as DatasetCombineRequest & { worker_id?: string };
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
     if (!isLocalWorker(workerID)) {
@@ -77,3 +78,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
@@ -221,9 +222,9 @@ function scanDatasetFolder(
   }
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const datasets = Array.isArray(body?.datasets) ? (body.datasets as DatasetPromptRequest[]) : [];
     const encryptedDatasetKeys = Array.isArray(body?.encryptedDatasetKeys)
       ? (body.encryptedDatasetKeys as EncryptedDatasetStartKey[])
@@ -306,3 +307,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to import a random dataset prompt.' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

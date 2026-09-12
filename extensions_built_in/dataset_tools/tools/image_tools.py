@@ -47,4 +47,4 @@ def resize_to_max(image, max_width=1024, max_height=1024):
     width = int(width * scale)
     height = int(height * scale)
 
-    return image.resize((width, height), Image.LANCZOS)
+    return image.resize((width, height), Image.Resampling.LANCZOS)

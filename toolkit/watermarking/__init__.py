@@ -1,3 +1,8 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .authenlora import AuthenLoRAController, MapperNet, SecretDecoder, SecretEncoder, bit_accuracy
+
 from .codecs import BUILTIN_AUTHENLORA_CODECS, get_builtin_codec_options, resolve_codec_path
 
 __all__ = [

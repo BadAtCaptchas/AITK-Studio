@@ -1,7 +1,9 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { TrainingFormContent } from './TrainingFormContent';
 
 export default function TrainingForm() {
-  return <TrainingFormContent />;
+  const params = useSearchParams();
+  return <TrainingFormContent key={params.get('id') || (params.get('cloneId') ? 'clone:' + params.get('cloneId') : 'new')} />;
 }

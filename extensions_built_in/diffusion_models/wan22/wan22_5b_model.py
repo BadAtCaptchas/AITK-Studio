@@ -3,7 +3,7 @@ import torch
 from toolkit.prompt_utils import PromptEmbeds
 from PIL import Image
 from diffusers import UniPCMultistepScheduler
-import torch
+
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.image_io import open_static_image
 from toolkit.samplers.custom_flowmatch_sampler import (
@@ -107,10 +107,10 @@ class Wan225bModel(Wan21):
 
         self._wan_cache = None
         self._i2v_loss_mask = None
-    
+
     def load_model(self):
         super().load_model()
-        
+
         # patch the condition embedder
         self.model.condition_embedder.forward = partial(time_text_monkeypatch, self.model.condition_embedder)
 
@@ -180,7 +180,7 @@ class Wan225bModel(Wan21):
             width = width // d * d
 
             # resize the control image
-            control_img = control_img.resize((width, height), Image.LANCZOS)
+            control_img = control_img.resize((width, height), Image.Resampling.LANCZOS)
 
             # 5. Prepare latent variables
             num_channels_latents = self.transformer.config.in_channels
@@ -253,7 +253,7 @@ class Wan225bModel(Wan21):
         conditioned_latent = latent_model_input
         noise_mask = None
         self._i2v_loss_mask = None
-        
+
         if batch.dataset_config.do_i2v:
             with torch.no_grad():
                 if batch.first_frame_latents is not None:

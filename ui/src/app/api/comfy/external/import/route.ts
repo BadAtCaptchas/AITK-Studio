@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import {
@@ -23,9 +24,9 @@ function errorResponse(error: unknown) {
   );
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const promptId = typeof body?.promptId === 'string' ? body.promptId.trim() : '';
     if (!promptId) {
       return NextResponse.json({ error: 'promptId is required.' }, { status: 400 });
@@ -53,3 +54,5 @@ export async function POST(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

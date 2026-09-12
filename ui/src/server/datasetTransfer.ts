@@ -1,9 +1,10 @@
+import { isRecord } from './commandInput';
 import { isEncryptedDatasetFolder } from './encryptedDatasets';
 import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import yauzl from 'yauzl';
+export { extractZipSafely } from './safeArchive';
 import {
   isPathInside as isArchivePathInside,
   listFilesRecursive,
@@ -75,101 +76,20 @@ export async function createDatasetExportArchive(datasetName: string, datasetFol
   return manifest;
 }
 
-export async function extractZipSafely(zipPath: string, destination: string) {
-  const destinationRoot = path.resolve(destination);
-  await fsp.mkdir(destinationRoot, { recursive: true });
 
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const fail = (error: Error) => {
-      if (!settled) {
-        settled = true;
-        reject(error);
-      }
-    };
-
-    yauzl.open(zipPath, { lazyEntries: true, validateEntrySizes: true }, (openError, zipFile) => {
-      if (openError || !zipFile) {
-        fail(openError || new Error('Could not open archive'));
-        return;
-      }
-
-      zipFile.on('error', fail);
-      zipFile.on('end', () => {
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
-      });
-
-      zipFile.readEntry();
-      zipFile.on('entry', entry => {
-        let normalizedName: string;
-        try {
-          normalizedName = validateArchiveEntryName(entry.fileName);
-        } catch (error) {
-          zipFile.close();
-          fail(error as Error);
-          return;
-        }
-
-        const targetPath = path.resolve(destinationRoot, ...normalizedName.split('/'));
-        if (!isArchivePathInside(destinationRoot, targetPath)) {
-          zipFile.close();
-          fail(new Error(`Archive entry escapes import folder: ${entry.fileName}`));
-          return;
-        }
-
-        if (/\/$/.test(normalizedName)) {
-          fsp
-            .mkdir(targetPath, { recursive: true })
-            .then(() => zipFile.readEntry())
-            .catch(error => {
-              zipFile.close();
-              fail(error);
-            });
-          return;
-        }
-
-        zipFile.openReadStream(entry, (streamError, readStream) => {
-          if (streamError || !readStream) {
-            zipFile.close();
-            fail(streamError || new Error(`Could not read archive entry: ${entry.fileName}`));
-            return;
-          }
-
-          fsp
-            .mkdir(path.dirname(targetPath), { recursive: true })
-            .then(() => {
-              const writeStream = fs.createWriteStream(targetPath, { flags: 'wx' });
-              writeStream.on('error', error => {
-                zipFile.close();
-                fail(error);
-              });
-              writeStream.on('close', () => zipFile.readEntry());
-              readStream.on('error', error => {
-                zipFile.close();
-                fail(error);
-              });
-              readStream.pipe(writeStream);
-            })
-            .catch(error => {
-              zipFile.close();
-              fail(error);
-            });
-        });
-      });
-    });
-  });
-}
-
-export async function readDatasetExportManifest(extractRoot: string) {
-  const text = await fsp.readFile(path.join(extractRoot, 'manifest.json'), 'utf-8');
-  const manifest = JSON.parse(text) as DatasetExportManifest;
-  if (manifest.format !== DATASET_EXPORT_FORMAT || manifest.version !== DATASET_EXPORT_VERSION) {
+export async function readDatasetExportManifest(extractRoot: string): Promise<DatasetExportManifest> {
+  const filename = path.join(extractRoot, 'manifest.json');
+  if ((await fsp.stat(filename)).size > 2 * 1024 ** 2) throw new Error('Dataset manifest exceeds the JSON limit');
+  const manifest: unknown = JSON.parse(await fsp.readFile(filename, 'utf-8'));
+  if (!isRecord(manifest) || manifest.format !== DATASET_EXPORT_FORMAT || manifest.version !== DATASET_EXPORT_VERSION ||
+      !isRecord(manifest.dataset) || manifest.dataset.archivePath !== 'dataset' || typeof manifest.dataset.name !== 'string' ||
+      manifest.dataset.name.length > 512 || typeof manifest.dataset.encrypted !== 'boolean' || !isRecord(manifest.source) ||
+      manifest.source.app !== 'ai-toolkit' || typeof manifest.source.datasetName !== 'string' || typeof manifest.exportedAt !== 'string') {
     throw new Error('Unsupported dataset export archive');
   }
-  return manifest;
+  return { format: DATASET_EXPORT_FORMAT, version: DATASET_EXPORT_VERSION, exportedAt: manifest.exportedAt,
+    source: { app: 'ai-toolkit', datasetName: manifest.source.datasetName },
+    dataset: { name: manifest.dataset.name, archivePath: 'dataset', encrypted: manifest.dataset.encrypted } };
 }
 
 export function getExtractedDatasetPath(extractRoot: string, archivePath: string) {

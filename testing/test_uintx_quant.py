@@ -28,6 +28,10 @@ class UIntXModel(torch.nn.Module):
         super().__init__()
         self.linear = torch.nn.Linear(in_features, out_features)
 
+    def forward(self, inputs):
+        """Run the layer when comparing packed checkpoint round trips."""
+        return self.linear(inputs)
+
 
 def deterministic_linear(dtype=torch.float32):
     layer = torch.nn.Linear(128, 16, bias=True, dtype=dtype)

@@ -15,8 +15,12 @@ import os from 'os';
 import { pipeline } from 'stream';
 import type { FileResponseResolution } from '../src/server/fileServing';
 import { configureFrontServerTimeouts, proxyRetryDecision, registerWorkerCrash } from './fileServerPolicy';
+import { pipeCommandBody } from './commandStreamGuard';
+import { isRequestAuthenticated } from '../src/utils/authSession';
+import { ingressConfig, browserRequestError, trustedForwardHeaders } from '../src/server/ingressPolicy';
 
 const isDev = process.argv.includes('dev');
+const ingress = ingressConfig();
 const UPSTREAM_HOST = '127.0.0.1';
 const STARTUP_TIMEOUT_MS = 60_000;
 
@@ -186,11 +190,11 @@ function proxy(req: IncomingMessage, res: ServerResponse, upstreamPort: number, 
       port: upstreamPort,
       path: req.url,
       method: req.method,
-      headers: proxyHeaders(req.headers),
+      headers: proxyHeaders(trustedForwardHeaders(req) as IncomingHttpHeaders),
       agent: upstreamAgent,
     },
     upstreamResponse => {
-      if (res.destroyed) {
+      if (res.destroyed || res.headersSent || res.writableEnded) {
         upstreamResponse.resume();
         return;
       }
@@ -232,16 +236,17 @@ function proxy(req: IncomingMessage, res: ServerResponse, upstreamPort: number, 
     if (!res.headersSent && !res.destroyed) {
       res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('UI server unavailable');
-    } else if (!res.destroyed) {
+    } else if (!res.destroyed && !res.writableEnded) {
       res.destroy(error);
     }
   });
 
   if (bodyless) upstreamRequest.end();
-  else req.pipe(upstreamRequest);
+  else pipeCommandBody(req, res, upstreamRequest);
 }
 
 function proxyUpgrade(req: IncomingMessage, socket: import('stream').Duplex, head: Buffer, upstreamPort: number) {
+  if (browserRequestError(requestHeaders(trustedForwardHeaders(req) as IncomingHttpHeaders), `http://localhost:${PUBLIC_PORT}`, req.method || 'GET')) { socket.end('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
   const upstream = net.connect(upstreamPort, UPSTREAM_HOST, () => {
     if (socket.destroyed) {
       upstream.destroy();
@@ -249,9 +254,7 @@ function proxyUpgrade(req: IncomingMessage, socket: import('stream').Duplex, hea
     }
     const requestLine = `${req.method || 'GET'} ${req.url || '/'} HTTP/${req.httpVersion}\r\n`;
     let headerBlock = '';
-    for (let index = 0; index < req.rawHeaders.length; index += 2) {
-      headerBlock += `${req.rawHeaders[index]}: ${req.rawHeaders[index + 1]}\r\n`;
-    }
+    for (const [name, value] of Object.entries(trustedForwardHeaders(req))) if (value !== undefined) headerBlock += `${name}: ${value}\r\n`;
     upstream.write(`${requestLine}${headerBlock}\r\n`);
     if (head.length > 0) upstream.write(head);
     socket.pipe(upstream).pipe(socket);
@@ -267,9 +270,17 @@ function proxyUpgrade(req: IncomingMessage, socket: import('stream').Duplex, hea
 function listen(publicPort: number, upstreamPort: number) {
   return new Promise<http.Server>((resolve, reject) => {
     const server = http.createServer((req, res) => {
+      const invalid = browserRequestError(requestHeaders(trustedForwardHeaders(req) as IncomingHttpHeaders), `http://localhost:${publicPort}`, req.method || 'GET');
+      if (invalid) { res.writeHead(403, { 'Content-Type': 'text/plain' }); res.end(invalid); return; }
       void tryServeAccelerated(req, res)
-        .then(served => {
-          if (!served && !res.headersSent && !res.destroyed) proxy(req, res, upstreamPort);
+        .then(async served => {
+          if (served || res.headersSent || res.destroyed) return;
+          const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+          if (pathname.startsWith('/api/') && pathname !== '/api/auth' && !['GET', 'HEAD', 'OPTIONS'].includes(req.method || 'GET') &&
+              !await isRequestAuthenticated({ headers: requestHeaders(req.headers) }, process.env.AI_TOOLKIT_AUTH)) {
+            res.writeHead(401, { 'Content-Type': 'application/json', Connection: 'close' }); res.end(JSON.stringify({ error: 'Unauthorized' })); return;
+          }
+          proxy(req, res, upstreamPort);
         })
         .catch(error => {
           console.error('Front server request failed:', error);
@@ -284,7 +295,8 @@ function listen(publicPort: number, upstreamPort: number) {
     configureFrontServerTimeouts(server);
     server.on('upgrade', (req, socket, head) => proxyUpgrade(req, socket, head, upstreamPort));
     server.once('error', reject);
-    server.listen(publicPort, () => {
+    server.listen(publicPort, ingress.host, () => {
+      console.log(`UI listening on ${ingress.host}:${publicPort}; authentication ${ingress.authenticated ? 'enabled' : 'disabled (local only)'}`);
       server.off('error', reject);
       resolve(server);
     });

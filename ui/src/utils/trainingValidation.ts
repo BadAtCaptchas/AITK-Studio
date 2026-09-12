@@ -1,3 +1,4 @@
+import { configContractErrors } from '../domain/configContract';
 import type { JobConfig } from '../types';
 import { parseRemoteDatasetRef } from './remoteDatasetRefs';
 import { AUTHENLORA_BUILTIN_CODEC_BITS } from './authenloraCodecs';
@@ -24,7 +25,7 @@ export function validateTrainingConfig(
     isDatasetUnlocked = () => false,
   }: TrainingValidationContext,
 ): ValidationMessage[] {
-  const messages: ValidationMessage[] = [];
+  const messages: ValidationMessage[] = configContractErrors(rawConfig).map(message => ({ level: 'error', message, target: { step: 'raw', label: 'Configuration' } }));
   const name = rawConfig.config?.name?.trim() || '';
   const processConfig = rawConfig.config?.process?.[0];
   const trainConfig = processConfig?.train;

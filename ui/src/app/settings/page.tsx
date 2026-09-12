@@ -3,6 +3,7 @@ import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import ThemeToggle from '@/components/ThemeToggle';
 
 import { useEffect, useRef, useState } from 'react';
+import RuntimeDiagnostics from '@/components/RuntimeDiagnostics';
 import useSettings, { notifySettingsChanged } from '@/hooks/useSettings';
 import useWorkers from '@/hooks/useWorkers';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
@@ -822,6 +823,7 @@ export default function Settings() {
                   ))}
                 </div>
 
+                <div className="mb-6"><RuntimeDiagnostics /></div>
                 <section id="appearance" className="scroll-mt-20">
                   <h2 className="text-base font-semibold">Appearance</h2>
                   <div className="mt-4 flex items-center justify-between rounded-lg border border-gray-800 p-4">

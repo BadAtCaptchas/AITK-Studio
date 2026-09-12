@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder, defaultModelsFolder } from '@/paths';
@@ -106,14 +107,14 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   const access = await ensureSettingsAccess(request);
   if (access.response) {
     return access.response;
   }
 
   try {
-    const body: unknown = assertGlobalPayload(await request.json());
+    const body: unknown = assertGlobalPayload(await readJsonCommand(request));
     if (!isRecord(body)) {
       return NextResponse.json({ error: 'Settings payload must be an object' }, { status: 400 });
     }
@@ -219,3 +220,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

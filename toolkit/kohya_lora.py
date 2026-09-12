@@ -693,7 +693,7 @@ def get_block_index(lora_name: str) -> int:
             idx = 3 * i + j
         elif g[2] == "attentions":
             idx = 3 * i + j
-        elif g[2] == "upsamplers" or g[2] == "downsamplers":
+        else:  # RE_UPDOWN restricts this group to up/downsamplers.
             idx = 3 * i + 2
 
         if g[0] == "down":

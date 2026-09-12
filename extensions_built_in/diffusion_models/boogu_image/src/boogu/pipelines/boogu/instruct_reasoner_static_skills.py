@@ -1,7 +1,7 @@
 ﻿from textwrap import dedent
 from typing import List, Tuple
 
-from boogu.pipelines.boogu.static_skills import *
+from .static_skills import *
 
 
 class InstructionReasonerStaticRewriteSkills:

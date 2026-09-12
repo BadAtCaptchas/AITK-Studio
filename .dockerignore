@@ -62,3 +62,8 @@ pnpm-debug.log*
 
 .DS_Store
 ._.DS_Store
+
+# Local review inputs and isolated verification artifacts.
+AITK_Studio_Codex_Review/
+AITK_CODEX_IMPLEMENTATION_MEMORY.md
+ui/.review-build/

@@ -1,3 +1,4 @@
+from toolkit.xla import mark_xla_step
 # WIP, coming soon ish
 from toolkit.models.v2.vision_encoders.clip_vision import CLIPVisionEncoder
 from functools import partial
@@ -243,7 +244,7 @@ class AggressiveWanI2VUnloadPipeline(WanImageToVideoPipeline):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         self._current_timestep = None
         self.vae.to(device)

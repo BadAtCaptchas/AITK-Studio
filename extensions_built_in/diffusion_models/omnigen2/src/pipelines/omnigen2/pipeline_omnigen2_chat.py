@@ -45,7 +45,7 @@ import PIL.Image
 
 from diffusers.utils import BaseOutput
 
-from src.pipelines.image_processor import OmniGen2ImageProcessor
+from ..image_processor import OmniGen2ImageProcessor
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -264,7 +264,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
                 latents.append(ref_latents)
 
         return latents
-    
+
     def _apply_chat_template(self, prompt: str, images: List = None):
         if images is not None:
             prompt = "".join(
@@ -275,11 +275,11 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
             ) + prompt
         prompt = f"<|im_start|>system\nYou are a helpful assistant that generates high-quality images based on user instructions.<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
         return prompt
-    
+
     def _get_qwen2_prompt_embeds(
-        self, 
+        self,
         prompt: Union[str, List[str]],
-        input_images = None, 
+        input_images = None,
         device: Optional[torch.device] = None,
         use_only_text_hidden_states: bool = True,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -321,7 +321,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
             mask = text_input_ids != self.mllm.config.image_token_id
             mask = mask & text_mask
             mask = mask.bool()
-            
+
             text_l = mask.sum(dim=-1)
             max_l = text_l.max()
             text_batch_size = prompt_embeds.size(0)
@@ -436,7 +436,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
             )
 
         return prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
-    
+
     @property
     def num_timesteps(self):
         return self._num_timesteps
@@ -444,7 +444,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
     @property
     def text_guidance_scale(self):
         return self._text_guidance_scale
-    
+
     @property
     def image_guidance_scale(self):
         return self._image_guidance_scale
@@ -452,7 +452,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
     @property
     def cfg_range(self):
         return self._cfg_range
-    
+
     def prepare_inputs_for_text_generation(self, prompts, input_images, device):
         if isinstance(prompts, str):
             prompts = [prompts]
@@ -490,7 +490,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
             clean_up_tokenization_spaces=False,
         )
         return output_texts
-    
+
     def generate_image(
         self,
         prompt: Optional[Union[str, List[str]]] = None,
@@ -575,7 +575,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
 
         if input_images is None:
             input_images = []
-        
+
         if len(input_images) == 1 and align_res:
             width, height = ref_latents[0][0].shape[-1] * self.vae_scale_factor, ref_latents[0][0].shape[-2] * self.vae_scale_factor
             ori_width, ori_height = width, height
@@ -587,7 +587,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
             ratio = min(ratio, 1.0)
 
             height, width = int(height * ratio) // 16 * 16, int(width * ratio) // 16 * 16
-        
+
         if len(input_images) == 0:
             self._image_guidance_scale = 1
 
@@ -609,7 +609,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
             self.transformer.config.axes_lens,
             theta=10000,
         )
-        
+
         image = self.processing(
             latents=latents,
             ref_latents=ref_latents,
@@ -629,11 +629,11 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
         image = F.interpolate(image, size=(ori_height, ori_width), mode='bilinear')
 
         image = self.image_processor.postprocess(image, output_type=output_type)
-        
+
         # Offload all models
         self.maybe_free_model_hooks()
         return image
-        
+
     @torch.no_grad()
     def __call__(
         self,
@@ -705,7 +705,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
             return generated_text, images
         else:
             return OmniGen2PipelineOutput(text=generated_text, images=images)
-    
+
     def processing(
         self,
         latents,
@@ -733,7 +733,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
         )
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
-        
+
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 model_pred = self.predict(
@@ -744,7 +744,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
                     prompt_attention_mask=prompt_attention_mask,
                     ref_image_hidden_states=ref_latents,
                 )
-                
+
                 text_guidance_scale = self.text_guidance_scale if self.cfg_range[0] <= i / len(timesteps) <= self.cfg_range[1] else 1.0
                 image_guidance_scale = self.image_guidance_scale if self.cfg_range[0] <= i / len(timesteps) <= self.cfg_range[1] else 1.0
                 if text_guidance_scale > 1.0 and image_guidance_scale > 1.0:
@@ -788,7 +788,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
 
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
-                
+
                 if step_func is not None:
                     step_func(i, self._num_timesteps)
 
@@ -798,7 +798,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
         if self.vae.config.shift_factor is not None:
             latents = latents + self.vae.config.shift_factor
         image = self.vae.decode(latents, return_dict=False)[0]
-        
+
         return image
 
     def predict(
@@ -814,7 +814,7 @@ class OmniGen2ChatPipeline(DiffusionPipeline):
         timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
         batch_size, num_channels_latents, height, width = latents.shape
-        
+
         optional_kwargs = {}
         if 'ref_image_hidden_states' in set(inspect.signature(self.transformer.forward).parameters.keys()):
             optional_kwargs['ref_image_hidden_states'] = ref_image_hidden_states

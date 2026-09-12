@@ -310,5 +310,3 @@ In `high_level_description`, include the literal phrase `on a transparent backgr
 TARGET IMAGE ASPECT RATIO: {{aspect_ratio}} (width:height).
 User idea: {{original_prompt}}
 """
-
-

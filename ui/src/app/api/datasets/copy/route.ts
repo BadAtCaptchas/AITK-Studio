@@ -1,11 +1,12 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { copyDatasetBetweenRoots } from '@/server/datasetCopy';
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const datasetPath = typeof body?.datasetPath === 'string' ? body.datasetPath : '';
     const destinationScope = await resolveDatasetScope();
     const sourceScope = destinationScope;
@@ -23,3 +24,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to copy dataset' }, { status });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

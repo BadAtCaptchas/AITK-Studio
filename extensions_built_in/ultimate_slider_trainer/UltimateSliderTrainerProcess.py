@@ -15,23 +15,23 @@ import gc
 from toolkit import train_tools
 import torch
 from jobs.process import BaseSDTrainProcess
-import random
 
-import random
-from collections import OrderedDict
+
+
+
 from tqdm import tqdm
 
 from toolkit.config_modules import SliderConfig
-from toolkit.train_tools import get_torch_dtype, apply_snr_weight
-import gc
-from toolkit import train_tools
+
+
+
 from toolkit.prompt_utils import \
     EncodedPromptPair, ACTION_TYPES_SLIDER, \
     EncodedAnchor, concat_prompt_pairs, \
     concat_anchors, PromptEmbedsCache, encode_prompts_to_cache, build_prompt_pair_batch_from_cache, split_anchors, \
     split_prompt_pairs
 
-import torch
+
 
 
 def flush():
@@ -75,7 +75,7 @@ class UltimateSliderTrainerProcess(BaseSDTrainProcess):
     def load_datasets(self):
         if self.data_loader is None and \
                 self.slider_config.datasets is not None and len(self.slider_config.datasets) > 0:
-            print(f"Loading datasets")
+            print('Loading datasets')
             datasets = []
             for dataset in self.slider_config.datasets:
                 print(f" - Dataset: {dataset.pair_folder}")

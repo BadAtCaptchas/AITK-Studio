@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
         const jobConfig = parseJobConfig(job.job_config);
         if (!jobConfig || !isLoraTrainingJob(jobConfig)) continue;
 
-        const jobFolder = await getSafeJobFolder(trainingRoot, job.name);
+        const jobFolder = await getSafeJobFolder(trainingRoot, jobStorageKey(job));
         if (!jobFolder) continue;
 
         const entries = await fs.promises.readdir(jobFolder, { withFileTypes: true }).catch(() => []);
@@ -168,3 +168,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to list generated LoRAs' }, { status: 500 });
   }
 }
+import { jobStorageKey } from '@/utils/jobIdentity';

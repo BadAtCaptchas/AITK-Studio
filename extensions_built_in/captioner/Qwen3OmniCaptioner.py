@@ -941,5 +941,3 @@ class Qwen3OmniCaptioner(BaseCaptioner):
             print(f"Error processing {file_path}: {e}")
             traceback.print_exc()
             return None
-
-

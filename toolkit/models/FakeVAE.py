@@ -20,8 +20,8 @@ class Config:
     # scaling_factor = 1.8
     shift_factor = 0
 
-    def __getitem__(cls, x):
-        return getattr(cls, x)
+    def __getitem__(self, x):
+        return getattr(self, x)
 
 
 class FakeVAE(nn.Module):

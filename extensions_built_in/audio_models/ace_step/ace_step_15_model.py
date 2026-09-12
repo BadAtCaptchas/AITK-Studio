@@ -110,7 +110,7 @@ class AceStep15Model(BaseAudioModel):
         load_device = device
         if self.model_config.low_vram:
             load_device = "cpu"
-            
+
         models = load_models(model_path, device=load_device, dtype=dtype)
 
         self.model = models["model"]
@@ -130,15 +130,15 @@ class AceStep15Model(BaseAudioModel):
         # quantize + offload + placement, all driven by model_config
         self.text_encoder.aitk_post_load(**self.component_load_kwargs("te"))
         flush()
-        
+
         self.vae = models["vae"]
-        
+
         # move back to device
         self.model.to(device)
         self.text_encoder.to(device)
         self.vae.to(device)
         self.tokenizer = models["tokenizer"]
-        
+
         self.pipeline = AceStep15Pipeline(
             transformer=self.model,
             vae=self.vae,
@@ -154,7 +154,7 @@ class AceStep15Model(BaseAudioModel):
             prompts = [prompt]
         else:
             prompts = prompt
-        
+
         if self.text_encoder.device == torch.device("cpu"):
             self.text_encoder.to(self.device_torch)
         # we need the encoder from the model
@@ -224,7 +224,7 @@ class AceStep15Model(BaseAudioModel):
 
     def get_transformer_block_names(self) -> Optional[List[str]]:
         return ["layers"]
-    
+
     def get_generation_pipeline(self):
         return self.pipeline
 
@@ -300,12 +300,12 @@ class AceStep15Model(BaseAudioModel):
             context=context.detach(),
         )
         return pred
-    
+
     def get_loss_target(self, *args, **kwargs):
         noise = kwargs.get("noise")
         batch = kwargs.get("batch")
         return (noise - batch.latents).detach()
-    
+
     def encode_audio(self, audio_tensor: torch.Tensor, device=None, dtype=None):
         if device is None:
             device = self.device_torch

@@ -193,7 +193,7 @@ class FluxKontextModel(BaseModel):
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(
-                    (gen_config.width, gen_config.height), Image.BILINEAR
+                    (gen_config.width, gen_config.height), Image.Resampling.BILINEAR
                 )
         gen_config.width = int(gen_config.width  // 16 * 16)
         gen_config.height = int(gen_config.height // 16 * 16)
@@ -245,13 +245,13 @@ class FluxKontextModel(BaseModel):
             img_ids[..., 2] = img_ids[..., 2] + torch.arange(w // 2)[None, :]
             img_ids = repeat(img_ids, "h w c -> b (h w) c",
                              b=bs).to(self.device_torch)
-            
+
             # handle control image ids
             if has_control:
                 ctrl_ids = img_ids.clone()
                 ctrl_ids[..., 0] = 1
                 img_ids = torch.cat([img_ids, ctrl_ids], dim=1)
-                
+
 
             txt_ids = torch.zeros(
                 bs, text_embeddings.text_embeds.shape[1], 3).to(self.device_torch)
@@ -278,7 +278,7 @@ class FluxKontextModel(BaseModel):
             txt_ids = txt_ids[0]
         if img_ids.ndim == 3:
             img_ids = img_ids[0]
-        
+
         latent_size = latent_model_input_packed.shape[1]
         # move the kontext channels. We have them on batch dimension to here, but need to put them on the latent dimension
         if has_control:
@@ -302,7 +302,7 @@ class FluxKontextModel(BaseModel):
             return_dict=False,
             **kwargs,
         )[0]
-        
+
         # remove kontext image conditioning
         noise_pred = noise_pred[:, :latent_size]
 
@@ -321,9 +321,9 @@ class FluxKontextModel(BaseModel):
 
         if bypass_guidance_embedding:
             restore_flux_guidance(self.unet)
-        
+
         return noise_pred
-    
+
     def get_prompt_embeds(self, prompt: str) -> PromptEmbeds:
         if self.pipeline.text_encoder.device != self.device_torch:
             self.pipeline.text_encoder.to(self.device_torch)
@@ -338,7 +338,7 @@ class FluxKontextModel(BaseModel):
         )
         pe.pooled_embeds = pooled_prompt_embeds
         return pe
-    
+
     def get_model_has_grad(self):
         # return from a weight if it has grad
         return self.model.proj_out.weight.requires_grad
@@ -346,7 +346,7 @@ class FluxKontextModel(BaseModel):
     def get_te_has_grad(self):
         # return from a weight if it has grad
         return self.text_encoder[1].encoder.block[0].layer[0].SelfAttention.q.weight.requires_grad
-    
+
     def save_model(self, output_path, meta, save_dtype):
         # only save the unet
         transformer: FluxTransformer2DModel = unwrap_model(self.model)
@@ -363,7 +363,7 @@ class FluxKontextModel(BaseModel):
         noise = kwargs.get('noise')
         batch = kwargs.get('batch')
         return (noise - batch.latents).detach()
-    
+
     def condition_noisy_latents(self, latents: torch.Tensor, batch:'DataLoaderBatchDTO'):
         with torch.no_grad():
             control_tensor = batch.control_tensor
@@ -372,7 +372,7 @@ class FluxKontextModel(BaseModel):
                 # we are not packed here, so we just need to pass them so we can pack them later
                 control_tensor = control_tensor * 2 - 1
                 control_tensor = control_tensor.to(self.vae_device_torch, dtype=self.torch_dtype)
-                
+
                 # if it is not the size of batch.tensor, (bs,ch,h,w) then we need to resize it
                 if batch.tensor is not None:
                     target_h, target_w = batch.tensor.shape[2], batch.tensor.shape[3]
@@ -383,11 +383,11 @@ class FluxKontextModel(BaseModel):
 
                 if control_tensor.shape[2] != target_h or control_tensor.shape[3] != target_w:
                     control_tensor = F.interpolate(control_tensor, size=(target_h, target_w), mode='bilinear')
-                    
+
                 control_latent = self.encode_images(control_tensor).to(latents.device, latents.dtype)
                 latents = torch.cat((latents, control_latent), dim=1)
 
-        return latents.detach() 
+        return latents.detach()
 
     def get_base_model_version(self):
         return "flux.1_kontext"

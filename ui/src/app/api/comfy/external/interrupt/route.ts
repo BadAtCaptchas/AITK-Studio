@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { NextResponse } from 'next/server';
 import { ExternalComfyError, interruptComfy, resolveExternalComfyUrl } from '@/server/externalComfy';
 
@@ -11,12 +12,14 @@ function errorResponse(error: unknown) {
   return NextResponse.json({ error: error instanceof Error ? error.message : 'External ComfyUI interrupt failed.' }, { status: 500 });
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = await request.json().catch(() => ({}));
+    const body = await readJsonCommand(request);
     const serverUrl = await resolveExternalComfyUrl(body?.server_url ?? body?.serverUrl);
     return NextResponse.json({ serverUrl, result: await interruptComfy(serverUrl) });
   } catch (error) {
     return errorResponse(error);
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

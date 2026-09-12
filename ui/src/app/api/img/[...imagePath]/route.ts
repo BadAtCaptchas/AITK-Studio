@@ -45,6 +45,7 @@ function copyResponseHeaders(source: Response) {
     'content-disposition',
     'x-content-type-options',
     'etag',
+    'last-modified',
   ]) {
     const value = source.headers.get(name);
     if (value) headers.set(name, value);
@@ -96,6 +97,7 @@ async function serve(
     const requestedValue = getRequestedValue(request, imagePath);
     const remoteAsset = parseRemoteDatasetAssetRef(requestedValue);
     if (remoteAsset) {
+      if (remoteAsset.type !== 'img') return new NextResponse('Invalid image representation', { status: 400 });
       if (
         !(await isRemoteDatasetAssetRequestAuthorized(
           request.headers,
@@ -103,6 +105,8 @@ async function serve(
           remoteAsset.path,
           remoteAsset.expires,
           remoteAsset.signature,
+          remoteAsset.type,
+          request.method,
         ))
       ) {
         return new NextResponse('Unauthorized', { status: 401 });
@@ -113,6 +117,7 @@ async function serve(
         remoteAssetPath(remoteAsset.path),
         request.headers,
         request.method === 'HEAD' ? 'HEAD' : 'GET',
+        request.signal,
       );
       if ((remoteResponse.headers.get('content-type') || '').toLowerCase().includes('image/svg+xml')) {
         return new NextResponse('Unsupported media type', { status: 415 });

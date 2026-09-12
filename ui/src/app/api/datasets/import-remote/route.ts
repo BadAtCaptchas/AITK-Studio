@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -20,11 +21,11 @@ async function writeResponseBodyToFile(response: Response, targetPath: string) {
   await pipeline(Readable.fromWeb(response.body as any), fs.createWriteStream(targetPath));
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   let workRoot: string | null = null;
 
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const { datasetsRoot } = await resolveDatasetScope();
     await fsp.mkdir(datasetsRoot, { recursive: true });
 
@@ -87,3 +88,5 @@ export async function POST(request: NextRequest) {
     }
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

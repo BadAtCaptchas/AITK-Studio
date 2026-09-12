@@ -26,7 +26,8 @@ function loadTensorBoardWithProbeStatus(status) {
   delete require.cache[tensorBoardModulePath];
   let probeCount = 0;
 
-  childProcess.spawnSync = () => {
+  childProcess.spawnSync = (_command, args) => {
+    if (args?.some(arg => arg.includes('sys.executable'))) return { status: 0, stdout: JSON.stringify({ executable: process.execPath, version: [3, 12] }) };
     probeCount += 1;
     return { status };
   };

@@ -84,18 +84,18 @@ class HidreamModel(BaseModel):
         # will be updated if we detect a existing checkpoint in training folder
         model_path = self.model_config.name_or_path
         extras_path = self.model_config.extras_name_or_path
-        
+
         llama_model_path = self.model_config.model_kwargs.get('llama_model_path', LLAMA_MODEL_PATH)
-        
+
         scheduler = HidreamModel.get_train_scheduler()
-        
+
         self.print_and_status_update("Loading llama 8b model")
-        
+
         tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(
             llama_model_path,
             use_fast=False
         )
-        
+
         # load + quantize + offload + placement, all driven by model_config
         text_encoder_4 = LlamaTextEncoder.load(
             llama_model_path,
@@ -114,16 +114,16 @@ class HidreamModel(BaseModel):
         )
 
         flush()
-        
+
         self.print_and_status_update("Loading vae")
-        
+
         vae = KLVAE.load_model(extras_path, dtype=torch.bfloat16).to(
             self.device_torch, dtype=dtype
         )
-        
-        
+
+
         self.print_and_status_update("Loading clip encoders")
-        
+
         text_encoder = CLIPTextEncoderWithProjection.load_model(
             extras_path, dtype=torch.bfloat16
         ).to(self.device_torch, dtype=dtype)
@@ -139,21 +139,21 @@ class HidreamModel(BaseModel):
         tokenizer_2 = CLIPTextEncoderWithProjection.load_tokenizer(
             extras_path, subfolder="tokenizer_2", use_fast=False
         )
-        
+
         flush()
         self.print_and_status_update("Loading T5 encoders")
-        
+
         # load + quantize + offload + placement, all driven by model_config
         text_encoder_3 = T5TextEncoder.load(
             extras_path, subfolder="text_encoder_3", **self.component_load_kwargs("te")
         )
         flush()
-        
+
         tokenizer_3 = T5TextEncoder.load_tokenizer(
             extras_path, subfolder="tokenizer_3", use_fast=False
         )
         flush()
-        
+
         if self.low_vram:
             self.print_and_status_update("Moving everything to device")
             # move it all back
@@ -163,7 +163,7 @@ class HidreamModel(BaseModel):
             text_encoder_2.to(self.device_torch, dtype=dtype)
             text_encoder_4.to(self.device_torch, dtype=dtype)
             text_encoder_3.to(self.device_torch, dtype=dtype)
-            
+
         # set to eval mode
         # transformer.eval()
         vae.eval()
@@ -174,7 +174,7 @@ class HidreamModel(BaseModel):
 
         pipe = self.hidream_pipeline_class(
             scheduler=scheduler,
-            vae=vae, 
+            vae=vae,
             text_encoder=text_encoder,
             tokenizer=tokenizer,
             text_encoder_2=text_encoder_2,
@@ -187,10 +187,10 @@ class HidreamModel(BaseModel):
         )
 
         flush()
-        
+
         text_encoder_list = [text_encoder, text_encoder_2, text_encoder_3, text_encoder_4]
         tokenizer_list = [tokenizer, tokenizer_2, tokenizer_3, tokenizer_4]
-        
+
         for te in text_encoder_list:
             # set the dtype
             te.to(self.device_torch, dtype=dtype)
@@ -200,7 +200,7 @@ class HidreamModel(BaseModel):
             te.eval()
             # set the requires grad to false
             te.requires_grad_(False)
-        
+
         flush()
 
         # save it to the model class
@@ -213,14 +213,14 @@ class HidreamModel(BaseModel):
 
     def get_generation_pipeline(self):
         scheduler = FlowUniPCMultistepScheduler(
-            num_train_timesteps=1000, 
-            shift=3.0, 
+            num_train_timesteps=1000,
+            shift=3.0,
             use_dynamic_shifting=False
         )
-        
+
         pipeline: HiDreamImagePipeline = HiDreamImagePipeline(
             scheduler=scheduler,
-            vae=self.vae, 
+            vae=self.vae,
             text_encoder=self.text_encoder[0],
             tokenizer=self.tokenizer[0],
             text_encoder_2=self.text_encoder[1],
@@ -291,25 +291,25 @@ class HidreamModel(BaseModel):
 
         dtype = self.model.dtype
         device = self.device_torch
-        
+
         # Pack the latent
         if latent_model_input.shape[-2] != latent_model_input.shape[-1]:
             B, C, H, W = latent_model_input.shape
             patch_size = self.transformer.config.patch_size
             pH, pW = H // patch_size, W // patch_size
             out = torch.zeros(
-                (B, C, self.transformer.max_seq, patch_size * patch_size), 
-                dtype=latent_model_input.dtype, 
+                (B, C, self.transformer.max_seq, patch_size * patch_size),
+                dtype=latent_model_input.dtype,
                 device=latent_model_input.device
             )
             latent_model_input = einops.rearrange(latent_model_input, 'B C (H p1) (W p2) -> B C (H W) (p1 p2)', p1=patch_size, p2=patch_size)
-            out[:, :, 0:pH*pW] = latent_model_input 
+            out[:, :, 0:pH*pW] = latent_model_input
             latent_model_input = out
 
         text_embeds = text_embeddings.text_embeds
         # run the to for the list
         text_embeds = [te.to(device, dtype=dtype) for te in text_embeds]
-        
+
         noise_pred = self.transformer(
             hidden_states = latent_model_input,
             timesteps = timestep,
@@ -322,7 +322,7 @@ class HidreamModel(BaseModel):
         noise_pred = -noise_pred
 
         return noise_pred
-    
+
     def get_prompt_embeds(self, prompt: str) -> PromptEmbeds:
         self.text_encoder_to(self.device_torch, dtype=self.torch_dtype)
         max_sequence_length = 128
@@ -340,7 +340,7 @@ class HidreamModel(BaseModel):
             [prompt_embeds, pooled_prompt_embeds]
         )
         return pe
-    
+
     def get_model_has_grad(self):
         # return from a weight if it has grad
         return self.model.double_stream_blocks[0].block.attn1.to_q.weight.requires_grad
@@ -348,7 +348,7 @@ class HidreamModel(BaseModel):
     def get_te_has_grad(self):
         # assume no one wants to finetune 4 text encoders.
         return False
-    
+
     def save_model(self, output_path, meta, save_dtype):
         # only save the unet
         transformer: HiDreamImageTransformer2DModel = unwrap_model(self.model)
@@ -365,7 +365,7 @@ class HidreamModel(BaseModel):
         noise = kwargs.get('noise')
         batch = kwargs.get('batch')
         return (noise - batch.latents).detach()
-    
+
     def get_transformer_block_names(self) -> Optional[List[str]]:
         return ['double_stream_blocks', 'single_stream_blocks']
 
@@ -422,7 +422,6 @@ class HidreamModel(BaseModel):
             new_key = key.replace("diffusion_model.", "transformer.")
             new_sd[new_key] = value
         return new_sd
-    
+
     def get_base_model_version(self):
         return "hidream_i1"
-    

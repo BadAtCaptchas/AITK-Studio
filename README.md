@@ -125,7 +125,7 @@ AITK Studio is an all-in-one training suite for diffusion models. It supports cu
 
 ### Requirements
 
-- Python 3.10 or newer. Python 3.12 is recommended.
+- Python 3.12 is the reference interpreter; Python 3.11 is retained for DGX. These dependency profiles do not support Python 3.13 or newer.
 - NVIDIA GPU with enough VRAM for the model and workflow you want to run.
 - Python virtual environment support.
 - Git.
@@ -138,9 +138,7 @@ git clone https://github.com/BadAtCaptchas/AITK-Studio.git
 cd AITK-Studio
 python3 -m venv venv
 source venv/bin/activate
-# install the older-GPU Torch stack first
-pip3 install -r requirements_torch_legacy_cu128.txt
-pip3 install -r requirements.txt
+python scripts/install_runtime.py --profile legacy-cu128
 ```
 
 For devices running **DGX OS** (including DGX Spark), follow [these](dgx_instructions.md) instructions.
@@ -153,8 +151,7 @@ git clone https://github.com/BadAtCaptchas/AITK-Studio.git
 cd AITK-Studio
 python -m venv venv
 .\venv\Scripts\activate
-pip install -r requirements_torch_legacy_cu128.txt
-pip install -r requirements.txt
+python scripts/install_runtime.py --profile legacy-cu128
 ```
 
 ### macOS
@@ -175,7 +172,7 @@ Blackwell GPUs such as the RTX 50-series require a PyTorch build with CUDA 12.8 
 Use the Blackwell Torch stack on Windows and standard Linux systems:
 
 ```bash
-pip install -r requirements_torch_blackwell_cu128.txt
+python scripts/install_runtime.py --profile blackwell-cu128
 ```
 
 DGX OS users should use the CUDA 13.0 stack in `dgx_instructions.md`.
@@ -734,9 +731,8 @@ cd AITK-Studio
 git submodule update --init --recursive
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements_torch_legacy_cu128.txt
-pip install -r requirements.txt
-pip install --upgrade accelerate transformers diffusers huggingface_hub # Optional, run it if you run into issues
+python scripts/install_runtime.py --profile legacy-cu128
+python scripts/environment_doctor.py
 ```
 
 ##### Modal
@@ -912,3 +908,5 @@ This fork tracks reproducible code bugs in this repository only. If you find a b
 Please do not open bug reports here for upstream-only behavior, setup help, usage questions, or feature requests. If the behavior exists only in the original Ostris AI Toolkit, report it upstream.
 
 AITK Studio is based on the original [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit). Keep the original license and attribution intact when redistributing this project.
+
+See [Execution and recovery](docs/execution-safety.md) for installation profiles, authenticated ingress, operation recovery, and migration compatibility.

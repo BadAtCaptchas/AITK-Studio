@@ -1,3 +1,5 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
@@ -39,7 +41,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const trainingFolder = await getJobTrainingRoot(job);
-  const jobFolder = path.join(trainingFolder, job.name);
+  const jobFolder = path.join(trainingFolder, jobStorageKey(job));
   const logPath = path.join(jobFolder, 'loss_log.db');
 
   const key = url.searchParams.get('key') ?? 'loss';
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 // Delete every logged step in [min_step, max_step] (inclusive) across all
 // metric keys. Used by the loss graph's "Delete Selected Range" action.
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function deleteCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
@@ -61,7 +63,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   let body: { min_step?: unknown; max_step?: unknown } = {};
   try {
-    body = assertGlobalPayload(await request.json());
+    body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
     // fall through to validation below
   }
@@ -95,7 +97,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   const trainingFolder = await getJobTrainingRoot(job);
-  const jobFolder = path.join(trainingFolder, job.name);
+  const jobFolder = path.join(trainingFolder, jobStorageKey(job));
   const logPath = path.join(jobFolder, 'loss_log.db');
 
   try {
@@ -110,3 +112,5 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const DELETE = withCommandBoundary(deleteCommand);

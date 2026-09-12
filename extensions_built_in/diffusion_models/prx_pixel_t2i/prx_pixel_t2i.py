@@ -40,6 +40,8 @@ import os
 from typing import List, Optional
 
 import torch
+from optimum.quanto import freeze
+from toolkit.util.quantize import get_qtype, quantize, quantize_model
 import yaml
 
 from transformers import AutoTokenizer, Qwen3VLTextModel

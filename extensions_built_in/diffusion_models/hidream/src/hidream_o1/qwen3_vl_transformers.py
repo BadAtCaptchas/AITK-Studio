@@ -1077,7 +1077,7 @@ class Qwen3VLTextModel(Qwen3VLPreTrainedModel):
 
         attention_mask = create_causal_mask(
             config=self.config,
-            input_embeds=inputs_embeds,
+            inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             cache_position=cache_position,
             past_key_values=past_key_values,
@@ -2002,6 +2002,7 @@ class Qwen3VLModel(Qwen3VLPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
+        deepstack_image_embeds = deepstack_video_embeds = None
         image_mask = None
         video_mask = None
 

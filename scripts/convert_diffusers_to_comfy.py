@@ -214,9 +214,6 @@ diffusers_map = {
         "attn.to_v.bias",
         "proj_mlp.bias",
     ],
-    "single_blocks.().linear2.weight": [
-        "proj_out.weight",
-    ],
     "single_blocks.().norm.query_norm.scale": [
         "attn.norm_q.weight",
     ],

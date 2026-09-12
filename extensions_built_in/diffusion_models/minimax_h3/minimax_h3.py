@@ -42,6 +42,7 @@ from functools import partial
 from typing import TYPE_CHECKING, List, Optional
 
 import torch
+from toolkit.dto import DTO
 import yaml
 from PIL import Image
 from safetensors.torch import load_file, save_file
@@ -437,7 +438,7 @@ class MinimaxH3Model(BaseModel):
         # quantization backends; the rest loads at its stored precision (the
         # checkpoint's bf16/fp16/fp32 mix is deliberate)
         state_dict, num_quantized = import_comfy_quantized_layers(
-            transformer, state_dict, orig_dtype=dtype
+            transformer, state_dict, orig_dtype=self.torch_dtype
         )
         if not num_quantized:
             raise ValueError(
@@ -869,7 +870,7 @@ class MinimaxH3Model(BaseModel):
             and batch.dataset_config.do_i2v
             and getattr(batch, "num_frames", 1) > 1
         )
-        if not do_i2v:
+        if not do_i2v or not self._uses_latent_keyframe_conditioning():
             return None, None, (), ()
 
         if batch.first_frame_latents is not None:
@@ -887,7 +888,12 @@ class MinimaxH3Model(BaseModel):
             )
         if first_latents.ndim == 4:
             first_latents = first_latents.unsqueeze(2)
-        cond_noise = torch.randn_like(first_latents)
+        cached_noise = getattr(batch, "keyframe_conditioning_noise", None)
+        if cached_noise is not None and cached_noise.shape == first_latents.shape:
+            cond_noise = cached_noise.to(device, torch.float32)
+        else:
+            cond_noise = torch.randn_like(first_latents)
+            batch.keyframe_conditioning_noise = cond_noise.detach()
         first_latents = (
             KEYFRAME_NOISE_AUG_T * first_latents
             + (1.0 - KEYFRAME_NOISE_AUG_T) * cond_noise
@@ -919,44 +925,10 @@ class MinimaxH3Model(BaseModel):
             t_v = 1.0 - sigma_v
             t_a = 1.0 - sigma_a
 
-            # --- i2v first-frame conditioning rows -------------------------
-            do_i2v = (
-                batch is not None
-                and batch.dataset_config.do_i2v
-                and getattr(batch, "num_frames", 1) > 1
+            # Dispatch to fl2va/ref2va conditioning before constructing the layout.
+            cond_rows, cond_audio_rows, keyframe_anchors, ref_blocks = self._build_condition(
+                batch, (t_lat, h_lat, w_lat), device, dtype
             )
-            cond_rows = None
-            if do_i2v and self._uses_latent_keyframe_conditioning():
-                if batch.first_frame_latents is not None:
-                    first_latents = batch.first_frame_latents.to(device, torch.float32)
-                else:
-                    frames = batch.tensor
-                    if frames is None:
-                        raise ValueError(
-                            "do_i2v needs the first frame; no cached "
-                            "first_frame_latents or raw tensors in batch"
-                        )
-                    first_frames = frames[:, 0] if frames.ndim == 5 else frames
-                    first_latents = self.encode_keyframe_latents(
-                        first_frames.unsqueeze(2).to(device)
-                    )
-                if first_latents.ndim == 4:
-                    first_latents = first_latents.unsqueeze(2)
-                if (
-                    batch.keyframe_conditioning_noise is not None
-                    and batch.keyframe_conditioning_noise.shape == first_latents.shape
-                ):
-                    cond_noise = batch.keyframe_conditioning_noise.to(
-                        device, torch.float32
-                    )
-                else:
-                    cond_noise = torch.randn_like(first_latents)
-                    batch.keyframe_conditioning_noise = cond_noise.detach()
-                first_latents = (
-                    KEYFRAME_NOISE_AUG_T * first_latents
-                    + (1.0 - KEYFRAME_NOISE_AUG_T) * cond_noise
-                )
-                cond_rows = patchify_video_latents(first_latents).to(dtype)
 
             # --- audio rows -------------------------------------------------
             if batch is not None and getattr(batch, "num_frames", None):

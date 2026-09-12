@@ -46,7 +46,7 @@ class FLitePipeline(DiffusionPipeline):
     This model inherits from [`DiffusionPipeline`].
     """
 
-    model_cpu_offload_seq = "text_encoder->dit_model->vae" 
+    model_cpu_offload_seq = "text_encoder->dit_model->vae"
 
     dit_model: torch.nn.Module
     vae: AutoencoderKL
@@ -220,10 +220,10 @@ class FLitePipeline(DiffusionPipeline):
 
         # 6. Sampling loop
         self.dit_model.eval()
-        
+
         # Check if guidance is needed
         do_classifier_free_guidance = guidance_scale >= 1.0
-        
+
         for i in self.progress_bar(range(num_inference_steps, 0, -1)):
             # Calculate timesteps
             t = i / num_inference_steps
@@ -232,10 +232,10 @@ class FLitePipeline(DiffusionPipeline):
             t = t * alpha / (1 + (alpha - 1) * t)
             t_next = t_next * alpha / (1 + (alpha - 1) * t_next)
             dt = t - t_next
-            
+
             # Create tensor with proper device
             t_tensor = torch.tensor([t] * batch_size, device=device, dtype=dtype)
-            
+
             if do_classifier_free_guidance:
                 # Duplicate latents for both conditional and unconditional inputs
                 latents_input = torch.cat([latents] * 2)
@@ -243,13 +243,13 @@ class FLitePipeline(DiffusionPipeline):
                 context_input = torch.cat([negative_embeds, prompt_embeds])
                 # Duplicate timesteps for the batch
                 t_input = torch.cat([t_tensor] * 2)
-                
+
                 # Get model predictions in a single pass
                 model_outputs = self.dit_model(latents_input, context_input, t_input)
-                
+
                 # Split outputs back into unconditional and conditional predictions
                 uncond_output, cond_output = model_outputs.chunk(2)
-                
+
                 if apg_config.enabled:
                     # Augmented Parallel Guidance
                     dy = cond_output
@@ -268,7 +268,7 @@ class FLitePipeline(DiffusionPipeline):
             else:
                 # If no guidance needed, just run the model normally
                 model_output = self.dit_model(latents, prompt_embeds, t_tensor)
-            
+
             # Update latents
             acc_latents = acc_latents + dt * model_output.to(device)
             latents = acc_latents.clone()
@@ -296,7 +296,7 @@ class FLitePipeline(DiffusionPipeline):
                 )
             else:
                 raise
-            
+
         # 8. Post-process images
         images = (decoded_images / 2 + 0.5).clamp(0, 1)
         # Convert to PIL Images
@@ -305,4 +305,4 @@ class FLitePipeline(DiffusionPipeline):
 
         return FLitePipelineOutput(
             images=pil_images,
-        ) 
+        )

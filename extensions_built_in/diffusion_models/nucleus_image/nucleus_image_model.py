@@ -94,7 +94,7 @@ class NucleusImageModel(QwenImageVAEHolderMixin, BaseModel):
                 base_model_path = model_path
 
         transformer = NucleusMoEImageTransformer2DModel.load_model(model_path, dtype=dtype)
-        
+
         # handle versions of pytorch that don't have grouped mm, by disabling it in the SwiGLUExperts
         if not hasattr(torch.nn.functional, "grouped_mm"):
             for m in transformer.modules():
@@ -234,7 +234,7 @@ class NucleusImageModel(QwenImageVAEHolderMixin, BaseModel):
             if self.model_config.layer_offloading:
                 parameters_and_buffers = itertools.chain(self.model.parameters(), self.model.buffers())
                 next(parameters_and_buffers).to(self.device_torch)
-                
+
 
         sc = self.get_bucket_divisibility()
         gen_config.width = int(gen_config.width // sc * sc)
@@ -267,26 +267,26 @@ class NucleusImageModel(QwenImageVAEHolderMixin, BaseModel):
             if self.model_config.layer_offloading:
                 parameters_and_buffers = itertools.chain(self.model.parameters(), self.model.buffers())
                 next(parameters_and_buffers).to(self.device_torch)
-        
+
         with torch.no_grad():
             patch_size = self.pipeline.transformer.config.patch_size
-            
+
             img_shape = (1, latent_model_input.shape[2] // patch_size, latent_model_input.shape[3] // patch_size)
             img_shapes = [
                 img_shape for _ in range(latent_model_input.shape[0])
             ]
             latent_height = latent_model_input.shape[2]
             latent_width = latent_model_input.shape[3]
-            
+
             pixel_height = latent_model_input.shape[2] * self.pipeline.vae_scale_factor
             pixel_width = latent_model_input.shape[3] * self.pipeline.vae_scale_factor
-        
+
         latent_model_input = self.pipeline._pack_latents(
-            latents=latent_model_input, 
+            latents=latent_model_input,
             batch_size=latent_model_input.shape[0],
             num_channels_latents=self.pipeline.transformer.config.in_channels // 4,
-            height=latent_height, 
-            width=latent_width, 
+            height=latent_height,
+            width=latent_width,
             patch_size=patch_size,
         )
 
@@ -298,10 +298,10 @@ class NucleusImageModel(QwenImageVAEHolderMixin, BaseModel):
             img_shapes=img_shapes,
             return_dict=False,
         )[0]
-        
+
         # invert it
         pred = -pred
-        
+
         pred = self.pipeline._unpack_latents(
             latents=pred,
             height=pixel_height,
@@ -320,7 +320,7 @@ class NucleusImageModel(QwenImageVAEHolderMixin, BaseModel):
 
         if isinstance(prompt, str):
             prompt = [prompt]
-        
+
         return_index = self.pipeline.default_return_index
         device = self.device_torch
 

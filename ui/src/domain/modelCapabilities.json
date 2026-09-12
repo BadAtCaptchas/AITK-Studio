@@ -1,0 +1,3160 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "arch": "chroma",
+      "module": "extensions_built_in.diffusion_models.chroma",
+      "className": "ChromaModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "chroma_radiance",
+      "module": "extensions_built_in.diffusion_models.chroma",
+      "className": "ChromaRadianceModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "hidream",
+      "module": "extensions_built_in.diffusion_models.hidream",
+      "className": "HidreamModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "hidream_e1",
+      "module": "extensions_built_in.diffusion_models.hidream",
+      "className": "HidreamE1Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "f-lite",
+      "module": "extensions_built_in.diffusion_models.f_light",
+      "className": "FLiteModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "omnigen2",
+      "module": "extensions_built_in.diffusion_models.omnigen2",
+      "className": "OmniGen2Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "boogu_image",
+      "module": "extensions_built_in.diffusion_models.boogu_image",
+      "className": "BooguImageModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "boogu_image_edit",
+      "module": "extensions_built_in.diffusion_models.boogu_image",
+      "className": "BooguImageEditModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "boogu_image_turbo",
+      "module": "extensions_built_in.diffusion_models.boogu_image",
+      "className": "BooguImageTurboModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "flux_kontext",
+      "module": "extensions_built_in.diffusion_models.flux_kontext",
+      "className": "FluxKontextModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "wan22_5b",
+      "module": "extensions_built_in.diffusion_models.wan22",
+      "className": "Wan225bModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "wan22_14b",
+      "module": "extensions_built_in.diffusion_models.wan22",
+      "className": "Wan2214bModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "wan22_14b_i2v",
+      "module": "extensions_built_in.diffusion_models.wan22",
+      "className": "Wan2214bI2VModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "qwen_image",
+      "module": "extensions_built_in.diffusion_models.qwen_image",
+      "className": "QwenImageModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "qwen_image_edit",
+      "module": "extensions_built_in.diffusion_models.qwen_image",
+      "className": "QwenImageEditModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "qwen_image_edit_plus",
+      "module": "extensions_built_in.diffusion_models.qwen_image",
+      "className": "QwenImageEditPlusModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "flux2",
+      "module": "extensions_built_in.diffusion_models.flux2",
+      "className": "Flux2Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "flux2_klein_4b",
+      "module": "extensions_built_in.diffusion_models.flux2",
+      "className": "Flux2Klein4BModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "flux2_klein_9b",
+      "module": "extensions_built_in.diffusion_models.flux2",
+      "className": "Flux2Klein9BModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "asymflux2_klein_9b",
+      "module": "extensions_built_in.diffusion_models.flux2",
+      "className": "AsymFlux2Klein9BModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "zimage",
+      "module": "extensions_built_in.diffusion_models.z_image.z_image",
+      "className": "ZImageModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "zimage_l2p",
+      "module": "extensions_built_in.diffusion_models.z_image.z_image_l2p_model",
+      "className": "ZImageL2PModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "ltx2",
+      "module": "extensions_built_in.diffusion_models.ltx2",
+      "className": "LTX2Model",
+      "optionalDependencies": [
+        "torchcodec"
+      ]
+    },
+    {
+      "arch": "ltx2.3",
+      "module": "extensions_built_in.diffusion_models.ltx2",
+      "className": "LTX23Model",
+      "optionalDependencies": [
+        "torchcodec"
+      ]
+    },
+    {
+      "arch": "ltx2.5",
+      "module": "extensions_built_in.diffusion_models.ltx2",
+      "className": "LTX25Model",
+      "optionalDependencies": [
+        "torchcodec"
+      ]
+    },
+    {
+      "arch": "zeta_chroma",
+      "module": "extensions_built_in.diffusion_models.zeta_chroma",
+      "className": "ZetaChromaModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "ernie_image",
+      "module": "extensions_built_in.diffusion_models.ernie_image",
+      "className": "ErnieImageModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "ideogram4",
+      "module": "extensions_built_in.diffusion_models.ideogram4",
+      "className": "Ideogram4Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "nucleus_image",
+      "module": "extensions_built_in.diffusion_models.nucleus_image",
+      "className": "NucleusImageModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "hidream_o1",
+      "module": "extensions_built_in.diffusion_models.hidream.hidream_o1_model",
+      "className": "HidreamO1Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "glm_image",
+      "module": "extensions_built_in.diffusion_models.glm_image",
+      "className": "GlmImageModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "i1",
+      "module": "extensions_built_in.diffusion_models.i1",
+      "className": "I1Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "prx_pixel",
+      "module": "extensions_built_in.diffusion_models.prx_pixel_t2i",
+      "className": "PRXPixelT2IModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "krea2",
+      "module": "extensions_built_in.diffusion_models.krea2",
+      "className": "Krea2Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "anima",
+      "module": "extensions_built_in.diffusion_models.anima",
+      "className": "AnimaModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "mageflow",
+      "module": "extensions_built_in.diffusion_models.mageflow",
+      "className": "MageFlowModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "mageflow_edit",
+      "module": "extensions_built_in.diffusion_models.mageflow",
+      "className": "MageFlowEditModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "minimax_h3",
+      "module": "extensions_built_in.diffusion_models.minimax_h3",
+      "className": "MinimaxH3Model",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "minimax_h3_ref2va",
+      "module": "extensions_built_in.diffusion_models.minimax_h3",
+      "className": "MinimaxH3Ref2VAModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "minimax_h3_vsa",
+      "module": "extensions_built_in.diffusion_models.minimax_h3",
+      "className": "MinimaxH3FastModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "wan21",
+      "module": "toolkit.models.wan21",
+      "className": "Wan21",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "wan21_i2v",
+      "module": "toolkit.models.wan21",
+      "className": "Wan21I2V",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "cogview4",
+      "module": "toolkit.models.cogview4",
+      "className": "CogView4",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "ace_step_15",
+      "module": "extensions_built_in.audio_models.ace_step",
+      "className": "AceStep15Model",
+      "optionalDependencies": [
+        "torchcodec"
+      ]
+    },
+    {
+      "arch": "ace_step_15_xl",
+      "module": "extensions_built_in.audio_models.ace_step",
+      "className": "AceStep15XLModel",
+      "optionalDependencies": [
+        "torchcodec"
+      ]
+    },
+    {
+      "arch": "flex2",
+      "module": "extensions_built_in.flex2.flex2",
+      "className": "Flex2",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "sd1",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "sd2",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "sdxl",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "sd3",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "pixart",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "pixart_sigma",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "auraflow",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "flux",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "lumina2",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "vega",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "ssd",
+      "module": "toolkit.stable_diffusion_model",
+      "className": "StableDiffusion",
+      "optionalDependencies": []
+    }
+  ],
+  "choices": [
+    {
+      "name": "anima",
+      "arch": "anima",
+      "label": "Anima",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "flux",
+      "arch": "flux",
+      "label": "FLUX.1",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "flux_kontext",
+      "arch": "flux_kontext",
+      "label": "FLUX.1-Kontext-dev",
+      "group": "instruction",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.control_path",
+        "sample.ctrl_img",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "flex1",
+      "arch": "flux",
+      "label": "Flex.1",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "flex2",
+      "arch": "flex2",
+      "label": "Flex.2",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [
+        "depth",
+        "line",
+        "pose",
+        "inpaint"
+      ],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "chroma",
+      "arch": "chroma",
+      "label": "Chroma",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "zeta_chroma",
+      "arch": "zeta_chroma",
+      "label": "Zeta Chroma",
+      "group": "experimental",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "wan21:1b",
+      "arch": "wan21",
+      "label": "Wan 2.1 (1.3B)",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "datasets.num_frames",
+        "model.low_vram"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "wan21_i2v:14b480p",
+      "arch": "wan21_i2v",
+      "label": "Wan 2.1 I2V (14B-480P)",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.low_vram"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "wan21_i2v:14b",
+      "arch": "wan21_i2v",
+      "label": "Wan 2.1 I2V (14B-720P)",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.low_vram"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "wan21:14b",
+      "arch": "wan21",
+      "label": "Wan 2.1 (14B)",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "datasets.num_frames",
+        "model.low_vram"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "wan22_14b:t2v",
+      "arch": "wan22_14b",
+      "label": "Wan 2.2 (14B)",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "datasets.num_frames",
+        "model.low_vram",
+        "model.multistage",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "wan22_14b_i2v",
+      "arch": "wan22_14b_i2v",
+      "label": "Wan 2.2 I2V (14B)",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.low_vram",
+        "model.multistage",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "wan22_5b",
+      "arch": "wan22_5b",
+      "label": "Wan 2.2 TI2V (5B)",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.low_vram",
+        "datasets.do_i2v"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "lumina2",
+      "arch": "lumina2",
+      "label": "Lumina2",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "glm_image",
+      "arch": "glm_image",
+      "label": "GLM-Image",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "boogu_image",
+      "arch": "boogu_image",
+      "label": "Boogu-Image Base",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "boogu_image_edit",
+      "arch": "boogu_image_edit",
+      "label": "Boogu-Image Edit",
+      "group": "instruction",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.control_path",
+        "datasets.multi_control_paths",
+        "sample.ctrl_img",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "boogu_image_turbo",
+      "arch": "boogu_image_turbo",
+      "label": "Boogu-Image Turbo (experimental)",
+      "group": "experimental",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "i1",
+      "arch": "i1",
+      "label": "i1-3B",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "qwen_image",
+      "arch": "qwen_image",
+      "label": "Qwen-Image",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "qwen_image:2512",
+      "arch": "qwen_image",
+      "label": "Qwen-Image-2512",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "qwen_image_edit",
+      "arch": "qwen_image_edit",
+      "label": "Qwen-Image-Edit",
+      "group": "instruction",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.control_path",
+        "sample.ctrl_img",
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "qwen_image_edit_plus",
+      "arch": "qwen_image_edit_plus",
+      "label": "Qwen-Image-Edit-2509",
+      "group": "instruction",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.qie.match_target_res"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "qwen_image_edit_plus:2511",
+      "arch": "qwen_image_edit_plus",
+      "label": "Qwen-Image-Edit-2511",
+      "group": "instruction",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.qie.match_target_res"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "hidream",
+      "arch": "hidream",
+      "label": "HiDream",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "hidream_e1",
+      "arch": "hidream_e1",
+      "label": "HiDream E1",
+      "group": "instruction",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.control_path",
+        "sample.ctrl_img",
+        "model.low_vram"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "sdxl",
+      "arch": "sdxl",
+      "label": "SDXL",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "model.quantize",
+        "train.timestep_type"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "sd15",
+      "arch": "sd1",
+      "label": "SD 1.5",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [],
+      "disableSections": [
+        "model.quantize",
+        "train.timestep_type"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "omnigen2",
+      "arch": "omnigen2",
+      "label": "OmniGen2",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.control_path",
+        "sample.ctrl_img"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "flux2",
+      "arch": "flux2",
+      "label": "FLUX.2",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.qie.match_target_res"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "zimage:turbo",
+      "arch": "zimage",
+      "label": "Z-Image Turbo (w/ Training Adapter)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.assistant_lora_path"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "zimage",
+      "arch": "zimage",
+      "label": "Z-Image",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "zimage:juggernaut_z",
+      "arch": "zimage",
+      "label": "Juggernaut Z",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "zimage:deturbo",
+      "arch": "zimage",
+      "label": "Z-Image De-Turbo (De-Distilled)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "zimage_l2p",
+      "arch": "zimage_l2p",
+      "label": "Z-Image L2P (pixel space)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "prx_pixel",
+      "arch": "prx_pixel",
+      "label": "PRXPixel (pixel space)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "minimax_h3",
+      "arch": "minimax_h3",
+      "label": "MiniMax-H3",
+      "group": "experimental",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.low_vram",
+        "datasets.do_audio",
+        "datasets.audio_normalize",
+        "datasets.audio_preserve_pitch",
+        "datasets.do_i2v",
+        "train.audio_loss_multiplier",
+        "datasets.auto_frame_count",
+        "datasets.include_images_in_video_dataset",
+        "model.assistant_lora_path"
+      ],
+      "disableSections": [
+        "network.conv",
+        "model.quantize",
+        "model.quantize_te",
+        "train.train_text_encoder",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "minimax_h3_ref2va",
+      "arch": "minimax_h3_ref2va",
+      "label": "MiniMax-H3 Ref2VA",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.multi_ctrl_imgs",
+        "datasets.multi_control_paths",
+        "datasets.num_frames",
+        "model.layer_offloading",
+        "model.low_vram",
+        "datasets.do_audio",
+        "datasets.audio_normalize",
+        "datasets.audio_preserve_pitch",
+        "train.audio_loss_multiplier",
+        "datasets.auto_frame_count",
+        "model.assistant_lora_path"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ltx2",
+      "arch": "ltx2",
+      "label": "LTX-2",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.layer_offloading",
+        "model.low_vram",
+        "datasets.do_audio",
+        "datasets.audio_normalize",
+        "datasets.audio_preserve_pitch",
+        "datasets.do_i2v",
+        "train.audio_loss_multiplier",
+        "train.ltx_strategy",
+        "datasets.auto_frame_count"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 8
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ltx2.3",
+      "arch": "ltx2.3",
+      "label": "LTX-2.3",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.layer_offloading",
+        "model.low_vram",
+        "datasets.do_audio",
+        "datasets.audio_normalize",
+        "datasets.audio_preserve_pitch",
+        "datasets.do_i2v",
+        "train.audio_loss_multiplier",
+        "train.ltx_strategy",
+        "datasets.auto_frame_count"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 8
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ltx2.5",
+      "arch": "ltx2.5",
+      "label": "LTX-2.5",
+      "group": "video",
+      "isVideoModel": true,
+      "additionalSections": [
+        "sample.ctrl_img",
+        "datasets.num_frames",
+        "model.layer_offloading",
+        "model.low_vram",
+        "datasets.do_audio",
+        "datasets.audio_normalize",
+        "datasets.audio_preserve_pitch",
+        "datasets.do_i2v",
+        "train.audio_loss_multiplier",
+        "datasets.auto_frame_count"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "video",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 8
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "flux2_klein_4b",
+      "arch": "flux2_klein_4b",
+      "label": "FLUX.2-klein-base-4B",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.qie.match_target_res"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ernie_image",
+      "arch": "ernie_image",
+      "label": "ERNIE-Image",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ideogram4",
+      "arch": "ideogram4",
+      "label": "Ideogram 4 NF4",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.ideogram_skip_unconditional_transformer"
+      ],
+      "disableSections": [
+        "network.conv",
+        "model.quantize",
+        "model.quantize_te",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ideogram4:fp8",
+      "arch": "ideogram4",
+      "label": "Ideogram 4 FP8",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.ideogram_skip_unconditional_transformer"
+      ],
+      "disableSections": [
+        "network.conv",
+        "model.quantize",
+        "model.quantize_te",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ideogram4:nvfp4",
+      "arch": "ideogram4",
+      "label": "Ideogram 4 Comfy NVFP4",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.ideogram_skip_unconditional_transformer"
+      ],
+      "disableSections": [
+        "network.conv",
+        "model.quantize",
+        "model.quantize_te",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "krea2",
+      "arch": "krea2",
+      "label": "Krea 2 (raw)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "krea2:turbo",
+      "arch": "krea2",
+      "label": "Krea 2 Turbo (w/ Training Adapter)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.assistant_lora_path"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "krea2:o_edit",
+      "arch": "krea2",
+      "label": "Krea 2 (raw) [Edit Training]",
+      "group": "experimental",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.qie.match_target_res",
+        "model.model_kwargs.kv_cache"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "krea2:o_edit_turbo",
+      "arch": "krea2",
+      "label": "Krea 2 Turbo (w/ Training Adapter) [Edit Training]",
+      "group": "experimental",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.assistant_lora_path",
+        "model.qie.match_target_res",
+        "model.model_kwargs.kv_cache"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "mageflow",
+      "arch": "mageflow",
+      "label": "Mage-Flow",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "mageflow_edit",
+      "arch": "mageflow_edit",
+      "label": "Mage-Flow Edit",
+      "group": "instruction",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "flux2_klein_9b",
+      "arch": "flux2_klein_9b",
+      "label": "FLUX.2-klein-base-9B",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.qie.match_target_res"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "asymflux2_klein_9b",
+      "arch": "asymflux2_klein_9b",
+      "label": "AsymFLUX.2-klein-9B",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ace_step_15_xl",
+      "arch": "ace_step_15_xl",
+      "label": "ACE-Step 1.5 XL",
+      "group": "audio",
+      "isVideoModel": false,
+      "additionalSections": [
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "audio",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ace_step_15",
+      "arch": "ace_step_15",
+      "label": "ACE-Step 1.5",
+      "group": "audio",
+      "isVideoModel": false,
+      "additionalSections": [
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "audio",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "nucleus_image",
+      "arch": "nucleus_image",
+      "label": "Nucleus-Image",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram"
+      ],
+      "disableSections": [
+        "network.conv"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "hidream_o1",
+      "arch": "hidream_o1",
+      "label": "HiDream-O1",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "model.quantize_te",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    }
+  ],
+  "processKinds": [
+    "AceStepCaptioner",
+    "ComfyInstaller",
+    "HFModelDownloader",
+    "OllamaCaptioner",
+    "OpenRouterCaptioner",
+    "Qwen3OmniCaptioner",
+    "Qwen3VLCaptioner",
+    "SecureRemoteOllamaCaptioner",
+    "batch_img2img",
+    "concept_replacer",
+    "concept_slider",
+    "dataset_tools",
+    "diffusion_trainer",
+    "esrgan",
+    "extract_lora",
+    "image_reference_slider_trainer",
+    "image_to_video_trainer",
+    "locon",
+    "lora",
+    "lora_hack",
+    "merge_lora",
+    "mod_lora",
+    "pure_lora_generator",
+    "reference",
+    "reference_generator",
+    "rescale_lora",
+    "rescale_sd",
+    "sd_trainer",
+    "slider",
+    "slider_old",
+    "super_tagger",
+    "sync_from_collection",
+    "textual_inversion_trainer",
+    "to_folder",
+    "ui_trainer",
+    "ultimate_slider_trainer",
+    "vae"
+  ],
+  "cudaOnlyQuantization": [
+    "nvfp4",
+    "convrot4",
+    "convrot8"
+  ]
+}

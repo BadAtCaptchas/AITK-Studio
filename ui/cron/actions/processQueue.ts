@@ -1,5 +1,6 @@
 import { db } from '../../src/server/db';
 import type { Job, Queue } from '../../src/types';
+import { devicesOverlap } from '../../src/utils/jobIdentity';
 import { reconcileLocalJobProcess } from '../../src/server/jobProcess';
 import { isAnyRemoteOllamaCaptionJob } from '../../src/server/secureRemoteCaptionJobs';
 import startJob from './startJob';
@@ -27,7 +28,7 @@ export default async function processQueue() {
 
       for (const job of runningJobs.filter(job => !isSecureRemoteOllamaCaptionJobConfigJson(job.job_config))) {
         console.log(`Stopping job ${job.id} on GPU(s) ${job.gpu_ids}`);
-        await db.jobs.update(job.id, {
+        await db.jobs.updateIf(job.id, { attempt_id: job.attempt_id ?? null, status: job.status }, {
           return_to_queue: true,
           info: 'Stopping job...',
         });
@@ -36,15 +37,14 @@ export default async function processQueue() {
     if (queue.is_running) {
       // first see if one is already running, status of running or stopping
       const runningJobs: Job[] = await db.jobs.list({
-        status: ['running', 'stopping'],
-        gpu_ids: queue.gpu_ids,
+        status: ['starting', 'running', 'stopping'],
         worker_id: 'local',
       });
-      const runningJob = runningJobs.find(job => !isSecureRemoteOllamaCaptionJobConfigJson(job.job_config)) || null;
+      const runningJob = runningJobs.find(job => devicesOverlap(job.gpu_ids, queue.gpu_ids) && !isSecureRemoteOllamaCaptionJobConfigJson(job.job_config)) || null;
 
       if (runningJob) {
         const reconciledJob = await reconcileLocalJobProcess(runningJob);
-        if (reconciledJob && ['running', 'stopping'].includes(reconciledJob.status)) {
+        if (reconciledJob && ['starting', 'running', 'stopping'].includes(reconciledJob.status)) {
           // already running, nothing to do
           continue; // skip to next queue
         }

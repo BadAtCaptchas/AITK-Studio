@@ -33,7 +33,7 @@ class EmbedND(nn.Module):
             dim=-3,
         )
         return emb.unsqueeze(2)
-    
+
 class PatchEmbed(nn.Module):
     def __init__(
         self,
@@ -56,13 +56,13 @@ class PatchEmbed(nn.Module):
     def forward(self, latent):
         latent = self.proj(latent)
         return latent
-    
+
 class PooledEmbed(nn.Module):
-    def __init__(self, text_emb_dim, hidden_size): 
+    def __init__(self, text_emb_dim, hidden_size):
         super().__init__()
         self.pooled_embedder = TimestepEmbedding(in_channels=text_emb_dim, time_embed_dim=hidden_size)
         self.apply(self._init_weights)
-    
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             nn.init.normal_(m.weight, std=0.02)
@@ -71,7 +71,7 @@ class PooledEmbed(nn.Module):
 
     def forward(self, pooled_embed):
         return self.pooled_embedder(pooled_embed)
-    
+
 class TimestepEmbed(nn.Module):
     def __init__(self, hidden_size, frequency_embedding_size=256):
         super().__init__()
@@ -89,7 +89,7 @@ class TimestepEmbed(nn.Module):
         t_emb = self.time_proj(timesteps).to(dtype=wdtype)
         t_emb = self.timestep_embedder(t_emb)
         return t_emb
-    
+
 class OutEmbed(nn.Module):
     def __init__(self, hidden_size, patch_size, out_channels):
         super().__init__()

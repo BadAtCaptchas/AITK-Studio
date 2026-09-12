@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import { getTrainingFolder } from '@/server/settings';
@@ -12,10 +13,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 1200;
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   let body: unknown;
   try {
-    body = assertGlobalPayload(await request.json());
+    body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
@@ -39,3 +40,5 @@ export async function POST(request: Request) {
   const status = result.ok ? 200 : result.timedOut ? 504 : 500;
   return NextResponse.json(result, { status });
 }
+
+export const POST = withCommandBoundary(postCommand);

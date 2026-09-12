@@ -1,0 +1,40 @@
+name: Fresh hardware profile resolution
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['requirements*.txt', 'dgx_requirements.txt', 'scripts/install_runtime.py', '.github/workflows/runtime-profiles.yml']
+permissions:
+  contents: read
+jobs:
+  resolve:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: '3.12', profile: legacy-cu128 }
+          - { os: windows-latest, python: '3.12', profile: legacy-cu128 }
+          - { os: ubuntu-latest, python: '3.12', profile: blackwell-cu128 }
+          - { os: windows-latest, python: '3.12', profile: blackwell-cu130 }
+          - { os: ubuntu-24.04-arm, python: '3.11', profile: dgx-cu130 }
+          - { os: macos-14, python: '3.12', profile: macos }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      PIP_NO_CACHE_DIR: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m venv .venv
+      - name: Resolve all profile and base requirements together
+        shell: bash
+        run: |
+          if [ -f .venv/Scripts/python.exe ]; then PYTHON=.venv/Scripts/python.exe; else PYTHON=.venv/bin/python; fi
+          "$PYTHON" scripts/install_runtime.py --profile '${{ matrix.profile }}' --dry-run --report resolution.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resolution-${{ matrix.os }}-${{ matrix.profile }}
+          path: resolution.json
+          if-no-files-found: ignore

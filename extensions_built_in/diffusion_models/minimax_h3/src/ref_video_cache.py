@@ -276,5 +276,3 @@ def load_ref_video_latent(
     entry = {"latent": latent, "num_frames": num_frames, "audio_rows": audio_rows}
     mem_cache[path] = entry
     return entry
-
-

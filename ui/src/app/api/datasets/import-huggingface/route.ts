@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -13,9 +14,9 @@ import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const normalized = normalizeHfDatasetImportRequest(body) as HfDatasetImportRequest;
     const workerID = normalized.worker_id || 'local';
 
@@ -49,3 +50,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

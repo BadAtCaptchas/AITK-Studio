@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import { createRequestedArchive, type ArchiveRequest } from '@/server/archiveDownloads';
@@ -12,9 +13,9 @@ function isArchiveRequest(value: unknown): value is ArchiveRequest {
   return target === 'samples' || target === 'dataset' || target === 'dataset_captions';
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body: unknown = assertGlobalPayload(await request.json());
+    const body: unknown = assertGlobalPayload(await readJsonCommand(request));
     if (!isArchiveRequest(body)) return NextResponse.json({ error: 'Invalid archive request' }, { status: 400 });
     return NextResponse.json({ ok: true, ...(await createRequestedArchive(body)) });
   } catch (error: unknown) {
@@ -24,3 +25,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

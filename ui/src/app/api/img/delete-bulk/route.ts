@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import {
@@ -103,12 +104,12 @@ function splitRemoteAndLocalPaths(imgPaths: unknown) {
   return { localPaths, remoteGroups: Array.from(remoteGroups.values()), error: null };
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
     const authError = await requireAuth(request);
     if (authError) return authError;
 
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const { localPaths, remoteGroups, error } = splitRemoteAndLocalPaths(body?.imgPaths);
     if (error || !localPaths || !remoteGroups) {
       return NextResponse.json({ error: error || 'Invalid image paths' }, { status: 400 });
@@ -141,3 +142,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to delete images' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

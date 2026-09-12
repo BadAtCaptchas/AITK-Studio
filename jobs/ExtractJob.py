@@ -37,7 +37,7 @@ class ExtractJob(BaseJob):
     def run(self):
         super().run()
         # load models
-        print(f"Loading models for extraction")
+        print('Loading models for extraction')
         print(f" - Loading base model: {self.base_model_path}")
         # (text_model, vae, unet)
         self.model_base = load_models_from_stable_diffusion_checkpoint(self.is_v2, self.base_model_path)

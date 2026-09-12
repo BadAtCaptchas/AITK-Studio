@@ -28,7 +28,7 @@ function assertKreaEditArch(block) {
 }
 
 test('Krea2 edit UI presets expose edit controls and keep text encoder loaded', () => {
-  const options = readSource('src/app/jobs/new/options.ts');
+  const options = readSource('src/domain/modelOptions.ts');
 
   const rawEdit = archBlock(options, 'krea2:o_edit');
   assertKreaEditArch(rawEdit);

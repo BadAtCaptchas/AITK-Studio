@@ -1,4 +1,5 @@
 import { isLegacyScopedRecord } from '../utils/obsoleteWorkspaceGuard';
+import { ownResponseBody, readBoundedResponseText } from './responseBody';
 import path from 'path';
 import fs from 'fs/promises';
 import { createReadStream, existsSync } from 'fs';
@@ -13,7 +14,8 @@ import {
   normalizeHostname,
   OfflineModeError,
 } from './networkPolicy';
-import { clearDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
+import { activeOperationForResource } from './operations';
+import { clearDurableEncryptedDatasetKeys, getDurableKeySnapshot } from './encryptedDatasetSecrets';
 import { getJobRemoteCaptionState } from './remoteCaptionJobs';
 import {
   collectDatasetReferences,
@@ -27,7 +29,7 @@ const REMOTE_BACKGROUND_POLL_TIMEOUT_MS = 5_000;
 const REMOTE_BACKGROUND_COOLDOWN_MS = 30_000;
 const REMOTE_BACKGROUND_LOG_INTERVAL_MS = 5 * 60 * 1000;
 
-type RemoteRequestInit = RequestInit & { timeoutMs?: number };
+type RemoteRequestInit = RequestInit & { timeoutMs?: number; headerTimeoutMs?: number; bodyIdleMs?: number; acceptHttpStatus?: boolean };
 
 export class RemoteClientError extends Error {
   status: number;
@@ -334,20 +336,26 @@ export function resetRemoteBackgroundPollingStateForTests() {
 }
 
 async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: RemoteRequestInit = {}) {
-  const { timeoutMs, ...fetchInit } = init;
+  const { timeoutMs, headerTimeoutMs = 30_000, bodyIdleMs = 60_000, acceptHttpStatus = false, ...fetchInit } = init;
   const headers = new Headers(fetchInit.headers);
   headers.set('Authorization', `Bearer ${worker.api_token}`);
 
-  let signal = fetchInit.signal;
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  let onAbort: (() => void) | null = null;
-  if (timeoutMs != null) {
-    const controller = new AbortController();
-    signal = controller.signal;
-    timeout = setTimeout(() => controller.abort(), timeoutMs);
-    onAbort = () => controller.abort(fetchInit.signal?.reason);
-    fetchInit.signal?.addEventListener('abort', onAbort, { once: true });
-  }
+  fetchInit.signal?.throwIfAborted();
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const duration = timeoutMs ?? 60 * 60 * 1000;
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error('Invalid remote request timeout');
+  const timeout = setTimeout(() => controller.abort(new Error('Remote request deadline exceeded')), duration);
+  const headerTimeout = setTimeout(() => controller.abort(new Error('Remote response header deadline exceeded')), Math.min(duration, headerTimeoutMs));
+  headerTimeout.unref?.();
+  timeout.unref?.();
+  const onAbort = () => controller.abort(fetchInit.signal?.reason);
+  fetchInit.signal?.addEventListener('abort', onAbort, { once: true });
+  const dispose = () => {
+    clearTimeout(timeout);
+    clearTimeout(headerTimeout);
+    fetchInit.signal?.removeEventListener('abort', onAbort);
+  };
 
   const url = remoteUrl(worker, routePath);
   const response = await guardedFetch(
@@ -360,13 +368,13 @@ async function remoteRequest(worker: WorkerNodeRecord, routePath: string, init: 
       signal,
     },
     `remote worker ${worker.name}`,
-  ).finally(() => {
-    if (timeout) clearTimeout(timeout);
-    if (onAbort) fetchInit.signal?.removeEventListener('abort', onAbort);
+  ).then(result => { clearTimeout(headerTimeout); return ownResponseBody(result, signal, dispose, bodyIdleMs); }).catch(error => {
+    dispose();
+    throw error;
   });
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
+  if (!response.ok && !acceptHttpStatus) {
+    const body = await readBoundedResponseText(response, 64 * 1024, true).catch(() => 'Remote error body unavailable');
     throw new RemoteClientError(
       `Remote worker ${worker.name} returned ${response.status} for ${routePath}`,
       response.status,
@@ -390,8 +398,9 @@ export async function remoteJson<T>(
   if (init.body != null && !headers.has('Content-Type') && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
-  const response = await remoteRequest(worker, routePath, { ...init, headers });
-  return response.json() as Promise<T>;
+  const response = await remoteRequest(worker, routePath, { timeoutMs: 30_000, ...init, headers });
+  const payload: unknown = JSON.parse(await readBoundedResponseText(response, 8 * 1024 * 1024));
+  return payload as T;
 }
 
 export function withoutRemoteRedirects(init: RequestInit): RequestInit {
@@ -404,11 +413,14 @@ export async function remoteProxyFetch(
   routePath: string,
   headersToForward: Headers,
   method: 'GET' | 'HEAD' = 'GET',
+  signal?: AbortSignal,
 ) {
   const headers = new Headers();
-  const range = headersToForward.get('range');
-  if (range) headers.set('range', range);
-  return remoteRequest(worker, routePath, { headers, method });
+  for (const name of ['range', 'if-range', 'if-none-match', 'if-match', 'if-modified-since', 'if-unmodified-since']) {
+    const value = headersToForward.get(name);
+    if (value) headers.set(name, value);
+  }
+  return remoteRequest(worker, routePath, { headers, method, signal, acceptHttpStatus: true });
 }
 
 export async function fetchRemoteJob(workerId: string, remoteJobId: string) {
@@ -444,15 +456,20 @@ export function remoteJobMissingUpdate() {
 }
 
 export async function markRemoteJobMissing(localJob: Job) {
-  return db.jobs.update(localJob.id, remoteJobMissingUpdate());
+  return await db.jobs.updateIf(localJob.id, { attempt_id: localJob.attempt_id ?? null, status: localJob.status, updated_at: new Date(localJob.updated_at) }, remoteJobMissingUpdate()) || (await db.jobs.findById(localJob.id)) || localJob;
 }
 
 export async function fetchWorkerJobs(worker: WorkerNodeRecord, jobType?: string | null) {
-  const query = new URLSearchParams({ local_only: '1' });
+  const cursorKey = `remote-discovery-cursor:${worker.id}:${jobType || 'all'}`;
+  const prior = await db.runtime.get(cursorKey);
+  const query = new URLSearchParams({ local_only: '1', summary: '0', limit: '20' });
+  if (typeof prior?.value === 'string' && prior.value) query.set('cursor', prior.value);
   if (jobType) query.set('job_type', jobType);
-  const result = await remoteJson<{ jobs: Job[] }>(worker, `/api/jobs?${query.toString()}`, {
+  const result = await remoteJson<{ jobs: Job[]; nextCursor?: string | null }>(worker, `/api/jobs?${query.toString()}`, {
     timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS,
   });
+  if (!Array.isArray(result.jobs)) throw new Error('Worker returned an invalid job page');
+  await db.runtime.compareAndSwap(cursorKey, prior?.version ?? null, result.nextCursor || '');
   return { jobs: result.jobs.filter(job => !isLegacyScopedRecord(job)) };
 }
 
@@ -527,11 +544,13 @@ async function resolveRemoteMirrorName(worker: WorkerNodeRecord, remoteJob: Job,
 
 async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
   const existing = await db.jobs.findByRemoteId(worker.id, remoteJob.id);
+  if (existing && (['editing', 'deleting', 'restarting', 'remote-starting'].includes(existing.status) || await activeOperationForResource(`job:${existing.id}`))) return existing;
+  const keySnapshot = existing ? await getDurableKeySnapshot(existing.id) : null;
   const name = await resolveRemoteMirrorName(worker, remoteJob, existing?.id);
   const patch = remoteJobPatch(remoteJob, worker.id, remoteJob.id, name, existing);
 
   const synced = existing
-    ? await db.jobs.update(existing.id, patch)
+    ? await db.jobs.updateIf(existing.id, { attempt_id: existing.attempt_id ?? null, status: existing.status, updated_at: new Date(existing.updated_at) }, patch) || existing
     : await db.jobs.create({
         name: patch.name,
         worker_id: patch.worker_id,
@@ -555,7 +574,7 @@ async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
       });
 
   if (remoteJob.status === 'completed' && !getJobRemoteCaptionState(synced)) {
-    await clearDurableEncryptedDatasetKeys(synced.id).catch(error =>
+    await clearDurableEncryptedDatasetKeys(synced.id, keySnapshot).catch(error =>
       console.error('Error clearing durable encrypted dataset keys:', error),
     );
   }
@@ -564,8 +583,10 @@ async function upsertRemoteJobMirror(worker: WorkerNodeRecord, remoteJob: Job) {
 }
 
 export async function syncRemoteJob(localJob: Job, options: { background?: boolean } = {}) {
-  if (isLocalWorker(localJob.worker_id) || !localJob.remote_job_id) return localJob;
+  if (isLocalWorker(localJob.worker_id) || !localJob.remote_job_id || ['editing', 'deleting', 'restarting'].includes(localJob.status)) return localJob;
+  if (options.background !== false && await activeOperationForResource(`job:${localJob.id}`)) return localJob;
 
+  const keySnapshot = await getDurableKeySnapshot(localJob.id);
   try {
     const worker = await getRemoteWorker(localJob.worker_id);
     let remoteJob: Job | null;
@@ -587,12 +608,13 @@ export async function syncRemoteJob(localJob: Job, options: { background?: boole
     const latestLocalJob = await db.jobs.findById(localJob.id);
     const localJobForPatch = latestLocalJob || localJob;
     const name = await resolveRemoteMirrorName(worker, remoteJob, localJob.id);
-    const synced = await db.jobs.update(
-      localJob.id,
+    const synced = await db.jobs.updateIf(
+      localJob.id, { attempt_id: localJob.attempt_id ?? null, status: localJob.status, updated_at: new Date(localJob.updated_at) },
       remoteJobPatch(remoteJob, worker.id, remoteJob.id, name, localJobForPatch),
     );
+    if (!synced) return latestLocalJob || localJob;
     if (remoteJob.status === 'completed' && !getJobRemoteCaptionState(synced)) {
-      await clearDurableEncryptedDatasetKeys(localJob.id).catch(error =>
+      await clearDurableEncryptedDatasetKeys(localJob.id, keySnapshot).catch(error =>
         console.error('Error clearing durable encrypted dataset keys:', error),
       );
     }
@@ -601,10 +623,10 @@ export async function syncRemoteJob(localJob: Job, options: { background?: boole
     if (isRemoteJobMissingError(error)) {
       return markRemoteJobMissing(localJob);
     }
-    return db.jobs.update(localJob.id, {
+    return await db.jobs.updateIf(localJob.id, { attempt_id: localJob.attempt_id ?? null, status: localJob.status, updated_at: new Date(localJob.updated_at) }, {
       remote_sync_at: new Date(),
       remote_error: error instanceof Error ? error.message : 'Remote sync failed',
-    });
+    }) || (await db.jobs.findById(localJob.id)) || localJob;
   }
 }
 
@@ -732,7 +754,9 @@ function sleep(ms: number) {
 
 async function waitForRemoteArchiveImport<T>(worker: WorkerNodeRecord, routePath: string, uploadID: string) {
   let firstPoll = true;
+  const deadline = Date.now() + 60 * 60 * 1000;
   while (true) {
+    if (Date.now() > deadline) throw new Error('Remote import is still pending; its operation can be resumed.');
     if (firstPoll) {
       firstPoll = false;
     } else {
@@ -765,6 +789,7 @@ async function remoteZipFileJson<T>(
     fileName?: string;
     onProgress?: (progress: FileUploadProgress) => void;
     backgroundComplete?: boolean;
+    uploadID?: string;
   },
 ) {
   const fileStat = await fs.stat(options.filePath);
@@ -777,7 +802,17 @@ async function remoteZipFileJson<T>(
     });
   };
 
-  const uploadID = randomUUID();
+  const uploadID = options.uploadID || randomUUID();
+  if (options.uploadID) {
+    try {
+      const prior: unknown = await remoteJson(worker, appendQueryParams(routePath, { aitk_upload: 'status', uploadID }));
+      if (isRemoteArchiveImportStatus<T>(prior)) {
+        if (prior.status === 'completed' && prior.result !== null) return prior.result;
+        if (prior.status === 'failed') throw new Error(prior.error || 'Remote import failed');
+        return waitForRemoteArchiveImport<T>(worker, routePath, uploadID);
+      }
+    } catch (error) { if (!(error instanceof RemoteClientError && error.status === 404)) throw error; }
+  }
   const chunkBytes = remoteArchiveUploadChunkBytes();
   const chunksTotal = Math.max(1, Math.ceil(fileStat.size / chunkBytes));
   reportProgress();
@@ -809,6 +844,7 @@ async function remoteZipFileJson<T>(
           'X-AITK-File-Name': fileName,
         },
         duplex: 'half',
+        timeoutMs: 600_000, headerTimeoutMs: 600_000,
       } as RequestInit & { duplex: 'half' },
     );
 
@@ -833,7 +869,7 @@ async function remoteZipFileJson<T>(
     },
   );
 
-  if (options.backgroundComplete && isRemoteArchiveImportStatus<T>(completeResult)) {
+  if (isRemoteArchiveImportStatus<T>(completeResult)) {
     if (completeResult.status === 'completed') {
       if (completeResult.result == null) {
         throw new Error('Remote archive import completed without a result.');
@@ -854,6 +890,7 @@ export async function uploadBundleToWorker(
   zipPath: string,
   gpuIds: string,
   onProgress?: (progress: FileUploadProgress) => void,
+  uploadID?: string,
 ) {
   return remoteZipFileJson<{ job: Job; warnings: string[] }>(
     worker,
@@ -864,6 +901,7 @@ export async function uploadBundleToWorker(
       filePath: zipPath,
       fileName: path.basename(zipPath),
       onProgress,
+      uploadID,
     },
   );
 }
@@ -883,6 +921,7 @@ export async function uploadDatasetArchiveToWorker(
   zipPath: string,
   preferredName?: string,
   onProgress?: (progress: FileUploadProgress) => void,
+  uploadID?: string,
 ) {
   return remoteZipFileJson<{
     dataset: { name: string; encrypted: boolean; path?: string };
@@ -893,6 +932,7 @@ export async function uploadDatasetArchiveToWorker(
     fileName: path.basename(zipPath),
     onProgress,
     backgroundComplete: true,
+    uploadID,
   });
 }
 

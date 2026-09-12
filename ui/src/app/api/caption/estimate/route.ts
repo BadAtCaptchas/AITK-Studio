@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
@@ -47,9 +48,9 @@ function countCaptionTargets(datasetPath: string, extensions: string[], captionE
   return count;
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const datasetPath = typeof body?.datasetPath === 'string' ? body.datasetPath : '';
     if (!datasetPath.trim()) {
       return NextResponse.json({ error: 'datasetPath is required' }, { status: 400 });
@@ -126,3 +127,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

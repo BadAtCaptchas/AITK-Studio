@@ -104,7 +104,7 @@ class OmniGen2RotaryPosEmbed(nn.Module):
 
         # Get combined rotary embeddings
         freqs_cis = self._get_freqs_cis(freqs_cis, position_ids)
-        
+
         # create separate rotary embeddings for captions and images
         cap_freqs_cis = torch.zeros(
             batch_size, encoder_seq_len, freqs_cis.shape[-1], device=device, dtype=freqs_cis.dtype

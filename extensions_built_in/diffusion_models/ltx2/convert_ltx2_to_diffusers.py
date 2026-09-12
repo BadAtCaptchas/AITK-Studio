@@ -377,6 +377,8 @@ def get_ltx2_transformer_config(
         }
         rename_dict = LTX_2_3_TRANSFORMER_KEYS_RENAME_DICT
         special_keys_remap = LTX_2_0_TRANSFORMER_SPECIAL_KEYS_REMAP
+    else:
+        raise ValueError(f"Unsupported LTX version: {version}")
     return config, rename_dict, special_keys_remap
 
 
@@ -403,6 +405,8 @@ def get_ltx2_connectors_config(
                 "causal_temporal_positioning": False,
             },
         }
+        rename_dict = LTX_2_0_CONNECTORS_KEYS_RENAME_DICT
+        special_keys_remap = LTX_2_0_CONNECTORS_SPECIAL_KEYS_REMAP
     elif version == "2.0":
         config = {
             "model_id": "Lightricks/LTX-2",
@@ -462,6 +466,8 @@ def get_ltx2_connectors_config(
         rename_dict = LTX_2_3_CONNECTORS_KEYS_RENAME_DICT
         special_keys_remap = LTX_2_0_CONNECTORS_SPECIAL_KEYS_REMAP
 
+    else:
+        raise ValueError(f"Unsupported LTX version: {version}")
     return config, rename_dict, special_keys_remap
 
 
@@ -696,6 +702,8 @@ def get_ltx2_video_vae_config(
         }
         rename_dict = LTX_2_3_VIDEO_VAE_RENAME_DICT
         special_keys_remap = LTX_2_0_VAE_SPECIAL_KEYS_REMAP
+    else:
+        raise ValueError(f"Unsupported LTX version: {version}")
     return config, rename_dict, special_keys_remap
 
 
@@ -784,6 +792,8 @@ def get_ltx2_audio_vae_config(
         }
         rename_dict = LTX_2_0_AUDIO_VAE_RENAME_DICT
         special_keys_remap = LTX_2_0_AUDIO_VAE_SPECIAL_KEYS_REMAP
+    else:
+        raise ValueError(f"Unsupported LTX version: {version}")
     return config, rename_dict, special_keys_remap
 
 
@@ -881,6 +891,8 @@ def get_ltx2_vocoder_config(
         }
         rename_dict = LTX_2_3_VOCODER_RENAME_DICT
         special_keys_remap = LTX_2_3_VOCODER_SPECIAL_KEYS_REMAP
+    else:
+        raise ValueError(f"Unsupported LTX version: {version}")
     return config, rename_dict, special_keys_remap
 
 

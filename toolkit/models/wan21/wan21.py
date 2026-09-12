@@ -1,3 +1,4 @@
+from toolkit.xla import mark_xla_step
 # WIP, coming soon ish
 from functools import partial
 import torch
@@ -37,6 +38,7 @@ from toolkit.util.quantize import (
     get_qtype,
     quantize,
     quantize_component_in_stages,
+    quantize_model,
 )
 from toolkit.util.ostris_quant import is_ostris_qtype
 from diffusers import FlowMatchEulerDiscreteScheduler, UniPCMultistepScheduler
@@ -280,7 +282,7 @@ class AggressiveWanUnloadPipeline(WanPipeline):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         self._current_timestep = None
 

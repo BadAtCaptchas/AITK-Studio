@@ -19,7 +19,7 @@ from toolkit.memory_management import attach_layer_offloading
 from safetensors.torch import load_file
 from optimum.quanto import QTensor
 from toolkit.metadata import get_meta_for_safetensors
-from safetensors.torch import load_file, save_file
+from safetensors.torch import save_file
 from toolkit.models.v2.text_encoders.qwen3 import Qwen3TextEncoder
 from diffusers import AutoencoderKL
 from toolkit.models.FakeVAE import FakeVAE
@@ -240,7 +240,7 @@ class ZetaChromaModel(BaseModel):
     ):
         self.model.to(self.device_torch, dtype=self.torch_dtype)
         self.model.to(self.device_torch)
-        
+
         do_low_step_schedule = gen_config.num_inference_steps <= 8 and gen_config.guidance_scale <= 1.0
 
         sc = self.get_bucket_divisibility()
@@ -271,24 +271,24 @@ class ZetaChromaModel(BaseModel):
     ):
         if self.model.device == torch.device("cpu"):
             self.model.to(self.device_torch)
-        
+
         with torch.no_grad():
-            
+
             pixel_shape = latent_model_input.shape
             # todo: do we invert like this?
             # t_vec = (1000 - timestep) / 1000
             t_vec = timestep / 1000
-            
+
             height = latent_model_input.shape[2]
             h_patches = height // self.patch_size
             width = latent_model_input.shape[3]
             w_patches = width // self.patch_size
             batch_size = latent_model_input.shape[0]
-            
+
             img, _ = vae_flatten(latent_model_input, patch_size=self.patch_size)
-            
+
             num_patches = img.shape[1]
-            
+
             # --- Build position IDs ---
             pos_lengths = text_embeddings.attention_mask.sum(1)
             offset = pos_lengths
@@ -302,8 +302,8 @@ class ZetaChromaModel(BaseModel):
             img_mask = torch.ones(
                 (batch_size, num_patches), device=self.device_torch, dtype=torch.bool
             )
-            
-            
+
+
 
         # model_out_list = self.transformer(
         #     latent_model_input_list,
@@ -319,7 +319,7 @@ class ZetaChromaModel(BaseModel):
             txt_mask=text_embeddings.attention_mask, # (1, 512)
             timesteps=t_vec, # (1,)
         )
-        
+
         pred = vae_unflatten(pred.float(), pixel_shape, patch_size=self.patch_size)
 
         return pred
@@ -332,7 +332,7 @@ class ZetaChromaModel(BaseModel):
             prompt,
         )
         pe = PromptEmbeds([prompt_embeds, None], attention_mask=mask)
-        
+
         return pe
 
     def get_model_has_grad(self):

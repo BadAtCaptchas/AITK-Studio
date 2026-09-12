@@ -1,3 +1,8 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .i1_model import I1Model
+
 __all__ = ["I1Model"]
 
 

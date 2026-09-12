@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { isLocalWorker, syncRemoteJob } from '@/server/remoteClient';
@@ -7,7 +8,7 @@ import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function postCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
   const job = await db.jobs.findById(jobID);
   if (!job) {
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   try {
-    const body = await request.json().catch(() => ({}));
+    const body = await readJsonCommand(request);
     const synced = await syncRemoteJob(job, { background: false });
     const result = await syncRemoteCaptionResultForJob(synced, {
       force: body?.force === true,
@@ -40,3 +41,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

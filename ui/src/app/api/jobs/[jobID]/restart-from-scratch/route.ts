@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import { JobStartError } from '@/server/jobStart';
@@ -25,7 +26,7 @@ function handleRestartError(error: unknown) {
   throw error;
 }
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function postCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   let body: JobStartRequest = {};
   try {
-    body = assertGlobalPayload(await request.json());
+    body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
     body = {};
   }
@@ -51,3 +52,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return handleRestartError(error);
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

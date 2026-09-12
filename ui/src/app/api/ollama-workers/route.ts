@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -14,9 +15,9 @@ export async function GET() {
   return NextResponse.json({ workers: workers.map(toPublicRemoteOllamaWorker) });
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const worker = await saveRemoteOllamaWorker(body || {});
     return NextResponse.json(toPublicRemoteOllamaWorker(worker));
   } catch (error) {
@@ -24,3 +25,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: /already exists/i.test(message) ? 409 : 400 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

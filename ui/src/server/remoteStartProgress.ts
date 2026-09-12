@@ -1,114 +1,24 @@
-import { randomUUID } from 'crypto';
-import type { RemoteStartProgress, RemoteStartProgressStatus } from '../types';
+import { activeOperationForResource, getOperation, type Operation } from './operations';
+import type { RemoteStartProgress } from '../types';
 
-type RemoteStartProgressPatch = Partial<
-  Pick<
-    RemoteStartProgress,
-    | 'status'
-    | 'message'
-    | 'percent'
-    | 'datasetName'
-    | 'bytesProcessed'
-    | 'bytesTotal'
-    | 'warnings'
-    | 'error'
-    | 'remoteJobID'
-  >
->;
-
-type RemoteStartProgressStore = Map<string, RemoteStartProgress>;
-
-const REMOTE_START_PROGRESS_MAX_AGE_MS = 60 * 60 * 1000;
-const ACTIVE_REMOTE_START_STATUSES = new Set<RemoteStartProgressStatus>([
-  'queued',
-  'preparing',
-  'checking-datasets',
-  'zipping-dataset',
-  'uploading-dataset',
-  'importing-dataset',
-  'zipping-job',
-  'uploading-job',
-  'importing-job',
-  'starting',
-]);
-
-declare global {
-  var __remoteStartProgressStore: RemoteStartProgressStore | undefined;
+export function remoteStartProgress(operation: Operation): RemoteStartProgress {
+  const progress = operation.progress;
+  const ended = ['completed', 'failed', 'canceled', 'needs-keys'].includes(operation.state);
+  const status = operation.state === 'completed' ? 'completed' : ended ? 'failed' :
+    typeof progress.status === 'string' && ['queued', 'preparing', 'checking-datasets', 'zipping-dataset', 'uploading-dataset', 'importing-dataset', 'zipping-job', 'uploading-job', 'importing-job', 'starting'].includes(progress.status) ? progress.status as RemoteStartProgress['status'] : 'queued';
+  return { startID: operation.id, jobID: operation.input.kind === 'remote-start' ? operation.input.jobID : '', status,
+    operationState: operation.state, phase: operation.phase,
+    message: operation.error || (typeof progress.message === 'string' ? progress.message : 'Queued remote start'),
+    percent: ended ? 100 : typeof progress.percent === 'number' ? Math.min(100, Math.max(0, progress.percent)) : 0,
+    datasetName: typeof progress.datasetName === 'string' ? progress.datasetName : null,
+    bytesProcessed: typeof progress.bytesProcessed === 'number' ? progress.bytesProcessed : 0,
+    bytesTotal: typeof progress.bytesTotal === 'number' ? progress.bytesTotal : 0,
+    warnings: Array.isArray(progress.warnings) ? progress.warnings.filter((value: unknown): value is string => typeof value === 'string') : [],
+    error: operation.error, remoteJobID: typeof progress.remoteJobID === 'string' ? progress.remoteJobID : null,
+    createdAt: operation.createdAt, updatedAt: operation.updatedAt };
 }
-
-const remoteStartProgressStore: RemoteStartProgressStore =
-  globalThis.__remoteStartProgressStore ?? new Map<string, RemoteStartProgress>();
-
-if (!globalThis.__remoteStartProgressStore) {
-  globalThis.__remoteStartProgressStore = remoteStartProgressStore;
+export async function getRemoteStartProgress(id: string) {
+  const operation = await getOperation(id);
+  return operation?.input.kind === 'remote-start' ? remoteStartProgress(operation) : null;
 }
-
-function cloneProgress(progress: RemoteStartProgress) {
-  return { ...progress, warnings: [...progress.warnings] };
-}
-
-function cleanupOldRemoteStartProgress() {
-  const now = Date.now();
-  for (const [startID, progress] of remoteStartProgressStore.entries()) {
-    if (now - new Date(progress.updatedAt).getTime() > REMOTE_START_PROGRESS_MAX_AGE_MS) {
-      remoteStartProgressStore.delete(startID);
-    }
-  }
-}
-
-export function createRemoteStartProgress(jobID: string) {
-  cleanupOldRemoteStartProgress();
-
-  const now = new Date().toISOString();
-  const progress: RemoteStartProgress = {
-    startID: randomUUID(),
-    jobID,
-    status: 'queued',
-    message: 'Queued remote start',
-    percent: 0,
-    datasetName: null,
-    bytesProcessed: 0,
-    bytesTotal: 0,
-    warnings: [],
-    error: null,
-    remoteJobID: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  remoteStartProgressStore.set(progress.startID, progress);
-  return cloneProgress(progress);
-}
-
-export function getRemoteStartProgress(startID: string) {
-  cleanupOldRemoteStartProgress();
-  const progress = remoteStartProgressStore.get(startID);
-  return progress ? cloneProgress(progress) : null;
-}
-
-export function updateRemoteStartProgress(startID: string, patch: RemoteStartProgressPatch) {
-  const progress = remoteStartProgressStore.get(startID);
-  if (!progress) return null;
-
-  const updated: RemoteStartProgress = {
-    ...progress,
-    ...patch,
-    percent: Math.max(0, Math.min(100, patch.percent ?? progress.percent)),
-    datasetName: patch.datasetName !== undefined ? patch.datasetName : progress.datasetName,
-    warnings: patch.warnings ? [...patch.warnings] : progress.warnings,
-    updatedAt: new Date().toISOString(),
-  };
-
-  remoteStartProgressStore.set(startID, updated);
-  return cloneProgress(updated);
-}
-
-export function hasActiveRemoteStartForJob(jobID: string) {
-  cleanupOldRemoteStartProgress();
-  for (const progress of remoteStartProgressStore.values()) {
-    if (progress.jobID === jobID && ACTIVE_REMOTE_START_STATUSES.has(progress.status)) {
-      return true;
-    }
-  }
-  return false;
-}
+export async function hasActiveRemoteStartForJob(jobID: string) { return Boolean(await activeOperationForResource(`job:${jobID}`)); }

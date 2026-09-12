@@ -16,7 +16,7 @@ function exportedArrayBlock(source, exportName, nextExportName) {
 }
 
 test('stable Orbit and experimental ConvRot backends are exposed by the new-job selector', () => {
-  const options = readSource('src/app/jobs/new/options.ts');
+  const options = readSource('src/domain/modelOptions.ts');
   const quantizationOptions = exportedArrayBlock(options, 'quantizationOptions', 'defaultQtype');
 
   assert.match(quantizationOptions, /\{ value: 'orbit4', label: 'AITK Orbit 4-bit' \}/);

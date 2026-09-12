@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import { ExternalComfyError, resolveExternalComfyUrl, runIdeogramComfyPreflight } from '@/server/externalComfy';
@@ -24,9 +25,9 @@ function errorResponse(error: unknown) {
   );
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const serverUrl = await resolveExternalComfyUrl(body?.server_url ?? body?.serverUrl);
     const state = isRecord(body?.state) ? (body.state as IdeogramWorkflowState) : undefined;
     const workflow = isRecord(body?.workflow) ? body.workflow : buildIdeogramComfyWorkflow(state);
@@ -40,3 +41,5 @@ export async function POST(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

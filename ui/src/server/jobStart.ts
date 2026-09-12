@@ -1,5 +1,8 @@
+import { configContractErrors } from '../domain/configContract';
 import fsp from 'fs/promises';
+import { assertPythonRuntimeReady } from './pythonPath';
 import { db } from './db';
+import { beginOperationCommit, checkpointOperation, getOperation } from './operations';
 import { createRemoteTrainingJobBundle } from './trainingJobBundle';
 import {
   getRemoteWorker,
@@ -114,6 +117,7 @@ export async function prepareJobStart(
   jobID: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
   durableEncryptedDatasetKeys = false,
+  options: { allowQueued?: boolean; operationID?: string } = {},
 ): Promise<PreparedJobStart> {
   if (!isValidJobId(jobID)) {
     failStart({ error: 'Invalid job ID' }, 400);
@@ -123,6 +127,13 @@ export async function prepareJobStart(
   if (!job) {
     failStart({ error: 'Job not found' }, 404);
   }
+  if (!(options.operationID && job.attempt_id === options.operationID) && !['stopped', 'error', 'completed', ...(options.allowQueued ? ['queued'] : [])].includes(job.status)) {
+    failStart({ error: 'Job already has an active or queued attempt', code: 'JOB_ACTIVE' }, 409);
+  }
+  if (isLocalWorker(job.worker_id)) {
+    try { await assertPythonRuntimeReady(); }
+    catch (error) { failStart({ error: error instanceof Error ? error.message : 'Python runtime unavailable', code: 'PYTHON_NOT_READY' }, 409); }
+  }
   let jobConfig: any;
   try {
     jobConfig = JSON.parse(job.job_config);
@@ -130,6 +141,9 @@ export async function prepareJobStart(
     failStart({ error: 'Invalid job config' }, 400);
   }
 
+  const contractErrors = configContractErrors(jobConfig, { deviceBackend: isLocalWorker(job.worker_id) ? process.platform === 'darwin' ? 'mps' : 'cuda' : undefined });
+  if (contractErrors.length) failStart({ error: contractErrors[0], code: 'INVALID_CONFIG' }, 400);
+  if (isLocalWorker(job.worker_id)) await assertPythonRuntimeReady(jobConfig.config?.process?.[0]?.model?.arch);
   const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
   let encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedDatasetKeys);
   if (encryptedKeyCoverage.missingDatasets.length > 0) {
@@ -159,7 +173,7 @@ export async function prepareJobStart(
     );
   }
 
-  if (durableEncryptedDatasetKeys && requiredEncryptedDatasets.length > 0) {
+  if ((durableEncryptedDatasetKeys || useDurableEncryptedKeys) && requiredEncryptedDatasets.length > 0) {
     try {
       await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
     } catch (error) {
@@ -198,9 +212,12 @@ export async function prepareJobStart(
 async function queueLocalJob(prepared: PreparedJobStart, options: { startQueue?: boolean; info?: string } = {}) {
   const { job, jobID } = prepared;
   const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
+  const queued = await db.jobs.updateIf(jobID, {
+    attempt_id: job.attempt_id ?? null, status: job.status, updated_at: new Date(job.updated_at),
+  }, { queue_position: newQueuePosition, status: 'queued', stop: false, return_to_queue: false, info: options.info || 'Job queued' });
+  if (!queued) failStart({ error: 'Job changed while starting. Refresh and retry.', code: 'JOB_CHANGED' }, 409);
 
-  await db.jobs.update(jobID, { queue_position: newQueuePosition });
-
+  try {
   const queue = await db.queues.findByGpuIds(job.gpu_ids);
   if (!queue) {
     await db.queues.create({
@@ -210,13 +227,10 @@ async function queueLocalJob(prepared: PreparedJobStart, options: { startQueue?:
   } else if (options.startQueue === true && !queue.is_running) {
     await db.queues.update(queue.id, { is_running: true });
   }
-
-  await db.jobs.update(jobID, {
-    status: 'queued',
-    stop: false,
-    return_to_queue: false,
-    info: options.info || 'Job queued',
-  });
+  } catch (error) {
+    await db.jobs.updateIf(jobID, { attempt_id: queued.attempt_id ?? null, status: 'queued', updated_at: new Date(queued.updated_at) }, { status: job.status, info: 'Queue preparation failed; retry the start command' });
+    throw error;
+  }
 
   return (await db.jobs.findById(jobID)) || job;
 }
@@ -285,7 +299,7 @@ export async function assertPreparedJobCanStart(prepared: PreparedJobStart) {
 
 export async function startPreparedJob(
   prepared: PreparedJobStart,
-  options: { startQueue?: boolean; queueInfo?: string; onRemoteStartProgress?: RemoteStartProgressCallback } = {},
+  options: { startQueue?: boolean; queueInfo?: string; onRemoteStartProgress?: RemoteStartProgressCallback; operationID?: string } = {},
 ): Promise<Job> {
   const { job, jobID, jobConfig, requiredEncryptedDatasets, encryptedKeysForLaunch, useDurableEncryptedKeys } =
     prepared;
@@ -314,6 +328,7 @@ export async function startPreparedJob(
         return dispatchRemoteCaptionJob({
           job,
           jobConfig,
+          operationID: options.operationID,
           worker,
           encrypted: requiredEncryptedDatasets.length > 0,
           durableEncryptedDatasetKeys: useDurableEncryptedKeys,
@@ -328,6 +343,7 @@ export async function startPreparedJob(
 
       if (!remoteJobId) {
         const datasetSync = await syncRemoteDatasetsForJobConfig(jobConfig, worker, {
+          operationID: options.operationID,
           onProgress: progress =>
             onProgress?.({
               status: progress.status,
@@ -355,12 +371,14 @@ export async function startPreparedJob(
           bytesTotal: 0,
           warnings: remoteWarnings,
         });
-        const bundle = await createRemoteTrainingJobBundle(jobID, {
-          includeDatasets: false,
-          checkpointMode: 'all',
-          targetWorker: worker,
-          targetJobConfig: remoteJobConfig,
-        });
+        const priorOperation = options.operationID ? await getOperation(options.operationID) : null;
+        const cachedPath = priorOperation?.checkpoint.bundleZipPath;
+        const cacheExists = typeof cachedPath === 'string' && await fsp.stat(cachedPath).then(stat => stat.isFile()).catch(() => false);
+        const bundle = cacheExists && typeof cachedPath === 'string'
+          ? { zipPath: cachedPath, warnings: [] as string[] }
+          : await createRemoteTrainingJobBundle(jobID, { includeDatasets: false, checkpointMode: 'all', targetWorker: worker, targetJobConfig: remoteJobConfig });
+        if (options.operationID) await checkpointOperation(options.operationID, 'bundle-ready', { bundleZipPath: bundle.zipPath });
+
         try {
           const bundleStat = await fsp.stat(bundle.zipPath);
           onProgress?.({
@@ -383,8 +401,9 @@ export async function startPreparedJob(
               bytesTotal: uploadComplete ? 0 : progress.total,
               warnings: remoteWarnings,
             });
-          });
+          }, options.operationID ? `job-${options.operationID}` : undefined);
           remoteJobId = imported.job.id;
+          if (options.operationID) await checkpointOperation(options.operationID, 'remote-job-identified', { remoteJobID: remoteJobId });
           const localJobConfig = {
             ...jobConfig,
             config: {
@@ -392,7 +411,7 @@ export async function startPreparedJob(
               name: imported.job.name,
             },
           };
-          await db.jobs.update(jobID, {
+          await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null }, {
             name: imported.job.name,
             gpu_ids: imported.job.gpu_ids,
             job_config: JSON.stringify(localJobConfig),
@@ -411,7 +430,7 @@ export async function startPreparedJob(
             remoteJobID: imported.job.id,
           });
         } finally {
-          await fsp.rm(bundle.zipPath, { force: true }).catch(() => undefined);
+          if (!options.operationID) await fsp.rm(bundle.zipPath, { force: true }).catch(() => undefined);
         }
       }
 
@@ -431,8 +450,13 @@ export async function startPreparedJob(
         body: JSON.stringify({
           encryptedDatasetKeys: remoteStartHasKeys ? remoteEncryptedKeysForLaunch : undefined,
           durableEncryptedDatasetKeys: useDurableEncryptedKeys,
+          idempotencyKey: options.operationID,
         }),
       };
+      if (options.operationID) {
+        await beginOperationCommit(options.operationID, 'starting-remote-job');
+        await checkpointOperation(options.operationID, 'start-requested', { remoteJobID: remoteJobId });
+      }
       await remoteJson(
         worker,
         `/api/jobs/${encodeURIComponent(remoteJobId)}/start`,
@@ -445,7 +469,7 @@ export async function startPreparedJob(
         warnings: remoteWarnings,
         remoteJobID: remoteJobId,
       });
-      await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`);
+      await remoteJson(worker, `/api/queue/${encodeURIComponent(job.gpu_ids)}/start`, { method: 'POST' });
       await db.queues
         .findByGpuIds(job.gpu_ids, job.worker_id)
         .then(queue =>
@@ -474,15 +498,16 @@ export async function startPreparedJob(
         percent: 100,
         error: message,
       });
-      await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
+      await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null }, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
       failStart({ error: message }, isRemoteCaptionDispatchError(error) ? error.status : 502);
     }
   }
 
   if (isAnyRemoteOllamaCaptionJob(jobConfig)) {
-    await startJobNow(jobID, {
+    const started = await startJobNow(jobID, {
       encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
     });
+    if (!started) failStart({ error: 'Job or selected devices are already active', code: 'JOB_ACTIVE' }, 409);
     return (await db.jobs.findById(jobID)) || job;
   }
 
@@ -492,7 +517,9 @@ export async function startPreparedJob(
 
   if (requiredEncryptedDatasets.length > 0) {
     await assertPreparedJobCanStart(prepared);
-    await startJobNow(jobID, { encryptedDatasetKeys: encryptedKeysForLaunch });
+    if (!(await startJobNow(jobID, { encryptedDatasetKeys: encryptedKeysForLaunch }))) {
+      failStart({ error: 'Job or selected devices are already active', code: 'JOB_ACTIVE' }, 409);
+    }
     return (await db.jobs.findById(jobID)) || job;
   }
 

@@ -51,8 +51,8 @@ class Config:
     # - Shift factor: -0.12306906282901764
     # - Scaling factor: 1.7985087266803625
 
-    def __getitem__(cls, x):
-        return getattr(cls, x)
+    def __getitem__(self, x):
+        return getattr(self, x)
 
 
 class AutoencoderPixelMixer(nn.Module):

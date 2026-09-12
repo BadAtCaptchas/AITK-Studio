@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import {
   RUNTIME_PATH,
   TOOLKIT_ROOT,
@@ -17,6 +18,7 @@ import {
 
 const SHUTDOWN_GRACE_MS = 8000;
 const FORCE_GRACE_MS = 2000;
+const INTERNAL_TOKEN = randomBytes(32).toString('base64url');
 
 function parseMode() {
   const modeArgIndex = process.argv.indexOf('--mode');
@@ -171,6 +173,7 @@ function spawnManaged(spec) {
     env: {
       ...process.env,
       AITK_APP_SUPERVISOR_PID: String(process.pid),
+      ...(['UI', 'WORKER'].includes(spec.label) ? { AITK_INTERNAL_TOKEN: INTERNAL_TOKEN } : {}),
     },
     stdio: spec.ipc ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -184,6 +187,9 @@ function spawnManaged(spec) {
 async function main() {
   const mode = parseMode();
   const port = getUiPort(mode);
+  const bind = process.env.AITK_BIND_HOST || '127.0.0.1';
+  const internalHost = ['0.0.0.0', '::', 'localhost'].includes(bind) ? '127.0.0.1' : bind.includes(':') ? `[${bind}]` : bind;
+  process.env.AITK_INTERNAL_URL = `http://${internalHost}:${port}`;
   const children = [];
   let shuttingDown = false;
   let exitCode = 0;

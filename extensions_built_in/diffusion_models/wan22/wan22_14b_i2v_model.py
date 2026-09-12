@@ -2,7 +2,7 @@ import torch
 from toolkit.models.wan21.wan_utils import add_first_frame_conditioning
 from toolkit.prompt_utils import PromptEmbeds
 from PIL import Image
-import torch
+
 from toolkit.config_modules import GenerateImageConfig
 from toolkit.image_io import open_static_image
 from .wan22_pipeline import Wan22Pipeline
@@ -15,8 +15,8 @@ from .wan22_14b_model import Wan2214bModel
 
 class Wan2214bI2VModel(Wan2214bModel):
     arch = "wan22_14b_i2v"
-    
-    
+
+
     def generate_single_image(
         self,
         pipeline: Wan22Pipeline,
@@ -26,8 +26,8 @@ class Wan2214bI2VModel(Wan2214bModel):
         generator: torch.Generator,
         extra: dict,
     ):
-        
-        # todo 
+
+        # todo
         # reactivate progress bar since this is slooooow
         pipeline.set_progress_bar_config(disable=False)
 
@@ -49,7 +49,7 @@ class Wan2214bI2VModel(Wan2214bModel):
             width = width // d * d
 
             # resize the control image
-            control_img = control_img.resize((width, height), Image.LANCZOS)
+            control_img = control_img.resize((width, height), Image.Resampling.LANCZOS)
 
             # 5. Prepare latent variables
             # num_channels_latents = self.transformer.config.in_channels
@@ -73,7 +73,7 @@ class Wan2214bI2VModel(Wan2214bModel):
                 * 2.0
                 - 1.0
             )  # normalize to [-1, 1]
-            
+
             # Add conditioning using the standalone function
             gen_config.latents = add_first_frame_conditioning(
                 latent_model_input=latents,
@@ -108,7 +108,7 @@ class Wan2214bI2VModel(Wan2214bModel):
             # get just the first image
             img = batch_item[0]
         return img
-    
+
     def get_noise_prediction(
         self,
         latent_model_input: torch.Tensor,
@@ -127,14 +127,14 @@ class Wan2214bI2VModel(Wan2214bModel):
                 first_frames = frames[:, 0]
             else:
                 raise ValueError(f"Unknown frame shape {frames.shape}")
-            
+
             # Add conditioning using the standalone function
             conditioned_latent = add_first_frame_conditioning(
                 latent_model_input=latent_model_input,
                 first_frame=first_frames,
                 vae=self.vae
             )
-        
+
         noise_pred = self.model(
             hidden_states=conditioned_latent,
             timestep=timestep,

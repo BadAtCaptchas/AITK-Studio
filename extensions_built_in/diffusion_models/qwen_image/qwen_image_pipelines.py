@@ -1,3 +1,4 @@
+from toolkit.xla import mark_xla_step
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -310,7 +311,7 @@ class QwenImageEditPlusCustomPipeline(QwenImageEditPlusPipeline):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         self._current_timestep = None
         if output_type == "latent":

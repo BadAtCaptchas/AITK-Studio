@@ -1,0 +1,561 @@
+[
+  {
+    "name": "guided image",
+    "valid": true,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "video output",
+    "valid": true,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "ltx2",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 81,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "unknown architecture",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "does-not-exist",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "negative steps",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": -1,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "boolean steps",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": true,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "fractional steps",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 1.5,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "wrong train shape",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": [],
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "wrong sample shape",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": []
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "future version",
+    "valid": false,
+    "config": {
+      "capability_version": 2,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "boolean version",
+    "valid": false,
+    "config": {
+      "capability_version": true,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "invalid video frames",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "ltx2",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 80,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "invalid precision",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001,
+              "dtype": "not-a-dtype"
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "CUDA quantization on MPS",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "mps",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model",
+              "qtype": "nvfp4"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "MPS image",
+    "valid": true,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "mps",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "declared extension",
+    "valid": true,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "custom",
+            "device": "cuda",
+            "model": {
+              "arch": "custom-model",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      },
+      "extensions": {
+        "example.custom": {
+          "processKinds": [
+            "custom"
+          ],
+          "modelArches": [
+            "custom-model"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "unregistered process",
+    "valid": false,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "unknown",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "advanced options retained",
+    "valid": true,
+    "config": {
+      "capability_version": 1,
+      "job": "extension",
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "train": {
+              "steps": 10,
+              "batch_size": 1,
+              "lr": 0.001,
+              "custom_scheduler": {
+                "advanced": true
+              }
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "image generation",
+    "valid": true,
+    "config": {
+      "capability_version": 1,
+      "job": "generate",
+      "config": {
+        "process": [
+          {
+            "type": "to_folder",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/model"
+            },
+            "sample": {
+              "width": 512,
+              "height": 512,
+              "num_frames": 1,
+              "fps": 16
+            }
+          }
+        ]
+      }
+    }
+  }
+]

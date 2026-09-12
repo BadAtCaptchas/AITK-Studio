@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import {
@@ -30,9 +31,9 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     if (!isRecord(body?.state)) {
       return NextResponse.json({ error: 'state is required.' }, { status: 400 });
     }
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
       workflow,
       images: Array.isArray(body?.images) ? body.images : [],
       favorite: typeof body?.favorite === 'boolean' ? body.favorite : undefined,
-      status: body?.status,
+      status: body.status === 'queued' || body.status === 'completed' || body.status === 'error' || body.status === 'imported' || body.status === 'canceled' ? body.status : undefined,
     });
     return NextResponse.json(result);
   } catch (error) {
@@ -65,9 +66,9 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
+async function patchCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const id = typeof body?.id === 'string' ? body.id.trim() : '';
     if (!id) return NextResponse.json({ error: 'id is required.' }, { status: 400 });
     const result = await setIdeogramWorkflowHistoryFavorite(id, Boolean(body?.favorite));
@@ -78,7 +79,7 @@ export async function PATCH(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+async function deleteCommand(request: Request) {
   try {
     const url = new URL(request.url);
     const id = url.searchParams.get('id')?.trim() || '';
@@ -90,3 +91,7 @@ export async function DELETE(request: Request) {
     return errorResponse(error);
   }
 }
+
+export const POST = withCommandBoundary(postCommand);
+export const PATCH = withCommandBoundary(patchCommand);
+export const DELETE = withCommandBoundary(deleteCommand);

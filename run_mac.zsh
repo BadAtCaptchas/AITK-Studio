@@ -24,10 +24,7 @@ PYTHON_VERSION="3.12.8"
 RELEASE_TAG="20241219"
 
 # --- Package versions (update these as needed) ---
-NODE_VERSION="23.11.1"
-TORCH_VERSION="2.11.0"
-TORCHVISION_VERSION="0.26.0"
-TORCHAUDIO_VERSION="2.11.0"
+NODE_VERSION="24.21.0"
 
 # Detect architecture
 ARCH="$(uname -m)"
@@ -117,28 +114,7 @@ else
 fi
 
 # ── 4. Install / update PyTorch packages ────────────────────────────
-# Helper: returns 0 if the package is installed at the exact version
-pkg_ok() {
-    local pkg="$1" want="$2"
-    local got
-    got="$("$PIP" show "$pkg" 2>/dev/null | awk '/^Version:/{print $2}')" || true
-    [[ "$got" == "$want" ]]
-}
-
-PKGS_TO_INSTALL=()
-
-pkg_ok "torch"       "$TORCH_VERSION"       || PKGS_TO_INSTALL+=("torch==$TORCH_VERSION")
-pkg_ok "torchvision" "$TORCHVISION_VERSION"  || PKGS_TO_INSTALL+=("torchvision==$TORCHVISION_VERSION")
-pkg_ok "torchaudio"  "$TORCHAUDIO_VERSION"   || PKGS_TO_INSTALL+=("torchaudio==$TORCHAUDIO_VERSION")
-
-if (( ${#PKGS_TO_INSTALL[@]} )); then
-    echo "Installing / updating: ${PKGS_TO_INSTALL[*]}"
-    "$PIP" install "${PKGS_TO_INSTALL[@]}"
-else
-    echo "PyTorch packages are up to date."
-fi
-
-# ── 5. Install / update requirements.txt ────────────────────────────
+# Resolve Torch and application dependencies together.
 REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
 REQ_HASH_FILE="$VENV_DIR/.requirements_hash"
 
@@ -150,7 +126,7 @@ if [[ -f "$REQUIREMENTS" ]]; then
 
     if [[ "$CURRENT_HASH" != "$STORED_HASH" ]]; then
         echo "Installing / updating requirements.txt..."
-        "$PIP" install -r "$REQUIREMENTS"
+        "$PYTHON" "$SCRIPT_DIR/scripts/install_runtime.py" --profile macos
         echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
     else
         echo "Requirements are up to date."

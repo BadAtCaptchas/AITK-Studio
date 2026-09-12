@@ -101,7 +101,7 @@ class QwenImageEditModel(QwenImageModel):
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(
-                    (gen_config.width, gen_config.height), Image.BILINEAR
+                    (gen_config.width, gen_config.height), Image.Resampling.BILINEAR
                 )
 
         # flush for low vram if we are doing that
@@ -245,7 +245,7 @@ class QwenImageEditModel(QwenImageModel):
 
         img_h2, img_w2 = height // 2, width // 2
         control_img_h2, control_img_w2 = control_height // 2, control_width // 2
-        
+
         img_shapes = [[(1, img_h2, img_w2), (1, control_img_h2, control_img_w2)]] * batch_size
 
         latents = latent_model_input

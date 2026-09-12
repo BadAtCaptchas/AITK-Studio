@@ -474,9 +474,6 @@ class ZImageL2PModel(ZImageModel):
         text_encoder = Qwen3TextEncoder.load(
             base_model_path, **self.component_load_kwargs("te")
         )
-        text_encoder = Qwen3ForCausalLM.from_pretrained(
-            base_model_path, subfolder="text_encoder", torch_dtype=dtype
-        )
 
         if (
             self.model_config.layer_offloading

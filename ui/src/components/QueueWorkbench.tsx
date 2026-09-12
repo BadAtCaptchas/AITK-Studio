@@ -55,7 +55,7 @@ type PendingReorder = {
   gpuIDs: string;
   jobIDs: string[];
 };
-const activeJobStatuses = new Set(['queued', 'running', 'stopping']);
+const activeJobStatuses = new Set(['queued', 'starting', 'remote-starting', 'running', 'stopping']);
 function getLaneKey(workerID: string, gpuIDs: string | null) {
   return `${workerID}:${gpuIDs || ''}`;
 }
@@ -739,13 +739,14 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
 }
 export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }: QueueWorkbenchProps) {
   const router = useRouter();
-  const { jobs, status, refreshJobs } = useJobsList({
+  const [activeTab, setActiveTab] = useState<TabKey>('active');
+  const { jobs, status, refreshJobs, hasMore, loadMore, isRefreshing, freshness } = useJobsList({
+    view: activeTab,
     reloadInterval: 5000,
   });
   const { queues, status: queueStatus, refreshQueues } = useQueueList(5000);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
-  const [activeTab, setActiveTab] = useState<TabKey>('active');
   const [sort, setSort] = useState<SortKey>('newest');
   const [selectedJobID, setSelectedJobID] = useState<string | null>(null);
   const [dragJobID, setDragJobID] = useState<string | null>(null);
@@ -1147,6 +1148,8 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
         )}
       </div>
 
+      {hasMore && <button className="operator-button" disabled={isRefreshing} onClick={loadMore}>Load more jobs</button>}
+      {freshness && (freshness.failed > 0 || Date.now() - Date.parse(freshness.updatedAt) > 30000) && <p role="status" className="text-sm text-amber-300">Job synchronization is delayed. Last checked {new Date(freshness.updatedAt).toLocaleTimeString()}.</p>}
       {hasInlineInspector && selectedJob && (
         <div className="min-w-0">
           <div className="mb-2 flex justify-end">

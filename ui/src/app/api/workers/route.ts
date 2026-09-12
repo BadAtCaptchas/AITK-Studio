@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
@@ -20,9 +21,9 @@ export async function GET() {
   return NextResponse.json({ workers: workers.map(toPublicWorker) });
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const id = asString(body.id);
     const name = asString(body.name);
     const baseUrl = normalizeWorkerBaseUrl(asString(body.base_url));
@@ -58,3 +59,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

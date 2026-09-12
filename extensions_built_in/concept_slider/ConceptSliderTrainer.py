@@ -194,7 +194,7 @@ class ConceptSliderTrainer(DiffusionTrainer):
             enhance_negative_target = neutral_pred + guidance_scale * negative
             erase_negative_target = neutral_pred - guidance_scale * negative
             erase_positive_target = neutral_pred - guidance_scale * positive
-            
+
             # normalize to neutral std/mean
             enhance_positive_target = norm_like_tensor(
                 enhance_positive_target, neutral_pred

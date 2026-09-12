@@ -33,6 +33,9 @@ export type JobCreateInput = {
   remote_sync_at?: Date | string | null;
   remote_error?: string | null;
   gpu_ids: string;
+  storage_key?: string | null;
+  attempt_id?: string | null;
+  process_started_at?: number | null;
   job_config: string;
   status?: string;
   stop?: boolean;
@@ -253,6 +256,9 @@ function normalizeJob(raw: any): Job | null {
   return {
     id: String(raw.id),
     name: String(raw.name ?? ''),
+    storage_key: raw.storage_key == null ? null : String(raw.storage_key),
+    attempt_id: raw.attempt_id == null ? null : String(raw.attempt_id),
+    process_started_at: typeof raw.process_started_at === 'number' ? raw.process_started_at : null,
     worker_id: String(raw.worker_id ?? 'local'),
     remote_job_id: raw.remote_job_id == null ? null : String(raw.remote_job_id),
     remote_sync_at: raw.remote_sync_at == null ? null : parseDate(raw.remote_sync_at),
@@ -798,10 +804,53 @@ async function nextMongoQueueId(queues: Collection<Document>) {
     .sort({ id: -1 })
     .limit(1)
     .next();
-  return Number(latest?.id ?? 0) + 1;
+  const mongo = await getMongoDb();
+  const counters = mongo.collection<{ _id: string; value: number }>('runtime_counters');
+  try { await counters.updateOne({ _id: 'queue' }, { $max: { value: Number(latest?.id ?? 0) } }, { upsert: true }); }
+  catch (error) { if (!(error && typeof error === 'object' && 'code' in error && error.code === 11000)) throw error; }
+  const result = await counters.findOneAndUpdate({ _id: 'queue' }, { $inc: { value: 1 } }, { returnDocument: 'after' });
+  return Number(result!.value);
 }
 
 export const db = {
+  runtime: {
+    async get(key: string): Promise<{ key: string; value: unknown; version: number } | null> {
+      const row = isMongoProvider()
+        ? await (await getMongoDb()).collection('runtime_records').findOne({ key })
+        : await getPrisma().runtimeRecord.findUnique({ where: { key } });
+      return row ? { key, value: JSON.parse(String(row.value)) as unknown, version: Number(row.version) } : null;
+    },
+    async compareAndSwap(key: string, version: number | null, value: unknown): Promise<boolean> {
+      const encoded = JSON.stringify(value);
+      if (Buffer.byteLength(encoded) > 8 * 1024 * 1024) throw new Error('Runtime record exceeds its size limit');
+      if (isMongoProvider()) {
+        const collection = (await getMongoDb()).collection<{ _id: string; key: string; value: string; version: number; updated_at: Date }>('runtime_records');
+        if (version === null) {
+          try { await collection.insertOne({ _id: key, key, value: encoded, version: 1, updated_at: new Date() }); return true; }
+          catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 11000) return false; throw error; }
+        }
+        const result = await collection.updateOne({ key, version }, { $set: { value: encoded, updated_at: new Date() }, $inc: { version: 1 } });
+        return result.modifiedCount === 1;
+      }
+      if (version === null) {
+        try { await getPrisma().runtimeRecord.create({ data: { key, value: encoded } }); return true; }
+        catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return false; throw error; }
+      }
+      return (await getPrisma().runtimeRecord.updateMany({ where: { key, version }, data: { value: encoded, version: { increment: 1 } } })).count === 1;
+    },
+    async delete(key: string, version?: number): Promise<boolean> {
+      const where = { key, ...(version === undefined ? {} : { version }) };
+      if (isMongoProvider()) return (await (await getMongoDb()).collection('runtime_records').deleteOne(where)).deletedCount === 1;
+      return (await getPrisma().runtimeRecord.deleteMany({ where })).count === 1;
+    },
+    async list(prefix: string, limit = 100, after = ''): Promise<Array<{ key: string; value: unknown; version: number }>> {
+      const take = Math.min(1000, Math.max(1, limit));
+      const rows = isMongoProvider()
+        ? await (await getMongoDb()).collection('runtime_records').find({ key: { $gte: prefix, $lt: `${prefix}\uffff`, ...(after ? { $gt: after } : {}) } }).sort({ key: 1 }).limit(take).toArray()
+        : await getPrisma().runtimeRecord.findMany({ where: { key: { startsWith: prefix, ...(after ? { gt: after } : {}) } }, orderBy: { key: 'asc' }, take });
+      return rows.map(row => ({ key: String(row.key), value: JSON.parse(String(row.value)) as unknown, version: Number(row.version) }));
+    },
+  },
   settings: {
     async list(): Promise<SettingRecord[]> {
       if (isMongoProvider()) {
@@ -841,15 +890,15 @@ export const db = {
       await Promise.all(Object.entries(settings).map(([key, value]) => db.settings.upsert(key, value ?? '')));
     },
 
-    async delete(key: string): Promise<void> {
+    async delete(key: string, expectedValue?: string): Promise<void> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
-        await mongoCollection(mongo, 'settings').deleteOne({ key });
+        await mongoCollection(mongo, 'settings').deleteOne({ key, ...(expectedValue === undefined ? {} : { value: expectedValue }) });
         return;
       }
 
       try {
-        await getPrisma().settings.delete({ where: { key } });
+        await getPrisma().settings.deleteMany({ where: { key, ...(expectedValue === undefined ? {} : { value: expectedValue }) } });
       } catch (error: any) {
         if (error?.code !== 'P2025') throw error;
       }
@@ -967,6 +1016,21 @@ export const db = {
   },
 
   jobs: {
+    async updateIf(id: string, expected: { attempt_id: string | null; status?: string | string[]; updated_at?: Date | string }, data: JobUpdateInput): Promise<Job | null> {
+      if (isMongoProvider()) {
+        const filter: Document = { id, attempt_id: expected.attempt_id };
+        if (expected.status) filter.status = Array.isArray(expected.status) ? { $in: expected.status } : expected.status;
+        if (expected.updated_at) filter.updated_at = new Date(expected.updated_at);
+        return normalizeJob(await (await getMongoDb()).collection('jobs').findOneAndUpdate(filter, { $set: { ...data, updated_at: new Date() } }, { returnDocument: 'after' }));
+      }
+      const where: Prisma.JobWhereInput = { id, attempt_id: expected.attempt_id,
+        ...(expected.status ? { status: Array.isArray(expected.status) ? { in: expected.status } : expected.status } : {}),
+        ...(expected.updated_at ? { updated_at: new Date(expected.updated_at) } : {}) };
+      return getPrisma().$transaction(async transaction => {
+        if ((await transaction.job.updateMany({ where, data })).count !== 1) return null;
+        return transaction.job.findUnique({ where: { id } });
+      });
+    },
     async findById(id: string): Promise<Job | null> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
@@ -1011,6 +1075,8 @@ export const db = {
         gpu_ids?: string;
         worker_id?: string;
         order?: 'created_desc' | 'queue_asc';
+        limit?: number;
+        before?: { created_at: string; id: string };
       } = {},
     ) {
       if (isMongoProvider()) {
@@ -1021,30 +1087,34 @@ export const db = {
         if (options.worker_id) filter.worker_id = options.worker_id;
         if (Array.isArray(options.status)) filter.status = { $in: options.status };
         else if (options.status) filter.status = options.status;
-        const sort: Record<string, 1 | -1> = options.order === 'queue_asc' ? { queue_position: 1 } : { created_at: -1 };
+        if (options.before) filter.$or = [{ created_at: { $lt: new Date(options.before.created_at) } }, { created_at: new Date(options.before.created_at), id: { $lt: options.before.id } }];
+        const sort: Record<string, 1 | -1> = options.order === 'queue_asc' ? { queue_position: 1, id: 1 } : { created_at: -1, id: -1 };
         const rows = await mongoCollection(mongo, 'jobs')
           .find(filter, { projection: { _id: 0 } })
           .sort(sort)
+          .limit(options.limit ? Math.max(1, Math.min(501, Math.floor(options.limit))) : 0)
           .toArray();
         return rows.map(normalizeJob).filter(Boolean) as Job[];
       }
 
-      const where: any = {};
+      const where: Prisma.JobWhereInput = {};
       if (options.job_type) where.job_type = options.job_type;
       if (options.gpu_ids) where.gpu_ids = options.gpu_ids;
       if (options.worker_id) where.worker_id = options.worker_id;
       if (Array.isArray(options.status)) where.status = { in: options.status };
       else if (options.status) where.status = options.status;
+      if (options.before) where.OR = [{ created_at: { lt: new Date(options.before.created_at) } }, { created_at: new Date(options.before.created_at), id: { lt: options.before.id } }];
       return getPrisma().job.findMany({
         where: Object.keys(where).length > 0 ? where : undefined,
-        orderBy: options.order === 'queue_asc' ? { queue_position: 'asc' } : { created_at: 'desc' },
+        orderBy: options.order === 'queue_asc' ? [{ queue_position: 'asc' }, { id: 'asc' }] : [{ created_at: 'desc' }, { id: 'desc' }],
+        take: options.limit ? Math.max(1, Math.min(501, Math.floor(options.limit))) : undefined,
       });
     },
 
     async findFirst(
       options: { status?: string | string[]; gpu_ids?: string; worker_id?: string; order?: 'queue_asc' } = {},
     ) {
-      const rows = await db.jobs.list(options);
+      const rows = await db.jobs.list({ ...options, limit: 1 });
       return rows[0] ?? null;
     },
 
@@ -1080,6 +1150,9 @@ export const db = {
     },
 
     async create(input: JobCreateInput): Promise<Job> {
+      input = { ...input, id: input.id || randomUUID() };
+      // Existing/imported folders supply their actual key; new outputs get a portable identity.
+      input.storage_key = input.storage_key ?? `job-${input.id}`;
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
         const now = new Date();
@@ -1091,6 +1164,9 @@ export const db = {
           remote_sync_at: input.remote_sync_at ?? null,
           remote_error: input.remote_error ?? null,
           gpu_ids: input.gpu_ids,
+          storage_key: input.storage_key ?? input.name,
+          attempt_id: input.attempt_id ?? null,
+          process_started_at: input.process_started_at ?? null,
           job_config: input.job_config,
           created_at: now,
           updated_at: now,
@@ -1116,7 +1192,7 @@ export const db = {
         return job;
       }
 
-      return getPrisma().job.create({ data: input });
+      return getPrisma().job.create({ data: { ...input, storage_key: input.storage_key ?? input.name } });
     },
 
     async update(id: string, data: JobUpdateInput): Promise<Job> {
@@ -1144,13 +1220,13 @@ export const db = {
       return getPrisma().job.update({ where: { id }, data });
     },
 
-    async delete(id: string): Promise<Job | null> {
+    async delete(id: string, expected?: { attempt_id: string | null; status: string }): Promise<Job | null> {
       if (isMongoProvider()) {
         const mongo = await getMongoDb();
-        const result = await mongoCollection(mongo, 'jobs').findOneAndDelete({ id }, { projection: { _id: 0 } });
+        const result = await mongoCollection(mongo, 'jobs').findOneAndDelete({ id, ...expected }, { projection: { _id: 0 } });
         return normalizeJob(result);
       }
-      return getPrisma().job.delete({ where: { id } });
+      return getPrisma().job.delete({ where: { id, ...expected } });
     },
   },
 

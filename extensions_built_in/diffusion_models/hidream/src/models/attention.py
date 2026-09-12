@@ -95,7 +95,7 @@ class FeedForwardSwiGLU(nn.Module):
         self.w2 = nn.Linear(hidden_dim, dim, bias=False)
         self.w3 = nn.Linear(dim, hidden_dim, bias=False)
         self.apply(self._init_weights)
-    
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)

@@ -130,6 +130,7 @@ class BooguImageProcessor(VaeImageProcessor):
             max_pixels = self.max_pixels
 
         ratio = 1.0
+        max_side_length_ratio = 1.0
         if max_side_length is not None:
             if height > width:
                 max_side_length_ratio = max_side_length / height

@@ -1181,5 +1181,3 @@ class BooguImageTransformer2DModel(
         if not return_dict:
             return output
         return Transformer2DModelOutput(sample=output)
-
-

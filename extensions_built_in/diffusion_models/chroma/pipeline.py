@@ -1,3 +1,4 @@
+from toolkit.xla import mark_xla_step
 from typing import Union, List, Optional, Dict, Any, Callable
 
 import numpy as np
@@ -9,12 +10,7 @@ from diffusers.utils import is_torch_xla_available
 from diffusers.utils.torch_utils import randn_tensor
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
+XLA_AVAILABLE = is_torch_xla_available()
 
 
 def prepare_latent_image_ids(batch_size, height, width, patch_size=2, max_offset=0):
@@ -95,7 +91,7 @@ class ChromaPipeline(FluxPipeline):
         )
         self.is_radiance = is_radiance
         self.vae_scale_factor = 8 if not is_radiance else 1
-    
+
     def prepare_latents(
         self,
         batch_size,
@@ -116,9 +112,9 @@ class ChromaPipeline(FluxPipeline):
 
         if latents is not None:
             latent_image_ids = prepare_latent_image_ids(
-                batch_size, 
-                height, 
-                width, 
+                batch_size,
+                height,
+                width,
                 patch_size=2 if not self.is_radiance else 16
             ).to(device=device, dtype=dtype)
             # latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
@@ -131,20 +127,20 @@ class ChromaPipeline(FluxPipeline):
             )
 
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        
+
         if not self.is_radiance:
             latents = self._pack_latents(latents, batch_size, num_channels_latents, height, width)
 
         # latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
         latent_image_ids = prepare_latent_image_ids(
-            batch_size, 
-            height, 
-            width, 
+            batch_size,
+            height,
+            width,
             patch_size=2 if not self.is_radiance else 16
         ).to(device=device, dtype=dtype)
 
         return latents, latent_image_ids
-    
+
     def __call__(
         self,
         prompt: Union[str, List[str]] = None,
@@ -210,7 +206,7 @@ class ChromaPipeline(FluxPipeline):
             generator,
             latents,
         )
-        
+
         # extend img ids to match batch size
         # latent_image_ids = latent_image_ids.unsqueeze(0)
         # latent_image_ids = torch.cat([latent_image_ids] * batch_size, dim=0)
@@ -236,7 +232,7 @@ class ChromaPipeline(FluxPipeline):
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
-        
+
         guidance = torch.full([1], 0, device=device, dtype=torch.float32)
         guidance = guidance.expand(latents.shape[0])
 
@@ -304,7 +300,7 @@ class ChromaPipeline(FluxPipeline):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         if output_type == "latent":
             image = latents

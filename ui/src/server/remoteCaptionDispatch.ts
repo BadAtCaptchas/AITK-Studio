@@ -1,3 +1,4 @@
+import { beginOperationCommit, checkpointOperation, getOperation } from './operations';
 import fsp from 'fs/promises';
 import path from 'path';
 import { db, type WorkerNodeRecord } from './db';
@@ -61,12 +62,14 @@ async function startRemoteWorkerCaptionJob(
   remoteJobID: string,
   gpuIds: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
+  operationID?: string,
 ) {
   const hasEncryptedDatasetKeys = Array.isArray(encryptedDatasetKeys) && encryptedDatasetKeys.length > 0;
   const startInit: RequestInit = {
     method: 'POST',
     body: JSON.stringify({
       encryptedDatasetKeys,
+      idempotencyKey: operationID,
       durableEncryptedDatasetKeys: hasEncryptedDatasetKeys,
     }),
   };
@@ -75,7 +78,7 @@ async function startRemoteWorkerCaptionJob(
     `/api/jobs/${encodeURIComponent(remoteJobID)}/start`,
     hasEncryptedDatasetKeys ? withoutRemoteRedirects(startInit) : startInit,
   );
-  await remoteJson(worker, `/api/queue/${encodeURIComponent(gpuIds)}/start`);
+  await remoteJson(worker, `/api/queue/${encodeURIComponent(gpuIds)}/start`, { method: 'POST' });
   const queue = await db.queues.findByGpuIds(gpuIds, worker.id);
   if (queue) {
     await db.queues.update(queue.id, { is_running: true });
@@ -86,13 +89,21 @@ async function startRemoteWorkerCaptionJob(
 
 export async function dispatchRemoteCaptionJob(options: {
   job: Job;
+  operationID?: string;
   jobConfig: any;
   worker: WorkerNodeRecord;
   encrypted: boolean;
   durableEncryptedDatasetKeys: boolean;
   encryptedKeysForLaunch: EncryptedDatasetStartKey[];
 }) {
-  const { job, worker } = options;
+  const { job, worker, operationID } = options;
+  const ownedUpdate = async (patch: Parameters<typeof db.jobs.update>[1]) => {
+    const updated = await db.jobs.updateIf(job.id, { attempt_id: job.attempt_id ?? null }, patch);
+    if (!updated) throw new Error('Remote caption attempt ownership changed');
+    return updated;
+  };
+  const checkpoint = async (phase: string, data: Record<string, unknown> = {}) => { if (operationID) await checkpointOperation(operationID, phase, data); };
+  const prior = operationID ? await getOperation(operationID) : null;
   const captionInfo = findCaptionProcess(options.jobConfig);
   if (!captionInfo) {
     throw new RemoteCaptionDispatchError('Caption process not found in job config', 400);
@@ -123,7 +134,7 @@ export async function dispatchRemoteCaptionJob(options: {
 
   if (job.remote_job_id) {
     const state = currentJobConfig.config?.remote_caption;
-    if (typeof state?.remoteDatasetPath === 'string' && state.remoteDatasetPath.trim()) {
+    if (prior?.checkpoint.captionStartRequested !== true && typeof state?.remoteDatasetPath === 'string' && state.remoteDatasetPath.trim()) {
       const remoteJobName = remoteCaptionRemoteJobName(job);
       const remoteJobConfig = buildRemoteOllamaCaptionJobConfig(currentJobConfig, {
         remoteDatasetPath: state.remoteDatasetPath,
@@ -146,8 +157,10 @@ export async function dispatchRemoteCaptionJob(options: {
       options.encrypted && typeof state?.remoteDatasetPath === 'string'
         ? encryptedKeyForRemoteDataset(realOriginalDatasetPath, options.encryptedKeysForLaunch, state.remoteDatasetPath)
         : undefined;
-    await startRemoteWorkerCaptionJob(worker, job.remote_job_id, job.gpu_ids, encryptedKeys);
-    const updated = await db.jobs.update(job.id, {
+    if (operationID) await beginOperationCommit(operationID, 'starting-remote-job');
+    await checkpoint('start-requested', { captionStartRequested: true, remoteJobID: job.remote_job_id });
+    await startRemoteWorkerCaptionJob(worker, job.remote_job_id, job.gpu_ids, encryptedKeys, operationID);
+    const updated = await ownedUpdate({
       job_config: JSON.stringify(
         patchRemoteCaptionState(currentJobConfig, {
           downloadStatus: 'running',
@@ -157,7 +170,7 @@ export async function dispatchRemoteCaptionJob(options: {
       remote_error: null,
       remote_sync_at: new Date(),
     });
-    return syncRemoteJob(updated);
+    return syncRemoteJob(updated, { background: false });
   }
 
   const initialState = buildInitialRemoteCaptionState({
@@ -170,7 +183,7 @@ export async function dispatchRemoteCaptionJob(options: {
     recaption: captionInfo.recaption,
   });
   currentJobConfig = setRemoteCaptionState(currentJobConfig, initialState);
-  await db.jobs.update(job.id, {
+  await ownedUpdate({
     job_config: JSON.stringify(currentJobConfig),
     remote_error: null,
     remote_sync_at: new Date(),
@@ -178,21 +191,26 @@ export async function dispatchRemoteCaptionJob(options: {
 
   const exportRoot = path.join(datasetsRoot, '.aitk-remote-caption-bundles');
   const originalDatasetName = path.basename(realOriginalDatasetPath);
-  const zipPath = path.join(exportRoot, datasetExportFileName(originalDatasetName));
+  const cachedZip = prior?.checkpoint.captionZip;
+  const zipPath = typeof cachedZip === 'string' ? cachedZip : path.join(exportRoot, datasetExportFileName(originalDatasetName));
 
   try {
-    await createDatasetExportArchive(originalDatasetName, realOriginalDatasetPath, zipPath);
+    if (!await fsp.stat(zipPath).then(stat => stat.isFile()).catch(() => false)) await createDatasetExportArchive(originalDatasetName, realOriginalDatasetPath, zipPath);
+    await checkpoint('caption-bundle-ready', { captionZip: zipPath });
     const importedDataset = await uploadDatasetArchiveToWorker(
       worker,
       zipPath,
       remoteCaptionDatasetName(job, originalDatasetName),
+      undefined, operationID ? `caption-${operationID}` : undefined,
     );
     const remoteJobName = remoteCaptionRemoteJobName(job);
     const remoteJobConfig = buildRemoteOllamaCaptionJobConfig(options.jobConfig, {
       remoteDatasetPath: importedDataset.path,
       remoteJobName,
     });
-    const remoteJob = await remoteJson<Job>(worker, '/api/jobs', {
+    // The imported dataset path is unique to this operation; recover a create whose response was lost.
+    const recovered = await remoteJson<Job | null>(worker, '/api/jobs?job_type=caption&job_ref=' + encodeURIComponent(importedDataset.path));
+    const remoteJob = recovered || await remoteJson<Job>(worker, '/api/jobs', {
       method: 'POST',
       body: JSON.stringify({
         name: remoteJobName,
@@ -204,6 +222,7 @@ export async function dispatchRemoteCaptionJob(options: {
       }),
     });
 
+    await checkpoint('remote-job-identified', { remoteJobID: remoteJob.id });
     const runningConfig = setRemoteCaptionState(options.jobConfig, {
       ...initialState,
       downloadStatus: 'running',
@@ -213,7 +232,7 @@ export async function dispatchRemoteCaptionJob(options: {
       lastError: null,
     });
     currentJobConfig = runningConfig;
-    const localJob = await db.jobs.update(job.id, {
+    const localJob = await ownedUpdate({
       remote_job_id: remoteJob.id,
       job_config: JSON.stringify(runningConfig),
       remote_error: null,
@@ -224,16 +243,17 @@ export async function dispatchRemoteCaptionJob(options: {
       options.encrypted && importedDataset.path
         ? encryptedKeyForRemoteDataset(realOriginalDatasetPath, options.encryptedKeysForLaunch, importedDataset.path)
         : undefined;
-    await startRemoteWorkerCaptionJob(worker, remoteJob.id, job.gpu_ids, encryptedKeys);
-    return syncRemoteJob(localJob);
+    if (operationID) await beginOperationCommit(operationID, 'starting-remote-job');
+    await checkpoint('start-requested', { captionStartRequested: true, remoteJobID: remoteJob.id });
+    await startRemoteWorkerCaptionJob(worker, remoteJob.id, job.gpu_ids, encryptedKeys, operationID);
+    return syncRemoteJob(localJob, { background: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Remote caption dispatch failed';
     const failedConfig = patchRemoteCaptionState(currentJobConfig, {
       downloadStatus: 'failed',
       lastError: message,
     });
-    await db.jobs
-      .update(job.id, {
+    await ownedUpdate({
         job_config: JSON.stringify(failedConfig),
         remote_error: message,
         remote_sync_at: new Date(),
@@ -241,6 +261,6 @@ export async function dispatchRemoteCaptionJob(options: {
       .catch(() => undefined);
     throw error;
   } finally {
-    await fsp.rm(zipPath, { force: true }).catch(() => undefined);
+    if (!operationID) await fsp.rm(zipPath, { force: true }).catch(() => undefined);
   }
 }

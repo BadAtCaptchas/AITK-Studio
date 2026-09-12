@@ -506,17 +506,20 @@ export function getUiPort(mode) {
 }
 
 export function buildAppCommands(mode, port = getUiPort(mode)) {
-  const tsNodeDevBin = path.join(UI_ROOT, 'node_modules', 'ts-node-dev', 'lib', 'bin.js');
-  const tsNodeBin = (() => {
-    try {
-      return require.resolve('ts-node/dist/bin.js');
-    } catch {
-      return require.resolve('ts-node-dev/node_modules/ts-node/dist/bin.js');
-    }
-  })();
   const updaterScript = path.join(UI_ROOT, 'scripts', 'repo-updater.mjs');
 
   if (mode === 'dev') {
+    const tsNodeDevBin = path.join(UI_ROOT, 'node_modules', 'ts-node-dev', 'lib', 'bin.js');
+    let tsNodeBin;
+    try {
+      tsNodeBin = require.resolve('ts-node/dist/bin.js');
+    } catch {
+      try {
+        tsNodeBin = createRequire(require.resolve('ts-node-dev/package.json')).resolve('ts-node/dist/bin.js');
+      } catch {
+        throw new Error('Development startup requires UI development dependencies. Run npm ci in ui/.');
+      }
+    }
     return [
       {
         label: 'WORKER',

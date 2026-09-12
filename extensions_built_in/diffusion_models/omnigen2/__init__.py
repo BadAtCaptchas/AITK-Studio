@@ -180,7 +180,7 @@ class OmniGen2Model(BaseModel):
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(
-                    (gen_config.width, gen_config.height), Image.BILINEAR
+                    (gen_config.width, gen_config.height), Image.Resampling.BILINEAR
                 )
             input_images = [control_img]
 

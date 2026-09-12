@@ -21,12 +21,14 @@ def get_optimizer(
         if lower_type.endswith('lion'):
             optimizer = dadaptation.DAdaptLion(params, eps=1e-6, lr=use_lr, **optimizer_params)
         elif lower_type.endswith('adam'):
-            optimizer = dadaptation.DAdaptLion(params, eps=1e-6, lr=use_lr, **optimizer_params)
+            optimizer = dadaptation.DAdaptAdam(params, eps=1e-6, lr=use_lr, **optimizer_params)
         elif lower_type == 'dadaptation':
             # backwards compatibility
             optimizer = dadaptation.DAdaptAdam(params, eps=1e-6, lr=use_lr, **optimizer_params)
             # warn user that dadaptation is deprecated
             print("WARNING: Dadaptation optimizer type has been changed to DadaptationAdam. Please update your config.")
+        else:
+            raise ValueError(f'Unknown optimizer type {optimizer_type}')
     elif lower_type.startswith("prodigy8bit"):
         from toolkit.optimizers.prodigy_8bit import Prodigy8bit
         print("Using Prodigy optimizer")

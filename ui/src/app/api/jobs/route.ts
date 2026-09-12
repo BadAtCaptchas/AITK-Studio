@@ -1,14 +1,16 @@
+import { configContractErrors } from '@/domain/configContract';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
+import { readJsonCommand, commandError, CommandInputError, isRecord, withCommandBoundary } from '@/server/commandInput';
+import { validJobName, deviceIds } from '@/utils/jobIdentity';
+import type { JobUpdateInput } from '@/server/db';
 import { NextResponse } from 'next/server';
 import { isMac } from '@/helpers/basic';
 import { db } from '@/server/db';
 import { withComfyInstallProgress } from '@/server/comfyInstallProgress';
 import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
-import { reconcileLocalJobProcess } from '@/server/jobProcess';
-import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
-import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 
 import type { Job } from '@/types';
 import { isRequestAuthenticated } from '@/utils/authSession';
@@ -115,59 +117,42 @@ export async function GET(request: Request) {
   try {
     if (id) {
       const job = await db.jobs.findById(id);
-      if (job && !isLocalWorker(job.worker_id)) {
-        const synced = await syncRemoteJob(job);
-        const captionSynced = await syncRemoteCaptionResultForJob(synced);
-        return NextResponse.json(await withJobProgress(captionSynced));
-      }
-      const reconciled = await reconcileLocalJobProcess(job);
-      return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
+      return NextResponse.json(job ? await withJobProgress(job) : null);
     }
     if (job_ref) {
       const job = await db.jobs.findLatestByRef(job_ref, job_type);
-      if (job && !isLocalWorker(job.worker_id)) {
-        const synced = await syncRemoteJob(job);
-        const captionSynced = await syncRemoteCaptionResultForJob(synced);
-        return NextResponse.json(await withJobProgress(captionSynced));
-      }
-      const reconciled = await reconcileLocalJobProcess(job);
-      return NextResponse.json(reconciled ? await withJobProgress(reconciled) : reconciled);
+      return NextResponse.json(job ? await withJobProgress(job) : null);
     }
 
-    const jobs = await listJobsForJobsApi({
-      jobType: job_type,
-      localOnly,
-    });
-    const reconciledJobs = (await Promise.all(jobs.map(job => reconcileLocalJobProcess(job)))).filter(
-      (job): job is Job => job !== null,
-    );
-    const resultSyncedJobs = await Promise.all(reconciledJobs.map(job => syncRemoteCaptionResultForJob(job)));
-    const progressedJobs = await Promise.all(resultSyncedJobs.map(job => withJobProgress(job)));
-    return NextResponse.json({ jobs: progressedJobs });
+    const page = await listJobsForJobsApi({ jobType: job_type, localOnly, cursor: searchParams.get('cursor'), limit: searchParams.get('limit'), view: searchParams.get('view'), summary: searchParams.get('summary') !== '0' });
+    return NextResponse.json(page);
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: 'Failed to fetch training data' }, { status: 500 });
+    const detail = commandError(error);
+    return NextResponse.json(detail || { error: 'Failed to fetch training data' }, { status: detail?.status || 500 });
   }
 }
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
   }
 
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = await readJsonCommand(request);
     const { id, name, job_config } = body;
-    const resolvedJobConfig = job_config;
+    const resolvedJobConfig = isRecord(job_config) ? { ...job_config, capability_version: job_config.capability_version ?? 1 } : job_config;
     const worker_id = normalizeWorkerId(body.worker_id);
 
-    if (!isValidJobName(name)) {
+    if (!validJobName(name)) {
       return NextResponse.json({ error: 'Invalid job name' }, { status: 400 });
     }
-    let gpu_ids: string = body.gpu_ids;
+    let gpu_ids: string;
+    try { gpu_ids = deviceIds(body.gpu_ids).join(','); }
+    catch { throw new CommandInputError('Invalid device selection'); }
 
-    if (isMac()) {
+    if (isMac() && isLocalWorker(worker_id)) {
       gpu_ids = 'mps';
     }
 
@@ -188,7 +173,7 @@ export async function POST(request: Request) {
     if (!isSafeJobConfig(resolvedJobConfig)) {
       return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
     }
-    const validationConfigErrors = getJobValidationConfigErrors(resolvedJobConfig);
+    const validationConfigErrors = [...configContractErrors(resolvedJobConfig), ...getJobValidationConfigErrors(resolvedJobConfig)];
     if (validationConfigErrors.length > 0) {
       return NextResponse.json(
         { error: validationConfigErrors[0], validation_errors: validationConfigErrors },
@@ -196,16 +181,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const extra: any = {};
+    const extra: Pick<JobUpdateInput, 'job_ref' | 'job_type'> = {};
     if ('job_ref' in body) {
+      if (body.job_ref !== null && typeof body.job_ref !== 'string') throw new CommandInputError('Invalid job_ref');
       extra['job_ref'] = body.job_ref;
     }
 
     if ('job_type' in body) {
+      if (typeof body.job_type !== 'string' || !['train', 'caption', 'generate'].includes(body.job_type)) throw new CommandInputError('Invalid job_type');
       extra['job_type'] = body.job_type;
     }
 
-    if (id && typeof id !== 'string') {
+    if (id !== undefined && typeof id !== 'string') {
       return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });
     }
 
@@ -215,18 +202,24 @@ export async function POST(request: Request) {
       if (!existing) {
         return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
+      if (!['queued', 'stopped', 'error', 'completed'].includes(existing.status)) {
+        return NextResponse.json({ error: 'Stop the active job before changing its configuration', code: 'JOB_ACTIVE' }, { status: 409 });
+      }
 
       const duplicateJob = await db.jobs.findByName(name);
       if (duplicateJob && duplicateJob.id !== id) {
         return NextResponse.json({ error: duplicateJobNameError() }, { status: 409 });
       }
 
+      const editing = await claimJobMaintenance(existing, 'editing');
+      if (!editing) return NextResponse.json({ error: 'Job changed or its process has not exited. Refresh and retry.' }, { status: 409 });
+      try {
       const workerChanged = existing.worker_id !== worker_id;
-      let remotePatch: any = {};
+      let remotePatch: JobUpdateInput = {};
       if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
         const worker = await getRemoteWorker(worker_id);
         const remoteJobConfig = await rewriteSameWorkerRemoteDatasetRefsForWorker(resolvedJobConfig, worker);
-        const remoteJob = await remoteJson<any>(worker, '/api/jobs', {
+        const remoteJob = await remoteJson<unknown>(worker, '/api/jobs', {
           method: 'POST',
           body: JSON.stringify({
             id: existing.remote_job_id,
@@ -236,6 +229,7 @@ export async function POST(request: Request) {
             ...extra,
           }),
         });
+        if (!isRecord(remoteJob) || typeof remoteJob.name !== 'string' || typeof remoteJob.gpu_ids !== 'string') throw new Error('Invalid remote job response');
         remotePatch = {
           name: remoteJob.name,
           gpu_ids: remoteJob.gpu_ids,
@@ -244,8 +238,10 @@ export async function POST(request: Request) {
         };
       }
 
-      const training = await db.jobs.update(id, {
+      const training = await db.jobs.updateIf(id, { attempt_id: editing.attempt_id ?? null, status: 'editing' }, {
+        status: existing.status,
         name,
+        storage_key: existing.storage_key || existing.name,
         worker_id,
         remote_job_id: workerChanged ? null : existing.remote_job_id,
         remote_error: workerChanged ? null : existing.remote_error,
@@ -254,7 +250,12 @@ export async function POST(request: Request) {
         ...extra,
         ...remotePatch,
       });
+      if (!training) return NextResponse.json({ error: 'Job changed while saving. Refresh and retry.' }, { status: 409 });
       return NextResponse.json(training);
+      } catch (error) {
+        await db.jobs.updateIf(id, { attempt_id: editing.attempt_id ?? null, status: 'editing' }, { status: existing.status });
+        throw error;
+      }
     } else {
       // find the highest queue position and add 1000
       const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
@@ -275,6 +276,8 @@ export async function POST(request: Request) {
       return NextResponse.json(training);
     }
   } catch (error: any) {
+    const invalid = commandError(error);
+    if (invalid) return NextResponse.json({ error: invalid.error, code: invalid.code }, { status: invalid.status });
     if (error.code === 'P2002') {
       // Handle unique constraint violation, 409=Conflict
       return NextResponse.json({ error: 'Job name already exists in this workspace' }, { status: 409 });
@@ -284,3 +287,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to save training data' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);
+import { claimJobMaintenance } from '@/server/jobAttempts';

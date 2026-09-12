@@ -24,6 +24,7 @@ function copyResponseHeaders(source: Response) {
     'content-disposition',
     'x-content-type-options',
     'etag',
+    'last-modified',
   ]) {
     const value = source.headers.get(name);
     if (value) headers.set(name, value);
@@ -49,6 +50,8 @@ export async function GET(request: NextRequest) {
       remotePath,
       request.nextUrl.searchParams.get('expires'),
       request.nextUrl.searchParams.get('sig'),
+      type,
+      request.method,
     ))
   ) {
     return new NextResponse('Unauthorized', { status: 401 });
@@ -56,8 +59,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const worker = await getRemoteWorker(workerID);
-    const remoteResponse = await remoteProxyFetch(worker, remoteAssetPath(type, remotePath), request.headers);
-    return new NextResponse(remoteResponse.body, {
+    const remoteResponse = await remoteProxyFetch(worker, remoteAssetPath(type, remotePath), request.headers, request.method === 'HEAD' ? 'HEAD' : 'GET', request.signal);
+    return new NextResponse(request.method === 'HEAD' ? null : remoteResponse.body, {
       status: remoteResponse.status,
       headers: copyResponseHeaders(remoteResponse),
     });
@@ -66,3 +69,5 @@ export async function GET(request: NextRequest) {
     return new NextResponse('Remote dataset asset unavailable', { status: 502 });
   }
 }
+
+export const HEAD = GET;

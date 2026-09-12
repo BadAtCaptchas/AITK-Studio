@@ -1,4 +1,5 @@
 'use client';
+import { configContractErrors } from '@/domain/configContract';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import {
   isEditableTrainingConfig,
@@ -54,7 +55,7 @@ export function TrainingFormContent() {
   const { settings, isSettingsLoaded, settingsStatus, settingsError, refreshSettings } = useSettings();
   const legacyView = settings.TRAINING_LEGACY_VIEW === 'true';
   const { workers, status: workerStatus, refreshWorkers } = useWorkers();
-  const { gpuList, isGPUInfoLoaded, status: gpuStatus, refreshGpuInfo } = useGPUInfo(null, null, workerID);
+  const { gpuData, gpuList, isGPUInfoLoaded, status: gpuStatus, refreshGpuInfo } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus, refreshDatasets } = useDatasetList({ includeRemote: true });
   const [datasetOptions, setDatasetOptions] = useState<
     Array<
@@ -108,7 +109,7 @@ export function TrainingFormContent() {
         try {
           parsed.config.process[0].sqlite_db_path = './aitk_db.db';
           parsed.config.process[0].training_folder = settings.TRAINING_FOLDER;
-          parsed.config.process[0].device = 'cuda';
+          parsed.config.process[0].device = gpuData?.isMac ? 'mps' : 'cuda';
           parsed.config.process[0].performance_log_every = 10;
         } catch (err) {
           console.warn('Could not set required fields on imported config:', err);
@@ -440,6 +441,7 @@ export function TrainingFormContent() {
       : []),
     ...validationMessages,
     ...validateJobBeforeSave(jobConfig),
+    ...configContractErrors(jobConfig, { deviceBackend: gpuData ? gpuData.isMac ? 'mps' : 'cuda' : undefined }).map(message => ({ level: 'error' as const, message, target: { step: 'raw', label: 'Raw configuration' } })),
   ];
   const [focusTarget, setFocusTarget] = useState<(TrainingFieldTarget & { nonce: number }) | null>(null);
   const revealFinding = (message: ValidationMessage) => {
@@ -492,7 +494,7 @@ export function TrainingFormContent() {
     try {
       parsed.config.process[0].sqlite_db_path = './aitk_db.db';
       parsed.config.process[0].training_folder = settings.TRAINING_FOLDER;
-      parsed.config.process[0].device = 'cuda';
+      parsed.config.process[0].device = gpuData?.isMac ? 'mps' : 'cuda';
       parsed.config.process[0].performance_log_every = 10;
     } catch (e) {
       console.warn(e);
@@ -540,7 +542,7 @@ export function TrainingFormContent() {
       </PageNotice>
     ) : null;
   return (
-    <>
+    <div className="contents" {...draft.formTracking}>
       <TopBar className="h-16 border-gray-900 bg-gray-950 px-4">
         <div className="flex min-w-0 items-center gap-3">
           <Button
@@ -757,6 +759,6 @@ export function TrainingFormContent() {
           </DialogPanel>
         </Dialog>
       )}
-    </>
+    </div>
   );
 }

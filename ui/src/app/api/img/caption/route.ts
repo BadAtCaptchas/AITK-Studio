@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
@@ -8,10 +9,13 @@ import { resolveCaptionWritePathAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const { imgPath, caption } = body;
+    if (typeof imgPath !== 'string' || !imgPath || typeof caption !== 'string') {
+      return NextResponse.json({ error: 'imgPath and caption must be strings' }, { status: 400 });
+    }
     const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
     if (remoteAsset) {
       const worker = await getRemoteWorker(remoteAsset.workerID);
@@ -61,3 +65,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to create dataset' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

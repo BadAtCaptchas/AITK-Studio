@@ -1,0 +1,38 @@
+[MAIN]
+py-version=3.11
+persistent=no
+load-plugins=scripts.pylint_inference
+
+[MESSAGES CONTROL]
+# The repository includes upstream research implementations with established
+# naming, long tensor operations, framework overrides and deferred imports.
+# Keep correctness checks enabled; docs/python-lint.md explains the style scope.
+disable=all
+enable=E,F,
+       anomalous-backslash-in-string,
+       bare-except,
+       cell-var-from-loop,
+       confusing-with-statement,
+       dangerous-default-value,
+       duplicate-key,
+       f-string-without-interpolation,
+       missing-final-newline,
+       missing-timeout,
+       reimported,
+       self-assigning-variable,
+       subprocess-run-check,
+       trailing-comma-tuple,
+       trailing-newlines,
+       trailing-whitespace,
+       unbalanced-tuple-unpacking,
+       undefined-loop-variable,
+       unreachable
+
+[TYPECHECK]
+# Diffusers fills FrozenDict attributes from @register_to_config at runtime.
+ignored-classes=diffusers.configuration_utils.FrozenDict
+# These backends are optional/platform-specific; their callers remain checked.
+ignored-modules=triton,torch_xla,flash_attn,sageattention,xformers,dadaptation,llava,modal,dashscope
+
+[REPORTS]
+score=no

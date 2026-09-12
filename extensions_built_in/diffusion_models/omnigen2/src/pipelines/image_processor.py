@@ -111,20 +111,21 @@ class OmniGen2ImageProcessor(VaeImageProcessor):
                 width = image.shape[3]
             else:
                 width = image.shape[2]
-        
+
         if max_side_length is None:
             max_side_length = self.max_side_length
-        
+
         if max_pixels is None:
             max_pixels = self.max_pixels
-        
+
         ratio = 1.0
+        max_side_length_ratio = 1.0
         if max_side_length is not None:
             if height > width:
                 max_side_length_ratio = max_side_length / height
             else:
                 max_side_length_ratio = max_side_length / width
-        
+
         cur_pixels = height * width
         max_pixels_ratio = (max_pixels / cur_pixels) ** 0.5
         ratio = min(max_pixels_ratio, max_side_length_ratio, 1.0) # do not upscale input image

@@ -198,7 +198,7 @@ class NerfEmbedder(nn.Module):
         super().__init__()
         self.max_freqs = max_freqs
         self.hidden_size_input = hidden_size_input
-        
+
         # A linear layer to project the concatenated input features and
         # positional encodings to the final output dimension.
         self.embedder = nn.Sequential(
@@ -225,39 +225,39 @@ class NerfEmbedder(nn.Module):
         # Create normalized 1D coordinate grids from 0 to 1.
         pos_x = torch.linspace(0, 1, patch_size, device=device, dtype=dtype)
         pos_y = torch.linspace(0, 1, patch_size, device=device, dtype=dtype)
-        
+
         # Create a 2D meshgrid of coordinates.
         pos_y, pos_x = torch.meshgrid(pos_y, pos_x, indexing="ij")
-        
+
         # Reshape positions to be broadcastable with frequencies.
         # Shape becomes (patch_size^2, 1, 1).
         pos_x = pos_x.reshape(-1, 1, 1)
         pos_y = pos_y.reshape(-1, 1, 1)
-        
+
         # Create a 1D tensor of frequency values from 0 to max_freqs-1.
         freqs = torch.linspace(0, self.max_freqs - 1, self.max_freqs, dtype=dtype, device=device)
-        
+
         # Reshape frequencies to be broadcastable for creating 2D basis functions.
         # freqs_x shape: (1, max_freqs, 1)
         # freqs_y shape: (1, 1, max_freqs)
         freqs_x = freqs[None, :, None]
         freqs_y = freqs[None, None, :]
-        
+
         # A custom weighting coefficient, not part of standard DCT.
         # This seems to down-weight the contribution of higher-frequency interactions.
         coeffs = (1 + freqs_x * freqs_y) ** -1
-        
+
         # Calculate the 1D cosine basis functions for x and y coordinates.
         # This is the core of the DCT formulation.
         dct_x = torch.cos(pos_x * freqs_x * torch.pi)
         dct_y = torch.cos(pos_y * freqs_y * torch.pi)
-        
+
         # Combine the 1D basis functions to create 2D basis functions by element-wise
         # multiplication, and apply the custom coefficients. Broadcasting handles the
         # combination of all (pos_x, freqs_x) with all (pos_y, freqs_y).
         # The result is flattened into a feature vector for each position.
         dct = (dct_x * dct_y * coeffs).view(1, -1, self.max_freqs ** 2)
-        
+
         return dct
 
     def forward(self, inputs):
@@ -282,17 +282,17 @@ class NerfEmbedder(nn.Module):
             inputs = inputs.float()
             # Fetch the pre-computed or cached positional embeddings.
             dct = self.fetch_pos(patch_size, inputs.device, torch.float32)
-            
+
             # Repeat the positional embeddings for each item in the batch.
             dct = dct.repeat(B, 1, 1)
-            
+
             # Concatenate the original input features with the positional embeddings
             # along the feature dimension.
             inputs = torch.cat([inputs, dct], dim=-1)
-            
+
             # Project the combined tensor to the target hidden size.
             inputs = self.embedder.float()(inputs)
-        
+
         return inputs.to(original_dtype)
 
 
@@ -336,7 +336,7 @@ class NerfGLUBlock(nn.Module):
 
         # Apply the final output projection.
         x = torch.bmm(torch.nn.functional.silu(torch.bmm(x, fc1_gate)) * torch.bmm(x, fc1_value), fc2)
-        
+
         x = x + res_x
         return x
 
@@ -385,7 +385,7 @@ class NerfFinalLayerConv(nn.Module):
         # Apply the 3x3 convolution
         x = self.conv(x_norm_permuted)
         return x
-    
+
 
 class Approximator(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, hidden_dim: int, n_layers=4):
@@ -448,7 +448,7 @@ class SelfAttention(nn.Module):
         qkv = self.qkv(x)
         q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
         q, k = self.norm(q, k, v)
-        x = attention(q, k, v, pe=pe)
+        x = attention(q, k, v, pe=pe, mask=None)
         x = self.proj(x)
         return x
 

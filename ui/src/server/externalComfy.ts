@@ -168,7 +168,7 @@ export async function listToolkitLoras(): Promise<ToolkitLoraSummary[]> {
     if (job.worker_id && job.worker_id !== 'local') continue;
     const jobConfig = parseJobConfig(job.job_config);
     if (!jobConfig || !isLoraTrainingJob(jobConfig)) continue;
-    const jobFolder = await getSafeJobFolder(trainingRoot, job.name);
+    const jobFolder = await getSafeJobFolder(trainingRoot, jobStorageKey(job));
     if (!jobFolder) continue;
 
     const entries = await fs.promises.readdir(jobFolder, { withFileTypes: true }).catch(() => []);
@@ -549,3 +549,4 @@ export async function copyToolkitLoraToExternalComfy({
     lora: knownLora,
   };
 }
+import { jobStorageKey } from '../utils/jobIdentity';

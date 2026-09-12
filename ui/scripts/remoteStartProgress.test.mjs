@@ -1,44 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
-import {
-  createRemoteStartProgress,
-  getRemoteStartProgress,
-  hasActiveRemoteStartForJob,
-  updateRemoteStartProgress,
-} from '../dist/src/server/remoteStartProgress.js';
-
-test('remote start progress stores updates and terminal failures', () => {
-  const created = createRemoteStartProgress('job-1');
-
-  assert.equal(created.status, 'queued');
-  assert.equal(hasActiveRemoteStartForJob('job-1'), true);
-
-  const uploading = updateRemoteStartProgress(created.startID, {
-    status: 'uploading-dataset',
-    message: 'Uploading dataset cats',
-    percent: 42,
-    datasetName: 'cats',
-    bytesProcessed: 12,
-    bytesTotal: 24,
-  });
-
-  assert.equal(uploading?.status, 'uploading-dataset');
-  assert.equal(uploading?.datasetName, 'cats');
-  assert.equal(uploading?.percent, 42);
-  assert.equal(uploading?.bytesProcessed, 12);
-  assert.equal(uploading?.bytesTotal, 24);
-
-  const failed = updateRemoteStartProgress(created.startID, {
-    status: 'failed',
-    message: 'Remote start failed',
-    percent: 150,
-    error: 'network failed',
-  });
-
-  assert.equal(failed?.status, 'failed');
-  assert.equal(failed?.percent, 100);
-  assert.equal(failed?.error, 'network failed');
-  assert.equal(hasActiveRemoteStartForJob('job-1'), false);
-  assert.equal(getRemoteStartProgress(created.startID)?.message, 'Remote start failed');
+import { installMemoryRuntime } from './memoryRuntimeFixture.mjs';
+import { enqueueOperation, updateOperation } from '../dist/src/server/operations.js';
+import { getRemoteStartProgress, hasActiveRemoteStartForJob } from '../dist/src/server/remoteStartProgress.js';
+test('remote progress is persisted, terminal, and exposes missing-key recovery', async () => {
+ const fixture = installMemoryRuntime();
+ try {
+  const operation = await enqueueOperation({ kind: 'remote-start', jobID: 'job-1', configHash: 'hash', durableKeys: false, needsEphemeralKeys: true });
+  await updateOperation(operation.id, { progress: { status: 'uploading-dataset', percent: 42, datasetName: 'cats' } });
+  assert.equal((await getRemoteStartProgress(operation.id)).percent, 42);
+  assert.equal(await hasActiveRemoteStartForJob('job-1'), true);
+  await updateOperation(operation.id, { state: 'needs-keys' });
+  assert.equal((await getRemoteStartProgress(operation.id)).operationState, 'needs-keys');
+  await updateOperation(operation.id, { state: 'failed', error: 'network failed' });
+  await updateOperation(operation.id, { state: 'running' });
+  assert.equal((await getRemoteStartProgress(operation.id)).error, 'network failed');
+  assert.equal(await hasActiveRemoteStartForJob('job-1'), false);
+ } finally { fixture.restore(); }
 });

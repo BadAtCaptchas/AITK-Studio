@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -58,9 +59,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
 
     rejectRemoteWorker(body?.worker_id);
 
@@ -83,9 +84,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function PATCH(request: NextRequest) {
+async function patchCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
 
     rejectRemoteWorker(body?.worker_id);
     const watcher = await saveDatasetWatcher({
@@ -100,7 +101,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
+async function deleteCommand(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams;
 
@@ -108,7 +109,7 @@ export async function DELETE(request: NextRequest) {
     rejectRemoteWorker(workerID);
     let id = params.get('id') || '';
     if (!id) {
-      const body = await request.json().catch(() => null);
+      const body = await readJsonCommand(request);
       id = typeof body?.id === 'string' ? body.id : '';
 
       workerID = body?.worker_id;
@@ -123,3 +124,7 @@ export async function DELETE(request: NextRequest) {
     return errorResponse(error);
   }
 }
+
+export const POST = withCommandBoundary(postCommand);
+export const PATCH = withCommandBoundary(patchCommand);
+export const DELETE = withCommandBoundary(deleteCommand);

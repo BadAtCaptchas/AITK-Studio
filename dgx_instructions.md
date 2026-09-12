@@ -48,7 +48,7 @@ This installs `torch==2.10.0` and `torchcodec==0.10.0`, avoiding the PyTorch 2.9
 **3) Install the remaining requirements (dgx_requirements.txt)**
 
 ```
-pip3 install -r dgx_requirements.txt
+python scripts/install_runtime.py --profile dgx-cu130
 ```
 
 ### Running the UI on DGX OS:

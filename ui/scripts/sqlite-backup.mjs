@@ -55,13 +55,21 @@ export function getSqliteBackupRetention(configured = process.env.AITK_SQLITE_BA
   return Math.min(Number(configured), MAX_SQLITE_BACKUP_RETENTION);
 }
 
-export async function backupExistingSqliteDatabase(filename, retention = getSqliteBackupRetention()) {
-  if (retention === 0 || !fs.existsSync(filename) || fs.statSync(filename).size === 0) return null;
+export async function backupExistingSqliteDatabase(filename, retention = getSqliteBackupRetention(), protectedVersion = null) {
+  if (retention === 0) {
+    if (protectedVersion) console.warn('Migration restore point is disabled by AITK_SQLITE_BACKUP_RETENTION=0. Continuing with the explicit backup opt-out.');
+    return null;
+  }
+  if (!fs.existsSync(filename) || fs.statSync(filename).size === 0) return null;
 
   const backupDirectory = path.join(path.dirname(filename), '.aitk-backups');
   const backupPrefix = `${path.basename(filename)}.`;
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = path.join(backupDirectory, `${backupPrefix}${timestamp}.${randomUUID()}.sqlite3`);
+  if (protectedVersion && !/^[a-zA-Z0-9-]+$/.test(protectedVersion)) throw new Error('Invalid backup version');
+  const backupPath = path.join(backupDirectory, protectedVersion
+    ? `${backupPrefix}protected-${protectedVersion}.sqlite3`
+    : `${backupPrefix}${timestamp}.${randomUUID()}.sqlite3`);
+  if (protectedVersion && fs.existsSync(backupPath)) return backupPath;
   fs.mkdirSync(backupDirectory, { recursive: true });
 
   const db = new sqlite3.Database(filename);
@@ -77,7 +85,7 @@ export async function backupExistingSqliteDatabase(filename, retention = getSqli
 
   const backups = fs
     .readdirSync(backupDirectory, { withFileTypes: true })
-    .filter(entry => entry.isFile() && entry.name.startsWith(backupPrefix) && entry.name.endsWith('.sqlite3'))
+    .filter(entry => entry.isFile() && entry.name.startsWith(backupPrefix) && entry.name.endsWith('.sqlite3') && !entry.name.startsWith(`${backupPrefix}protected-`))
     .map(entry => entry.name)
     .sort()
     .reverse();

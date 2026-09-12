@@ -11,6 +11,8 @@ from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.image_io import open_static_image
 from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
 from toolkit.dto import DTO
+from toolkit.paths import MODELS_PATH
+from toolkit.util.mixed_precision import attach_per_op_casting, pin_stored_fp32
 from toolkit.models.base_model import BaseModel
 from toolkit.basic import flush
 from toolkit.prompt_utils import PromptEmbeds
@@ -305,7 +307,12 @@ class LTX2Model(BaseModel):
             del transformer_sd, original_dit_ckpt
             flush()
         else:
-            if os.path.exists(model_path):
+            transformer_path = model_path
+            transformer_subfolder = "transformer"
+            if os.path.isdir(model_path):
+                transformer_subfolder = None
+                if os.path.isdir(os.path.join(model_path, "transformer")):
+                    transformer_path = os.path.join(model_path, "transformer")
                 # check if the path is a full checkpoint.
                 te_folder_path = os.path.join(model_path, "text_encoder")
                 # if we have the te, this folder is a full checkpoint, use it as the base
@@ -451,7 +458,7 @@ class LTX2Model(BaseModel):
         # remove the vision tower
         text_encoder.model.vision_tower = None
         flush()
-        
+
         if self.model_config.quantize_te:
             self.print_and_status_update("Quantizing Text Encoder")
             quantize(text_encoder, weights=get_qtype(self.model_config.qtype_te))
@@ -695,7 +702,7 @@ class LTX2Model(BaseModel):
             control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             # resize the control image
             control_img = control_img.resize(
-                (gen_config.width, gen_config.height), Image.LANCZOS
+                (gen_config.width, gen_config.height), Image.Resampling.LANCZOS
             )
             # add the control image to the extra dict
             extra["image"] = control_img
@@ -1313,12 +1320,12 @@ class LTX2Model(BaseModel):
             patch_size_t=self.pipeline.transformer_temporal_patch_size,
         )
 
-        if audio_target is not None:
+        if batch.audio_target is not None:
             # every pass's DTO carries its own audio stream and target
             return DTO(
                 unpacked_output,
                 audio=noise_pred_audio,
-                audio_target=audio_target,
+                audio_target=batch.audio_target,
             )
         return unpacked_output
 

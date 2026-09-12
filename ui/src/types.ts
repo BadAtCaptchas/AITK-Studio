@@ -104,6 +104,7 @@ export interface EncryptedDatasetStartKey {
 }
 
 export interface JobStartRequest {
+  idempotencyKey?: string;
   encryptedDatasetKeys?: EncryptedDatasetStartKey[];
   durableEncryptedDatasetKeys?: boolean;
   background?: boolean;
@@ -124,6 +125,8 @@ export type RemoteStartProgressStatus =
   | 'failed';
 
 export interface RemoteStartProgress {
+  operationState?: string;
+  phase?: string;
   startID: string;
   jobID: string;
   status: RemoteStartProgressStatus;
@@ -183,6 +186,9 @@ export interface RemoteOllamaWorker {
 export interface Job {
   id: string;
   name: string;
+  storage_key?: string | null;
+  attempt_id?: string | null;
+  process_started_at?: number | null;
   worker_id: string;
   remote_job_id: string | null;
   remote_sync_at: DbDate | null;

@@ -197,18 +197,6 @@ export async function assertUrlAllowedByOfflineMode(input: string | URL, feature
   }
 }
 
-function requestUrl(input: RequestInfo | URL) {
-  if (typeof input === 'string' || input instanceof URL) return String(input);
-  if (typeof Request !== 'undefined' && input instanceof Request) return input.url;
-  return String(input);
-}
-
-function requestMethod(input: RequestInfo | URL, init?: RequestInit) {
-  const method =
-    init?.method || (typeof Request !== 'undefined' && input instanceof Request ? input.method : undefined) || 'GET';
-  return method.toUpperCase();
-}
-
 function cloneHeadersWithoutBodyHeaders(headers: Headers) {
   const next = new Headers(headers);
   next.delete('content-length');
@@ -236,45 +224,46 @@ export async function guardedFetch(input: RequestInfo | URL, init?: RequestInit,
         : String(input);
   await assertUrlAllowedByOfflineMode(url, feature);
 
-  if (init?.redirect === 'manual' || init?.redirect === 'error') {
+  const request = new Request(input, init);
+  if (request.redirect === 'manual' || request.redirect === 'error') {
     return fetch(input, init);
   }
 
-  let currentInput = input;
-  let currentInit = init;
-  let currentUrl = requestUrl(currentInput);
-  let currentMethod = requestMethod(currentInput, currentInit);
+  let currentRequest = request;
 
   for (let redirectCount = 0; redirectCount <= MAX_OFFLINE_REDIRECTS; redirectCount += 1) {
-    const response = await fetch(currentInput, { ...currentInit, redirect: 'manual' });
-    const nextUrl = redirectTarget(response, currentUrl);
+    const response = await fetch(currentRequest, { ...init, method: currentRequest.method,
+      headers: currentRequest.headers, body: undefined, redirect: 'manual' });
+    const nextUrl = redirectTarget(response, currentRequest.url);
     if (!nextUrl) return response;
-
-    await assertUrlAllowedByOfflineMode(nextUrl, `${feature} redirect`);
-
-    if (redirectCount === MAX_OFFLINE_REDIRECTS) {
-      throw new OfflineModeError(`Offline mode blocked ${feature}: too many redirects`);
+    try {
+      await assertUrlAllowedByOfflineMode(nextUrl, `${feature} redirect`);
+      if (redirectCount === MAX_OFFLINE_REDIRECTS) {
+        throw new OfflineModeError(`Offline mode blocked ${feature}: too many redirects`);
+      }
+      const nextHeaders = new Headers(currentRequest.headers);
+      const crossedOrigin = new URL(nextUrl).origin !== new URL(currentRequest.url).origin;
+      // An allowed destination is not authorized to receive another service's
+      // credentials or payload. Reject rather than guessing which custom header is secret.
+      if (crossedOrigin && (currentRequest.body !== null || Array.from(nextHeaders.keys()).some(
+        name => !['accept', 'accept-language', 'user-agent'].includes(name.toLowerCase()),
+      ))) {
+        throw new OfflineModeError(`Blocked cross-origin redirect for ${feature}`);
+      }
+      const switchToGet = (response.status === 303 && currentRequest.method !== 'HEAD') ||
+        ((response.status === 301 || response.status === 302) && currentRequest.method === 'POST');
+      if (!switchToGet && currentRequest.body !== null) {
+        throw new OfflineModeError(`Cannot safely replay a request body for ${feature}`);
+      }
+      currentRequest = new Request(nextUrl, {
+        method: switchToGet ? 'GET' : currentRequest.method,
+        headers: switchToGet ? cloneHeadersWithoutBodyHeaders(nextHeaders) : nextHeaders,
+        signal: request.signal,
+        redirect: 'manual',
+      });
+    } finally {
+      await response.body?.cancel().catch(() => undefined);
     }
-
-    const nextHeaders = new Headers(currentInit?.headers);
-    const shouldSwitchToGet =
-      response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod === 'POST');
-    if (shouldSwitchToGet) {
-      currentInit = {
-        ...currentInit,
-        method: 'GET',
-        body: undefined,
-        headers: cloneHeadersWithoutBodyHeaders(nextHeaders),
-      };
-      currentMethod = 'GET';
-    } else {
-      currentInit = {
-        ...currentInit,
-        headers: nextHeaders,
-      };
-    }
-    currentInput = nextUrl;
-    currentUrl = nextUrl;
   }
 
   throw new OfflineModeError(`Offline mode blocked ${feature}: too many redirects`);

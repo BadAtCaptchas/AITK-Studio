@@ -8,6 +8,8 @@ from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.image_io import open_static_image
 from PIL import Image
 from toolkit.models.base_model import BaseModel
+from toolkit.metadata import get_meta_for_safetensors
+from toolkit.util.quantize import quantize_model
 from toolkit.models.vae_tiling import temporary_vae_tiling
 from toolkit.basic import flush
 from toolkit.prompt_utils import PromptEmbeds
@@ -266,7 +268,7 @@ class QwenImageModel(QwenImageVAEHolderMixin, BaseModel):
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(
-                    (gen_config.width, gen_config.height), Image.BILINEAR
+                    (gen_config.width, gen_config.height), Image.Resampling.BILINEAR
                 )
         self.model.to(self.device_torch)
 

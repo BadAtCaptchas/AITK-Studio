@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { afterEach, test } from 'node:test';
 import { createRequire } from 'node:module';
 
@@ -8,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { prepareHfTokenEnv } = require('../dist/src/server/hfTokenEnv.js');
 
 const tempDirs = [];
-const tempRoot = path.resolve('.tmp', 'hf-token-env-tests');
+const tempRoot = path.join(os.tmpdir(), 'aitk-hf-token-env-tests');
 
 async function makeTempDir() {
   await fs.mkdir(tempRoot, { recursive: true });

@@ -1,0 +1,5 @@
+# Experimental Apple silicon profile; do not combine with a CUDA profile.
+torch==2.11.0
+torchvision==0.26.0
+torchaudio==2.11.0
+torchcodec==0.11.0

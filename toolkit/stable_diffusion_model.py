@@ -54,6 +54,7 @@ from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, T2IAda
     FluxTransformer2DModel, FlowMatchEulerDiscreteScheduler, SD3Transformer2DModel, Lumina2Pipeline, \
     FluxControlPipeline, Lumina2Transformer2DModel
 import diffusers
+from diffusers.utils import logging as diffusers_logging
 from diffusers import \
     AutoencoderKL, \
     UNet2DConditionModel
@@ -86,7 +87,7 @@ if TYPE_CHECKING:
     from toolkit.lora_special import LoRASpecialNetwork
 
 # tell it to shut up
-diffusers.logging.set_verbosity(diffusers.logging.ERROR)
+diffusers_logging.set_verbosity(diffusers_logging.ERROR)
 
 SD_PREFIX_VAE = "vae"
 SD_PREFIX_UNET = "unet"

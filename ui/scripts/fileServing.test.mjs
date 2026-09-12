@@ -2,13 +2,26 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { installMemoryRuntime } from './memoryRuntimeFixture.mjs';
+installMemoryRuntime();
 import {
   configureFrontServerTimeouts,
   proxyRetryDecision,
   registerWorkerCrash,
 } from '../dist/cron/fileServerPolicy.js';
-import { isAcceleratedApiRequestAuthenticated, parseSingleByteRange } from '../dist/src/server/fileServing.js';
+import { isAcceleratedApiRequestAuthenticated, parseSingleByteRange, resolveFileResponse } from '../dist/src/server/fileServing.js';
 import { AUTH_SESSION_COOKIE_NAME, createAuthSessionValue } from '../dist/src/utils/authSession.js';
+
+test('If-Range never treats stat-based weak validators as a matching content identity', () => {
+  const stat = { ino: 1, size: 100, mtimeMs: 1000 };
+  const whole = resolveFileResponse('fixture', stat, new Headers(), {});
+  for (const validator of ['"stale"', whole.headers.ETag, new Date().toUTCString()]) {
+    const result = resolveFileResponse('fixture', stat, new Headers({ range: 'bytes=50-', 'if-range': validator }), {});
+    assert.equal(result.status, 200);
+    assert.equal(result.headers['Content-Length'], '100');
+  }
+  assert.equal(resolveFileResponse('fixture', stat, new Headers({ range: 'bytes=50-' }), {}).status, 206);
+});
 
 test('single byte ranges support bounded, open-ended, and suffix requests', () => {
   assert.deepEqual(parseSingleByteRange('bytes=10-19', 100), { start: 10, end: 19 });

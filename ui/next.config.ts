@@ -13,6 +13,7 @@ function getAppVersion() {
 }
 
 const nextConfig: NextConfig = {
+  distDir: process.env.AITK_NEXT_DIST_DIR || '.next',
   env: {
     NEXT_PUBLIC_APP_VERSION: getAppVersion(),
   },
@@ -35,7 +36,7 @@ const nextConfig: NextConfig = {
   experimental: {
     webpackBuildWorker: true,
     serverActions: {
-      bodySizeLimit: '5gb',
+      bodySizeLimit: '2mb',
     },
     middlewareClientMaxBodySize: '5gb',
   },

@@ -1,11 +1,16 @@
+import { cleanupAuthRecords } from '../src/server/runtimeRetention';
 import processQueue from './actions/processQueue';
-import { disconnectDb } from '../src/server/db';
+import { db, disconnectDb } from '../src/server/db';
 import { startTensorBoard, stopTensorBoard } from '../src/server/tensorboard';
 import { getTrainingFolder } from './paths';
 import { getCloudflaredConfig, startCloudflared, stopCloudflared } from '../src/server/cloudflared';
 import { purgeLegacyDurableEncryptedDatasetKeys } from '../src/server/encryptedDatasetSecrets';
 import { syncRemoteCaptionResults } from '../src/server/remoteCaptionResults';
 import { runDatasetWatchersIfDue } from '../src/server/datasetWatchers';
+import { synchronizeJobPage } from '../src/server/jobReadModel';
+import { discoverRemoteJobs } from '../src/server/remoteClient';
+import { withProcessLease, LeaseBusyError } from '../src/server/processLease';
+import { processOperations } from '../src/server/operationWorker';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
@@ -15,6 +20,8 @@ class CronWorker {
   intervalId: NodeJS.Timeout;
   currentRun: Promise<void> | null;
   is_stopping: boolean;
+  background = new Map<string, Promise<void>>();
+  nextBackground = new Map<string, number>();
 
   constructor() {
     this.interval = 1000; // Default interval of 1 second
@@ -23,6 +30,12 @@ class CronWorker {
     this.is_stopping = false;
     this.intervalId = setInterval(() => {
       this.run();
+      this.startBackground('remote-caption', syncRemoteCaptionResults, 5000);
+      this.startBackground('dataset-watchers', runDatasetWatchersIfDue, 5000);
+      this.startBackground('operations', processOperations, 1000);
+      this.startBackground('job-sync', synchronizeJobPage, 5000);
+      this.startBackground('auth-retention', cleanupAuthRecords, 60000);
+      this.startBackground('remote-discovery', () => discoverRemoteJobs(), 15000);
     }, this.interval);
   }
 
@@ -43,9 +56,17 @@ class CronWorker {
   }
 
   async loop() {
+    const heartbeat = await db.runtime.get('worker-heartbeat');
+    await db.runtime.compareAndSwap('worker-heartbeat', heartbeat?.version ?? null, { at: Date.now(), pid: process.pid });
     await processQueue();
-    await syncRemoteCaptionResults();
-    await runDatasetWatchersIfDue();
+  }
+
+  startBackground(name: string, task: () => Promise<unknown>, interval: number) {
+    if (this.is_stopping || this.background.has(name) || Date.now() < (this.nextBackground.get(name) || 0)) return;
+    this.nextBackground.set(name, Date.now() + interval);
+    const running = withProcessLease('background:' + name, task).then(() => undefined).catch(error => { if (!(error instanceof LeaseBusyError)) console.error(`Background ${name} failed:`, error); })
+      .finally(() => this.background.delete(name));
+    this.background.set(name, running);
   }
 
   async stop() {
@@ -55,6 +76,7 @@ class CronWorker {
     if (this.currentRun) {
       await this.currentRun.catch(() => undefined);
     }
+    await Promise.allSettled(this.background.values());
   }
 }
 

@@ -14,6 +14,13 @@ model Settings {
   value String
 }
 
+model RuntimeRecord {
+  key        String @id
+  value      String
+  version    Int    @default(1)
+  updated_at DateTime @updatedAt
+}
+
 model Queue {
   id         Int     @id @default(autoincrement())
   worker_id  String  @default("local")
@@ -63,6 +70,9 @@ model JobReplica {
 model Job {
   id              String   @id @default(uuid())
   name            String   @unique
+  storage_key     String?
+  attempt_id      String?
+  process_started_at Float?
   worker_id       String   @default("local")
   remote_job_id   String?
   remote_sync_at  DateTime?
@@ -84,6 +94,9 @@ model Job {
   save_now        Boolean  @default(false) // if true, the job will be saved on the next step
   sample_now      Boolean  @default(false) // if true, one sample runs on the next step
 
+  @@index([created_at, id])
+  @@index([worker_id, status, queue_position, id])
+  @@index([job_type, status, created_at, id])
   @@index([status])
   @@index([worker_id])
   @@index([remote_job_id])

@@ -201,7 +201,7 @@ class DiffusionFeatureExtractor3(nn.Module):
         if 'height' in self.image_processor.size:
             size = self.image_processor.size['height']
         else:
-            size = self.image_processor.crop_size['height']
+            size = self.image_processor.size['shortest_edge']
         images = F.interpolate(tensors_0_1, size=(size, size),
                                mode='bicubic', align_corners=False)
 
@@ -366,7 +366,7 @@ class DiffusionFeatureExtractor3(nn.Module):
                 self.losses[key] /= self.log_every
                 # print in 2.000e-01 format
                 print(f" - {key}: {self.losses[key]:.3e}")
-            self.losses[key] = 0.0
+                self.losses[key] = 0.0
         
         # total_loss += mse_loss
         self.step += 1

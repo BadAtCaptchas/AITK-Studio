@@ -35,7 +35,7 @@ class UITrainer(SDTrainer):
         self._run_async_operation(self._update_status("running", "Starting"))
         self._stop_watcher_started = False
         # self.start_stop_watcher(interval_sec=2.0)
-    
+
     def start_stop_watcher(self, interval_sec: float = 5.0):
         """
         Start a daemon thread that periodically checks should_stop()
@@ -102,7 +102,7 @@ class UITrainer(SDTrainer):
 
     def should_stop(self):
         return self.ui_job_store.should_stop()
-    
+
     def should_return_to_queue(self):
         return self.ui_job_store.should_return_to_queue()
 

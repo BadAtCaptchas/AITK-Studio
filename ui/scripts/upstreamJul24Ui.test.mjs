@@ -10,7 +10,7 @@ const readUi = relativePath => fs.readFileSync(path.join(uiRoot, relativePath), 
 const readRoot = relativePath => fs.readFileSync(path.join(toolkitRoot, relativePath), 'utf8');
 
 test('gated model metadata and Studio guidance cover the upstream architectures', () => {
-  const options = readUi('src/app/jobs/new/options.ts');
+  const options = readUi('src/domain/modelOptions.ts');
   const simpleJob = readUi('src/app/jobs/new/SimpleJob.tsx');
   const mappings = new Map([
     ['flux', 'https://huggingface.co/black-forest-labs/FLUX.1-dev'],
@@ -57,7 +57,7 @@ test('Next dev indicators are disabled without weakening Studio build checks', (
 
   assert.match(nextConfig, /devIndicators:\s*false/);
   assert.doesNotMatch(nextConfig, /ignoreBuildErrors/);
-  assert.match(nextConfig, /bodySizeLimit:\s*'5gb'/);
+  assert.match(nextConfig, /bodySizeLimit:\s*'2mb'/);
   assert.match(nextConfig, /middlewareClientMaxBodySize:\s*'5gb'/);
 });
 

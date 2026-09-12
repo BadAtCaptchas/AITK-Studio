@@ -36,6 +36,21 @@ NVFP4_QTYPES = ("nvfp4",)
 _skip_warned = set()
 
 
+def swizzle_nvfp4_scales(scales: torch.Tensor) -> torch.Tensor:
+    """Pad and pack row-major scales into cuBLAS 128-by-4 block-scale tiles."""
+    if scales.ndim != 2 or min(scales.shape) <= 0:
+        raise ValueError("nvfp4 scales must be a nonempty two-dimensional tensor")
+    rows, cols = scales.shape
+    row_blocks = (rows + 127) // 128
+    col_blocks = (cols + 3) // 4
+    padded = torch.zeros(
+        (row_blocks * 128, col_blocks * 4), dtype=scales.dtype, device=scales.device
+    )
+    padded[:rows, :cols] = scales
+    tiles = padded.reshape(row_blocks, 128, col_blocks, 4).permute(0, 2, 1, 3)
+    return tiles.reshape(-1, 4, 32, 4).transpose(1, 2).contiguous().reshape(padded.shape)
+
+
 def unswizzle_nvfp4_scales(scales: torch.Tensor, rows: int, cols: int) -> torch.Tensor:
     """Undo the cuBLAS 128x4-tile block-scale layout (comfy_kitchen's
     ``to_blocked``) back to a row-major (rows, cols) matrix. ComfyUI nvfp4

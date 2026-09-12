@@ -209,7 +209,7 @@ class Chroma(nn.Module, OstrisModelMixin):
         #     use_compiled=params._use_compiled,
         # )
 
-        # pixel channel concat with DCT 
+        # pixel channel concat with DCT
         self.nerf_image_embedder = NerfEmbedder(
             in_channels=params.in_channels,
             hidden_size_input=params.nerf_hidden_size,
@@ -253,7 +253,7 @@ class Chroma(nn.Module, OstrisModelMixin):
     def device(self):
         # Get the device of the module (assumes all parameters are on the same device)
         return next(self.parameters()).device
-    
+
     def enable_gradient_checkpointing(self, enable: bool = True):
         self.gradient_checkpointing = enable
 
@@ -279,7 +279,7 @@ class Chroma(nn.Module, OstrisModelMixin):
         # unfold creates patches: [B, C * P * P, NumPatches]
         nerf_pixels = nn.functional.unfold(img, kernel_size=self.params.patch_size, stride=self.params.patch_size)
         nerf_pixels = nerf_pixels.transpose(1, 2) # -> [B, NumPatches, C * P * P]
-        
+
         # partchify ops
         img = self.img_in_patch(img) # -> [B, Hidden, H/P, W/P]
         num_patches = img.shape[2] * img.shape[3]
@@ -393,7 +393,7 @@ class Chroma(nn.Module, OstrisModelMixin):
         # final projection to get the output pixel values
         # img_dct = self.nerf_final_layer(img_dct) # -> [B*NumPatches, P*P, C]
         img_dct = self.nerf_final_layer_conv.norm(img_dct)
-        
+
         # gemini gogogo idk how to fold this properly :P
         # Reassemble the patches into the final image.
         img_dct = img_dct.transpose(1, 2) # -> [B*NumPatches, C, P*P]

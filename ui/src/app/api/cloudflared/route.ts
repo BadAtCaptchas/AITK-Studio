@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { NextRequest, NextResponse } from 'next/server';
 import { downloadCloudflared, getCloudflaredStatus, startCloudflared, stopCloudflared } from '@/server/cloudflared';
 
@@ -8,9 +9,9 @@ export async function GET() {
   return NextResponse.json(await getCloudflaredStatus());
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({}));
+    const body = await readJsonCommand(request);
     return NextResponse.json(await startCloudflared({ autoDownload: Boolean(body?.autoDownload) }));
   } catch (error) {
     return NextResponse.json(
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function PUT() {
+async function putCommand() {
   try {
     const download = await downloadCloudflared();
     return NextResponse.json({
@@ -35,6 +36,10 @@ export async function PUT() {
   }
 }
 
-export async function DELETE() {
+async function deleteCommand() {
   return NextResponse.json(await stopCloudflared());
 }
+
+export const POST = withCommandBoundary(postCommand);
+export const PUT = withCommandBoundary(putCommand);
+export const DELETE = withCommandBoundary(deleteCommand);

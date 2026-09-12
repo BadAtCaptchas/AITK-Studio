@@ -28,7 +28,7 @@ from toolkit.models.autoencoder_tiny_with_pooled_exits import AutoencoderTinyWit
 from tqdm import tqdm
 import math
 import torchvision.utils
-import time
+
 import numpy as np
 from .models.critic import Critic
 from torchvision.transforms import Resize
@@ -124,7 +124,7 @@ class TrainVAEProcess(BaseTrainProcess):
         if self.vae_type == 'AutoencoderTinyWithPooledExits':
             self.VaeClass = AutoencoderTinyWithPooledExits
             self.do_pooled_exits = True
-        
+
         if not self.train_encoder:
             # remove losses that only target encoder
             self.kld_weight = 0
@@ -193,7 +193,7 @@ class TrainVAEProcess(BaseTrainProcess):
 
     def load_datasets(self):
         if self.data_loader is None:
-            print(f"Loading datasets")
+            print('Loading datasets')
             datasets = []
             for dataset in self.datasets_objects:
                 print(f" - Dataset: {dataset['path']}")
@@ -256,7 +256,7 @@ class TrainVAEProcess(BaseTrainProcess):
 
             self.print(f"Style weight scalers: {self.style_weight_scalers}")
             self.print(f"Content weight scalers: {self.content_weight_scalers}")
-    
+
     def setup_clip(self):
         ckpt = 'google/siglip2-base-patch16-256'
         if self.resolution == 512:
@@ -268,12 +268,12 @@ class TrainVAEProcess(BaseTrainProcess):
         processor = SiglipImageProcessor.from_pretrained(ckpt)
         self.clip = vision_encoder
         self.clip_image_processor = processor
-        
+
     def get_clip_embeddings(self, image_n1p1):
         tensors_0_1 = (image_n1p1 + 1) / 2
         # sharpen images
         tensors_0_1 = sharpen_image(tensors_0_1)
-        
+
         tensors_0_1 = tensors_0_1.clamp(0, 1)
 
         # resize if needed
@@ -286,14 +286,14 @@ class TrainVAEProcess(BaseTrainProcess):
         std = torch.tensor([0.5, 0.5, 0.5]).to(
             tensors_0_1.device, dtype=tensors_0_1.dtype
         ).view([1, 3, 1, 1]).detach()
-        
+
         # tensors_0_1 = torch.clip((255. * tensors_0_1), 0, 255).round() / 255.0
         clip_image = (tensors_0_1 - mean) / std
-        
+
         id_embeds = self.clip(
             clip_image.to(self.clip.device, dtype=torch.bfloat16),
             output_hidden_states=True,
-        )  
+        )
         last_hidden_state = id_embeds['last_hidden_state']
         return last_hidden_state
 
@@ -303,7 +303,7 @@ class TrainVAEProcess(BaseTrainProcess):
             target_embeddings = self.get_clip_embeddings(target).float()
         pred_embeddings = self.get_clip_embeddings(pred).float()
         return torch.nn.functional.mse_loss(pred_embeddings, target_embeddings)
-    
+
     def get_pooled_output_loss(self, pooled_outputs, target):
         if pooled_outputs is None:
             return torch.tensor(0.0, device=self.device)
@@ -344,18 +344,18 @@ class TrainVAEProcess(BaseTrainProcess):
             pred_sharp = sharpen_image(pred)
             with torch.no_grad():
                 target_sharp = sharpen_image(target)
-            
+
             loss_sharp = loss_fn(pred_sharp, target_sharp)
 
             return (loss_sharp + loss_normal) / 2
         else:
             return torch.tensor(0.0, device=self.device)
-    
+
     def get_mae_loss(self, pred, target):
         if self.mae_weight > 0:
             loss_fn = nn.L1Loss()
             loss_normal = loss_fn(pred, target)
-            
+
             pred_sharp = sharpen_image(pred)
             with torch.no_grad():
                 target_sharp = sharpen_image(target)
@@ -392,7 +392,7 @@ class TrainVAEProcess(BaseTrainProcess):
             std_loss_row  = ((std_row - 1) ** 2).mean()
 
             # do a global one
-            
+
             mean = latents.mean(dim=(2, 3), keepdim=True)
             std  = latents.std(dim=(2, 3), keepdim=True, unbiased=False)
             mean_loss_global = (mean ** 2).mean()
@@ -401,7 +401,7 @@ class TrainVAEProcess(BaseTrainProcess):
             return (mean_loss_col + std_loss_col + mean_loss_row + std_loss_row + mean_loss_global + std_loss_global) / 3
         else:
             return torch.tensor(0.0, device=self.device)
-        
+
     def get_ltv_loss(self, latent, images):
         # loss to reduce the latent space variance
         if self.ltv_weight > 0:
@@ -409,18 +409,18 @@ class TrainVAEProcess(BaseTrainProcess):
                 images = images.to(latent.device, dtype=latent.dtype)
                 # resize down to latent size
                 images = torch.nn.functional.interpolate(images, size=(latent.shape[2], latent.shape[3]), mode='bilinear', align_corners=False)
-                
+
                 # mean the color channel and then expand to latent size
                 images = images.mean(dim=1, keepdim=True)
                 images = images.repeat(1, latent.shape[1], 1, 1)
-                
+
                 # normalize to a mean of 0 and std of 1
                 images_mean = images.mean(dim=(2, 3), keepdim=True)
                 images_std = images.std(dim=(2, 3), keepdim=True)
                 images = (images - images_mean) / (images_std + 1e-6)
-                
+
                 # now we target the same std of the image for the latent space as to not reduce to 0
-            
+
             latent_tv = torch.abs(total_variation_deltas(latent))
             images_tv = torch.abs(total_variation_deltas(images))
             loss = torch.abs(latent_tv - images_tv) # keep it spatially aware
@@ -431,14 +431,14 @@ class TrainVAEProcess(BaseTrainProcess):
             return loss
         else:
             return torch.tensor(0.0, device=self.device)
-        
+
     def get_latent_pixel_matching_loss(self, latent, pixels):
         if self.lpm_weight > 0:
             with torch.no_grad():
                 pixels = pixels.to(latent.device, dtype=latent.dtype)
                 # resize down to latent size
                 pixels = torch.nn.functional.interpolate(pixels, size=(latent.shape[2], latent.shape[3]), mode='bilinear', align_corners=False)
-                
+
                 # mean the color channel and then expand to latent size
                 pixels = pixels.mean(dim=1, keepdim=True)
                 pixels = pixels.repeat(1, latent.shape[1], 1, 1)
@@ -448,9 +448,9 @@ class TrainVAEProcess(BaseTrainProcess):
                 pixels_mean = pixels.mean(dim=(2, 3), keepdim=True)
                 pixels_std = pixels.std(dim=(2, 3), keepdim=True)
                 pixels = (pixels - pixels_mean) / (pixels_std + 1e-6) * latent_std + latent_mean
-                
+
             return torch.nn.functional.mse_loss(latent.float(), pixels.float())
-            
+
         else:
             return torch.tensor(0.0, device=self.device)
 
@@ -517,7 +517,7 @@ class TrainVAEProcess(BaseTrainProcess):
 
                 target_latent = None
                 if self.target_latent_vae is not None:
-                    target_input_scale = self.target_vae_scale_factor / self.vae_scale_factor 
+                    target_input_scale = self.target_vae_scale_factor / self.vae_scale_factor
                     target_input_size = (int(img.shape[2] * target_input_scale), int(img.shape[3] * target_input_scale))
                     # resize to target input size
                     target_input_batch = Resize(target_input_size)(img).to(self.device, dtype=torch.float32)
@@ -526,13 +526,13 @@ class TrainVAEProcess(BaseTrainProcess):
                     target_latent = self.target_latent_vae.config['scaling_factor'] * (target_latent - shift)
                     target_latent = target_latent.to(self.device, dtype=self.torch_dtype)
                 latent = self.vae.encode(img, return_dict=False)[0]
-                
+
                 if hasattr(latent, 'sample'):
                     latent = latent.sample()
-                
+
                 shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
                 latent = self.vae.config['scaling_factor'] * (latent - shift)
-                
+
                 latent_img = latent.clone()
                 bs, ch, h, w = latent_img.shape
                 grid_size = math.ceil(math.sqrt(ch))
@@ -555,20 +555,20 @@ class TrainVAEProcess(BaseTrainProcess):
                 # make rgb
                 latent_img = latent_img.repeat(3, 1, 1).unsqueeze(0)
                 latent_img = (latent_img / 2 + 0.5).clamp(0, 1)
-                
+
                 # resize to 256x256
                 latent_img = torch.nn.functional.interpolate(latent_img, size=(self.sample_resolution, self.sample_resolution), mode='nearest')
                 latent_img = latent_img.squeeze(0).cpu().permute(1, 2, 0).float().numpy()
                 latent_img = (latent_img * 255).astype(np.uint8)
                 # convert to pillow image
                 latent_img = Image.fromarray(latent_img)
-                
+
                 if target_latent is not None:
                     latent = target_latent.to(latent.device, dtype=latent.dtype)
-                    
+
                 shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
                 latent = latent / self.vae.config['scaling_factor'] + shift
-                
+
                 decoded = self.vae.decode(latent).sample
                 decoded = (decoded / 2 + 0.5).clamp(0, 1)
                 # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
@@ -593,7 +593,7 @@ class TrainVAEProcess(BaseTrainProcess):
                     scale_up = 1
 
                 # scale up using nearest neighbor
-                output_img = output_img.resize((output_img.width * scale_up, output_img.height * scale_up), Image.NEAREST)
+                output_img = output_img.resize((output_img.width * scale_up, output_img.height * scale_up), Image.Resampling.NEAREST)
 
                 step_num = ''
                 if step is not None:
@@ -616,9 +616,9 @@ class TrainVAEProcess(BaseTrainProcess):
             path_to_load = latest_file
             # todo update step and epoch count
         else:
-            self.print(f" - No checkpoint found, starting from scratch")
+            self.print(' - No checkpoint found, starting from scratch')
         # load vae
-        self.print(f"Loading VAE")
+        self.print('Loading VAE')
         self.print(f" - Loading VAE: {path_to_load}")
         if self.vae is None:
             if path_to_load is not None:
@@ -637,7 +637,7 @@ class TrainVAEProcess(BaseTrainProcess):
             self.vae.eval()
         self.vae.decoder.train()
         self.vae_scale_factor = 2 ** (len(self.vae.config['block_out_channels']) - 1)
-        
+
         if self.target_latent_vae_path is not None:
             self.print(f"Loading target latent VAE from {self.target_latent_vae_path}")
             self.target_latent_vae = AutoencoderKL.from_pretrained(self.target_latent_vae_path)
@@ -666,7 +666,7 @@ class TrainVAEProcess(BaseTrainProcess):
         start_step = self.step_num
         self.first_step = start_step
 
-        self.print(f"Training VAE")
+        self.print('Training VAE')
         self.print(f" - Training folder: {self.training_folder}")
         self.print(f" - Batch size: {self.batch_size}")
         self.print(f" - Learning rate: {self.learning_rate}")
@@ -709,7 +709,7 @@ class TrainVAEProcess(BaseTrainProcess):
             self.setup_vgg19()
             # self.vgg_19.requires_grad_(False)
             self.vgg_19.eval()
-        
+
         if self.use_critic:
             self.critic.setup()
 
@@ -719,7 +719,7 @@ class TrainVAEProcess(BaseTrainProcess):
         if self.lpips_weight > 0 and self.lpips_loss is None:
             # self.lpips_loss = lpips.LPIPS(net='vgg')
             self.lpips_loss = lpips.LPIPS(net='vgg').to(self.device, dtype=torch.bfloat16)
-            
+
         if self.only_if_contains is not None:
             orig_params = params
             params = []
@@ -772,9 +772,9 @@ class TrainVAEProcess(BaseTrainProcess):
         epoch_losses = copy.deepcopy(blank_losses)
         log_losses = copy.deepcopy(blank_losses)
         # range start at self.epoch_num go to self.epochs
-        
+
         latent_size = self.resolution // self.vae_scale_factor
-        
+
         for epoch in range(self.epoch_num, self.epochs, 1):
             if self.step_num >= self.max_steps:
                 break
@@ -783,7 +783,7 @@ class TrainVAEProcess(BaseTrainProcess):
                     break
                 with torch.no_grad():
                     batch = batch.to(self.device, dtype=self.torch_dtype)
-                    
+
                     if self.random_scaling:
                         # only random scale 0.5 of the time
                         if random.random() < 0.5:
@@ -795,17 +795,17 @@ class TrainVAEProcess(BaseTrainProcess):
                         # make sure it is vae divisible
                         new_size = (new_size[0] // self.vae_scale_factor * self.vae_scale_factor,
                                     new_size[1] // self.vae_scale_factor * self.vae_scale_factor)
-                            
+
 
                     # resize so it matches size of vae evenly
                     if batch.shape[2] % self.vae_scale_factor != 0 or batch.shape[3] % self.vae_scale_factor != 0:
                         batch = Resize((batch.shape[2] // self.vae_scale_factor * self.vae_scale_factor,
                                                 batch.shape[3] // self.vae_scale_factor * self.vae_scale_factor))(batch)
-                    
+
                     target_latent = None
                     lat_mse_loss = torch.tensor(0.0, device=self.device)
                     if self.target_latent_vae is not None:
-                        target_input_scale = self.target_vae_scale_factor / self.vae_scale_factor 
+                        target_input_scale = self.target_vae_scale_factor / self.vae_scale_factor
                         target_input_size = (int(batch.shape[2] * target_input_scale), int(batch.shape[3] * target_input_scale))
                         # resize to target input size
                         target_input_batch = Resize(target_input_size)(batch).to(self.device, dtype=torch.float32)
@@ -814,7 +814,7 @@ class TrainVAEProcess(BaseTrainProcess):
                         shift = self.target_latent_vae.config['shift_factor'] if self.target_latent_vae.config['shift_factor'] is not None else 0
                         target_latent = self.target_latent_vae.config['scaling_factor'] * (target_latent - shift)
                         target_latent = target_latent.to(self.device, dtype=self.torch_dtype)
-                        
+
 
                     # forward pass
                 # grad only if eq_vae
@@ -827,17 +827,17 @@ class TrainVAEProcess(BaseTrainProcess):
                         dgd = self.vae.encode(batch).latent_dist
                         mu, logvar = dgd.mean, dgd.logvar
                         latents = dgd.sample()
-                    
+
                     # scale shift latent to config
                     shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
                     latents = self.vae.config['scaling_factor'] * (latents - shift)
-                    
+
                     if target_latent is not None and self.train_encoder:
                         # forward_latents = target_latent.detach()
                         lat_mse_loss = torch.nn.MSELoss()(target_latent.float(), latents.float())
                         latents = target_latent.detach()
                         forward_latents = target_latent.detach()
-                        
+
                     elif self.eq_vae:
                         # process flips, rotate, scale
                         latent_chunks = list(latents.chunk(latents.shape[0], dim=0))
@@ -858,11 +858,11 @@ class TrainVAEProcess(BaseTrainProcess):
                                 if do_flip_y > 0:
                                     latent_chunks[i] = torch.flip(latent_chunks[i], [3])
                                     batch_chunks[i] = torch.flip(batch_chunks[i], [3])
-                                
+
                                 # resize latent to fit
                                 if latent_chunks[i].shape[2] != latent_size or latent_chunks[i].shape[3] != latent_size:
                                     latent_chunks[i] = torch.nn.functional.interpolate(latent_chunks[i], size=(latent_size, latent_size), mode='bilinear', align_corners=False)
-                                
+
                                 # if do_scale > 0:
                                 #     scale = 2
                                 #     start_latent_h = latent_chunks[i].shape[2]
@@ -876,7 +876,7 @@ class TrainVAEProcess(BaseTrainProcess):
                                 #     latent_y = random.randint(0, latent_chunks[i].shape[3] - start_latent_w)
                                 #     batch_x = latent_x * self.vae_scale_factor
                                 #     batch_y = latent_y * self.vae_scale_factor
-                                    
+
                                 #     # crop
                                 #     latent_chunks[i] = latent_chunks[i][:, :, latent_x:latent_x + start_latent_h, latent_y:latent_y + start_latent_w]
                                 #     batch_chunks[i] = batch_chunks[i][:, :, batch_x:batch_x + start_batch_h, batch_y:batch_y + start_batch_w]
@@ -891,22 +891,22 @@ class TrainVAEProcess(BaseTrainProcess):
                             forward_latents = channel_dropout(latents, self.dropout)
                         else:
                             forward_latents = latents
-                            
+
                         # resize batch to resolution if needed
                         if batch_chunks[0].shape[2] != self.resolution or batch_chunks[0].shape[3] != self.resolution:
                             batch_chunks = [torch.nn.functional.interpolate(b, size=(self.resolution, self.resolution), mode='bilinear', align_corners=False) for b in batch_chunks]
                         batch = torch.cat(batch_chunks, dim=0)
-                                
+
                     else:
                         # latents.detach().requires_grad_(True)
                         forward_latents = latents
-                    
+
                 forward_latents = forward_latents.to(self.device, dtype=self.torch_dtype)
-                
+
                 if not self.train_encoder:
                     # detach latents if not training encoder
                     forward_latents = forward_latents.detach()
-                
+
                 # shift latents to match vae config
                 shift = self.vae.config['shift_factor'] if self.vae.config['shift_factor'] is not None else 0
                 forward_latents = forward_latents / self.vae.config['scaling_factor'] + shift
@@ -963,24 +963,24 @@ class TrainVAEProcess(BaseTrainProcess):
                         critic_gen_loss *= crit_g_scaler
                 else:
                     critic_gen_loss = torch.tensor(0.0, device=self.device, dtype=self.torch_dtype)
-                
+
                 if self.mv_loss_weight > 0:
                     mv_loss = self.get_mean_variance_loss(latents) * self.mv_loss_weight
                 else:
                     mv_loss = torch.tensor(0.0, device=self.device, dtype=self.torch_dtype)
-                
+
                 if self.ltv_weight > 0:
                     ltv_loss = self.get_ltv_loss(latents, batch) * self.ltv_weight
                 else:
                     ltv_loss = torch.tensor(0.0, device=self.device, dtype=self.torch_dtype)
-                    
+
                 if self.lpm_weight > 0:
                     lpm_loss = self.get_latent_pixel_matching_loss(latents, batch) * self.lpm_weight
                 else:
                     lpm_loss = torch.tensor(0.0, device=self.device, dtype=self.torch_dtype)
 
                 loss = style_loss + content_loss + kld_loss + mse_loss + tv_loss + critic_gen_loss + pattern_loss + lpips_loss + mv_loss + ltv_loss + mae_loss + lat_mse_loss + clip_loss + pool_loss
-                
+
                 # check if loss is NaN or Inf
                 if torch.isnan(loss) or torch.isinf(loss):
                     self.print(f"Loss is NaN or Inf, stopping at step {self.step_num}")
@@ -1001,7 +1001,7 @@ class TrainVAEProcess(BaseTrainProcess):
                     self.print(f" - Latent TV loss: {ltv_loss.item()}")
                     self.print(f" - Latent pixel matching loss: {lpm_loss.item()}")
                     self.print(f" - Total loss: {loss.item()}")
-                    self.print(f" - Stopping training")
+                    self.print(' - Stopping training')
                     exit(1)
 
                 # Backward pass and optimization
@@ -1046,7 +1046,7 @@ class TrainVAEProcess(BaseTrainProcess):
                     loss_string += f" ltv: {ltv_loss:.2e}"
                 if self.lpm_weight > 0:
                     loss_string += f" lpm: {lpm_loss:.2e}"
-                
+
 
                 if hasattr(optimizer, 'get_avg_learning_rate'):
                     learning_rate = optimizer.get_avg_learning_rate()

@@ -114,7 +114,6 @@ class Critic:
             self.optimizer,
             total_iters=self.process.max_steps * self.num_critic_per_gen,
             factor=1,
-            verbose=False
         )
 
     def load_weights(self):
@@ -126,7 +125,7 @@ class Critic:
             print(f" - Latest checkpoint is: {latest_file}")
             path_to_load = latest_file
         else:
-            self.print(f" - No checkpoint found, starting from scratch")
+            self.print(' - No checkpoint found, starting from scratch')
         if path_to_load:
             self.model.load_state_dict(load_file(path_to_load))
 
@@ -184,7 +183,7 @@ class Critic:
 
         # # Compute WGAN-GP critic loss
         # critic_loss = -(torch.mean(out_target) - torch.mean(out_pred)) + self.lambda_gp * gradient_penalty
-        
+
         stacked_output = self.model(inputs).float()
         out_pred, out_target = torch.chunk(stacked_output, 2, dim=0)
 
@@ -196,7 +195,7 @@ class Critic:
         gradient_penalty = get_gradient_penalty(self.model, vgg_target, vgg_pred, self.device)
 
         critic_loss = loss_real + loss_fake + self.lambda_gp * gradient_penalty
-        
+
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
         self.optimizer.step()
@@ -217,4 +216,3 @@ class Critic:
             learning_rate = self.optimizer.param_groups[0]['lr']
 
         return learning_rate
-

@@ -70,17 +70,17 @@ class ChromaRadianceModel(BaseModel):
     @staticmethod
     def get_train_scheduler():
         return CustomFlowMatchEulerDiscreteScheduler(**scheduler_config)
-    
+
     def get_bucket_divisibility(self):
         # return the bucket divisibility for the model
         return 32
 
     def load_model(self):
         dtype = self.torch_dtype
-        
+
         # will be updated if we detect a existing checkpoint in training folder
         model_path = self.model_config.name_or_path
-        
+
         if model_path == "lodestones/Chroma":
             print("Looking for latest Chroma checkpoint")
             # get the latest checkpoint
@@ -94,7 +94,7 @@ class ChromaRadianceModel(BaseModel):
                 else:
                     latest_version += 1
             print(f"Using latest Chroma version: v{latest_version}")
-            
+
             # make sure we have it
             model_path = huggingface_hub.hf_hub_download(
                 repo_id=model_path,
@@ -115,20 +115,20 @@ class ChromaRadianceModel(BaseModel):
                 repo_id=model_path,
                 filename=f"{model_path.split('/')[-1]}.safetensors",
             )
-        
+
         else:
             # check if the model path is a local file
             if os.path.exists(model_path):
                 print(f"Using local model: {model_path}")
             else:
                 raise ValueError(f"Model path {model_path} does not exist")
-        
+
         # extras_path = 'black-forest-labs/FLUX.1-schnell'
         # schnell model is gated now, use flex instead
         extras_path = 'ostris/Flex.1-alpha'
 
         self.print_and_status_update("Loading transformer")
-        
+
         if model_path.endswith('.pth') or model_path.endswith('.pt'):
             chroma_state_dict = torch.load(model_path, map_location='cpu', weights_only=True)
             transformer = Chroma.load_from_state_dict(chroma_state_dict, dtype)
@@ -241,7 +241,7 @@ class ChromaRadianceModel(BaseModel):
 
         extra['negative_prompt_embeds'] = unconditional_embeds.text_embeds
         extra['negative_prompt_attn_mask'] = unconditional_embeds.attention_mask
-        
+
         img = pipeline(
             prompt_embeds=conditional_embeds.text_embeds,
             prompt_attn_mask=conditional_embeds.attention_mask,
@@ -264,7 +264,7 @@ class ChromaRadianceModel(BaseModel):
     ):
         with torch.no_grad():
             bs, c, h, w = latent_model_input.shape
-            
+
             img_ids = prepare_latent_image_ids(
                 bs, h, w, patch_size=16
             ).to(self.device_torch)
@@ -295,9 +295,9 @@ class ChromaRadianceModel(BaseModel):
 
         if isinstance(noise_pred, QTensor):
             noise_pred = noise_pred.dequantize()
-        
+
         return noise_pred
-    
+
     def get_prompt_embeds(self, prompt: str) -> PromptEmbeds:
         if isinstance(prompt, str):
             prompts = [prompt]
@@ -329,20 +329,20 @@ class ChromaRadianceModel(BaseModel):
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
 
         prompt_attention_mask = text_inputs["attention_mask"]
-        
+
         pe = PromptEmbeds(
             prompt_embeds
         )
         pe.attention_mask = prompt_attention_mask
         return pe
-    
+
     def get_model_has_grad(self):
         # return from a weight if it has grad
         return False
     def get_te_has_grad(self):
         # return from a weight if it has grad
         return False
-    
+
     def save_model(self, output_path, meta, save_dtype):
         # comfy-format single-file save via the mixin (chroma's class keys ARE
         # the original layout); handles torchao/Ostris dequant, not just quanto
@@ -359,9 +359,9 @@ class ChromaRadianceModel(BaseModel):
         noise = kwargs.get('noise')
         batch = kwargs.get('batch')
         return (noise - batch.latents).detach()
-    
+
     lora_keys_use_comfy_prefix = True
 
-    
+
     def get_base_model_version(self):
         return "chroma_radiance"

@@ -664,6 +664,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             `torch.Tensor`:
                 The sample tensor at the previous timestep.
         """
+        x_t = None
         timestep = args[0] if len(args) > 0 else kwargs.pop("timestep", None)
         prev_timestep = args[1] if len(args) > 1 else kwargs.pop("prev_timestep", None)
         if sample is None:
@@ -717,6 +718,8 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                 - 2.0 * (sigma_t * (torch.exp(h) - 1.0)) * model_output
                 + sigma_t * torch.sqrt(torch.exp(2 * h) - 1.0) * noise
             )
+        if x_t is None:
+            raise ValueError("Unsupported DPM algorithm or solver type for this update order")
         return x_t
 
     def multistep_dpm_solver_second_order_update(
@@ -740,6 +743,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             `torch.Tensor`:
                 The sample tensor at the previous timestep.
         """
+        x_t = None
         timestep_list = args[0] if len(args) > 0 else kwargs.pop("timestep_list", None)
         prev_timestep = args[1] if len(args) > 1 else kwargs.pop("prev_timestep", None)
         if sample is None:
@@ -840,6 +844,8 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                     - 2.0 * (sigma_t * ((torch.exp(h) - 1.0) / h - 1.0)) * D1
                     + sigma_t * torch.sqrt(torch.exp(2 * h) - 1.0) * noise
                 )
+        if x_t is None:
+            raise ValueError("Unsupported DPM algorithm or solver type for this update order")
         return x_t
 
     def multistep_dpm_solver_third_order_update(
@@ -864,6 +870,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                 The sample tensor at the previous timestep.
         """
 
+        x_t = None
         timestep_list = args[0] if len(args) > 0 else kwargs.pop("timestep_list", None)
         prev_timestep = args[1] if len(args) > 1 else kwargs.pop("prev_timestep", None)
         if sample is None:
@@ -939,6 +946,8 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                 * D2
                 + sigma_t * torch.sqrt(1.0 - torch.exp(-2 * h)) * noise
             )
+        if x_t is None:
+            raise ValueError("Unsupported DPM algorithm or solver type for this update order")
         return x_t
 
     def index_for_timestep(self, timestep, schedule_timesteps=None):

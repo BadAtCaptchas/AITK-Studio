@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
@@ -76,9 +77,10 @@ async function jsonResponse(request: Request, payload: unknown) {
   return new NextResponse(json, { headers: { 'Content-Type': 'application/json' } });
 }
 
-export async function POST(request: Request) {
-  const body = assertGlobalPayload(await request.json());
+async function postCommand(request: Request) {
+  const body = assertGlobalPayload(await readJsonCommand(request));
   const { datasetName } = body;
+  if (typeof datasetName !== 'string' || !datasetName) return NextResponse.json({ error: 'datasetName is required' }, { status: 400 });
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
   const compact = body?.compact === true;
@@ -154,3 +156,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

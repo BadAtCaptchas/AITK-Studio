@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { NextRequest, NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { getRemoteWorker, RemoteClientError, remoteJson } from '@/server/remoteClient';
@@ -52,13 +53,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ wor
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ workerID: string }> }) {
+async function postCommand(request: NextRequest, { params }: { params: Promise<{ workerID: string }> }) {
   const { workerID } = await params;
   const existing = await db.workerNodes.findById(workerID);
   if (!existing) return NextResponse.json({ error: 'Worker not found' }, { status: 404 });
 
   try {
-    const body = await request.json().catch(() => ({}));
+    const body = await readJsonCommand(request);
     const action = parseAction(body?.action);
     const worker = await getRemoteWorker(workerID);
     const result = await remoteJson(worker, '/api/updater', {
@@ -70,3 +71,5 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return remoteUpdaterError(error);
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

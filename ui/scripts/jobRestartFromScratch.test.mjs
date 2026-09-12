@@ -63,6 +63,8 @@ function makeDeps(job, overrides = {}) {
   let currentJob = job;
   const deps = {
     findJobById: async () => currentJob,
+    claimMaintenance: async job => ({ ...job, status: 'restarting' }),
+    updateOwnedJob: async (_id, _expected, data) => { calls.updates.push(data); currentJob = { ...currentJob, ...data }; return currentJob; },
     updateJob: async (_jobID, data) => {
       calls.updates.push(data);
       currentJob = { ...currentJob, ...data };
@@ -228,7 +230,7 @@ test('restart from scratch forwards existing remote training jobs', async () => 
   assert.equal(restarted.info, 'remote restarted');
   assert.equal(calls.removedPaths.length, 0);
   assert.equal(calls.deleteMetricsForJob.length, 0);
-  assert.equal(calls.updates.length, 0);
+  assert.deepEqual(calls.updates, [{ status: job.status }]);
   assert.equal(calls.remoteJson.length, 1);
   assert.equal(calls.remoteJson[0].routePath, '/api/jobs/remote-1/restart-from-scratch');
   assert.deepEqual(calls.ensureQueueRunning, [{ gpuIds: '0', workerId: 'worker-1' }]);

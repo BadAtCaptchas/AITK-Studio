@@ -577,6 +577,3 @@ class Ideogram4Model(BaseModel):
         return ["layers"]
 
     lora_keys_use_comfy_prefix = True
-
-
-

@@ -32,9 +32,9 @@ class BaseJob:
 
     def run(self):
         print("")
-        print(f"#############################################")
+        print('#############################################')
         print(f"# Running job: {self.name}")
-        print(f"#############################################")
+        print('#############################################')
         print("")
         # implement in child class
         # be sure to call super().run() first

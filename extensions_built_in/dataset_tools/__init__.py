@@ -25,8 +25,8 @@ class SyncFromCollectionExtension(Extension):
         # import your process class here so it is only loaded when needed and return it
         from .SyncFromCollection import SyncFromCollection
         return SyncFromCollection
-    
-    
+
+
 class SuperTaggerExtension(Extension):
     uid = "super_tagger"
     name = "Super Tagger"

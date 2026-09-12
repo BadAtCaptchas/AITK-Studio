@@ -766,15 +766,6 @@ class IPAdapter(torch.nn.Module):
             do_rescale=False,
         ).pixel_values
 
-    def to(self, *args, **kwargs):
-        super().to(*args, **kwargs)
-        self.image_encoder.to(*args, **kwargs)
-        self.image_proj_model.to(*args, **kwargs)
-        self.adapter_modules.to(*args, **kwargs)
-        if self.preprocessor is not None:
-            self.preprocessor.to(*args, **kwargs)
-        return self
-
     # def load_ip_adapter(self, state_dict: Union[OrderedDict, dict]):
     #     self.image_proj_model.load_state_dict(state_dict["image_proj"])
     #     ip_layers = torch.nn.ModuleList(self.pipe.unet.attn_processors.values())

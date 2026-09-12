@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
@@ -28,9 +29,9 @@ async function isInsideRoot(root: string, target: string) {
   return relativePath !== '' && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const { filePath } = body;
 
     if (!filePath || typeof filePath !== 'string') {
@@ -74,3 +75,5 @@ export async function POST(request: NextRequest) {
     return new NextResponse('Internal Server Error', { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

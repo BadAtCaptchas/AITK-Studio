@@ -653,10 +653,7 @@ def get_diffusers_vae_key_from_ldm_key(target_ldm_key, i=None):
         if ldm_key == target_ldm_key:
             return diffusers_key
 
-    if ldm_key in vae_ldm_to_diffusers_dict:
-        return vae_ldm_to_diffusers_dict[ldm_key]
-    else:
-        return None
+    return vae_ldm_to_diffusers_dict.get(target_ldm_key)
 
 # def get_ldm_vae_key_from_diffusers_key(target_diffusers_key):
 #     for ldm_key, diffusers_key in vae_ldm_to_diffusers_dict.items():

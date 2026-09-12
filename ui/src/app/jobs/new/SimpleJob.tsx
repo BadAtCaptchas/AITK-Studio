@@ -2218,6 +2218,10 @@ export default function SimpleJob({
                     <div className="text-gray-200">{trainerLabel}</div>
                     <div className="text-gray-500">Architecture</div>
                     <div className="text-gray-200">{modelArch?.label || processConfig.model.arch}</div>
+                    <div className="text-gray-500">Model / artifact</div>
+                    <div className="max-w-64 break-all text-right text-gray-200">{processConfig.model.name_or_path}</div>
+                    <div className="text-gray-500">Sample output</div>
+                    <div className="text-gray-200">{modelArch?.group === 'audio' ? 'Audio' : modelArch?.isVideoModel ? 'Video' : 'Image'}</div>
                     <div className="text-gray-500">Target</div>
                     <div className="text-gray-200">
                       {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}

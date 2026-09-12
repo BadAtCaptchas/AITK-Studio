@@ -31,14 +31,8 @@ export const defaultDatasetConfig: DatasetConfig = {
   include_images_in_video_dataset: false,
 };
 
-export const defaultSliderConfig: SliderConfig = {
-  guidance_strength: 3.0,
-  anchor_strength: 1.0,
-  positive_prompt: 'person who is happy',
-  negative_prompt: 'person who is sad',
-  target_class: 'person',
-  anchor_class: '',
-};
+export { defaultSliderConfig } from '@/domain/trainingDefaults';
+import { defaultSliderConfig } from '@/domain/trainingDefaults';
 
 export const defaultWatermarkConfig: WatermarkConfig = {
   enabled: false,

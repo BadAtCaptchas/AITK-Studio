@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
@@ -8,10 +9,10 @@ import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { sanitizeCaptionText } from '@/utils/captionQuality';
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   let body;
   try {
-    body = assertGlobalPayload(await request.json());
+    body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
     // Client aborted the request before body was fully sent
     return new NextResponse(null, { status: 499 });
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { imgPath } = body;
+  if (typeof imgPath !== 'string' || !imgPath) return NextResponse.json({ error: 'imgPath is required' }, { status: 400 });
   try {
     const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
     if (remoteAsset) {
@@ -79,3 +81,5 @@ export async function POST(request: NextRequest) {
     return new NextResponse('Error getting caption', { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

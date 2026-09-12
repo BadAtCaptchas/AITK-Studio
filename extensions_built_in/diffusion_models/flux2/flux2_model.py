@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List, Optional
 import huggingface_hub
 import torch
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.dequantize import patch_dequantization_on_save
 from toolkit.image_io import open_static_image
 from toolkit.memory_management import attach_layer_offloading
 from toolkit.metadata import get_meta_for_safetensors
@@ -397,6 +398,8 @@ class Flux2Model(BaseModel):
         transformer_path = model_path
 
         self.print_and_status_update("Loading transformer")
+        with torch.device("meta"):
+            transformer = Flux2(self.get_flux2_params())
         # use local path if provided
         if os.path.exists(os.path.join(transformer_path, self.flux2_te_filename)):
             transformer_path = os.path.join(transformer_path, self.flux2_te_filename)
@@ -493,7 +496,7 @@ class Flux2Model(BaseModel):
             if is_hf_offline_mode():
                 download_kwargs["local_files_only"] = True
             vae_path = huggingface_hub.hf_hub_download(**download_kwargs)
-        
+
         # config sniffed from the checkpoint (small-decoder detection)
         vae = AutoEncoder.load_model(vae_path, dtype=dtype)
 
@@ -824,7 +827,7 @@ class Flux2Model(BaseModel):
         latents = self.vae.encode(images)
 
         return latents
-    
+
     def decode_latents(self, latents, device=None, dtype=None):
         if device is None:
             device = self.vae_device_torch

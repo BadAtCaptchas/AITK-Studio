@@ -43,7 +43,7 @@ def get_pipeline_embeds(pipeline, prompt, negative_prompt, device):
             attention_mask = None
         concat_embeds.append(pipeline.text_encoder(input_ids[:, i: i + max_length],
                                                    attention_mask=attention_mask)[0])
-        
+
         if negative_prompt is not None:
             if hasattr(pipeline.text_encoder.config, "use_attention_mask") and pipeline.text_encoder.config.use_attention_mask:
                 attention_mask = negative_ids[:, i: i + max_length].attention_mask.to(device)

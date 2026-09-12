@@ -99,7 +99,8 @@ def _mixed_packed_state() -> dict[str, torch.Tensor]:
 class MiniMaxH3RegistryTests(unittest.TestCase):
     def test_optional_registry_and_frame_contract(self):
         self.assertEqual(MinimaxH3Model.arch, "minimax_h3")
-        self.assertIn(MinimaxH3Model, AI_TOOLKIT_MODELS)
+        descriptor = next(item for item in AI_TOOLKIT_MODELS if item.arch == 'minimax_h3')
+        self.assertIs(descriptor.load(), MinimaxH3Model)
         self.assertEqual(packing.align_num_frames_down(39), 39)
         self.assertEqual(packing.align_num_frames_down(38), 22)
         self.assertEqual(packing.video_latent_num_frames(39), 12)

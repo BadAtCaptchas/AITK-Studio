@@ -83,7 +83,7 @@ test('Flux guidance policy distinguishes official FLUX, Ideogram, Klein, and Fle
 });
 
 test('Flux UI arch defaults set or clear guidance bypass explicitly', () => {
-  const source = fs.readFileSync(path.join(process.cwd(), 'src/app/jobs/new/options.ts'), 'utf8');
+  const source = fs.readFileSync(path.join(process.cwd(), 'src/domain/modelOptions.ts'), 'utf8');
 
   assert.match(
     archBlock(source, 'flux'),

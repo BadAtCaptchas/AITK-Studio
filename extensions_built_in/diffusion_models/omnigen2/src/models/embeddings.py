@@ -54,13 +54,13 @@ class TimestepEmbedding(nn.Module):
             self.post_act = get_activation(post_act_fn)
 
         self.initialize_weights()
-        
+
     def initialize_weights(self):
         nn.init.normal_(self.linear_1.weight, std=0.02)
         nn.init.zeros_(self.linear_1.bias)
         nn.init.normal_(self.linear_2.weight, std=0.02)
         nn.init.zeros_(self.linear_2.bias)
-        
+
     def forward(self, sample, condition=None):
         if condition is not None:
             sample = sample + self.cond_proj(condition)

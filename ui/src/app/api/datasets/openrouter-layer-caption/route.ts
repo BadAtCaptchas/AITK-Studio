@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -18,7 +19,7 @@ function requiredElementIndex(value: unknown) {
   return elementIndex;
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
     const apiKey = await getOpenRouterApiKey();
     const contentType = request.headers.get('content-type') || '';
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
       }
       imageDataUrl = await encryptedOpenRouterUploadImageDataUrl(formData, 'Caption Layer');
     } else {
-      const body = assertGlobalPayload(await request.json());
+      const body = assertGlobalPayload(await readJsonCommand(request));
       caption = typeof body?.caption === 'string' ? body.caption : '';
       model = typeof body?.model === 'string' ? body.model : '';
       elementIndex = requiredElementIndex(body?.elementIndex);
@@ -72,3 +73,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

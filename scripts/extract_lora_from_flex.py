@@ -13,13 +13,12 @@ parser.add_argument("--full", action="store_true", help="Do a full transformer e
 
 args = parser.parse_args()
 
-if True:
-    # set cuda environment variable
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
-    import torch
-    from safetensors.torch import load_file, save_file
-    from lycoris.utils import extract_linear, extract_conv, make_sparse
-    from diffusers import FluxTransformer2DModel
+# set cuda environment variable
+os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+import torch
+from safetensors.torch import load_file, save_file
+from lycoris.utils import extract_linear, extract_conv, make_sparse
+from diffusers import FluxTransformer2DModel
 
 base = args.base
 tuned = args.tuned

@@ -10,6 +10,24 @@ import {
   withoutRemoteRedirects,
 } from '../dist/src/server/remoteClient.js';
 
+test('remote JSON deadline includes stalled response bodies and rejects pre-aborted requests', async () => {
+  installRemotePolicyDb();
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{')); } }));
+  };
+  // Keep the test process alive while the deliberately unref'ed transport timer expires.
+  const keepAlive = setTimeout(() => undefined, 1_000);
+  try {
+    await assert.rejects(remoteJson(makeWorker(), '/stall', { timeoutMs: 25 }), /deadline/);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(remoteJson(makeWorker(), '/cancel', { timeoutMs: 25, signal: controller.signal }));
+    assert.equal(calls, 1);
+  } finally { clearTimeout(keepAlive); }
+});
+
 const require = createRequire(import.meta.url);
 const dbModule = require('../dist/src/server/db.js');
 

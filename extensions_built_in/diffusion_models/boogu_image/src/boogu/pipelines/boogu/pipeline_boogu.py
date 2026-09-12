@@ -21,17 +21,17 @@ from PIL import Image
 from tqdm import tqdm
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
 
-from boogu.pipelines.boogu.instruct_reasoner_static_skills import (
+from .instruct_reasoner_static_skills import (
     InstructionReasonerStaticRewriteSkills,
 )
-from boogu.pipelines.image_processor import BooguImageProcessor
+from ..image_processor import BooguImageProcessor
 
 # from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
-from boogu.schedulers.scheduling_flow_match_euler_discrete_time_shifting import (
+from ...schedulers.scheduling_flow_match_euler_discrete_time_shifting import (
     FlowMatchEulerDiscreteScheduler,
 )
-from boogu.utils.teacache_util import TeaCacheParams
-from boogu.utils.validator_utils import get_device_validator
+from ...utils.teacache_util import TeaCacheParams
+from ...utils.validator_utils import get_device_validator
 
 from ...models.transformers.rope import BooguImageRotaryPosEmbed
 from ..lora_pipeline import BooguImageLoraLoaderMixin

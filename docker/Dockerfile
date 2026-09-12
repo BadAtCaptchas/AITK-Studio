@@ -73,11 +73,12 @@ RUN python -m pip install --no-cache-dir --break-system-packages \
       --index-url https://download.pytorch.org/whl/cu128 \
       --extra-index-url https://pypi.org/simple
 
-COPY requirements_base.txt requirements.txt ./
-RUN python -m pip install --no-cache-dir --break-system-packages -r requirements.txt \
-    && python -m pip install --no-cache-dir --break-system-packages setuptools==70.0.0
+COPY requirements_torch_blackwell_cu128.txt requirements_base.txt requirements.txt ./
+RUN python -m pip install --no-cache-dir --break-system-packages -r requirements.txt -r requirements_torch_blackwell_cu128.txt \
+    && python -m pip check
 
 COPY ui/package.json ui/package-lock.json ./ui/
+COPY ui/scripts/patch-next-middleware.mjs ./ui/scripts/patch-next-middleware.mjs
 WORKDIR /app/ai-toolkit/ui
 RUN npm ci
 
@@ -92,6 +93,7 @@ RUN npm run update_db \
     && rm -f /app/ai-toolkit/aitk_db.db /app/ai-toolkit/aitk_db.db-shm /app/ai-toolkit/aitk_db.db-wal \
     && npm cache clean --force
 
+ENV AITK_BIND_HOST=0.0.0.0 AITK_NETWORK_MODE=1
 EXPOSE 8675 6006
 
 WORKDIR /

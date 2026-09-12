@@ -123,6 +123,7 @@ const runStartLikeJobAction = (
   options: StartJobOptions = {},
 ) => {
   return new Promise<void>((resolve, reject) => {
+    const idempotencyKey = globalThis.crypto.randomUUID();
     const waitForRemoteStart = async (startID: string) => {
       while (true) {
         await new Promise(waitResolve => window.setTimeout(waitResolve, 500));
@@ -140,6 +141,7 @@ const runStartLikeJobAction = (
     }) => {
       const res = await apiClient.post(`/api/jobs/${jobID}/${actionPath}`, {
         ...payload,
+        ...(actionPath === 'start' ? { idempotencyKey } : {}),
         background: options.background === true && actionPath === 'start',
       });
       const data = res.data;
@@ -236,7 +238,7 @@ export const restartJobFromScratch = (
 export const stopJob = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/jobs/${jobID}/stop`)
+      .post(`/api/jobs/${jobID}/stop`)
       .then(res => res.data)
       .then(data => {
         console.log('Job stopped:', data);
@@ -251,7 +253,7 @@ export const stopJob = (jobID: string) => {
 export const deleteJob = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/jobs/${jobID}/delete`)
+      .post(`/api/jobs/${jobID}/delete`)
       .then(res => res.data)
       .then(data => {
         console.log('Job deleted:', data);
@@ -266,7 +268,7 @@ export const deleteJob = (jobID: string) => {
 export const markJobAsStopped = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/jobs/${jobID}/mark_stopped`)
+      .post(`/api/jobs/${jobID}/mark_stopped`)
       .then(res => res.data)
       .then(data => {
         console.log('Job marked as stopped:', data);
@@ -281,7 +283,7 @@ export const markJobAsStopped = (jobID: string) => {
 export const saveJobNow = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/jobs/${jobID}/save_now`)
+      .post(`/api/jobs/${jobID}/save_now`)
       .then(res => res.data)
       .then(data => {
         console.log('Job set to save on next step:', data);
@@ -379,7 +381,17 @@ export const importTrainingJob = (
     const response = await apiClient.post(`/api/jobs/import?${completeParams.toString()}`, undefined, {
       headers: { 'X-AITK-File-Name': encodeURIComponent(file.name) },
     });
-    return response.data as TrainingJobImportResult;
+    let result: unknown = response.data;
+    const deadline = Date.now() + 60 * 60 * 1000;
+    while (result && typeof result === 'object' && 'uploadID' in result && 'status' in result) {
+      if (result.status === 'completed' && 'result' in result) { result = result.result; break; }
+      if (result.status === 'failed') throw new Error('error' in result && typeof result.error === 'string' ? result.error : 'Archive import failed');
+      if (Date.now() >= deadline) throw new Error('Import is still running. Its progress remains available on the server.');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      result = (await apiClient.get(`/api/jobs/import?aitk_upload=status&uploadID=${encodeURIComponent(uploadID)}`)).data;
+    }
+    if (!result || typeof result !== 'object' || !('job' in result) || !('warnings' in result)) throw new Error('Invalid import response');
+    return result as TrainingJobImportResult;
   })();
 };
 export const sampleJobNow = async (jobID: string): Promise<void> => {
@@ -409,7 +421,7 @@ export const getAvaliableJobActions = (job: Job) => {
   const canDelete = ['queued', 'completed', 'stopped', 'error'].includes(job.status) && !isStopping;
   const canEdit = ['queued', 'completed', 'stopped', 'error'].includes(job.status) && !isStopping;
   const canRemoveFromQueue = job.status === 'queued';
-  const canStop = job.status === 'running' && !isStopping;
+  const canStop = ['starting', 'running'].includes(job.status) && !isStopping;
   let canStart = ['stopped', 'error'].includes(job.status) && !isStopping;
   const canRestartFromScratch =
     job.job_type === 'train' && ['queued', 'completed', 'stopped', 'error'].includes(job.status) && !isStopping;

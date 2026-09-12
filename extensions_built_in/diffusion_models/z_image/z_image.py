@@ -6,6 +6,8 @@ import yaml
 from toolkit.base_lora import fuse_base_lora_into_model, load_lora_network_for_model
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.models.base_model import BaseModel
+from toolkit.models.v2.text_encoders.qwen3 import Qwen3TextEncoder
+from toolkit.models.v2.vae.autoencoder_kl import KLVAE
 from toolkit.basic import flush
 from toolkit.prompt_utils import PromptEmbeds
 from toolkit.samplers.custom_flowmatch_sampler import (

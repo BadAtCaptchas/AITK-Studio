@@ -288,5 +288,3 @@ class ExampleTransformer2DModel(nn.Module, OstrisModelMixin):
         x = x.view(b, gh, gw, p, p, self.out_channels)
         x = x.permute(0, 5, 1, 3, 2, 4).reshape(b, self.out_channels, h, w)
         return x
-
-

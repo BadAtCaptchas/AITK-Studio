@@ -1,15 +1,16 @@
+from toolkit.xla import mark_xla_step
 
 import torch
 from toolkit.basic import flush
 from transformers import AutoTokenizer, UMT5EncoderModel
 from diffusers import  WanPipeline, WanTransformer3DModel, AutoencoderKLWan
-import torch
+
 from diffusers import FlowMatchEulerDiscreteScheduler
 from typing import List
 from diffusers.pipelines.wan.pipeline_output import WanPipelineOutput
 from diffusers.pipelines.wan.pipeline_wan import XLA_AVAILABLE
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 from diffusers.image_processor import PipelineImageInput
 
 
@@ -42,7 +43,7 @@ class Wan22Pipeline(WanPipeline):
     @property
     def _execution_device(self):
         return self._exec_device
-    
+
     def __call__(
         self: WanPipeline,
         prompt: Union[str, List[str]] = None,
@@ -73,11 +74,11 @@ class Wan22Pipeline(WanPipeline):
 
         if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
-            
+
         if num_frames % self.vae_scale_factor_temporal != 1:
             num_frames = num_frames // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal + 1
         num_frames = max(num_frames, 1)
-        
+
 
         width = width // (self.vae.config.scale_factor_spatial * 2) * (self.vae.config.scale_factor_spatial * 2)
         height = height // (self.vae.config.scale_factor_spatial * 2) * (self.vae.config.scale_factor_spatial * 2)
@@ -87,7 +88,7 @@ class Wan22Pipeline(WanPipeline):
         transformer_device = self.transformer.device
         text_encoder_device = self.text_encoder.device
         device = self._exec_device
-        
+
         if self._aggressive_offload:
             print("Unloading vae")
             self.vae.to("cpu")
@@ -97,7 +98,7 @@ class Wan22Pipeline(WanPipeline):
                 self.transformer_2.to("cpu")
             self.text_encoder.to(device)
             flush()
-        
+
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -110,7 +111,7 @@ class Wan22Pipeline(WanPipeline):
             callback_on_step_end_tensor_inputs,
             guidance_scale_2
         )
-        
+
         if self.config.boundary_ratio is not None and guidance_scale_2 is None:
             guidance_scale_2 = guidance_scale
 
@@ -158,7 +159,7 @@ class Wan22Pipeline(WanPipeline):
 
         # 5. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
-        
+
         conditioning = None # wan2.2 i2v conditioning
         # check shape of latents to see if it is first frame conditioned for 2.2 14b i2v
         if latents is not None:
@@ -166,10 +167,10 @@ class Wan22Pipeline(WanPipeline):
                 # first 16 channels are latent. other 20 are conditioning
                 conditioning = latents[:, 16:]
                 latents = latents[:, :16]
-                
+
                 # we need to trick the in_channls to think it is only 16 channels
                 num_channels_latents = 16
-                
+
         latents = self.prepare_latents(
             batch_size * num_videos_per_prompt,
             num_channels_latents,
@@ -181,7 +182,7 @@ class Wan22Pipeline(WanPipeline):
             generator,
             latents,
         )
-        
+
         mask = noise_mask
         if mask is None:
             mask = torch.ones(latents.shape, dtype=torch.float32, device=device)
@@ -190,14 +191,14 @@ class Wan22Pipeline(WanPipeline):
         num_warmup_steps = len(timesteps) - \
             num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-        
+
         if self.config.boundary_ratio is not None:
             boundary_timestep = self.config.boundary_ratio * self.scheduler.config.num_train_timesteps
         else:
             boundary_timestep = None
-        
+
         current_model = self.transformer
-        
+
         if self._aggressive_offload:
             # we don't have one loaded yet in aggressive offload mode
             current_model = None
@@ -208,7 +209,7 @@ class Wan22Pipeline(WanPipeline):
                     continue
 
                 self._current_timestep = t
-                
+
                 if boundary_timestep is None or t >= boundary_timestep:
                     if self._aggressive_offload and current_model != self.transformer:
                         if self.transformer_2 is not None:
@@ -226,7 +227,7 @@ class Wan22Pipeline(WanPipeline):
                     # low-noise stage in wan2.2
                     current_model = self.transformer_2
                     current_guidance_scale = guidance_scale_2
-                    
+
                 latent_model_input = latents.to(device, transformer_dtype)
                 if self.config.expand_timesteps:
                     # seq_len: num_latent_frames * latent_height//2 * latent_width//2
@@ -235,9 +236,9 @@ class Wan22Pipeline(WanPipeline):
                     timestep = temp_ts.unsqueeze(0).expand(latents.shape[0], -1)
                 else:
                     timestep = t.expand(latents.shape[0])
-                
+
                 pre_condition_latent_model_input = latent_model_input.clone()
-                
+
                 if conditioning is not None:
                     # conditioning is first frame conditioning for 2.2 i2v
                     latent_model_input = torch.cat(
@@ -265,7 +266,7 @@ class Wan22Pipeline(WanPipeline):
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(
                     noise_pred, t, latents, return_dict=False)[0]
-                
+
                 # apply i2v mask
                 latents = (pre_condition_latent_model_input * (1 - mask)) + (
                     latents * mask
@@ -289,7 +290,7 @@ class Wan22Pipeline(WanPipeline):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         self._current_timestep = None
 
@@ -323,7 +324,7 @@ class Wan22Pipeline(WanPipeline):
 
         # Offload all models
         self.maybe_free_model_hooks()
-        
+
         # move transformer back to device
         if self._aggressive_offload:
             # print("Moving transformer back to device")

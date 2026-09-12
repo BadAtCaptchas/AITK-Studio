@@ -33,6 +33,7 @@ from toolkit.pipelines import CustomStableDiffusionXLPipeline
 from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, T2IAdapter, DDPMScheduler, \
     LCMScheduler, Transformer2DModel, AutoencoderTiny, ControlNetModel
 import diffusers
+from diffusers.utils import logging as diffusers_logging
 from diffusers import \
     AutoencoderKL, \
     UNet2DConditionModel
@@ -50,7 +51,7 @@ if TYPE_CHECKING:
     from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
 
 # tell it to shut up
-diffusers.logging.set_verbosity(diffusers.logging.ERROR)
+diffusers_logging.set_verbosity(diffusers_logging.ERROR)
 
 SD_PREFIX_VAE = "vae"
 SD_PREFIX_UNET = "unet"
@@ -332,6 +333,7 @@ class BaseModel:
             "generate_single_image must be implemented in child classes")
 
     def get_noise_prediction(
+        self,
         latent_model_input: torch.Tensor,
         timestep: torch.Tensor,  # 0 to 1000 scale
         text_embeddings: PromptEmbeds,
@@ -339,6 +341,9 @@ class BaseModel:
     ):
         raise NotImplementedError(
             "get_noise_prediction must be implemented in child classes")
+
+    def prepare_sample_prompt_context(self, gen_config: GenerateImageConfig) -> None:
+        """Hook for models that need per-sample context before prompt encoding."""
 
     def get_loss_weight(
         self,

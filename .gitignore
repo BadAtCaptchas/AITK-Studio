@@ -196,3 +196,6 @@ aitk_db.db-shm
 
 /projects
 .aitk-backups
+
+# Isolated compilation/test artifacts.
+ui/.review-build/

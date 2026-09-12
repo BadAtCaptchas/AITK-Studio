@@ -399,6 +399,7 @@ class LTXTrainingUpdateTests(unittest.TestCase):
         trainer.adapter = None
         trainer.dfe = None
         trainer.snr_gos = None
+        trainer.additional_logs = {}
         trainer.apply_model_loss_weight = lambda **kwargs: kwargs["loss"]
         trainer._record_tensor_stats = lambda *args, **kwargs: None
         trainer._record_monitor_metric = lambda *args, **kwargs: None

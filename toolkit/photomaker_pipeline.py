@@ -11,6 +11,7 @@ from safetensors import safe_open
 from huggingface_hub.utils import validate_hf_hub_args
 from transformers import CLIPImageProcessor, CLIPTokenizer
 from diffusers import StableDiffusionXLPipeline
+from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import rescale_noise_cfg
 from diffusers.pipelines.stable_diffusion_xl.pipeline_output import StableDiffusionXLPipelineOutput
 from diffusers.utils import (
     _get_model_file,
@@ -374,6 +375,8 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
         dtype = next(self.id_encoder.parameters()).dtype
         if not isinstance(input_id_images[0], torch.Tensor):
             id_pixel_values = self.id_image_processor(input_id_images, return_tensors="pt").pixel_values
+        else:
+            id_pixel_values = torch.stack(input_id_images)
 
         id_pixel_values = id_pixel_values.unsqueeze(0).to(device=device, dtype=dtype)  # TODO: multiple prompts
 

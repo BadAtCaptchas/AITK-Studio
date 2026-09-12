@@ -1,7 +1,8 @@
+import { jobStorageKey } from '../utils/jobIdentity';
 import fs from 'fs/promises';
 import path from 'path';
 import type { Job } from '@/types';
-import { getJobTrainingRoot } from '@/server/trainingPaths';
+import { getJobTrainingRoot } from './trainingPaths';
 
 export const HF_DOWNLOAD_PROGRESS_FILE = '.hf_download_progress.json';
 
@@ -115,7 +116,7 @@ function isVisible(progress: HFDownloadProgress) {
 
 export async function getHFDownloadProgress(job: Job): Promise<HFDownloadProgress | null> {
   const trainingRoot = await getJobTrainingRoot(job);
-  const jobFolder = path.resolve(trainingRoot, job.name);
+  const jobFolder = path.resolve(trainingRoot, jobStorageKey(job));
   if (!isPathWithin(trainingRoot, jobFolder)) return null;
 
   const progressPath = path.join(jobFolder, HF_DOWNLOAD_PROGRESS_FILE);

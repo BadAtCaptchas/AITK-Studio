@@ -1,6 +1,8 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
+import { createHash } from 'crypto';
+import { checkpointOperation, getOperation } from './operations';
 import type { WorkerNodeRecord } from './db';
 import { getDatasetsRoot } from './settings';
 import {
@@ -75,6 +77,7 @@ type RemoteDatasetSyncDeps = {
     zipPath: string,
     preferredName: string,
     onProgress?: (progress: FileUploadProgress) => void,
+    uploadID?: string,
   ) => Promise<{ dataset?: { name?: string; encrypted?: boolean; path?: string }; path?: string; renamed?: boolean }>;
   stat: (targetPath: string) => Promise<fs.Stats>;
   realpath: (targetPath: string) => Promise<string>;
@@ -189,6 +192,7 @@ export async function syncRemoteDatasetsForJobConfig(
   options: {
     onProgress?: (progress: RemoteDatasetSyncProgress) => void;
     deps?: Partial<RemoteDatasetSyncDeps>;
+    operationID?: string;
   } = {},
 ): Promise<RemoteDatasetSyncResult> {
   const deps = { ...defaultDeps, ...(options.deps || {}) };
@@ -230,7 +234,11 @@ export async function syncRemoteDatasetsForJobConfig(
     if (!remoteDataset) {
       const uploadIndex = missingGroups.findIndex(missing => missing.localDatasetPath === group.localDatasetPath);
       const safeName = safeNameSegment(group.datasetName, 'dataset');
-      const zipPath = path.join(exportRoot, datasetExportFileName(safeName));
+      const slot = createHash('sha256').update(group.localDatasetPath).digest('hex').slice(0, 24);
+      const zipKey = `datasetZip:${slot}`;
+      const operation = options.operationID ? await getOperation(options.operationID) : null;
+      const cached = operation?.checkpoint[zipKey];
+      const zipPath = typeof cached === 'string' ? cached : path.join(exportRoot, datasetExportFileName(safeName));
 
       options.onProgress?.({
         status: 'zipping-dataset',
@@ -242,7 +250,10 @@ export async function syncRemoteDatasetsForJobConfig(
       });
 
       try {
-        await deps.createDatasetArchive(group.datasetName, group.localDatasetPath, zipPath);
+        if (!(typeof cached === 'string' && await deps.stat(zipPath).then(stat => stat.isFile()).catch(() => false))) {
+          await deps.createDatasetArchive(group.datasetName, group.localDatasetPath, zipPath);
+        }
+        if (options.operationID) await checkpointOperation(options.operationID, 'dataset-bundle-ready', { [zipKey]: zipPath });
         const zipStat = await deps.stat(zipPath);
         options.onProgress?.({
           status: 'uploading-dataset',
@@ -270,7 +281,7 @@ export async function syncRemoteDatasetsForJobConfig(
             bytesProcessed: uploadComplete ? 0 : progress.loaded,
             bytesTotal: uploadComplete ? 0 : progress.total,
           });
-        });
+        }, options.operationID ? `dataset-${options.operationID}-${slot}` : undefined);
 
         uploaded = true;
         remoteDataset = {
@@ -283,7 +294,7 @@ export async function syncRemoteDatasetsForJobConfig(
           warnings.push(`Remote worker renamed uploaded dataset "${group.datasetName}" to "${remoteDataset.name}".`);
         }
       } finally {
-        await deps.rmPath(zipPath, { force: true }).catch(() => undefined);
+        if (!options.operationID) await deps.rmPath(zipPath, { force: true }).catch(() => undefined);
       }
     }
 

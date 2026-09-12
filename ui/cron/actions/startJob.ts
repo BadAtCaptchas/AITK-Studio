@@ -1,11 +1,14 @@
 import { db, getDatabaseConfig } from '../../src/server/db';
+import { finishObservedJobProcess } from '../../src/server/jobProcess';
+import { claimJobAttempt } from '../../src/server/jobAttempts';
+import { jobStorageKey } from '../../src/utils/jobIdentity';
 import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { TOOLKIT_ROOT, getHFToken, getModelsRoot, getOpenRouterApiKey } from '../paths';
 import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
-import { getToolkitPythonPath } from '../../src/server/pythonPath';
+import { getToolkitPythonPath, assertPythonRuntimeReady } from '../../src/server/pythonPath';
 import { getJobTrainingRoot } from '../../src/server/trainingPaths';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
 import {
@@ -16,6 +19,7 @@ import {
 import {
   clearDurableEncryptedDatasetKeys,
   getDurableEncryptedDatasetKeys,
+  getDurableKeySnapshot,
 } from '../../src/server/encryptedDatasetSecrets';
 import {
   getDirectRemoteOllamaWorkerId,
@@ -84,6 +88,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
     let launchLogPath = '';
     let launchLogFd: number | null = null;
     let cleanupHfTokenEnv: (() => Promise<void>) | null = null;
+    let durableKeySnapshot: string | null = null;
 
     const closeLaunchLog = () => {
       if (launchLogFd == null) return;
@@ -111,12 +116,12 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const tensorBoardEnabled = isTensorBoardEnabled();
       const tensorBoardLogDir = getTensorBoardLogDir(trainingRoot);
 
-      const trainingFolder = path.join(trainingRoot, job.name);
+      const trainingFolder = path.join(trainingRoot, jobStorageKey(job));
       if (!fs.existsSync(trainingFolder)) {
         fs.mkdirSync(trainingFolder, { recursive: true });
       }
 
-      const configPath = path.join(trainingFolder, '.job_config.json');
+      const configPath = path.join(trainingFolder, `.job_config-${job.attempt_id}.json`);
       const logPath = path.join(trainingFolder, 'log.txt');
       launchLogPath = path.join(trainingFolder, LAUNCH_LOG_FILE);
       const hfDownloadProgressPath = path.join(trainingFolder, '.hf_download_progress.json');
@@ -156,6 +161,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         }
       }
       const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
+      durableKeySnapshot = await getDurableKeySnapshot(jobID);
       const durableEncryptedDatasetKeys = await getDurableEncryptedDatasetKeys(jobID);
       const encryptedKeyMap = normalizeEncryptedKeyMap([
         ...durableEncryptedDatasetKeys,
@@ -168,7 +174,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         }
         return { datasetPath: dataset.path, keyB64 };
       });
-      jobConfig.config.name = job.name;
+      jobConfig.config.name = jobStorageKey(job);
       if (Array.isArray(jobConfig.config?.process)) {
         jobConfig.config.process.forEach((processConfig: any) => {
           processConfig.sqlite_db_path = dbConfig.sqlitePath;
@@ -196,7 +202,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       if (!fs.existsSync(runFilePath)) {
         const message = `Error launching job: run.py not found`;
         appendLaunchLog(launchLogPath, `[launcher] run.py not found at path: ${runFilePath}`);
-        await db.jobs.update(jobID, { status: 'error', pid: null, info: message });
+        await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: ['starting', 'running', 'stopping'] }, { status: 'error', pid: null, info: message });
         resolve();
         return;
       }
@@ -209,6 +215,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         AITK_MONGODB_DB: dbConfig.mongoDb,
         CUDA_DEVICE_ORDER: 'PCI_BUS_ID',
         CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
+        AITK_ATTEMPT_ID: job.attempt_id || '',
         IS_AI_TOOLKIT_UI: '1',
         MODELS_PATH: modelsRoot,
         AITK_HF_DOWNLOAD_PROGRESS_PATH: hfDownloadProgressPath,
@@ -232,7 +239,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
 
       const args = [runFilePath, configPath, '--log', logPath];
       launchLogFd = fs.openSync(launchLogPath, 'a');
-      appendLaunchLog(launchLogPath, `[launcher] ${new Date().toISOString()} starting job ${jobID}`);
+      appendLaunchLog(launchLogPath, `[launcher] ${new Date().toISOString()} starting job ${jobID}, attempt ${job.attempt_id}`);
       appendLaunchLog(launchLogPath, `[launcher] cwd: ${TOOLKIT_ROOT}`);
       appendLaunchLog(
         launchLogPath,
@@ -248,7 +255,14 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         tokenFilePrefix: `job-${jobID}`,
       });
       cleanupHfTokenEnv = preparedHfEnv.cleanup;
+      delete preparedHfEnv.env.AITK_INTERNAL_TOKEN;
+      delete preparedHfEnv.env.AITK_INTERNAL_URL;
 
+      const owner = await db.jobs.findById(jobID);
+      if (!owner || owner.attempt_id !== job.attempt_id || owner.status !== 'starting') {
+        await finishObservedJobProcess(job, 'error', 'Launch canceled before process creation');
+        closeLaunchLog(); cleanupSensitiveEnv(); resolve(); return;
+      }
       const subprocess = spawn(pythonPath, args, {
         env: preparedHfEnv.env,
         cwd: TOOLKIT_ROOT,
@@ -260,16 +274,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       const pid = subprocess.pid ?? null;
       const handleLaunchFailure = async (message: string) => {
         appendLaunchLog(launchLogPath, `[launcher] ${message}`);
-        const currentJob = await db.jobs.findById(jobID).catch(() => null);
-        if (currentJob?.status === 'running' && (pid == null || currentJob.pid == null || currentJob.pid === pid)) {
-          await db.jobs
-            .update(jobID, {
-              status: 'error',
-              pid: null,
-              info: message,
-            })
-            .catch(error => console.error('Error updating failed job status:', error));
-        }
+        await finishObservedJobProcess(job, 'error', message).catch(error => console.error('Error updating failed job status:', error));
       };
 
       subprocess.once('error', error => {
@@ -282,23 +287,8 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         closeLaunchLog();
         cleanupSensitiveEnv();
         if (code === 0 && signal == null) {
-          void db.jobs
-            .findById(jobID)
-            .then(currentJob => {
-              if (
-                currentJob?.status === 'running' &&
-                (pid == null || currentJob.pid == null || currentJob.pid === pid)
-              ) {
-                return db.jobs
-                  .update(jobID, {
-                    status: 'completed',
-                    pid: null,
-                    info: 'Job completed',
-                  })
-                  .then(() => clearDurableEncryptedDatasetKeys(jobID));
-              }
-              return null;
-            })
+          void finishObservedJobProcess(job, 'completed', 'Job completed')
+            .then(updated => updated && updated.status !== 'queued' ? clearDurableEncryptedDatasetKeys(jobID, durableKeySnapshot) : undefined)
             .catch(error => console.error('Error reconciling completed job process:', error));
           return;
         }
@@ -308,7 +298,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       });
 
       if (pid != null) {
-        await db.jobs.update(jobID, { pid });
+        await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: 'starting' }, { pid });
       }
       try {
         fs.writeFileSync(path.join(trainingFolder, 'pid.txt'), String(pid ?? ''), { flag: 'w' });
@@ -328,7 +318,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         );
       }
       await db.jobs
-        .update(jobID, {
+        .updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: ['starting', 'running', 'stopping'] }, {
           status: 'error',
           pid: null,
           info: `Error launching job: ${error?.message || 'Unknown error'}`,
@@ -340,35 +330,32 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
   });
 };
 
-export async function startJobNow(jobID: string, options: StartJobOptions = {}) {
-  const job: Job | null = await db.jobs.findById(jobID);
-  if (!job) {
+export async function startJobNow(jobID: string, options: StartJobOptions = {}): Promise<boolean> {
+  const candidate: Job | null = await db.jobs.findById(jobID);
+  if (!candidate) {
     console.error(`Job with ID ${jobID} not found`);
-    return;
+    return false;
   }
-  if (job.worker_id && job.worker_id !== 'local') {
-    console.error(`Job ${jobID} belongs to remote worker ${job.worker_id}; local cron will not start it.`);
-    return;
+  if (candidate.worker_id && candidate.worker_id !== 'local') {
+    console.error(`Job ${jobID} belongs to remote worker ${candidate.worker_id}; local cron will not start it.`);
+    return false;
   }
 
-  await db.jobs.update(jobID, {
-    status: 'running',
-    stop: false,
-    return_to_queue: false,
-    sample_now: false,
-    info: 'Starting job...',
-  });
+  await assertPythonRuntimeReady();
+  const job = await claimJobAttempt(candidate);
+  if (!job) return false;
 
   startAndWatchJob(job, options).catch(async (error: any) => {
     console.error('Error preparing job launch:', error);
     await db.jobs
-      .update(jobID, {
+      .updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: ['starting', 'running', 'stopping'] }, {
         status: 'error',
         pid: null,
         info: `Error launching job: ${error?.message || 'Unknown error'}`,
       })
       .catch(updateError => console.error('Error updating failed job status:', updateError));
   });
+  return true;
 }
 
 export default async function startJob(jobID: string) {

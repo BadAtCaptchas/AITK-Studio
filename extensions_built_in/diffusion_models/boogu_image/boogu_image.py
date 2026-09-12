@@ -1,5 +1,4 @@
 import os
-import sys
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
 import torch
@@ -23,15 +22,11 @@ from toolkit.samplers.custom_flowmatch_sampler import (
 )
 from toolkit.util.quantize import get_qtype, quantize, quantize_model
 
-VENDORED_SRC = os.path.join(os.path.dirname(__file__), "src")
-if VENDORED_SRC not in sys.path:
-    sys.path.insert(0, VENDORED_SRC)
-
-from boogu.models.transformers import BooguImageTransformer2DModel
-from boogu.models.transformers.rope import BooguImageRotaryPosEmbed
-from boogu.pipelines.boogu.pipeline_boogu import BooguImagePipeline
-from boogu.pipelines.boogu.pipeline_boogu_turbo import BooguImageTurboPipeline
-from boogu.schedulers.scheduling_flow_match_euler_discrete_time_shifting import (
+from .src.boogu.models.transformers import BooguImageTransformer2DModel
+from .src.boogu.models.transformers.rope import BooguImageRotaryPosEmbed
+from .src.boogu.pipelines.boogu.pipeline_boogu import BooguImagePipeline
+from .src.boogu.pipelines.boogu.pipeline_boogu_turbo import BooguImageTurboPipeline
+from .src.boogu.schedulers.scheduling_flow_match_euler_discrete_time_shifting import (
     FlowMatchEulerDiscreteScheduler as BooguFlowMatchEuler,
 )
 
@@ -320,7 +315,7 @@ class BooguImageModel(BaseModel):
             control_img = open_static_image(gen_config.ctrl_img, mode="RGB")
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(
-                    (gen_config.width, gen_config.height), Image.BILINEAR
+                    (gen_config.width, gen_config.height), Image.Resampling.BILINEAR
                 )
             input_images = [[control_img]]
 
@@ -332,7 +327,7 @@ class BooguImageModel(BaseModel):
                 control_img = open_static_image(control_path, mode="RGB")
                 if control_img.size != (gen_config.width, gen_config.height):
                     control_img = control_img.resize(
-                        (gen_config.width, gen_config.height), Image.BILINEAR
+                        (gen_config.width, gen_config.height), Image.Resampling.BILINEAR
                     )
                 image_group.append(control_img)
             input_images.append(image_group)

@@ -1,65 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import fs from 'fs';
+import fs from 'fs/promises';
 import { db } from '@/server/db';
 import { getJobTrainingRoot } from '@/server/trainingPaths';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { clearDurableEncryptedDatasetKeys } from '@/server/encryptedDatasetSecrets';
+import { claimJobMaintenance } from '@/server/jobAttempts';
+import { isPathWithinRoot } from '@/server/pathContainment';
+import { jobStorageKey } from '@/utils/jobIdentity';
 
-function resolveWithinRoot(root: string, target: unknown) {
-  if (typeof target !== 'string' || target.trim().length === 0) {
-    return null;
+export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+  const { jobID } = await params;
+  const candidate = await db.jobs.findById(jobID);
+  if (!candidate) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  const job = await claimJobMaintenance(candidate, 'deleting');
+  if (!job) return NextResponse.json({ error: 'Stop the job and wait for its process to exit before deleting it' }, { status: 409 });
+  try {
+    if (!isLocalWorker(job.worker_id)) {
+      if (job.remote_job_id) {
+        const worker = await getRemoteWorker(job.worker_id);
+        await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/delete`, { method: 'POST' });
+      }
+    } else {
+      const trainingRoot = await getJobTrainingRoot(job);
+      const trainingFolder = path.resolve(trainingRoot, jobStorageKey(job));
+      if (trainingFolder === path.resolve(trainingRoot) || !isPathWithinRoot(path.resolve(trainingRoot), trainingFolder)) throw new Error('Invalid job folder');
+      const canonicalRoot = await fs.realpath(trainingRoot).catch(() => null);
+      const canonicalFolder = await fs.realpath(trainingFolder).catch(() => null);
+      if (canonicalFolder && (!canonicalRoot || canonicalFolder === canonicalRoot || !isPathWithinRoot(canonicalRoot, canonicalFolder))) throw new Error('Job folder escapes the training root');
+      await fs.rm(trainingFolder, { recursive: true, force: true });
+    }
+    await clearDurableEncryptedDatasetKeys(jobID);
+    await db.jobs.delete(jobID, { attempt_id: job.attempt_id ?? null, status: 'deleting' });
+    return NextResponse.json(job);
+  } catch (error) {
+    await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: 'deleting' }, { status: 'error', info: 'Deletion did not complete. Review the error and retry.' });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Deletion failed' }, { status: 409 });
   }
-
-  const resolvedRoot = path.resolve(root);
-  const resolvedPath = path.resolve(resolvedRoot, target);
-  const relativePath = path.relative(resolvedRoot, resolvedPath);
-
-  if (relativePath === '' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-    return null;
-  }
-
-  return resolvedPath;
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
-  const { jobID } = await params;
-
-  const job = await db.jobs.findById(jobID);
-
-  if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  }
-
-  if (!isLocalWorker(job.worker_id)) {
-    if (job.remote_job_id) {
-      try {
-        const worker = await getRemoteWorker(job.worker_id);
-        await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/delete`);
-      } catch (error) {
-        console.error('Error deleting remote job before removing local mirror:', error);
-      }
-    }
-    await clearDurableEncryptedDatasetKeys(jobID).catch(error =>
-      console.error('Error clearing durable encrypted dataset keys:', error),
-    );
-    await db.jobs.delete(jobID);
-    return NextResponse.json(job);
-  }
-
-  const trainingRoot = await getJobTrainingRoot(job);
-  const trainingFolder = resolveWithinRoot(trainingRoot, job.name);
-
-  if (!trainingFolder) {
-    return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
-  }
-
-  await fs.promises.rm(trainingFolder, { recursive: true, force: true });
-
-  await clearDurableEncryptedDatasetKeys(jobID).catch(error =>
-    console.error('Error clearing durable encrypted dataset keys:', error),
-  );
-  await db.jobs.delete(jobID);
-
-  return NextResponse.json(job);
+export function GET() {
+  return NextResponse.json({ error: 'Use POST for this command' }, { status: 405, headers: { Allow: 'POST' } });
 }

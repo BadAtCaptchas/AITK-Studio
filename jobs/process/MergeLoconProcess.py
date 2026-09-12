@@ -14,7 +14,4 @@ class MergeLoconProcess(BaseExtractProcess):
 
 
     def get_output_path(self, prefix=None, suffix=None):
-        if suffix is None:
-            suffix = f"_{self.mode}_{self.linear_param}_{self.conv_param}"
         return super().get_output_path(prefix, suffix)
-

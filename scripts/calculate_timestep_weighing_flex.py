@@ -9,13 +9,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # protect from formatting
-if True:
-    import torch
-    from optimum.quanto import freeze, qfloat8, QTensor, qint4
-    from diffusers import FluxTransformer2DModel, FluxPipeline, AutoencoderKL, FlowMatchEulerDiscreteScheduler
-    from toolkit.util.quantize import quantize, get_qtype
-    from transformers import T5EncoderModel, T5TokenizerFast, CLIPTextModel, CLIPTokenizer
-    from torchvision import transforms
+import torch
+from optimum.quanto import freeze, qfloat8, QTensor, qint4
+from diffusers import FluxTransformer2DModel, FluxPipeline, AutoencoderKL, FlowMatchEulerDiscreteScheduler
+from toolkit.util.quantize import quantize, get_qtype
+from transformers import T5EncoderModel, T5TokenizerFast, CLIPTextModel, CLIPTokenizer
+from torchvision import transforms
 
 qtype = "qfloat8"
 dtype = torch.bfloat16
@@ -214,15 +213,3 @@ with torch.no_grad():
 print(f"Timestep weights saved to {output_path}")
 print("Done!")
 flush()
-        
-        
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    

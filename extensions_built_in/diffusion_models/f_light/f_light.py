@@ -61,17 +61,17 @@ class FLiteModel(BaseModel):
     @staticmethod
     def get_train_scheduler():
         return CustomFlowMatchEulerDiscreteScheduler(**scheduler_config)
-    
+
     def get_bucket_divisibility(self):
         # return the bucket divisibility for the model
         return 16
 
     def load_model(self):
         dtype = self.torch_dtype
-        
+
         # will be updated if we detect a existing checkpoint in training folder
         model_path = self.model_config.name_or_path
-        
+
         extras_path = self.model_config.extras_name_or_path
 
         self.print_and_status_update("Loading transformer")
@@ -86,17 +86,17 @@ class FLiteModel(BaseModel):
         flush()
 
         self.print_and_status_update("Loading T5")
-        tokenizer = T5TokenizerFast.from_pretrained(
+        tokenizer = T5TextEncoder.load_tokenizer(
             extras_path, subfolder="tokenizer", torch_dtype=dtype, use_safetensors=True
         )
-        text_encoder = T5EncoderModel.from_pretrained(
+        text_encoder = T5TextEncoder.from_pretrained(
             extras_path, subfolder="text_encoder", torch_dtype=dtype, use_safetensors=True
         )
 
         self.noise_scheduler = FLiteModel.get_train_scheduler()
-        
+
         self.print_and_status_update("Loading VAE")
-        vae = AutoencoderKL.from_pretrained(
+        vae = KLVAE.from_pretrained(
             extras_path,
             subfolder="vae",
             torch_dtype=dtype,
@@ -116,7 +116,7 @@ class FLiteModel(BaseModel):
         pipe.text_encoder = text_encoder
         pipe.dit_model = transformer
         pipe.transformer = transformer
-        pipe.scheduler = self.noise_scheduler,
+        pipe.scheduler = self.noise_scheduler
 
         self.print_and_status_update("Preparing Model")
 
@@ -168,7 +168,7 @@ class FLiteModel(BaseModel):
     ):
 
         extra['negative_prompt_embeds'] = unconditional_embeds.text_embeds
-        
+
         img = pipeline(
             prompt_embeds=conditional_embeds.text_embeds,
             negative_prompt_embeds=unconditional_embeds.text_embeds,
@@ -202,9 +202,9 @@ class FLiteModel(BaseModel):
 
         if isinstance(noise_pred, QTensor):
             noise_pred = noise_pred.dequantize()
-        
+
         return noise_pred
-    
+
     def get_prompt_embeds(self, prompt: str) -> PromptEmbeds:
         if isinstance(prompt, str):
             prompts = [prompt]
@@ -214,16 +214,16 @@ class FLiteModel(BaseModel):
             self.pipeline.text_encoder.to(self.device_torch)
 
         prompt_embeds, negative_embeds = self.pipeline.encode_prompt(
-            prompt=prompts, 
-            negative_prompt=None, 
-            device=self.text_encoder[0].device, 
+            prompt=prompts,
+            negative_prompt=None,
+            device=self.text_encoder[0].device,
             dtype=self.torch_dtype,
         )
-        
+
         pe = PromptEmbeds(prompt_embeds)
-        
+
         return pe
-    
+
     def get_model_has_grad(self):
         # return from a weight if it has grad
         return False
@@ -231,7 +231,7 @@ class FLiteModel(BaseModel):
     def get_te_has_grad(self):
         # return from a weight if it has grad
         return False
-    
+
     def save_model(self, output_path, meta, save_dtype):
         # only save the unet
         transformer: DiT = unwrap_model(self.model)
@@ -252,13 +252,13 @@ class FLiteModel(BaseModel):
         batch = kwargs.get('batch')
         # return (noise - batch.latents).detach()
         return (batch.latents - noise).detach()
-    
+
     lora_keys_use_comfy_prefix = True
 
-    
+
     def get_base_model_version(self):
         return "f-lite"
-    
+
     def get_stepped_pred(self, pred, noise):
         # just used for DFE support
         latents = pred + noise

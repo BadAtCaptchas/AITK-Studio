@@ -24,15 +24,15 @@ def get_differential_mask(
 ):
     # make a differential mask
     differential_mask = torch.abs(conditional_latents - unconditional_latents)
-    if len(differential_mask.shape) == 4:
-        max_differential = \
-            differential_mask.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
-    elif len(differential_mask.shape) == 5:
-        max_differential = \
-            differential_mask.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0].max(dim=4, keepdim=True)[0]
-    differential_scaler = 1.0 / max_differential
+    if differential_mask.ndim not in (4, 5):
+        raise ValueError("Differential masks require BCHW or BCTHW tensors")
+    dimensions = tuple(range(1, differential_mask.ndim))
+    max_differential = differential_mask.amax(dim=dimensions, keepdim=True)
+    differential_scaler = 1.0 / max_differential.clamp_min(torch.finfo(differential_mask.dtype).eps)
     differential_mask = differential_mask * differential_scaler
 
+    if gradient and torch.equal(differential_mask.min(), differential_mask.max()):
+        return torch.zeros_like(differential_mask)
     if gradient:
         # wew need to scale it to 0-1
         # differential_mask = differential_mask - differential_mask.min()

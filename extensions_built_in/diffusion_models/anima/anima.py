@@ -2,6 +2,7 @@ import os
 from typing import List, Optional
 
 import torch
+from optimum.quanto import freeze
 import yaml
 from safetensors.torch import load_file, save_file
 

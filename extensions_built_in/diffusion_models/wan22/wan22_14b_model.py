@@ -10,7 +10,7 @@ from toolkit.models.wan21.wan_utils import add_first_frame_conditioning
 from toolkit.prompt_utils import PromptEmbeds
 from PIL import Image
 from diffusers import UniPCMultistepScheduler
-import torch
+
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
@@ -224,7 +224,7 @@ class Wan2214bModel(Wan21):
             raise ValueError(
                 "At least one of train_high_noise or train_low_noise must be True in model.model_kwargs"
             )
-        
+
         # if we are only training one or the other, the target LoRA modules will be the wan transformer class
         if not self.train_high_noise or not self.train_low_noise:
             self.target_lora_modules = ["WanTransformer3DModel"]
@@ -330,14 +330,14 @@ class Wan2214bModel(Wan21):
             boundary_ratio=boundary_ratio_t2v,
             low_vram=self.model_config.low_vram,
         )
-        
+
         if self.model_config.quantize and self.model_config.accuracy_recovery_adapter is not None:
             # apply the accuracy recovery adapter to both transformers
             self.print_and_status_update("Applying Accuracy Recovery Adapter to Transformers")
             quantize_model(self, transformer)
             flush()
-            
-        
+
+
         if layer_offloading_transformer:
             attach_layer_offloading(
                 self,
@@ -443,7 +443,7 @@ class Wan2214bModel(Wan21):
         # we need to build out both dictionaries for high and low noise LoRAs
         high_noise_lora = {}
         low_noise_lora = {}
-        
+
         only_train_high_noise = self.train_high_noise and not self.train_low_noise
         only_train_low_noise = self.train_low_noise and not self.train_high_noise
 
@@ -508,7 +508,7 @@ class Wan2214bModel(Wan21):
                     "diffusion_model.", "diffusion_model.transformer_2."
                 )
                 combined_dict[new_key] = low_noise_lora[key]
-        
+
         # if we are not training both stages, we wont have transformer designations in the keys
         if not self.train_high_noise or not self.train_low_noise:
             new_dict = {}
@@ -523,7 +523,7 @@ class Wan2214bModel(Wan21):
             combined_dict = new_dict
 
         return combined_dict
-    
+
     def generate_single_image(
         self,
         pipeline,

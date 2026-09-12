@@ -1,3 +1,4 @@
+from toolkit.xla import mark_xla_step
 from typing import Union, List, Optional, Dict, Any, Tuple, Callable
 
 import numpy as np
@@ -17,12 +18,7 @@ from torchvision import transforms
 
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
+XLA_AVAILABLE = is_torch_xla_available()
 
 class CustomStableDiffusionXLPipeline(StableDiffusionXLPipeline):
 
@@ -901,7 +897,7 @@ class StableDiffusionXLRefinerPipeline(StableDiffusionXLPipeline):
                         callback(step_idx, t, latents)
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         if not output_type == "latent":
             # make sure the VAE is in float32 mode, as it overflows in float16
@@ -1133,7 +1129,7 @@ class FluxWithCFGPipeline(FluxPipeline):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         if output_type == "latent":
             image = latents
@@ -1472,7 +1468,7 @@ class FluxAdvancedControlPipeline(FluxControlPipeline):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         if output_type == "latent":
             image = latents

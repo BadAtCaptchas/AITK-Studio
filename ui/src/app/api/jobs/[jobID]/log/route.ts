@@ -1,3 +1,4 @@
+import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
@@ -142,7 +143,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const trainingFolder = await getJobTrainingRoot(job);
-    let readableLogPath = await resolveReadableJobLogPath(trainingFolder, job.name, jobID);
+    let readableLogPath = await resolveReadableJobLogPath(trainingFolder, jobStorageKey(job), jobID);
     if (!readableLogPath) {
       return NextResponse.json({ log: '', offset: 0, reset: true });
     }

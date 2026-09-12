@@ -192,7 +192,7 @@ test('validation settings are rejected at the real save boundary', () => {
 test('updates to global remote jobs rewrite dataset references and retain the remote mapping', () => {
   const jobsRoute = read('src/app/api/jobs/route.ts');
 
-  assert.match(jobsRoute, /assertGlobalPayload\(await request\.json\(\)\)/);
+  assert.match(jobsRoute, /await readJsonCommand\(request\)/);
   assert.match(
     jobsRoute,
     /rewriteSameWorkerRemoteDatasetRefsForWorker\(resolvedJobConfig, worker\)/,
@@ -262,6 +262,6 @@ test('polling hooks guard request identity and clear data when their request sco
   assert.match(files, /setFiles\(\[\]\);/);
   assert.match(samples, /activeJobIDRef\.current !== requestJobID/);
   assert.match(samples, /setSampleImages\(\[\]\);/);
-  assert.match(jobs, /activeScopeRef\.current !== currentRequestScope/);
+  assert.match(jobs, /activeScope\.current !== scope/);
   assert.match(jobs, /setJobs\(\[\]\);/);
 });

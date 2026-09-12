@@ -501,6 +501,3 @@ class ExampleModel(BaseModel):
     # (ComfyUI convention) and load back to the internal ``transformer.``
     # prefix; see BaseModel.convert_lora_weights_before_save/load
     lora_keys_use_comfy_prefix = True
-
-
-

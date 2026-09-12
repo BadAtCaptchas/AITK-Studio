@@ -891,5 +891,3 @@ def triton_block_sparse_attn_backward(
     )
 
     return dq, dk, dv
-
-

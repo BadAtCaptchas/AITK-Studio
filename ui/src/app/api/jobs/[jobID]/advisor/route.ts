@@ -1,3 +1,4 @@
+import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { analyzeTrainingAdvisor } from '@/server/trainingAdvisor';
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!jobConfig) return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
 
   const trainingFolder = await getJobTrainingRoot(job);
-  const logPath = path.join(trainingFolder, job.name, 'loss_log.db');
+  const logPath = path.join(trainingFolder, jobStorageKey(job), 'loss_log.db');
   const metrics = await db.metrics.getMetrics(jobID, logPath, {
     keys: ADVISOR_METRIC_KEYS,
     maxPoints: 5000,

@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -26,7 +27,7 @@ async function rootPromptForDataset(datasetName: string) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
     const contentType = request.headers.get('content-type') || '';
     let provider = '';
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
       maxNewTokens = positiveNumberFromValue(formData.get('maxNewTokens'));
       imageDataUrl = await encryptedOpenRouterUploadImageDataUrl(formData, 'Recaption');
     } else {
-      const body = assertGlobalPayload(await request.json());
+      const body = assertGlobalPayload(await readJsonCommand(request));
       provider = typeof body?.provider === 'string' ? body.provider : '';
       model = typeof body?.model === 'string' ? body.model : '';
       prompt = typeof body?.prompt === 'string' ? body.prompt : '';
@@ -101,3 +102,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

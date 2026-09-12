@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { NextRequest, NextResponse } from 'next/server';
 import { getRepoUpdateStatus, requestRepoUpdateCheck } from '@/server/updater';
 
@@ -8,9 +9,9 @@ export async function GET() {
   return NextResponse.json(await getRepoUpdateStatus());
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({}));
+    const body = await readJsonCommand(request);
     const action = body?.action === 'apply' || body?.action === 'restart' ? body.action : 'check';
     return NextResponse.json(await requestRepoUpdateCheck(action));
   } catch (error) {
@@ -20,3 +21,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

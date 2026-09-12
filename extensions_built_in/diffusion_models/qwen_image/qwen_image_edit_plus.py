@@ -163,25 +163,25 @@ class QwenImageEditPlusModel(QwenImageModel):
         # todo handle not caching text encoder
         if self.pipeline.text_encoder.device != self.device_torch:
             self.pipeline.text_encoder.to(self.device_torch)
-            
+
         if control_images is None:
             raise ValueError("Missing control images for QwenImageEditPlusModel")
-        
+
         if not isinstance(control_images, list):
             control_images = [control_images]
-        
-        # expects a list of list of control images List[List[Tensor]] where each item corresponds to a batch item, 
+
+        # expects a list of list of control images List[List[Tensor]] where each item corresponds to a batch item,
         # and each item in the inner list corresponds to a control image for that batch item.
         # for single image/caching, it may come in as just List[Tensor], so we handle that case by wrapping it in another list
         if not isinstance(control_images[0], list):
             control_images = [control_images]
-        
+
         if len(prompt) != len(control_images):
             raise ValueError("Number of prompts must match number of control image sets")
-        
+
         prompt_embeds_list = []
         prompt_embeds_mask_list = []
-        
+
         for b in range(len(prompt)):
             batch_control_images = control_images[b]
 
@@ -229,7 +229,7 @@ class QwenImageEditPlusModel(QwenImageModel):
             batch_size, num_channels_latents, height, width = latent_model_input.shape
             if self.vae.device != self.device_torch:
                 self.vae.to(self.device_torch)
-            
+
             control_image_res = VAE_IMAGE_SIZE
             if self.model_config.model_kwargs.get("match_target_res", False):
                 # use the current target size to set the control image res
@@ -258,7 +258,7 @@ class QwenImageEditPlusModel(QwenImageModel):
             # split the latents into batch items so we can concat the controls
             packed_latents_list = torch.chunk(latent_model_input, batch_size, dim=0)
             packed_latents_with_controls_list = []
-            
+
             batch_control_tensor_list = batch.control_tensor_list
             if batch_control_tensor_list is None and batch.control_tensor is not None:
                 batch_control_tensor_list = []

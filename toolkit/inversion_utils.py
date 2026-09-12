@@ -132,6 +132,7 @@ def inversion_forward_process(
         cfg_scale=3.5,
         num_inference_steps=50, eps=None
 ):
+    alpha_bar = sd.noise_scheduler.alphas_cumprod
     current_num_timesteps = len(sd.noise_scheduler.timesteps)
     sd.noise_scheduler.set_timesteps(num_inference_steps, device=sd.device)
 
@@ -151,7 +152,6 @@ def inversion_forward_process(
         eta_is_zero = False
         if type(etas) in [int, float]: etas = [etas] * sd.noise_scheduler.num_inference_steps
         xts = sample_xts_from_x0(sd, sample, num_inference_steps=num_inference_steps)
-        alpha_bar = sd.noise_scheduler.alphas_cumprod
         zs = torch.zeros(size=variance_noise_shape, device=sd.device, dtype=torch.float16)
 
     t_to_idx = {int(v): k for k, v in enumerate(timesteps)}

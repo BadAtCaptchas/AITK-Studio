@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/save_now`);
+      await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/save_now`, { method: 'POST' });
       const synced = await syncRemoteJob(job);
       return NextResponse.json(synced);
     } catch (error) {
@@ -31,11 +31,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  const updated = await db.jobs.update(jobID, {
+  const updated = await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: 'running' }, {
     save_now: true,
   });
+  if (!updated) return NextResponse.json({ error: 'Job is no longer running' }, { status: 409 });
 
   console.log(`Job ${jobID} marked to save on next step`);
 
   return NextResponse.json(updated);
+}
+
+export function GET() {
+  return NextResponse.json({ error: "Use POST for this command" }, { status: 405, headers: { Allow: "POST" } });
 }

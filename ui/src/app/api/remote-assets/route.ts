@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
       worker,
       remoteAssetProxyPath(type, remotePath, job.remote_job_id, { thumbnail }),
       request.headers,
+      request.method === 'HEAD' ? 'HEAD' : 'GET',
+      request.signal,
     );
     return new NextResponse(remoteResponse.body, {
       status: remoteResponse.status,

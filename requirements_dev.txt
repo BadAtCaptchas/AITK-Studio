@@ -1,0 +1,2 @@
+# Optional development tools, installed with the existing project interpreter.
+pylint==4.0.5

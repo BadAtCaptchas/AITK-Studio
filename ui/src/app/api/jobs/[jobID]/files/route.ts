@@ -1,3 +1,4 @@
+import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const trainingFolder = await getJobTrainingRoot(job);
-  const jobFolder = path.join(trainingFolder, job.name);
+  const jobFolder = path.join(trainingFolder, jobStorageKey(job));
 
   try {
     await fs.promises.access(jobFolder);

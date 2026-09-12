@@ -54,9 +54,9 @@ class PureLoraGenerator(BaseExtensionProcess):
                     te.to(self.device_torch)
             else:
                 self.sd.text_encoder.eval()
-                self.sd.to(self.device_torch)
+                self.sd.text_encoder.to(self.device_torch)
 
-            print(f"Converting to LoRM UNet")
+            print('Converting to LoRM UNet')
             # replace the unet with LoRMUnet
             convert_diffusers_unet_to_lorm(
                 self.sd.unet,

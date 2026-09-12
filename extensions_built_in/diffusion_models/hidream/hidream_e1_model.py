@@ -65,7 +65,7 @@ class HidreamE1Model(HidreamModel):
             # resize to width and height
             if control_img.size != (gen_config.width, gen_config.height):
                 control_img = control_img.resize(
-                    (gen_config.width, gen_config.height), Image.BILINEAR
+                    (gen_config.width, gen_config.height), Image.Resampling.BILINEAR
                 )
         img = pipeline(
             prompt_embeds_t5=conditional_embeds.text_embeds[0],

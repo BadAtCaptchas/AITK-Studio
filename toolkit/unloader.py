@@ -19,7 +19,6 @@ class FakeTextEncoder(torch.nn.Module):
         raise NotImplementedError(
             "This is a fake text encoder and should not be used for inference."
         )
-        return None
 
     @property
     def device(self):

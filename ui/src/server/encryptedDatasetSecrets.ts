@@ -241,8 +241,13 @@ export async function storeDurableEncryptedDatasetKeys(
   return merged;
 }
 
-export async function clearDurableEncryptedDatasetKeys(jobID: string): Promise<void> {
-  await db.settings.delete(durableSettingKey(jobID));
+export async function getDurableKeySnapshot(jobID: string): Promise<string | null> {
+  return (await db.settings.get(durableSettingKey(jobID)))?.value ?? null;
+}
+
+export async function clearDurableEncryptedDatasetKeys(jobID: string, expectedValue?: string | null): Promise<void> {
+  if (expectedValue === null) return;
+  await db.settings.delete(durableSettingKey(jobID), expectedValue);
 }
 
 export async function purgeLegacyDurableEncryptedDatasetKeys(): Promise<number> {

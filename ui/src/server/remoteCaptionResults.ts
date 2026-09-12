@@ -1,11 +1,15 @@
 import fs from 'fs';
+import { randomUUID } from 'crypto';
+import { claimJobMaintenance } from './jobAttempts';
+import { withProcessLease, LeaseBusyError } from './processLease';
+import { decodeJobCursor, encodeJobCursor } from './jobsApiList';
 import fsp from 'fs/promises';
 import path from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { db, type JobUpdateInput } from './db';
 import { getKeyForRequiredDataset, normalizeEncryptedKeyMap } from './encryptedDatasets';
-import { clearDurableEncryptedDatasetKeys, getDurableEncryptedDatasetKeys } from './encryptedDatasetSecrets';
+import { clearDurableEncryptedDatasetKeys, getDurableEncryptedDatasetKeys, getDurableKeySnapshot } from './encryptedDatasetSecrets';
 import { getDatasetsRoot } from './settings';
 import { resolveDatasetDirectoryInsideRoot } from './remoteCaptionSecurity';
 import { extractZipSafely, getExtractedDatasetPath, readDatasetExportManifest } from './datasetTransfer';
@@ -44,15 +48,6 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-const DOWNLOAD_STALE_MS = 10 * 60 * 1000;
-
-function isFreshDownloadInProgress(state: RemoteCaptionState) {
-  if (state.downloadStatus !== 'downloading') return false;
-  if (!state.downloadStartedAt) return false;
-  const startedAt = Date.parse(state.downloadStartedAt);
-  return Number.isFinite(startedAt) && Date.now() - startedAt < DOWNLOAD_STALE_MS;
-}
-
 async function writeResponseBodyToFile(response: Response, targetPath: string) {
   if (!response.body) throw new Error('Remote worker returned an empty dataset archive');
   await fsp.mkdir(path.dirname(targetPath), { recursive: true });
@@ -66,11 +61,13 @@ async function updateRemoteCaptionState(
 ) {
   const jobConfig = JSON.parse(job.job_config);
   const nextConfig = patchRemoteCaptionState(jobConfig, patch);
-  return db.jobs.update(job.id, {
+  const updated = await db.jobs.updateIf(job.id, { attempt_id: job.attempt_id ?? null, status: job.status, updated_at: new Date(job.updated_at) }, {
     ...extraJobPatch,
     job_config: JSON.stringify(nextConfig),
     remote_sync_at: new Date(),
   });
+  if (!updated) throw new Error('Caption result ownership changed');
+  return updated;
 }
 
 async function durableKeyForRemoteCaption(job: Job, state: RemoteCaptionState) {
@@ -149,7 +146,7 @@ async function cleanupRemoteDataset(job: Job, state: RemoteCaptionState) {
   }
 }
 
-export async function syncRemoteCaptionResultForJob(
+async function syncOwnedRemoteCaptionResult(
   job: Job,
   options: { force?: boolean; retryFailed?: boolean; background?: boolean } = {},
 ) {
@@ -158,8 +155,7 @@ export async function syncRemoteCaptionResultForJob(
   if (!state) return job;
   if (state.downloadStatus === 'merged' && !options.force) return job;
   if (state.downloadStatus === 'failed' && !options.force && !options.retryFailed) return job;
-  if (isFreshDownloadInProgress(state) && !options.force) return job;
-  if (job.status !== 'completed') return job;
+  if (job.status !== 'editing') return job;
   if (!state.remoteDatasetName) return job;
 
   const background = options.background !== false;
@@ -177,6 +173,7 @@ export async function syncRemoteCaptionResultForJob(
   const datasetsRoot = await getDatasetsRoot();
   let workRoot: string | null = null;
   let workingJob = job;
+  const keySnapshot = await getDurableKeySnapshot(job.id);
   let markedDownloading = false;
 
   try {
@@ -257,7 +254,7 @@ export async function syncRemoteCaptionResultForJob(
           : `Remote captions merged (${merged.mergeStats.copied} copied, ${merged.mergeStats.skipped} skipped)`,
       },
     );
-    await clearDurableEncryptedDatasetKeys(workingJob.id).catch(error =>
+    await clearDurableEncryptedDatasetKeys(workingJob.id, keySnapshot).catch(error =>
       console.error('Error clearing durable encrypted dataset keys:', error),
     );
     return updated;
@@ -288,13 +285,56 @@ export async function syncRemoteCaptionResultForJob(
   }
 }
 
+export async function syncRemoteCaptionResultForJob(
+  job: Job,
+  options: { force?: boolean; retryFailed?: boolean; background?: boolean } = {},
+): Promise<Job> {
+  if (!['completed', 'editing'].includes(job.status) || isLocalWorker(job.worker_id) || !job.remote_job_id) return job;
+  const state = getJobRemoteCaptionState(job);
+  if (!state || job.status === 'completed' && (state.downloadStatus === 'merged' && !options.force || state.downloadStatus === 'failed' && !options.force && !options.retryFailed)) return job;
+  try {
+    return await withProcessLease('caption-result:' + job.id, async () => {
+      let fresh = await db.jobs.findById(job.id);
+      const recoveryKey = 'caption-result-owner:' + job.id;
+      const recovery = await db.runtime.get(recoveryKey);
+      // Acquiring this lease proves any previous merger is dead. Restore only
+      // the exact maintenance attempt recorded before its claim.
+      if (fresh?.status === 'editing' && recovery?.value === fresh.attempt_id) {
+        fresh = await db.jobs.updateIf(fresh.id, { attempt_id: fresh.attempt_id ?? null, status: 'editing' }, { status: 'completed' });
+      }
+      if (!fresh || fresh.status !== 'completed') return fresh || job;
+      const attemptID = randomUUID();
+      if (!await db.runtime.compareAndSwap(recoveryKey, recovery?.version ?? null, attemptID)) return fresh;
+      const claimed = await claimJobMaintenance(fresh, 'editing', attemptID);
+      if (!claimed) return fresh;
+      let result = claimed;
+      try { result = await syncOwnedRemoteCaptionResult(claimed, options); }
+      finally {
+        const restored = await db.jobs.updateIf(claimed.id, { attempt_id: claimed.attempt_id ?? null, status: 'editing' }, { status: 'completed' });
+        if (restored) {
+          result = restored;
+          const owner = await db.runtime.get(recoveryKey);
+          if (owner && owner.value === claimed.attempt_id) await db.runtime.delete(recoveryKey, owner.version);
+        }
+      }
+      return result;
+    });
+  } catch (error) {
+    if (error instanceof LeaseBusyError) return job;
+    throw error;
+  }
+}
+
 export async function syncRemoteCaptionResults() {
-  const jobs = await db.jobs.list({ job_type: 'caption' });
+  const prior = await db.runtime.get('caption-sync:cursor');
+  const before = decodeJobCursor(typeof prior?.value === 'string' ? prior.value : null);
+  const jobs = await db.jobs.list({ job_type: 'caption', limit: 25, before });
   const results: Job[] = [];
   for (const job of jobs) {
     if (isLocalWorker(job.worker_id) || !job.remote_job_id || !getJobRemoteCaptionState(job)) continue;
     const synced = await syncRemoteJob(job);
     results.push(await syncRemoteCaptionResultForJob(synced));
   }
+  await db.runtime.compareAndSwap('caption-sync:cursor', prior?.version ?? null, jobs.length === 25 ? encodeJobCursor(jobs[jobs.length - 1]) : '');
   return results;
 }

@@ -1,3 +1,8 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .generator import generate_images_with_comfy
+
 from toolkit.comfy.config import is_comfy_backend
 from toolkit.comfy.errors import ComfyConfigError, ComfyError, ComfyWorkflowError
 

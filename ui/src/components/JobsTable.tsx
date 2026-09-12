@@ -196,7 +196,7 @@ export default function JobsTable({
   onQueuesChange,
   onStatusChange,
 }: JobsTableProps) {
-  const { jobs, status, refreshJobs } = useJobsList({
+  const { jobs, status, refreshJobs, hasMore, loadMore, isRefreshing } = useJobsList({
     onlyActive,
     reloadInterval: 5000,
     job_type,
@@ -574,6 +574,7 @@ export default function JobsTable({
           />
         </div>
       )}
+      {hasMore && <button className="operator-button" disabled={isRefreshing} onClick={loadMore}>Load more jobs</button>}
     </div>
   );
 }

@@ -44,12 +44,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json(await syncRemoteJob(job));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to request remote sample';
-      await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
+      await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: 'running' }, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
       return NextResponse.json({ error: message }, { status: 502 });
     }
   }
 
-  const updated = await db.jobs.update(jobID, { sample_now: true });
+  const updated = await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: 'running' }, { sample_now: true });
+  if (!updated) return NextResponse.json({ error: 'Job attempt changed' }, { status: 409 });
   console.log(`Job ${jobID} marked to sample on the next step`);
   return NextResponse.json(updated);
 }

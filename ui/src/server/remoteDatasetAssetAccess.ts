@@ -1,14 +1,15 @@
 import { createHmac, timingSafeEqual } from 'crypto';
-import { makeRemoteDatasetAssetRef, type RemoteDatasetAssetType } from '@/utils/remoteDatasetRefs';
-import { isRequestAuthenticated } from '@/utils/authSession';
+import { makeRemoteDatasetAssetRef, type RemoteDatasetAssetType } from '../utils/remoteDatasetRefs';
+import { isRequestAuthenticated } from '../utils/authSession';
 
 const SIGNATURE_TTL_MS = 6 * 60 * 60 * 1000;
-const SIGNATURE_CONTEXT = 'remote-dataset-asset-v1';
+const SIGNATURE_CONTEXT = 'remote-dataset-asset-v2';
 
 type RemoteDatasetAssetIdentity = {
   workerID: string;
   remotePath: string;
   expires: number;
+  type: RemoteDatasetAssetType;
 };
 
 function authSecret() {
@@ -21,12 +22,13 @@ function bearerToken(headers: Headers) {
   return match?.[1] || null;
 }
 
-function payload({ workerID, remotePath, expires }: RemoteDatasetAssetIdentity) {
-  return [SIGNATURE_CONTEXT, workerID, remotePath, String(expires)].join('\n');
+function payload({ workerID, remotePath, expires, type }: RemoteDatasetAssetIdentity) {
+  return JSON.stringify([SIGNATURE_CONTEXT, 'aitk-studio', 'read', workerID, remotePath, type, expires]);
 }
 
 function hmac(secret: string, identity: RemoteDatasetAssetIdentity) {
-  return createHmac('sha256', secret).update(payload(identity)).digest('base64url');
+  const key = process.env.AITK_ASSET_SIGNING_SECRET || createHmac('sha256', secret).update('aitk-asset-signing-key-v2').digest('hex');
+  return `v2.${createHmac('sha256', key).update(payload(identity)).digest('base64url')}`;
 }
 
 function safeEqual(left: string, right: string) {
@@ -35,13 +37,13 @@ function safeEqual(left: string, right: string) {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-export function signRemoteDatasetAsset(workerID: string, remotePath: string) {
+export function signRemoteDatasetAsset(workerID: string, remotePath: string, type: RemoteDatasetAssetType) {
   const secret = authSecret();
   if (!secret) return null;
   const expires = Date.now() + SIGNATURE_TTL_MS;
   return {
     expires,
-    signature: hmac(secret, { workerID, remotePath, expires }),
+    signature: hmac(secret, { workerID, remotePath, expires, type }),
   };
 }
 
@@ -51,7 +53,7 @@ export function makeSignedRemoteDatasetAssetRef(
   remotePath: string,
   filename?: string,
 ) {
-  return makeRemoteDatasetAssetRef(workerID, type, remotePath, filename, signRemoteDatasetAsset(workerID, remotePath));
+  return makeRemoteDatasetAssetRef(workerID, type, remotePath, filename, signRemoteDatasetAsset(workerID, remotePath, type));
 }
 
 export function isRemoteDatasetAssetSignatureValid(
@@ -59,14 +61,17 @@ export function isRemoteDatasetAssetSignatureValid(
   remotePath: string,
   expiresValue: string | number | null | undefined,
   signature: string | null | undefined,
+  type: RemoteDatasetAssetType,
+  method = 'GET',
 ) {
+  if (!['GET', 'HEAD'].includes(method) || !['img', 'file', 'audio-art'].includes(type)) return false;
   const secret = authSecret();
   if (!secret) return true;
   const expires = Number(expiresValue);
   if (!workerID || !remotePath || !signature || !Number.isSafeInteger(expires) || expires <= Date.now()) {
     return false;
   }
-  return safeEqual(signature, hmac(secret, { workerID, remotePath, expires }));
+  return safeEqual(signature, hmac(secret, { workerID, remotePath, expires, type }));
 }
 
 export function hasCentralBearerAuth(headers: Headers) {
@@ -82,9 +87,11 @@ export async function isRemoteDatasetAssetRequestAuthorized(
   remotePath: string,
   expiresValue: string | number | null | undefined,
   signature: string | null | undefined,
+  type: RemoteDatasetAssetType,
+  method = 'GET',
 ) {
   return (
     (await isRequestAuthenticated({ headers }, authSecret())) ||
-    isRemoteDatasetAssetSignatureValid(workerID, remotePath, expiresValue, signature)
+    isRemoteDatasetAssetSignatureValid(workerID, remotePath, expiresValue, signature, type, method)
   );
 }

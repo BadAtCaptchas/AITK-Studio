@@ -399,6 +399,14 @@ class CaptionConfig:
         self.quantize = kwargs.get("quantize", False)
         self.qtype = kwargs.get("qtype", "float8")
         self.low_vram = kwargs.get("low_vram", False)
+        self.layer_offloading = kwargs.get("layer_offloading", False)
+        self.layer_offloading_percent = float(kwargs.get("layer_offloading_percent", 1.0))
+        self.batch_size = int(kwargs.get("batch_size", 1))
+        self.num_workers = int(kwargs.get("num_workers", 1))
+        if not 0.0 <= self.layer_offloading_percent <= 1.0:
+            raise ValueError("layer_offloading_percent must be between 0 and 1")
+        if self.batch_size < 1 or self.num_workers < 1:
+            raise ValueError("caption batch_size and num_workers must be positive")
         self.caption_extension = kwargs.get("caption_extension", "txt")
         self.caption_extension = _normalize_caption_extension(self.caption_extension)
         self.recaption = kwargs.get("recaption", False)
@@ -431,6 +439,7 @@ class BaseCaptioner(BaseExtensionProcess):
             print(f'Job ID: "{self.job_id}"')
 
         self.is_stopping = False
+        self.step_num = 0
 
         if self.is_ui_captioner:
             self.is_stopping = False
@@ -544,7 +553,7 @@ class BaseCaptioner(BaseExtensionProcess):
                 scale_factor = (max_pixels / image_pixels) ** 0.5
                 new_width = int(image.width * scale_factor)
                 new_height = int(image.height * scale_factor)
-                image = image.resize((new_width, new_height), resample=Image.BICUBIC)
+                image = image.resize((new_width, new_height), resample=Image.Resampling.BICUBIC)
         return image
 
     def save_caption_for_file(self, file_path: str, caption: str):

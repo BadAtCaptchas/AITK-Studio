@@ -312,7 +312,7 @@ class DiT(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin, Ost
         return ["blocks"]
 
     _supports_gradient_checkpointing = True
-    
+
     @register_to_config
     def __init__(
         self,

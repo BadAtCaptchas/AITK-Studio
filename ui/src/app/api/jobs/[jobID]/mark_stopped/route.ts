@@ -1,59 +1,23 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { db } from '@/server/db';
-
-import {
-  getRemoteWorker,
-  isLocalWorker,
-  isRemoteJobMissingError,
-  markRemoteJobMissing,
-  remoteJson,
-  syncRemoteJob,
-} from '@/server/remoteClient';
-
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+import { claimJobMaintenance } from '@/server/jobAttempts';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+export async function POST(_request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
-
   const job = await db.jobs.findById(jobID);
-
-  if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  }
-
-  if (!isLocalWorker(job.worker_id)) {
-    if (job.remote_job_id) {
-      try {
-        const worker = await getRemoteWorker(job.worker_id);
-        await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/mark_stopped`);
-        const synced = await syncRemoteJob(job);
-        return NextResponse.json(synced);
-      } catch (error) {
-        if (isRemoteJobMissingError(error)) {
-          return NextResponse.json(await markRemoteJobMissing(job));
-        }
-        const message = error instanceof Error ? error.message : 'Failed to mark remote job as stopped';
-        await db.jobs.update(jobID, { remote_error: message, remote_sync_at: new Date() }).catch(() => undefined);
-        return NextResponse.json({ error: message }, { status: 502 });
-      }
+  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  const owned = await claimJobMaintenance(job, 'editing');
+  if (!owned) return NextResponse.json({ error: 'Stop the active process before marking this job stopped.' }, { status: 409 });
+  try {
+    if (!isLocalWorker(job.worker_id) && job.remote_job_id) {
+      await remoteJson(await getRemoteWorker(job.worker_id), '/api/jobs/' + encodeURIComponent(job.remote_job_id) + '/mark_stopped', { method: 'POST' });
     }
-
-    const updated = await db.jobs.update(jobID, {
-      stop: true,
-      status: 'stopped',
-      info: 'Remote job stopped',
-      pid: null,
-    });
-    return NextResponse.json(updated);
+    const stopped = await db.jobs.updateIf(jobID, { attempt_id: owned.attempt_id ?? null, status: 'editing' },
+      { status: 'stopped', stop: false, return_to_queue: false, pid: null, process_started_at: null, info: 'Removed from queue' });
+    return NextResponse.json(stopped);
+  } catch (error) {
+    await db.jobs.updateIf(jobID, { attempt_id: owned.attempt_id ?? null, status: 'editing' }, { status: job.status, info: 'Could not remove job from queue' });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to update job' }, { status: 502 });
   }
-
-  // update job status to 'running'
-  await db.jobs.update(jobID, {
-    stop: true,
-    status: 'stopped',
-    info: 'Job stopped',
-    pid: null,
-  });
-
-  console.log(`Job ${jobID} marked as stopped`);
-
-  return NextResponse.json(job);
 }
+export function GET() { return NextResponse.json({ error: 'Use POST for this command' }, { status: 405, headers: { Allow: 'POST' } }); }

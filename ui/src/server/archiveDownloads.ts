@@ -1,3 +1,4 @@
+import { jobStorageKey } from '../utils/jobIdentity';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -80,7 +81,8 @@ async function datasetArchive(request: ArchiveRequest): Promise<ArchiveResult> {
 async function resolveSampleJob(request: ArchiveRequest) {
   if (request.jobID) return db.jobs.findById(request.jobID);
   if (!safeName(request.jobName)) return null;
-  const matches = (await db.jobs.list()).filter(job => job.name === request.jobName);
+  const match = await db.jobs.findByName(request.jobName);
+  const matches = match ? [match] : [];
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -101,7 +103,7 @@ async function sampleArchive(request: ArchiveRequest): Promise<ArchiveResult> {
   }
 
   const trainingRoot = await getJobTrainingRoot(job);
-  const jobRoot = path.resolve(trainingRoot, job.name);
+  const jobRoot = path.resolve(trainingRoot, jobStorageKey(job));
   if (!isPathInside(path.resolve(trainingRoot), jobRoot)) throw new Error('Invalid job output path');
   const samplesRoot = await fsp.realpath(path.join(jobRoot, 'samples')).catch(() => null);
   if (!samplesRoot || !isPathInside(jobRoot, samplesRoot)) throw new Error('Samples folder not found');

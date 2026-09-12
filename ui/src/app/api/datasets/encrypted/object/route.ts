@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
@@ -25,14 +26,15 @@ function remoteClientErrorResponse(error: RemoteClientError) {
   return NextResponse.json({ error: error.message }, { status: error.status });
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const { datasetName, objectPath, worker_id } = assertGlobalPayload(await request.json());
+    const { datasetName, objectPath, worker_id } = assertGlobalPayload(await readJsonCommand(request));
     if (typeof datasetName !== 'string' || typeof objectPath !== 'string') {
       return NextResponse.json({ error: 'Invalid encrypted object request' }, { status: 400 });
     }
 
-    if (!isLocalWorker(worker_id)) {
+    if (worker_id !== undefined && typeof worker_id !== 'string') return NextResponse.json({ error: 'Invalid worker_id' }, { status: 400 });
+    if (typeof worker_id === 'string' && !isLocalWorker(worker_id)) {
       const worker = await getRemoteWorker(worker_id);
       const remoteResponse = await remoteFetch(worker, '/api/datasets/encrypted/object', {
         method: 'POST',
@@ -87,3 +89,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

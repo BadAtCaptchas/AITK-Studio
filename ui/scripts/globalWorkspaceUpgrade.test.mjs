@@ -135,7 +135,8 @@ test('database preparation creates fresh schema, backs up legacy upgrades and pr
   assert.equal((await all(db, "SELECT name FROM sqlite_master WHERE name = 'Job'")).length, 1);
   await exec(
     db,
-    `ALTER TABLE Job ADD COLUMN project_id TEXT;
+    `DROP TABLE SchemaMigration;
+    ALTER TABLE Job ADD COLUMN project_id TEXT;
     ALTER TABLE JobReplica ADD COLUMN remote_project_id TEXT;
     CREATE TABLE Project (id TEXT PRIMARY KEY);
     CREATE TABLE ProjectReplica (id TEXT PRIMARY KEY);

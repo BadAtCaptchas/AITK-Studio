@@ -8,6 +8,7 @@ from torch.nn import Parameter
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 
 from toolkit.basic import adain
+from diffusers.models.attention_processor import AttnProcessor2_0
 from toolkit.saving import load_ip_adapter_model
 from toolkit.train_tools import get_torch_dtype
 from typing import TYPE_CHECKING, Union, Iterator, Mapping, Any, Tuple, List, Optional, Dict

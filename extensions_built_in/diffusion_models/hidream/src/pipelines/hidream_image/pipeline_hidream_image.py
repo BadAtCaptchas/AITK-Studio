@@ -1,3 +1,4 @@
+from toolkit.xla import mark_xla_step
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Union
 import math
@@ -27,12 +28,7 @@ from .pipeline_output import HiDreamImagePipelineOutput
 from ...models.transformers.transformer_hidream_image import HiDreamImageTransformer2DModel
 from ...schedulers.fm_solvers_unipc import FlowUniPCMultistepScheduler
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
+XLA_AVAILABLE = is_torch_xla_available()
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -194,7 +190,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
         return prompt_embeds
-    
+
     def _get_clip_prompt_embeds(
         self,
         tokenizer,
@@ -238,7 +234,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, -1)
 
         return prompt_embeds
-    
+
     def _get_llama3_prompt_embeds(
         self,
         prompt: Union[str, List[str]] = None,
@@ -273,8 +269,8 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
             )
 
         outputs = self.text_encoder_4(
-            text_input_ids.to(device), 
-            attention_mask=attention_mask.to(device), 
+            text_input_ids.to(device),
+            attention_mask=attention_mask.to(device),
             output_hidden_states=True,
             output_attentions=True
         )
@@ -287,7 +283,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         prompt_embeds = prompt_embeds.repeat(1, 1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(-1, batch_size * num_images_per_prompt, seq_len, dim)
         return prompt_embeds
-    
+
     def encode_prompt(
         self,
         prompt: Union[str, List[str]],
@@ -357,7 +353,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
                     f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
                     " the batch size of `prompt`."
                 )
-            
+
             negative_prompt_embeds, negative_pooled_prompt_embeds = self._encode_prompt(
                 prompt = negative_prompt,
                 prompt_2 = negative_prompt_2,
@@ -386,7 +382,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
         max_sequence_length: int = 128,
     ):
         device = device or self._execution_device
-        
+
         if prompt_embeds is None:
             prompt_2 = prompt_2 or prompt
             prompt_2 = [prompt_2] if isinstance(prompt_2, str) else prompt_2
@@ -491,19 +487,19 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
                 raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
             latents = latents.to(device)
         return latents
-    
+
     @property
     def guidance_scale(self):
         return self._guidance_scale
-    
+
     @property
     def do_classifier_free_guidance(self):
         return self._guidance_scale > 1
-    
+
     @property
     def joint_attention_kwargs(self):
         return self._joint_attention_kwargs
-    
+
     @property
     def num_timesteps(self):
         return self._num_timesteps
@@ -511,7 +507,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
     @property
     def interrupt(self):
         return self._interrupt
-    
+
     @torch.no_grad()
     def __call__(
         self,
@@ -628,8 +624,8 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
             img_ids_pad = torch.zeros(self.transformer.max_seq, 3)
             img_ids_pad[:pH*pW, :] = img_ids
 
-            img_sizes = img_sizes.unsqueeze(0).to(latents.device) 
-            img_ids = img_ids_pad.unsqueeze(0).to(latents.device) 
+            img_sizes = img_sizes.unsqueeze(0).to(latents.device)
+            img_ids = img_ids_pad.unsqueeze(0).to(latents.device)
             if self.do_classifier_free_guidance:
                 img_sizes = img_sizes.repeat(2 * B, 1)
                 img_ids = img_ids.repeat(2 * B, 1, 1)
@@ -669,8 +665,8 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
                     patch_size = self.transformer.config.patch_size
                     pH, pW = H // patch_size, W // patch_size
                     out = torch.zeros(
-                        (B, C, self.transformer.max_seq, patch_size * patch_size), 
-                        dtype=latent_model_input.dtype, 
+                        (B, C, self.transformer.max_seq, patch_size * patch_size),
+                        dtype=latent_model_input.dtype,
                         device=latent_model_input.device
                     )
                     latent_model_input = einops.rearrange(latent_model_input, 'B C (H p1) (W p2) -> B C (H W) (p1 p2)', p1=patch_size, p2=patch_size)
@@ -717,7 +713,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         if output_type == "latent":
             image = latents

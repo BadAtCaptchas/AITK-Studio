@@ -47,7 +47,7 @@ class ExtractLoraProcess(BaseExtractProcess):
 
     def run(self):
         super().run()
-        print(f"Running process: {self.mode}, dim: {self.dim}")
+        print(f"Running process: {self.mode}, dim: {self.linear_param}")
 
         state_dict, extract_diff_meta = extract_diff(
             self.job.model_base,
@@ -69,5 +69,5 @@ class ExtractLoraProcess(BaseExtractProcess):
 
     def get_output_path(self, prefix=None, suffix=None):
         if suffix is None:
-            suffix = f"_{self.dim}"
+            suffix = f"_{self.linear_param}"
         return super().get_output_path(prefix, suffix)

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { apiClient, authRequiredState, isAuthorizedState } from '@/utils/api';
-import { LEGACY_AUTH_STORAGE_KEY } from '@/utils/authSession';
+import { LEGACY_AUTH_STORAGE_KEY } from '@/utils/authConstants';
 
 interface AuthWrapperProps {
   authRequired: boolean;

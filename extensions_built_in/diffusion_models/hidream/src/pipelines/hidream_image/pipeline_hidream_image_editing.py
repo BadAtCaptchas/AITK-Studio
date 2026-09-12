@@ -1,3 +1,4 @@
+from toolkit.xla import mark_xla_step
 # ref https://github.com/HiDream-ai/HiDream-E1/blob/main/pipeline_hidream_image_editing.py
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -23,12 +24,7 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.hidream_image.pipeline_output import HiDreamImagePipelineOutput
 import logging
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
+XLA_AVAILABLE = is_torch_xla_available()
 
 
 logger = logging.getLogger(__name__)
@@ -216,8 +212,8 @@ class HiDreamImageEditingPipeline(DiffusionPipeline, HiDreamImageLoraLoaderMixin
         self.default_sample_size = 128
         if getattr(self, "tokenizer_4", None) is not None:
             self.tokenizer_4.pad_token = self.tokenizer_4.eos_token
-        
-        
+
+
         self.aggressive_unloading = aggressive_unloading
 
     def _get_t5_prompt_embeds(
@@ -949,6 +945,8 @@ class HiDreamImageEditingPipeline(DiffusionPipeline, HiDreamImageLoraLoaderMixin
             batch_size = len(prompt)
         elif pooled_prompt_embeds is not None:
             batch_size = pooled_prompt_embeds.shape[0]
+        else:
+            raise ValueError("Provide a prompt or pooled prompt embeddings")
 
         device = self._execution_device
 
@@ -1019,8 +1017,8 @@ class HiDreamImageEditingPipeline(DiffusionPipeline, HiDreamImageLoraLoaderMixin
             target_prompt_embeds_llama3 = prompt_embeds_llama3
             target_negative_prompt_embeds_llama3 = negative_prompt_embeds_llama3
             target_pooled_prompt_embeds = pooled_prompt_embeds
-            target_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds 
-        
+            target_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds
+
         image = self.image_processor.preprocess(image)
 
         image_latents = self.prepare_image_latents(
@@ -1045,7 +1043,7 @@ class HiDreamImageEditingPipeline(DiffusionPipeline, HiDreamImageLoraLoaderMixin
                 prompt_embeds_t5 = torch.cat([negative_prompt_embeds_t5, negative_prompt_embeds_t5, prompt_embeds_t5], dim=0)
                 prompt_embeds_llama3 = torch.cat([negative_prompt_embeds_llama3, negative_prompt_embeds_llama3, prompt_embeds_llama3], dim=1)
                 pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
-            
+
             target_prompt_embeds_t5 = torch.cat([target_negative_prompt_embeds_t5, target_prompt_embeds_t5], dim=0)
             target_prompt_embeds_llama3 = torch.cat([target_negative_prompt_embeds_llama3, target_prompt_embeds_llama3], dim=1)
             target_pooled_prompt_embeds = torch.cat([target_negative_pooled_prompt_embeds, target_pooled_prompt_embeds], dim=0)
@@ -1082,9 +1080,9 @@ class HiDreamImageEditingPipeline(DiffusionPipeline, HiDreamImageLoraLoaderMixin
         # 6. Denoising loop
         refine_stage = False
         if reload_keys is not None:
-            logger.info(f"loading editing keys")
+            logger.info('loading editing keys')
             load_info = self.transformer.load_state_dict(reload_keys['editing'], strict=False)
-            logger.info(f"finished loading editing keys")
+            logger.info('finished loading editing keys')
             assert len(load_info.unexpected_keys) == 0
             try:
                 self.transformer.enable_adapters()
@@ -1100,9 +1098,9 @@ class HiDreamImageEditingPipeline(DiffusionPipeline, HiDreamImageLoraLoaderMixin
                         self.transformer.disable_adapters()
                     except Exception as e:
                         pass
-                    logger.info(f"loading refine keys")
+                    logger.info('loading refine keys')
                     load_info = self.transformer.load_state_dict(reload_keys['refine'], strict=False)
-                    logger.info(f"finished loading refine keys")
+                    logger.info('finished loading refine keys')
                     assert len(load_info.unexpected_keys) == 0
                     logger.info(f"Refining start at step {i}")
                     refine_stage = True
@@ -1186,7 +1184,7 @@ class HiDreamImageEditingPipeline(DiffusionPipeline, HiDreamImageLoraLoaderMixin
                     progress_bar.update()
 
                 if XLA_AVAILABLE:
-                    xm.mark_step()
+                    mark_xla_step()
 
         if output_type == "latent":
             image = latents

@@ -341,5 +341,3 @@ def vsa_attention(
     ).permute(0, 2, 1, 3)  # (B, S_pad, H, D)
 
     return finish(out)
-
-

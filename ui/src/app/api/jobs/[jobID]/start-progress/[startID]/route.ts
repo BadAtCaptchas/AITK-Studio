@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ jobID: string; startID: string }> },
 ) {
   const { jobID, startID } = await params;
-  const progress = getRemoteStartProgress(startID);
+  const progress = await getRemoteStartProgress(startID);
 
   if (!progress || progress.jobID !== jobID) {
     return NextResponse.json({ error: 'Remote start progress not found' }, { status: 404 });

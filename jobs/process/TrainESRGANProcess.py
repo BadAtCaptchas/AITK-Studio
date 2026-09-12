@@ -26,7 +26,7 @@ from toolkit.style import get_style_model_and_losses
 from toolkit.train_tools import get_torch_dtype
 from diffusers import AutoencoderKL
 from tqdm import tqdm
-import time
+
 import numpy as np
 from .models.vgg19_critic import Critic
 
@@ -132,7 +132,7 @@ class TrainESRGANProcess(BaseTrainProcess):
 
     def load_datasets(self):
         if self.data_loader is None:
-            print(f"Loading datasets")
+            print('Loading datasets')
             datasets = []
             for dataset in self.datasets_objects:
                 print(f" - Dataset: {dataset['path']}")
@@ -189,7 +189,7 @@ class TrainESRGANProcess(BaseTrainProcess):
                 # if is nan, set to 1
                 if scaler != scaler:
                     scaler = 1
-                    print(f"Warning: content loss scaler is nan, setting to 1")
+                    print('Warning: content loss scaler is nan, setting to 1')
                 self.content_weight_scalers.append(scaler)
 
             self.print(f"Style weight scalers: {self.style_weight_scalers}")
@@ -308,11 +308,11 @@ class TrainESRGANProcess(BaseTrainProcess):
             # upscale to size * self.upscale_sample while maintaining pixels
             output = output.resize(
                 (self.resolution * self.upscale_sample, self.resolution * self.upscale_sample),
-                resample=Image.NEAREST
+                resample=Image.Resampling.NEAREST
             )
             img = img.resize(
                 (self.resolution * self.upscale_sample, self.resolution * self.upscale_sample),
-                resample=Image.NEAREST
+                resample=Image.Resampling.NEAREST
             )
 
             width, height = output.size
@@ -339,11 +339,11 @@ class TrainESRGANProcess(BaseTrainProcess):
                     min_dim = min(img.width, img.height)
                     img = img.crop((0, 0, min_dim, min_dim))
                 # resize
-                img = img.resize((self.resolution * self.zoom, self.resolution * self.zoom), resample=Image.BICUBIC)
+                img = img.resize((self.resolution * self.zoom, self.resolution * self.zoom), resample=Image.Resampling.BICUBIC)
 
                 target_image = img
                 # downscale the image input
-                img = img.resize((self.resolution, self.resolution), resample=Image.BICUBIC)
+                img = img.resize((self.resolution, self.resolution), resample=Image.Resampling.BICUBIC)
 
                 # downscale the image input
 
@@ -391,9 +391,9 @@ class TrainESRGANProcess(BaseTrainProcess):
             path_to_load = latest_file
             # todo update step and epoch count
         elif self.pretrained_path is None:
-            self.print(f" - No checkpoint found, starting from scratch")
+            self.print(' - No checkpoint found, starting from scratch')
         else:
-            self.print(f" - No checkpoint found, loading pretrained model")
+            self.print(' - No checkpoint found, loading pretrained model')
             self.print(f" - path: {path_to_load}")
 
         if path_to_load is not None:
@@ -438,7 +438,7 @@ class TrainESRGANProcess(BaseTrainProcess):
         start_step = self.step_num
         self.first_step = start_step
 
-        self.print(f"Training ESRGAN model:")
+        self.print('Training ESRGAN model:')
         self.print(f" - Training folder: {self.training_folder}")
         self.print(f" - Batch size: {self.batch_size}")
         self.print(f" - Learning rate: {self.learning_rate}")
@@ -466,7 +466,6 @@ class TrainESRGANProcess(BaseTrainProcess):
             optimizer,
             total_iters=num_steps,
             factor=1,
-            verbose=False
         )
 
         # setup tqdm progress bar

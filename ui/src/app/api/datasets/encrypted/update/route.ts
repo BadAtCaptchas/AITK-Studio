@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import fsp from 'fs/promises';
@@ -18,15 +19,16 @@ type EncryptedObjectUpdate = {
   dataBase64: string;
 };
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const { datasetName, manifest, objects, deleteObjects, worker_id } = body;
     if (typeof datasetName !== 'string') {
       return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
     }
 
-    if (!isLocalWorker(worker_id)) {
+    if (worker_id !== undefined && typeof worker_id !== 'string') return NextResponse.json({ error: 'Invalid worker_id' }, { status: 400 });
+    if (typeof worker_id === 'string' && !isLocalWorker(worker_id)) {
       const worker = await getRemoteWorker(worker_id);
       return NextResponse.json(
         await remoteJson(worker, '/api/datasets/encrypted/update', {
@@ -74,3 +76,5 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

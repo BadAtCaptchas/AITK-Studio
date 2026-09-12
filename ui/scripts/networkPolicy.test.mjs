@@ -96,7 +96,7 @@ test('guardedFetch validates redirects before following them in offline mode', a
   const calls = [];
 
   globalThis.fetch = async url => {
-    calls.push(String(url));
+    calls.push(url instanceof Request ? url.url : String(url));
     return new Response('', {
       status: 302,
       headers: { Location: 'https://8.8.8.8/escaped' },
@@ -116,7 +116,7 @@ test('guardedFetch follows allowed redirects in offline mode', async () => {
   const calls = [];
 
   globalThis.fetch = async url => {
-    calls.push(String(url));
+    calls.push(url instanceof Request ? url.url : String(url));
     if (calls.length === 1) {
       return new Response('', {
         status: 302,
@@ -131,4 +131,36 @@ test('guardedFetch follows allowed redirects in offline mode', async () => {
   assert.equal(response.status, 200);
   assert.equal(await response.text(), 'ok');
   assert.deepEqual(calls, ['http://127.0.0.1/start', 'http://127.0.0.1/final']);
+});
+
+test('offline redirects cannot disclose credentials or replay POST bodies across origins', async () => {
+  process.env.AITK_OFFLINE_MODE = '1';
+  installPolicyDb();
+  for (const status of [302, 303, 307, 308]) {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return new Response('', { status, headers: { location: 'http://127.0.0.1:19002/target' } });
+    };
+    await assert.rejects(() => guardedFetch(new Request('http://127.0.0.1:19001/source', {
+      method: 'POST', headers: { authorization: 'Bearer synthetic' }, body: 'synthetic body',
+    })), /cross-origin/);
+    assert.equal(calls, 1);
+  }
+});
+
+test('Request manual policy and HEAD method survive offline handling', async () => {
+  process.env.AITK_OFFLINE_MODE = '1';
+  installPolicyDb();
+  const seen = [];
+  globalThis.fetch = async input => {
+    seen.push(input.method);
+    return new Response(null, { status: seen.length === 1 ? 303 : 200, headers: { location: '/final' } });
+  };
+  await guardedFetch(new Request('http://127.0.0.1/source', { method: 'HEAD' }));
+  assert.deepEqual(seen, ['HEAD', 'HEAD']);
+  seen.length = 0;
+  const response = await guardedFetch(new Request('http://127.0.0.1/source', { redirect: 'manual' }));
+  assert.equal(response.status, 303);
+  assert.equal(seen.length, 1);
 });

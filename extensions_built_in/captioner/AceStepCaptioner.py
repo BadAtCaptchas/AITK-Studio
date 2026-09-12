@@ -134,7 +134,7 @@ class AceStepCaptioner(BaseCaptioner):
         )
         if self.caption_config.low_vram:
             self.model.to("cpu")
-        
+
         self.model2 = None
         self.processor2 = None
 

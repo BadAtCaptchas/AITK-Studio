@@ -1,3 +1,4 @@
+import { jobStorageKey } from '../utils/jobIdentity';
 import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -109,7 +110,7 @@ export async function createRemoteTrainingJobBundle(
       : sourceJobConfig;
   const trainingRoot = await getJobTrainingRoot(job);
   const datasetsRoot = await getDatasetsRoot();
-  const jobFolder = path.join(trainingRoot, job.name);
+  const jobFolder = path.join(trainingRoot, jobStorageKey(job));
   const warnings: string[] = [];
 
   const latestCheckpoint = await findLatestCheckpoint(jobFolder, job.step);

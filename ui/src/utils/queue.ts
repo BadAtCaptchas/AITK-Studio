@@ -3,7 +3,7 @@ import { apiClient } from '@/utils/api';
 export const startQueue = (queueID: string, workerID = 'local') => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/queue/${queueID}/start`, { params: { worker_id: workerID } })
+      .post(`/api/queue/${queueID}/start`, undefined, { params: { worker_id: workerID } })
       .then(res => res.data)
       .then(data => {
         console.log('Queue started:', data);
@@ -18,7 +18,7 @@ export const startQueue = (queueID: string, workerID = 'local') => {
 export const stopQueue = (queueID: string, workerID = 'local') => {
   return new Promise<void>((resolve, reject) => {
     apiClient
-      .get(`/api/queue/${queueID}/stop`, { params: { worker_id: workerID } })
+      .post(`/api/queue/${queueID}/stop`, undefined, { params: { worker_id: workerID } })
       .then(res => res.data)
       .then(data => {
         console.log('Queue stopped:', data);

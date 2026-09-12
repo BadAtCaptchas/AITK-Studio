@@ -102,14 +102,13 @@ class ReferenceGenerator(BaseExtensionProcess):
             self.adapter = T2IAdapter.from_pretrained(
                 self.generate_config.t2i_adapter_path,
                 torch_dtype=self.torch_dtype,
-                varient="fp16"
+                variant="fp16"
             ).to(device)
 
         midas_depth = MidasDetector.from_pretrained(
             "valhalla/t2iadapter-aux-models",
             filename="dpt_large_384.pt",
             model_type="dpt_large",
-            revision="9f7f54b84a83ae8f152a4fe8d852a4d6bf58f5e2",
         ).to(device)
 
         if self.model_config.is_xl:

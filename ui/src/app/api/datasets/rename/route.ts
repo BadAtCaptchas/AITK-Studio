@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import { renameDatasetFolder, DatasetRenameError } from '@/server/datasetRename';
@@ -8,9 +9,9 @@ import { resolveDatasetScope } from '@/server/datasetScope';
 
 export const runtime = 'nodejs';
 
-export async function POST(request: Request) {
+async function postCommand(request: Request) {
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
     const oldName = body?.oldName ?? body?.name;
     const newName = body?.newName;
@@ -52,3 +53,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error?.message || 'Failed to rename dataset' }, { status });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

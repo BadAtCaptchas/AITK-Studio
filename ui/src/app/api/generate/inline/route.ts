@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
@@ -266,14 +267,14 @@ function runInlineGenerate(
   });
 }
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
   }
 
   try {
-    const body = assertGlobalPayload(await request.json());
+    const body = assertGlobalPayload(await readJsonCommand(request));
     const rawJobConfig: unknown = JSON.parse(JSON.stringify(body.job_config || null));
     const generateContext = getGenerateConfig(rawJobConfig);
     if (!generateContext) {
@@ -380,3 +381,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error?.message || 'Inline generation failed.' }, { status: 500 });
   }
 }
+
+export const POST = withCommandBoundary(postCommand);

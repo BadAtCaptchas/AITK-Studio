@@ -558,6 +558,7 @@ def quantize(
     *,
     component_label: Optional[str] = None,
     name_prefix: str = "",
+    keep_on_quantize_device: bool = False,
 ) -> QuantizationReport:
     """Quantize the specified model submodules
 
@@ -666,7 +667,7 @@ def quantize(
                 print(f"Failed to quantize {qualified_name}: {e}")
                 raise
             finally:
-                if original_device is not None:
+                if original_device is not None and not keep_on_quantize_device:
                     m.to(original_device)
             continue
 
@@ -715,7 +716,7 @@ def quantize(
                 if weight_bytes:
                     report.quantized_modules += 1
             finally:
-                if original_device is not None:
+                if original_device is not None and not keep_on_quantize_device:
                     # Quanto may replace the module in its parent, so re-fetch it.
                     model.get_submodule(name).to(original_device)
         except Exception as e:
@@ -949,6 +950,24 @@ def dequantize_ostris_to_linear(module: torch.nn.Module) -> int:
     return replaced
 
 
+def _has_quantizable_linear(module, weights, exclude, include=None):
+    """Check dense layer eligibility without casting already packed weights."""
+    for name, child in module.named_modules():
+        if _matches_patterns(name, include, exclude) is not None:
+            continue
+        if not isinstance(child, torch.nn.Linear) or isinstance(child, OstrisLinear):
+            continue
+        weight = child._parameters.get("weight")
+        if not isinstance(weight, torch.Tensor) or not weight.dtype.is_floating_point:
+            continue
+        if isinstance(weight, QTensor) or is_quantized_tensor(weight):
+            continue
+        if isinstance(weights, ostristype) and not weights.quantizer.can_quantize(child):
+            continue
+        return True
+    return False
+
+
 @torch.no_grad()
 def quantize_module(
     module: torch.nn.Module,
@@ -980,7 +999,9 @@ def quantize_module(
     patch_dequantization_on_save(module)
     quantization_type = get_qtype(qtype)
     exclude = list(exclude or [])
-    quantize_kwargs = quantize_kwargs or {}
+    quantize_kwargs = dict(quantize_kwargs or {})
+    configured_exclude = _normalize_patterns(quantize_kwargs.pop("exclude", None), "exclude") or []
+    exclude.extend(pattern for pattern in configured_exclude if pattern not in exclude)
     keep_on_device = keep_on_device and device is not None
 
     all_blocks: List[torch.nn.Module] = []
@@ -1000,7 +1021,7 @@ def quantize_module(
     t_check = t_h2d = t_quant = t_d2h = 0.0
     for block in tqdm(all_blocks):
         t = time.perf_counter()
-        skip = not _has_quantizable_linear(block, quantization_type, exclude)
+        skip = not _has_quantizable_linear(block, quantization_type, exclude, quantize_kwargs.get("include"))
         t_check += time.perf_counter() - t
         if skip:
             # pre-quantized checkpoint with a matching qtype: nothing in this
@@ -1081,19 +1102,6 @@ def quantize_model(
 
     # sensitive modules to keep in full precision (fnmatch patterns)
     exclude_modules = base_model.get_quantization_exclude_modules() or []
-    quantize_options = dict(base_model.model_config.quantize_kwargs or {})
-    configured_exclude = _normalize_patterns(
-        quantize_options.get("exclude"),
-        "exclude",
-    ) or []
-    combined_exclude = list(exclude_modules)
-    combined_exclude.extend(
-        pattern for pattern in configured_exclude if pattern not in combined_exclude
-    )
-    backend_call_kwargs = {
-        "kernel": quantize_options.get("kernel"),
-        "max_workspace_mb": quantize_options.get("max_workspace_mb"),
-    }
 
     mc = base_model.model_config
     device = base_model.device_torch
@@ -1148,6 +1156,20 @@ def attach_ara_and_quantize(
     from toolkit.lora_special import LoRASpecialNetwork
 
     exclude_modules = list(exclude or [])
+    quantize_options = dict(base_model.model_config.quantize_kwargs or {})
+    configured_exclude = _normalize_patterns(
+        quantize_options.get("exclude"),
+        "exclude",
+    ) or []
+    combined_exclude = list(exclude_modules)
+    combined_exclude.extend(
+        pattern for pattern in configured_exclude if pattern not in combined_exclude
+    )
+    backend_call_kwargs = {
+        "kernel": quantize_options.get("kernel"),
+        "max_workspace_mb": quantize_options.get("max_workspace_mb"),
+    }
+
     load_lora_path = ara_path
 
     if not os.path.exists(load_lora_path):
@@ -1173,17 +1195,15 @@ def attach_ara_and_quantize(
     if hasattr(base_model, "convert_lora_weights_before_load"):
         lora_state_dict = base_model.convert_lora_weights_before_load(lora_state_dict)
         
-        network_config = {
-            "type": "lora",
-            "network_kwargs": {"only_if_contains": []},
-            "transformer_only": False,
-        }
-        first_key = list(lora_state_dict.keys())[0]
-        first_weight = lora_state_dict[first_key]
-        # if it starts with lycoris and includes lokr
-        if any("lokr" in key.lower() for key in lora_state_dict.keys()):
-            network_config["type"] = "lokr"
-        
+    network_config = {
+        "type": "lora",
+        "network_kwargs": {"only_if_contains": []},
+        "transformer_only": False,
+    }
+    # if it starts with lycoris and includes lokr
+    if any("lokr" in key.lower() for key in lora_state_dict.keys()):
+        network_config["type"] = "lokr"
+
     network_kwargs = {}
 
     # find firse loraA weight
@@ -1244,119 +1264,97 @@ def attach_ara_and_quantize(
                     only_if_contains.append(contains_key)
         network_kwargs["only_if_contains"] = only_if_contains
         
-        if hasattr(base_model, 'target_lora_modules'):
-            network_kwargs['target_lin_modules'] = base_model.target_lora_modules
+    if hasattr(base_model, 'target_lora_modules'):
+        network_kwargs['target_lin_modules'] = base_model.target_lora_modules
 
-        # todo auto grab these
-        # get dim and scale
-        network_config = NetworkConfig(**network_config)
+    # todo auto grab these
+    # get dim and scale
+    network_config = NetworkConfig(**network_config)
 
-        network = LoRASpecialNetwork(
-            text_encoder=None,
-            unet=model_to_quantize,
-            lora_dim=network_config.linear,
-            multiplier=1.0,
-            alpha=network_config.linear_alpha,
-            # conv_lora_dim=self.network_config.conv,
-            # conv_alpha=self.network_config.conv_alpha,
-            train_unet=True,
-            train_text_encoder=False,
-            network_config=network_config,
-            network_type=network_config.type,
-            transformer_only=network_config.transformer_only,
-            is_transformer=base_model.is_transformer,
-            base_model=base_model,
-            is_ara=True,
-            **network_kwargs
-        )
-        network.apply_to(
-            None, model_to_quantize, apply_text_encoder=False, apply_unet=True
-        )
-        network.force_to(base_model.device_torch, dtype=base_model.torch_dtype)
-        network._update_torch_multiplier()
-        network.load_weights(lora_state_dict)
-        network.eval()
-        network.is_active = True
-        network.can_merge_in = False
-        base_model.accuracy_recovery_adapter = network
+    network = LoRASpecialNetwork(
+        text_encoder=None,
+        unet=model_to_quantize,
+        lora_dim=network_config.linear,
+        multiplier=1.0,
+        alpha=network_config.linear_alpha,
+        # conv_lora_dim=self.network_config.conv,
+        # conv_alpha=self.network_config.conv_alpha,
+        train_unet=True,
+        train_text_encoder=False,
+        network_config=network_config,
+        network_type=network_config.type,
+        transformer_only=network_config.transformer_only,
+        is_transformer=base_model.is_transformer,
+        base_model=base_model,
+        is_ara=True,
+        **network_kwargs
+    )
+    network.apply_to(
+        None, model_to_quantize, apply_text_encoder=False, apply_unet=True
+    )
+    network.force_to(base_model.device_torch, dtype=base_model.torch_dtype)
+    network._update_torch_multiplier()
+    network.load_weights(lora_state_dict)
+    network.eval()
+    network.is_active = True
+    network.can_merge_in = False
+    base_model.accuracy_recovery_adapter = network
 
-        # quantize it
-        lora_exclude_modules = []
-        quantization_type = get_qtype(
-            base_model.model_config.qtype,
-            kernel=backend_call_kwargs["kernel"] or "auto",
-            max_workspace_mb=backend_call_kwargs["max_workspace_mb"] or 64,
-        )
-        ara_report = _start_report(
-            quantization_type,
-            "transformer",
-            base_model.device_torch,
-        )
-        for lora_module in tqdm(network.unet_loras, desc="Attaching quantization"):
-            # the lora has already hijacked the original module
-            orig_module = lora_module.org_module[0]
-            orig_module.to(base_model.torch_dtype)
-            # make the params not require gradients
-            for param in orig_module.parameters():
-                param.requires_grad = False
-            module_report = quantize(
-                orig_module,
-                weights=quantization_type,
-                **backend_call_kwargs,
-            )
-            ara_report.merge(module_report)
-            freeze(orig_module)
-            module_name = lora_module.lora_name.replace('$$', '.').replace('transformer.', '')
-            lora_exclude_modules.append(module_name)
-            if base_model.model_config.low_vram:
-                # move it back to cpu
-                orig_module.to("cpu")
-        pass
-        # quantize additional layers
-        print_acc(" - quantizing additional layers")
-        additional_quantization_type = (
-            quantization_type
-            if isinstance(quantization_type, ostristype)
-            else get_qtype("uint8")
-        )
-        additional_report = quantize(
-            model_to_quantize,
-            weights=additional_quantization_type,
-            include=quantize_options.get("include"),
-            exclude=lora_exclude_modules + combined_exclude,
+    # quantize it
+    lora_exclude_modules = []
+    quantization_type = get_qtype(
+        base_model.model_config.qtype,
+        kernel=backend_call_kwargs["kernel"] or "auto",
+        max_workspace_mb=backend_call_kwargs["max_workspace_mb"] or 64,
+    )
+    ara_report = _start_report(
+        quantization_type,
+        "transformer",
+        base_model.device_torch,
+    )
+    for lora_module in tqdm(network.unet_loras, desc="Attaching quantization"):
+        # the lora has already hijacked the original module
+        orig_module = lora_module.org_module[0]
+        orig_module.to(base_model.torch_dtype)
+        # make the params not require gradients
+        for param in orig_module.parameters():
+            param.requires_grad = False
+        module_report = quantize(
+            orig_module,
+            weights=quantization_type,
+            quantize_device=device,
+            keep_on_quantize_device=keep_on_device,
             **backend_call_kwargs,
         )
-        if isinstance(quantization_type, ostristype):
-            ara_report.merge(additional_report)
-            _finish_report(ara_report, base_model.device_torch)
-            model_to_quantize._aitk_quantization_report = ara_report
-            base_model.quantization_report = ara_report
-            if base_model.model_config.low_vram and quantization_type.name == "orbit4":
-                enforce_orbit4_low_vram_coverage(ara_report)
-            base_model.print_and_status_update(f" - {ara_report.summary()}")
-            return ara_report
-    else:
-        transformer_block_names = base_model.get_transformer_block_names() or []
-        all_blocks = _resolve_staged_blocks(
-            model_to_quantize,
-            transformer_block_names,
-        )
-        base_model.print_and_status_update(
-            f" - quantizing {len(all_blocks)} transformer blocks"
-        )
-        report = quantize_component_in_stages(
-            model_to_quantize,
-            weights=base_model.model_config.qtype,
-            device=base_model.device_torch,
-            dtype=base_model.torch_dtype,
-            block_paths=transformer_block_names,
-            exclude=exclude_modules,
-            options=quantize_options,
-            component_label="transformer",
-        )
-        freeze(model_to_quantize)
-        if base_model.model_config.low_vram and base_model.model_config.qtype == "orbit4":
-            enforce_orbit4_low_vram_coverage(report)
-        base_model.quantization_report = report
-        base_model.print_and_status_update(f" - {report.summary()}")
-        return report
+        ara_report.merge(module_report)
+        freeze(orig_module)
+        module_name = lora_module.lora_name.replace('$$', '.').replace('transformer.', '')
+        lora_exclude_modules.append(module_name)
+        if base_model.model_config.low_vram and not keep_on_device:
+            # move it back to cpu
+            orig_module.to("cpu")
+    # quantize additional layers
+    print_acc(" - quantizing additional layers")
+    additional_quantization_type = (
+        quantization_type
+        if isinstance(quantization_type, ostristype)
+        else get_qtype("uint8")
+    )
+    additional_report = quantize(
+        model_to_quantize,
+        weights=additional_quantization_type,
+        include=quantize_options.get("include"),
+        exclude=lora_exclude_modules + combined_exclude,
+        quantize_device=device,
+        keep_on_quantize_device=keep_on_device,
+        **backend_call_kwargs,
+    )
+    if isinstance(quantization_type, ostristype):
+        ara_report.merge(additional_report)
+        _finish_report(ara_report, base_model.device_torch)
+        model_to_quantize._aitk_quantization_report = ara_report
+        base_model.quantization_report = ara_report
+        if base_model.model_config.low_vram and quantization_type.name == "orbit4":
+            enforce_orbit4_low_vram_coverage(ara_report)
+        base_model.print_and_status_update(f" - {ara_report.summary()}")
+    return ara_report

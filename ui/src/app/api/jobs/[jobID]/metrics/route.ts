@@ -1,3 +1,4 @@
+import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { db } from '@/server/db';
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const trainingFolder = await getJobTrainingRoot(job);
-  const jobFolder = path.join(trainingFolder, job.name);
+  const jobFolder = path.join(trainingFolder, jobStorageKey(job));
   const logPath = path.join(jobFolder, 'loss_log.db');
   const sinceStepParam = url.searchParams.get('since_step');
   const sinceStep = sinceStepParam != null ? Number(sinceStepParam) : null;

@@ -16,7 +16,7 @@ function archBlock(source, name) {
 }
 
 test('LTX UI profiles prefer shifted logit-normal and expose strategy settings', () => {
-  const options = readSource('src/app/jobs/new/options.ts');
+  const options = readSource('src/domain/modelOptions.ts');
 
   for (const arch of ['ltx2', 'ltx2.3']) {
     const block = archBlock(options, arch);

@@ -525,7 +525,7 @@ class HidreamO1Model(BaseModel):
         }
         if self.is_comfy_weight:
             save_dict = {key: value for key, value in save_dict.items() if 'lm_head.weight' not in key}
-            
+
             if not output_path.endswith(".safetensors"):
                 output_path += ".safetensors"
             meta = get_meta_for_safetensors(meta, name=self.arch)

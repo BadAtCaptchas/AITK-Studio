@@ -71,7 +71,7 @@ class Flex2(BaseModel):
         self.is_flow_matching = True
         self.is_transformer = True
         self.target_lora_modules = ['FluxTransformer2DModel']
-        
+
         # for training, pass these as kwargs
         self.invert_inpaint_mask_chance = model_config.model_kwargs.get('invert_inpaint_mask_chance', 0.0)
         self.inpaint_dropout = model_config.model_kwargs.get('inpaint_dropout', 0.0)
@@ -333,9 +333,9 @@ class Flex2(BaseModel):
 
         if bypass_guidance_embedding:
             restore_flux_guidance(self.unet)
-        
+
         return noise_pred
-    
+
     def get_prompt_embeds(self, prompt: str) -> PromptEmbeds:
         if self.pipeline.text_encoder.device != self.device_torch:
             self.pipeline.text_encoder.to(self.device_torch)
@@ -350,7 +350,7 @@ class Flex2(BaseModel):
         )
         pe.pooled_embeds = pooled_prompt_embeds
         return pe
-    
+
     def get_model_has_grad(self):
         # return from a weight if it has grad
         return self.model.proj_out.weight.requires_grad
@@ -358,7 +358,7 @@ class Flex2(BaseModel):
     def get_te_has_grad(self):
         # return from a weight if it has grad
         return self.text_encoder[1].encoder.block[0].layer[0].SelfAttention.q.weight.requires_grad
-    
+
     def save_model(self, output_path, meta, save_dtype):
         # only save the unet
         transformer: FluxTransformer2DModel = unwrap_model(self.model)
@@ -375,7 +375,7 @@ class Flex2(BaseModel):
         noise = kwargs.get('noise')
         batch = kwargs.get('batch')
         return (noise - batch.latents).detach()
-    
+
     def condition_noisy_latents(self, latents: torch.Tensor, batch:'DataLoaderBatchDTO'):
         with torch.no_grad():
             # inpainting input is 0-1 (bs, 4, h, w) on batch.inpaint_tensor
@@ -387,13 +387,13 @@ class Flex2(BaseModel):
             if inpaint_tensor is None and batch.mask_tensor is not None:
                 # we have a mask tensor, use it
                 inpaint_tensor = batch.mask_tensor
-            
+
             if self.inpaint_random_chance > 0.0:
                 do_random = random.random() < self.inpaint_random_chance
                 if do_random:
                     # force a random tensor
                     inpaint_tensor = None
-            
+
             if inpaint_tensor is None and not do_dropout and self.do_random_inpainting:
                 # generate a random one since we dont have one
                 # this will make random blobs, invert the blobs for now as we normanlly inpaint the alpha
@@ -404,9 +404,9 @@ class Flex2(BaseModel):
                     device=latents.device,
                 ).to(latents.device, latents.dtype)
             if inpaint_tensor is not None and not do_dropout:
-                
+
                 if inpaint_tensor.shape[1] == 4:
-                    # get just the mask 
+                    # get just the mask
                     inpainting_tensor_mask = inpaint_tensor[:, 3:4, :, :].to(latents.device, dtype=latents.dtype)
                 elif inpaint_tensor.shape[1] == 3:
                     # rgb mask. Just get one channel
@@ -415,14 +415,14 @@ class Flex2(BaseModel):
                     inpaint_tensor = 1 - inpaint_tensor
                 else:
                     inpainting_tensor_mask = inpaint_tensor
-                
+
                 # # use our batch latents so we cna avoid encoding again
                 inpainting_latent = batch.latents
-                
+
                 # resize the mask to match the new encoded size
                 inpainting_tensor_mask = F.interpolate(inpainting_tensor_mask, size=(inpainting_latent.shape[2], inpainting_latent.shape[3]), mode='bilinear')
                 inpainting_tensor_mask = inpainting_tensor_mask.to(latents.device, latents.dtype)
-                
+
                 if self.random_blur_mask:
                     # blur the mask
                     # Give it a channel dim of 1
@@ -432,30 +432,30 @@ class Flex2(BaseModel):
                     # we are at latent size, so keep kernel smaller
                     inpainting_tensor_mask = random_blur(
                         inpainting_tensor_mask,
-                        min_kernel_size=3, 
+                        min_kernel_size=3,
                         max_kernel_size=8,
                         p=0.5
                     )
-                
+
                 do_mask_invert = False
                 if self.invert_inpaint_mask_chance > 0.0:
                     do_mask_invert = random.random() < self.invert_inpaint_mask_chance
                 if do_mask_invert:
                     # invert the mask
                     inpainting_tensor_mask = 1 - inpainting_tensor_mask
-                
+
                 # mask out the inpainting area, it is currently 0 for inpaint area, and 1 for keep area
                 # we are zeroing our the latents in the inpaint area not on the pixel space.
                 inpainting_latent = inpainting_latent * inpainting_tensor_mask
-                
-                # do the random dialation after the mask is applied so it does not match perfectly. 
+
+                # do the random dialation after the mask is applied so it does not match perfectly.
                 # this will make the model learn to prevent weird edges
                 if self.random_dialate_mask:
                     inpainting_tensor_mask = random_dialate_mask(
                         inpainting_tensor_mask,
-                        max_percent=0.05 
+                        max_percent=0.05
                     )
-                
+
                 # mask needs to be 1 for inpaint area and 0 for area to leave alone. So flip it.
                 inpainting_tensor_mask = 1 - inpainting_tensor_mask
                 # leave the mask as 0-1 and concat on channel of latents
@@ -466,7 +466,7 @@ class Flex2(BaseModel):
                 inpainting_latent = torch.zeros_like(latents)
                 # add ones for the mask since we are technically inpainting everything
                 inpainting_latent = torch.cat((inpainting_latent, torch.ones_like(inpainting_latent[:, :1, :, :])), dim=1)
-            
+
             control_tensor = batch.control_tensor
             if control_tensor is None:
                 # concat random normal noise onto the latents
@@ -475,9 +475,9 @@ class Flex2(BaseModel):
                 ctrl = torch.zeros(
                     latents.shape[0], # bs
                     latents.shape[1],
-                    latents.shape[2], 
-                    latents.shape[3], 
-                    device=latents.device, 
+                    latents.shape[2],
+                    latents.shape[3],
+                    device=latents.device,
                     dtype=latents.dtype
                 )
                 # inpainting always comes first
@@ -487,7 +487,7 @@ class Flex2(BaseModel):
             # if we have multiple control tensors, they come in like [bs, num_control_images, ch, h, w]
             # if we have 1, it comes in like [bs, ch, h, w]
             # stack out control tensors to be [bs, ch * num_control_images, h, w]
-            
+
             control_tensor_list = []
             if len(control_tensor.shape) == 4:
                 control_tensor_list.append(control_tensor)
@@ -495,13 +495,13 @@ class Flex2(BaseModel):
                 num_control_images = control_tensor.shape[1]
                 # reshape
                 control_tensor = control_tensor.view(
-                    control_tensor.shape[0], 
-                    control_tensor.shape[1] * control_tensor.shape[2], 
-                    control_tensor.shape[3], 
+                    control_tensor.shape[0],
+                    control_tensor.shape[1] * control_tensor.shape[2],
+                    control_tensor.shape[3],
                     control_tensor.shape[4]
                 )
                 control_tensor_list = control_tensor.chunk(num_control_images, dim=1)
-            
+
             do_dropout = random.random() < self.control_dropout if self.control_dropout > 0.0 else False
             if do_dropout:
                 # dropout with zeros
@@ -513,14 +513,14 @@ class Flex2(BaseModel):
                 control_tensor = control_tensor * 2 - 1
 
                 control_tensor = control_tensor.to(self.vae_device_torch, dtype=self.torch_dtype)
-                
+
                 # if it is not the size of batch.tensor, (bs,ch,h,w) then we need to resize it
                 if control_tensor.shape[2] != batch.tensor.shape[2] or control_tensor.shape[3] != batch.tensor.shape[3]:
                     control_tensor = F.interpolate(control_tensor, size=(batch.tensor.shape[2], batch.tensor.shape[3]), mode='bilinear')
-                
+
                 # encode it
                 control_latent = self.encode_images(control_tensor).to(latents.device, latents.dtype)
-                
+
             # inpainting always comes first
             control_latent = torch.cat((inpainting_latent, control_latent), dim=1)
             # concat it onto the latents

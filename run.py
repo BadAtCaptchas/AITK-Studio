@@ -22,6 +22,9 @@ if "SEED" in os.environ:
         print(f"Invalid SEED value: {os.environ['SEED']}. SEED must be an integer.")
 
 sys.path.insert(0, os.getcwd())
+from toolkit.attempt_process import register_attempt_process
+
+register_attempt_process()
 # must come before ANY torch or fastai imports
 # import toolkit.cuda_malloc
 
@@ -108,7 +111,7 @@ def run_process_error_handler(process, e):
         print_acc(f"Error running on_error: {e2}")
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser()
 
     # require at lease one config file
@@ -168,7 +171,7 @@ def main():
             mark_process_stopping(process)
             run_process_error_handler(process, e)
             print_end_message(jobs_completed, jobs_failed, jobs_stopped)
-            return
+            return 1 if jobs_failed else 0
         except UserFacingError as e:
             print_acc(f"Error running job: {e}")
             jobs_failed += 1
@@ -189,8 +192,11 @@ def main():
             mark_process_stopping(process, "stopped", "Job stopped")
             run_process_error_handler(process, e)
             print_end_message(jobs_completed, jobs_failed, jobs_stopped)
-            return
+            return 130
+
+    print_end_message(jobs_completed, jobs_failed, jobs_stopped)
+    return 1 if jobs_failed else 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

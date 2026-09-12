@@ -1,3 +1,4 @@
+import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
@@ -8,10 +9,10 @@ import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { sanitizeCaptionText } from '@/utils/captionQuality';
 
-export async function POST(request: NextRequest) {
+async function postCommand(request: NextRequest) {
   let body;
   try {
-    body = assertGlobalPayload(await request.json());
+    body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
     return new NextResponse(null, { status: 499 });
   }
@@ -87,3 +88,5 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ captions });
 }
+
+export const POST = withCommandBoundary(postCommand);

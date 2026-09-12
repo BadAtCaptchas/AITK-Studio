@@ -25,7 +25,7 @@ class BaseProcess(object):
         self.performance_log_every = self.get_conf('performance_log_every', 0)
 
         print(json.dumps(redact_secrets(self.config), indent=4))
-        
+
     def on_error(self, e: Exception):
         pass
 

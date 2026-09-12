@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { installMemoryRuntime } from './memoryRuntimeFixture.mjs';
+installMemoryRuntime();
 
 import {
   assembleArchiveUploadChunks,
@@ -30,7 +32,7 @@ function chunkRequest(uploadID, chunkIndex, chunksTotal, fileBytes, body) {
 test('archive chunks are assembled in order after bounded streaming writes', async () => {
   const uploadRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-archive-chunks-'));
   const uploadID = 'upload-test-1234';
-  const outputPath = path.join(uploadRoot, 'assembled.zip');
+  const outputPath = path.join(uploadRoot, uploadID, 'upload.zip');
 
   try {
     await saveArchiveUploadChunk(chunkRequest(uploadID, 0, 2, 6, Buffer.from('abc')), uploadRoot, {
@@ -70,7 +72,7 @@ test('archive chunk upload rejects a declared archive larger than its route limi
 test('archive assembly rejects a size declaration that does not match stored chunks', async () => {
   const uploadRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-archive-chunks-'));
   const uploadID = 'upload-test-9012';
-  const outputPath = path.join(uploadRoot, 'assembled.zip');
+  const outputPath = path.join(uploadRoot, uploadID, 'upload.zip');
 
   try {
     await saveArchiveUploadChunk(chunkRequest(uploadID, 0, 1, 3, Buffer.from('abc')), uploadRoot, {

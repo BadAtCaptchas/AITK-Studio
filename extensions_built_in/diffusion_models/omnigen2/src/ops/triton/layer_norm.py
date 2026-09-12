@@ -806,12 +806,12 @@ class LayerNormFn(torch.autograd.Function):
             # Handle output tensors with correct dtype
             y = x  # Preserve input tensor properties
             y1 = torch.empty_like(x) if x1 is not None else None
-            
+
             # Only create residual_out if prenorm is True
-            residual_out = torch.empty(x.shape, 
+            residual_out = torch.empty(x.shape,
                                     dtype=torch.float32 if residual_in_fp32 else x.dtype,
                                     device=x.device) if prenorm else None
-            
+
             # Handle dropout masks
             dropout_mask = None
             dropout_mask1 = None
@@ -828,13 +828,13 @@ class LayerNormFn(torch.autograd.Function):
                     return (y, y1) if not prenorm else (y, y1, residual_out)
             else:
                 if weight1 is None:
-                    return ((y, dropout_mask, dropout_mask1) if not prenorm 
+                    return ((y, dropout_mask, dropout_mask1) if not prenorm
                         else (y, residual_out, dropout_mask, dropout_mask1))
                 else:
-                    return ((y, y1, dropout_mask, dropout_mask1) if not prenorm 
+                    return ((y, y1, dropout_mask, dropout_mask1) if not prenorm
                         else (y, y1, residual_out, dropout_mask, dropout_mask1))
 
-        ctx.zero_seq_length = False  
+        ctx.zero_seq_length = False
         # reshape input data into 2D tensor
         x = x.reshape(-1, x.shape[-1])
         if x.stride(-1) != 1:
@@ -944,7 +944,7 @@ class LayerNormFn(torch.autograd.Function):
                 None,
                 None,
             )
-        
+
         x, weight, bias, weight1, bias1, rowscale, seeds, mean, rstd = ctx.saved_tensors
         dy = dy.reshape(-1, dy.shape[-1])
         if dy.stride(-1) != 1:
@@ -966,7 +966,7 @@ class LayerNormFn(torch.autograd.Function):
             assert dresidual.shape == x.shape
         else:
             dresidual = None
-        
+
         dx, dw, db, dresidual_in, dx1, dw1, db1 = _layer_norm_bwd(
             dy,
             x,

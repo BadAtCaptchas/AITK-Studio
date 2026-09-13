@@ -2490,7 +2490,7 @@ class TextEmbeddingFileItemDTOMixin:
         if self.caption is None:
             self.load_caption()
         item = OrderedDict([
-            ("caption", self.caption),
+            ("caption", self.caption if caption_override is None else caption_override),
             ("text_embedding_space_version", self.text_embedding_space_version),
             ("text_embedding_version", self.text_embedding_version),
         ])
@@ -2723,8 +2723,13 @@ class TextEmbeddingCachingMixin:
                         if dop_blank_path not in [t[0] for t in encode_targets] + [text_embedding_path]:
                             encode_targets.append((dop_blank_path, file_item.get_dop_dropout_caption()))
                             dropout_target_paths.add(dop_blank_path)
-                # only process if not saved to disk
-                if not os.path.exists(text_embedding_path):
+                # A normal caption can be cached while newly enabled dropout or
+                # preservation captions still need their own entries.
+                encode_targets = [
+                    (path, caption) for path, caption in encode_targets
+                    if not os.path.exists(path)
+                ]
+                if encode_targets:
                     # load if not loaded
                     if not did_move:
                         self.sd.set_device_state_preset('cache_text_encoder')

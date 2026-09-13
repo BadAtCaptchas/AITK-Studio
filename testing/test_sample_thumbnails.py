@@ -7,6 +7,7 @@ import threading
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,8 @@ class SampleAtomicWriteTests(unittest.TestCase):
             self.assertFalse(worker.is_alive())
             self.assertEqual(Path(root, "sample-1.png").read_bytes(), b"partial-complete")
             self.assertEqual(Path(root, ".thumbs", "sample-1.png.jpg").read_bytes(), b"jpeg")
+            self.assertTrue(Path(root, ".tmp").is_dir())
+            self.assertEqual(list(Path(root, ".tmp").iterdir()), [])
 
     def test_concurrent_saves_use_isolated_staging_directories(self):
         with tempfile.TemporaryDirectory() as root:
@@ -100,7 +103,54 @@ class SampleAtomicWriteTests(unittest.TestCase):
             self.assertTrue(all(not worker.is_alive() for worker in workers))
             self.assertEqual(Path(root, "sample-1.png").read_bytes(), b"1")
             self.assertEqual(Path(root, "sample-2.png").read_bytes(), b"2")
-            self.assertFalse(os.path.exists(os.path.join(root, ".tmp")))
+            self.assertTrue(Path(root, ".tmp").is_dir())
+            self.assertEqual(list(Path(root, ".tmp").iterdir()), [])
+
+    def test_concurrent_cleanup_preserves_pending_save_staging_parent(self):
+        with tempfile.TemporaryDirectory() as root:
+            before_mkdtemp = threading.Event()
+            resume_save = threading.Event()
+            errors = []
+            original_mkdtemp = tempfile.mkdtemp
+
+            def save_image(harness, image, count, max_count):
+                Path(harness.get_image_path(count, max_count)).write_bytes(str(count).encode())
+
+            first = AtomicSaveHarness(root, save_image)
+            second = AtomicSaveHarness(root, save_image)
+
+            def pause_before_mkdtemp(*args, **kwargs):
+                if threading.current_thread() is worker:
+                    self.assertTrue(Path(kwargs["dir"]).is_dir())
+                    before_mkdtemp.set()
+                    self.assertTrue(resume_save.wait(10), "Pending save was not resumed")
+                return original_mkdtemp(*args, **kwargs)
+
+            def save_first():
+                try:
+                    first.save_image_atomic(object(), 1)
+                except Exception as error:
+                    errors.append(error)
+
+            worker = threading.Thread(target=save_first)
+            with patch.object(tempfile, "mkdtemp", side_effect=pause_before_mkdtemp):
+                worker.start()
+                try:
+                    self.assertTrue(before_mkdtemp.wait(5), "Pending save did not reach mkdtemp")
+                    second.save_image_atomic(object(), 2)
+                finally:
+                    resume_save.set()
+                    worker.join(5)
+
+            self.assertFalse(worker.is_alive())
+            if errors:
+                raise errors[0]
+            for count, harness in ((1, first), (2, second)):
+                self.assertEqual(harness.output_folder, root)
+                self.assertEqual(Path(root, f"sample-{count}.png").read_bytes(), str(count).encode())
+                self.assertEqual(Path(root, ".thumbs", f"sample-{count}.png.jpg").read_bytes(), b"jpeg")
+            self.assertTrue(Path(root, ".tmp").is_dir())
+            self.assertEqual(list(Path(root, ".tmp").iterdir()), [])
 
     def test_failed_save_restores_output_folder_and_removes_staging(self):
         with tempfile.TemporaryDirectory() as root:
@@ -113,7 +163,8 @@ class SampleAtomicWriteTests(unittest.TestCase):
                 harness.save_image_atomic(object())
 
             self.assertEqual(harness.output_folder, root)
-            self.assertFalse(os.path.exists(os.path.join(root, ".tmp")))
+            self.assertTrue(Path(root, ".tmp").is_dir())
+            self.assertEqual(list(Path(root, ".tmp").iterdir()), [])
 
 
 class ThumbnailGenerationTests(unittest.TestCase):

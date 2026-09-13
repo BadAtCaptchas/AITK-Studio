@@ -1702,13 +1702,9 @@ class GenerateImageConfig:
                 os.replace(tmp_media_path, os.path.join(real_folder, media_filename))
             finally:
                 self.output_folder = real_folder
+                # Keep the shared parent: another save may be about to create
+                # its staging directory inside it.
                 shutil.rmtree(tmp_folder, ignore_errors=True)
-                try:
-                    os.rmdir(tmp_root)
-                except OSError:
-                    # Another concurrent save may still be using the shared
-                    # hidden root, or the process may have left diagnostics.
-                    pass
 
     def _generate_thumbnail(self, media_path, thumb_path):
         # 300x300 center-cropped 90% jpg. Returns True if one was written.

@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import torch
 from PIL import Image
@@ -24,11 +24,11 @@ class DatasetCaptionLoadingTests(unittest.TestCase):
         self.caption = "a red flower"
         self.path.with_suffix(".txt").write_text(self.caption, encoding="utf-8")
 
-    def config(self, **overrides):
+    def config(self, num_workers=0, **overrides):
         return DatasetConfig(
             folder_path=self.temp_dir.name,
             resolution=64,
-            num_workers=0,
+            num_workers=num_workers,
             **overrides,
         )
 
@@ -131,6 +131,28 @@ class DatasetCaptionLoadingTests(unittest.TestCase):
         batch = next(iter(resumed))
         encoder.encode_prompt.assert_called_once_with("")
         self.assertTrue(torch.equal(batch.prompt_embeds.text_embeds, torch.zeros(1, 2, 4)))
+
+    def test_prefetch_options_follow_effective_worker_count_on_each_platform(self):
+        cases = [
+            (True, False, 2, 0),   # Windows forces synchronous loading.
+            (False, True, 2, 0),   # macOS forces synchronous loading.
+            (False, False, 0, 0),  # Linux can opt into synchronous loading.
+            (False, False, 2, 2),  # Linux workers retain configured prefetching.
+        ]
+        for windows, macos, workers, expected_workers in cases:
+            for buckets in (False, True):
+                with (
+                    self.subTest(windows=windows, macos=macos, workers=workers, buckets=buckets),
+                    patch("toolkit.data_loader.is_native_windows", return_value=windows),
+                    patch("toolkit.data_loader.is_macos", return_value=macos),
+                ):
+                    config = self.config(num_workers=workers, prefetch_factor=3, buckets=buckets)
+                    loader = get_dataloader_from_datasets([config], batch_size=1, sd=self.encoder())
+                    self.assertEqual(loader.num_workers, expected_workers)
+                    self.assertEqual(loader.prefetch_factor, 3 if expected_workers else None)
+                    if expected_workers == 0:
+                        batch = next(iter(loader))
+                        self.assertEqual(batch.file_items[0].caption, self.caption)
 
 
 if __name__ == "__main__":

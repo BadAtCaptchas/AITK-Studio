@@ -55,6 +55,10 @@ npm run build_and_start
 <details>
 <summary><strong>Windows · PowerShell</strong></summary>
 
+For automatic setup, updates, and launch, double-click [`run_windows.bat`](run_windows.bat) in your checkout, or run `.\run_windows.bat` from PowerShell. The launcher uses the current manager to provision Python, PyTorch, Node.js, and other dependencies. Local changes cause the code update to be skipped; dependency setup and launch still run.
+
+For manual setup:
+
 ```powershell
 git clone https://github.com/BadAtCaptchas/AITK-Studio.git
 cd AITK-Studio

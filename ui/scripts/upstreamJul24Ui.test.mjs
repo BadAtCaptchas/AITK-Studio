@@ -44,12 +44,14 @@ test('gated model metadata and Studio guidance cover the upstream architectures'
 
 test('Studio supported-model documentation contains the July 24 additions', () => {
   const readme = readRoot('README.md');
+  const modelCatalog = readRoot('docs/supported-models.md');
 
-  assert.match(readme, /zhen-nan\/L2P/);
-  assert.match(readme, /krea\/Krea-2-Turbo.*Krea 2 Turbo/);
-  assert.match(readme, /krea\/Krea-2-Raw.*Krea 2 Edit Training/);
-  assert.match(readme, /krea\/Krea-2-Turbo.*Krea 2 Turbo Edit Training/);
-  assert.match(readme, /# AITK Studio/);
+  assert.match(readme, /\[[^\]]+\]\(docs\/supported-models\.md\)/);
+  assert.match(readme, /alt="AITK Studio"/);
+  assert.match(modelCatalog, /zhen-nan\/L2P/);
+  assert.match(modelCatalog, /krea\/Krea-2-Turbo.*Krea 2 Turbo/);
+  assert.match(modelCatalog, /krea\/Krea-2-Raw.*Krea 2 Edit Training/);
+  assert.match(modelCatalog, /krea\/Krea-2-Turbo.*Krea 2 Turbo Edit Training/);
 });
 
 test('Next dev indicators are disabled without weakening Studio build checks', () => {

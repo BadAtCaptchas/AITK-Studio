@@ -40,7 +40,6 @@ from toolkit.models.diffusion_feature_extraction import DiffusionFeatureExtracto
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.util.losses import wavelet_loss, stepped_loss
 from toolkit.watermarking import AuthenLoRAController
-import torch.nn.functional as F
 from toolkit.unloader import unload_text_encoder
 from toolkit.memory_management import sync_grad_transfers
 from PIL import Image
@@ -380,15 +379,16 @@ class SDTrainer(BaseSDTrainProcess):
             # make sure model is on cpu for this part so we don't oom.
             self.sd.unet.to('cpu')
 
-        # cache unconditional embeds (blank prompt)
-        with torch.no_grad():
-            self.unconditional_embeds = self.encode_static_prompt(
-                [self.train_config.unconditional_prompt],
-                long_prompts=self.do_long_prompts,
-            ).to(
-                self.device_torch,
-                dtype=self.sd.torch_dtype
-            ).detach()
+        # cache unconditional embeds (blank prompt); text-generating models have no text encoder
+        if not getattr(self.sd, 'is_llm', False):
+            with torch.no_grad():
+                self.unconditional_embeds = self.encode_static_prompt(
+                    [self.train_config.unconditional_prompt],
+                    long_prompts=self.do_long_prompts,
+                ).to(
+                    self.device_torch,
+                    dtype=self.sd.torch_dtype
+                ).detach()
 
         if self.train_config.do_prior_divergence:
             self.do_prior_prediction = True
@@ -396,14 +396,16 @@ class SDTrainer(BaseSDTrainProcess):
             # D-OPSD: the teacher (prior) prediction is the training target
             self.do_prior_prediction = True
         # move vae to device if we did not cache latents
-        if not self.is_latents_cached:
-            self.sd.vae.eval()
-            self.sd.vae.to(self.device_torch)
-        else:
-            # offload it. Already cached
-            self.sd.vae.to('cpu')
-            flush()
-        add_all_snr_to_noise_scheduler(self.sd.noise_scheduler, self.device_torch)
+        if self.sd.vae is not None:
+            if not self.is_latents_cached:
+                self.sd.vae.eval()
+                self.sd.vae.to(self.device_torch)
+            else:
+                # offload it. Already cached
+                self.sd.vae.to('cpu')
+                flush()
+        if self.sd.noise_scheduler is not None:
+            add_all_snr_to_noise_scheduler(self.sd.noise_scheduler, self.device_torch)
         if self.adapter is not None:
             self.adapter.to(self.device_torch)
 
@@ -1890,8 +1892,30 @@ class SDTrainer(BaseSDTrainProcess):
                 **kwargs
             )
 
+    def train_llm_accumulation(self, batch: DataLoaderBatchDTO):
+        """Text-generating models (BaseModel.is_llm): no noise, scheduler, VAE or prompt
+        encoding. The model computes its own loss from the batch (cached media + captions)
+        and reports per-term logs through additional_loss_logs."""
+        network = self.network if self.network is not None else BlankNetwork()
+        network.multiplier = batch.get_network_weight_list()
+        with torch.no_grad():
+            loss_multiplier = torch.tensor(batch.loss_multiplier_list).to(self.device_torch, dtype=torch.float32)
+        with network:
+            with self.timer('llm_loss'):
+                loss = self.sd.get_llm_loss(batch)
+            self.additional_logs.update(getattr(self.sd, "additional_loss_logs", None) or {})
+            if not torch.isfinite(loss):
+                print_acc("loss is nan")
+                loss = torch.zeros_like(loss).requires_grad_(True)
+            with self.timer('backward'):
+                loss = loss * loss_multiplier.mean()
+                # backward stays inside the network context (see the note in the diffusion path)
+                self.accelerator.backward(loss)
+        return loss.detach()
 
     def train_single_accumulation(self, batch: DataLoaderBatchDTO):
+        if getattr(self.sd, 'is_llm', False):
+            return self.train_llm_accumulation(batch)
         with torch.no_grad():
             self.timer.start('preprocess_batch')
             if isinstance(self.adapter, CustomAdapter):

@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
 import { ConfigDoc, GroupedSelectOption, SelectOption, JobConfig } from '@/types';
 import { defaultSliderConfig } from './trainingDefaults';
-import { defaultAudioSampleConfig, defaultSampleConfig } from '@/helpers/defaultSamples';
+import { defaultAudioSampleConfig, defaultSampleConfig, defaultYue2SampleConfig, defaultQwen25OmniSampleConfig } from '@/helpers/defaultSamples';
 
 import contract from './modelCapabilities.json';
 
@@ -19,6 +20,8 @@ type DisableableSections =
   | 'slider';
 
 type AdditionalSections =
+  | 'sample.duration'
+  | 'model.model_kwargs.instruction'
   | 'datasets.control_path'
   | 'datasets.multi_control_paths'
   | 'datasets.do_i2v'
@@ -40,7 +43,7 @@ type AdditionalSections =
   | 'model.model_kwargs.kv_cache'
   | 'model.ideogram_skip_unconditional_transformer';
 
-type ModelGroup = 'image' | 'instruction' | 'video' | 'experimental' | 'audio';
+type ModelGroup = 'image' | 'instruction' | 'video' | 'experimental' | 'audio' | 'llm';
 
 export type SampleTag = {
   title: string;
@@ -77,6 +80,8 @@ export interface ModelArch {
   sampleTags?: SampleTags;
   defaultAutoTrainingProfileId?: string;
   modelNotes?: ModelNotes;
+  extensionNotes?: ReactNode;
+  customSections?: (config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => ReactNode;
   allowedNetworkTypes?: string[];
   customModelSelectOptions?: Array<{
     label: string;
@@ -91,6 +96,91 @@ const defaultNameOrPath = '';
 const defaultLinearRank = 32;
 
 const modelPresentation: ModelArch[] = [
+{name: "yue2",
+label: "YuE2",
+group: "audio",
+defaults: {
+      // default updates when [selected, unselected] in the UI
+      "config.process[0].model.name_or_path": [
+        "Comfy-Org/YuE2/checkpoints/yue2_3b_int8_convrot.safetensors",
+        defaultNameOrPath,
+      ],
+      "config.process[0].model.quantize": [true, false],
+      "config.process[0].model.quantize_te": [false, false],
+      "config.process[0].model.low_vram": [false, false],
+      "config.process[0].train.unload_text_encoder": [false, false],
+      "config.process[0].train.noise_scheduler": ["flowmatch", "flowmatch"],
+      "config.process[0].train.timestep_type": ["sigmoid", "sigmoid"],
+      // the int8 repack ships convrot8 layers; requesting convrot8 keeps them as-is (no requantization)
+      "config.process[0].model.qtype": ["convrot8", "qfloat8"],
+      "config.process[0].sample": [
+        defaultYue2SampleConfig,
+        defaultSampleConfig,
+      ],
+      "config.process[0].datasets[x].cache_latents_to_disk": [true, true],
+      // audio has no resolution; every bucket would duplicate the whole dataset
+      "config.process[0].datasets[x].resolution": [[512], [512, 768, 1024]],
+      // blank captions break lyric following; the AR must always see the prefix
+      "config.process[0].datasets[x].caption_dropout_rate": [0, 0.05],
+      "config.process[0].model.model_kwargs": [
+        {
+          cot: "full",
+          abc_dropout: 0.5,
+          sample_ar_repetition_penalty: 1.2,
+          ar_kl_weight: 0.2,
+        },
+        {},
+      ],
+    },
+hasMultiLinePrompts: true,
+disableSections: ["network.conv", "model.quantize_te"],
+additionalSections: ["model.low_vram", "sample.duration"],
+modelNotes: {"summary":"Experimental: YuE2 audio training","paragraphs":["Trains AR composition and NAR audio rendering together. Use a large, varied dataset: small collections quickly overfit the AR expert. Keep caption dropout at zero and latent caching enabled.","Uses the community real-audio tokenizer. Training captions contain style tags, then [Lyrics] and the lyrics. Vocal separation training is unavailable."]}},
+{name: "qwen25_omni",
+label: "Qwen2.5-Omni",
+group: "llm",
+defaults: {
+      // default updates when [selected, unselected] in the UI
+      "config.process[0].model.name_or_path": [
+        "ai-toolkit/Qwen2.5-Omni-7B/qwen2_5_omni_7b_convrot8.safetensors",
+        defaultNameOrPath,
+      ],
+      "config.process[0].model.quantize": [true, false],
+      "config.process[0].model.quantize_te": [false, false],
+      "config.process[0].model.low_vram": [false, false],
+      // the single-file thinker ships convrot8 layers; requesting convrot8 keeps them as-is
+      "config.process[0].model.qtype": ["convrot8", "qfloat8"],
+      "config.process[0].train.unload_text_encoder": [false, false],
+      "config.process[0].train.noise_scheduler": ["flowmatch", "flowmatch"],
+      "config.process[0].train.batch_size": [1, 1],
+      "config.process[0].sample": [
+        defaultQwen25OmniSampleConfig,
+        defaultSampleConfig,
+      ],
+      // media is encoded on the GPU per step; the cache is optional and large (~54 MB per 300 s of audio)
+      "config.process[0].datasets[x].cache_latents_to_disk": [false, true],
+      "config.process[0].datasets[x].resolution": [[512], [512, 768, 1024]],
+      // the caption is the training target; a blank one trains nothing
+      "config.process[0].datasets[x].caption_dropout_rate": [0, 0.05],
+      "config.process[0].model.model_kwargs": [
+        { instruction: "Describe this in detail." },
+        {},
+      ],
+    },
+disableSections: [
+      "network.conv",
+      "trigger_word",
+      "train.diff_output_preservation",
+      "train.blank_prompt_preservation",
+      "train.unload_text_encoder",
+      "slider",
+    ],
+additionalSections: [
+      "model.model_kwargs.instruction",
+      "sample.ctrl_img",
+      "datasets.num_frames",
+    ],
+modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Train the text stack from audio, image, or video files paired with text captions. Batch size must be 1. Video uses frames without its audio track.","Use the same instruction when training and captioning. Sampling accepts a media file and writes generated text."]}},
   {
     name: 'anima',
     label: 'Anima',
@@ -1901,7 +1991,7 @@ export const modelArchs: ModelArch[] = modelPresentation.map(presentation => {
   };
 });
 
-export const groupedModelOptions: GroupedSelectOption[] = modelArchs.reduce((acc, arch) => {
+export const groupModelOptions = (archs: ModelArch[]): GroupedSelectOption[] => archs.reduce((acc, arch) => {
   const group = acc.find(g => g.label === arch.group);
   if (group) {
     group.options.push({ value: arch.name, label: arch.label });
@@ -1913,6 +2003,8 @@ export const groupedModelOptions: GroupedSelectOption[] = modelArchs.reduce((acc
   }
   return acc;
 }, [] as GroupedSelectOption[]);
+
+export const groupedModelOptions = groupModelOptions(modelArchs);
 
 export const quantizationOptions: SelectOption[] = [
   { value: '', label: '- NONE -' },

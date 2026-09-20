@@ -7,6 +7,8 @@ Follow the shared library from datasets to training and generation. For setup, s
 - [Training workspace](#training-workspace)
 - [Datasets](#datasets)
 - [Generation](#generation)
+- [Live inference and captioning](#live-inference-and-captioning)
+- [Job notes and samples](#job-notes-and-samples)
 - [Job Import and Export](#job-import-and-export)
 - [Workflow tools and telemetry](#workflow-tools-and-telemetry)
 
@@ -101,6 +103,18 @@ Prompt JSON files are also supported for per-image settings. The JSON can be an 
 ```
 
 Common per-image keys include `prompt`, `negative_prompt` or `neg`, `width`, `height`, `seed`, `guidance_scale`, `sample_steps`, `sampler`, `format` or `ext`, and `network_multiplier`.
+
+## Live inference and captioning
+
+Open **Generate → Live inference**, select a local GPU, and start an engine. The engine stays in the queue until stopped and keeps model components loaded between requests. Select a model, enter a prompt, optionally upload reference media, and add LoRA or LoKr adapters from the library or uploader. Each adapter has its own strength and enabled toggle. Hook mode permits adapter changes without merging weights; changing merged adapters can reload model components.
+
+Generation shows progress and latent previews where the model provides sampling steps. Use **Reconnect / latest result** after a page reload, **Cancel generation** to cancel a request, **Unload model** to release loaded components, or **Stop engine** to end the job. Outputs can be images, video, audio, or text. Live inference requires the managed Studio app stack and currently supports local engines. Native and ComfyUI generation remain available on the main Generate page.
+
+Caption jobs now include Qwen2.5-Omni and MOSS music captioners, captioner LoRA selection, and ACE-Step formatting/vocal extraction options. Qwen3-Omni accepts audio as well as images and video. YuE2 uses prose and lyric sections; leave tag shuffling and token dropout off to preserve that structure.
+
+## Job notes and samples
+
+Open a job's **Notes** tab to edit its notes. In Samples, Ctrl/Cmd-click toggles selection and Shift-click selects a range; Delete or Backspace opens the deletion confirmation. Audio cards show artwork until opened, and text model samples can be read in the sample viewer.
 
 ## Job Import and Export
 

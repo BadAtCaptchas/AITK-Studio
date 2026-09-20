@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { getDefaultModelConfig, getDefaultSampler, archSupportsSection, type GeneratorModelConfig } from '@/domain/generationConfig';
 import { configContractErrors, CAPABILITY_VERSION } from '@/domain/configContract';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
@@ -25,7 +26,8 @@ import { startJob } from '@/utils/jobs';
 import { getMediaUrl } from '@/utils/media';
 import { startQueue } from '@/utils/queue';
 import type { ComfyConfig, ComfyMode, ComfyOnError, GenerationBackend, ModelConfig, SelectOption } from '@/types';
-import { groupedModelOptions, modelArchs, quantizationOptions } from '@/domain/modelOptions';
+import { useModelArchs } from '@/extensions/modelArchs';
+import { quantizationOptions } from '@/domain/modelOptions';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { getLayerOffloadingMemoryProfile, type LayerOffloadingBackend } from '@/utils/memoryProfiles';
 import { uploadLoraFile } from '@/utils/streamedUploads';
@@ -225,6 +227,7 @@ function promptHasAnyTrigger(prompt: string, triggerWords: string[]) {
 }
 
 export function GeneratePageContent() {
+  const { archs, groupedModelOptions } = useModelArchs();
   const router = useRouter();
   const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -334,8 +337,8 @@ export function GeneratePageContent() {
     return currentPromptItems.length * repeats;
   }, [currentPromptItems, numRepeats]);
   const supportsLayerOffloading = useMemo(
-    () => archSupportsSection(modelConfig.arch, 'model.layer_offloading') || Boolean(modelConfig.layer_offloading),
-    [modelConfig.arch, modelConfig.layer_offloading],
+    () => archSupportsSection(modelConfig.arch, 'model.layer_offloading', archs) || Boolean(modelConfig.layer_offloading),
+    [modelConfig.arch, modelConfig.layer_offloading, archs],
   );
   const layerOffloadingMemoryProfile = useMemo(
     () => getLayerOffloadingMemoryProfile(modelConfig.arch),
@@ -376,7 +379,7 @@ export function GeneratePageContent() {
       model_kwargs: (lora.model?.model_kwargs as Record<string, unknown>) || current.model_kwargs || {},
     }));
     if (lora.model.arch) {
-      setSampler(getDefaultSampler(String(lora.model.arch)));
+      setSampler(getDefaultSampler(String(lora.model.arch), archs));
     }
   };
   const handleLoraPathChange = (value: string) => {
@@ -456,8 +459,8 @@ export function GeneratePageContent() {
     setImportSummary('');
   };
   const handleArchChange = (archName: string) => {
-    setModelConfig(getDefaultModelConfig(archName));
-    setSampler(getDefaultSampler(archName));
+    setModelConfig(getDefaultModelConfig(archName, archs));
+    setSampler(getDefaultSampler(archName, archs));
   };
   const handleLayerOffloadingChange = (checked: boolean) => {
     setModelConfig(current => ({
@@ -613,6 +616,7 @@ export function GeneratePageContent() {
     return {
       capability_version: CAPABILITY_VERSION,
       job: 'generate',
+      extensions: { 'studio.installed': { modelArches: [model.arch.split(':')[0]] } },
       config: {
         name: normalizedJobName,
         device: gpuData?.isMac ? 'mps' : 'cuda',
@@ -774,6 +778,7 @@ export function GeneratePageContent() {
         <div className="flex shrink-0 items-center gap-2">
           <Wand2 className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Generate</h1>
+          <Link href="/generate/live" className="operator-button text-xs">Live inference</Link>
           <span className="hidden text-sm text-gray-400 sm:inline">/ {'Local workspace'}</span>
         </div>
         <div className="flex-1"></div>

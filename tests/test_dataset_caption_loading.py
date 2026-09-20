@@ -51,6 +51,8 @@ class DatasetCaptionLoadingTests(unittest.TestCase):
             unet=SimpleNamespace(),
             vae=SimpleNamespace(),
             get_bucket_divisibility=lambda: 32,
+            get_latent_space_version=lambda: "issue87",
+            get_text_embedding_space_version=lambda: "issue87",
             encode_prompt=Mock(side_effect=lambda caption: PromptEmbeds(
                 torch.full((1, 2, 4), float(len(caption)))
             )),

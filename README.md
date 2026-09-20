@@ -91,7 +91,8 @@ See the [training reference](docs/training.md#cli-training) for configuration an
 
 - **Image & editing:** FLUX, Qwen Image, Z-Image, SDXL, Ideogram 4, HiDream, Krea 2, and more.
 - **Video:** Wan 2.1 / 2.2, LTX-2 / 2.3 / 2.5, and MiniMax H3.
-- **Audio:** Ace Step 1.5 and 1.5 XL; MiniMax H3 also supports joint video/audio workflows.
+- **Audio:** Ace Step 1.5 and 1.5 XL, plus experimental YuE2; MiniMax H3 also supports joint video/audio workflows.
+- **Multimodal text:** Qwen2.5-Omni instruction tuning with image, audio, or video inputs.
 
 **[Browse the full model catalog →](docs/supported-models.md)** for model links and experimental variants. Supported training modes and memory needs vary by model.
 

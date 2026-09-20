@@ -1,4 +1,6 @@
 'use client';
+import { deleteSample } from '@/utils/sampleActions';
+import { getAudioArtworkUrl, getSampleThumbnailUrl } from '@/utils/media';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, DialogBackdrop, DialogPanel } from '@headlessui/react';
@@ -8,7 +10,7 @@ import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import classNames from 'classnames';
 import { openConfirm } from './ConfirmModal';
 import { apiClient } from '@/utils/api';
-import { isVideo, isAudio, encodeFilePathForUrl } from '@/utils/basic';
+import { isVideo, isAudio, isText, encodeFilePathForUrl } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
 import { getDisplayPath, getMediaUrl, parseRemoteAssetRef } from '@/utils/media';
 import BoundingBoxOverlay, { parseBoundingBoxes } from './BoundingBoxOverlay';
@@ -140,7 +142,7 @@ export default function SampleImageViewer({
     setImageAtIndex(nextIdx);
   }, [sampleImages, currentIndex, imgInfo.promptIdx, setImageAtIndex]);
 
-  const canDeleteSample = useMemo(() => Boolean(imgPath && !parseRemoteAssetRef(imgPath)), [imgPath]);
+  const canDeleteSample = useMemo(() => Boolean(imgPath), [imgPath]);
 
   const handleDelete = useCallback(() => {
     if (!imgPath || !canDeleteSample) return;
@@ -150,8 +152,7 @@ export default function SampleImageViewer({
       type: 'warning',
       confirmText: 'Delete',
       onConfirm: () => {
-        apiClient
-          .post('/api/img/delete', { imgPath: imgPath })
+        deleteSample(imgPath)
           .then(() => {
             console.log('Image deleted:', imgPath);
             onChange(null);
@@ -213,6 +214,29 @@ export default function SampleImageViewer({
     return imgPath;
   }, [showingControlIdx, controlImages, imgPath]);
 
+  // text samples (LLM models): the file body is the sample
+  const [sampleText, setSampleText] = useState<string | null>(null);
+  useEffect(() => {
+    if (!displayedImgPath || !isText(displayedImgPath)) {
+      setSampleText(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(getMediaUrl(displayedImgPath), { signal: controller.signal })
+      .then(r => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(setSampleText)
+      .catch(err => {
+        if (err?.name !== 'AbortError') console.error('Sample text fetch failed:', err);
+      });
+    return () => controller.abort();
+  }, [displayedImgPath]);
+
+  // control thumbnails: audio has no image thumb, it gets its waveform art
+  const thumbSrc = (p: string) =>
+    isAudio(p) ? getAudioArtworkUrl(p) : getSampleThumbnailUrl(p);
+
+  // The sample's prompt is what generated it; if it's an Ideogram bbox-JSON we can
+  // overlay the boxes on the generated image. Only on the main image (not controls).
   const boundingBoxes = useMemo(
     () => (sampleItem?.prompt ? parseBoundingBoxes(sampleItem.prompt, imageSize ?? undefined) : null),
     [sampleItem?.prompt, imageSize],
@@ -273,8 +297,12 @@ export default function SampleImageViewer({
           >
             <div className="overflow-hidden flex items-center justify-center">
               {displayedImgPath &&
-                (isAudio(displayedImgPath) ? (
-                  <div className="w-[500px] h-[500px] max-w-[95vw] max-h-[82vh]">
+                (isText(displayedImgPath) ? (
+                  <div className="w-[640px] max-w-full sm:max-w-[95vw] max-h-[82vh] overflow-y-auto p-6 text-sm text-gray-100 whitespace-pre-wrap break-words text-left">
+                    {sampleText ?? 'Loading…'}
+                  </div>
+                ) : isAudio(displayedImgPath) ? (
+                  <div className="w-[500px] h-[500px] max-w-full sm:max-w-[95vw] max-h-[82vh]">
                     <AudioPlayer
                       src={getMediaUrl(displayedImgPath)}
                       title={getDisplayPath(displayedImgPath).replace(/^.*[\\/]/, '')}
@@ -322,19 +350,28 @@ export default function SampleImageViewer({
               </div>
               {controlImages.length > 0 && (
                 <div key={imgPath} className="flex space-x-2 mr-4">
-                  {showingControlIdx !== null && (
-                    <img
-                      src={getMediaUrl(imgPath!)}
-                      alt="Main"
-                      className="max-h-12 max-w-12 object-contain bg-black border-2 border-gray-700 hover:border-gray-500 rounded cursor-pointer"
-                      onClick={() => setShowingControlIdx(null)}
-                      title="Main image"
-                    />
-                  )}
+                  {showingControlIdx !== null &&
+                    (isText(imgPath!) ? (
+                      <div
+                        className="h-12 w-12 flex items-center justify-center text-xs bg-black border-2 border-gray-700 hover:border-gray-500 rounded cursor-pointer"
+                        onClick={() => setShowingControlIdx(null)}
+                        title="Generated text"
+                      >
+                        Txt
+                      </div>
+                    ) : (
+                      <img
+                        src={thumbSrc(imgPath!)}
+                        alt="Main"
+                        className="max-h-12 max-w-12 object-contain bg-black border-2 border-gray-700 hover:border-gray-500 rounded cursor-pointer"
+                        onClick={() => setShowingControlIdx(null)}
+                        title="Main image"
+                      />
+                    ))}
                   {controlImages.map((ci, idx) => (
                     <img
                       key={idx}
-                      src={getMediaUrl(ci)}
+                      src={thumbSrc(ci)}
                       alt={`Control ${idx + 1}`}
                       className={`max-h-12 max-w-12 object-contain bg-black border-2 rounded cursor-pointer ${
                         showingControlIdx === idx ? 'border-brand-500' : 'border-gray-700 hover:border-gray-500'
@@ -381,7 +418,7 @@ export default function SampleImageViewer({
                     anchor="bottom end"
                     className="bg-gray-900 border border-gray-700 rounded shadow-lg w-48 px-2 py-2 mt-1 z-50"
                   >
-                    {imgPath && isAudio(imgPath) && (
+                    {imgPath && (isAudio(imgPath) || isText(imgPath)) && (
                       <MenuItem>
                         <a
                           className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"

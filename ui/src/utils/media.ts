@@ -33,7 +33,8 @@ export function getDisplayPath(value: string) {
   return remote?.filename || value;
 }
 
-export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audio-art') {
+export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audio-art'): string {
+  if (overrideType === 'audio-art' && /^\/api\/jobs\/[^/]+\/samples\//.test(value)) return getSampleThumbnailUrl(value);
   if (value.startsWith('/api/') || /^https?:\/\//i.test(value)) return value;
   const remoteDataset = parseRemoteDatasetAssetRef(value);
   if (remoteDataset) {
@@ -63,7 +64,7 @@ export function getMediaUrl(value: string, overrideType?: 'img' | 'file' | 'audi
   return `/api/img/${encodeURIComponent(value)}`;
 }
 
-export function getSampleThumbnailUrl(value: string) {
+export function getSampleThumbnailUrl(value: string): string {
   const mediaUrl = getMediaUrl(value);
   return `${mediaUrl}${mediaUrl.includes('?') ? '&' : '?'}thumb=1`;
 }
@@ -80,3 +81,5 @@ export function getDownloadUrl(value: string) {
   }
   return `/api/files/${encodeURIComponent(value)}`;
 }
+
+export const getAudioArtworkUrl = (value: string) => getMediaUrl(value, 'audio-art');

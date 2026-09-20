@@ -649,6 +649,7 @@ export interface SampleItem {
   sample_steps?: number;
   fps?: number;
   num_frames?: number;
+  duration?: number;
   ctrl_img?: string | null;
   ctrl_idx?: number;
   network_multiplier?: number;
@@ -695,6 +696,7 @@ export interface SampleConfig {
   keep_low_vram_for_samples?: boolean;
   num_frames: number;
   fps: number;
+  duration?: number;
 }
 
 export interface LoggingConfig {
@@ -758,9 +760,25 @@ export interface MetaConfig {
 }
 
 export interface JobConfig {
+  extensions?: Record<string, { modelArches?: string[]; processKinds?: string[] }>;
   job: string;
   config: ConfigObject;
   meta: MetaConfig;
+}
+
+// A LoRA published on the hub, offered for a specific model option. `path` is a
+// 'org/repo/path_to/file.safetensors' reference; the backend looks for it under
+// the models folder first and downloads it into MODELS_PATH/loras if missing.
+export interface CloudLora {
+  path: string;
+  name: string;
+  description?: string;
+}
+
+export interface CaptionLora {
+  path: string;
+  name: string;
+  strength: number;
 }
 
 export interface CaptionProcessConfig {
@@ -783,6 +801,9 @@ export interface CaptionProcessConfig {
     caption_prompt?: string;
     max_res?: number;
     max_new_tokens?: number;
+    caption_format?: string;
+    extract_vocals_before_transcribe?: boolean;
+    keep_timestamps?: boolean;
     batch_size?: number;
     layer_offloading?: boolean;
     layer_offloading_percent?: number;
@@ -796,6 +817,7 @@ export interface CaptionProcessConfig {
     convert_destination?: 'current' | 'copy' | string;
     caption_extension?: string;
     temperature?: number;
+    loras?: CaptionLora[];
   };
 }
 

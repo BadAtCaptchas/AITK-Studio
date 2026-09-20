@@ -422,6 +422,16 @@ class CaptionConfig:
         self.caption_prompt = kwargs.get(
             "caption_prompt", "Describe this image in detail."
         )
+        self.loras = kwargs.get("loras", None) or []
+        import math
+        if not isinstance(self.loras, list) or len(self.loras) > 32:
+            raise ValueError("caption.loras must be a list of at most 32 adapters")
+        for spec in self.loras:
+            if not isinstance(spec, dict) or not isinstance(spec.get("path"), str) or not spec["path"].strip():
+                raise ValueError("Each caption LoRA requires a path")
+            strength = spec.get("strength", 1.0)
+            if isinstance(strength, bool) or not isinstance(strength, (float, int)) or not math.isfinite(strength) or abs(strength) > 16:
+                raise ValueError("Caption LoRA strength must be finite and between -16 and 16")
 
 
 class BaseCaptioner(BaseExtensionProcess):
@@ -458,6 +468,7 @@ class BaseCaptioner(BaseExtensionProcess):
         if os.path.isdir(self.caption_config.path_to_caption) and is_encrypted_dataset_path(self.caption_config.path_to_caption):
             self.encrypted_reader = EncryptedDatasetReader(self.caption_config.path_to_caption)
         self.model = None
+        self.lora_stack = None
         self.processor = None
         self.model2 = None
         self.processor2 = None
@@ -473,6 +484,7 @@ class BaseCaptioner(BaseExtensionProcess):
             self.start_stop_watcher()
             self.update_status("running", "Loading Model")
             self.load_model()
+            self.load_loras()
             self.maybe_compile_models()
             self.update_status("running", "Looking for files")
             self.find_files()
@@ -1069,6 +1081,28 @@ class BaseCaptioner(BaseExtensionProcess):
     def load_model(self):
         raise NotImplementedError("Model loading not implemented for this captioner")
 
+    def load_loras(self):
+        """Attach the configured LoRAs to self.model as forward-hook sidechains
+        (the inference engine's hook mode): the low-rank branch runs alongside
+        the layer in the model's compute dtype and the base weights are never
+        touched, so quantized weights stay on their grid and nothing is merged."""
+        specs = [
+            l for l in self.caption_config.loras if isinstance(l, dict) and l.get("path")
+        ]
+        if not specs or self.model is None:
+            return
+        from toolkit.inference_lora import LoRAStack
+
+        # self is the holder: LoRAStack reads .model (and .text_encoder, unused here)
+        stack = LoRAStack(self, mode="hook").load(
+            specs, status_fn=self.print_and_status_update
+        )
+        stack.apply(status_fn=self.print_and_status_update)
+        self.lora_stack = stack
+        self.print_and_status_update(
+            f"Applied {len(stack.loras)} LoRA(s) as sidechains"
+        )
+
     def maybe_compile_models(self):
         if not self.caption_config.compile:
             return
@@ -1119,6 +1153,33 @@ class BaseCaptioner(BaseExtensionProcess):
                 block_list[index] = torch.compile(block, dynamic=True)
                 count += 1
         return count
+
+    def load_video_frames_for_caption(self, file_path: str, fps: float):
+        if self.encrypted_reader is None:
+            from transformers.video_utils import load_video
+            frames = load_video(file_path, fps=fps)
+            return frames[0] if isinstance(frames, tuple) else frames
+        import io
+        import av
+        import numpy as np
+        item = self.encrypted_items_by_path[file_path]
+        source = io.BytesIO(self.encrypted_reader.decrypt_object_bytes(item.objectPath))
+        frames = []
+        with av.open(source) as container:
+            stream = container.streams.video[0]
+            source_fps = float(stream.average_rate or stream.base_rate or fps)
+            next_time = 0.0
+            for index, frame in enumerate(container.decode(stream)):
+                timestamp = frame.time if frame.time is not None else index / source_fps
+                if timestamp + 1e-6 < next_time:
+                    continue
+                if len(frames) >= 4096:
+                    raise ValueError("Video exceeds the captioner's 4096-frame limit")
+                frames.append(frame.to_ndarray(format="rgb24"))
+                next_time = timestamp + 1.0 / fps
+        if not frames:
+            raise ValueError("Video contains no decodable frames")
+        return np.stack(frames)
 
     def load_audio_tensor_for_caption(self, file_path: str):
         if self.encrypted_reader is not None:

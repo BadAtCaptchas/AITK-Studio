@@ -7,6 +7,7 @@ import { Button } from '@headlessui/react';
 import { TopBar, MainContent } from '@/components/layout';
 import useJob from '@/hooks/useJob';
 import SampleImages, { SampleImagesMenu } from '@/components/SampleImages';
+import JobNotes from '@/components/JobNotes';
 import JobOverview from '@/components/JobOverview';
 import JobActionBar from '@/components/JobActionBar';
 import JobConfigViewer from '@/components/JobConfigViewer';
@@ -15,7 +16,7 @@ import type { Job } from '@/types';
 import { PageNotice, StatusBadge } from '@/components/OperatorPrimitives';
 import { useRouter } from 'next/navigation';
 
-type PageKey = 'overview' | 'samples' | 'config' | 'loss_log';
+type PageKey = 'overview' | 'samples' | 'config' | 'loss_log' | 'notes';
 
 interface Page {
   name: string;
@@ -28,6 +29,7 @@ interface Page {
 }
 
 const pages: Page[] = [
+  { name: 'Notes', value: 'notes', icon: MdCode, component: JobNotes, mainCss: 'pt-[124px]' },
   {
     name: 'Overview',
     value: 'overview',

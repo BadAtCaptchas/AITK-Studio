@@ -188,9 +188,18 @@ async function postCommand(request: Request) {
     }
 
     if ('job_type' in body) {
-      if (typeof body.job_type !== 'string' || !['train', 'caption', 'generate'].includes(body.job_type)) throw new CommandInputError('Invalid job_type');
+      if (typeof body.job_type !== 'string' || !['train', 'caption', 'generate', 'inference'].includes(body.job_type)) throw new CommandInputError('Invalid job_type');
       extra['job_type'] = body.job_type;
     }
+
+    const processes = isRecord(resolvedJobConfig) && isRecord(resolvedJobConfig.config) && Array.isArray(resolvedJobConfig.config.process) ? resolvedJobConfig.config.process : [];
+    const hasEngine = processes.some((process: unknown) => isRecord(process) && process.type === 'InferenceEngine');
+    if (hasEngine) {
+      if (processes.length !== 1) throw new CommandInputError('An inference engine must be its own job');
+      const process = processes[0];
+      if (isRecord(process) && isRecord(process.engine) && 'token' in process.engine) throw new CommandInputError('Studio manages engine credentials; remove engine.token from the config');
+      extra.job_type = 'inference';
+    } else if (extra.job_type === 'inference') throw new CommandInputError('Inference jobs require an InferenceEngine process');
 
     if (id !== undefined && typeof id !== 'string') {
       return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });

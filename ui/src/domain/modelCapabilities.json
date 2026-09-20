@@ -352,6 +352,18 @@
       "module": "toolkit.stable_diffusion_model",
       "className": "StableDiffusion",
       "optionalDependencies": []
+    },
+    {
+      "arch": "yue2",
+      "module": "extensions_built_in.audio_models.yue2",
+      "className": "YuE2AudioModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "qwen25_omni",
+      "module": "extensions_built_in.llm_models.qwen25_omni",
+      "className": "Qwen25OmniLLM",
+      "optionalDependencies": []
     }
   ],
   "choices": [
@@ -3111,6 +3123,107 @@
       "offloading": {
         "layers": true
       }
+    },
+    {
+      "name": "yue2",
+      "arch": "yue2",
+      "label": "YuE2 (Experimental)",
+      "group": "audio",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "sample.duration"
+      ],
+      "disableSections": [
+        "network.conv",
+        "model.quantize_te",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "audio",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
+    },
+    {
+      "name": "qwen25_omni",
+      "arch": "qwen25_omni",
+      "label": "Qwen2.5-Omni",
+      "group": "llm",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.model_kwargs.instruction",
+        "sample.ctrl_img",
+        "datasets.num_frames"
+      ],
+      "disableSections": [
+        "network.conv",
+        "model.quantize_te",
+        "train.unload_text_encoder",
+        "trigger_word",
+        "train.diff_output_preservation",
+        "train.blank_prompt_preservation",
+        "slider"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "text",
+      "dimensions": {
+        "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": false
+      }
     }
   ],
   "processKinds": [
@@ -3150,7 +3263,10 @@
     "to_folder",
     "ui_trainer",
     "ultimate_slider_trainer",
-    "vae"
+    "vae",
+    "InferenceEngine",
+    "MossMusicCaptioner",
+    "Qwen25OmniCaptioner"
   ],
   "cudaOnlyQuantization": [
     "nvfp4",

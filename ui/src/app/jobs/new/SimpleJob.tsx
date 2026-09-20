@@ -1,13 +1,12 @@
 'use client';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
+import { useModelArchs } from '@/extensions/modelArchs';
 import Link from 'next/link';
 import type { ValidationMessage, TrainingFieldTarget } from '@/utils/trainingValidation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  modelArchs,
   ModelArch,
-  groupedModelOptions,
   quantizationOptions,
   defaultQtype,
   jobTypeOptions,
@@ -85,7 +84,7 @@ import {
   AUTHENLORA_CODEC_OPTIONS,
   getAuthenloraCodecSelectValue,
 } from '@/utils/authenloraCodecs';
-import { uploadLoraFile } from '@/utils/streamedUploads';
+import { uploadLoraFile, uploadTemporaryMediaFile } from '@/utils/streamedUploads';
 import { openDoc } from '@/components/DocModal';
 type Props = {
   legacyView?: boolean;
@@ -167,6 +166,7 @@ export default function SimpleJob({
   isLoading,
   comfyAutoInstall = false,
 }: Props) {
+  const { archs: modelArchs, groupedModelOptions, errors: modelUiErrors } = useModelArchs();
   const fieldError = (label: string, index?: number) =>
     validationMessages.find(
       item =>
@@ -179,7 +179,7 @@ export default function SimpleJob({
   const [baseLoraUploadMessage, setBaseLoraUploadMessage] = useState('');
   const modelArch = useMemo(() => {
     return modelArchs.find(a => a.name === jobConfig.config.process[0].model.arch) as ModelArch;
-  }, [jobConfig.config.process[0].model.arch]);
+  }, [jobConfig.config.process[0].model.arch, modelArchs]);
   const jobType = useMemo(() => {
     return jobTypeOptions.find(j => j.value === jobConfig.config.process[0].type);
   }, [jobConfig.config.process[0].type]);
@@ -877,7 +877,7 @@ export default function SimpleJob({
                     label="Model architecture"
                     value={processConfig.model.arch}
                     onChange={value => {
-                      handleModelArchChange(processConfig.model.arch, value, jobConfig, setJobConfig);
+                      handleModelArchChange(processConfig.model.arch, value, jobConfig, setJobConfig, modelArchs);
                     }}
                     options={groupedModelOptions}
                   />
@@ -960,6 +960,10 @@ export default function SimpleJob({
                   </button>
                 )}
 
+                {modelUiErrors.length > 0 && <p className="text-xs text-amber-400">{modelUiErrors.join('; ')}</p>}
+                {modelArch?.extensionNotes && <div className="text-sm text-gray-300">{modelArch.extensionNotes}</div>}
+                {modelArch?.customSections?.(jobConfig, setJobConfig)}
+                {modelArch?.additionalSections?.includes('model.model_kwargs.instruction') && <TextAreaInput label="Training instruction" value={String(processConfig.model.model_kwargs?.instruction || '')} onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.instruction')} />}
                 {modelArch?.modelNotes && (
                   <button
                     type="button"
@@ -1984,6 +1988,19 @@ export default function SimpleJob({
                         required
                       />
                     )}
+                    {(modelArch?.additionalSections?.includes('sample.ctrl_img') || modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && <div className="my-3 space-y-2">
+                      <TextInput label="Reference media path" value={sample.ctrl_img || ''} onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].ctrl_img`)} placeholder="Image, audio, or video file" />
+                      <input aria-label="Upload sample reference media" type="file" accept="image/*,audio/*,video/*" onChange={async event => {
+                        const file = event.target.files?.[0]; if (!file) return;
+                        try {
+                          const response = await uploadTemporaryMediaFile(file);
+                          const data: unknown = response.data;
+                          if (!data || typeof data !== 'object' || !('files' in data) || !Array.isArray(data.files) || typeof data.files[0] !== 'string') throw new Error('Invalid media upload response');
+                          setJobConfig(data.files[0], `config.process[0].sample.samples[${i}].ctrl_img`);
+                        } catch (error) { reportWorkflowError(error instanceof Error ? error.message : 'Could not upload reference media'); }
+                      }} className="text-sm" />
+                    </div>}
+                    {modelArch?.additionalSections?.includes('sample.duration') && <NumberInput label="Duration (seconds)" min={1} value={sample.duration ?? sampleConfig.duration ?? 120} onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].duration`)} />}
                     <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       {!isAudioModel && (
                         <>

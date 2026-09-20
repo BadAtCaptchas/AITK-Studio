@@ -57,7 +57,7 @@ export function remoteAssetProxyPath(
 ) {
   const remoteSamplePath = remoteSampleAssetPath(remotePath, remoteJobID);
   if (remoteSamplePath) {
-    return options?.thumbnail && type === 'img' ? `${remoteSamplePath}?thumb=1` : remoteSamplePath;
+    return (options?.thumbnail && type === 'img') || type === 'audio-art' ? `${remoteSamplePath}?thumb=1` : remoteSamplePath;
   }
 
   const encoded = encodeURIComponent(remotePath);

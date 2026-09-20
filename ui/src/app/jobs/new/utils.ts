@@ -32,14 +32,15 @@ export const handleModelArchChange = (
   newArchName: string,
   jobConfig: JobConfig,
   setJobConfig: (value: any, key: string) => void,
+  availableArchs: ModelArch[] = modelArchs,
 ) => {
-  const currentArch = modelArchs.find(a => a.name === currentArchName);
+  const currentArch = availableArchs.find(a => a.name === currentArchName);
   if (!currentArch || currentArch.name === newArchName) {
     return;
   }
 
   // update the defaults when a model is selected
-  const newArch = modelArchs.find(model => model.name === newArchName);
+  const newArch = availableArchs.find(model => model.name === newArchName);
 
   // update vram setting
   if (!newArch?.additionalSections?.includes('model.low_vram')) {
@@ -96,6 +97,7 @@ export const handleModelArchChange = (
 
   // set new model
   setJobConfig(newArchName, 'config.process[0].model.arch');
+  if (!modelArchs.some(arch => arch.name === newArchName)) setJobConfig({ ...jobConfig.extensions, 'studio.installed': { modelArches: [newArchName.split(':')[0]] } }, 'extensions');
 
   // update datasets
   const hasControlPath = newArch?.additionalSections?.includes('datasets.control_path') || false;

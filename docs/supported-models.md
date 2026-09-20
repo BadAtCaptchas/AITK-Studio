@@ -8,6 +8,7 @@ Browse the model integrations included in AITK Studio. Available training modes 
 - [Instruction / Edit](#instruction--edit)
 - [Video](#video)
 - [Audio](#audio)
+- [Multimodal text](#multimodal-text)
 - [MiniMax H3](#minimax-h3)
 - [Experimental](#experimental)
 
@@ -78,6 +79,11 @@ Browse the model integrations included in AITK Studio. Available training modes 
 
 - [ACE-Step/Ace-Step1.5](https://huggingface.co/ACE-Step/Ace-Step1.5) (Ace Step 1.5)
 - [ACE-Step/acestep-v15-xl-base](https://huggingface.co/ACE-Step/acestep-v15-xl-base) (Ace Step 1.5 XL)
+- [Comfy-Org/YuE2](https://huggingface.co/Comfy-Org/YuE2) (experimental YuE2 music generation and training, with the community audio tokenizer and SheetSage conditioning). Stem-only/separation training is disabled in this integration.
+
+## Multimodal text
+
+- [ai-toolkit/Qwen2.5-Omni-7B](https://huggingface.co/ai-toolkit/Qwen2.5-Omni-7B) (Qwen2.5-Omni instruction tuning and text generation from image, audio, or video input). Training requires batch size 1; gradient accumulation is supported. The media encoders remain frozen.
 
 ## MiniMax H3
 

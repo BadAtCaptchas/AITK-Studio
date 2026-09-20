@@ -186,7 +186,6 @@ class CaptionMixin:
 
 if TYPE_CHECKING:
     from toolkit.config_modules import DatasetConfig
-    from toolkit.data_transfer_object.data_loader import FileItemDTO
 
 
 class Bucket:
@@ -238,7 +237,7 @@ class BucketsMixin:
         # for file_item in enumerate(file_list):
         for idx, file_item in enumerate(file_list):
             file_item: 'FileItemDTO' = file_item
-            if self.is_audio_model:
+            if file_item.is_audio_model:
                 bucket_key = f"{file_item.width}ms"
                 if bucket_key not in self.buckets:
                     self.buckets[bucket_key] = Bucket(file_item.width, 1)
@@ -476,15 +475,19 @@ class CaptionProcessingDTOMixin:
                 # drop the caption
                 return ''
 
-        # get tokens
-        token_list = raw_caption.split(',')
-        # trim whitespace
-        token_list = [x.strip() for x in token_list]
-        # remove empty strings
-        token_list = [x for x in token_list if x]
+        # Prose captions retain their punctuation and whitespace unless tag
+        # dropout or shuffling actually needs to split them into tokens.
+        do_token_dropout = (
+            self.dataset_config.token_dropout_rate > 0
+            and not short_caption
+            and not self.dataset_config.cache_text_embeddings
+        )
+        token_list = None
+        if do_token_dropout or self.dataset_config.shuffle_tokens:
+            token_list = [token.strip() for token in raw_caption.split(',') if token.strip()]
 
         # handle token dropout
-        if self.dataset_config.token_dropout_rate > 0 and not short_caption and not self.dataset_config.cache_text_embeddings:
+        if do_token_dropout:
             new_token_list = []
             keep_tokens: int = self.dataset_config.keep_tokens
             for idx, token in enumerate(token_list):
@@ -505,7 +508,7 @@ class CaptionProcessingDTOMixin:
             random.shuffle(token_list)
 
         # join back together
-        caption = ', '.join(token_list)
+        caption = ', '.join(token_list) if token_list is not None else raw_caption
         caption = inject_trigger_into_prompt(caption, trigger, to_replace_list, add_if_not_present)
 
         if self.dataset_config.random_triggers:
@@ -2290,7 +2293,8 @@ class LatentCachingMixin:
         extras = _dto_extras_from_state_dict(state_dict)
         if 'audio' in extras:
             audio_latent = extras['audio'].to('cpu', dtype=self.sd.torch_dtype)
-            latent = DTO(latent, audio=audio_latent)
+        if extras:
+            latent = DTO(latent, **extras).to('cpu', dtype=self.sd.torch_dtype)
         if 'num_frames' in state_dict:
             num_frames = int(state_dict['num_frames'].item())
 
@@ -2317,8 +2321,11 @@ class LatentCachingMixin:
         frames = None
 
         if self.dataset_config.cache_tensors_to_disk:
-            if not self.is_audio_model:
+            if not file_item.is_audio_model:
                 state_dict['tensor'] = _latent_to_uint8(file_item.tensor).cpu()
+            else:
+                state_dict['waveform'] = _waveform_to_int16(file_item.tensor).cpu()
+                state_dict['waveform_sample_rate'] = torch.tensor(file_item.sample_rate, dtype=torch.int32)
             if file_item.audio_data is not None:
                 state_dict['waveform'] = _waveform_to_int16(
                     file_item.audio_data['waveform']
@@ -2329,9 +2336,14 @@ class LatentCachingMixin:
 
         # add batch dimension
         try:
-            imgs = file_item.tensor.unsqueeze(0).to(device, dtype=dtype)
-            latent = self.sd.encode_images(imgs).squeeze(0)
-            state_dict['latent'] = latent.clone().detach().cpu()
+            input_dtype = torch.float32 if file_item.is_audio_model else dtype
+            imgs = file_item.tensor.unsqueeze(0).to(device, dtype=input_dtype)
+            latent = self.sd.encode_images(imgs)
+            latent = latent.map(lambda value: value.squeeze(0)) if isinstance(latent, DTO) else latent.squeeze(0)
+            if isinstance(latent, DTO):
+                state_dict.update(latent.detach().cpu().clone().to_state_dict())
+            else:
+                state_dict['latent'] = latent.clone().detach().cpu()
         except Exception as e:
             print_acc(f"Error processing image: {file_item.path}")
             print_acc(f"Error: {str(e)}")
@@ -2352,7 +2364,7 @@ class LatentCachingMixin:
             del first_frame_latent
 
         # audio (video+audio models only - audio-only models already encoded above via encode_images)
-        if not self.is_audio_model and file_item.audio_data is not None:
+        if not file_item.is_audio_model and file_item.audio_data is not None:
             audio_latent = self.sd.encode_audio([file_item.audio_data]).squeeze(0)
             # The legacy reader still accepts audio_latent; new caches use the
             # generic DTO namespace so additional streams can be added safely.
@@ -2438,6 +2450,8 @@ class LatentCachingMixin:
                         file_item = file_items[0]
                         try:
                             state_dict = self._encode_latent_for_file_item(file_item, latent_path, to_disk)
+                            for warning in getattr(self.sd, 'pop_encode_warnings', lambda: [])():
+                                print_acc(f"{file_item.path}: {warning}")
                         except Exception as error:
                             print_acc(f"Skipping cache item {file_item.path}: {error}")
                             failed_items.extend(file_items)

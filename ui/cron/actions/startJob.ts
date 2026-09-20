@@ -2,6 +2,7 @@ import { db, getDatabaseConfig } from '../../src/server/db';
 import { finishObservedJobProcess } from '../../src/server/jobProcess';
 import { claimJobAttempt } from '../../src/server/jobAttempts';
 import { jobStorageKey } from '../../src/utils/jobIdentity';
+import { inferenceToken } from '../../src/server/inferenceToken';
 import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
@@ -179,6 +180,10 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         jobConfig.config.process.forEach((processConfig: any) => {
           processConfig.sqlite_db_path = dbConfig.sqlitePath;
           processConfig.training_folder = trainingRoot;
+          if (processConfig.type === 'InferenceEngine') {
+            processConfig.engine = { ...processConfig.engine, job_folder: trainingFolder, output_folder: path.join(trainingFolder, 'outputs'), host: '127.0.0.1', port: 0 };
+            delete processConfig.engine.token;
+          }
           if (tensorBoardEnabled && processConfig.log_dir == null) {
             processConfig.log_dir = tensorBoardLogDir;
           }
@@ -256,6 +261,9 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       });
       cleanupHfTokenEnv = preparedHfEnv.cleanup;
       delete preparedHfEnv.env.AITK_INTERNAL_TOKEN;
+      if (jobConfig.config.process.some((process: { type?: string }) => process.type === 'InferenceEngine')) {
+        preparedHfEnv.env.AITK_ENGINE_TOKEN = inferenceToken(jobID, job.attempt_id || '');
+      }
       delete preparedHfEnv.env.AITK_INTERNAL_URL;
 
       const owner = await db.jobs.findById(jobID);

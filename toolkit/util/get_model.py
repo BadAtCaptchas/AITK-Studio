@@ -36,7 +36,7 @@ def get_all_models() -> List[BaseModel]:
     for sub_dir in extension_folders:
         extensions_dir = os.path.join(TOOLKIT_ROOT, sub_dir)
         for (_, name, _) in pkgutil.iter_modules([extensions_dir]):
-            if sub_dir == 'extensions_built_in' and name in {'diffusion_models', 'audio_models', 'flex2'}:
+            if sub_dir == 'extensions_built_in' and name in {'diffusion_models', 'audio_models', 'llm_models', 'flex2'}:
                 continue
             try:
                 # Import the module

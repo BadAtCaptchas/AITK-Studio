@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
+import { isRequestAuthenticated } from '@/utils/authSession';
+import { waveformArtwork } from '@/server/audioArtwork';
+import { resolveSampleThumbnail } from '@/server/sampleThumbnails';
 import { catchAllToFilePath } from '@/server/catchAllPath';
 
 /**
@@ -130,9 +133,10 @@ function extractArtFromTag(buf: Buffer): ArtResult {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ audioPath: string[] }> }) {
+  if (!await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)) return new NextResponse('Unauthorized', { status: 401 });
   const { audioPath } = await params;
   try {
-    const filepath = path.resolve(decodeURIComponent(audioPath.join('/')));
+    const filepath = path.resolve(catchAllToFilePath(audioPath));
 
     // Security check
     const datasetRoot = await getDatasetsRoot();
@@ -164,6 +168,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return new NextResponse('File not found', { status: 404 });
     }
 
+    if (!/\.(mp3|wav|flac|ogg|m4a|aac)$/i.test(resolvedFile)) return new NextResponse('Unsupported audio file', { status: 400 });
+    const etag = `W/"art-${stat.size}-${stat.mtimeMs}"`;
+    const headers = { 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff', ETag: etag };
+    if (request.headers.get('if-none-match') === etag) return new NextResponse(null, { status: 304, headers });
+    const thumbnail = await resolveSampleThumbnail(path.dirname(resolvedFile), path.basename(resolvedFile));
+    if (thumbnail) return new NextResponse(new Uint8Array(await fs.promises.readFile(thumbnail.path)), { headers: { ...headers, 'Content-Type': thumbnail.contentType } });
+    const fallback = async () => new NextResponse(new Uint8Array(await waveformArtwork(resolvedFile, stat.mtimeMs, stat.size)), { headers: { ...headers, 'Content-Type': 'image/png' } });
+
     // Read only the ID3 tag (first min(tagSize, 4MB) bytes).
     // First read 10 bytes to get tag size, then read the full tag.
     const fd = await fs.promises.open(resolvedFile, 'r');
@@ -172,7 +184,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       await fd.read(headerBuf, 0, 10, 0);
 
       if (headerBuf[0] !== 0x49 || headerBuf[1] !== 0x44 || headerBuf[2] !== 0x33) {
-        return new NextResponse('No ID3 tag', { status: 404 });
+        return await fallback();
       }
 
       const tagSize = synchsafeToInt(headerBuf[6], headerBuf[7], headerBuf[8], headerBuf[9]);
@@ -183,11 +195,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
       const art = extractArtFromTag(tagBuf);
       if (!art) {
-        return new NextResponse('No album art found', { status: 404 });
+        return await fallback();
       }
 
       return new NextResponse(art.data as any, {
         headers: {
+          ...headers,
           'Content-Type': art.mime,
           'Content-Length': String(art.data.length),
           'Cache-Control': 'private, no-cache, must-revalidate',

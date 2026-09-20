@@ -39,6 +39,7 @@ function jobDisplayTitle(row: Job) {
     const splits = (row.job_ref || '').split(/[/\\]/);
     return { prefix: 'Caption', title: splits[splits.length - 1] || row.name };
   }
+  if (row.job_type === 'inference') return { prefix: 'Inference', title: row.name };
   if (row.job_type === 'generate') {
     return { prefix: 'Generate', title: row.name };
   }

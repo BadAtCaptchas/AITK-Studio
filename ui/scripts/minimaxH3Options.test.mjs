@@ -67,8 +67,8 @@ test('Ref2VA and LTX 2.5 are registered with current controls', () => {
   assert.match(options, /Lightricks\/LTX-2\.5/);
 });
 
-test('README lists current MiniMax H3 support', () => {
-  const readme = readSource('../README.md');
+test('model catalog lists current MiniMax H3 support', () => {
+  const readme = readSource('../docs/supported-models.md');
   assert.match(readme, /Comfy-Org\/MiniMax-H3/);
   assert.match(readme, /ConvRot\/NVFP4 prequantized components/);
   assert.match(readme, /approximately 43 GB/);

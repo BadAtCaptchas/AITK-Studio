@@ -21,7 +21,7 @@ class ConfigContractTests(unittest.TestCase):
         for choice in CONTRACT['choices']:
             base = choice['name'].split(':')[0]
             self.assertIn(aliases.get(base, base), BY_ARCH, choice['name'])
-            self.assertIn(choice['outputType'], ('image', 'video', 'audio'))
+            self.assertIn(choice['outputType'], ('image', 'video', 'audio', 'text'))
             self.assertEqual(choice['offloading']['layers'], 'model.layer_offloading' in choice['additionalSections'])
 
 

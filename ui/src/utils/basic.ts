@@ -105,3 +105,5 @@ export const pathJoin = (...parts: string[]) => {
     .filter(part => part.length > 0)
     .join(sep);
 }
+
+export const isText = (value: string): boolean => /\.txt(?:[?#]|$)/i.test(value);

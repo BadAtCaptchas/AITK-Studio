@@ -57,6 +57,10 @@ def config_contract_errors(value, device_backend=None):
                 errors.append('model.arch is required.')
                 continue
             base = arch.split(':', maxsplit=1)[0]
+            if base == 'qwen25_omni' and isinstance(train, dict) and train.get('batch_size', 1) != 1:
+                errors.append('Qwen2.5-Omni requires batch size 1.')
+            if base == 'yue2' and isinstance(model.get('model_kwargs'), dict) and model['model_kwargs'].get('do_separation') is True:
+                errors.append('YuE2 separation training is not supported.')
             choice = next((item for item in CONTRACT['choices'] if item['name'] == arch), None)
             choice = choice or next((item for item in CONTRACT['choices'] if item['name'] == base), None)
             if not choice and not any(item['arch'] == base for item in CONTRACT['models']) and base not in extras['modelArches']:

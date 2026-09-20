@@ -77,6 +77,8 @@ export function configContractErrors(value: unknown, context: { deviceBackend?: 
         continue;
       }
       const arch = model.arch.split(':')[0];
+      if (arch === 'qwen25_omni' && record(train) && train.batch_size !== undefined && train.batch_size !== 1) errors.push('Qwen2.5-Omni requires batch size 1.');
+      if (arch === 'yue2' && record(model.model_kwargs) && model.model_kwargs.do_separation === true) errors.push('YuE2 separation training is not supported.');
       const choice =
         contract.choices.find(item => item.name === model.arch) || contract.choices.find(item => item.name === arch);
       if (!choice && !contract.models.some(item => item.arch === arch) && !extraModels.has(arch))

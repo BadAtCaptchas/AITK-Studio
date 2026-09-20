@@ -13,34 +13,28 @@ ARTWORK_SIZE = 1024
 
 def load_waveform(audio_path: str, num_samples: int = 512) -> np.ndarray:
     """Load audio and return a downsampled waveform envelope using PyAV."""
-    container = av.open(audio_path)
-    stream = container.streams.audio[0]
-    stream.codec_context.thread_type = "AUTO"
-
+    if num_samples < 1:
+        raise ValueError("num_samples must be positive")
     frames = []
-    for frame in container.decode(stream):
-        arr = frame.to_ndarray()
-        # mix down to mono
-        if arr.ndim > 1:
-            arr = arr.mean(axis=0)
-        frames.append(arr)
-    container.close()
-
-    audio = np.concatenate(frames)
-
-    # downsample to num_samples bins by taking max absolute value per bin
-    bin_size = len(audio) // num_samples
-    if bin_size == 0:
-        bin_size = 1
-    trimmed = audio[: bin_size * num_samples]
-    bins = trimmed.reshape(num_samples, bin_size)
-    envelope = np.max(np.abs(bins), axis=1)
-
-    # normalize to 0-1
-    peak = envelope.max()
-    if peak > 0:
-        envelope = envelope / peak
-    return envelope
+    with av.open(audio_path) as container:
+        if not container.streams.audio:
+            raise ValueError("File has no audio stream")
+        stream = container.streams.audio[0]
+        stream.codec_context.thread_type = "AUTO"
+        for frame in container.decode(stream):
+            arr = frame.to_ndarray().astype(np.float32)
+            if arr.ndim > 1:
+                arr = arr.mean(axis=0)
+            frames.append(arr)
+    if not frames:
+        return np.zeros(num_samples, dtype=np.float32)
+    audio = np.abs(np.concatenate(frames))
+    if audio.size < num_samples:
+        envelope = np.pad(audio, (0, num_samples - audio.size))
+    else:
+        envelope = np.array([chunk.max() for chunk in np.array_split(audio, num_samples)])
+    peak = envelope.max(initial=0)
+    return envelope / peak if peak > 0 else envelope
 
 
 def create_artwork(waveform: np.ndarray, size: int = ARTWORK_SIZE) -> Image.Image:

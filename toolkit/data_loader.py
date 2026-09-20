@@ -395,6 +395,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         self.dataset_config.bucket_tolerance = sd.get_bucket_divisibility()
         self.is_video = dataset_config.num_frames > 1 or dataset_config.auto_frame_count
         self.is_audio_model = hasattr(sd, 'is_audio_model') and sd.is_audio_model if sd is not None else False
+        # text-generating multimodal models take audio, image and video files in one dataset
+        self.is_multimodal_llm = getattr(sd, 'is_multimodal_llm', False) if sd is not None else False
         super().__init__()
         folder_path = dataset_config.folder_path
         self.dataset_path = dataset_config.dataset_path
@@ -459,6 +461,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         if self.is_encrypted_dataset and self.encrypted_reader is not None:
             if self.is_audio_model:
                 file_list = self.encrypted_reader.list_items(media_kinds=["audio"])
+            elif self.is_multimodal_llm:
+                media_kinds = ["audio", "image"] + (["video"] if self.is_video else [])
+                file_list = self.encrypted_reader.list_items(media_kinds=media_kinds)
             elif self.is_video:
                 media_kinds = ["video"]
                 if self.dataset_config.include_images_in_video_dataset:
@@ -471,6 +476,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             if self.is_audio_model:
                 # only look for audio files
                 extensions = audio_extensions
+            elif self.is_multimodal_llm:
+                extensions = audio_extensions + image_extensions + (video_extensions if self.is_video else [])
             elif self.is_video:
                 extensions = video_extensions
                 if self.dataset_config.include_images_in_video_dataset:
@@ -540,24 +547,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         
         self.size_database["__version__"] = dataloader_version
 
-        # set latent space version
-        latent_space_version = "sd1"
-        if self.sd is not None and self.sd.model_config.latent_space_version is not None:
-            latent_space_version = self.sd.model_config.latent_space_version
-        elif self.sd is not None and self.sd.latent_space_version is not None:
-            latent_space_version = self.sd.latent_space_version
-        elif self.sd.is_xl:
-            latent_space_version = 'sdxl'
-        elif self.sd.is_v3:
-            latent_space_version = 'sd3'
-        elif self.sd.is_auraflow:
-            latent_space_version = 'sdxl'
-        elif self.sd.is_flux:
-            latent_space_version = 'flux1'
-        elif self.sd.model_config.is_pixart_sigma:
-            latent_space_version = 'sdxl'
-        else:
-            latent_space_version = self.sd.model_config.arch if self.sd is not None else "sd1"
+        # cache keys come from the model so a model can invalidate them on its own kwargs
+        latent_space_version = self.sd.get_latent_space_version() if self.sd is not None else "sd1"
+        text_embedding_space_version = self.sd.get_text_embedding_space_version() if self.sd is not None else "sd1"
             
         temporal_compression = 8
         if self.sd is not None:
@@ -574,7 +566,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 file_item = FileItemDTO(
                     sd=self.sd,
                     path=file_path,
-                    is_audio_model=self.is_audio_model,
+                    is_audio_model=self.is_audio_model or (self.is_multimodal_llm and (encrypted_item.mediaKind == "audio" if encrypted_item is not None else file_path.lower().endswith(tuple(audio_extensions)))),
                     dataset_config=dataset_config,
                     dataloader_transforms=self.transform,
                     size_database=self.size_database,
@@ -582,11 +574,11 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                     encrypted_reader=self.encrypted_reader,
                     encrypted_item=encrypted_item,
                     encode_control_in_text_embeddings=self.sd.encode_control_in_text_embeddings if self.sd else False,
-                    text_embedding_space_version=self.sd.text_embedding_space_version if self.sd else "sd1",
+                    text_embedding_space_version=text_embedding_space_version,
                     te_padding_side=self.sd.te_padding_side if self.sd else "right",
                     latent_space_version=latent_space_version,
                     temporal_compression=temporal_compression,
-                    sample_rate=self.sd.sample_rate if self.is_audio_model and self.sd is not None else 48000,
+                    sample_rate=self.sd.sample_rate if (self.is_audio_model or self.is_multimodal_llm) and self.sd is not None else 48000,
                 )
                 self.file_list.append(file_item)
             except Exception as e:

@@ -34,7 +34,6 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   rootMargin = '200px 0px',
 }) => {
   const [loaded, setLoaded] = useState<boolean>(false);
-  const [showAudioPlayer, setShowAudioPlayer] = useState(true);
   const [pollTick, setPollTick] = useState(0);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [streamVideo, setStreamVideo] = useState(false);
@@ -209,10 +208,10 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
               muted
             />
           )}
-          {isVisible && isItAudio && !showAudioPlayer && (
+          {isVisible && isItAudio && (
             <div
               className="w-full h-full cursor-pointer flex items-center justify-center bg-gray-900"
-              onClick={() => setShowAudioPlayer(true)}
+              onClick={onImageClick}
             >
               <img
                 src={getMediaUrl(imageUrl, 'audio-art')}
@@ -224,7 +223,6 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
               />
             </div>
           )}
-          {isVisible && isItAudio && showAudioPlayer && <AudioPlayer src={mediaUrl} title={displayName} />}
           {!isItAudio && blobUrl && (
             <img
               src={blobUrl}

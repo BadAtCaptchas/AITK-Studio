@@ -407,3 +407,29 @@ It's Converging!
   num_frames: 1,
   fps: 1,
 };
+
+const tagValue = (prompt: string, tag: string) => {
+  const m = prompt.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
+  return m ? m[1].trim() : '';
+};
+
+export const defaultQwen25OmniSampleConfig: SampleConfig = {
+  ...defaultSampleConfig,
+  width: 512,
+  height: 512,
+  guidance_scale: 1,
+  sample_steps: 1,
+  samples: [{ prompt: 'Describe this in detail.' }, { prompt: 'Describe this in detail.' }],
+};
+
+export const defaultYue2SampleConfig: SampleConfig = {
+  ...defaultAudioSampleConfig,
+  samples: defaultAudioSampleConfig.samples.map(s => ({
+    ...s,
+    prompt: `${tagValue(s.prompt, 'CAPTION')}\n[Lyrics]\n${tagValue(s.prompt, 'LYRICS')}\n`,
+  })),
+  guidance_scale: 1,
+  sample_steps: 32,
+  // max seconds per sample; the AR stops earlier when the song ends
+  duration: 120,
+};

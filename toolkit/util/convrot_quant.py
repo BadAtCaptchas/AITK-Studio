@@ -1429,7 +1429,7 @@ class ConvRotInt8Quantizer(OstrisQuantizer):
         return output
 
     @torch.no_grad()
-    def requantize_codes_(self, module, fp_weight: torch.Tensor) -> None:
+    def requantize_codes_(self, module, fp_weight: torch.Tensor, stochastic: bool = False) -> None:
         """Re-quantize only the codes on the module's STORED scales — the grid a
         QAT run trains against (see ConvRotQuantizer.requantize_codes_)."""
         w = fp_weight.to(device=module.cr8_qdata.device, dtype=torch.float32)
@@ -1440,11 +1440,9 @@ class ConvRotInt8Quantizer(OstrisQuantizer):
         scales = self._scales(module).unsqueeze(1)
         for start, end in _row_chunks(module.out_features, rows_per_chunk):
             w_rot = rotate(w[start:end], self._rot(module))
-            qdata[start:end] = (
-                torch.round(w_rot / scales[start:end])
-                .clamp_(-127, 127)
-                .to(torch.int8)
-            )
+            codes = w_rot / scales[start:end]
+            codes = torch.floor(codes + torch.rand_like(codes)) if stochastic else torch.round(codes)
+            qdata[start:end] = codes.clamp_(-127, 127).to(torch.int8)
         module.cr8_qdata = qdata
 
     def forward(self, module, x: torch.Tensor) -> torch.Tensor:

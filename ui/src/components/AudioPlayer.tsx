@@ -46,12 +46,13 @@ function broadcastExclusivePlay(token: string) {
  * `/api/audio/art/...` instead; that route accepts both shapes.
  */
 function albumArtUrlFromSrc(src: string): string {
+  if (/^\/api\/jobs\/[^/]+\/samples\//.test(src)) return `${src}${src.includes('?') ? '&' : '?'}thumb=1`;
   const prefix = '/api/img/';
   if (src.startsWith(prefix)) {
     return `/api/audio/art/${src.slice(prefix.length)}`;
   }
   const remoteDatasetPrefix = '/api/remote-datasets/assets';
-  if (src.startsWith(remoteDatasetPrefix)) {
+  if (src.startsWith(remoteDatasetPrefix) || src.startsWith('/api/remote-assets')) {
     try {
       const url = new URL(src, window.location.origin);
       url.searchParams.set('type', 'audio-art');

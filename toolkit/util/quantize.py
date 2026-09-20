@@ -28,7 +28,6 @@ from toolkit.util.ostris_quant import (
     get_ostris_backend_metadata,
     get_ostris_quantizer,
 )
-import os
 
 if TYPE_CHECKING:
     from toolkit.models.base_model import BaseModel
@@ -930,9 +929,7 @@ def dequantize_ostris_to_linear(module: torch.nn.Module) -> int:
         for child_name, child in list(parent.named_children()):
             if not isinstance(child, OstrisLinear):
                 continue
-            weight = child.ostris_quantizer.dequantize_folded(child).to(
-                child.ostris_orig_dtype
-            )
+            weight = child.dequantize_weight()
             new = torch.nn.Linear(
                 child.in_features,
                 child.out_features,

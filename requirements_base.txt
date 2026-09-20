@@ -32,6 +32,9 @@ huggingface_hub==1.23.0
 datasets[vision]==5.0.0
 peft==0.18.1
 gradio
+# inference engine http server (extensions_built_in/inference_engine)
+fastapi>=0.115
+uvicorn>=0.30
 python-slugify
 pymongo
 psutil>=5.9

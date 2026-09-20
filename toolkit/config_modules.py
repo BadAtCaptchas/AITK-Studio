@@ -180,6 +180,8 @@ class SampleItem:
         self.sample_steps: int = kwargs.get('sample_steps', sample_config.sample_steps)
         self.fps: int = kwargs.get('fps', sample_config.fps)
         self.num_frames: int = kwargs.get('num_frames', sample_config.num_frames)
+        # audio models: max seconds to generate
+        self.duration: Optional[float] = kwargs.get('duration', sample_config.duration)
         self.ctrl_img: Optional[str] = kwargs.get('ctrl_img', None)
         self.ctrl_idx: int = kwargs.get('ctrl_idx', 0)
         # for multi control image models
@@ -228,6 +230,7 @@ class SampleConfig:
         self.extra_values = kwargs.get('extra_values', [])
         self.num_frames = kwargs.get('num_frames', 1)
         self.fps: int = kwargs.get('fps', 16)
+        self.duration: Optional[float] = kwargs.get('duration', None)
         if self.num_frames > 1 and self.ext not in ['webp']:
             print("Changing sample extention to animated webp")
             self.ext = 'webp'
@@ -1539,6 +1542,7 @@ class GenerateImageConfig:
             ctrl_img_3: Optional[str] = None,  # third control image for multi control model
             num_frames: int = 1,
             fps: int = 15,
+            duration: Optional[float] = None,  # audio models: max seconds
             ctrl_idx: int = 0,
             do_cfg_norm: bool = False,
     ):
@@ -1572,6 +1576,7 @@ class GenerateImageConfig:
         self.extra_values = extra_values if extra_values is not None else []
         self.num_frames = num_frames
         self.fps = fps
+        self.duration = duration
         self.ctrl_img = ctrl_img
         self.ctrl_idx = ctrl_idx
         
@@ -1665,7 +1670,8 @@ class GenerateImageConfig:
                 self.output_folder = tmp_folder
                 try:
                     self.save_image(image, count, max_count)
-                    media_filename = os.path.basename(self.get_image_path(count, max_count))
+                    media_path = self.get_prompt_path(count, max_count) if isinstance(image, str) else self.get_image_path(count, max_count)
+                    media_filename = os.path.basename(media_path)
                 finally:
                     self.output_folder = real_folder
 
@@ -1724,6 +1730,10 @@ class GenerateImageConfig:
                 cap.release()
             if ok:
                 img = PILImage.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        elif ext in ['.mp3', '.wav', '.flac', '.ogg']:
+            # waveform cover rendered at thumb size so the UI never has to read the tags
+            from toolkit.audio.album_artwork import create_artwork, load_waveform
+            img = create_artwork(load_waveform(media_path), size=300)
         if img is None:
             return False
         if img.mode != 'RGB':
@@ -1740,7 +1750,11 @@ class GenerateImageConfig:
         # make parent dirs
         os.makedirs(self.output_folder, exist_ok=True)
         self.set_gen_time()
-        if isinstance(image, list):
+        if isinstance(image, str):
+            # text-generating models: the sample is the text itself
+            with open(self.get_prompt_path(count, max_count), 'w', encoding='utf-8') as f:
+                f.write(image)
+        elif isinstance(image, list):
             # video
             if self.num_frames == 1:
                 raise ValueError(f"Expected 1 img but got a list {len(image)}")
@@ -1898,7 +1912,7 @@ class GenerateImageConfig:
         pass
     
     def log_image(self, image, count: int = 0, max_count=0):
-        if self.logger is None:
+        if self.logger is None or isinstance(image, str):
             return
 
         self.logger.log_image(image, count, self.prompt)

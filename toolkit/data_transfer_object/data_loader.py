@@ -97,7 +97,9 @@ class FileItemDTO(
             self.dataset_config.num_frames > 1
             or self.dataset_config.auto_frame_count
         )
-        if dataset_is_video and self.dataset_config.include_images_in_video_dataset:
+        if self.is_audio_model:
+            self.is_video = False
+        elif dataset_is_video and (self.dataset_config.include_images_in_video_dataset or getattr(kwargs.get("sd"), "is_multimodal_llm", False)):
             if self.is_encrypted:
                 self.is_video = self.encrypted_item.mediaKind == "video"
             else:

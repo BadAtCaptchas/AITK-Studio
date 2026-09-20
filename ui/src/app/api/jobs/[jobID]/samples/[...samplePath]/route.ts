@@ -4,11 +4,44 @@ import { Readable } from 'stream';
 import { db } from '@/server/db';
 
 import { resolveJobSampleFile } from '@/server/jobSamples';
+import path from 'path';
+import { isRequestAuthenticated } from '@/utils/authSession';
+import { isLocalWorker, getRemoteWorker, remoteJson } from '@/server/remoteClient';
+import { normalizeStoragePathSetting } from '@/server/pathContainment';
+import { resolveSampleThumbnail } from '@/server/sampleThumbnails';
+import { waveformArtwork } from '@/server/audioArtwork';
 
 type SampleRouteParams = {
   jobID: string;
   samplePath: string[];
 };
+
+export async function DELETE(request: Request, { params }: { params: Promise<SampleRouteParams> }) {
+  if (!await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const { jobID, samplePath } = await params;
+  if (samplePath.length !== 1 || !samplePath[0] || /[\\/]/.test(samplePath[0])) return Response.json({ error: 'Invalid sample path' }, { status: 400 });
+  const job = await db.jobs.findById(jobID);
+  if (!job) return Response.json({ error: 'Job not found' }, { status: 404 });
+  try {
+    if (!isLocalWorker(job.worker_id)) {
+      if (!job.remote_job_id) return Response.json({ error: 'Remote job not available' }, { status: 409 });
+      return Response.json(await remoteJson<unknown>(await getRemoteWorker(job.worker_id), `/api/jobs/${encodeURIComponent(job.remote_job_id)}/samples/${encodeURIComponent(samplePath[0])}`, { method: 'DELETE' }));
+    }
+    const sample = await resolveJobSampleFile(job, samplePath[0]);
+    if (!sample) return Response.json({ deleted: false });
+    const folder = path.dirname(sample.path);
+    const thumbnail = await resolveSampleThumbnail(folder, samplePath[0]);
+    await fs.promises.unlink(sample.path);
+    if (thumbnail) await fs.promises.unlink(thumbnail.path).catch(() => undefined);
+    if (path.extname(sample.path) !== '.txt') {
+      const caption = await normalizeStoragePathSetting(sample.path.slice(0, -path.extname(sample.path).length) + '.txt', folder);
+      if (caption) await fs.promises.unlink(caption).catch(() => undefined);
+    }
+    return Response.json({ deleted: true });
+  } catch {
+    return Response.json({ error: 'Could not delete sample' }, { status: 500 });
+  }
+}
 
 function parseRange(value: string | null, size: number) {
   if (!value) return null;
@@ -32,6 +65,7 @@ function parseRange(value: string | null, size: number) {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<SampleRouteParams> }) {
+  if (!await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)) return new NextResponse('Unauthorized', { status: 401 });
   const { jobID, samplePath } = await params;
   const sampleSegments = samplePath;
 
@@ -52,6 +86,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
   }
 
   const { path: canonicalPath, stat, contentType } = sampleFile;
+  if (request.nextUrl.searchParams.get('thumb') === '1' && contentType.startsWith('audio/')) {
+    try {
+      const artwork = await waveformArtwork(canonicalPath, stat.mtimeMs, stat.size);
+      return new NextResponse(new Uint8Array(artwork), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff' } });
+    } catch { return new NextResponse('Artwork unavailable', { status: 503 }); }
+  }
   const etag = `W/"${stat.ino.toString(36)}-${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
   const cacheControl = 'private, no-cache, must-revalidate';
 

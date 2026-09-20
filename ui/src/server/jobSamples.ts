@@ -7,6 +7,7 @@ import { resolveSampleThumbnail } from './sampleThumbnails';
 import type { Job } from '@/types';
 
 export const sampleContentTypeMap: Record<string, string> = {
+  '.txt': 'text/plain; charset=utf-8',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
@@ -99,11 +100,14 @@ export async function listJobSampleUrls(job: Job) {
   const roots = await getJobSampleRoots(job);
   const seen = new Set<string>();
   const samples: string[] = [];
+  let textModel = false;
+  try { textModel = JSON.parse(job.job_config)?.config?.process?.some((p: { model?: { arch?: string } }) => p.model?.arch === 'qwen25_omni') === true; } catch { /* malformed config */ }
 
   for (const root of roots) {
     const entries = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (!entry.isFile() || !allowedSampleExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+      if (path.extname(entry.name).toLowerCase() === '.txt' && !textModel) continue;
       if (seen.has(entry.name)) continue;
 
       seen.add(entry.name);
@@ -129,7 +133,7 @@ export async function resolveJobSampleFile(job: Job, filename: string, options?:
     const stat = await fs.promises.stat(canonicalPath).catch(() => null);
     if (!stat || !stat.isFile()) continue;
 
-    if (options?.thumbnail && (contentType.startsWith('image/') || contentType.startsWith('video/'))) {
+    if (options?.thumbnail && (contentType.startsWith('image/') || contentType.startsWith('video/') || contentType.startsWith('audio/'))) {
       const thumbnail = await resolveSampleThumbnail(root, filename);
       if (thumbnail) return thumbnail;
     }

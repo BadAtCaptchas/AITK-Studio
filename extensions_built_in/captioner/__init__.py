@@ -69,7 +69,33 @@ class OllamaCaptionerExtension(Extension):
         return OllamaCaptioner
 
 
+class Qwen25OmniCaptionerExtension(Extension):
+    uid = "Qwen25OmniCaptioner"
+    name = "Qwen 2.5 Omni Captioner"
+
+    @classmethod
+    def get_process(cls):
+        # import your process class here so it is only loaded when needed and return it
+        from .Qwen25OmniCaptioner import Qwen25OmniCaptioner
+
+        return Qwen25OmniCaptioner
+
+
+class MossMusicCaptionerExtension(Extension):
+    uid = "MossMusicCaptioner"
+    name = "MOSS-Music Captioner"
+
+    @classmethod
+    def get_process(cls):
+        # import your process class here so it is only loaded when needed and return it
+        from .MossMusicCaptioner import MossMusicCaptioner
+
+        return MossMusicCaptioner
+
+
 AI_TOOLKIT_EXTENSIONS = [
+    MossMusicCaptionerExtension,
+    Qwen25OmniCaptionerExtension,
     AceStepCaptionerExtension,
     OllamaCaptionerExtension,
     OpenRouterCaptionerExtension,

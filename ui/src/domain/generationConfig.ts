@@ -38,7 +38,7 @@ export function getDefaultModelConfig(archName: string, availableArchs: ModelArc
     quantize_te: Boolean(archDefault('config.process[0].model.quantize_te', false)),
     qtype: String(archDefault('config.process[0].model.qtype', 'qfloat8')),
     qtype_te: String(archDefault('config.process[0].model.qtype_te', 'qfloat8')),
-    low_vram: false,
+    low_vram: Boolean(archDefault('config.process[0].model.low_vram', false)),
     model_kwargs:
       (archDefault('config.process[0].model.model_kwargs', {}) as Record<string, unknown>) || {},
     dtype: String(archDefault('config.process[0].train.dtype', 'bf16')),

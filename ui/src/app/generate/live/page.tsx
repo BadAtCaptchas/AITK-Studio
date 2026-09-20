@@ -136,6 +136,8 @@ export default function LiveGeneratePage() {
       if (typeof sample.guidance_scale === 'number') setGuidance(sample.guidance_scale);
       if (typeof sample.duration === 'number') setDuration(sample.duration);
     }
+    const presetGuidance: unknown = definition?.defaults?.['config.process[0].sample.guidance_scale']?.[0];
+    if (typeof presetGuidance === 'number') setGuidance(presetGuidance);
     setFrames(definition?.isVideoModel ? 33 : 1);
   };
   const start = async () => {

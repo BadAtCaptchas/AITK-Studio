@@ -1988,18 +1988,27 @@ export default function SimpleJob({
                         required
                       />
                     )}
-                    {(modelArch?.additionalSections?.includes('sample.ctrl_img') || modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && <div className="my-3 space-y-2">
-                      <TextInput label="Reference media path" value={sample.ctrl_img || ''} onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].ctrl_img`)} placeholder="Image, audio, or video file" />
-                      <input aria-label="Upload sample reference media" type="file" accept="image/*,audio/*,video/*" onChange={async event => {
-                        const file = event.target.files?.[0]; if (!file) return;
-                        try {
-                          const response = await uploadTemporaryMediaFile(file);
-                          const data: unknown = response.data;
-                          if (!data || typeof data !== 'object' || !('files' in data) || !Array.isArray(data.files) || typeof data.files[0] !== 'string') throw new Error('Invalid media upload response');
-                          setJobConfig(data.files[0], `config.process[0].sample.samples[${i}].ctrl_img`);
-                        } catch (error) { reportWorkflowError(error instanceof Error ? error.message : 'Could not upload reference media'); }
-                      }} className="text-sm" />
-                    </div>}
+                    {(modelArch?.additionalSections?.includes('sample.ctrl_img') || modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && (
+                      <div className="my-3 space-y-2">
+                        {(modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')
+                          ? (['ctrl_img', 'ctrl_img_2', 'ctrl_img_3'] as const)
+                          : (['ctrl_img'] as const)
+                        ).map((key, referenceIndex) => (
+                          <div key={key} className="space-y-2">
+                            <TextInput label={`Reference media ${referenceIndex + 1}`} value={sample[key] || ''} onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].${key}`)} placeholder="Image, audio, or video file" />
+                            <input aria-label={`Upload sample reference media ${referenceIndex + 1}`} type="file" accept="image/*,audio/*,video/*" onChange={async event => {
+                              const file = event.target.files?.[0]; if (!file) return;
+                              try {
+                                const response = await uploadTemporaryMediaFile(file);
+                                const data: unknown = response.data;
+                                if (!data || typeof data !== 'object' || !('files' in data) || !Array.isArray(data.files) || typeof data.files[0] !== 'string') throw new Error('Invalid media upload response');
+                                setJobConfig(data.files[0], `config.process[0].sample.samples[${i}].${key}`);
+                              } catch (error) { reportWorkflowError(error instanceof Error ? error.message : 'Could not upload reference media'); }
+                            }} className="text-sm" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {modelArch?.additionalSections?.includes('sample.duration') && <NumberInput label="Duration (seconds)" min={1} value={sample.duration ?? sampleConfig.duration ?? 120} onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].duration`)} />}
                     <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       {!isAudioModel && (

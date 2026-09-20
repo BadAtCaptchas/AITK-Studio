@@ -461,6 +461,8 @@ export function GeneratePageContent() {
   const handleArchChange = (archName: string) => {
     setModelConfig(getDefaultModelConfig(archName, archs));
     setSampler(getDefaultSampler(archName, archs));
+    const presetGuidance: unknown = archs.find(item => item.name === archName)?.defaults?.['config.process[0].sample.guidance_scale']?.[0];
+    if (typeof presetGuidance === 'number') setGuidanceScale(presetGuidance);
   };
   const handleLayerOffloadingChange = (checked: boolean) => {
     setModelConfig(current => ({

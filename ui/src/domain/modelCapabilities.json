@@ -98,6 +98,12 @@
       "optionalDependencies": []
     },
     {
+      "arch": "qwen_image_2",
+      "module": "extensions_built_in.diffusion_models.qwen_image_2",
+      "className": "QwenImage2Model",
+      "optionalDependencies": []
+    },
+    {
       "arch": "flux2",
       "module": "extensions_built_in.diffusion_models.flux2",
       "className": "Flux2Model",
@@ -1493,6 +1499,54 @@
       "outputType": "image",
       "dimensions": {
         "minimum": 1,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "qwen_image_2",
+      "arch": "qwen_image_2",
+      "label": "Qwen-Image-2.1",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "datasets.multi_control_paths",
+        "sample.multi_ctrl_imgs",
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.unload_text_encoder"
+      ],
+      "allowedNetworkTypes": [],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 32,
         "maximum": 32768
       },
       "frames": {

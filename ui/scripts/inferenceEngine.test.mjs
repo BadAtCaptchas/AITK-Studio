@@ -23,6 +23,29 @@ function loadSource(relative, overrides = {}) {
 const { readEngineFrames, payloadToFloat32, latentToImage, parsePreview } = loadSource('../src/utils/engineStream.ts');
 const { inferenceToken } = loadSource('../src/server/inferenceToken.ts');
 
+test('Qwen Image 2.1 presets reach training and generation through the shared catalog', () => {
+  const catalog = loadSource('../src/domain/modelOptions.ts', {
+    './trainingDefaults': loadSource('../src/domain/trainingDefaults.ts'),
+    '@/helpers/defaultSamples': loadSource('../src/helpers/defaultSamples.ts'),
+    './modelCapabilities.json': require('../src/domain/modelCapabilities.json'),
+  });
+  const { getDefaultModelConfig } = loadSource('../src/domain/generationConfig.ts', {
+    './modelOptions': catalog,
+    '../utils/memoryProfiles': loadSource('../src/utils/memoryProfiles.ts'),
+  });
+  const choice = catalog.modelArchs.find(model => model.name === 'qwen_image_2');
+  assert.ok(choice);
+  assert.ok(choice.additionalSections.includes('datasets.multi_control_paths'));
+  assert.ok(choice.additionalSections.includes('sample.multi_ctrl_imgs'));
+  assert.equal(choice.defaults['config.process[0].sample.guidance_scale'][0], 1);
+  assert.equal(choice.defaults['config.process[0].train.timestep_type'][0], 'shift');
+  const model = getDefaultModelConfig(choice.name);
+  assert.equal(model.name_or_path, 'Comfy-Org/Qwen-Image-2.1');
+  assert.equal(model.qtype, 'convrot8');
+  assert.equal(model.qtype_te, 'convrot8');
+  assert.equal(model.low_vram, true);
+});
+
 test('generator defaults and controls follow installed model declarations', () => {
   const { getDefaultModelConfig, getDefaultSampler, archSupportsSection } = loadSource('../src/domain/generationConfig.ts', {
     './modelOptions': { modelArchs: [] },

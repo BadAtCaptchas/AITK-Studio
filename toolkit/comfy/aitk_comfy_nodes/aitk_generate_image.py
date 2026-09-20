@@ -79,7 +79,7 @@ class AITKGenerateImage:
             gen_config = GenerateImageConfig(**image_config)
             sd.generate_images([gen_config], sampler=payload.get('sampler'))
             image_path = gen_config.get_image_path(0, 0)
-            image = open_static_image(image_path, mode='RGB')
+            image = open_static_image(image_path, mode='RGBA' if getattr(sd, 'output_rgba', False) else 'RGB')
 
         array = np.asarray(image).astype(np.float32) / 255.0
         return (torch.from_numpy(array)[None,],)

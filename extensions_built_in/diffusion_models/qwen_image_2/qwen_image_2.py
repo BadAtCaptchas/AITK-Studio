@@ -34,6 +34,7 @@ from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.image_io import open_static_image
+from toolkit.sample_controls import sample_control_paths
 from toolkit.models.base_model import BaseModel
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
@@ -85,29 +86,12 @@ BASE_REPO = "Qwen/Qwen-Image-2.1"
 TILE_DECODE_ABOVE_PIXELS = 1024 * 1024
 
 
-def _drop_repeats(images):
-    """Drop a reference that repeats the one before it.
-
-    `GenerateImageConfig.ctrl_img_1` defaults to `ctrl_img`, so the sampler
-    hands the same reference over twice when only one was configured. Here that
-    is not merely wasteful: the prompt would reserve slots for two images while
-    only one set of latents arrives.
-    """
-    kept = []
-    for image in images:
-        previous = kept[-1] if kept else None
-        if (
-            previous is not None
-            and previous.shape == image.shape
-            and torch.equal(previous, image)
-        ):
-            continue
-        kept.append(image)
-    return kept
-
-
 class QwenImage2Model(BaseModel):
     arch = "qwen_image_2"
+    preserve_image_alpha = True
+
+    def get_text_embedding_space_version(self):
+        return super().get_text_embedding_space_version() + f"_rgba_grid_v2_{self.control_image_max_pixels}"
 
     def __init__(
         self,
@@ -121,6 +105,9 @@ class QwenImage2Model(BaseModel):
         super().__init__(
             device, model_config, dtype, custom_pipeline, noise_scheduler, **kwargs
         )
+        for key in ("rgba", "use_kv_cache", "rewrite_prompt"):
+            if key in model_config.model_kwargs and not isinstance(model_config.model_kwargs[key], bool):
+                raise ValueError(f"model_kwargs.{key} must be a boolean")
         self.is_flow_matching = True
         self.is_transformer = True
         self.use_old_lokr_format = False
@@ -318,7 +305,8 @@ class QwenImage2Model(BaseModel):
                 control_images = [[sample] for sample in control_images]
         elif len(control_images) > 0 and not isinstance(control_images[0], list):
             control_images = [list(control_images)]
-        control_images = [_drop_repeats(sample) for sample in control_images]
+        if any(len(sample) > 10 for sample in control_images):
+            raise ValueError("Qwen Image 2.1 supports at most 10 reference images")
         if len(control_images) == 1 and batch_size > 1:
             control_images = control_images * batch_size
         if len(control_images) != batch_size:
@@ -375,6 +363,26 @@ class QwenImage2Model(BaseModel):
                 "reference images, so this means the samples disagree on how many."
             )
         return torch.cat(sample_latents, dim=0), shapes
+
+    def load_cached_control_images(self, file_item):
+        # The cached vision embeddings must use the same bucket crop and alpha
+        # as the VAE references loaded on each training step.
+        file_item.load_control_image()
+        try:
+            controls = file_item.control_tensor_list
+            if controls is None and file_item.control_tensor is not None:
+                controls = list(file_item.control_tensor) if file_item.control_tensor.dim() == 4 else [file_item.control_tensor]
+            return [image.unsqueeze(0).to(self.device_torch, self.torch_dtype) for image in (controls or [])]
+        finally:
+            file_item.cleanup_control()
+
+    def load_sample_control_images(self, gen_config):
+        """Keep reference order and alpha identical for vision and VAE encoding."""
+        paths = sample_control_paths(gen_config)
+        return [torch.from_numpy(
+            np.array(open_static_image(path, mode="RGBA"), dtype=np.float32) / 255.0
+        ).permute(2, 0, 1).unsqueeze(0).to(self.device_torch, self.torch_dtype)
+            for path in paths] or None
 
     # ------------------------------------------------------------------
     # Prompts
@@ -489,6 +497,26 @@ class QwenImage2Model(BaseModel):
     # ------------------------------------------------------------------
     # Sampling
     # ------------------------------------------------------------------
+    def generate_images(self, image_configs, sampler=None, pipeline=None):
+        rewrite = self.model_config.model_kwargs.get("rewrite_prompt", False)
+        saved_cache = self.sample_prompts_cache
+        try:
+            if rewrite:
+                from .prompt_rewrite import rewrite_prompt
+                # Sample prompt caches contain the original captions, so encode
+                # the expanded prompt afresh. Training captions are never rewritten.
+                self.sample_prompts_cache = None
+                for config in image_configs:
+                    self.print_and_status_update("Expanding Qwen prompt on CPU")
+                    config.prompt = rewrite_prompt(config.prompt, sample_control_paths(config), config.seed,
+                        getattr(self, "sample_cancel_check", None))
+            for config in image_configs:
+                if self.output_rgba and config.output_ext.lower() in ("jpg", "jpeg"):
+                    raise ValueError("Transparent Qwen output requires PNG, WebP, or JXL")
+            return super().generate_images(image_configs, sampler=sampler, pipeline=pipeline)
+        finally:
+            self.sample_prompts_cache = saved_cache
+
     def get_generation_pipeline(self):
         return QwenImage21Pipeline(self)
 
@@ -510,29 +538,8 @@ class QwenImage2Model(BaseModel):
 
         # the same list the sampler built for the prompt embeddings, so the two
         # agree on how many references there are
-        paths = [
-            path
-            for path in (
-                gen_config.ctrl_img,
-                gen_config.ctrl_img_1,
-                gen_config.ctrl_img_2,
-                gen_config.ctrl_img_3,
-            )
-            if path is not None
-        ]
-        condition_images = None
-        if paths:
-            tensors = [
-                torch.from_numpy(
-                    np.array(open_static_image(path, mode="RGBA"), dtype=np.float32) / 255.0
-                )
-                .permute(2, 0, 1)
-                .unsqueeze(0)
-                for path in paths
-            ]
-            condition_images = self._prepare_control_images(
-                self._normalize_control_images([tensors], 1)
-            )
+        tensors = self.load_sample_control_images(gen_config)
+        condition_images = self._prepare_control_images([tensors]) if tensors else None
 
         return pipeline(
             conditional_embeds=conditional_embeds,
@@ -544,6 +551,7 @@ class QwenImage2Model(BaseModel):
             latents=gen_config.latents,
             generator=generator,
             condition_images=condition_images,
+            use_kv_cache=self.model_config.model_kwargs.get("use_kv_cache", True),
         )[0]
 
     # ------------------------------------------------------------------

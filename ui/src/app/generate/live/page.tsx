@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { QwenImageControls } from '@/components/generate/QwenImageControls';
+import { transparentQwenPrompt } from '@/domain/qwenImage';
 import { apiClient } from '@/utils/api';
 import { startJob, stopJob } from '@/utils/jobs';
 import useGPUInfo from '@/hooks/useGPUInfo';
@@ -121,6 +123,7 @@ export default function LiveGeneratePage() {
   useEffect(() => () => streamAbort.current?.abort(), []);
   const changeArch = (name: string) => {
     setArch(name);
+    setControls([]);
     const definition = archs.find(item => item.name === name);
     const next: Record<string, unknown> = { arch: name, dtype: 'bf16' };
     for (const [key, pair] of Object.entries(definition?.defaults || {})) {
@@ -253,6 +256,7 @@ export default function LiveGeneratePage() {
                 num_frames: frames,
                 fps,
                 duration,
+                ...(arch === 'qwen_image_2' ? { ctrl_imgs: controls } : {}),
                 ctrl_img: controls[0],
                 ctrl_img_1: controls[0],
                 ctrl_img_2: controls[1],
@@ -397,6 +401,12 @@ export default function LiveGeneratePage() {
               placeholder={'{"model_kwargs": {}}'}
             />
           </details>
+          {arch === 'qwen_image_2' && <QwenImageControls
+            options={record(model.model_kwargs) ? model.model_kwargs : {}}
+            onOption={(key, value) => setModel(current => ({ ...current, model_kwargs: { ...(record(current.model_kwargs) ? current.model_kwargs : {}), [key]: value } }))}
+            onPreset={(width, height, steps) => { setWidth(width); setHeight(height); setSteps(steps); }}
+            onTransparentPrompt={() => setPrompt(transparentQwenPrompt(prompt))}
+          />}
           <TextAreaInput label="Prompt / instruction" value={prompt} onChange={setPrompt} />
           <TextAreaInput label="Negative prompt" value={negative} onChange={setNegative} />
           <div className="grid grid-cols-3 gap-3">
@@ -420,7 +430,10 @@ export default function LiveGeneratePage() {
               onChange={async e => {
                 try {
                   const uploaded: string[] = [];
-                  for (const file of Array.from(e.target.files || []).slice(0, 3)) {
+                  const files = Array.from(e.target.files || []);
+                  const maxReferences = arch === 'qwen_image_2' ? 10 : 3;
+                  if (files.length > maxReferences) throw new Error(`Choose at most ${maxReferences} references.`);
+                  for (const file of files) {
                     const response = await fetch(endpoint(`assets?name=${encodeURIComponent(file.name)}`), {
                       method: 'POST',
                       body: file,
@@ -437,6 +450,13 @@ export default function LiveGeneratePage() {
               }}
             />
           </label>
+          {controls.length > 0 && <ol className="space-y-1 text-sm">
+            {controls.map((path, index) => <li key={`${path}-${index}`} className="flex items-center gap-2">
+              <span className="truncate">{index + 1}. {path.split(/[\\/]/).pop()}</span>
+              <button type="button" disabled={busy || index === 0} onClick={() => setControls(current => { const next = [...current]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })}>Up</button>
+              <button type="button" disabled={busy} onClick={() => setControls(current => current.filter((_, i) => i !== index))}>Remove</button>
+            </li>)}
+          </ol>}
           {controls.length > 0 && (
             <button className="text-sm text-gray-400" onClick={() => setControls([])}>
               Clear {controls.length} reference file(s)

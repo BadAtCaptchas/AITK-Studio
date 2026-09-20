@@ -93,6 +93,7 @@ def image_config_to_dict(gen_config) -> Dict[str, Any]:
         'ctrl_img_1': gen_config.ctrl_img_1,
         'ctrl_img_2': gen_config.ctrl_img_2,
         'ctrl_img_3': gen_config.ctrl_img_3,
+        'ctrl_imgs': getattr(gen_config, 'ctrl_imgs', None),
         'do_cfg_norm': gen_config.do_cfg_norm,
     }
 

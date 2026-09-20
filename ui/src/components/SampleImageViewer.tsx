@@ -176,6 +176,7 @@ export default function SampleImageViewer({
 
   const controlImages = useMemo<string[]>(() => {
     if (!imgPath) return [];
+    if (sampleItem?.ctrl_imgs) return sampleItem.ctrl_imgs.filter(Boolean);
     let controlImageArr: string[] = [];
     if (sampleItem?.ctrl_img) {
       // can be a an array of paths, or a single path

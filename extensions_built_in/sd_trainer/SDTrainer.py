@@ -258,6 +258,7 @@ class SDTrainer(BaseSDTrainProcess):
                     ctrl_img_1=sample_item.ctrl_img_1,
                     ctrl_img_2=sample_item.ctrl_img_2,
                     ctrl_img_3=sample_item.ctrl_img_3,
+                    ctrl_imgs=sample_item.ctrl_imgs,
                 )
                 prepare_sample_config = getattr(
                     self.sd, "prepare_sample_image_config_for_encoding", None
@@ -269,58 +270,61 @@ class SDTrainer(BaseSDTrainProcess):
                 if gen_img_config.ctrl_img is not None or gen_img_config.ctrl_img_1 is not None or gen_img_config.ctrl_img_2 is not None or gen_img_config.ctrl_img_3 is not None:
                     has_control_images = True
                 # see if we need to encode the control images
-                if self.sd.encode_control_in_text_embeddings and has_control_images:
+                if self.sd.encode_control_in_text_embeddings and (has_control_images or gen_img_config.ctrl_imgs):
                     self.sd.prepare_sample_prompt_context(gen_img_config)
 
-                    video_exts = ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.wmv', '.m4v', '.flv']
-
-                    def _is_ctrl_video(pth):
-                        return os.path.splitext(str(pth))[1].lower() in video_exts
-
-                    ctrl_img_list = []
-
-                    if gen_img_config.ctrl_img is not None:
-                        ctrl_img = open_static_image(gen_img_config.ctrl_img, mode="RGB")
-                        # convert to 0 to 1 tensor
-                        ctrl_img = (
-                            TF.to_tensor(ctrl_img)
-                            .unsqueeze(0)
-                            .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
-                        )
-                        ctrl_img_list.append(ctrl_img)
-
-                    if gen_img_config.ctrl_img_1 is not None:
-                        ctrl_img_1 = open_static_image(gen_img_config.ctrl_img_1, mode="RGB")
-                        # convert to 0 to 1 tensor
-                        ctrl_img_1 = (
-                            TF.to_tensor(ctrl_img_1)
-                            .unsqueeze(0)
-                            .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
-                        )
-                        ctrl_img_list.append(ctrl_img_1)
-                    if gen_img_config.ctrl_img_2 is not None:
-                        ctrl_img_2 = open_static_image(gen_img_config.ctrl_img_2, mode="RGB")
-                        # convert to 0 to 1 tensor
-                        ctrl_img_2 = (
-                            TF.to_tensor(ctrl_img_2)
-                            .unsqueeze(0)
-                            .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
-                        )
-                        ctrl_img_list.append(ctrl_img_2)
-                    if gen_img_config.ctrl_img_3 is not None:
-                        ctrl_img_3 = open_static_image(gen_img_config.ctrl_img_3, mode="RGB")
-                        # convert to 0 to 1 tensor
-                        ctrl_img_3 = (
-                            TF.to_tensor(ctrl_img_3)
-                            .unsqueeze(0)
-                            .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
-                        )
-                        ctrl_img_list.append(ctrl_img_3)
-
-                    if self.sd.has_multiple_control_images:
-                        ctrl_img = ctrl_img_list
+                    if callable(getattr(self.sd, "load_sample_control_images", None)):
+                        ctrl_img = self.sd.load_sample_control_images(gen_img_config)
                     else:
-                        ctrl_img = ctrl_img_list[0] if len(ctrl_img_list) > 0 else None
+                        video_exts = ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.wmv', '.m4v', '.flv']
+
+                        def _is_ctrl_video(pth):
+                            return os.path.splitext(str(pth))[1].lower() in video_exts
+
+                        ctrl_img_list = []
+
+                        if gen_img_config.ctrl_img is not None:
+                            ctrl_img = open_static_image(gen_img_config.ctrl_img, mode="RGB")
+                            # convert to 0 to 1 tensor
+                            ctrl_img = (
+                                TF.to_tensor(ctrl_img)
+                                .unsqueeze(0)
+                                .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
+                            )
+                            ctrl_img_list.append(ctrl_img)
+
+                        if gen_img_config.ctrl_img_1 is not None:
+                            ctrl_img_1 = open_static_image(gen_img_config.ctrl_img_1, mode="RGB")
+                            # convert to 0 to 1 tensor
+                            ctrl_img_1 = (
+                                TF.to_tensor(ctrl_img_1)
+                                .unsqueeze(0)
+                                .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
+                            )
+                            ctrl_img_list.append(ctrl_img_1)
+                        if gen_img_config.ctrl_img_2 is not None:
+                            ctrl_img_2 = open_static_image(gen_img_config.ctrl_img_2, mode="RGB")
+                            # convert to 0 to 1 tensor
+                            ctrl_img_2 = (
+                                TF.to_tensor(ctrl_img_2)
+                                .unsqueeze(0)
+                                .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
+                            )
+                            ctrl_img_list.append(ctrl_img_2)
+                        if gen_img_config.ctrl_img_3 is not None:
+                            ctrl_img_3 = open_static_image(gen_img_config.ctrl_img_3, mode="RGB")
+                            # convert to 0 to 1 tensor
+                            ctrl_img_3 = (
+                                TF.to_tensor(ctrl_img_3)
+                                .unsqueeze(0)
+                                .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
+                            )
+                            ctrl_img_list.append(ctrl_img_3)
+
+                        if self.sd.has_multiple_control_images:
+                            ctrl_img = ctrl_img_list
+                        else:
+                            ctrl_img = ctrl_img_list[0] if len(ctrl_img_list) > 0 else None
 
 
                     positive = self.sd.encode_prompt(

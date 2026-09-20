@@ -1,5 +1,7 @@
 'use client';
 import Link from 'next/link';
+import { QwenImageControls, QwenReferenceInputs } from '@/components/generate/QwenImageControls';
+import { transparentQwenPrompt } from '@/domain/qwenImage';
 import { getDefaultModelConfig, getDefaultSampler, archSupportsSection, type GeneratorModelConfig } from '@/domain/generationConfig';
 import { configContractErrors, CAPABILITY_VERSION } from '@/domain/configContract';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
@@ -251,6 +253,7 @@ export function GeneratePageContent() {
   const [jsonPromptItems, setJsonPromptItems] = useState<PromptImageSettings[] | null>(null);
   const [importSummary, setImportSummary] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
+  const [qwenReferences, setQwenReferences] = useState<string[]>([]);
   const [width, setWidth] = useState<number | null>(1024);
   const [height, setHeight] = useState<number | null>(1024);
   const [seed, setSeed] = useState<number | null>(-1);
@@ -540,6 +543,10 @@ export function GeneratePageContent() {
     if (useLora && !loraPath.trim()) {
       errors.push('Select a LoRA or enter a LoRA path.');
     }
+    if (model.arch === 'qwen_image_2') {
+      if (qwenReferences.some(path => !path.trim())) errors.push('Fill or remove empty reference paths.');
+      if (model.model_kwargs?.rgba === true && imageFormat === 'jpg') errors.push('Use PNG, WebP, or JXL for transparent output.');
+    }
     if (promptItems.length === 0) {
       errors.push('Enter at least one prompt.');
     }
@@ -595,9 +602,13 @@ export function GeneratePageContent() {
     normalizedJobName: string,
     model: GeneratorModelConfig,
   ) => {
+    if (model.arch === 'qwen_image_2') {
+      promptItems = promptItems.map(item => ({ ...item, ...(item.ctrl_imgs !== undefined ? { ctrl_imgs: item.ctrl_imgs } : qwenReferences.length ? { ctrl_imgs: qwenReferences } : {}) }));
+    }
     const promptList = promptItems.map(item => item.prompt);
     const sampleItems = promptItems.map(item => ({
       prompt: item.prompt,
+      ...(model.arch === 'qwen_image_2' ? { ctrl_imgs: item.ctrl_imgs } : {}),
       width: getPromptNumber(item, ['width'], width || 1024),
       height: getPromptNumber(item, ['height'], height || 1024),
       neg: getPromptString(item, ['neg', 'negative_prompt'], negativePrompt),
@@ -1098,6 +1109,14 @@ export function GeneratePageContent() {
                   placeholder="Path or Hugging Face repo"
                 />
 
+                {modelConfig.arch === 'qwen_image_2' && <>
+                  <QwenImageControls options={modelConfig.model_kwargs || {}}
+                    onOption={(key, value) => { setModelConfig(current => ({ ...current, model_kwargs: { ...current.model_kwargs, [key]: value } })); if (key === 'rgba' && value) setImageFormat('png'); }}
+                    onPreset={(width, height, steps) => { setWidth(width); setHeight(height); setSampleSteps(steps); }}
+                    onTransparentPrompt={() => { const items = currentPromptItems.map(item => ({ ...item, prompt: transparentQwenPrompt(item.prompt) })); setJsonPromptItems(items); setPrompts(items.map(item => item.prompt).join('\n')); }}
+                  />
+                  <QwenReferenceInputs paths={qwenReferences} onChange={setQwenReferences} />
+                </>}
                 <div className="grid grid-cols-2 gap-3">
                   <NumberInput label="Width" value={width} onChange={setWidth} min={64} max={4096} />
                   <NumberInput label="Height" value={height} onChange={setHeight} min={64} max={4096} />

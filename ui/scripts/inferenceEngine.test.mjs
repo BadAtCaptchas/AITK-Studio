@@ -279,3 +279,19 @@ test('installed UI extensions compile TSX, tolerate absent roots, and isolate co
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /extensions\/broken/);
 });
+
+
+test('Qwen references preserve order, legacy aliases, and explicit clearing', () => {
+  const { qwenSampleReferences, transparentQwenPrompt, QWEN_IMAGE_PRESETS } = loadSource('../src/domain/qwenImage.ts');
+  assert.deepEqual(qwenSampleReferences({ ctrl_img: 'one', ctrl_img_1: 'one', ctrl_img_2: 'two' }), ['one', 'two']);
+  const ten = Array.from({ length: 10 }, (_, i) => `ref-${i}`);
+  assert.deepEqual(qwenSampleReferences({ ctrl_imgs: ten, ctrl_img: 'stale' }), ten);
+  assert.deepEqual(qwenSampleReferences({ ctrl_imgs: [], ctrl_img: 'stale' }), []);
+  const prompt = transparentQwenPrompt('A dragon sticker.');
+  assert.equal(transparentQwenPrompt(prompt), prompt);
+  assert.ok(prompt.includes('A dragon sticker.'));
+  assert.equal(QWEN_IMAGE_PRESETS.filter(preset => preset.steps === 40).length, 7);
+  for (const preset of QWEN_IMAGE_PRESETS) {
+    assert.equal(preset.width % 32, 0); assert.equal(preset.height % 32, 0);
+  }
+});

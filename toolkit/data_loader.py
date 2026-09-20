@@ -391,6 +391,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             sd: 'StableDiffusion' = None,
     ):
         self.dataset_config = dataset_config
+        if getattr(sd, "preserve_image_alpha", False) and dataset_config.cache_text_embeddings:
+            if dataset_config.control_from_same_folder or (dataset_config.control_path and (dataset_config.augmentations or dataset_config.poi)):
+                raise ValueError("Qwen reference prompt caches require fixed reference images and crops; disable cache_text_embeddings for randomized controls or augmentations")
         # update bucket divisibility
         self.dataset_config.bucket_tolerance = sd.get_bucket_divisibility()
         self.is_video = dataset_config.num_frames > 1 or dataset_config.auto_frame_count
@@ -498,6 +501,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             # repeat the list
             file_list = file_list * self.dataset_config.num_repeats
 
+        if self.dataset_config.standardize_images and getattr(self.sd, "preserve_image_alpha", False):
+            raise ValueError("RGBA model datasets require standardize_images=false")
         if self.dataset_config.standardize_images:
             if self.sd.is_xl or self.sd.is_vega or self.sd.is_ssd:
                 NormalizeMethod = NormalizeSDXLTransform

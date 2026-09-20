@@ -659,7 +659,9 @@ class BaseModel:
                             if gen_config.ctrl_img is not None or gen_config.ctrl_img_1 is not None or gen_config.ctrl_img_2 is not None or gen_config.ctrl_img_3 is not None:
                                 has_control_images = True
                             # load the control image if out model uses it in text encoding
-                            if has_control_images and self.encode_control_in_text_embeddings:
+                            if callable(getattr(self, "load_sample_control_images", None)):
+                                ctrl_img = self.load_sample_control_images(gen_config)
+                            elif has_control_images and self.encode_control_in_text_embeddings:
                                 ctrl_img_list = []
                     
                                 if gen_config.ctrl_img is not None:

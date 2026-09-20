@@ -656,6 +656,7 @@ export interface SampleItem {
   ctrl_img_1?: string | null;
   ctrl_img_2?: string | null;
   ctrl_img_3?: string | null;
+  ctrl_imgs?: string[];
 }
 
 export type GenerationBackend = 'native' | 'comfy';

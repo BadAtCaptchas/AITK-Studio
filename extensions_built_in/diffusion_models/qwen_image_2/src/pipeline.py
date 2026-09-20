@@ -25,6 +25,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from diffusers.utils.torch_utils import randn_tensor
+from .transformer import QwenImage21KVCache
 
 SYSTEM_PROMPT = "Comprehend and analyze the provided prompt."
 VISION_BLOCK = "<|vision_start|><|image_pad|><|vision_end|>"
@@ -151,6 +152,7 @@ class QwenImage21PromptEncoder:
         }
         if flat_images:
             processor_kwargs["images"] = flat_images
+            processor_kwargs["do_resize"] = False
         model_inputs = self.processor(**processor_kwargs).to(device)
 
         forward_kwargs = {
@@ -342,6 +344,7 @@ class QwenImage21Pipeline:
         latents: Optional[torch.Tensor] = None,
         generator: Optional[torch.Generator] = None,
         condition_images: Optional[List[torch.Tensor]] = None,
+        use_kv_cache: bool = True,
         **kwargs,
     ) -> List[Image.Image]:
         model = self.model
@@ -383,7 +386,13 @@ class QwenImage21Pipeline:
         cond = model.pad_prompt_embeds(conditional_embeds)
         uncond = model.pad_prompt_embeds(unconditional_embeds) if do_cfg else None
 
+        cache_enabled = use_kv_cache and transformer.config.causal_condition
+        blocks = len(transformer.transformer_blocks)
+        cond_cache = QwenImage21KVCache(blocks) if cache_enabled else None
+        uncond_cache = QwenImage21KVCache(blocks) if cache_enabled and do_cfg else None
+
         for step_index, timestep in enumerate(scheduler.timesteps):
+            cache_mode = ("extract" if step_index == 0 else "cached") if cache_enabled else None
             t = timestep.expand(latents.shape[0]).to(device, dtype=dtype) / 1000
             noise_pred = run_transformer(
                 transformer,
@@ -392,6 +401,7 @@ class QwenImage21Pipeline:
                 *cond,
                 condition_latents=condition_latents,
                 condition_shapes=condition_shapes,
+                kv_cache=cond_cache, kv_cache_mode=cache_mode,
             )
             if do_cfg:
                 uncond_pred = run_transformer(
@@ -401,6 +411,7 @@ class QwenImage21Pipeline:
                     *uncond,
                     condition_latents=condition_latents,
                     condition_shapes=condition_shapes,
+                    kv_cache=uncond_cache, kv_cache_mode=cache_mode,
                 )
                 noise_pred = uncond_pred + guidance_scale * (noise_pred - uncond_pred)
 

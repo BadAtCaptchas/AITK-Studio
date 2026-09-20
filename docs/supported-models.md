@@ -57,7 +57,7 @@ Browse the model integrations included in AITK Studio. Available training modes 
 - [Qwen/Qwen-Image-Edit](https://huggingface.co/Qwen/Qwen-Image-Edit) (Qwen-Image-Edit)
 - [Qwen/Qwen-Image-Edit-2509](https://huggingface.co/Qwen/Qwen-Image-Edit-2509) (Qwen-Image-Edit-2509)
 - [Qwen/Qwen-Image-Edit-2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) (Qwen-Image-Edit-2511)
-- [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (same model as text-to-image; add dataset control paths or sample reference images for editing). Use dimensions divisible by 32. Multiple sample references are supported; enable `model_kwargs.rgba` for RGBA output.
+- [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (same model as text-to-image; add dataset control paths or sample reference images for editing). Use dimensions divisible by 32. Up to 10 ordered sample references are supported; enable `model_kwargs.rgba` for RGBA output. See [Qwen Image 2.1 controls and configuration](qwen-image-2.1.md).
 - [Boogu/Boogu-Image-0.1-Edit](https://huggingface.co/Boogu/Boogu-Image-0.1-Edit) (Boogu-Image Edit)
 - [HiDream-ai/HiDream-E1-1](https://huggingface.co/HiDream-ai/HiDream-E1-1) (HiDream E1)
 - [krea/Krea-2-Raw](https://huggingface.co/krea/Krea-2-Raw) (Krea 2 Edit Training)

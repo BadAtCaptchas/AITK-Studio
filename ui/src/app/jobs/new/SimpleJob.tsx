@@ -2,6 +2,8 @@
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useModelArchs } from '@/extensions/modelArchs';
 import Link from 'next/link';
+import { QwenImageControls, QwenReferenceInputs } from '@/components/generate/QwenImageControls';
+import { qwenSampleReferences, transparentQwenPrompt } from '@/domain/qwenImage';
 import type { ValidationMessage, TrainingFieldTarget } from '@/utils/trainingValidation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -1938,6 +1940,11 @@ export default function SimpleJob({
                   We will use this to generate previews during training. Add more prompts below.
                 </p>
               </div>
+              {processConfig.model.arch === 'qwen_image_2' && <QwenImageControls
+                options={processConfig.model.model_kwargs || {}}
+                onOption={(key, value) => { setJobConfig(value, `config.process[0].model.model_kwargs.${key}`); if (key === 'rgba' && value) setJobConfig('png', 'config.process[0].sample.ext'); }}
+                onPreset={(width, height, steps) => setJobConfig({ ...sampleConfig, width, height, sample_steps: steps }, 'config.process[0].sample')}
+              />}
               <div className="space-y-3">
                 {sampleConfig.samples.map((sample, i) => (
                   <div key={i} className="border border-gray-900 bg-gray-950/35 p-3">
@@ -1988,7 +1995,11 @@ export default function SimpleJob({
                         required
                       />
                     )}
-                    {(modelArch?.additionalSections?.includes('sample.ctrl_img') || modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && (
+                    {processConfig.model.arch === 'qwen_image_2' && <>
+                      <QwenReferenceInputs paths={qwenSampleReferences(sample)} onChange={paths => setJobConfig(paths, `config.process[0].sample.samples[${i}].ctrl_imgs`)} />
+                      <button type="button" className="text-sm text-blue-300" onClick={() => { setSamplePromptValue(i, transparentQwenPrompt(sample.prompt)); setJobConfig(true, 'config.process[0].model.model_kwargs.rgba'); setJobConfig('png', 'config.process[0].sample.ext'); }}>Add transparency instructions</button>
+                    </>}
+                    {processConfig.model.arch !== 'qwen_image_2' && (modelArch?.additionalSections?.includes('sample.ctrl_img') || modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && (
                       <div className="my-3 space-y-2">
                         {(modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')
                           ? (['ctrl_img', 'ctrl_img_2', 'ctrl_img_3'] as const)

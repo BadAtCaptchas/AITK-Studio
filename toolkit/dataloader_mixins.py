@@ -1096,7 +1096,7 @@ class ImageProcessingDTOMixin:
             print_acc(f"Error loading image: {self.path}")
             raise Exception(f"Image loading error ({self.path}): {e}") from e
 
-        if self.use_alpha_as_mask:
+        if self.use_alpha_as_mask and not self.preserve_image_alpha:
             # we do this to make sure it does not replace the alpha with another color
             # we want the image just without the alpha channel
             np_img = np.array(img)
@@ -1104,7 +1104,7 @@ class ImageProcessingDTOMixin:
             np_img = np_img[:, :, :3]
             img = Image.fromarray(np_img)
 
-        img = img.convert('RGB')
+        img = img.convert('RGBA' if self.preserve_image_alpha else 'RGB')
         w, h = img.size
         if w > h and self.scale_to_width < self.scale_to_height:
             # throw error, they should match
@@ -1165,7 +1165,12 @@ class ImageProcessingDTOMixin:
             # do augmentations
             for augment in self.augments:
                 if augment in transforms_dict:
-                    img = transforms_dict[augment](img)
+                    if self.preserve_image_alpha:
+                        alpha = img.getchannel('A')
+                        img = transforms_dict[augment](img.convert('RGB')).convert('RGBA')
+                        img.putalpha(alpha)
+                    else:
+                        img = transforms_dict[augment](img)
 
         if self.has_augmentations:
             # augmentations handles transforms
@@ -1352,7 +1357,9 @@ class ControlFileItemDTOMixin:
             try:
                 img = image_utils.open_static_image(control_path)
 
-                if image_utils.image_has_alpha(img):
+                if self.preserve_image_alpha:
+                    img = img.convert("RGBA")
+                elif image_utils.image_has_alpha(img):
                     img = img.convert("RGBA")
                     # Create a background with the specified transparent color
                     transparent_color = tuple(self.dataset_config.control_transparent_color)
@@ -1684,12 +1691,14 @@ class AugmentationFileItemDTOMixin:
         # save the original tensor
         self.unaugmented_tensor = transforms.ToTensor()(img) if transform is None else transform(img)
 
-        open_cv_image = np.array(img)
+        keep_alpha = getattr(self, 'preserve_image_alpha', False) and img.mode == 'RGBA'
+        alpha = np.array(img.getchannel('A')) if keep_alpha else None
+        open_cv_image = np.array(img.convert('RGB') if keep_alpha else img)
         # Convert RGB to BGR
         open_cv_image = open_cv_image[:, :, ::-1].copy()
 
         # apply augmentations
-        transformed = self.aug_transform(image=open_cv_image)
+        transformed = self.aug_transform(image=open_cv_image, **({'mask': alpha} if keep_alpha else {}))
         augmented = transformed["image"]
 
         # save just the spatial transforms for controls and masks
@@ -1704,6 +1713,8 @@ class AugmentationFileItemDTOMixin:
 
         # convert back to RGB tensor
         augmented = cv2.cvtColor(augmented, cv2.COLOR_BGR2RGB)
+        if keep_alpha:
+            augmented = np.concatenate([augmented, transformed['mask'][..., None]], axis=-1)
 
         # convert to PIL image
         augmented = Image.fromarray(augmented)
@@ -1720,6 +1731,8 @@ class AugmentationFileItemDTOMixin:
 
         # save colorspace to convert back to
         colorspace = img.mode
+        keep_alpha = getattr(self, 'preserve_image_alpha', False) and colorspace == 'RGBA'
+        alpha = np.array(img.getchannel('A')) if keep_alpha else None
 
         # convert to rgb
         img = img.convert('RGB')
@@ -1729,11 +1742,13 @@ class AugmentationFileItemDTOMixin:
         open_cv_image = open_cv_image[:, :, ::-1].copy()
 
         # Replay transforms
-        transformed = A.ReplayCompose.replay(self.aug_replay_spatial_transforms, image=open_cv_image)
+        transformed = A.ReplayCompose.replay(self.aug_replay_spatial_transforms, image=open_cv_image, **({'mask': alpha} if keep_alpha else {}))
         augmented = transformed["image"]
 
         # convert back to RGB tensor
         augmented = cv2.cvtColor(augmented, cv2.COLOR_BGR2RGB)
+        if keep_alpha:
+            augmented = np.concatenate([augmented, transformed['mask'][..., None]], axis=-1)
 
         # convert to PIL image
         augmented = Image.fromarray(augmented)
@@ -2155,6 +2170,8 @@ class LatentCachingFileItemDTOMixin:
             ("latent_space_version", self.latent_space_version),
             ("latent_version", self.latent_version),
         ])
+        if getattr(self, "preserve_image_alpha", False):
+            item["image_channels"] = 4
         is_video = self.is_video
         # when adding items, do it after so we dont change old latents
         if self.flip_x:
@@ -2516,6 +2533,9 @@ class TextEmbeddingFileItemDTOMixin:
         # out of their cache key
         if text_only:
             return item
+        if getattr(self, "preserve_image_alpha", False) and self.control_path is not None:
+            item["reference_crop"] = [self.scale_to_width, self.scale_to_height, self.crop_x, self.crop_y,
+                self.crop_width, self.crop_height, self.flip_x, self.flip_y]
         # if we have a control image, cache the path
         if self.encode_control_in_text_embeddings and self.control_path is not None:
             item["control_path"] = self.control_path
@@ -2759,19 +2779,22 @@ class TextEmbeddingCachingMixin:
                             control_path_list = []
                         elif not isinstance(control_path_list, list):
                             control_path_list = [control_path_list]
-                        for i in range(len(control_path_list)):
-                            try:
-                                img = image_utils.open_static_image(control_path_list[i], mode="RGB")
-                                # convert to 0 to 1 tensor
-                                img = (
-                                    TF.to_tensor(img)
-                                    .unsqueeze(0)
-                                    .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
-                                )
-                                ctrl_img_list.append(img)
-                            except Exception as e:
-                                print_acc(f"Error: {e}")
-                                print_acc(f"Error loading control image: {control_path_list[i]}")
+                        if callable(getattr(self.sd, "load_cached_control_images", None)):
+                            ctrl_img_list = self.sd.load_cached_control_images(file_item)
+                        else:
+                            for i in range(len(control_path_list)):
+                                try:
+                                    img = image_utils.open_static_image(control_path_list[i], mode="RGBA" if file_item.preserve_image_alpha else "RGB")
+                                    # convert to 0 to 1 tensor
+                                    img = (
+                                        TF.to_tensor(img)
+                                        .unsqueeze(0)
+                                        .to(self.sd.device_torch, dtype=self.sd.torch_dtype)
+                                    )
+                                    ctrl_img_list.append(img)
+                                except Exception as e:
+                                    print_acc(f"Error: {e}")
+                                    print_acc(f"Error loading control image: {control_path_list[i]}")
                         # control VIDEOS ride into the presentation by path (models
                         # with supports_video_control_images turn them into
                         # timestamped vision blocks); images first, then videos.

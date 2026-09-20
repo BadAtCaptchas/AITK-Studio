@@ -93,6 +93,7 @@ class FileItemDTO(
         self.is_encrypted = self.encrypted_reader is not None and self.encrypted_item is not None
         self.dataset_config: "DatasetConfig" = kwargs.get("dataset_config", None)
         self.is_audio_model = kwargs.get("is_audio_model", False)
+        self.preserve_image_alpha = bool(getattr(kwargs.get("sd"), "preserve_image_alpha", False))
         dataset_is_video = (
             self.dataset_config.num_frames > 1
             or self.dataset_config.auto_frame_count

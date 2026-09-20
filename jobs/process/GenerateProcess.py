@@ -6,6 +6,7 @@ from collections import OrderedDict
 from typing import Any, Dict, ForwardRef, List, Optional, Union
 
 import torch
+from tqdm import tqdm
 from safetensors.torch import save_file, load_file
 
 from jobs.process.BaseProcess import BaseProcess
@@ -292,6 +293,7 @@ class GenerateProcess(BaseProcess):
                     ctrl_img_1=self.get_image_value(image_config, 'ctrl_img_1', None),
                     ctrl_img_2=self.get_image_value(image_config, 'ctrl_img_2', None),
                     ctrl_img_3=self.get_image_value(image_config, 'ctrl_img_3', None),
+                    ctrl_imgs=self.get_image_value(image_config, 'ctrl_imgs', None),
                     num_frames=self.get_image_int(image_config, 'num_frames', 1),
                     fps=self.get_image_int(image_config, 'fps', 15),
                     do_cfg_norm=self.get_image_bool(image_config, 'do_cfg_norm', False),

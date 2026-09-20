@@ -602,6 +602,8 @@ class Engine:
             for key in ("ctrl_img", "ctrl_img_1", "ctrl_img_2", "ctrl_img_3"):
                 if sample.get(key):
                     sample[key] = self._resolve_asset(sample[key])
+            if sample.get("ctrl_imgs") is not None:
+                sample["ctrl_imgs"] = [self._resolve_asset(path) for path in sample["ctrl_imgs"]]
             if entry["needs_control_image"] and not sample.get("ctrl_img"):
                 raise ValueError(f"{arch} requires a control image (ctrl_img)")
             output_ext = sample.pop("output_ext", None) or OUTPUT_EXT[entry["modality"]]
@@ -655,6 +657,11 @@ class Engine:
             def status_hook(msg):
                 job.emit("status", message=str(msg))
 
+            def check_cancel():
+                if job.cancel.is_set():
+                    raise GenerationCancelled()
+
+            holder.sample_cancel_check = check_cancel
             holder.sample_step_hook = step_hook
             if hasattr(holder, "add_status_update_hook"):
                 holder._status_update_hooks.append(status_hook)
@@ -667,6 +674,7 @@ class Engine:
             finally:
                 gen_seconds = time.perf_counter() - t_gen
                 holder.sample_step_hook = None
+                holder.sample_cancel_check = None
                 if hasattr(holder, "_status_update_hooks"):
                     try:
                         holder._status_update_hooks.remove(status_hook)

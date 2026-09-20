@@ -378,7 +378,7 @@ class QwenImage21Pipeline:
         scheduler.set_timesteps(sigmas=sigmas, device=device, mu=mu)
         scheduler.set_begin_index(0)
 
-        # 2.1 is meant to be sampled without guidance; a scale of 1 skips it
+        # A scale of 1 skips classifier-free guidance.
         do_cfg = guidance_scale > 1.0 and unconditional_embeds is not None
         cond = model.pad_prompt_embeds(conditional_embeds)
         uncond = model.pad_prompt_embeds(unconditional_embeds) if do_cfg else None

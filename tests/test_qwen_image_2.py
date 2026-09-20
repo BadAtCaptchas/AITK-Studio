@@ -36,7 +36,7 @@ class QwenImage2Tests(unittest.TestCase):
         }]}}), [])
         entry = get_arch_entry('qwen_image_2')
         self.assertFalse(entry['needs_control_image'])
-        self.assertEqual(entry['sample']['guidance_scale'], 1)
+        self.assertEqual(entry['sample']['guidance_scale'], 3)
         self.assertEqual(entry['model']['qtype'], 'convrot8')
 
     def test_materialized_convrot_embedding_is_not_a_missing_checkpoint_key(self):
@@ -96,6 +96,7 @@ class QwenImage2Tests(unittest.TestCase):
         self.assertEqual(tensor_to_pil(transparent).getpixel((0, 0)), (255, 255, 255))
         holder = QwenImage2Model('cpu', ModelConfig(arch='qwen_image_2', name_or_path='test'), dtype='fp32')
         self.assertEqual(holder.get_bucket_divisibility(), 32)
+        self.assertFalse(holder.use_old_lokr_format)
         self.assertEqual(len(holder._normalize_control_images([[image, image, image + 1]], 1)[0]), 2)
 
     def test_prompt_padding_and_latent_roundtrip(self):
@@ -154,9 +155,12 @@ class QwenImage2Tests(unittest.TestCase):
             _emit_sample_step=lambda latent, index, total: events.append((index, total, latent.clone())))
         prompt = (torch.randn(1, 3, 8), torch.ones(1, 3, dtype=torch.bool), torch.zeros(1, 3, dtype=torch.bool))
         pipeline = QwenImage21Pipeline(holder)
-        output = pipeline(prompt, height=32, width=32, num_inference_steps=2)
-        self.assertEqual([(index, total) for index, total, _ in events], [(0, 2), (1, 2)])
-        self.assertTrue(torch.isfinite(output[0]).all())
+        for guidance_scale in (1.0, 3.0):
+            events.clear()
+            output = pipeline(prompt, unconditional_embeds=(torch.zeros_like(prompt[0]), *prompt[1:]),
+                guidance_scale=guidance_scale, height=32, width=32, num_inference_steps=2)
+            self.assertEqual([(index, total) for index, total, _ in events], [(0, 2), (1, 2)])
+            self.assertTrue(torch.isfinite(output[0]).all())
         class Cancelled(Exception):
             pass
         def cancel(*args):

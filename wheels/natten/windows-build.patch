@@ -1,0 +1,112 @@
+diff --git a/csrc/CMakeLists.txt b/csrc/CMakeLists.txt
+index add3c8f..a1696c7 100644
+--- a/csrc/CMakeLists.txt
++++ b/csrc/CMakeLists.txt
+@@ -36,6 +36,9 @@ endif()
+ if (TORCH_VERSION VERSION_LESS "1.8.0")
+     message(FATAL_ERROR "PyTorch >= 1.8.0 is required.")
+ endif()
++if(TORCH_VERSION VERSION_GREATER_EQUAL "2.13.0")
++    set(CXX_STD "20")
++endif()
+ 
+ ## Torch CMake
+ execute_process(COMMAND ${PYTHON_PATH} "-c" "from __future__ import print_function; import os; import torch;
+@@ -69,8 +72,13 @@ if(${NATTEN_IS_WINDOWS})
+ endif()
+ 
+ set(CMAKE_C_FLAGS    "${CMAKE_C_FLAGS}")
+-set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=c++17")
+-set(CMAKE_CUDA_FLAGS "-Xcompiler -Wall -ldl")
++if(NATTEN_IS_WINDOWS)
++  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /permissive- /EHsc /bigobj")
++  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/permissive- -Xcompiler=/EHsc")
++else()
++  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++${CXX_STD}")
++  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -Wall -ldl")
++endif()
+ 
+ set(CMAKE_C_FLAGS_DEBUG    "${CMAKE_C_FLAGS_DEBUG}    -Wall -O0")
+ set(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG}  -Wall -O0")
+@@ -78,9 +86,13 @@ set(CMAKE_CUDA_FLAGS_DEBUG "-O0 -G -Xcompiler -Wall")
+ 
+ set(CMAKE_CXX_STANDARD "${CXX_STD}")
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
++set(CMAKE_CUDA_STANDARD "${CXX_STD}")
++set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
+-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wconversion")
+-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-fno-strict-aliasing")
++if(NOT NATTEN_IS_WINDOWS)
++  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wconversion")
++  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-fno-strict-aliasing")
++endif()
+ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --use_fast_math")
+ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --extended-lambda")
+ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -ftemplate-backtrace-limit=0")
+@@ -90,8 +102,10 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
+ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DNDEBUG")
+ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --std=c++${CXX_STD}")
+ 
+-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+-set(CMAKE_CUDA_FLAGS_RELEASE "${CMAKE_CUDA_FLAGS_RELEASE} -Xcompiler -O3")
++if(NOT NATTEN_IS_WINDOWS)
++  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
++  set(CMAKE_CUDA_FLAGS_RELEASE "${CMAKE_CUDA_FLAGS_RELEASE} -Xcompiler -O3")
++endif()
+ set(CMAKE_CUDA_FLAGS_RELEASE "${CMAKE_CUDA_FLAGS_RELEASE} --use_fast_math")
+ 
+ if(${ADD_LINEINFO})
+@@ -199,10 +213,15 @@ endif()
+ 
+ add_library(natten SHARED ${ALL_SOURCES})
+ 
+-set_target_properties(natten PROPERTIES PREFIX "" OUTPUT_NAME ${OUTPUT_FILE_NAME})
++get_filename_component(NATTEN_OUTPUT_NAME "${OUTPUT_FILE_NAME}" NAME)
++get_filename_component(NATTEN_OUTPUT_DIR "${OUTPUT_FILE_NAME}" DIRECTORY)
++set_target_properties(natten PROPERTIES
++  PREFIX "" OUTPUT_NAME "${NATTEN_OUTPUT_NAME}"
++  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${NATTEN_OUTPUT_DIR}"
++  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${NATTEN_OUTPUT_DIR}")
+ set_target_properties(natten PROPERTIES LINKER_LANGUAGE CXX)
+ message("Building NATTEN for the following architectures: ${NATTEN_CUDA_ARCH_LIST}")
+ set_target_properties(natten PROPERTIES CUDA_ARCHITECTURES "${NATTEN_CUDA_ARCH_LIST}")
+ 
+ target_include_directories(natten SYSTEM PUBLIC ${TORCH_INCLUDE_DIRS})
+-target_link_libraries(natten PUBLIC c10 torch torch_cpu torch_python cudart c10_cuda torch_cuda)
++target_link_libraries(natten PUBLIC c10 torch torch_cpu torch_python CUDA::cudart c10_cuda torch_cuda)
+diff --git a/csrc/include/natten/helpers.h b/csrc/include/natten/helpers.h
+index 0552177..846d903 100644
+--- a/csrc/include/natten/helpers.h
++++ b/csrc/include/natten/helpers.h
+@@ -25,7 +25,7 @@
+ #include <ATen/ATen.h>
+ 
+ #define CHECK_CONTIGUOUS(x)                                     \
+-  TORCH_CHECK(not x.is_sparse(), #x " must be a dense tensor"); \
++  TORCH_CHECK(!x.is_sparse(), #x " must be a dense tensor"); \
+   TORCH_CHECK(x.is_contiguous(), #x " must be contiguous");
+ 
+ #define CHECK_CUDA(x) \
+diff --git a/setup.py b/setup.py
+index a2b5332..314a0bc 100644
+--- a/setup.py
++++ b/setup.py
+@@ -400,7 +400,7 @@ class BuildExtension(build_ext):
+             output_binary_name = self.get_ext_filename(
+                 ext.name
+             )  # i.e. libnatten.cpython-VERSION-ARCH-OS.so
+-            output_so_name = output_binary_name.replace(LIB_EXT, "")
++            output_so_name = output_binary_name.replace(LIB_EXT, "").replace("\\", "/")
+ 
+             # extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
+ 
+@@ -456,7 +456,7 @@ class BuildExtension(build_ext):
+                 assert (
+                     "python.exe" in python_path
+                 ), f"Expected the python executable path to end with python.exe, got {python_path}"
+-                python_lib_dir = python_path.replace("python.exe", "libs").strip()
++                python_lib_dir = path.join(sys.base_prefix, "libs")
+                 cmake_args.append(f"-DPY_LIB_DIR={python_lib_dir}")
+                 cmake_args.append("-G Ninja")
+                 cmake_args.append("-DCMAKE_BUILD_TYPE=Release")

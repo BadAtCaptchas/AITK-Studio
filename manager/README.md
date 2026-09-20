@@ -32,8 +32,11 @@ python3 -m manager doctor      # diagnose problems
   `torchcodec==0.15.0` on all platforms; flash-attn 2.8.3 prebuilt wheels
   (mjun0812) on Linux x86_64/aarch64 + Windows; NATTEN 0.21.7 wheels
   (whl.natten.org) on Linux both arches; triton bundled with torch on Linux
-  and `triton-windows` 3.7.x on Windows. No flash-attn/NATTEN/triton on Mac,
-  no NATTEN on Windows (no wheels exist).
+  and `triton-windows` 3.7.x on Windows. No flash-attn/NATTEN/triton on Mac.
+  A bundled [Windows NATTEN wheel](../wheels/natten/README.md) is installed
+  automatically for Python 3.12, PyTorch 2.13/CUDA 13.0, and SM 12.0 GPUs.
+  Other Windows configurations skip NATTEN. The manager verifies its native
+  CUDA extension after installation and removes it if that validation fails.
 - **The torch stack is pinned against the resolver.** torch is an unpinned
   transitive dep of timm/peft/accelerate/torchvision, so anything in
   `requirements*.txt` that conflicts with what the pinned torch needs makes the
@@ -93,5 +96,3 @@ python3 -m manager doctor      # diagnose problems
   clobber modified files.
 - **Migrations** ([migrations.py](migrations.py)): one-time post-update steps,
   each applied at most once per environment.
-
-

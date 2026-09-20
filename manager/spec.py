@@ -18,7 +18,8 @@ kernels smoke-tested on an RTX 5090 / sm120 with torch 2.13.0+cu130):
   and fail to import on 2.12.0 final — the torch2.13 batches (v0.9.47+) are
   verified good. Re-verify imports whenever bumping torch.
 - NATTEN 0.21.7: prebuilt at whl.natten.org for {cu126,cu130,cu132} x
-  {cp310..cp314} x {linux x86_64, linux aarch64}. No Windows/mac wheels.
+  {cp310..cp314} x {linux x86_64, linux aarch64}. A bundled Windows x64
+  cp312/torch2.13/cu130 wheel supports SM 12.0 only. No mac wheels.
 - triton: bundled with torch on Linux (incl. aarch64; torch 2.13 bundles
   triton 3.7.1); triton-windows 3.7.x matches on Windows; nothing for MPS.
 - flash-linear-attention 0.5.2: pure-Python (py3-none-any) Triton kernels —
@@ -50,6 +51,7 @@ venv python doesn't match.
 """
 
 import os
+from pathlib import Path
 
 from .util import REPO_ROOT
 
@@ -63,6 +65,7 @@ TRITON_WINDOWS = "triton-windows>=3.7,<3.8"
 
 NATTEN_VERSION = "0.21.7"
 NATTEN_FIND_LINKS = "https://whl.natten.org"
+NATTEN_WINDOWS_WHEELS_DIR = os.path.join(REPO_ROOT, "wheels", "natten")
 
 # pure-Python triton kernels; bare install (no [cuda]/[rocm] extra) on purpose —
 # the extras only add torch/triton pins we already manage per-platform
@@ -261,6 +264,29 @@ def _natten_pin(flavor):
     )
 
 
+def _windows_natten_wheel(detection, flavor, python_version):
+    """Select the bundled SM 12.0 wheel only for its exact runtime stack."""
+    if flavor != "cu130" or python_version != "3.12":
+        return None
+    # Require every reported GPU to be supported: this wheel has no PTX or
+    # kernels for other architectures. Unknown capabilities also skip it.
+    gpus = (detection.get("nvidia") or {}).get("gpus", [])
+    if not gpus:
+        return None
+    try:
+        if any(float(gpu.get("compute_cap")) != 12.0 for gpu in gpus):
+            return None
+    except (TypeError, ValueError):
+        return None
+    cp = "cp" + python_version.replace(".", "")
+    filename = "natten-%s-%s-%s-win_amd64.whl" % (
+        _natten_pin(flavor).split("==", 1)[1], cp, cp
+    )
+    wheel = Path(NATTEN_WINDOWS_WHEELS_DIR) / filename
+    # Pin bumps and checkouts without the binary must never pick an older ABI.
+    return wheel.resolve().as_uri() if wheel.is_file() else None
+
+
 def _cuda_flavor(detection):
     """Pick a cuda wheel flavor the installed driver can actually run."""
     nvidia = detection.get("nvidia") or {}
@@ -333,7 +359,15 @@ def _cuda_spec(detection):
         find_links.append(NATTEN_FIND_LINKS)
     elif os_name == "windows":
         extras = _WIN_HELPERS + extras + [TRITON_WINDOWS]
-        notes = notes + ["NATTEN has no Windows wheels — skipping it."]
+        natten_wheel = _windows_natten_wheel(detection, flavor, python_version)
+        if natten_wheel:
+            optional.append(natten_wheel)
+            notes = notes + ["Using bundled Windows NATTEN wheel for SM 12.0."]
+        else:
+            notes = notes + [
+                "No bundled NATTEN wheel matches this Python/PyTorch/CUDA/GPU "
+                "configuration — skipping it."
+            ]
 
     return EnvSpec(
         flavor,
@@ -480,5 +514,4 @@ def _build_spec(detection, allow_cpu=False):
         extra_packages=[TORCHCODEC],
         notes=["CPU-only install: training will be impractically slow."],
     )
-
 

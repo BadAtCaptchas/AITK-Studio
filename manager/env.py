@@ -461,9 +461,14 @@ def _optional_names(pkg):
 
 
 def _venv_import_ok(module_name):
+    script = "import %s" % module_name
+    if module_name == "natten":
+        # NATTEN catches native-extension ImportError and still imports using
+        # a fallback. A CUDA accelerator wheel must actually load libnatten.
+        script += "\nif not natten.HAS_LIBNATTEN: raise RuntimeError('libnatten failed to load')"
     try:
         out = subprocess.run(
-            [venv_python(), "-c", "import %s" % module_name],
+            [venv_python(), "-c", script],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=180,
@@ -537,7 +542,7 @@ def ensure_requirements(spec, dry_run=False, force=False):
         dist_name, import_name = _optional_names(pkg)
         if not _venv_import_ok(import_name):
             warn(
-                "%s installed but fails to import against this torch build — "
+                "%s installed but fails runtime validation against this torch build — "
                 "removing it (training falls back to native attention)."
                 % import_name
             )
@@ -705,5 +710,4 @@ def sync(spec, detection, dry_run=False, force=False):
     write_sitecustomize(dry_run=dry_run, spec=spec)
     migrations.run_pending(dry_run=dry_run)
     ok("Environment is up to date.")
-
 

@@ -1,0 +1,77 @@
+NATTEN manager wheel validation - 2026-09-20
+
+Built against PyTorch 2.13.0+cu130 in an isolated Python 3.12 environment.
+Installed the hardware-selected file URI through manager.env._pip_install.
+Manager native-extension validation passed.
+Validation did not set CUDA_PATH or add the build toolkit/compiler to PATH.
+
+GPU comparisons
+Command: <repo>\.tmp\natten-manager-env\Scripts\python.exe wheels/natten/validate.py
+Exit code: 0
+{"natten": "0.21.7+torch2130cu130", "torch": "2.13.0+cu130", "cuda": "13.0", "gpu": "NVIDIA GeForce RTX 5080", "capability": [12, 0], "module": "<repo>\\.tmp\\natten-manager-env\\Lib\\site-packages\\natten\\__init__.py"}
+PASS na1d causal=False dilation=1 torch.float16: forward and q/k/v gradients
+PASS na1d causal=True dilation=1 torch.float16: forward and q/k/v gradients
+PASS na1d causal=False dilation=2 torch.float16: forward and q/k/v gradients
+PASS na2d causal=False dilation=1 torch.float16: forward and q/k/v gradients
+PASS na2d causal=True dilation=1 torch.float16: forward and q/k/v gradients
+PASS na2d causal=False dilation=2 torch.float16: forward and q/k/v gradients
+PASS na3d causal=False dilation=1 torch.float16: forward and q/k/v gradients
+PASS na3d causal=True dilation=1 torch.float16: forward and q/k/v gradients
+PASS attention causal=False torch.float16: forward and q/k/v gradients
+PASS attention causal=True torch.float16: forward and q/k/v gradients
+PASS na1d causal=False dilation=1 torch.bfloat16: forward and q/k/v gradients
+PASS na1d causal=True dilation=1 torch.bfloat16: forward and q/k/v gradients
+PASS na1d causal=False dilation=2 torch.bfloat16: forward and q/k/v gradients
+PASS na2d causal=False dilation=1 torch.bfloat16: forward and q/k/v gradients
+PASS na2d causal=True dilation=1 torch.bfloat16: forward and q/k/v gradients
+PASS na2d causal=False dilation=2 torch.bfloat16: forward and q/k/v gradients
+PASS na3d causal=False dilation=1 torch.bfloat16: forward and q/k/v gradients
+PASS na3d causal=True dilation=1 torch.bfloat16: forward and q/k/v gradients
+PASS attention causal=False torch.bfloat16: forward and q/k/v gradients
+PASS attention causal=True torch.bfloat16: forward and q/k/v gradients
+PASS na1d causal=False dilation=1 torch.float32: forward and q/k/v gradients
+PASS na1d causal=True dilation=1 torch.float32: forward and q/k/v gradients
+PASS na1d causal=False dilation=2 torch.float32: forward and q/k/v gradients
+PASS na2d causal=False dilation=1 torch.float32: forward and q/k/v gradients
+PASS na2d causal=True dilation=1 torch.float32: forward and q/k/v gradients
+PASS na2d causal=False dilation=2 torch.float32: forward and q/k/v gradients
+PASS na3d causal=False dilation=1 torch.float32: forward and q/k/v gradients
+PASS na3d causal=True dilation=1 torch.float32: forward and q/k/v gradients
+PASS attention causal=False torch.float32: forward and q/k/v gradients
+PASS attention causal=True torch.float32: forward and q/k/v gradients
+All 30 forward/backward comparisons passed.
+
+Upstream tests
+Command: <repo>\.tmp\natten-manager-env\Scripts\python.exe -m pytest -q tests/test_compute_delta.py tests/test_fna.py -k "test_against_pt_reference or quick"
+Exit code: 0
+....                                                                     [100%]
+============================== warnings summary ===============================
+..\natten-manager-env\Lib\site-packages\_pytest\cacheprovider.py:469
+  <repo>\.tmp\natten-manager-env\Lib\site-packages\_pytest\cacheprovider.py:469: PytestCacheWarning: could not create cache path <repo>\.tmp\natten-windows-source\.pytest_cache\v\cache\nodeids: [WinError 5] Access is denied: '<repo>\\.tmp\\natten-windows-source\\.pytest_cache\\v\\cache'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+4 passed, 14 deselected, 1 warning in 51.50s
+
+Manager tests
+Command: <repo>\.venv\Scripts\python.exe -m unittest discover -s tests -p test_manager_natten.py -v
+Exit code: 0
+test_cuda_and_python_must_match (test_manager_natten.ManagerNattenTests.test_cuda_and_python_must_match) ... ok
+test_existing_python_filter_rejects_wrong_interpreter (test_manager_natten.ManagerNattenTests.test_existing_python_filter_rejects_wrong_interpreter) ... ok
+test_linux_keeps_upstream_wheel_selection (test_manager_natten.ManagerNattenTests.test_linux_keeps_upstream_wheel_selection) ... ok
+test_matching_windows_selects_real_wheel_with_current_abi (test_manager_natten.ManagerNattenTests.test_matching_windows_selects_real_wheel_with_current_abi) ... ok
+test_missing_artifact_skips_without_breaking_install (test_manager_natten.ManagerNattenTests.test_missing_artifact_skips_without_breaking_install) ... ok
+test_paths_with_spaces_are_installable_file_urls (test_manager_natten.ManagerNattenTests.test_paths_with_spaces_are_installable_file_urls) ... ok
+test_pin_bumps_do_not_reuse_old_wheel (test_manager_natten.ManagerNattenTests.test_pin_bumps_do_not_reuse_old_wheel) ... ok
+test_runtime_validation_rejects_silent_native_import_failure (test_manager_natten.ManagerNattenTests.test_runtime_validation_rejects_silent_native_import_failure) ... ok
+test_unknown_or_unsupported_gpu_configurations_skip (test_manager_natten.ManagerNattenTests.test_unknown_or_unsupported_gpu_configurations_skip) ... ok
+test_windows_arm_fallback_selects_x64_wheel (test_manager_natten.ManagerNattenTests.test_windows_arm_fallback_selects_x64_wheel) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.067s
+
+OK
+
+Wheel RECORD hashes verified for all 62 entries.
+Wheel tag: cp312-cp312-win_amd64
+SHA256: 831143af4349eea378531998548850e07eba6b1237c344061e628573b10d0717

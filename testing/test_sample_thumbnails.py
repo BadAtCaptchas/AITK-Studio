@@ -192,7 +192,9 @@ class SampleAtomicWriteTests(unittest.TestCase):
 class ThumbnailGenerationTests(unittest.TestCase):
     def setUp(self):
         self.harness = types.SimpleNamespace()
-        self.generate = types.MethodType(METHODS["_generate_thumbnail"], self.harness)
+
+    def generate(self, media_path: str, thumb_path: str) -> str | None:
+        return METHODS["_generate_thumbnail"](self.harness, media_path, thumb_path)
 
     def test_static_and_animated_images_generate_valid_jpegs(self):
         from PIL import Image

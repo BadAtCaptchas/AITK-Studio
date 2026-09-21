@@ -74,6 +74,11 @@ import { applySelectedDatasetDefaults } from '@/utils/jobDatasetDefaults';
 import { IoFlaskSharp } from 'react-icons/io5';
 import { isMac } from '@/helpers/basic';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
+import {
+  hasKrea2TextFusionExclusion,
+  setKrea2TextFusionExclusion,
+  supportsKrea2TextFusionExclusion,
+} from '@/utils/krea2TextFusion';
 import TrainingPhasesEditor from './TrainingPhasesEditor';
 import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
@@ -1332,6 +1337,28 @@ export default function SimpleJob({
                       min={0}
                       max={1}
                     />
+                  )}
+                  {supportsKrea2TextFusionExclusion(processConfig.model, networkConfig) && (
+                    <div className="col-span-full space-y-2">
+                      <Checkbox
+                        label="Exclude text-fusion layers"
+                        checked={hasKrea2TextFusionExclusion(networkConfig?.network_kwargs?.ignore_if_contains)}
+                        onChange={enabled =>
+                          setJobConfig(
+                            setKrea2TextFusionExclusion(networkConfig?.network_kwargs?.ignore_if_contains, enabled),
+                            'config.process[0].network.network_kwargs.ignore_if_contains',
+                          )
+                        }
+                        doc={{
+                          title: 'Exclude text-fusion layers',
+                          description:
+                            'Excludes text-fusion attention and MLP adapters, plus the text projection MLP, from the LoRA being trained. This is an experimental option for character/style training; quality and stability improvements are not established. Turning it off removes this preset, while other custom layer filters remain active. Use a new training run when changing adapter targets.',
+                        }}
+                      />
+                      <p className="text-xs text-gray-400">
+                        Experimental for character/style LoRAs. Excludes text-fusion attention and MLP adapters.
+                      </p>
+                    </div>
                   )}
                 </div>,
               )}

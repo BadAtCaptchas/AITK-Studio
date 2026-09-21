@@ -238,6 +238,48 @@ You can also exclude layers by their names by using `ignore_if_contains` network
 `ignore_if_contains` takes priority over `only_if_contains`. So if a weight is covered by both,
 it will be ignored.
 
+### Optional Krea 2 text-fusion exclusion
+
+For standard **Krea 2 (raw)** and **Krea 2 Turbo (w/ Training Adapter)** LoRA jobs, the
+**LoRA target** section has an **Exclude text-fusion layers** checkbox. It is off by
+default and is available only with the `lora` network type and edit conditioning disabled.
+This experimental character/style option excludes attention and MLP adapters inside text
+fusion, plus the text projection MLP, from the LoRA being trained.
+
+The checkbox uses the existing configuration field. To enable it in YAML, add these
+entries to your existing `network.network_kwargs.ignore_if_contains` list:
+
+```yaml
+network_kwargs:
+  ignore_if_contains:
+    - "txtfusion."
+    - "txtmlp"
+```
+
+The checkbox also recognizes the equivalent six-entry list in the
+[community training report](https://www.reddit.com/r/StableDiffusion/comments/1wgl3ss/for_the_sake_of_training_krea2/).
+Toggling it on normalizes those entries to the compact list above. Toggling it off removes
+only the recognized preset entries; other custom exclusions and inclusion filters remain
+active. The checkbox represents this preset, so custom filters can still exclude text
+fusion independently when it is off. Saved and imported jobs keep their explicit filters;
+opening the form does not rewrite them. Model selection retains its existing default-handling
+behavior. Use a new training run when changing adapter targets instead of resuming a
+checkpoint with a different target set.
+
+With the current architecture and default `transformer_only: true`, this reduces the LoRA
+target count from 256 to 224 by excluding 32 text-fusion Linear layers. The text-fusion
+projector and `txtmlp` already receive no adapters under that default, but the explicit
+exclusions also cover configurations with `transformer_only: false`. All these base-model
+layers still participate in the forward pass. Experimental edit presets and the Turbo
+assistant adapter are unchanged.
+
+The layer-selection behavior is verified; improvements in training quality or stability
+are not established. The [Diffusers Krea 2 guide](https://github.com/huggingface/diffusers/blob/main/examples/dreambooth/README_krea2.md#lora-rank-alpha-and-target-modules)
+and [Musubi Krea 2 guide](https://github.com/kohya-ss/musubi-tuner/blob/main/docs/krea2.md#lora-target-layers--loraの対象レイヤー)
+include text-fusion layers in their default target sets and describe narrower attention
+targeting for longer runs. Compare matched runs for likeness, style fidelity, prompt
+adherence, and instability before treating this option as a preferred default.
+
 ## LoKr Training
 
 To learn more about LoKr, read more about it at [KohakuBlueleaf/LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Guidelines.md) and the LyCORIS [network arguments](https://github.com/KohakuBlueleaf/LyCORIS/blob/main/docs/Network-Args.md). To train a LoKr model, change the network type in the config file:

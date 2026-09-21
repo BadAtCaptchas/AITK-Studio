@@ -1,28 +1,10 @@
 import os from 'os';
 import { randomUUID } from 'crypto';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { db } from './db';
-import { getToolkitPythonPath } from './pythonPath';
+import { getProcessBirth, processBirthMatches } from './processBirth';
 
 type Owner = { token: string; host: string; pid: number; birth: number; heartbeat: number };
-const execute = promisify(execFile);
 let identity: Promise<number> | undefined;
-async function processBirth(pid: number): Promise<number | null> {
-  const { stdout } = await execute(
-    getToolkitPythonPath(),
-    [
-      '-c',
-      'import sys,psutil\ntry: print(psutil.Process(int(sys.argv[1])).create_time())\nexcept psutil.NoSuchProcess: print("absent")',
-      String(pid),
-    ],
-    { timeout: 5_000, maxBuffer: 4096, windowsHide: true },
-  );
-  if (stdout.trim() === 'absent') return null;
-  const birth = Number(stdout.trim());
-  if (!Number.isFinite(birth) || birth <= 0) throw new Error('Cannot verify process ownership');
-  return birth;
-}
 function isOwner(value: unknown): value is Owner {
   return (
     value !== null &&
@@ -48,7 +30,7 @@ export class LeaseBusyError extends Error {
 
 /** Local filesystem work is recovered only after OS identity proves the previous owner is gone. */
 export async function acquireProcessLease(key: string) {
-  const birth = await (identity ??= processBirth(process.pid)
+  const birth = await (identity ??= getProcessBirth(process.pid)
     .then(value => {
       if (value === null) throw new Error('Process identity unavailable');
       return value;
@@ -66,8 +48,8 @@ export async function acquireProcessLease(key: string) {
       // Expiry is diagnostic only: a slow but live process retains ownership.
       const prior = row.value;
       if (prior.pid === process.pid && prior.birth === birth) throw new LeaseBusyError();
-      const actual = await processBirth(prior.pid);
-      if (actual !== null && Math.abs(actual - prior.birth) < 0.01) throw new LeaseBusyError();
+      const actual = await getProcessBirth(prior.pid);
+      if (actual !== null && processBirthMatches(actual, prior.birth)) throw new LeaseBusyError();
     }
     if (!(await db.runtime.compareAndSwap(recordKey, row?.version ?? null, owner))) continue;
     let closed = false;

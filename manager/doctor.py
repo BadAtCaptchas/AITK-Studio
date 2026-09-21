@@ -47,13 +47,14 @@ def run_doctor():
     uv = find_uv()
     _check("uv", True, uv or "not found (optional, recommended)")
 
-    if d["nvidia"]:
-        names = ", ".join(g["name"] for g in d["nvidia"]["gpus"])
+    nvidia = d.get("nvidia")
+    if isinstance(nvidia, dict):
+        names = ", ".join(g["name"] for g in nvidia["gpus"])
         _check(
             "gpu",
             True,
             "%s (driver %s, CUDA %s)"
-            % (names, d["nvidia"]["driver"], d["nvidia"]["cuda_version"]),
+            % (names, nvidia["driver"], nvidia["cuda_version"]),
         )
     elif d["rocm"]:
         _check("gpu", True, "AMD ROCm (experimental)")
@@ -166,5 +167,4 @@ def run_doctor():
         "%s @ %s%s"
         % (branch, gitops.current_commit(), " (dirty)" if gitops.is_dirty() else ""),
     )
-
 

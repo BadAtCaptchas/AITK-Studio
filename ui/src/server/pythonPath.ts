@@ -25,10 +25,16 @@ export function getToolkitPythonPath(): string {
     cwd: TOOLKIT_ROOT, windowsHide: true, encoding: 'utf8', timeout: 5_000, maxBuffer: 32_768,
   });
   if (result.error || result.status !== 0) throw new Error('Python cannot run. Activate Python 3.12 or set AITK_PYTHON_PATH to a working environment.');
-  const value: unknown = JSON.parse(result.stdout);
-  if (!value || typeof value !== 'object' || !('executable' in value) || typeof value.executable !== 'string' ||
-      !('version' in value) || !Array.isArray(value.version) || value.version[0] !== 3 || ![11, 12].includes(value.version[1])) {
-    throw new Error('Unsupported Python interpreter. Use Python 3.12 or the Python 3.11 DGX profile.');
+  let value: unknown;
+  try { value = JSON.parse(result.stdout); }
+  catch { throw new Error(`Cannot read Python interpreter details from ${candidate}.`); }
+  if (!value || typeof value !== 'object' || !('executable' in value) || typeof value.executable !== 'string' || !value.executable ||
+      !('version' in value) || !Array.isArray(value.version) || value.version.length !== 2 ||
+      value.version.some(part => typeof part !== 'number' || !Number.isSafeInteger(part) || part < 0)) {
+    throw new Error(`Cannot read Python interpreter details from ${candidate}.`);
+  }
+  if (value.version[0] !== 3 || ![11, 12].includes(value.version[1])) {
+    throw new Error(`Unsupported Python ${value.version.join('.')} at ${value.executable}. Use Python 3.12 or the Python 3.11 DGX profile. Run the manager environment sync, or set AITK_PYTHON_PATH to a supported environment.`);
   }
   resolved = { key, executable: value.executable, expires: Date.now() + 60_000 };
   return value.executable;

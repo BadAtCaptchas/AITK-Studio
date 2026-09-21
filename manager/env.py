@@ -1,9 +1,10 @@
 """Python environment provisioning and dependency sync.
 
 Strategy:
-- If a venv already exists (.venv or venv), use it.
+- Reuse a venv only when its Python version and architecture match the spec.
+- Preserve an incompatible venv before creating its replacement.
 - Otherwise create one: prefer uv (downloads the exact Python version needed),
-  fall back to the running Python's venv module if it is new enough.
+  fall back to the running Python's venv module only if it matches the spec.
 - Installs go through `uv pip` when uv is available (much faster), else pip.
 
 State (torch backend, requirements hash, applied migrations) is stored inside
@@ -14,6 +15,8 @@ import json
 import os
 import subprocess
 import sys
+import sysconfig
+import uuid
 
 from .util import (
     REPO_ROOT,
@@ -31,9 +34,6 @@ from .util import (
 )
 
 STATE_FILE = "aitk_manager_state.json"
-
-MIN_SYSTEM_PYTHON = (3, 10)
-
 
 # ---------------------------------------------------------------- state
 
@@ -58,17 +58,17 @@ def save_state(state):
 # ---------------------------------------------------------------- venv
 
 
-def venv_exists():
-    return os.path.isfile(venv_python())
+def venv_exists(venv=None):
+    return os.path.isfile(venv_python(venv))
 
 
-def _venv_platform():
+def _venv_platform(venv=None):
     """sysconfig platform of the existing venv ('win-amd64', 'win-arm64', ...)."""
-    if not venv_exists():
+    if not venv_exists(venv):
         return None
     try:
         out = subprocess.run(
-            [venv_python(), "-c", "import sysconfig; print(sysconfig.get_platform())"],
+            [venv_python(venv), "-c", "import sysconfig; print(sysconfig.get_platform())"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=30,
@@ -92,73 +92,90 @@ def _uv_python_platform(uv_python):
     return None
 
 
+def venv_matches(spec, venv=None):
+    """Check the interpreter itself, not just the installed package state."""
+    if venv_python_version(venv) != spec.python_version:
+        return False
+    want = _uv_python_platform(spec.uv_python)
+    return not want or _venv_platform(venv) == want
+
+
+def _preserve_venv(target, label):
+    """Move only a checkout-local environment aside, without deleting its files."""
+    target = os.path.abspath(target)
+    name = os.path.basename(target)
+    expected = os.path.join(os.path.realpath(REPO_ROOT), name)
+    if (
+        name not in (".venv", "venv")
+        or os.path.dirname(target) != os.path.abspath(REPO_ROOT)
+        or os.path.normcase(os.path.realpath(target)) != os.path.normcase(expected)
+    ):
+        die("Refusing to replace an environment outside this checkout: %s" % target)
+    backup = "%s.%s-%s" % (target, label, uuid.uuid4().hex)
+    os.rename(target, backup)
+    return backup
+
+
 def ensure_venv(spec, dry_run=False):
-    """Create the venv if missing. Returns path to the venv python."""
-    if venv_exists():
-        # Switching stacks (e.g. Spark emulated x64 <-> native arm64) needs a
-        # different interpreter arch; the venv is disposable by design, so
-        # recreate it rather than install unresolvable wheels into it.
-        want = _uv_python_platform(spec.uv_python)
-        have = _venv_platform()
-        if want and have and want != have:
-            if dry_run:
-                info(
-                    "[dry-run] venv is %s but this spec needs %s — would "
-                    "recreate the venv." % (have, want)
-                )
-                return venv_python()
-            warn(
-                "Existing venv is %s but this spec needs %s — recreating the "
-                "venv (all packages will be reinstalled)." % (have, want)
-            )
-            import shutil
-
-            shutil.rmtree(venv_dir(), ignore_errors=True)
-        else:
-            return venv_python()
-    if venv_exists():
-        return venv_python()
-
+    """Create or replace the venv to match the spec; preserve the old environment."""
+    # Keep the target stable if both .venv and venv exist and one is moved aside.
     target = venv_dir()
+    if venv_matches(spec, target):
+        return venv_python(target)
+
     uv = find_uv()
     # spec.uv_python pins the full interpreter build (arch included) where the
     # default choice would be wrong — e.g. Windows-on-ARM must stay x86_64
     python_request = spec.uv_python or spec.python_version
     if dry_run:
         info(
-            "[dry-run] would create venv at %s (python %s, via %s)"
-            % (target, python_request, "uv" if uv else "venv module")
+            "[dry-run] would %s venv at %s (python %s, via %s)"
+            % ("preserve and replace" if os.path.exists(target) else "create",
+               target, python_request, "uv" if uv else "venv module")
         )
         return venv_python(target)
 
-    if uv:
-        info("Creating venv with uv (python %s) at %s" % (python_request, target))
-        run(
-            [uv, "venv", target, "--python", python_request, "--seed"],
-            env=clean_env(),
-        )
-    else:
-        if sys.version_info < MIN_SYSTEM_PYTHON:
-            die(
-                "Python %d.%d is too old (need >= %d.%d) and uv is not installed.\n"
-                "Install uv (https://docs.astral.sh/uv/) or a newer Python, then re-run."
-                % (sys.version_info[:2] + MIN_SYSTEM_PYTHON)
-            )
-        if spec.uv_python:
-            warn(
-                "uv not found — the venv needs the %s interpreter and the "
-                "system Python may be a different build. Install uv if the "
-                "torch install below fails to resolve." % spec.uv_python
-            )
+    if not uv:
         pyver = "%d.%d" % (sys.version_info[:2])
-        if pyver != spec.python_version:
-            warn(
-                "Recommended Python is %s but using system Python %s "
-                "(install uv to get the exact version automatically)."
-                % (spec.python_version, pyver)
+        want = _uv_python_platform(spec.uv_python)
+        if pyver != spec.python_version or (want and sysconfig.get_platform() != want):
+            die(
+                "This environment requires Python %s, but the manager is running "
+                "Python %s (%s) and uv is unavailable. Install uv or run the manager "
+                "with the required interpreter. The existing environment was not changed."
+                % (python_request, pyver, sysconfig.get_platform())
             )
-        info("Creating venv at %s" % target)
-        run([sys.executable, "-m", "venv", target])
+
+    backup = None
+    if os.path.lexists(target):
+        try:
+            backup = _preserve_venv(target, "backup")
+        except OSError as error:
+            die(
+                "Cannot preserve the existing environment at %s: %s. "
+                "Close processes using it and run the manager from outside that environment."
+                % (target, error)
+            )
+        warn("Previous environment preserved at %s; creating Python %s." % (backup, python_request))
+    try:
+        if uv:
+            info("Creating venv with uv (python %s) at %s" % (python_request, target))
+            run([uv, "venv", target, "--python", python_request, "--seed"], env=clean_env())
+        else:
+            info("Creating venv at %s" % target)
+            run([sys.executable, "-m", "venv", target], env=clean_env())
+        if not venv_matches(spec, target):
+            die("Created environment does not provide the required Python %s." % python_request)
+    except BaseException:
+        if backup:
+            try:
+                if os.path.lexists(target):
+                    _preserve_venv(target, "failed")
+                os.rename(backup, target)
+                warn("Restored the previous environment at %s." % target)
+            except OSError as error:
+                warn("Could not restore the previous environment; it remains at %s: %s" % (backup, error))
+        raise
     ok("Virtual environment ready.")
     return venv_python(target)
 
@@ -207,13 +224,13 @@ def _pip_uninstall(packages, dry_run=False):
     run(cmd, check=False, env=clean_env())
 
 
-def venv_python_version():
+def venv_python_version(venv=None):
     """'3.12' etc. from the venv interpreter, or None."""
-    if not venv_exists():
+    if not venv_exists(venv):
         return None
     try:
         out = subprocess.run(
-            [venv_python(), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+            [venv_python(venv), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=30,
@@ -710,4 +727,3 @@ def sync(spec, detection, dry_run=False, force=False):
     write_sitecustomize(dry_run=dry_run, spec=spec)
     migrations.run_pending(dry_run=dry_run)
     ok("Environment is up to date.")
-

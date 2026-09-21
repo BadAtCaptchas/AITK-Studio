@@ -22,7 +22,7 @@ python3 -m manager doctor      # diagnose problems
   pin (2.13.0 / torchvision 0.28.0 / torchaudio 2.11.0) on every platform:
   cu130 wheels when the driver supports CUDA 13 (cu126 fallback for older
   drivers, refused outright on Blackwell GPUs which need cu130), same stack +
-  Python 3.11 + `dgx_requirements.txt` on DGX/Grace, PyPI wheels on Mac,
+  Python 3.12 + `dgx_requirements.txt` on DGX/Grace, PyPI wheels on Mac,
   rocm7.1 (experimental) for AMD, `--cpu` to force a CPU install. **Torch
   pins there must be updated together with the README install instructions,
   run_mac.zsh, and dgx_instructions.md.**
@@ -82,8 +82,14 @@ python3 -m manager doctor      # diagnose problems
   version numbers; `launch` polls the UI port and opens the browser when
   ready (`--no-browser` to disable, auto-skipped on headless boxes).
 - **uv is used when present** (fast installs, auto-downloads the right
-  Python); plain `venv` + `pip` otherwise. The venv is created at `.venv/`
-  (an existing `venv/` is also respected, matching `ui/cron/pythonPath.ts`).
+  Python); plain `venv` + `pip` otherwise, only with the required Python
+  version and architecture. The venv is created at `.venv/` (an existing
+  `venv/` is also respected, matching `ui/src/server/pythonPath.ts`). Install,
+  sync, and update check the interpreter against the spec before updating
+  packages. An incompatible environment is preserved alongside it as
+  `.venv.backup-<id>` or `venv.backup-<id>` before creating a replacement.
+  Failed interpreter creation restores the old environment. `check` also
+  treats an interpreter mismatch as out of sync, even if package pins match.
 - **State** (requirements hash, applied migrations) lives inside the venv
   (`aitk_manager_state.json`) — deleting the venv resets everything.
 - **Update flow**: `update` pulls fast-forward only, then **re-execs**

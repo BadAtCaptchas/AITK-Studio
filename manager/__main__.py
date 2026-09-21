@@ -48,8 +48,9 @@ def cmd_detect(args):
     else:
         backend = detection.get("spec", {}).get("backend", "unknown")
         info("os=%s arch=%s backend=%s" % (detection["os"], detection["arch"], backend))
-        if detection["nvidia"]:
-            for gpu in detection["nvidia"]["gpus"]:
+        nvidia = detection.get("nvidia")
+        if isinstance(nvidia, dict):
+            for gpu in nvidia["gpus"]:
                 info("gpu: %s (%s)" % (gpu["name"], gpu["memory"]))
 
 
@@ -79,7 +80,7 @@ def cmd_check(args):
         "behind": behind,
         "incoming": gitops.incoming_log(),
         "venv": env.venv_exists(),
-        "deps_in_sync": env.venv_exists()
+        "deps_in_sync": env.venv_matches(s)
         and env.torch_matches(s)
         and env.requirements_in_sync(s),
         "backend": s.backend,
@@ -247,5 +248,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

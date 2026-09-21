@@ -29,9 +29,9 @@ const NV_ENV = { ...process.env, CUDA_DEVICE_ORDER: 'PCI_BUS_ID' };
 // No stdout line for this long means the loop child is buffering or hung.
 const NV_WATCHDOG_MS = 15_000;
 const NV_QUERY_TIMEOUT_MS = 5000;
-// A line-less gap this long after the last line closes out a batch (all
-// lines of one iteration arrive together; iterations are MONITOR_TICK_MS
-// apart, so this can never bleed into the next batch).
+const GPU_SAMPLE_MAX_AGE_MS = 5000;
+// Collect nearby device rows, but never postpone publishing indefinitely
+// when stdout arrives continuously or contains several buffered iterations.
 const NV_BATCH_FLUSH_MS = 100;
 // Temperature refresh is decoupled from the tick (see refreshCpuTemp)
 const CPU_TEMP_REFRESH_MS = 5000;
@@ -102,12 +102,11 @@ class SystemMonitor {
   private latestGpu: GPUApiResponse = { hasNvidiaSmi: false, isMac: this.isMac, gpus: [] };
   private macGpuName = 'Apple GPU';
   private nvChild: ChildProcess | null = null;
-  private nvBatch: GpuInfo[] = [];
+  private nvBatch = new Map<number, GpuInfo>();
   private nvStdoutBuffer = '';
   private nvFlushTimer: NodeJS.Timeout | null = null;
   private nvUnavailable = false;
   private nvReaped = false;
-  private nvEverGotLine = false;
   private nvOneShotMode = false;
   private nvOneShotInFlight = false;
   private lastNvLineAt = 0;
@@ -148,7 +147,7 @@ class SystemMonitor {
     return {
       t: Date.now(),
       cpu: this.latestCpu,
-      gpu: this.latestGpu,
+      gpu: this.getGpuSample(),
       history: [...this.history],
     };
   }
@@ -156,6 +155,19 @@ class SystemMonitor {
   // -------------------------------------------------------------------------
   // Tick loop
   // -------------------------------------------------------------------------
+  private getGpuSample(): GPUApiResponse {
+    if (this.nvUnavailable || this.latestGpu.stale) return this.latestGpu;
+    if (this.latestGpu.sampledAt === undefined || Date.now() - this.latestGpu.sampledAt > GPU_SAMPLE_MAX_AGE_MS) {
+      return {
+        ...this.latestGpu,
+        gpus: [],
+        stale: true,
+        error: 'Waiting for fresh GPU readings.',
+      };
+    }
+    return this.latestGpu;
+  }
+
   private async tick(): Promise<void> {
     if (this.tickInFlight) return;
     this.tickInFlight = true;
@@ -175,7 +187,7 @@ class SystemMonitor {
     }
     try {
       if (this.isMac) {
-        this.latestGpu = this.sampleMacGpu();
+        this.latestGpu = { ...this.sampleMacGpu(), sampledAt: Date.now() };
       } else if (this.nvOneShotMode) {
         void this.sampleNvOneShot();
       } else {
@@ -185,7 +197,7 @@ class SystemMonitor {
       console.error('Monitor: GPU sample failed:', error);
     }
 
-    const sample: MonitorSample = { t, cpu: this.latestCpu, gpu: this.latestGpu };
+    const sample: MonitorSample = { t, cpu: this.latestCpu, gpu: this.getGpuSample() };
     this.history.push(historyPointFromSample(sample));
     if (this.history.length > MONITOR_HISTORY_LENGTH) {
       this.history.splice(0, this.history.length - MONITOR_HISTORY_LENGTH);
@@ -383,6 +395,7 @@ class SystemMonitor {
     try {
       child = spawn('nvidia-smi', [...NV_QUERY_ARGS, '-lms', String(MONITOR_TICK_MS)], {
         env: NV_ENV,
+        windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch {
@@ -391,16 +404,21 @@ class SystemMonitor {
     }
     this.nvChild = child;
     this.nvStdoutBuffer = '';
-    this.nvBatch = [];
+    this.nvBatch.clear();
     this.lastNvLineAt = Date.now();
 
-    child.stdout!.on('data', (chunk: Buffer) => this.onNvData(chunk.toString()));
+    child.stdout!.on('data', (chunk: Buffer) => {
+      if (this.nvChild === child) this.onNvData(chunk.toString());
+    });
     child.stderr!.on('data', () => {
       // nvidia-smi warnings are not actionable here
     });
     child.on('error', (err: NodeJS.ErrnoException) => {
+      if (this.nvChild !== child) return;
       if (err.code === 'ENOENT') {
         this.markNvUnavailable();
+      } else {
+        this.useNvOneShot();
       }
     });
     child.on('exit', () => {
@@ -424,35 +442,46 @@ class SystemMonitor {
       if (!line.trim()) continue;
       const gpu = parseGpuLine(line);
       if (!gpu) continue;
-      this.nvEverGotLine = true;
       this.lastNvLineAt = Date.now();
-      this.nvBatch.push(gpu);
+      // A pipe read can contain multiple iterations for the same GPU.
+      // Keep the newest row, not duplicate indices with the oldest first.
+      this.nvBatch.set(gpu.index, gpu);
     }
-    if (this.nvFlushTimer) clearTimeout(this.nvFlushTimer);
-    this.nvFlushTimer = setTimeout(() => this.flushNvBatch(), NV_BATCH_FLUSH_MS);
+    if (!this.nvFlushTimer && this.nvBatch.size > 0) {
+      this.nvFlushTimer = setTimeout(() => this.flushNvBatch(), NV_BATCH_FLUSH_MS);
+    }
   }
 
   private flushNvBatch(): void {
     this.nvFlushTimer = null;
-    if (this.nvBatch.length === 0) return;
+    if (this.nvBatch.size === 0) return;
     this.latestGpu = {
       hasNvidiaSmi: true,
       isMac: false,
-      gpus: this.nvBatch.sort((a, b) => a.index - b.index),
+      gpus: [...this.nvBatch.values()].sort((a, b) => a.index - b.index),
+      sampledAt: this.lastNvLineAt,
     };
-    this.nvBatch = [];
+    this.nvBatch.clear();
   }
 
   private nvWatchdog(): void {
     if (this.nvUnavailable || !this.nvChild) return;
     if (Date.now() - this.lastNvLineAt <= NV_WATCHDOG_MS) return;
-    console.warn('Monitor: no output from nvidia-smi loop, restarting it');
-    // Loop mode that never produced a single line isn't going to start —
-    // switch to a one-shot spawn per tick instead of kill/respawn forever.
-    if (!this.nvEverGotLine) {
-      this.nvOneShotMode = true;
+    console.warn('Monitor: no output from nvidia-smi loop, switching to one-shot queries');
+    this.useNvOneShot();
+  }
+
+  private useNvOneShot(): void {
+    this.nvOneShotMode = true;
+    const child = this.nvChild;
+    this.nvChild = null;
+    if (this.nvFlushTimer) {
+      clearTimeout(this.nvFlushTimer);
+      this.nvFlushTimer = null;
     }
-    this.nvChild.kill('SIGKILL');
+    this.nvBatch.clear();
+    this.nvStdoutBuffer = '';
+    child?.kill('SIGKILL');
   }
 
   private async sampleNvOneShot(): Promise<void> {
@@ -471,11 +500,13 @@ class SystemMonitor {
         .map(parseGpuLine)
         .filter((gpu): gpu is GpuInfo => gpu !== null)
         .sort((a, b) => a.index - b.index);
-      this.latestGpu = { hasNvidiaSmi: true, isMac: false, gpus };
+      if (gpus.length === 0) throw new Error('No GPU readings returned');
+      this.latestGpu = { hasNvidiaSmi: true, isMac: false, gpus, sampledAt: Date.now() };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         this.markNvUnavailable();
       } else {
+        this.latestGpu = { ...this.latestGpu, gpus: [], stale: true, error: 'Failed to read current GPU usage.' };
         console.error('Monitor: one-shot nvidia-smi failed:', err);
       }
     } finally {

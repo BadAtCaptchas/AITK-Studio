@@ -188,10 +188,10 @@ async function checkNvidiaSmi(isWindows: boolean): Promise<boolean> {
       // Check if nvidia-smi is available on Windows
       // It's typically located in C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe
       // but we'll just try to run it directly as it may be in PATH
-      await execAsync('nvidia-smi -L');
+      await execAsync('nvidia-smi -L', { timeout: 5000, killSignal: 'SIGKILL', windowsHide: true });
     } else {
       // Linux/macOS check
-      await execAsync('which nvidia-smi');
+      await execAsync('which nvidia-smi', { timeout: 5000, killSignal: 'SIGKILL', windowsHide: true });
     }
     return true;
   } catch (error) {
@@ -207,6 +207,9 @@ async function getGpuStats(isWindows: boolean) {
   // Execute command
   const { stdout } = await execAsync(command, {
     env: { ...process.env, CUDA_DEVICE_ORDER: 'PCI_BUS_ID' },
+    timeout: 5000,
+    killSignal: 'SIGKILL',
+    windowsHide: true,
   });
 
   // Parse CSV output

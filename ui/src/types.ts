@@ -353,6 +353,8 @@ export interface GPUApiResponse {
   hasNvidiaSmi: boolean;
   isMac: boolean;
   gpus: GpuInfo[];
+  sampledAt?: number;
+  stale?: boolean;
   error?: string;
 }
 

@@ -22,8 +22,9 @@ type FetchGpuInfoOptions = {
 const gpuCache = new Map<string, { data: GPUApiResponse; fetchedAt: number }>();
 const gpuRequestPool = new SharedAbortableRequestPool<string, GPUApiResponse>(async (workerID, signal) => {
   const data = await apiClient
-    .get('/api/gpu', { params: { worker_id: workerID }, signal })
+    .get('/api/gpu', { params: { worker_id: workerID }, signal, timeout: 10_000 })
     .then(res => res.data as GPUApiResponse);
+  if (data.stale || data.error) throw new Error(data.error || 'Waiting for fresh GPU readings.');
   gpuCache.set(workerID, { data, fetchedAt: Date.now() });
   return data;
 });
@@ -55,6 +56,7 @@ export default function useGPUInfo(
   const activeScopeRef = useRef('');
   const monitor = useMonitorStream();
   const useLocalMonitor = workerID === 'local';
+  const useLiveMonitor = useLocalMonitor && monitor.connected && !!monitor.gpu && !monitor.gpu.stale && !monitor.gpu.error;
   activeScopeRef.current = `${enabled}:${workerID}:${gpuIDsKey}`;
 
   const fetchGpuInfo = useCallback(
@@ -80,6 +82,8 @@ export default function useGPUInfo(
         if (fetchOptions?.signal?.aborted) return;
         if (activeScopeRef.current !== requestScope) return;
         console.error(`Failed to fetch GPU data: ${err instanceof Error ? err.message : String(err)}`);
+        setGpuData(null);
+        setGpuList([]);
         setStatus('error');
       } finally {
         if (!fetchOptions?.signal?.aborted && activeScopeRef.current === requestScope) {
@@ -98,7 +102,7 @@ export default function useGPUInfo(
   }, [enabled, gpuIDsKey, workerID]);
 
   useEffect(() => {
-    if (!enabled || !useLocalMonitor || !monitor.gpu) return;
+    if (!enabled || !useLiveMonitor || !monitor.gpu) return;
     const data = monitor.gpu;
     let gpus = [...data.gpus].sort((a, b) => a.index - b.index);
     if (gpuIds) gpus = gpus.filter(gpu => gpuIds.includes(gpu.index));
@@ -106,9 +110,17 @@ export default function useGPUInfo(
     setGpuList(gpus);
     setIsLoaded(true);
     setStatus('success');
-  }, [enabled, gpuIDsKey, gpuIds, monitor.gpu, useLocalMonitor]);
+  }, [enabled, gpuIDsKey, gpuIds, monitor.gpu, useLiveMonitor]);
 
-  const useLiveMonitor = useLocalMonitor && monitor.connected;
+  useEffect(() => {
+    if (!enabled || !useLocalMonitor || useLiveMonitor) return;
+    // Clear the old streamed reading once when switching to polling. Further
+    // stale stream events must not overwrite a fresh polling response.
+    setGpuData(null);
+    setGpuList([]);
+    setStatus('loading');
+  }, [enabled, useLocalMonitor, useLiveMonitor]);
+
   usePollLoop(
     signal => {
       if (!enabled || useLiveMonitor) return;

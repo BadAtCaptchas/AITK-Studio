@@ -112,7 +112,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
   const logRef = useRef<HTMLDivElement>(null);
   // Track whether we should auto-scroll to bottom
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
-  const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, systemPollInterval, job.worker_id);
+  const { gpuList, isGPUInfoLoaded, status: gpuStatus } = useGPUInfo(gpuIds, systemPollInterval, job.worker_id);
   const { cpuInfo, isCPUInfoLoaded } = useCPUInfo(systemPollInterval, job.worker_id);
   const totalSteps = getTotalSteps(job);
   const progress = totalSteps && totalSteps > 0 ? (job.step / totalSteps) * 100 : null;
@@ -279,7 +279,15 @@ export default function JobOverview({ job }: JobOverviewProps) {
       {/* GPU Widget Panel */}
       <div className="col-span-1">
         <div>{isCPUInfoLoaded && cpuInfo && <CPUWidget cpu={cpuInfo} />}</div>
-        <div className="mt-4">{isGPUInfoLoaded && gpuList.length > 0 && <GPUWidget gpu={gpuList[0]} />}</div>
+        <div className="mt-4">
+          {gpuStatus === 'error' ? (
+            <PageNotice tone="warning" title="GPU telemetry unavailable">
+              Current GPU readings could not be retrieved.
+            </PageNotice>
+          ) : isGPUInfoLoaded && gpuList.length > 0 ? (
+            <GPUWidget gpu={gpuList[0]} />
+          ) : null}
+        </div>
         {jobType === 'train' && (
           <div className="mt-4">
             <FilesWidget jobID={job.id} jobName={job.name} canGenerate={canGenerate} />

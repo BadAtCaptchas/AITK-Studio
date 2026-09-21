@@ -201,7 +201,7 @@ async function postCommand(request: Request) {
       extra.job_type = 'inference';
     } else if (extra.job_type === 'inference') throw new CommandInputError('Inference jobs require an InferenceEngine process');
 
-    if (id !== undefined && typeof id !== 'string') {
+    if (id !== undefined && id !== null && typeof id !== 'string') {
       return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });
     }
 

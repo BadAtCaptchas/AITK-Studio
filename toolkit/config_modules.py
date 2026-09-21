@@ -1691,12 +1691,13 @@ class GenerateImageConfig:
                 tmp_media_path = os.path.join(tmp_folder, media_filename)
                 tmp_thumb_path = os.path.join(tmp_folder, media_filename + '.thumb')
                 try:
-                    if self._generate_thumbnail(tmp_media_path, tmp_thumb_path):
+                    thumb_ext = self._generate_thumbnail(tmp_media_path, tmp_thumb_path)
+                    if thumb_ext:
                         thumbs_folder = os.path.join(real_folder, '.thumbs')
                         os.makedirs(thumbs_folder, exist_ok=True)
                         os.replace(
                             tmp_thumb_path,
-                            os.path.join(thumbs_folder, media_filename + '.jpg'),
+                            os.path.join(thumbs_folder, media_filename + thumb_ext),
                         )
                 except Exception as e:
                     print(f"Failed to generate thumbnail for {media_filename}: {e}")
@@ -1718,14 +1719,15 @@ class GenerateImageConfig:
                 shutil.rmtree(tmp_folder, ignore_errors=True)
 
     def _generate_thumbnail(self, media_path, thumb_path):
-        # 300x300 center-cropped 90% jpg. Returns True if one was written.
+        # 300x300 center-cropped PNG for alpha, otherwise 90% JPEG.
+        # Returns the written extension, or None for unsupported media.
         from PIL import Image as PILImage
         ext = os.path.splitext(media_path)[1].lower()
         img = None
         if ext in ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']:
             with PILImage.open(media_path) as source_img:
                 # Animated formats open on their first frame.
-                img = source_img.convert('RGB')
+                img = source_img.copy()
         elif ext == '.mp4':
             import cv2
             cap = cv2.VideoCapture(media_path)
@@ -1740,16 +1742,21 @@ class GenerateImageConfig:
             from toolkit.audio.album_artwork import create_artwork, load_waveform
             img = create_artwork(load_waveform(media_path), size=300)
         if img is None:
-            return False
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
+            return None
+        has_alpha = img.mode in ('RGBA', 'LA') or (
+            img.mode == 'P' and 'transparency' in img.info
+        )
+        img = img.convert('RGBA' if has_alpha else 'RGB')
         w, h = img.size
         side = min(w, h)
         left = (w - side) // 2
         top = (h - side) // 2
         img = img.crop((left, top, left + side, top + side)).resize((300, 300), PILImage.LANCZOS)
+        if has_alpha:
+            img.save(thumb_path, format='PNG', optimize=True)
+            return '.png'
         img.save(thumb_path, format='JPEG', quality=90)
-        return True
+        return '.jpg'
 
     def save_image(self, image, count: int = 0, max_count=0):
         # make parent dirs

@@ -47,10 +47,32 @@ class AtomicSaveHarness:
     def _generate_thumbnail(self, media_path, thumb_path):
         with open(thumb_path, "wb") as handle:
             handle.write(b"jpeg")
-        return True
+        return '.jpg'
 
 
 class SampleAtomicWriteTests(unittest.TestCase):
+    def test_rgba_thumbnail_is_published_as_png_before_media(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as root:
+            def save_image(harness, image, count, max_count):
+                image.save(harness.get_image_path(count, max_count))
+
+            harness = AtomicSaveHarness(root, save_image)
+            harness._generate_thumbnail = types.MethodType(METHODS['_generate_thumbnail'], harness)
+            image = Image.new('RGBA', (64, 32), (100, 50, 25, 64))
+            with patch.object(os, 'replace', wraps=os.replace) as replace:
+                harness.save_image_atomic(image, 1)
+            thumbnail = Path(root, '.thumbs', 'sample-1.png.png')
+            self.assertEqual([call.args[1] for call in replace.call_args_list], [
+                str(thumbnail), str(Path(root, 'sample-1.png')),
+            ])
+            for filename in (thumbnail, Path(root, 'sample-1.png')):
+                with Image.open(filename) as saved:
+                    self.assertEqual(saved.mode, 'RGBA')
+                    self.assertEqual(saved.getpixel((0, 0))[3], 64)
+            self.assertEqual(list(Path(root, '.tmp').iterdir()), [])
+
     def test_partial_media_is_hidden_and_thumbnail_is_published(self):
         with tempfile.TemporaryDirectory() as root:
             wrote_partial = threading.Event()
@@ -188,12 +210,39 @@ class ThumbnailGenerationTests(unittest.TestCase):
                 append_images=[Image.new("RGB", (320, 640), "green")],
             )
 
-            self.assertTrue(self.generate(static_path, static_thumb))
-            self.assertTrue(self.generate(animated_path, animated_thumb))
+            self.assertEqual(self.generate(static_path, static_thumb), '.jpg')
+            self.assertEqual(self.generate(animated_path, animated_thumb), '.jpg')
             for thumb_path in (static_thumb, animated_thumb):
                 with Image.open(thumb_path) as thumb:
                     self.assertEqual(thumb.format, "JPEG")
                     self.assertEqual(thumb.size, (300, 300))
+
+    def test_rgba_grayscale_and_palette_transparency_generate_pngs(self):
+        from PIL import Image
+
+        rgba = Image.new('RGBA', (640, 320), (100, 50, 25, 64))
+        grayscale = Image.new('LA', (640, 320), (100, 64))
+        palette = Image.new('P', (640, 320), 0)
+        palette.putpalette([100, 50, 25] * 256)
+        palette.info['transparency'] = 0
+        with tempfile.TemporaryDirectory() as root:
+            for image, expected_alpha in ((rgba, 64), (grayscale, 64), (palette, 0)):
+                with self.subTest(mode=image.mode):
+                    source = Path(root, f'{image.mode}.png')
+                    thumb = Path(root, f'{image.mode}.thumb')
+                    image.save(source)
+                    self.assertEqual(self.generate(str(source), str(thumb)), '.png')
+                    with Image.open(thumb) as saved:
+                        self.assertEqual(saved.format, 'PNG')
+                        self.assertEqual(saved.mode, 'RGBA')
+                        self.assertEqual(saved.size, (300, 300))
+                        self.assertEqual(saved.getchannel('A').getextrema(), (expected_alpha, expected_alpha))
+
+    def test_unsupported_media_does_not_write_thumbnail(self):
+        with tempfile.TemporaryDirectory() as root:
+            thumb = Path(root, 'sample.thumb')
+            self.assertIsNone(self.generate(str(Path(root, 'sample.txt')), str(thumb)))
+            self.assertFalse(thumb.exists())
 
     def test_mp4_uses_first_frame_and_releases_capture(self):
         from PIL import Image
@@ -224,7 +273,7 @@ class ThumbnailGenerationTests(unittest.TestCase):
                 media_path = os.path.join(root, "sample.mp4")
                 thumb_path = os.path.join(root, "sample.jpg")
                 Path(media_path).write_bytes(b"video")
-                self.assertTrue(self.generate(media_path, thumb_path))
+                self.assertEqual(self.generate(media_path, thumb_path), '.jpg')
                 self.assertEqual(released, [media_path])
                 with Image.open(thumb_path) as thumb:
                     self.assertEqual(thumb.size, (300, 300))

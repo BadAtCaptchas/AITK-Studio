@@ -8,7 +8,7 @@ import path from 'path';
 import { isRequestAuthenticated } from '@/utils/authSession';
 import { isLocalWorker, getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { normalizeStoragePathSetting } from '@/server/pathContainment';
-import { resolveSampleThumbnail } from '@/server/sampleThumbnails';
+import { removeSampleThumbnails } from '@/server/sampleThumbnails';
 import { waveformArtwork } from '@/server/audioArtwork';
 
 type SampleRouteParams = {
@@ -30,9 +30,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<Sam
     const sample = await resolveJobSampleFile(job, samplePath[0]);
     if (!sample) return Response.json({ deleted: false });
     const folder = path.dirname(sample.path);
-    const thumbnail = await resolveSampleThumbnail(folder, samplePath[0]);
     await fs.promises.unlink(sample.path);
-    if (thumbnail) await fs.promises.unlink(thumbnail.path).catch(() => undefined);
+    await removeSampleThumbnails(folder, samplePath[0]);
     if (path.extname(sample.path) !== '.txt') {
       const caption = await normalizeStoragePathSetting(sample.path.slice(0, -path.extname(sample.path).length) + '.txt', folder);
       if (caption) await fs.promises.unlink(caption).catch(() => undefined);

@@ -16,10 +16,18 @@ def register_attempt_process():
         if not store.available:
             raise RuntimeError('Attempt database is unavailable')
         pid = os.getpid()
-        started = psutil.Process(pid).create_time()
+        process = psutil.Process(pid)
+        started = process.create_time()
+        launch_pids = [pid]
+        if os.name == 'nt':
+            # A Windows venv redirector stays alive while its Python child runs.
+            # Node records that redirector's PID; only its actual child may take over.
+            parent_pid = process.ppid()
+            if parent_pid > 0:
+                launch_pids.append(parent_pid)
         if store.provider == 'mongodb':
             result = store._jobs.update_one(
-                {**store.identity, 'status': 'starting', '$or': [{'pid': None}, {'pid': pid}]},
+                {**store.identity, 'status': 'starting', '$or': [{'pid': None}, *({'pid': value} for value in launch_pids)]},
                 {'$set': {'pid': pid, 'process_started_at': started, 'status': 'running', 'info': 'Loading training runtime'}},
             )
             accepted = result.matched_count == 1
@@ -28,8 +36,9 @@ def register_attempt_process():
                 # Use explicit identity here; ordinary trainer queries are fenced by UIJobStore.
                 accepted = connection.execute(
                     "UPDATE Job SET pid=?, process_started_at=?, status='running', info='Loading training runtime' "
-                    "WHERE id=? AND attempt_id=? AND status='starting' AND (pid IS NULL OR pid=?)",
-                    (pid, started, store.job_id, store.attempt_id, pid),
+                    "WHERE id=? AND attempt_id=? AND status='starting' AND "
+                    "(pid IS NULL OR pid IN (" + ','.join('?' for _ in launch_pids) + "))",
+                    (pid, started, store.job_id, store.attempt_id, *launch_pids),
                 ).rowcount == 1
         if not accepted:
             raise RuntimeError('This launch no longer owns the job attempt; refusing to run')

@@ -45,6 +45,9 @@ const CHANNEL_NAME = 'ai-toolkit-monitor-stream';
 // Leader is presumed gone after this much silence; forwarded samples arrive
 // every MONITOR_TICK_MS so a healthy leader never comes close.
 const LEADER_SILENCE_MS = 3000;
+// A fetch stream can stay open forever without delivering another sample.
+// Bound both the initial connection and gaps between complete monitor events.
+const STREAM_SILENCE_MS = 10_000;
 // How long a hello goes unanswered before the tab takes the stream itself.
 const CLAIM_WAIT_MS = 700;
 const tabId = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -114,12 +117,13 @@ function handleEventBlock(block: string) {
       dataLines.push(line.slice('data:'.length).trimStart());
     }
   }
-  if (dataLines.length === 0) return;
+  if (dataLines.length === 0 || (event !== 'init' && event !== 'sample')) return false;
   const data = dataLines.join('\n');
   applyEvent(event, data);
   if (role === 'leader') {
     post({ type: 'event', id: tabId, event, data });
   }
+  return true;
 }
 
 async function runLoop() {
@@ -127,7 +131,13 @@ async function runLoop() {
   running = true;
   try {
     while (refCount > 0 && role === 'leader') {
-      abortController = new AbortController();
+      const controller = new AbortController();
+      abortController = controller;
+      let silenceTimer = setTimeout(() => controller.abort(), STREAM_SILENCE_MS);
+      const resetSilenceTimer = () => {
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => controller.abort(), STREAM_SILENCE_MS);
+      };
       try {
         const headers: Record<string, string> = { Accept: 'text/event-stream' };
         const token = localStorage.getItem('AI_TOOLKIT_AUTH');
@@ -137,7 +147,7 @@ async function runLoop() {
         const res = await fetch('/api/monitor', {
           headers,
           cache: 'no-store',
-          signal: abortController.signal,
+          signal: controller.signal,
         });
         if (res.status === 401) {
           // Mirror the axios interceptor's behavior
@@ -159,16 +169,20 @@ async function runLoop() {
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
             const block = buffer.slice(0, sep);
             buffer = buffer.slice(sep + 2);
-            handleEventBlock(block);
+            if (handleEventBlock(block)) resetSilenceTimer();
           }
         }
       } catch (err) {
-        if (!abortController.signal.aborted) {
+        if (!controller.signal.aborted) {
           console.error(`Monitor stream error: ${err instanceof Error ? err.message : String(err)}`);
         }
+      } finally {
+        clearTimeout(silenceTimer);
+        controller.abort();
       }
       if (state.connected) {
         emit({ ...state, connected: false });
+        if (role === 'leader') post({ type: 'snapshot', id: tabId, state });
       }
       if (refCount <= 0 || role !== 'leader') break;
       await new Promise(r => setTimeout(r, 2000));

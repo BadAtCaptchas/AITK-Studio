@@ -108,12 +108,15 @@ export default function useGPUInfo(
     setStatus('success');
   }, [enabled, gpuIDsKey, gpuIds, monitor.gpu, useLocalMonitor]);
 
-  usePollLoop(signal => fetchGpuInfo({ signal }), enabled && !useLocalMonitor ? reloadInterval : null, [
-    enabled,
-    workerID,
-    cacheTtlMs,
-    gpuIDsKey,
-  ]);
+  const useLiveMonitor = useLocalMonitor && monitor.connected;
+  usePollLoop(
+    signal => {
+      if (!enabled || useLiveMonitor) return;
+      return fetchGpuInfo({ signal, force: useLocalMonitor });
+    },
+    enabled && !useLiveMonitor ? (useLocalMonitor ? reloadInterval ?? 5000 : reloadInterval) : null,
+    [enabled, workerID, cacheTtlMs, gpuIDsKey, useLiveMonitor],
+  );
 
   return {
     gpuData,

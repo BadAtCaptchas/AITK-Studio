@@ -28,6 +28,7 @@ const NV_QUERY_ARGS = [
 const NV_ENV = { ...process.env, CUDA_DEVICE_ORDER: 'PCI_BUS_ID' };
 // No stdout line for this long means the loop child is buffering or hung.
 const NV_WATCHDOG_MS = 15_000;
+const NV_QUERY_TIMEOUT_MS = 5000;
 // A line-less gap this long after the last line closes out a batch (all
 // lines of one iteration arrive together; iterations are MONITOR_TICK_MS
 // apart, so this can never bleed into the next batch).
@@ -132,8 +133,8 @@ class SystemMonitor {
         // already gone
       }
     });
-    // Fixed cadence; a tick that overruns the interval (slow temperature
-    // read, hung nvidia-smi one-shot) just skips beats instead of stacking.
+    // Fixed cadence; a tick that overruns the interval skips beats instead
+    // of stacking. GPU queries refresh independently so they cannot stall CPU updates.
     this.tick();
     setInterval(() => this.tick(), MONITOR_TICK_MS);
   }
@@ -176,7 +177,7 @@ class SystemMonitor {
       if (this.isMac) {
         this.latestGpu = this.sampleMacGpu();
       } else if (this.nvOneShotMode) {
-        await this.sampleNvOneShot();
+        void this.sampleNvOneShot();
       } else {
         this.nvWatchdog();
       }
@@ -458,7 +459,12 @@ class SystemMonitor {
     if (this.nvUnavailable || this.nvOneShotInFlight) return;
     this.nvOneShotInFlight = true;
     try {
-      const { stdout } = await execFileAsync('nvidia-smi', NV_QUERY_ARGS, { env: NV_ENV });
+      const { stdout } = await execFileAsync('nvidia-smi', NV_QUERY_ARGS, {
+        env: NV_ENV,
+        timeout: NV_QUERY_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        windowsHide: true,
+      });
       const gpus = stdout
         .trim()
         .split('\n')
@@ -505,4 +511,3 @@ export function startMonitor(): SystemMonitor {
   }
   return g.__aiToolkitSystemMonitor;
 }
-

@@ -50,12 +50,20 @@ export default function useCPUInfo(reloadInterval: null | number = null, workerI
     setStatus('success');
   }, [monitor.cpu, useLocalMonitor]);
 
-  usePollLoop(signal => fetchCpuInfo(signal), useLocalMonitor ? null : reloadInterval, [workerID, useLocalMonitor]);
+  const useLiveMonitor = useLocalMonitor && monitor.connected;
+  usePollLoop(
+    signal => {
+      if (useLiveMonitor) return;
+      return fetchCpuInfo(signal);
+    },
+    useLiveMonitor ? null : useLocalMonitor ? reloadInterval ?? 5000 : reloadInterval,
+    [workerID, useLiveMonitor],
+  );
 
   return {
     cpuInfo,
     isCPUInfoLoaded,
     status,
-    refreshCpuInfo: () => (useLocalMonitor ? Promise.resolve() : fetchCpuInfo()),
+    refreshCpuInfo: () => fetchCpuInfo(),
   };
 }

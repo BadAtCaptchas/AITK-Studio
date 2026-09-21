@@ -39,6 +39,7 @@
     "test:dependency-install": "node --test scripts/installDeps.test.mjs",
     "test:models-path": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/modelsPath.test.mjs",
     "test:macstats": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/macstats.test.mjs",
+    "test:monitor": "node --test scripts/monitor.test.mjs",
     "test:minimax-h3": "node --test scripts/minimaxH3Options.test.mjs",
     "test:file-serving": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/fileServing.test.mjs scripts/remoteAssets.test.mjs scripts/sampleThumbnails.test.mjs",
     "test:basic": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/basicUtils.test.mjs scripts/pathContainment.test.mjs",

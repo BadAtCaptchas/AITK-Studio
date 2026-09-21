@@ -53,7 +53,7 @@ import { startQueue } from '@/utils/queue';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 interface JobActionBarProps {
   job: Job;
-  onRefresh?: () => void;
+  onRefresh?: () => void | Promise<void>;
   afterDelete?: () => void;
   hideView?: boolean;
   className?: string;
@@ -189,6 +189,7 @@ export default function JobActionBar({
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
   const [remoteStartStatus, setRemoteStartStatus] = useState<RemoteStartStatus | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
   const [captionResultSyncing, setCaptionResultSyncing] = useState(false);
   const [exportDialog, setExportDialog] = useState<ExportDialogState>(null);
   const [checkpointMode, setCheckpointMode] = useState<TrainingJobCheckpointExportMode>('latest');
@@ -199,14 +200,13 @@ export default function JobActionBar({
   const remoteStartStatusTimeout = useRef<number | null>(null);
   const exportInFlight = useRef(false);
   const modelDownloadInFlight = useRef(false);
-  const remoteStartInFlight = useRef(false);
+  const startInFlight = useRef(false);
   const captionResultInFlight = useRef(false);
   const activeExportID = useRef<string | null>(null);
   const cancelExportInFlight = useRef(false);
   const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
   const isDownloadingModels = modelDownloadStatus?.phase === 'downloading';
-  const isRemoteStarting = remoteStartStatus?.phase === 'starting';
   const remoteCaptionState = getRemoteCaptionState(job);
   const remoteCaptionDownloadStatus = remoteCaptionState?.downloadStatus || null;
   const remoteCaptionLastError =
@@ -406,9 +406,10 @@ export default function JobActionBar({
     }
   };
   const handleStartJob = async () => {
-    if (!canStart || remoteStartInFlight.current) return;
+    if (!canStart || isBusy || startInFlight.current) return;
     const useRemoteStartProgress = job.job_type === 'train' && job.worker_id !== 'local';
-    remoteStartInFlight.current = true;
+    startInFlight.current = true;
+    setIsStarting(true);
     if (remoteStartStatusTimeout.current !== null) {
       window.clearTimeout(remoteStartStatusTimeout.current);
       remoteStartStatusTimeout.current = null;
@@ -431,7 +432,7 @@ export default function JobActionBar({
       if (autoStartQueue) {
         await startQueue(job.gpu_ids, job.worker_id);
       }
-      onRefresh?.();
+      await onRefresh?.();
       if (useRemoteStartProgress) {
         setRemoteStartStatus(current => ({
           phase: 'completed',
@@ -453,7 +454,8 @@ export default function JobActionBar({
         reportWorkflowError(message);
       }
     } finally {
-      remoteStartInFlight.current = false;
+      startInFlight.current = false;
+      setIsStarting(false);
     }
   };
   const handleSaveNextStep = async () => {
@@ -521,19 +523,26 @@ export default function JobActionBar({
     !!(activeExportID.current || exportStatus?.progress?.exportID) &&
     exportStatus?.progress?.status !== 'canceling' &&
     exportStatus?.progress?.cancelRequested !== true;
-  const startActionLabel =
-    job.step > 0 && ['stopped', 'error', 'completed'].includes(job.status) ? 'Resume run' : 'Start run';
+  const isResuming = job.step > 0 && ['stopped', 'error', 'completed'].includes(job.status);
+  const startActionLabel = isStarting
+    ? isResuming
+      ? 'Resuming...'
+      : 'Starting...'
+    : isResuming
+      ? 'Resume run'
+      : 'Start run';
   return (
     <div className={`inline-flex items-center justify-end gap-1 ${className || ''}`}>
       {canStart && (
         <Button
           title={startActionLabel}
           aria-label={startActionLabel}
-          disabled={isRemoteStarting}
+          disabled={isStarting || isBusy}
+          aria-busy={isStarting}
           onClick={() => void handleStartJob()}
-          className={`${actionButtonClass} ${hideView ? '!w-auto gap-2 px-3' : ''} ${isRemoteStarting ? 'cursor-wait opacity-80' : ''}`}
+          className={`${actionButtonClass} ${hideView ? '!w-auto gap-2 px-3' : ''} ${isStarting ? 'cursor-wait opacity-80' : ''}`}
         >
-          {isRemoteStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          {isStarting ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           {hideView && <span>{startActionLabel}</span>}
         </Button>
       )}

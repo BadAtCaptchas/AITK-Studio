@@ -90,6 +90,11 @@ class QwenImage2Model(BaseModel):
     arch = "qwen_image_2"
     preserve_image_alpha = True
 
+    def get_latent_space_version(self) -> str:
+        # Include custom namespaces so sampled posterior caches are never
+        # reused after switching targets and references to posterior means.
+        return super().get_latent_space_version() + "_posterior_mean_v1"
+
     def get_text_embedding_space_version(self):
         return super().get_text_embedding_space_version() + f"_rgba_grid_v2_{self.control_image_max_pixels}"
 
@@ -223,7 +228,8 @@ class QwenImage2Model(BaseModel):
             images = torch.cat([images, torch.ones_like(images[:, :1])], dim=1)
         images = images.unsqueeze(2)  # single-frame dim
 
-        latents = self.vae.encode(images).latent_dist.sample()
+        # Reference training and inference use deterministic posterior means.
+        latents = self.vae.encode(images).latent_dist.mode()
         mean, std = self._latent_stats(latents.device, latents.dtype)
         latents = (latents - mean) / std
         return latents.squeeze(2).to(device, dtype=dtype)

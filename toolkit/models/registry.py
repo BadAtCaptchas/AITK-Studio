@@ -23,7 +23,7 @@ ARCH_REGISTRY: Dict[str, dict] = {
     "qwen_image": {"modality": "image", "model": {"name_or_path": "Qwen/Qwen-Image", "quantize": True, "quantize_te": True}, "sample": {**IMG, "num_inference_steps": 20}},
     "qwen_image_edit": {"modality": "image", "model": {"name_or_path": "Qwen/Qwen-Image-Edit", "quantize": True, "quantize_te": True}, "sample": {**IMG, "num_inference_steps": 20}, "needs_control_image": True},
     "qwen_image_edit_plus": {"modality": "image", "model": {"name_or_path": "Qwen/Qwen-Image-Edit-2509", "quantize": True, "quantize_te": True}, "sample": {**IMG, "num_inference_steps": 20}, "needs_control_image": True},
-    "qwen_image_2": {"modality": "image", "model": {"name_or_path": "Comfy-Org/Qwen-Image-2.1", "quantize": True, "quantize_te": True, "qtype": "convrot8", "qtype_te": "convrot8", "low_vram": True}, "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 3.0}},
+    "qwen_image_2": {"modality": "image", "model": {"name_or_path": "Comfy-Org/Qwen-Image-2.1", "quantize": True, "quantize_te": True, "qtype": "convrot8", "qtype_te": "convrot8", "low_vram": True}, "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 1.0}},
     "krea2": {"modality": "image", "model": {"name_or_path": "krea/Krea-2-Turbo", "quantize": True, "quantize_te": True}, "sample": {**IMG, "num_inference_steps": 8, "guidance_scale": 1.0}},
     "boogu_image": {"modality": "image", "model": {"name_or_path": "Boogu/Boogu-Image-0.1-Base", "quantize": True, "quantize_te": True}, "sample": dict(IMG)},
     "boogu_image_edit": {"modality": "image", "model": {"name_or_path": "Boogu/Boogu-Image-0.1-Edit", "quantize": True, "quantize_te": True}, "sample": dict(IMG), "needs_control_image": True},

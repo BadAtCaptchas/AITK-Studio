@@ -16,11 +16,13 @@ When present, `ctrl_imgs` replaces the legacy `ctrl_img` / `ctrl_img_1` / `ctrl_
 
 Qwen training preserves the alpha channel in target and control images. RGB sources receive opaque alpha. This is independent of the output setting. Other models retain their previous RGB behavior. Alpha-aware latent caches and reference embedding caches use new identities, so older opaque caches are not reused. Existing cache files are not deleted. Cached reference embeddings use the training crop; disable `cache_text_embeddings` for randomized control selection, control augmentations, or moving point-of-interest crops. Qwen datasets require `standardize_images: false` because the RGBA VAE supplies its own normalization.
 
+Training targets and reference images now use deterministic VAE posterior means. Latent cache identities include `_posterior_mean_v1`, including when a custom latent-space version is configured, so caches built from sampled posteriors are not reused. Restart training after updating to build the corrected caches in a fresh training process. Existing cache files remain intact, and this change does not invalidate text embedding caches.
+
 Enable **Transparent output (RGBA)** to retain generated alpha. The prompt helper adds the official transparency instructions and enables RGBA output. Save as PNG, WebP, or JXL; JPEG cannot retain alpha. The VAE sees four channels, while the vision encoder sees the reference composited over white. The bundled Comfy bridge also carries the ordered list and alpha output.
 
 ## Quality and sampling
 
-The Qwen controls offer a 1024x1024 / 20-step preview and seven native 2K / 40-step aspect-ratio presets. Choosing a preset changes the canvas and steps, keeping guidance unchanged. Studio follows upstream AI Toolkit's guidance default of 3; official Diffusers defaults to 1. Existing saved configurations keep their explicit values.
+The Qwen controls offer a 1024x1024 / 20-step preview and seven native 2K / 40-step aspect-ratio presets. Choosing a preset changes the canvas and steps, keeping guidance unchanged. Studio defaults to guidance 1. Existing saved configurations keep their explicit values; set guidance to 1 manually for existing jobs if desired. Explicit guidance values above 1 remain supported.
 
 Prefix KV caching is enabled for sampling when `causal_condition` is supported. Conditional and negative prompts have separate caches, created fresh for each generation. Training uses the ordinary differentiable path. Disable caching if you prefer to reduce cache memory.
 

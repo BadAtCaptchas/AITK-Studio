@@ -37,7 +37,7 @@ test('Qwen Image 2.1 presets reach training and generation through the shared ca
   assert.ok(choice);
   assert.ok(choice.additionalSections.includes('datasets.multi_control_paths'));
   assert.ok(choice.additionalSections.includes('sample.multi_ctrl_imgs'));
-  assert.equal(choice.defaults['config.process[0].sample.guidance_scale'][0], 3);
+  assert.equal(choice.defaults['config.process[0].sample.guidance_scale'][0], 1);
   assert.equal(choice.defaults['config.process[0].train.timestep_type'][0], 'shift');
   const model = getDefaultModelConfig(choice.name);
   assert.equal(model.name_or_path, 'Comfy-Org/Qwen-Image-2.1');

@@ -803,13 +803,13 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
       'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
       'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
       'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
-      'config.process[0].sample.guidance_scale': [3, 4],
+      'config.process[0].sample.guidance_scale': [1, 4],
     },
     disableSections: ['network.conv', 'train.unload_text_encoder'],
     additionalSections: ['datasets.multi_control_paths', 'sample.multi_ctrl_imgs', 'model.low_vram', 'model.layer_offloading'],
     modelNotes: {
       summary: 'Qwen Image 2.1: text-to-image and editing',
-      paragraphs: ['One model supports both tasks. Add dataset control paths or sample reference images for editing; omit them for text-to-image. The default Comfy weights use ConvRot int8 for the transformer and text encoder.', 'Use guidance 3.0 and dimensions divisible by 32. Keep the text encoder loaded when using references. RGBA output, 2K quality presets, prefix caching, and optional official prompt expansion are available in the Qwen controls. Up to 10 ordered references are supported; training preserves source alpha.'],
+      paragraphs: ['One model supports both tasks. Add dataset control paths or sample reference images for editing; omit them for text-to-image. The default Comfy weights use ConvRot int8 for the transformer and text encoder.', 'Use guidance 1.0 and dimensions divisible by 32. Existing saved jobs keep their explicit guidance; set it to 1.0 to use this recommendation. Keep the text encoder loaded when using references. RGBA output, 2K quality presets, prefix caching, and optional official prompt expansion are available in the Qwen controls. Up to 10 ordered references are supported; training preserves source alpha.'],
     },
   },
   {

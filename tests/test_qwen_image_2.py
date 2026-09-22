@@ -5,6 +5,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from diffusers.models.autoencoders.vae import DiagonalGaussianDistribution
+from diffusers.models.embeddings import get_timestep_embedding
 from PIL import Image
 from torchvision.transforms.functional import to_tensor
 from transformers import BatchFeature, Qwen2VLImageProcessor
@@ -18,7 +20,9 @@ from extensions_built_in.diffusion_models.qwen_image_2.src.pipeline import (
     prepare_condition_image, run_transformer, tensor_to_pil,
 )
 from extensions_built_in.diffusion_models.qwen_image_2.src.text_encoder import QwenImage21TextEncoder
-from extensions_built_in.diffusion_models.qwen_image_2.src.transformer import QwenImage21Transformer2DModel
+from extensions_built_in.diffusion_models.qwen_image_2.src.transformer import (
+    QwenImage21TemporalTimesteps, QwenImage21TimestepProjEmbeddings, QwenImage21Transformer2DModel,
+)
 from extensions_built_in.diffusion_models.qwen_image_2.src.vae import AutoencoderKLQwenImage21
 from toolkit.config_modules import ModelConfig, GenerateImageConfig, DatasetConfig
 from toolkit.sample_controls import sample_control_paths, validate_control_paths
@@ -26,6 +30,7 @@ from toolkit.data_transfer_object.data_loader import FileItemDTO
 from extensions_built_in.inference_engine.validation import validate_generation
 from toolkit.config_contract import config_contract_errors
 from toolkit.model_registry import resolve_model
+from toolkit.models.base_model import BaseModel
 from toolkit.models.registry import get_arch_entry
 from toolkit.models.v2._mixin import OstrisModelMixin
 from toolkit.util.comfy_quant_import import import_comfy_quantized_layers
@@ -38,6 +43,26 @@ def tiny_transformer():
     )
 
 
+class PosteriorMeanVAE(torch.nn.Module):
+    """A predictable, non-degenerate posterior for testing the real encoding wrapper."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer('_device_anchor', torch.empty(0))
+        self.config = SimpleNamespace(z_dim=4, latents_mean=[0.5, 1, 1.5, 2], latents_std=[1, 2, 4, 8])
+        self.encoded_inputs = []
+
+    @property
+    def device(self):
+        return self._device_anchor.device
+
+    def encode(self, images):
+        self.encoded_inputs.append(images.clone())
+        mean = images[..., ::16, ::16] + 2
+        posterior = DiagonalGaussianDistribution(torch.cat([mean, torch.full_like(mean, 0.5)], dim=1))
+        return SimpleNamespace(latent_dist=posterior)
+
+
 class QwenImage2Tests(unittest.TestCase):
     def test_registration_and_optional_edit_controls(self):
         self.assertIs(resolve_model('qwen_image_2'), QwenImage2Model)
@@ -46,8 +71,128 @@ class QwenImage2Tests(unittest.TestCase):
         }]}}), [])
         entry = get_arch_entry('qwen_image_2')
         self.assertFalse(entry['needs_control_image'])
-        self.assertEqual(entry['sample']['guidance_scale'], 3)
+        self.assertEqual(entry['sample']['guidance_scale'], 1)
         self.assertEqual(entry['model']['qtype'], 'convrot8')
+
+    def test_timestep_embeddings_preserve_fp32_frequencies_across_dtype_and_device_casts(self):
+        devices = ['cpu', 'cuda', 'cpu'] if torch.cuda.is_available() else ['cpu']
+        for width in (256, 257):
+            for max_period, time_factor in ((10000, 1000.0), (1000, 500.0)):
+                embedding = QwenImage21TemporalTimesteps(width, max_period=max_period, time_factor=time_factor)
+                for device in devices:
+                    for dtype in (torch.float32, torch.bfloat16, torch.float32, torch.float16, torch.bfloat16):
+                        embedding.to(device=device, dtype=dtype)
+                        for input_dtype in (torch.float32, dtype):
+                            with self.subTest(width=width, max_period=max_period, device=device, dtype=dtype,
+                                              input_dtype=input_dtype):
+                                timestep = torch.tensor([0, 0.001, 0.125, 0.499, 0.875, 1],
+                                                        device=device, dtype=input_dtype)
+                                expected = get_timestep_embedding(timestep.float() * time_factor, width,
+                                    flip_sin_to_cos=True, downscale_freq_shift=0, max_period=max_period)
+                                actual = embedding(timestep)
+                                self.assertEqual(actual.dtype, torch.float32)
+                                self.assertEqual(actual.device, timestep.device)
+                                torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+                # The old frequency buffer was nonpersistent; checkpoint keys must stay unchanged.
+                self.assertEqual(embedding.state_dict(), {})
+
+    def test_timestep_projection_keeps_learned_layer_dtype(self):
+        for dtype in (torch.float32, torch.bfloat16, torch.float16):
+            with self.subTest(dtype=dtype):
+                projection = QwenImage21TimestepProjEmbeddings(8).to(dtype=dtype)
+                timestep = torch.tensor([0.125, 0.875])
+                expected_embedding = get_timestep_embedding(timestep * 1000, 256,
+                    flip_sin_to_cos=True, downscale_freq_shift=0).to(dtype)
+                expected = projection.timestep_embedder(expected_embedding)
+                actual = projection(timestep, torch.zeros(2, 8, dtype=dtype))
+                self.assertEqual(actual.dtype, dtype)
+                self.assertTrue(torch.isfinite(actual).all())
+                torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+    def test_encode_images_uses_normalized_posterior_mean_and_preserves_alpha(self):
+        holder = QwenImage2Model('cpu', ModelConfig(arch='qwen_image_2', name_or_path='test'), dtype='fp32')
+        holder.vae = PosteriorMeanVAE()
+        for channels in (3, 4):
+            for dtype in (torch.float32, torch.bfloat16):
+                with self.subTest(channels=channels, dtype=dtype):
+                    images = torch.linspace(-1, 1, 2 * channels * 32 * 64).reshape(2, channels, 32, 64)
+                    expected_images = images.to(dtype)
+                    if channels == 3:
+                        expected_images = torch.cat([expected_images, torch.ones_like(expected_images[:, :1])], dim=1)
+                    means = torch.tensor([0.5, 1, 1.5, 2], dtype=dtype).view(1, 4, 1, 1)
+                    stds = torch.tensor([1, 2, 4, 8], dtype=dtype).view(1, 4, 1, 1)
+                    expected = (expected_images[..., ::16, ::16] + 2 - means) / stds
+                    state = torch.random.get_rng_state().clone()
+                    actual = holder.encode_images(list(images), device='cpu', dtype=dtype)
+                    repeated = holder.encode_images(list(images), device='cpu', dtype=dtype)
+                    self.assertEqual(actual.shape, (2, 4, 2, 4))
+                    self.assertEqual(actual.dtype, dtype)
+                    self.assertFalse(holder.vae.training)
+                    torch.testing.assert_close(holder.vae.encoded_inputs[-1], expected_images.unsqueeze(2), rtol=0, atol=0)
+                    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+                    torch.testing.assert_close(repeated, actual, rtol=0, atol=0)
+                    self.assertTrue(torch.equal(state, torch.random.get_rng_state()))
+
+    def test_reference_encoding_packs_deterministic_means_in_reference_order(self):
+        holder = QwenImage2Model('cpu', ModelConfig(arch='qwen_image_2', name_or_path='test'), dtype='fp32')
+        holder.vae = PosteriorMeanVAE()
+        controls = [
+            [torch.full((1, 3, 32, 64), 0.25), torch.full((1, 4, 64, 32), 0.75)],
+            [torch.full((1, 3, 32, 64), 0.5), torch.full((1, 4, 64, 32), 0.125)],
+        ]
+        means = torch.tensor([0.5, 1, 1.5, 2])
+        stds = torch.tensor([1, 2, 4, 8])
+        expected_samples = []
+        for sample in controls:
+            expected_refs = []
+            for image in sample:
+                pixel = image[0, :, 0, 0] * 2 - 1
+                if pixel.shape[0] == 3:
+                    pixel = torch.cat([pixel, torch.ones(1)])
+                normalized = (pixel + 2 - means) / stds
+                expected_refs.append(normalized.expand(8, 4))
+            expected_samples.append(torch.cat(expected_refs))
+        state = torch.random.get_rng_state().clone()
+        actual, shapes = holder.encode_condition_images(controls)
+        repeated, repeated_shapes = holder.encode_condition_images(controls)
+        self.assertEqual(shapes, [(2, 4), (4, 2)])
+        self.assertEqual(repeated_shapes, shapes)
+        self.assertEqual(actual.shape, (2, 16, 4))
+        torch.testing.assert_close(actual, torch.stack(expected_samples), rtol=0, atol=0)
+        torch.testing.assert_close(repeated, actual, rtol=0, atol=0)
+        self.assertTrue(torch.equal(state, torch.random.get_rng_state()))
+
+    def test_posterior_mean_invalidates_latent_caches_but_preserves_text_caches(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'target.png'
+            Image.new('RGBA', (64, 64), (100, 20, 30, 64)).save(path)
+            dataset_config = DatasetConfig(folder_path=directory, control_path=directory, resolution=64, buckets=True)
+            for custom_version in (None, 'custom_vae_v7'):
+                with self.subTest(custom_version=custom_version):
+                    config = ModelConfig(arch='qwen_image_2', name_or_path='test', latent_space_version=custom_version)
+                    holder = QwenImage2Model('cpu', config, dtype='fp32')
+                    second_holder = QwenImage2Model('cpu', config, dtype='fp32')
+                    old_version = BaseModel.get_latent_space_version(holder)
+                    self.assertEqual(old_version, custom_version or 'qwen_image_2')
+                    self.assertEqual(holder.get_latent_space_version(), old_version + '_posterior_mean_v1')
+                    self.assertEqual(holder.get_text_embedding_space_version(), 'qwen_image_2_rgba_grid_v2_1048576')
+                    items = []
+                    for model, version in ((holder, old_version), (holder, holder.get_latent_space_version()),
+                                           (second_holder, second_holder.get_latent_space_version())):
+                        item = FileItemDTO(path=str(path), dataset_config=dataset_config, sd=model,
+                            latent_space_version=version, text_embedding_space_version=model.get_text_embedding_space_version(),
+                            encode_control_in_text_embeddings=True)
+                        item.scale_to_width = item.scale_to_height = item.crop_width = item.crop_height = 64
+                        item.crop_x = item.crop_y = 0
+                        item.caption = 'edit'
+                        items.append(item)
+                    old, current, second = items
+                    self.assertNotEqual(old.get_latent_path(), current.get_latent_path())
+                    self.assertEqual(current.get_latent_path(), second.get_latent_path())
+                    self.assertEqual(current.get_latent_path(), current.get_latent_path(recalculate=True))
+                    self.assertEqual(old.get_text_embedding_info_dict(), current.get_text_embedding_info_dict())
+                    self.assertEqual(old.get_text_embedding_path(), current.get_text_embedding_path())
+                    self.assertEqual(current.get_text_embedding_path(), second.get_text_embedding_path())
 
     def test_materialized_convrot_embedding_is_not_a_missing_checkpoint_key(self):
         model = torch.nn.Module()

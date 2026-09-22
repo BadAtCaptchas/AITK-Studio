@@ -326,7 +326,7 @@ class BucketsMixin:
 
             # check if bucket exists, if not, create it
             bucket_key = f'{file_item.crop_width}x{file_item.crop_height}'
-            if self.is_video:
+            if self.is_video or getattr(self, 'is_layered', False):
                 # Keep one-frame images separate from every temporal video
                 # bucket even when their spatial dimensions match.
                 bucket_key = f'{bucket_key}x{file_item.num_frames}f'
@@ -366,6 +366,9 @@ class CaptionProcessingDTOMixin:
         if self.raw_caption is not None:
             # we already loaded it
             pass
+        elif getattr(self, 'is_layered', False):
+            self.raw_caption = self.layered_sample.caption(self.dataset_config.default_caption or '')
+            self.raw_caption_short = self.raw_caption
         elif getattr(self, 'is_encrypted', False):
             prompt = self.encrypted_reader.get_caption(self.encrypted_item) or ''
             short_caption = None
@@ -536,6 +539,9 @@ class CaptionProcessingDTOMixin:
             caption = ', '.join(token_list)
         if caption == '':
             pass
+        if getattr(self, 'is_layered', False):
+            from toolkit.layered_dataset import format_layered_caption
+            caption = format_layered_caption(self.layered_sample, caption)
         return caption
 
 class AudioProcessingDTOMixin:
@@ -1055,6 +1061,15 @@ class ImageProcessingDTOMixin:
         # handle get_prompt_embedding
         if self.is_text_embedding_cached:
             self.load_prompt_embedding()
+        if getattr(self, 'is_layered', False):
+            from toolkit.layered_dataset import load_layered_tensor
+            if self.is_latent_cached:
+                self.get_latent()
+                if not self.dataset_config.load_image_when_caching_latents:
+                    load_layered_tensor(self, composite_only=True)
+                    return
+            load_layered_tensor(self)
+            return
         # if we are caching latents, just do that
         if self.is_latent_cached:
             self.get_latent()
@@ -1345,6 +1360,10 @@ class ControlFileItemDTOMixin:
         return self.control_path
 
     def load_control_image(self: 'FileItemDTO'):
+        if getattr(self, 'is_layered', False):
+            from toolkit.layered_dataset import load_layered_tensor
+            load_layered_tensor(self, composite_only=True)
+            return
         control_tensors = []
         control_path_list = self.get_new_control_paths()
         if not isinstance(control_path_list, list):
@@ -2172,6 +2191,9 @@ class LatentCachingFileItemDTOMixin:
         ])
         if getattr(self, "preserve_image_alpha", False):
             item["image_channels"] = 4
+        if getattr(self, 'is_layered', False):
+            item['layered_signature'] = self.layered_signature
+            item['layered_frames'] = self.num_frames
         is_video = self.is_video
         # when adding items, do it after so we dont change old latents
         if self.flip_x:
@@ -2525,6 +2547,10 @@ class TextEmbeddingFileItemDTOMixin:
             ("text_embedding_space_version", self.text_embedding_space_version),
             ("text_embedding_version", self.text_embedding_version),
         ])
+        if getattr(self, 'is_layered', False):
+            item['layered_signature'] = self.layered_signature
+            item['layered_geometry'] = [self.scale_to_width, self.scale_to_height, self.crop_x,
+                self.crop_y, self.crop_width, self.crop_height, self.flip_x, self.flip_y]
         if dopsd_self_ref:
             # teacher embeds carry the item's own media as the vision reference
             item["dopsd_self_ref"] = True
@@ -2539,6 +2565,22 @@ class TextEmbeddingFileItemDTOMixin:
         # if we have a control image, cache the path
         if self.encode_control_in_text_embeddings and self.control_path is not None:
             item["control_path"] = self.control_path
+            if (
+                self.text_embedding_space_version.startswith(('ming_image_design_conditioning_', 'ming_image_design_layer_conditioning_'))
+                and not getattr(self, 'is_layered', False)
+                and not getattr(self, 'is_encrypted', False)
+            ):
+                # Ming encodes reference pixels through both its MLLM and VAE.
+                # A replacement image at the same path must invalidate embeds.
+                paths = self.control_path if isinstance(self.control_path, list) else [self.control_path]
+                signatures = []
+                for path in paths:
+                    digest = hashlib.sha256()
+                    with open(path, 'rb') as stream:
+                        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                            digest.update(chunk)
+                    signatures.append(digest.hexdigest())
+                item['ming_reference_contents'] = signatures
         if self.encode_control_in_text_embeddings and getattr(self, 'control_video_paths', None):
             item["control_videos"] = sorted(self.control_video_paths)
             # v2: reference-video vision blocks are no longer resampled by the
@@ -2779,7 +2821,11 @@ class TextEmbeddingCachingMixin:
                             control_path_list = []
                         elif not isinstance(control_path_list, list):
                             control_path_list = [control_path_list]
-                        if callable(getattr(self.sd, "load_cached_control_images", None)):
+                        if getattr(file_item, 'is_layered', False):
+                            from toolkit.layered_dataset import load_layered_tensor
+                            load_layered_tensor(file_item, composite_only=True)
+                            ctrl_img_list = [file_item.control_tensor.unsqueeze(0).to(self.sd.device_torch, dtype=self.sd.torch_dtype)]
+                        elif callable(getattr(self.sd, "load_cached_control_images", None)):
                             ctrl_img_list = self.sd.load_cached_control_images(file_item)
                         else:
                             for i in range(len(control_path_list)):

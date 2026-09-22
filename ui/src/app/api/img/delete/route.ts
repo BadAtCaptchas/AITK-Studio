@@ -9,6 +9,9 @@ import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { deleteCaptionSidecarsAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { isRequestAuthenticated } from '@/utils/authSession';
+import { deleteLayeredImageForPath } from '@/server/layeredImages';
+import { deleteSampleLayers } from '@/server/sampleLayers';
+import { isLayeredImageAssetPath } from '@/domain/layeredImages';
 
 async function postCommand(request: Request) {
   try {
@@ -37,6 +40,7 @@ async function postCommand(request: Request) {
     const datasetsPath = await getDatasetsRoot();
     const trainingPath = await getTrainingFolder();
     const normalizedImgPath = path.resolve(imgPath);
+    if (isLayeredImageAssetPath(normalizedImgPath)) return NextResponse.json({ error: 'Delete the composite to remove its layers' }, { status: 400 });
     const allowedRoots = [datasetsPath, trainingPath].map(root => path.resolve(root));
     const isWithinAllowedRoot = allowedRoots.some(root => {
       const rel = path.relative(root, normalizedImgPath);
@@ -68,7 +72,10 @@ async function postCommand(request: Request) {
     }
 
     // delete it and return success
-    await fs.promises.unlink(normalizedImgPath);
+    if (!await deleteLayeredImageForPath(normalizedImgPath, datasetsPath)) {
+      await deleteSampleLayers(normalizedImgPath);
+      await fs.promises.unlink(normalizedImgPath);
+    }
 
     await deleteCaptionSidecarsAsync(normalizedImgPath);
 

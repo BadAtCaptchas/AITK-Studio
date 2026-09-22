@@ -77,6 +77,24 @@ export function configContractErrors(value: unknown, context: { deviceBackend?: 
         continue;
       }
       const arch = model.arch.split(':')[0];
+      if (arch === 'ming_image_design' || arch === 'ming_image_design_layer') {
+        if (record(train) && train.batch_size !== undefined && train.batch_size !== 1) errors.push('Ming Image requires batch size 1.');
+        if (record(train) && train.train_text_encoder === true) errors.push('Ming Image conditioning must remain frozen.');
+        if (model.quantize_te === true) errors.push('Ming Image text encoder quantization is not supported.');
+        if (record(process.sample)) {
+          const prompts = [process.sample, ...(Array.isArray(process.sample.samples) ? process.sample.samples.filter(record) : [])];
+          if (prompts.some(sample => typeof sample.neg === 'string' && sample.neg.trim())) errors.push('Ming Image does not support nonempty negative prompts.');
+          for (const sample of prompts) for (const key of ['width', 'height'] as const) {
+            const dimension = sample[key];
+            if (dimension !== undefined && (typeof dimension !== 'number' || !Number.isInteger(dimension) || dimension < 16 || dimension > 8192 || dimension % 16 !== 0)) errors.push(`Ming Image sample ${key} must be a multiple of 16 between 16 and 8192.`);
+          }
+        }
+        if (Array.isArray(process.datasets)) for (const dataset of process.datasets) {
+          if (!record(dataset)) continue;
+          if (arch === 'ming_image_design_layer' && dataset.type !== 'layered_image') errors.push('Ming Design-Layer requires layered_image datasets.');
+          if (arch === 'ming_image_design' && dataset.type === 'layered_image') errors.push('Select Ming Design-Layer for layered_image datasets.');
+        }
+      }
       if (arch === 'qwen25_omni' && record(train) && train.batch_size !== undefined && train.batch_size !== 1) errors.push('Qwen2.5-Omni requires batch size 1.');
       if (arch === 'yue2' && record(model.model_kwargs) && model.model_kwargs.do_separation === true) errors.push('YuE2 separation training is not supported.');
       const choice =
@@ -120,11 +138,15 @@ export function configContractErrors(value: unknown, context: { deviceBackend?: 
     if (process.sample !== undefined && !record(process.sample)) errors.push('sample must be an object.');
     if (record(process.sample)) {
       finite(process.sample, 'num_frames', 1, 100000, true);
+      finite(process.sample, 'num_layers', 1, 32, true);
       finite(process.sample, 'fps', 0.001, 1000);
       finite(process.sample, 'width', 1, 32768, true);
       finite(process.sample, 'height', 1, 32768, true);
       finite(process.sample, 'sample_steps', 1, 10000, true);
       finite(process.sample, 'guidance_scale', 0, 1000);
+      if (Array.isArray(process.sample.samples)) {
+        for (const sample of process.sample.samples) if (record(sample)) finite(sample, 'num_layers', 1, 32, true);
+      }
     }
   }
   return errors;

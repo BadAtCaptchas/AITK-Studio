@@ -3,6 +3,9 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { DATASET_TEXT_CAPTION_EXTENSIONS, deleteCaptionSidecars } from './captionFiles';
 import { findEncryptedDatasetRoot } from './encryptedDatasets';
+import { deleteLayeredImageForPath } from './layeredImages';
+import { deleteSampleLayers } from './sampleLayers';
+import { isLayeredImageAssetPath } from '../domain/layeredImages';
 
 export type ImageDeleteItemResult = {
   imgPath: string;
@@ -66,6 +69,7 @@ function validatePlainImagePaths(imgPaths: string[], datasetsRoot: string, train
 
   return imgPaths.map(imgPath => {
     const normalized = path.resolve(imgPath);
+    if (isLayeredImageAssetPath(normalized)) throw new ImageDeleteError('Delete the composite to remove a layered document');
     const isWithinAllowedRoot = allowedRoots.some(root => isPathInside(root, normalized));
     if (!isWithinAllowedRoot) {
       throw new ImageDeleteError('Invalid image path');
@@ -100,7 +104,8 @@ export async function deletePlainImagePaths(
         results.push({ imgPath: item.imgPath, deleted: false, skipped: true });
         continue;
       }
-      await fsp.unlink(item.normalized);
+      const deletedGroup = await deleteLayeredImageForPath(item.normalized, datasetsRoot);
+      if (!deletedGroup) { await deleteSampleLayers(item.normalized); await fsp.unlink(item.normalized); }
       const extension = path.extname(item.normalized).toLowerCase();
       if (!DATASET_TEXT_CAPTION_EXTENSIONS.includes(extension)) {
         deleteCaptionSidecars(item.normalized);

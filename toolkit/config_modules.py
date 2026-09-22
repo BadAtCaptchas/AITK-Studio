@@ -4,6 +4,8 @@ import tempfile
 import threading
 import time
 import math
+import json
+import uuid
 from typing import Any, List, Optional, Literal, Union, TYPE_CHECKING, Dict
 import random
 
@@ -180,6 +182,8 @@ class SampleItem:
         self.sample_steps: int = kwargs.get('sample_steps', sample_config.sample_steps)
         self.fps: int = kwargs.get('fps', sample_config.fps)
         self.num_frames: int = kwargs.get('num_frames', sample_config.num_frames)
+        from toolkit.layered_output import validate_num_layers
+        self.num_layers = validate_num_layers(kwargs.get('num_layers', sample_config.num_layers))
         # audio models: max seconds to generate
         self.duration: Optional[float] = kwargs.get('duration', sample_config.duration)
         self.ctrl_img: Optional[str] = kwargs.get('ctrl_img', None)
@@ -231,6 +235,8 @@ class SampleConfig:
                                            0.5)  # step to start using refiner on sample if it exists
         self.extra_values = kwargs.get('extra_values', [])
         self.num_frames = kwargs.get('num_frames', 1)
+        from toolkit.layered_output import validate_num_layers
+        self.num_layers = validate_num_layers(kwargs.get('num_layers'))
         self.fps: int = kwargs.get('fps', 16)
         self.duration: Optional[float] = kwargs.get('duration', None)
         if self.num_frames > 1 and self.ext not in ['webp']:
@@ -1484,7 +1490,7 @@ class DatasetConfig:
         # if true, will use a fask method to get image sizes. This can result in errors. Do not use unless you know what you are doing
         self.fast_image_size: bool = kwargs.get('fast_image_size', False)
         
-        self.do_i2v: bool = kwargs.get('do_i2v', True)  # do image to video on models that are both t2i and i2v capable
+        self.do_i2v: bool = kwargs.get('do_i2v', self.type != 'layered_image')  # Layered still images never use video conditioning.
         self.do_audio: bool = kwargs.get('do_audio', False) # load audio from video files for models that support it
         self.audio_preserve_pitch: bool = kwargs.get('audio_preserve_pitch', False) # preserve pitch when stretching audio to fit num_frames
         self.audio_normalize: bool = kwargs.get('audio_normalize', False) # normalize audio volume levels when loading
@@ -1543,6 +1549,7 @@ class GenerateImageConfig:
             ctrl_img_2: Optional[str] = None,  # second control image for multi control model
             ctrl_img_3: Optional[str] = None,  # third control image for multi control model
             num_frames: int = 1,
+            num_layers: Optional[int] = None,
             fps: int = 15,
             duration: Optional[float] = None,  # audio models: max seconds
             ctrl_idx: int = 0,
@@ -1578,6 +1585,8 @@ class GenerateImageConfig:
         self.refiner_start_at = refiner_start_at
         self.extra_values = extra_values if extra_values is not None else []
         self.num_frames = num_frames
+        from toolkit.layered_output import validate_num_layers
+        self.num_layers = validate_num_layers(num_layers)
         self.fps = fps
         self.duration = duration
         self.ctrl_img = ctrl_img
@@ -1661,6 +1670,8 @@ class GenerateImageConfig:
         return os.path.join(self.output_folder, filename)
 
     def save_image_atomic(self, image, count: int = 0, max_count=0):
+        from toolkit.layered_output import LayeredImageOutput, publish_layered_output
+        layered_output = isinstance(image, LayeredImageOutput)
         # Stage each save in a unique directory on the destination filesystem,
         # then publish the thumbnail and sidecars before the media file. The lock
         # also protects model integrations that temporarily inspect output_folder
@@ -1690,20 +1701,27 @@ class GenerateImageConfig:
 
                 tmp_media_path = os.path.join(tmp_folder, media_filename)
                 tmp_thumb_path = os.path.join(tmp_folder, media_filename + '.thumb')
+                layered_thumbnail = None
                 try:
                     thumb_ext = self._generate_thumbnail(tmp_media_path, tmp_thumb_path)
                     if thumb_ext:
-                        thumbs_folder = os.path.join(real_folder, '.thumbs')
-                        os.makedirs(thumbs_folder, exist_ok=True)
-                        os.replace(
-                            tmp_thumb_path,
-                            os.path.join(thumbs_folder, media_filename + thumb_ext),
-                        )
+                        if layered_output:
+                            layered_thumbnail = (tmp_thumb_path, os.path.join('.thumbs', media_filename + thumb_ext))
+                        else:
+                            thumbs_folder = os.path.join(real_folder, '.thumbs')
+                            os.makedirs(thumbs_folder, exist_ok=True)
+                            os.replace(
+                                tmp_thumb_path,
+                                os.path.join(thumbs_folder, media_filename + thumb_ext),
+                            )
                 except Exception as e:
                     print(f"Failed to generate thumbnail for {media_filename}: {e}")
 
                 # Publish the media last so sample watchers never observe a
                 # partially written file or a media file before its thumbnail.
+                if layered_output:
+                    publish_layered_output(tmp_folder, real_folder, media_filename, thumbnail=layered_thumbnail)
+                    return
                 for filename in generated_files:
                     if filename == media_filename:
                         continue
@@ -1759,10 +1777,28 @@ class GenerateImageConfig:
         return '.jpg'
 
     def save_image(self, image, count: int = 0, max_count=0):
+        from toolkit.layered_output import LayeredImageOutput
         # make parent dirs
         os.makedirs(self.output_folder, exist_ok=True)
         self.set_gen_time()
-        if isinstance(image, str):
+        if isinstance(image, LayeredImageOutput):
+            if self.output_ext != 'png':
+                raise ValueError('Layered samples require PNG output')
+            media_path = self.get_image_path(count, max_count)
+            asset_id = uuid.uuid4().hex
+            asset_dir = os.path.join(self.output_folder, '.layers', asset_id)
+            os.makedirs(asset_dir)
+            paths = []
+            for index, layer in enumerate(image.layers):
+                filename = f'{index:03d}.png'
+                layer.convert('RGBA').save(os.path.join(asset_dir, filename))
+                paths.append(f'.layers/{asset_id}/{filename}')
+            with open(media_path + '.layers.json', 'w', encoding='utf-8') as handle:
+                json.dump({'version': 1, 'order': 'bottom-to-top', 'layers': paths}, handle)
+            save_static_image(image.composite.convert('RGBA'), media_path)
+            if self.add_prompt_file:
+                self.save_prompt_file(count, max_count)
+        elif isinstance(image, str):
             # text-generating models: the sample is the text itself
             with open(self.get_prompt_path(count, max_count), 'w', encoding='utf-8') as f:
                 f.write(image)
@@ -1924,6 +1960,9 @@ class GenerateImageConfig:
         pass
     
     def log_image(self, image, count: int = 0, max_count=0):
+        from toolkit.layered_output import LayeredImageOutput
+        if isinstance(image, LayeredImageOutput):
+            image = image.composite
         if self.logger is None or isinstance(image, str):
             return
 
@@ -1938,6 +1977,41 @@ def validate_configs(
     network_config: Optional[NetworkConfig] = None,
 ):
     from toolkit.memory_management.offload import is_block_offload_arch_supported
+
+    if model_config.arch in {'ming_image_design', 'ming_image_design_layer'}:
+        if model_config.arch == 'ming_image_design_layer' and train_config.validation_config is not None:
+            raise ValueError('Ming Design-Layer does not support the single-image validation_config path; use layered previews')
+        if network_config is None or network_config.type != 'lora' or network_config.all_layers:
+            raise ValueError('Ming Image supports transformer LoRA training only')
+        if network_config.network_kwargs.get('full_if_contains') or network_config.network_kwargs.get('full_train_in_out'):
+            raise ValueError('Ming Image does not support full-weight adapter modules')
+        if train_config.train_text_encoder or model_config.quantize_te:
+            raise ValueError('Ming conditioning is frozen and staged in BF16; disable text encoder training/quantization')
+        if train_config.diff_output_preservation or train_config.blank_prompt_preservation or train_config.do_guidance_loss:
+            raise ValueError('Ming Image currently supports ordinary flow-matching LoRA loss only')
+        if train_config.do_cfg or train_config.do_differential_guidance:
+            raise ValueError('Ming training uses conditional flow loss; disable training CFG and differential guidance')
+        if train_config.batch_size != 1:
+            raise ValueError('Experimental Ming training currently requires batch_size=1')
+        if train_config.standardize_images or train_config.img_multiplier not in (None, 1.0):
+            raise ValueError('Ming RGBA training requires standardize_images: false and img_multiplier: 1.0')
+        if train_config.noise_scheduler != 'flowmatch' or train_config.timestep_type not in ('linear', 'shift'):
+            raise ValueError('Ming requires noise_scheduler: flowmatch and timestep_type: linear or shift (checkpoint shift 6)')
+        for dataset in dataset_configs:
+            if dataset.batch_size not in (None, 1):
+                raise ValueError('Ming datasets cannot override batch_size above one')
+            if dataset.num_frames != 1 or dataset.auto_frame_count or dataset.do_audio:
+                raise ValueError('Ming accepts still images; layer counts come from manifests, not video/audio settings')
+            if dataset.standardize_images:
+                raise ValueError('Ming RGBA datasets require standardize_images: false')
+            if model_config.arch == 'ming_image_design_layer' and dataset.type != 'layered_image':
+                raise ValueError('Ming Design-Layer requires type: layered_image datasets; import PSD/ORA or prepare manifests')
+            if model_config.arch == 'ming_image_design' and dataset.type != 'image':
+                raise ValueError('Ming Design requires image datasets; select Design-Layer to train grouped layers')
+            if dataset.resolution % 16:
+                raise ValueError('Ming dataset resolutions must be divisible by 16')
+            if dataset.cache_text_embeddings and (dataset.caption_dropout_rate or dataset.shuffle_tokens or dataset.random_triggers or dataset.token_dropout_rate or dataset.random_crop or dataset.random_scale):
+                raise ValueError('Ming cached conditioning requires fixed captions and crops (no dropout, shuffle, random triggers/crop/scale)')
 
     orbit_enabled = (
         (model_config.quantize and _is_orbit_qtype(model_config.qtype))

@@ -10,6 +10,7 @@ import { resolveDatasetFolder } from './encryptedDatasets';
 import { getJobTrainingRoot } from './trainingPaths';
 import { getRemoteWorker, isLocalWorker, remoteJson } from './remoteClient';
 import { makeRemoteAssetRef } from './remoteAssets';
+import { listLayeredImages } from './layeredImages';
 
 const CAPTION_EXTENSIONS = new Set(['.txt', '.json', '.caption']);
 
@@ -31,7 +32,7 @@ function safeName(value: unknown): value is string {
 async function collectFiles(root: string, captionsOnly: boolean): Promise<string[]> {
   const output: string[] = [];
   for (const entry of await fsp.readdir(root, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
+    if (entry.name.startsWith('.') && entry.name.toLowerCase() !== '.layers') continue;
     const candidate = path.join(root, entry.name);
     if (entry.isDirectory()) output.push(...(await collectFiles(candidate, captionsOnly)));
     else if (entry.isFile() && (!captionsOnly || CAPTION_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))) {
@@ -66,6 +67,7 @@ async function datasetArchive(request: ArchiveRequest): Promise<ArchiveResult> {
   if (!canonicalFolder || !isPathInside(canonicalRoot, canonicalFolder)) throw new Error('Dataset not found');
 
   const captionsOnly = request.zipTarget === 'dataset_captions';
+  await listLayeredImages(canonicalFolder);
   const files = await collectFiles(canonicalFolder, captionsOnly);
   if (files.length === 0) throw new Error(captionsOnly ? 'No captions found' : 'Dataset is empty');
   const fileName = `${request.datasetName}_${captionsOnly ? 'captions' : 'dataset'}.zip`;

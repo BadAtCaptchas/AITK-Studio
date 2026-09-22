@@ -40,6 +40,19 @@ test('datasetCombineRequestHasKeyMaterial detects raw keys before remote forward
   );
 });
 
+test('combining layered documents into encrypted output fails without publishing an incomplete dataset', async t => {
+  const root = await makeRoot();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const id = 'document123';
+  const folder = await writePlainDataset(root, 'layered', [{ path: 'art.png', caption: 'poster' }, { path: `.layers/${id}/0.png` }]);
+  await fs.writeFile(path.join(folder, '.layers', id, 'manifest.json'), JSON.stringify({ format: 'aitk.layered-image', version: 1, id, composite: 'art.png', caption: 'art.txt', width: 64, height: 64, order: 'bottom-to-top', layers: [{ path: `.layers/${id}/0.png`, name: 'target' }] }));
+  const key = crypto.randomBytes(32);
+  await writePlainDataset(root, 'plain', [{ path: 'plain.png', caption: 'plain' }]);
+  await assert.rejects(combineDatasets(root, { sourceDatasets: ['layered', 'plain'], outputName: 'encrypted', outputEncrypted: true, outputEncryptedManifest: manifestForKey(key), outputKeyB64: b64(key) }), /Layered documents cannot be converted/);
+  assert.equal(fsSync.existsSync(path.join(root, 'encrypted')), false);
+  assert.equal(fsSync.existsSync(path.join(folder, 'art.png')), true);
+});
+
 function b64(value) {
   return Buffer.from(value).toString('base64');
 }

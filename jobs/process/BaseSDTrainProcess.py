@@ -39,6 +39,7 @@ from toolkit.data_loader import get_dataloader_from_datasets, trigger_dataloader
 from toolkit.data_transfer_object.data_loader import FileItemDTO, DataLoaderBatchDTO
 from toolkit.ema import ExponentialMovingAverage
 from toolkit.embedding import Embedding
+from toolkit.encrypted_dataset import is_encrypted_dataset_path
 from toolkit.image_utils import show_tensors, show_latents, reduce_contrast
 from toolkit.ip_adapter import IPAdapter
 from toolkit.lora_special import LoRASpecialNetwork
@@ -90,6 +91,34 @@ import hashlib
 from toolkit.util.blended_blur_noise import get_blended_blur_noise
 from toolkit.util.get_model import get_model_class
 from toolkit.basic import flush
+
+
+def prepare_encrypted_dataset_cache_policy(train_config, dataset_configs):
+    """Keep encrypted captions live before cache flags select device presets.
+
+    The loader also enforces these restrictions, but waiting until loader
+    construction leaves the trainer believing it can unload the text encoder.
+    A run containing encrypted data therefore uses live conditioning throughout.
+    """
+    encrypted = []
+    for dataset in dataset_configs:
+        source = dataset.dataset_path or dataset.folder_path
+        if dataset.encrypted or (source and is_encrypted_dataset_path(source)):
+            encrypted.append(dataset)
+    if not encrypted:
+        return
+    if any(dataset.type == 'layered_image' for dataset in encrypted):
+        raise ValueError('Grouped layered-image datasets do not support encrypted storage yet')
+    for dataset in encrypted:
+        dataset.encrypted = True
+        dataset.cache_latents = False
+        dataset.cache_latents_to_disk = False
+        dataset.cache_clip_vision_to_disk = False
+    for dataset in dataset_configs:
+        dataset.cache_text_embeddings = False
+    train_config.cache_text_embeddings = False
+    train_config.unload_text_encoder = False
+    print_acc('Encrypted datasets use live conditioning and keep the text encoder available')
 
 
 class BaseSDTrainProcess(BaseTrainProcess):
@@ -245,6 +274,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     self.datasets.append(dataset)
                 self.dataset_configs.append(dataset)
 
+        prepare_encrypted_dataset_cache_policy(self.train_config, self.dataset_configs)
+        self.is_latents_cached = all(
+            dataset.cache_latents or dataset.cache_latents_to_disk for dataset in self.dataset_configs
+        )
         self.is_caching_text_embeddings = any(
             dataset.cache_text_embeddings for dataset in self.dataset_configs
         )
@@ -473,7 +506,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # zero-pad 9 digits
                 step_num = f"_{str(step).zfill(9)}"
 
-            filename = f"[time]_{step_num}_[count].{self.sample_config.ext}"
+            filename = f"[time]_{step_num}_[count].{sample_config.ext}"
 
             output_path = os.path.join(sample_folder, filename)
 
@@ -520,6 +553,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 extra_values=sample_config.extra_values,
                 logger=self.logger,
                 num_frames=sample_item.num_frames,
+                num_layers=sample_item.num_layers,
                 fps=sample_item.fps,
                 duration=sample_item.duration,
                 ctrl_img=sample_item.ctrl_img,
@@ -543,6 +577,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
             self.adapter.is_sampling = True
 
+        previous_prompt_cache = self.sd.sample_prompts_cache
+        caches = getattr(self, '_sample_prompts_by_config', {})
+        if id(sample_config) in caches:
+            self.sd.sample_prompts_cache = caches[id(sample_config)]
         try:
             # send to be generated
             self._generate_sample_images(
@@ -553,6 +591,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 step=step,
             )
         finally:
+            self.sd.sample_prompts_cache = previous_prompt_cache
             if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
                 self.adapter.is_sampling = False
 
@@ -2116,7 +2155,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
         bicubic_resampling = getattr(Image, 'Resampling', Image).BICUBIC
         for item in validation_items:
             with Image.open(item.image_path) as source_image:
-                image = ImageOps.exif_transpose(source_image).convert('RGB')
+                image = ImageOps.exif_transpose(source_image).convert(
+                    'RGBA' if getattr(self.sd, 'preserve_image_alpha', False) else 'RGB'
+                )
             bucket = get_bucket_for_image_size(
                 image.width,
                 image.height,

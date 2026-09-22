@@ -83,3 +83,16 @@ export function getDownloadUrl(value: string) {
 }
 
 export const getAudioArtworkUrl = (value: string) => getMediaUrl(value, 'audio-art');
+
+export function getSampleLayersUrl(value: string): string | null {
+  const remote = parseRemoteAssetRef(value);
+  const source = remote?.path || value;
+  const match = /^\/api\/jobs\/([^/]+)\/samples\/([^/?]+)$/.exec(source);
+  if (!match) return null;
+  try {
+    const filename = decodeURIComponent(match[2]);
+    const jobID = remote?.jobID || decodeURIComponent(match[1]);
+    if (!filename.endsWith('.png') || /[\\/]/.test(filename)) return null;
+    return `/api/jobs/${encodeURIComponent(jobID)}/sample-layers?sample=${encodeURIComponent(filename)}`;
+  } catch { return null; }
+}

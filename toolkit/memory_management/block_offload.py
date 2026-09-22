@@ -243,6 +243,10 @@ class StaticPinnedCpuAllocator:
                 dtype=target_dtype,
                 pin_memory=True,
             )
+            # Replacing the module's CUDA storage below can release its last
+            # reference while this copy is still queued on the transfer stream.
+            # Stream waits order kernels, but do not protect allocator lifetime.
+            tensor.record_stream(torch.cuda.current_stream(tensor.device))
             result.copy_(tensor.detach(), non_blocking=non_blocking)
             return result
 
@@ -290,6 +294,7 @@ class _ManagedLayer:
     hook_handles: list[Any] = field(default_factory=list)
     transfer_event: Optional[torch.cuda.Event] = None
     state: str = "resident"
+    backward_active: bool = False
 
 
 def _normalize_device(device: Any) -> torch.device:
@@ -649,9 +654,12 @@ class BlockOffloadManager:
         result = entry.original_forward(*args, **kwargs)
 
         if (
-            torch.is_grad_enabled()
-            and self._output_requires_grad(result)
-            and not entry.reload_for_backward
+            entry.backward_active
+            or (
+                torch.is_grad_enabled()
+                and self._output_requires_grad(result)
+                and not entry.reload_for_backward
+            )
         ):
             entry.state = "device"
         else:
@@ -661,12 +669,16 @@ class BlockOffloadManager:
     def before_backward(self, entry: _ManagedLayer):
         """Reload a frozen quantized block just before its input-gradient work."""
         self._ensure_entry_on_device(entry)
+        # A non-reentrant checkpoint can complete its recomputed forward after
+        # this hook. Keep the reloaded weights until the original backward ends.
+        entry.backward_active = True
         for next_index in self.strategy.forward_backward_window(entry.index):
             if next_index != entry.index:
                 self._prefetch_entry(self.layers[next_index])
         return None
 
     def after_backward(self, entry: _ManagedLayer):
+        entry.backward_active = False
         self._offload_entry(entry, async_transfer=True)
         for next_index in self.strategy.forward_backward_window(entry.index):
             if next_index != entry.index:
@@ -694,13 +706,25 @@ class BlockOffloadManager:
             return
         if entry.state == "prefetching":
             self._wait_for_entry_transfer(entry)
-            if entry.state == "device":
-                return
         if entry.state == "offloading":
             self._wait_for_entry_transfer(entry)
         if entry.state != "device":
             self._move_entry(entry, self.process_device, async_transfer=False)
             entry.state = "device"
+        self._record_entry_compute_stream(entry)
+
+    def _record_entry_compute_stream(self, entry: _ManagedLayer):
+        # Prefetch allocates on the transfer stream. The compute stream also
+        # uses these allocations, and may still be using them when eviction
+        # replaces the module's storage on the transfer stream.
+        tensors = [*entry.params, *entry.buffers]
+        tensors.extend(param.grad for param in entry.params if param.grad is not None)
+        cuda_tensors = [tensor for tensor in tensors if tensor.device.type == "cuda"]
+        if not cuda_tensors:
+            return
+        stream = torch.cuda.current_stream(self.process_device)
+        for tensor in cuda_tensors:
+            tensor.record_stream(stream)
 
     def _prefetch_entry(self, entry: _ManagedLayer):
         if not self.active or entry.state in {"device", "prefetching", "resident"}:

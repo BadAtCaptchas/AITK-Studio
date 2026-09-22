@@ -230,17 +230,19 @@ class SDTrainer(BaseSDTrainProcess):
         except Exception:
             return self.sd.encode_prompt(prompt, control_images=self.get_blank_control_image(), **kwargs)
 
-    def cache_sample_prompts(self):
+    def cache_sample_prompts(self, sample_config=None):
         if self.train_config.disable_sampling:
             return
-        if self.sample_config is not None and self.sample_config.samples is not None and len(self.sample_config.samples) > 0:
+        sample_config = self.sample_config if sample_config is None else sample_config
+        self.sd.sample_prompts_cache = None
+        if sample_config is not None and sample_config.samples is not None and len(sample_config.samples) > 0:
             # cache all the samples
             self.sd.sample_prompts_cache = []
             sample_folder = os.path.join(self.save_root, 'samples')
             output_path = os.path.join(sample_folder, 'test.jpg')
-            for i in range(len(self.sample_config.prompts)):
-                sample_item = self.sample_config.samples[i]
-                prompt = self.sample_config.prompts[i]
+            for i in range(len(sample_config.prompts)):
+                sample_item = sample_config.samples[i]
+                prompt = sample_config.prompts[i]
 
                 if self.trigger_word is not None:
                     prompt = self.sd.inject_trigger_into_prompt(
@@ -254,6 +256,9 @@ class SDTrainer(BaseSDTrainProcess):
                     prompt=prompt, # it will autoparse the prompt
                     negative_prompt=sample_item.neg,
                     output_path=output_path,
+                    width=sample_item.width,
+                    height=sample_item.height,
+                    num_layers=sample_item.num_layers,
                     ctrl_img=sample_item.ctrl_img,
                     ctrl_img_1=sample_item.ctrl_img_1,
                     ctrl_img_2=sample_item.ctrl_img_2,
@@ -343,6 +348,17 @@ class SDTrainer(BaseSDTrainProcess):
                     'conditional': positive,
                     'unconditional': negative
                 })
+
+    def cache_all_sample_prompts(self):
+        self._sample_prompts_by_config = {}
+        if self.train_config.disable_sampling:
+            return
+        for config in (self.sample_config, getattr(self, 'first_sample_config', self.sample_config)):
+            if config is None or id(config) in self._sample_prompts_by_config:
+                continue
+            self.cache_sample_prompts(config)
+            self._sample_prompts_by_config[id(config)] = self.sd.sample_prompts_cache
+        self.sd.sample_prompts_cache = self._sample_prompts_by_config.get(id(self.sample_config))
 
 
     def before_dataset_load(self):
@@ -453,7 +469,7 @@ class SDTrainer(BaseSDTrainProcess):
                 if self.train_config.diff_output_preservation:
                     self.diff_output_preservation_embeds = self.sd.encode_prompt(self.train_config.diff_output_preservation_class)
 
-                self.cache_sample_prompts()
+                self.cache_all_sample_prompts()
 
                 print_acc("\n***** UNLOADING TEXT ENCODER *****")
                 if self.is_caching_text_embeddings:

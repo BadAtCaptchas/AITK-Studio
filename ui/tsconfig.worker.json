@@ -68,6 +68,8 @@
         "src/server/datasetImages.ts",
         "src/server/datasetRefusalCaptionAudit.ts",
         "src/server/imageDelete.ts",
+        "src/server/sampleLayers.ts",
+        "src/server/layeredImport.ts",
         "src/server/datasetDelete.ts",
         "src/server/datasetCaptionBulk.ts",
         "src/server/datasetSingleRecaption.ts",

@@ -10,6 +10,8 @@ from toolkit.util.ostris_quant import is_ostris_qtype
 
 
 SUPPORTED_BLOCK_ARCHES = {
+    "ming_image_design",
+    "ming_image_design_layer",
     "flux",
     "flux_kontext",
     "flux2",

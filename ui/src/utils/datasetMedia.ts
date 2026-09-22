@@ -6,6 +6,7 @@ export type DatasetImageListItem = {
   added_at?: string | null;
   captioned_at?: string | null;
   size_bytes?: number | null;
+  layer_count?: number | null;
 };
 
 export function normalizeDatasetImageListItem(item: unknown, root: string | null): DatasetImageListItem | null {
@@ -20,6 +21,7 @@ export function normalizeDatasetImageListItem(item: unknown, root: string | null
     added_at: typeof record.added_at === 'string' ? record.added_at : null,
     captioned_at: typeof record.captioned_at === 'string' ? record.captioned_at : null,
     size_bytes: typeof record.size_bytes === 'number' ? record.size_bytes : null,
+    ...(Number.isInteger(record.layer_count) && Number(record.layer_count) > 0 ? { layer_count: Number(record.layer_count) } : {}),
   };
 }
 

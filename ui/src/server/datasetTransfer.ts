@@ -1,5 +1,6 @@
 import { isRecord } from './commandInput';
 import { isEncryptedDatasetFolder } from './encryptedDatasets';
+import { listLayeredImages, validateLayeredImageAssets } from './layeredImages';
 import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -38,6 +39,7 @@ export function datasetExportFileName(datasetName: string) {
 
 export async function createDatasetExportArchive(datasetName: string, datasetFolder: string, outputPath: string) {
   const realDatasetFolder = await fsp.realpath(datasetFolder).catch(() => path.resolve(datasetFolder));
+  await listLayeredImages(realDatasetFolder);
   const files = await listFilesRecursive(realDatasetFolder, shouldIncludeDatasetExportPath);
   const manifest: DatasetExportManifest = {
     format: DATASET_EXPORT_FORMAT,
@@ -87,6 +89,7 @@ export async function readDatasetExportManifest(extractRoot: string): Promise<Da
       manifest.source.app !== 'ai-toolkit' || typeof manifest.source.datasetName !== 'string' || typeof manifest.exportedAt !== 'string') {
     throw new Error('Unsupported dataset export archive');
   }
+  await validateLayeredImageAssets(getExtractedDatasetPath(extractRoot, manifest.dataset.archivePath));
   return { format: DATASET_EXPORT_FORMAT, version: DATASET_EXPORT_VERSION, exportedAt: manifest.exportedAt,
     source: { app: 'ai-toolkit', datasetName: manifest.source.datasetName },
     dataset: { name: manifest.dataset.name, archivePath: 'dataset', encrypted: manifest.dataset.encrypted } };

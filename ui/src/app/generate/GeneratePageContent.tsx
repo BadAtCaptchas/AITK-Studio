@@ -29,7 +29,7 @@ import { getMediaUrl } from '@/utils/media';
 import { startQueue } from '@/utils/queue';
 import type { ComfyConfig, ComfyMode, ComfyOnError, GenerationBackend, ModelConfig, SelectOption } from '@/types';
 import { useModelArchs } from '@/extensions/modelArchs';
-import { quantizationOptions } from '@/domain/modelOptions';
+import { getTransformerQuantizationOptions, quantizationOptions } from '@/domain/modelOptions';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { getLayerOffloadingMemoryProfile, type LayerOffloadingBackend } from '@/utils/memoryProfiles';
 import { uploadLoraFile } from '@/utils/streamedUploads';
@@ -1179,7 +1179,7 @@ export function GeneratePageContent() {
                             qtype: value || 'qfloat8',
                           }))
                         }
-                        options={quantizationOptions}
+                        options={getTransformerQuantizationOptions(modelConfig.arch)}
                       />
                       <SelectInput
                         label="Text Encoder Quantization"

@@ -12,6 +12,7 @@ from extensions_built_in.sd_trainer.DiffusionTrainer import DiffusionTrainer
 from extensions_built_in.sd_trainer.SDTrainer import SDTrainer
 from jobs.process.BaseSDTrainProcess import BaseSDTrainProcess
 from toolkit.config_modules import (
+    SampleConfig,
     TrainConfig,
     ValidationConfig,
     ValidationItem,
@@ -374,18 +375,7 @@ class UpstreamJuly1823TrainingTest(unittest.TestCase):
     def test_cached_sample_prompts_replace_trigger_placeholder(self):
         process = SDTrainer.__new__(SDTrainer)
         process.train_config = SimpleNamespace(disable_sampling=False)
-        process.sample_config = SimpleNamespace(
-            prompts=['a [trigger] portrait'],
-            samples=[
-                SimpleNamespace(
-                    neg='bad',
-                    ctrl_img=None,
-                    ctrl_img_1=None,
-                    ctrl_img_2=None,
-                    ctrl_img_3=None,
-                )
-            ],
-        )
+        process.sample_config = SampleConfig(samples=[{'prompt': 'a [trigger] portrait', 'neg': 'bad'}])
         process.save_root = '.'
         process.trigger_word = 'subject'
         encoded_prompts = []

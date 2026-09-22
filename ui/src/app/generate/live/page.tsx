@@ -9,7 +9,7 @@ import { startJob, stopJob } from '@/utils/jobs';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import usePollLoop from '@/hooks/usePollLoop';
 import { useModelArchs } from '@/extensions/modelArchs';
-import { quantizationOptions } from '@/domain/modelOptions';
+import { getTransformerQuantizationOptions } from '@/domain/modelOptions';
 import LoraBrowserModal, { LoraPick } from '@/components/generate/LoraBrowserModal';
 import { readEngineFrames, payloadToFloat32, latentToImage, parsePreview, PreviewInfo } from '@/utils/engineStream';
 import { SelectInput, TextInput, TextAreaInput, NumberInput, Checkbox } from '@/components/formInputs';
@@ -365,7 +365,7 @@ export default function LiveGeneratePage() {
             <SelectInput
               label="Quantization"
               value={model.quantize ? String(model.qtype || 'qfloat8') : ''}
-              options={quantizationOptions}
+              options={getTransformerQuantizationOptions(arch)}
               onChange={v => setModel(m => ({ ...m, quantize: !!v, qtype: v || 'qfloat8' }))}
             />
             <SelectInput

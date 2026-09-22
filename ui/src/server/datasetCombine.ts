@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
+import { copyLayeredImage, listLayeredImages } from './layeredImages';
+import type { LayeredImageManifest } from '../domain/layeredImages';
 import type {
   DatasetSummary,
   EncryptedDatasetCatalog,
@@ -99,6 +101,8 @@ type PlainMediaSource = {
   mediaPath: string;
   mediaName: string;
   captionPath?: string;
+  datasetFolder: string;
+  layered?: LayeredImageManifest;
 };
 
 type EncryptedMediaSource = {
@@ -348,6 +352,7 @@ async function resolveSources(datasetsRoot: string, sourceNames: string[], keyMa
 async function listPlainMediaSources(datasetFolder: string): Promise<PlainMediaSource[]> {
   const root = path.resolve(datasetFolder);
   const results: PlainMediaSource[] = [];
+  const groups = new Map((await listLayeredImages(root)).map(group => [path.resolve(root, group.composite), group]));
 
   async function walk(current: string) {
     const entries = await fsp.readdir(current, { withFileTypes: true });
@@ -371,6 +376,8 @@ async function listPlainMediaSources(datasetFolder: string): Promise<PlainMediaS
         type: 'plain',
         mediaPath: absolutePath,
         mediaName: entry.name,
+        datasetFolder: root,
+        layered: groups.get(absolutePath),
         captionPath:
           isPathInside(root, captionPath) && fs.existsSync(captionPath) && fs.statSync(captionPath).isFile()
             ? captionPath
@@ -448,6 +455,11 @@ async function writePlainOutput(outputFolder: string, mediaSources: MediaSource[
 
   for (const source of mediaSources) {
     const names = allocator.allocate(sourceFileName(source), sourceExtension(source));
+    if (source.type === 'plain' && source.layered) {
+      await copyLayeredImage(source.datasetFolder, source.layered, outputFolder, names.mediaName);
+      itemCount += 1;
+      continue;
+    }
     const targetMediaPath = path.join(outputFolder, names.mediaName);
     const targetCaptionPath = path.join(outputFolder, names.captionName);
 
@@ -576,6 +588,9 @@ export async function combineDatasets(datasetsRoot: string, request: DatasetComb
   const outputEncryption = validateOutputEncryption(request);
   const sources = await resolveSources(root, sourceNames, keyMap);
   const mediaSources = await collectMediaSources(sources);
+  if (outputEncryption && mediaSources.some(source => source.type === 'plain' && source.layered)) {
+    throw new DatasetCombineError('Layered documents cannot be converted to encrypted datasets. Choose unencrypted output.');
+  }
   if (mediaSources.length === 0) {
     throw new DatasetCombineError('No supported media files were found in the selected datasets', 404);
   }

@@ -8,6 +8,7 @@ export type DatasetStudioItem =
       addedAt?: string | null;
       captionedAt?: string | null;
       sizeBytes?: number | null;
+      layerCount?: number | null;
     }
   | {
       kind: 'encrypted';

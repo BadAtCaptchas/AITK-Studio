@@ -88,6 +88,9 @@ class FileItemDTO(
 
     def __init__(self, *args, **kwargs):
         self.path = kwargs.get("path", "")
+        self.layered_sample = kwargs.get("layered_sample")
+        self.is_layered = self.layered_sample is not None
+        self.layered_signature = self.layered_sample.signature() if self.is_layered else None
         self.encrypted_reader = kwargs.get("encrypted_reader", None)
         self.encrypted_item = kwargs.get("encrypted_item", None)
         self.is_encrypted = self.encrypted_reader is not None and self.encrypted_item is not None
@@ -98,7 +101,10 @@ class FileItemDTO(
             self.dataset_config.num_frames > 1
             or self.dataset_config.auto_frame_count
         )
-        if self.is_audio_model:
+        if self.is_layered:
+            self.is_video = False
+            self.preserve_image_alpha = True
+        elif self.is_audio_model:
             self.is_video = False
         elif dataset_is_video and (self.dataset_config.include_images_in_video_dataset or getattr(kwargs.get("sd"), "is_multimodal_llm", False)):
             if self.is_encrypted:
@@ -126,6 +132,8 @@ class FileItemDTO(
             auto_frame_count=self.dataset_config.auto_frame_count,
             frame_count_snapper=self.frame_count_snapper,
         )
+        if self.is_layered:
+            self.num_frames = self.layered_sample.num_frames
         size_database = kwargs.get("size_database", {})
         dataset_root = kwargs.get("dataset_root", None)
         self.encode_control_in_text_embeddings = kwargs.get(
@@ -147,7 +155,7 @@ class FileItemDTO(
         else:
             file_key = os.path.basename(self.path)
 
-        file_signature = self.encrypted_reader.item_signature(self.encrypted_item) if self.is_encrypted else get_quick_signature_string(self.path)
+        file_signature = self.layered_signature if self.is_layered else self.encrypted_reader.item_signature(self.encrypted_item) if self.is_encrypted else get_quick_signature_string(self.path)
         if file_signature is None:
             raise Exception("Error: Could not get file signature for {self.path}")
 
@@ -226,6 +234,9 @@ class FileItemDTO(
         self.height: int = h
         self.dataloader_transforms = kwargs.get("dataloader_transforms", None)
         super().__init__(*args, **kwargs)
+        if self.is_layered:
+            self.has_control_image = True
+            self.control_path = self.path
 
         # self.caption_path: str = kwargs.get('caption_path', None)
         self.raw_caption: str = kwargs.get("raw_caption", None)
@@ -281,6 +292,11 @@ class DataLoaderBatchDTO:
     def __init__(self, **kwargs):
         try:
             self.file_items: List["FileItemDTO"] = kwargs.get("file_items", None)
+            if any(getattr(item, 'is_layered', False) for item in self.file_items):
+                if not all(getattr(item, 'is_layered', False) for item in self.file_items):
+                    raise ValueError("A batch cannot mix grouped layered-image samples with ordinary images")
+                if len({item.num_frames for item in self.file_items}) != 1:
+                    raise ValueError("Layered-image batches must contain equal layer counts")
             is_latents_cached = self.file_items[0].is_latent_cached
             self.tensor: Union[torch.Tensor, None] = None
             self.latents: Union[torch.Tensor, None] = None

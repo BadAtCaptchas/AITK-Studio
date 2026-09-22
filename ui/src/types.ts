@@ -642,6 +642,7 @@ export interface ModelConfig {
 }
 
 export interface SampleItem {
+  num_layers?: number;
   prompt: string;
   width?: number;
   height?: number;
@@ -682,6 +683,8 @@ export interface ComfyConfig {
 }
 
 export interface SampleConfig {
+  num_layers?: number;
+  format?: 'jpg' | 'png' | 'webp' | 'jxl';
   backend?: GenerationBackend;
   comfy?: ComfyConfig;
   sampler: string;

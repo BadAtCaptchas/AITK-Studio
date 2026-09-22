@@ -1,6 +1,7 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
+import { copyLayeredImage, deleteLayeredImage, deleteLayeredImageForPath, findLayeredImageForPath } from './layeredImages';
 import {
   DATASET_CAPTION_SIDECAR_EXTENSIONS,
   DATASET_TEXT_CAPTION_EXTENSIONS,
@@ -17,6 +18,7 @@ import {
   type CaptionKeywordMatchMode,
 } from '../utils/captionKeywordSearch';
 import { parseRemoteDatasetAssetRef } from '../utils/remoteDatasetRefs';
+import { isLayeredImageAssetPath } from '../domain/layeredImages';
 
 export type DatasetCaptionBulkAction = 'delete' | 'move' | 'remove_words';
 
@@ -107,6 +109,7 @@ function resolveMediaPaths(datasetFolder: string, imgPaths: string[]) {
   const resolvedFolder = path.resolve(datasetFolder);
   return imgPaths.map(imgPath => {
     const resolved = path.resolve(imgPath);
+    if (isLayeredImageAssetPath(path.relative(resolvedFolder, resolved))) throw new DatasetCaptionBulkError('Select the layered document composite instead of an individual layer');
     if (!isPathInside(resolvedFolder, resolved)) {
       throw new DatasetCaptionBulkError('Invalid image path');
     }
@@ -177,11 +180,11 @@ function matchedMedia(mediaPaths: string[], terms: string[], matchMode: CaptionK
   return matched;
 }
 
-async function performDelete(matched: ResolvedMedia[]) {
+async function performDelete(matched: ResolvedMedia[], datasetsRoot: string) {
   let deleted = 0;
   const removedPaths: string[] = [];
   for (const item of matched) {
-    await fsp.unlink(item.path);
+    if (!(await deleteLayeredImageForPath(item.path, datasetsRoot))) await fsp.unlink(item.path);
     if (!DATASET_TEXT_CAPTION_EXTENSIONS.includes(path.extname(item.path).toLowerCase())) {
       deleteCaptionSidecars(item.path);
     }
@@ -203,6 +206,14 @@ async function performMove(datasetsRoot: string, request: DatasetCaptionBulkRequ
   const removedPaths: string[] = [];
   for (const item of matched) {
     const targetMediaPath = uniqueDestinationMediaPath(destination.finalPath, item.path, usedStems);
+    const layered = await findLayeredImageForPath(item.path, datasetsRoot);
+    if (layered) {
+      await copyLayeredImage(layered.root, layered.manifest, destination.finalPath, path.basename(targetMediaPath));
+      await deleteLayeredImage(layered.root, layered.manifest);
+      moved += 1;
+      removedPaths.push(item.path);
+      continue;
+    }
     const sidecars = existingCaptionSidecars(item.path);
     await fsp.rename(item.path, targetMediaPath);
     for (const sidecar of sidecars) {
@@ -265,7 +276,7 @@ export async function performPlainDatasetCaptionBulkAction(
   const matched = matchedMedia(mediaPaths, terms, request.matchMode);
 
   if (request.action === 'delete') {
-    const deleted = await performDelete(matched);
+    const deleted = await performDelete(matched, datasetsRoot);
     return {
       action: request.action,
       found: matched.length,

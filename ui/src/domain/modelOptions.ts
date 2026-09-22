@@ -96,6 +96,69 @@ const defaultNameOrPath = '';
 const defaultLinearRank = 32;
 
 const modelPresentation: ModelArch[] = [
+  ...([false, true] as const).map((layered): ModelArch => ({
+    name: layered ? 'ming_image_design_layer' : 'ming_image_design',
+    label: layered ? 'Ming Image Design-Layer (experimental)' : 'Ming Image Design (experimental)',
+    group: 'experimental',
+    allowedNetworkTypes: ['lora'],
+    defaults: {
+      'config.process[0].model.name_or_path': [layered ? 'inclusionAI/Ming-Image-0.1-Design-Layer' : 'inclusionAI/Ming-Image-0.1-Design', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['ming_fp8', 'qfloat8'],
+      'config.process[0].model.quantize_te': [false, false],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].model.layer_offloading': [true, false],
+      'config.process[0].model.layer_offloading_backend': ['block', 'block'],
+      'config.process[0].model.layer_offloading_transformer_percent': [1, 0],
+      'config.process[0].model.layer_offloading_text_encoder_percent': [1, 0],
+      'config.process[0].train.dtype': ['bf16', 'bf16'],
+      'config.process[0].train.train_text_encoder': [false, false],
+      'config.process[0].train.train_unet': [true, true],
+      'config.process[0].train.cache_text_embeddings': [true, false],
+      'config.process[0].train.unload_text_encoder': [true, false],
+      'config.process[0].train.gradient_checkpointing': [true, true],
+      'config.process[0].train.batch_size': [1, 1],
+      'config.process[0].train.standardize_images': [false, false],
+      'config.process[0].train.img_multiplier': [1, 1],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.timestep_type': ['linear', 'sigmoid'],
+      'config.process[0].network.type': ['lora', 'lora'],
+      'config.process[0].network.transformer_only': [true, false],
+      'config.process[0].network.linear': [16, 32],
+      'config.process[0].network.linear_alpha': [16, 32],
+      'config.process[0].network.conv': [undefined, 16],
+      'config.process[0].network.conv_alpha': [undefined, 16],
+      'config.process[0].sample.format': ['png', 'jpg'],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.sample_steps': [12, 25],
+      'config.process[0].sample.guidance_scale': [layered ? 2 : 1, 4],
+      'config.process[0].sample.width': [layered ? 512 : 1024, 1024],
+      'config.process[0].sample.height': [layered ? 512 : 1024, 1024],
+      'config.process[0].sample.num_layers': [layered ? 2 : undefined, undefined],
+      'config.process[0].sample.neg': ['', ''],
+      'config.process[0].datasets[x].type': [layered ? 'layered_image' : 'image', 'image'],
+      'config.process[0].datasets[x].standardize_images': [false, false],
+      'config.process[0].datasets[x].do_i2v': [false, false],
+      'config.process[0].datasets[x].resolution': [[layered ? 512 : 1024], [512, 768, 1024]],
+      'config.process[0].datasets[x].cache_text_embeddings': [true, false],
+      'config.process[0].datasets[x].cache_latents_to_disk': [true, true],
+      'config.process[0].datasets[x].caption_dropout_rate': [0, 0.05],
+      'config.process[0].datasets[x].token_dropout_rate': [0, 0],
+      'config.process[0].datasets[x].random_triggers': [[], []],
+      'config.process[0].datasets[x].shuffle_tokens': [false, false],
+      'config.process[0].datasets[x].random_crop': [false, false],
+      'config.process[0].datasets[x].random_scale': [false, false],
+      'config.process[0].datasets[x].flip_x': [false, false],
+      'config.process[0].datasets[x].flip_y': [false, false],
+    },
+    disableSections: ['network.conv', 'train.train_text_encoder', 'model.quantize_te', 'train.diff_output_preservation', 'train.blank_prompt_preservation', 'slider'],
+    additionalSections: ['model.low_vram', 'model.layer_offloading', 'sample.ctrl_img'],
+    modelNotes: {
+      summary: 'Experimental native RGBA LoRA training',
+      paragraphs: [layered ? 'Import PSD/ORA documents or use prepared layered manifests. Each example includes a composite and ordered RGBA targets. Samples require one reference image and a layer count.' : 'Train on RGB or RGBA images with captions. Alpha is preserved in training and PNG samples.', 'The 16 GB starting profile uses CPU-staged frozen conditioning, cached embeddings, FP8 transformer weights and block offloading. High system RAM is required. Resolution and layer counts beyond measured validation may need more VRAM. Nonempty negative prompts are unsupported.'],
+      link: { href: 'https://github.com/vllm-project/vllm-omni/pull/8021', label: 'Pinned inference reference' },
+    },
+  })),
 {name: "yue2",
 label: "YuE2",
 group: "audio",
@@ -2054,6 +2117,12 @@ export const quantizationOptions: SelectOption[] = [
 ];
 
 export const defaultQtype = 'qfloat8';
+
+export function getTransformerQuantizationOptions(arch: string): SelectOption[] {
+  return arch === 'ming_image_design' || arch === 'ming_image_design_layer'
+    ? [quantizationOptions[0], { value: 'ming_fp8', label: 'Ming FP8 storage' }]
+    : quantizationOptions;
+}
 
 interface JobTypeOption extends SelectOption {
   disableSections?: DisableableSections[];

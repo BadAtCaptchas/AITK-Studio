@@ -329,7 +329,7 @@ export default function DatasetImageStudio({
   }, [items.length]);
   const selectedItem = items[selectedIndex] || null;
   const selectedKey = selectedItem ? itemKey(selectedItem) : '';
-  const selectedName = selectedItem ? itemName(selectedItem) : '';
+  const selectedName = selectedItem ? `${itemName(selectedItem)}${selectedItem.kind === 'plain' && selectedItem.layerCount ? ` · ${selectedItem.layerCount} layers` : ''}` : '';
   const selectedKind = selectedItem ? itemKind(selectedItem) : 'image';
   const hasEncryptedItems = useMemo(() => items.some(item => item.kind === 'encrypted'), [items]);
   const canPersistRecaptionState = !hasEncryptedItems;

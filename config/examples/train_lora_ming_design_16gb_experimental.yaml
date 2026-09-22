@@ -1,0 +1,71 @@
+---
+# Experimental 16 GB target profile. See docs/ming-image.md for validation status.
+job: extension
+config:
+  name: ming_design_lora
+  process:
+    - type: sd_trainer
+      training_folder: output
+      device: cuda:0
+      network:
+        type: lora
+        linear: 16
+        linear_alpha: 16
+        transformer_only: true
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 2
+      datasets:
+        - type: image
+          folder_path: /path/to/images
+          caption_ext: txt
+          resolution: [1024]
+          cache_latents_to_disk: true
+          cache_text_embeddings: true
+          caption_dropout_rate: 0
+          token_dropout_rate: 0
+          shuffle_tokens: false
+          random_crop: false
+          random_scale: false
+          flip_x: false
+          flip_y: false
+      train:
+        batch_size: 1
+        steps: 1000
+        gradient_accumulation: 1
+        train_unet: true
+        train_text_encoder: false
+        cache_text_embeddings: true
+        unload_text_encoder: true
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        timestep_type: linear # Ming applies the checkpoint's static shift of 6
+        optimizer: adamw8bit
+        lr: 0.0001
+        dtype: bf16
+      model:
+        arch: ming_image_design
+        name_or_path: inclusionAI/Ming-Image-0.1-Design
+        quantize: true
+        qtype: ming_fp8
+        quantize_te: false
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_backend: block
+        layer_offloading_transformer_percent: 1.0
+      sample:
+        sampler: flowmatch
+        format: png
+        sample_every: 250
+        width: 1024
+        height: 1024
+        sample_steps: 12
+        guidance_scale: 1
+        neg: ''
+        seed: 42
+        prompts:
+          - 'A clean graphic poster with the title SUMMER and a yellow sun on blue.'
+meta:
+  name: '[name]'
+  version: '1.0'

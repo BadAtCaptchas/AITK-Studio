@@ -8,6 +8,7 @@ import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { resolveCaptionWritePathAsync } from '@/server/captionFiles';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
+import { isLayeredImageAssetPath } from '@/domain/layeredImages';
 
 async function postCommand(request: Request) {
   try {
@@ -31,6 +32,9 @@ async function postCommand(request: Request) {
     const datasetsRoot = path.resolve(datasetsPath);
     const resolvedImagePath = path.resolve(imgPath);
     const relativeImagePath = path.relative(datasetsRoot, resolvedImagePath);
+    if (isLayeredImageAssetPath(relativeImagePath)) {
+      return NextResponse.json({ error: 'Edit layer captions in Layered documents' }, { status: 400 });
+    }
 
     // make sure the resolved image path is in the dataset path
     if (relativeImagePath.startsWith('..') || path.isAbsolute(relativeImagePath)) {

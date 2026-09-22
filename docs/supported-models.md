@@ -96,4 +96,5 @@ Browse the model integrations included in AITK Studio. Available training modes 
 
 ## Experimental
 
+- [inclusionAI/Ming-Image-0.1-Design](https://huggingface.co/inclusionAI/Ming-Image-0.1-Design) and [Ming-Image-0.1-Design-Layer](https://huggingface.co/inclusionAI/Ming-Image-0.1-Design-Layer) (native transformer LoRA and RGBA layer decomposition; [setup, document imports and validation status](ming-image.md)).
 - [lodestones/Zeta-Chroma](https://huggingface.co/lodestones/Zeta-Chroma) (Zeta Chroma)

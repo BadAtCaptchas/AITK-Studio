@@ -44,6 +44,7 @@ import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDa
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
 import ThemeLogo from '@/components/ThemeLogo';
 import DatasetActionBar from '@/components/DatasetActionBar';
+import LayeredDocumentsButton from '@/components/LayeredDocumentsButton';
 import CaptionMonitor from '@/components/CaptionMonitor';
 type DatasetEditorPageProps = {
   datasetName: string;
@@ -242,6 +243,7 @@ export default function DatasetEditorPage({
         addedAt: img.added_at ?? null,
         captionedAt: img.captioned_at ?? null,
         sizeBytes: typeof img.size_bytes === 'number' ? img.size_bytes : null,
+        layerCount: img.layer_count,
       })),
     [imgList],
   );
@@ -804,6 +806,7 @@ export default function DatasetEditorPage({
             <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden md:inline-flex" />
           )}
           {!isRemoteDataset && !encryptedManifest && <DatasetActionBar datasetName={datasetName} />}
+          {!encryptedManifest && <LayeredDocumentsButton datasetName={datasetName} workerID={workerID} onChanged={() => refreshImageList(datasetName)} />}
           <button
             type="button"
             onClick={() => setDatasetMenuOpen(open => !open)}

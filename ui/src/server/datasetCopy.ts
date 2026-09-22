@@ -2,6 +2,7 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { resolveDatasetDirectoryInsideRoot, isPathInside } from './remoteCaptionSecurity';
+import { listLayeredImages } from './layeredImages';
 
 function safeDatasetCopyName(baseName: string, suffix: string) {
   const safeBase = baseName
@@ -131,6 +132,7 @@ export async function copyDatasetBetweenRoots({
   }
 
   const sourcePath = await resolveDatasetDirectoryInsideRoot(path.resolve(datasetPath), sourceDatasetsRoot);
+  await listLayeredImages(sourcePath);
   const sourceName = path.basename(sourcePath);
   const destinationName = requestedName?.trim()
     ? normalizeRequestedDatasetName(requestedName)

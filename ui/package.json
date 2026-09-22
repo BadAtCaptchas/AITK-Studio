@@ -35,6 +35,8 @@
     "test:remote": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/cloudflaredConfig.test.mjs scripts/remoteClient.test.mjs scripts/jobsApiList.test.mjs scripts/queueSync.test.mjs scripts/openRouterPricing.test.mjs",
     "test:queue-reorder": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/queueReorder.test.mjs",
     "test:dataset-media": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/datasetMedia.test.mjs",
+    "test:layered-images": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/layeredImages.test.mjs scripts/mingImageOptions.test.mjs",
+    "test:layered-import-runtime": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node scripts/layeredImportSmoke.mjs",
     "test:lifecycle": "node --test scripts/appLifecycle.test.mjs",
     "test:dependency-install": "node --test scripts/installDeps.test.mjs",
     "test:models-path": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/modelsPath.test.mjs",

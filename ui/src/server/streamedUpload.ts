@@ -56,6 +56,7 @@ export async function streamRequestToStagingFile(
   directory: string,
   options: { maxBytes: number; prefix?: string },
 ) {
+  request.signal.throwIfAborted();
   if (!request.body) {
     throw new InvalidUploadError('Upload body is required');
   }
@@ -81,6 +82,7 @@ export async function streamRequestToStagingFile(
       Readable.fromWeb(request.body as unknown as NodeReadableStream),
       limiter,
       fs.createWriteStream(stagingPath, { flags: 'wx' }),
+      { signal: request.signal },
     );
     return { stagingPath, bytesWritten };
   } catch (error) {

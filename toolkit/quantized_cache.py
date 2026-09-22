@@ -184,6 +184,8 @@ def _module_backend_name(module: OstrisLinear) -> str:
 
 
 def _expected_packed_layout(qtype_name: str) -> str:
+    if qtype_name == "ming_fp8":
+        return "e4m3fn_per_tensor_v1"
     if qtype_name == "nvfp4":
         return "nvfp4_awq_block16_v1"
     if qtype_name == "convrot4":
@@ -208,6 +210,8 @@ def _expected_packed_layout(qtype_name: str) -> str:
 
 
 def _expected_buffer_names(qtype_name: str) -> set[str]:
+    if qtype_name == "ming_fp8":
+        return {"ming_fp8_data", "ming_fp8_scale"}
     if qtype_name == "nvfp4":
         return {"nv4_qdata", "nv4_scales", "nv4_pts", "nv4_pre_scale"}
     if qtype_name == "convrot4":
@@ -335,7 +339,7 @@ def _module_manifest(name: str, module: OstrisLinear) -> Dict[str, Any]:
                 "regular_hadamard_v1"
                 if qtype_name.startswith("convrot")
                 else "none"
-                if qtype_name.startswith("uint") or qtype_name == "nvfp4"
+                if qtype_name.startswith("uint") or qtype_name in {"nvfp4", "ming_fp8"}
                 else "deterministic_rpbh_v1"
             ),
             "dimension": int(module.in_features),

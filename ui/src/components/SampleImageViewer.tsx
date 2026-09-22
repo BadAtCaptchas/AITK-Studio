@@ -12,7 +12,7 @@ import { openConfirm } from './ConfirmModal';
 import { apiClient } from '@/utils/api';
 import { isVideo, isAudio, isText, encodeFilePathForUrl } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
-import { getDisplayPath, getMediaUrl, parseRemoteAssetRef } from '@/utils/media';
+import { getDisplayPath, getMediaUrl, getSampleLayersUrl, parseRemoteAssetRef } from '@/utils/media';
 import BoundingBoxOverlay, { parseBoundingBoxes } from './BoundingBoxOverlay';
 
 interface Props {
@@ -37,6 +37,22 @@ export default function SampleImageViewer({
   const [showingControlIdx, setShowingControlIdx] = useState<number | null>(null);
   const [showBoxes, setShowBoxes] = useState(false);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [layerUrls, setLayerUrls] = useState<string[]>([]);
+  const [showingLayer, setShowingLayer] = useState<number | null>(null);
+  const [layerError, setLayerError] = useState('');
+
+  useEffect(() => {
+    setLayerUrls([]); setShowingLayer(null); setLayerError('');
+    const url = imgPath ? getSampleLayersUrl(imgPath) : null;
+    if (!url) return;
+    const controller = new AbortController();
+    apiClient.get<unknown>(url, { signal: controller.signal }).then(response => {
+      const data = response.data;
+      if (!data || typeof data !== 'object' || !('layers' in data) || !Array.isArray(data.layers) || data.layers.length > 32 || !data.layers.every((layer: unknown) => typeof layer === 'string' && layer.startsWith('/api/jobs/'))) throw new Error('Invalid sample layers');
+      setLayerUrls(data.layers);
+    }).catch(() => { if (!controller.signal.aborted) setLayerError('Layer previews unavailable'); });
+    return () => controller.abort();
+  }, [imgPath]);
 
   useEffect(() => setMounted(true), []);
 
@@ -209,11 +225,12 @@ export default function SampleImageViewer({
   }, [sampleItem, sampleConfig]);
 
   const displayedImgPath = useMemo(() => {
+    if (showingLayer !== null && layerUrls[showingLayer]) return layerUrls[showingLayer];
     if (showingControlIdx !== null && controlImages[showingControlIdx]) {
       return controlImages[showingControlIdx];
     }
     return imgPath;
-  }, [showingControlIdx, controlImages, imgPath]);
+  }, [showingControlIdx, controlImages, imgPath, showingLayer, layerUrls]);
 
   // text samples (LLM models): the file body is the sample
   const [sampleText, setSampleText] = useState<string | null>(null);
@@ -245,6 +262,7 @@ export default function SampleImageViewer({
   const canShowBoxes = Boolean(
     boundingBoxes &&
       showingControlIdx === null &&
+      showingLayer === null &&
       displayedImgPath &&
       !isAudio(displayedImgPath) &&
       !isVideo(displayedImgPath),
@@ -321,7 +339,7 @@ export default function SampleImageViewer({
                     controls={true}
                   />
                 ) : (
-                  <div className="relative inline-block leading-[0px]">
+                  <div className="relative inline-block leading-[0px]" style={showingLayer !== null ? { backgroundColor: '#334155', backgroundImage: 'conic-gradient(#475569 25%, transparent 0 50%, #475569 0 75%, transparent 0)', backgroundSize: '20px 20px' } : undefined}>
                     <img
                       src={getMediaUrl(displayedImgPath)}
                       alt="Sample Image"
@@ -338,6 +356,12 @@ export default function SampleImageViewer({
                 ))}
             </div>
             {/* # make full width */}
+            {layerUrls.length > 0 && <div className="flex max-w-[95vw] items-center gap-3 overflow-x-auto bg-gray-950 px-4 py-2 text-xs">
+              <button type="button" onClick={() => { setShowingLayer(null); setShowingControlIdx(null); }} className={classNames('operator-button shrink-0', showingLayer === null && showingControlIdx === null && 'text-brand-300')}>Composite</button>
+              <span className="shrink-0 text-gray-400">Bottom → top</span>
+              {layerUrls.map((url, index) => <div key={url} className="flex shrink-0 flex-col items-center gap-1"><button type="button" onClick={() => { setShowingLayer(index); setShowingControlIdx(null); }} aria-label={`Preview layer ${index + 1}`} className={classNames('rounded border p-1', showingLayer === index ? 'border-brand-400' : 'border-gray-700')}><img src={url} alt={`Layer ${index + 1}`} className="h-12 w-16 object-contain" /></button><a href={url} download={`layer-${index + 1}.png`} className="text-brand-300">Layer {index + 1} PNG</a></div>)}
+            </div>}
+            {layerError && sampleConfig?.num_layers && <p className="bg-gray-950 px-4 py-1 text-xs text-amber-300">{layerError}</p>}
             <div className="bg-gray-950 text-sm flex justify-between items-center px-4 py-2">
               <div className="flex-1 relative h-10 min-w-0">
                 {sampleItem?.prompt && (
@@ -377,7 +401,7 @@ export default function SampleImageViewer({
                       className={`max-h-12 max-w-12 object-contain bg-black border-2 rounded cursor-pointer ${
                         showingControlIdx === idx ? 'border-brand-500' : 'border-gray-700 hover:border-gray-500'
                       }`}
-                      onClick={() => setShowingControlIdx(idx)}
+                      onClick={() => { setShowingLayer(null); setShowingControlIdx(idx); }}
                       title={`Control image ${idx + 1}`}
                     />
                   ))}

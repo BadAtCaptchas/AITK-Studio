@@ -3,8 +3,13 @@ from unittest import mock
 from types import SimpleNamespace
 
 import torch
+from torch.utils.checkpoint import checkpoint, set_checkpoint_early_stop
 
-from toolkit.memory_management.block_offload import BlockOffloadManager, LayerOffloadStrategy
+from toolkit.memory_management.block_offload import (
+    BlockOffloadManager,
+    LayerOffloadStrategy,
+    StaticPinnedCpuAllocator,
+)
 from toolkit.memory_management.manager import MemoryManager
 from toolkit.memory_management.offload import (
     is_block_offload_arch_supported,
@@ -250,6 +255,85 @@ class LayerOffloadStrategyTest(unittest.TestCase):
 
 
 class BlockOffloadManagerTest(unittest.TestCase):
+    def test_async_cpu_copy_protects_source_storage_on_copy_stream(self):
+        stream = FakeCudaStream()
+        calls = []
+        source = mock.Mock()
+        source.device = torch.device("cuda:0")
+        source.dtype = torch.float32
+        source.detach.return_value = source
+        source.record_stream.side_effect = lambda value: calls.append(("record", value))
+        destination = mock.Mock()
+        destination.copy_.side_effect = lambda value, **kwargs: calls.append(("copy", value))
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.cuda, "current_stream", return_value=stream) as current_stream,
+            mock.patch.object(torch, "empty_like", return_value=destination) as allocate,
+        ):
+            result = StaticPinnedCpuAllocator.copy(source)
+
+        self.assertIs(result, destination)
+        self.assertEqual(calls, [("record", stream), ("copy", source)])
+        current_stream.assert_called_once_with(source.device)
+        allocate.assert_called_once_with(source, device="cpu", dtype=torch.float32, pin_memory=True)
+        destination.copy_.assert_called_once_with(source, non_blocking=True)
+
+    def test_prefetched_storage_records_compute_stream_after_transfer_wait(self):
+        model = TinyBlockModel(block_count=1)
+        manager = BlockOffloadManager.attach(
+            model, torch.device("cpu"), offload_fraction=1.0, block_paths=["blocks"]
+        )
+        entry = manager.layers[0]
+        calls = []
+        stream = mock.Mock()
+        stream.wait_event.side_effect = lambda event: calls.append(("wait", event))
+        event = FakeCudaEvent()
+
+        def fake_tensor(name, device="cuda:0", grad=None):
+            return SimpleNamespace(
+                device=torch.device(device),
+                grad=grad,
+                record_stream=mock.Mock(side_effect=lambda value: calls.append((name, value))),
+            )
+
+        gradient = fake_tensor("gradient")
+        parameter = fake_tensor("parameter", grad=gradient)
+        buffer = fake_tensor("buffer")
+        cpu_buffer = fake_tensor("cpu buffer", device="cpu")
+        entry.params = [parameter]
+        entry.buffers = [buffer, cpu_buffer]
+        entry.state = "prefetching"
+        entry.transfer_event = event
+        manager.active = True
+        manager.process_device = torch.device("cuda:0")
+
+        with (
+            mock.patch.object(torch.cuda, "current_stream", return_value=stream),
+            mock.patch.object(manager, "_move_entry") as move_entry,
+        ):
+            manager._ensure_entry_on_device(entry)
+
+        self.assertEqual(
+            calls,
+            [("wait", event), ("parameter", stream), ("buffer", stream), ("gradient", stream)],
+        )
+        cpu_buffer.record_stream.assert_not_called()
+        move_entry.assert_not_called()
+        self.assertEqual(entry.state, "device")
+        self.assertIsNone(entry.transfer_event)
+
+    def test_cpu_entry_does_not_query_cuda_stream(self):
+        model = TinyBlockModel(block_count=1)
+        manager = BlockOffloadManager.attach(
+            model, torch.device("cpu"), offload_fraction=1.0, block_paths=["blocks"]
+        )
+
+        with mock.patch.object(torch.cuda, "current_stream") as current_stream:
+            manager._record_entry_compute_stream(manager.layers[0])
+
+        current_stream.assert_not_called()
+
     def test_frozen_fully_quantized_block_is_backward_reload_safe(self):
         model = TinyFrozenQuantizedBlockModel()
 
@@ -308,6 +392,42 @@ class BlockOffloadManagerTest(unittest.TestCase):
             manager.before_backward(entry)
 
         ensure.assert_called_once_with(entry)
+
+    def test_checkpoint_recompute_keeps_weights_until_backward_finishes(self):
+        for early_stop in (True, False):
+            with self.subTest(early_stop=early_stop):
+                model = TinyFrozenQuantizedBlockModel()
+                manager = BlockOffloadManager.attach(
+                    model, torch.device("cpu"), offload_fraction=1.0, block_paths=["blocks"]
+                )
+                entry = manager.layers[0]
+                calls = []
+                original_before = manager.before_backward
+                original_after = manager.after_backward
+
+                def before(layer):
+                    calls.append("backward starts")
+                    return original_before(layer)
+
+                def after(layer):
+                    calls.append("backward finishes")
+                    return original_after(layer)
+
+                inputs = torch.randn(2, 4, requires_grad=True)
+                with (
+                    mock.patch.object(manager, "before_backward", side_effect=before),
+                    mock.patch.object(manager, "after_backward", side_effect=after),
+                    mock.patch.object(
+                        manager, "_offload_entry", side_effect=lambda *args, **kwargs: calls.append("eviction")
+                    ),
+                ):
+                    with set_checkpoint_early_stop(early_stop):
+                        output = checkpoint(model.blocks[0], inputs, use_reentrant=False)
+                    output.square().sum().backward()
+
+                self.assertEqual(calls, ["eviction", "backward starts", "backward finishes", "eviction"])
+                self.assertFalse(entry.backward_active)
+                self.assertTrue(torch.isfinite(inputs.grad).all())
 
     def test_attach_is_idempotent_and_forward_still_runs_on_cpu(self):
         model = TinyBlockModel()

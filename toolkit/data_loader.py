@@ -23,6 +23,7 @@ from toolkit.data_transfer_object.data_loader import FileItemDTO, DataLoaderBatc
 from toolkit.print import print_acc
 from toolkit.accelerator import get_accelerator
 from toolkit.encrypted_dataset import EncryptedDatasetReader, is_encrypted_dataset_path
+from toolkit.layered_dataset import discover_layered_samples, validate_layered_config
 
 import platform
 
@@ -391,9 +392,14 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             sd: 'StableDiffusion' = None,
     ):
         self.dataset_config = dataset_config
+        self.is_layered = dataset_config.type == 'layered_image'
+        if self.is_layered:
+            validate_layered_config(dataset_config, batch_size=batch_size)
+            if not getattr(sd, 'supports_layered_images', False):
+                raise ValueError("layered_image datasets require a native layered-image model")
         if getattr(sd, "preserve_image_alpha", False) and dataset_config.cache_text_embeddings:
             if dataset_config.control_from_same_folder or (dataset_config.control_path and (dataset_config.augmentations or dataset_config.poi)):
-                raise ValueError("Qwen reference prompt caches require fixed reference images and crops; disable cache_text_embeddings for randomized controls or augmentations")
+                raise ValueError("RGBA reference prompt caches require fixed reference images and crops; disable cache_text_embeddings for randomized controls or augmentations")
         # update bucket divisibility
         self.dataset_config.bucket_tolerance = sd.get_bucket_divisibility()
         self.is_video = dataset_config.num_frames > 1 or dataset_config.auto_frame_count
@@ -410,6 +416,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             self.dataset_path and os.path.isdir(self.dataset_path) and is_encrypted_dataset_path(self.dataset_path)
         )
         if self.is_encrypted_dataset:
+            if self.is_layered:
+                raise ValueError("Grouped layered-image datasets do not support encrypted storage yet")
             self.dataset_config.encrypted = True
             if self.dataset_config.cache_latents_to_disk:
                 print_acc("  -  Disabling disk latent cache for encrypted dataset")
@@ -474,6 +482,10 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 file_list = self.encrypted_reader.list_items(media_kinds=media_kinds)
             else:
                 file_list = self.encrypted_reader.list_items(media_kinds=["image"])
+        elif self.is_layered:
+            layered_samples = discover_layered_samples(self.dataset_path)
+            self.layered_samples = {str(sample.composite_path): sample for sample in layered_samples}
+            file_list = list(self.layered_samples)
         elif os.path.isdir(self.dataset_path):
             extensions = image_extensions
             if self.is_audio_model:
@@ -485,7 +497,10 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 extensions = video_extensions
                 if self.dataset_config.include_images_in_video_dataset:
                     extensions = video_extensions + image_extensions
-            file_list = [os.path.join(root, file) for root, _, files in os.walk(self.dataset_path) for file in files if file.lower().endswith(tuple(extensions)) and not file.startswith('.')]
+            file_list = []
+            for root, directories, files in os.walk(self.dataset_path):
+                directories[:] = [name for name in directories if name.casefold() != '.layers' and not name.casefold().startswith('.layered-import-')]
+                file_list.extend(os.path.join(root, file) for file in files if file.lower().endswith(tuple(extensions)) and not file.startswith('.'))
         else:
             # assume json
             with open(self.dataset_path, 'r') as f:
@@ -571,6 +586,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 file_item = FileItemDTO(
                     sd=self.sd,
                     path=file_path,
+                    layered_sample=self.layered_samples.get(file_path) if self.is_layered else None,
                     is_audio_model=self.is_audio_model or (self.is_multimodal_llm and (encrypted_item.mediaKind == "audio" if encrypted_item is not None else file_path.lower().endswith(tuple(audio_extensions)))),
                     dataset_config=dataset_config,
                     dataloader_transforms=self.transform,
@@ -587,6 +603,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 )
                 self.file_list.append(file_item)
             except Exception as e:
+                if self.is_layered:
+                    raise
                 if isinstance(e, (image_utils.UnsupportedAnimatedImageError, image_utils.JpegXLSupportError)):
                     raise
                 print_acc(traceback.format_exc())
@@ -736,7 +754,7 @@ def get_dataloader_from_datasets(
 
     for config in dataset_config_list:
 
-        if config.type == 'image':
+        if config.type in ('image', 'layered_image'):
             # dataset level batch_size overrides the train config batch_size when set
             dataset_batch_size = config.batch_size if config.batch_size is not None else batch_size
             dataset = AiToolkitDataset(config, batch_size=dataset_batch_size, sd=sd)

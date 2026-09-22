@@ -11,6 +11,7 @@ import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAcce
 import { findDatasetItemsRecursivelyAsync } from '@/server/datasetImages';
 import { findExistingCaptionSidecarAsync, isTextCaptionFilePath } from '@/server/captionFiles';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
+import { listLayeredImages } from '@/server/layeredImages';
 
 const brotliCompress = promisify(zlib.brotliCompress);
 const gzipCompress = promisify(zlib.gzip);
@@ -21,6 +22,7 @@ type DatasetImageListEntry = {
   added_at: string | null;
   captioned_at: string | null;
   size_bytes: number;
+  layer_count?: number;
 };
 
 function dateToIso(date: Date | undefined) {
@@ -146,9 +148,10 @@ async function postCommand(request: Request) {
     }
 
     const imageFiles = await findDatasetItemsRecursivelyAsync(datasetFolder);
+    const layered = new Map((await listLayeredImages(datasetFolder)).map(group => [path.resolve(datasetFolder, group.composite), group.layers.length]));
     imageFiles.sort((a, b) => a.localeCompare(b));
     const root = datasetFolder + path.sep;
-    const images = await Promise.all(imageFiles.map(imgPath => imageEntry(imgPath, compact ? root : null)));
+    const images = await Promise.all(imageFiles.map(async imgPath => ({ ...await imageEntry(imgPath, compact ? root : null), ...(layered.has(path.resolve(imgPath)) ? { layer_count: layered.get(path.resolve(imgPath)) } : {}) })));
 
     return jsonResponse(request, compact ? { root, images } : { images });
   } catch (error) {

@@ -370,6 +370,18 @@
       "module": "extensions_built_in.llm_models.qwen25_omni",
       "className": "Qwen25OmniLLM",
       "optionalDependencies": []
+    },
+    {
+      "arch": "ming_image_design",
+      "module": "extensions_built_in.diffusion_models.ming_image",
+      "className": "MingImageDesignModel",
+      "optionalDependencies": []
+    },
+    {
+      "arch": "ming_image_design_layer",
+      "module": "extensions_built_in.diffusion_models.ming_image",
+      "className": "MingImageDesignLayerModel",
+      "optionalDependencies": []
     }
   ],
   "choices": [
@@ -3277,6 +3289,102 @@
       },
       "offloading": {
         "layers": false
+      }
+    },
+    {
+      "name": "ming_image_design",
+      "arch": "ming_image_design",
+      "label": "Ming Image Design (experimental)",
+      "group": "experimental",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "sample.ctrl_img"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.train_text_encoder",
+        "model.quantize_te",
+        "train.diff_output_preservation",
+        "train.blank_prompt_preservation",
+        "slider"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 16,
+        "maximum": 8192
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 1,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "ming_image_design_layer",
+      "arch": "ming_image_design_layer",
+      "label": "Ming Image Design-Layer (experimental)",
+      "group": "experimental",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "sample.ctrl_img"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.train_text_encoder",
+        "model.quantize_te",
+        "train.diff_output_preservation",
+        "train.blank_prompt_preservation",
+        "slider"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 16,
+        "maximum": 8192
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 1,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
       }
     }
   ],

@@ -10,6 +10,7 @@ import { isLocalWorker, getRemoteWorker, remoteJson } from '@/server/remoteClien
 import { normalizeStoragePathSetting } from '@/server/pathContainment';
 import { removeSampleThumbnails } from '@/server/sampleThumbnails';
 import { waveformArtwork } from '@/server/audioArtwork';
+import { deleteSampleLayers } from '@/server/sampleLayers';
 
 type SampleRouteParams = {
   jobID: string;
@@ -30,6 +31,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<Sam
     const sample = await resolveJobSampleFile(job, samplePath[0]);
     if (!sample) return Response.json({ deleted: false });
     const folder = path.dirname(sample.path);
+    await deleteSampleLayers(sample.path);
     await fs.promises.unlink(sample.path);
     await removeSampleThumbnails(folder, samplePath[0]);
     if (path.extname(sample.path) !== '.txt') {

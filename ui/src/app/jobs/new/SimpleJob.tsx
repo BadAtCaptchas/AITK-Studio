@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import {
   ModelArch,
   quantizationOptions,
+  getTransformerQuantizationOptions,
   defaultQtype,
   jobTypeOptions,
   SampleTags,
@@ -532,6 +533,9 @@ export default function SimpleJob({
     trainingBarClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6';
   }
   const transformerQuantizationOptions: GroupedSelectOption[] | SelectOption[] = useMemo(() => {
+    if (modelArch?.name === 'ming_image_design' || modelArch?.name === 'ming_image_design_layer') {
+      return getTransformerQuantizationOptions(modelArch.name);
+    }
     const hasARA = modelArch?.accuracyRecoveryAdapters && Object.keys(modelArch.accuracyRecoveryAdapters).length > 0;
     if (!hasARA) {
       return quantizationOptions;
@@ -2026,6 +2030,7 @@ export default function SimpleJob({
                       <QwenReferenceInputs paths={qwenSampleReferences(sample)} onChange={paths => setJobConfig(paths, `config.process[0].sample.samples[${i}].ctrl_imgs`)} />
                       <button type="button" className="text-sm text-blue-300" onClick={() => { setSamplePromptValue(i, transparentQwenPrompt(sample.prompt)); setJobConfig(true, 'config.process[0].model.model_kwargs.rgba'); setJobConfig('png', 'config.process[0].sample.ext'); }}>Add transparency instructions</button>
                     </>}
+                    {processConfig.model.arch === 'ming_image_design_layer' && <NumberInput label="Generated layers" value={sample.num_layers ?? sampleConfig.num_layers ?? 2} min={1} max={32} onChange={value => setJobConfig(value ?? 2, `config.process[0].sample.samples[${i}].num_layers`)} />}
                     {processConfig.model.arch !== 'qwen_image_2' && (modelArch?.additionalSections?.includes('sample.ctrl_img') || modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && (
                       <div className="my-3 space-y-2">
                         {(modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')

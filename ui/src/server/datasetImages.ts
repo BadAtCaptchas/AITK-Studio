@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { DATASET_TEXT_CAPTION_EXTENSIONS } from './captionFiles';
 import { isDatasetRootCaptionEntry } from './datasetRootCaption';
+import { pendingLayeredImagePaths, pendingLayeredImagePathsAsync } from './layeredPublication';
 
 export const DATASET_MEDIA_EXTENSIONS = [
   '.png',
@@ -65,6 +66,10 @@ export function findDatasetItemsRecursively(dir: string, datasetRoot = dir): str
     }
   }
 
+  if (dir === datasetRoot) {
+    const pending = pendingLayeredImagePaths(datasetRoot);
+    return results.filter(file => !pending.has(path.resolve(file)));
+  }
   return results;
 }
 
@@ -113,5 +118,9 @@ export async function findDatasetItemsRecursivelyAsync(dir: string, datasetRoot 
     }
   }
 
+  if (dir === datasetRoot) {
+    const pending = await pendingLayeredImagePathsAsync(datasetRoot);
+    return results.filter(file => !pending.has(path.resolve(file)));
+  }
   return results;
 }

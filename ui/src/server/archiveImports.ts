@@ -26,6 +26,7 @@ import { withProcessLease } from './processLease';
 import { isPathWithinRoot } from './pathContainment';
 import { getExtractedDatasetPath, readDatasetExportManifest } from './datasetTransfer';
 import { isEncryptedDatasetFolder } from './encryptedDatasets';
+import { listLayeredImages, validateLayeredImageAssets } from './layeredImages';
 import {
   safeNameSegment,
   validateArchiveEntryName,
@@ -168,6 +169,7 @@ export async function executeArchiveImport(operation: Operation): Promise<unknow
   let result: unknown;
   if (input.kind === 'dataset-import') {
     const manifest = await readDatasetExportManifest(extractRoot);
+    await listLayeredImages(getExtractedDatasetPath(extractRoot, manifest.dataset.archivePath));
     const preferred = input.preferredName || manifest.dataset.name || 'dataset';
     const name = await reserveName(operation, datasetsRoot, preferred, 'datasetName');
     const destination = path.join(datasetsRoot, name);
@@ -220,6 +222,7 @@ export async function executeArchiveImport(operation: Operation): Promise<unknow
           `dataset-${index}`,
         );
         const target = path.join(datasetsRoot, datasetName);
+        await validateLayeredImageAssets(extracted(extractRoot, mapping.archivePath));
         await publishDirectory(extracted(extractRoot, mapping.archivePath), target, `${operation.id}:dataset-${index}`);
         for (const configPath of mapping.targetConfigPaths) mappings.set(configPath, target);
       }

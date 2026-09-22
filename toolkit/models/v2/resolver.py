@@ -11,6 +11,7 @@ into here.
 """
 
 import os
+import re
 from typing import Callable, Iterable, Optional
 
 from toolkit.paths import MODELS_PATH
@@ -64,6 +65,20 @@ def comfy_local_rel(repo_rel: str) -> str:
     return repo_rel
 
 
+def _is_full_precision_file(filename: str) -> bool:
+    name = os.path.basename(filename).lower()
+    # Mixed checkpoints may mention a floating dtype for the layers left
+    # unquantized. Quantization markers take precedence over that hint.
+    if re.search(
+        r"convrot|(?:fp|float)[48]|e[45]m[23]|int\d+|w\d+a\d+|quant|(?:^|[_-])q\d+",
+        name,
+    ):
+        return False
+    return re.search(
+        r"(?:^|[_-])(?:bf16|fp16|fp32|float16|float32)(?:[_\-.]|$)", name
+    ) is not None
+
+
 def resolve_comfy_candidates(
     candidates: Iterable[str],
     repo_id: str,
@@ -74,10 +89,22 @@ def resolve_comfy_candidates(
 ) -> Optional[str]:
     """Pick the best comfy weight file among precision variants of one
     component (repo-relative paths, ranked by comfy_precision_rank for the
-    requested qtype, then list order). The best-ranked LOCAL candidate wins;
-    only when no candidate is local is the best-ranked one downloaded to its
-    comfy-layout location under MODELS_PATH."""
+    requested qtype, then list order). With no quantization requested, use
+    only BF16/FP16/FP32 candidates when available: dequantizing a cached
+    checkpoint cannot recover its original precision. Otherwise all candidates remain
+    eligible, including models with only quantized or unlabelled filenames.
+    The best-ranked LOCAL eligible candidate wins; only when none is local
+    is the best-ranked one downloaded under MODELS_PATH."""
     candidates = list(candidates)
+    if not qtype:
+        full_precision = [
+            candidate for candidate in candidates
+            if _is_full_precision_file(candidate)
+        ]
+        if full_precision:
+            candidates = full_precision
+    if not candidates:
+        return None
     ordered = sorted(
         candidates,
         key=lambda c: (comfy_precision_rank(c, qtype=qtype), candidates.index(c)),
@@ -323,5 +350,3 @@ def resolve_named_file(
         token=hf_token,
         local_dir=MODELS_PATH,
     )
-
-

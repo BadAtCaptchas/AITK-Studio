@@ -144,7 +144,6 @@ class QwenImage2Model(BaseModel):
     # Loading
     # ------------------------------------------------------------------
     def load_model(self):
-        dtype = self.torch_dtype
         self.print_and_status_update("Loading Qwen-Image 2.1 model")
         model_path = self.model_config.name_or_path
         base_model_path = self.model_config.extras_name_or_path
@@ -169,13 +168,21 @@ class QwenImage2Model(BaseModel):
 
         self.print_and_status_update("Loading text encoder")
         processor = QwenImage21TextEncoder.load_processor(base_model_path)
+        te_load_kwargs = self.component_load_kwargs("te")
         text_encoder = QwenImage21TextEncoder.load_model(
-            base_model_path, dtype=dtype, subfolder="text_encoder"
+            base_model_path,
+            dtype=te_load_kwargs["dtype"],
+            subfolder="text_encoder",
+            use_comfy_weights=te_load_kwargs["use_comfy_weights"],
+            # Match .load() source selection, while deferring quantization
+            # until the vision patch below has been installed.
+            qtype=(te_load_kwargs["qtype"] or "").split("|", 1)[0] or None,
+            quantize_on_load=False,
         )
         # the vision tower stays: any prompt may carry reference images. bf16
         # Conv3d has no fast kernel, the equivalent GEMM does
         text_encoder.patch_vision_patch_embed()
-        text_encoder.aitk_post_load(**self.component_load_kwargs("te"))
+        text_encoder.aitk_post_load(**te_load_kwargs)
         text_encoder.requires_grad_(False)
         text_encoder.eval()
         flush()

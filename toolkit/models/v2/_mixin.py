@@ -74,9 +74,9 @@ class OstrisModelMixin:
     aitk_comfy_repo: Optional[str] = None
     # standard name_or_path (hub repo id) -> repo-relative comfy weight file
     # candidates for this module: every precision variant the class can digest.
-    # Selection ranks them convrot8 > float8 mixed > float8 > bf16 > fp16
-    # (resolver.comfy_precision_rank); a locally-present candidate always wins
-    # over a download.
+    # Selection ranks candidates for the requested qtype (resolver.comfy_precision_rank).
+    # Without quantization, known full-precision variants exclude quantized
+    # alternatives. Within the eligible candidates, local files win over downloads.
     aitk_comfy_weight_names: Dict[str, List[str]] = {}
 
     # ---- tokenizer/processor source, for text-encoder modules ----
@@ -467,7 +467,10 @@ class OstrisModelMixin:
                 config=config,
                 subfolder=subfolder,
                 use_comfy_weights=use_comfy_weights,
-                qtype=qtype if quantize_on_load else None,
+                # Even deferred quantization uses qtype to select its source;
+                # a resident int8 repack must not satisfy a BF16 request.
+                qtype=qtype,
+                quantize_on_load=quantize_on_load,
                 kwargs=kwargs,
             )
             resident = pool.get(pool_key)
@@ -939,5 +942,3 @@ class OstrisTransformersMixin(OstrisModelMixin):
 
         with init_empty_weights(include_buffers=False):
             return cls(config)
-
-

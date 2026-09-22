@@ -2,6 +2,14 @@
 
 Qwen Image 2.1 supports text-to-image generation and image editing through the `qwen_image_2` architecture. Studio uses the Comfy-Org weights with ConvRot int8 defaults. The [official model card](https://huggingface.co/Qwen/Qwen-Image-2.1) and [reference repository](https://github.com/QwenLM/Qwen-Image-2.1) describe the model's capabilities.
 
+## Weight sources and precision
+
+The transformer and text encoder support both BF16 and ConvRot int8 repacks. With `quantize: false` or `quantize_te: false`, the corresponding component selects its BF16 source rather than reusing cached int8 weights and dequantizing them. If only the int8 file is cached, Studio downloads the BF16 file; existing cached weights remain intact. With quantization enabled, source selection prefers an available cached variant, ranks ConvRot int8 first for `convrot8`, and applies the requested quantization after loading when needed. Explicit checkpoint file paths keep their existing source semantics.
+
+Text encoder source selection respects `qtype_te` and `model_kwargs.use_comfy_weights`. To load the standard Hugging Face layout directly, use `name_or_path: Qwen/Qwen-Image-2.1` with `model_kwargs.use_comfy_weights: false`. The vision patch is installed before post-load quantization and device placement.
+
+Original Diffusers transformer checkpoints now convert the separate MLP gate and up projections into Studio's fused projection during loading, including when the pair spans different shard files. This preserves the pretrained weights and the module names used by existing Studio adapters. BF16 repacks already use the fused layout.
+
 ## References and transparency
 
 Training sample forms, Native Generate, and Live Generate accept up to 10 reference images in order. Use the Up and Remove controls to manage that order. Annotated images or a separate edit mask can be supplied as references alongside the original image; there is no separate mask-painting editor. CLI/YAML samples use an ordered list:
@@ -43,4 +51,4 @@ The integration follows the task-specific sampling profiles, including the T2I p
 
 Weight-free checks cover small-reference token alignment with the installed processor, RGBA data loading and saving, cache identities, reference order and limits, guided editing with and without KV caching, cancellation, and the rewriter request/parser integration. Full-size image generation, training, and 9B prompt rewriting still require validation with pretrained weights on the target machine.
 
-Validated locally: 48 focused Python checks and 16 UI/server checks passed, along with app and worker TypeScript checks, changed-UI lint, runtime imports, and syntax checks. The rewriter tests substitute its model loader; no pretrained weights were downloaded.
+Weight-free regression checks also cover timestep precision after dtype conversions, deterministic posterior means, and source-selection policy for BF16 and int8 loading. Tiny real checkpoints verify weight preservation, forward outputs, and training gradients through the original Diffusers loading path. Mocked loading checks verify text encoder policy propagation and vision-patch ordering; they do not load pretrained components. These corrections have not yet been shown to resolve the reported training collapse with the affected configuration and pretrained weights.

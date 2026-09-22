@@ -44,6 +44,7 @@ from diffusers.models.attention_dispatch import dispatch_attention_fn
 from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.embeddings import TimestepEmbedding
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
+from diffusers.models.model_loading_utils import load_state_dict
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import RMSNorm
 
@@ -853,6 +854,43 @@ class QwenImage21Rope(nn.Module):
         )
 
 
+class _QwenImage21CheckpointShards:
+    """Stream converted shards, retaining only MLP halves awaiting their partner."""
+
+    def __init__(self, files, prefixes, convert, *, dduf_entries=None, disable_mmap=False):
+        self.files = files
+        self.prefixes = prefixes
+        self.convert = convert
+        self.dduf_entries = dduf_entries
+        self.disable_mmap = disable_mmap
+
+    def __len__(self):
+        return len(self.files)
+
+    def __iter__(self):
+        pending = {}
+        for filename in self.files:
+            state_dict = load_state_dict(
+                filename, dduf_entries=self.dduf_entries, disable_mmap=self.disable_mmap
+            )
+            for prefix in self.prefixes:
+                gate_key, up_key = f"{prefix}.gate_layer.weight", f"{prefix}.proj.weight"
+                for key in (gate_key, up_key):
+                    if key in state_dict:
+                        pending[key] = state_dict.pop(key)
+                if gate_key in pending and up_key in pending:
+                    state_dict.update(self.convert({
+                        gate_key: pending.pop(gate_key), up_key: pending.pop(up_key)
+                    }))
+            # Diffusers accepts state dictionaries as well as filenames here.
+            yield state_dict
+            # The loader has consumed this shard. Release its references before
+            # reading the next one, especially when loading also casts tensors.
+            state_dict.clear()
+        if pending:
+            raise ValueError(f"Incomplete Qwen Image 2.1 MLP checkpoint: {sorted(pending)}")
+
+
 class QwenImage21Transformer2DModel(
     ModelMixin,
     ConfigMixin,
@@ -971,6 +1009,51 @@ class QwenImage21Transformer2DModel(
                 continue
             new_sd[key] = value
         return new_sd
+
+    @classmethod
+    def _load_pretrained_model(
+        cls, model, state_dict, resolved_model_file, pretrained_model_name_or_path,
+        loaded_keys, **kwargs,
+    ):
+        # The mixin's single-file loader already converts split MLPs. Diffusers'
+        # directory/Hub loader needs the same conversion, including when the two
+        # halves live in different shards. Update the key manifest before its
+        # missing-key check so pretrained gate_up weights are never initialized
+        # as if they were absent from the original checkpoint.
+        split_suffixes = (".gate_layer.weight", ".proj.weight")
+        prefixes = {
+            key[: -len(suffix)]
+            for key in loaded_keys
+            for suffix in split_suffixes
+            if key.endswith(f".img_mlp{suffix}")
+        }
+        if prefixes:
+            checkpoint_keys = set(loaded_keys)
+            for prefix in sorted(prefixes):
+                required = {f"{prefix}{suffix}" for suffix in split_suffixes}
+                if not required.issubset(checkpoint_keys):
+                    raise ValueError(f"Incomplete Qwen Image 2.1 MLP checkpoint: {prefix}")
+                if f"{prefix}.gate_up.weight" in checkpoint_keys:
+                    raise ValueError(f"Ambiguous split and fused Qwen Image 2.1 MLP weights: {prefix}")
+            if state_dict is not None:
+                state_dict = cls.convert_state_dict_on_load(state_dict)
+                loaded_keys = list(state_dict)
+            else:
+                split_keys = {f"{prefix}{suffix}" for prefix in prefixes for suffix in split_suffixes}
+                loaded_keys = [key for key in loaded_keys if key not in split_keys]
+                loaded_keys.extend(f"{prefix}.gate_up.weight" for prefix in sorted(prefixes))
+                resolved_model_file = _QwenImage21CheckpointShards(
+                    resolved_model_file, sorted(prefixes), cls.convert_state_dict_on_load,
+                    dduf_entries=kwargs.get("dduf_entries"),
+                    disable_mmap=kwargs.get("disable_mmap", False),
+                )
+                # Conversion carries unmatched halves across shards. Consume in
+                # order instead of submitting every tensor dictionary at once.
+                kwargs["is_parallel_loading_enabled"] = False
+        return super()._load_pretrained_model(
+            model, state_dict, resolved_model_file, pretrained_model_name_or_path,
+            loaded_keys, **kwargs,
+        )
 
     @register_to_config
     def __init__(

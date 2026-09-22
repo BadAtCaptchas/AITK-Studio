@@ -25,7 +25,7 @@ Browse the model integrations included in AITK Studio. Available training modes 
 - [Alpha-VLLM/Lumina-Image-2.0](https://huggingface.co/Alpha-VLLM/Lumina-Image-2.0) (Lumina2)
 - [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) (Qwen-Image)
 - [Qwen/Qwen-Image-2512](https://huggingface.co/Qwen/Qwen-Image-2512) (Qwen-Image-2512)
-- [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (Qwen Image 2.1; Studio defaults to the [Comfy-Org repack](https://huggingface.co/Comfy-Org/Qwen-Image-2.1), ConvRot int8, and guidance 1.0)
+- [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (Qwen Image 2.1; Studio defaults to the official weights with local ConvRot int8 quantization and guidance 1.0. Automatic Comfy substitution is disabled; the [Comfy-Org repack](https://huggingface.co/Comfy-Org/Qwen-Image-2.1) remains available by explicit selection.)
 - [zai-org/GLM-Image](https://huggingface.co/zai-org/GLM-Image) (GLM-Image)
 - [Boogu/Boogu-Image-0.1-Base](https://huggingface.co/Boogu/Boogu-Image-0.1-Base) (Boogu-Image Base)
 - [Boogu/Boogu-Image-0.1-Turbo](https://huggingface.co/Boogu/Boogu-Image-0.1-Turbo) (Boogu-Image Turbo, experimental training)

@@ -40,10 +40,51 @@ test('Qwen Image 2.1 presets reach training and generation through the shared ca
   assert.equal(choice.defaults['config.process[0].sample.guidance_scale'][0], 1);
   assert.equal(choice.defaults['config.process[0].train.timestep_type'][0], 'shift');
   const model = getDefaultModelConfig(choice.name);
-  assert.equal(model.name_or_path, 'Comfy-Org/Qwen-Image-2.1');
+  assert.equal(model.name_or_path, 'Qwen/Qwen-Image-2.1');
+  assert.deepEqual(model.model_kwargs, { use_comfy_weights: false });
+  assert.equal(model.quantize, true);
+  assert.equal(model.quantize_te, true);
   assert.equal(model.qtype, 'convrot8');
   assert.equal(model.qtype_te, 'convrot8');
   assert.equal(model.low_vram, true);
+});
+
+test('Qwen source defaults apply on selection and preserve existing job source options', () => {
+  const catalog = loadSource('../src/domain/modelOptions.ts', {
+    './trainingDefaults': loadSource('../src/domain/trainingDefaults.ts'),
+    '@/helpers/defaultSamples': loadSource('../src/helpers/defaultSamples.ts'),
+    './modelCapabilities.json': require('../src/domain/modelCapabilities.json'),
+  });
+  const { handleModelArchChange } = loadSource('../src/app/jobs/new/utils.ts', {
+    './options': catalog,
+    '@/utils/basic': loadSource('../src/utils/basic.ts'),
+    '@/utils/memoryProfiles': loadSource('../src/utils/memoryProfiles.ts'),
+    '@/utils/fluxGuidancePolicy': loadSource('../src/utils/fluxGuidancePolicy.ts'),
+  });
+  const job = { config: { process: [{
+    model: { arch: 'flux', name_or_path: 'test/flux', model_kwargs: {} },
+    datasets: [], sample: { samples: [] },
+  }] } };
+  const writes = new Map();
+  const capture = (value, key) => writes.set(key, value);
+  handleModelArchChange('flux', 'qwen_image_2', job, capture);
+  assert.equal(writes.get('config.process[0].model.name_or_path'), 'Qwen/Qwen-Image-2.1');
+  assert.deepEqual(writes.get('config.process[0].model.model_kwargs'), { use_comfy_weights: false });
+  writes.clear();
+  handleModelArchChange('qwen_image_2', 'flux', job, capture);
+  assert.deepEqual(writes.get('config.process[0].model.model_kwargs'), {});
+
+  for (const model_kwargs of [{ rgba: true }, { use_comfy_weights: true }, { use_comfy_weights: false }]) {
+    const saved = structuredClone(job);
+    saved.config.process[0].model = {
+      arch: 'qwen_image_2', name_or_path: 'Comfy-Org/Qwen-Image-2.1', model_kwargs,
+    };
+    const before = structuredClone(saved);
+    writes.clear();
+    handleModelArchChange('qwen_image_2', 'qwen_image_2', saved, capture);
+    assert.equal(writes.size, 0);
+    assert.deepEqual(saved, before);
+  }
 });
 
 test('generator defaults and controls follow installed model declarations', () => {

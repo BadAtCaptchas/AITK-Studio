@@ -793,7 +793,8 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
     label: 'Qwen-Image-2.1',
     group: 'image',
     defaults: {
-      'config.process[0].model.name_or_path': ['Comfy-Org/Qwen-Image-2.1', defaultNameOrPath],
+      'config.process[0].model.name_or_path': ['Qwen/Qwen-Image-2.1', defaultNameOrPath],
+      'config.process[0].model.model_kwargs': [{ use_comfy_weights: false }, {}],
       'config.process[0].model.quantize': [true, false],
       'config.process[0].model.quantize_te': [true, false],
       'config.process[0].model.low_vram': [true, false],
@@ -809,7 +810,7 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
     additionalSections: ['datasets.multi_control_paths', 'sample.multi_ctrl_imgs', 'model.low_vram', 'model.layer_offloading'],
     modelNotes: {
       summary: 'Qwen Image 2.1: text-to-image and editing',
-      paragraphs: ['One model supports both tasks. Add dataset control paths or sample reference images for editing; omit them for text-to-image. The default Comfy weights use ConvRot int8 for the transformer and text encoder.', 'Use guidance 1.0 and dimensions divisible by 32. Existing saved jobs keep their explicit guidance; set it to 1.0 to use this recommendation. Keep the text encoder loaded when using references. RGBA output, 2K quality presets, prefix caching, and optional official prompt expansion are available in the Qwen controls. Up to 10 ordered references are supported; training preserves source alpha.'],
+      paragraphs: ['One model supports both tasks. Add dataset control paths or sample reference images for editing; omit them for text-to-image. New configurations load the official Qwen weights and quantize the transformer and text encoder locally to ConvRot int8. Automatic Comfy substitution is disabled; set model_kwargs.use_comfy_weights to true to opt in. Existing saved configurations and explicit Comfy sources remain supported.', 'Use guidance 1.0 and dimensions divisible by 32. Existing saved jobs keep their explicit guidance; set it to 1.0 to use this recommendation. Keep the text encoder loaded when using references. RGBA output, 2K quality presets, prefix caching, and optional official prompt expansion are available in the Qwen controls. Up to 10 ordered references are supported; training preserves source alpha.'],
     },
   },
   {

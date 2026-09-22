@@ -953,8 +953,8 @@ class QwenImage21Transformer2DModel(
     aitk_comfy_repo = "Comfy-Org/Qwen-Image-2.1"
     # convrot8 first: it is the toolkit's default qtype, and a matching
     # pre-quantized file attaches as-is instead of paying a quantize pass.
-    # Registered under both repo ids so name_or_path can be either the comfy
-    # repack (the default) or the original repo.
+    # Registered under both repo ids for explicit use_comfy_weights opt-in.
+    # The default official source bypasses these repack candidates.
     _COMFY_FILES = [
         "diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
         "diffusion_models/qwen_image_2.1_bf16.safetensors",

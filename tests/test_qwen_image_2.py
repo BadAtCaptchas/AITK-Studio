@@ -73,6 +73,7 @@ class QwenImage2Tests(unittest.TestCase):
         self.assertFalse(entry['needs_control_image'])
         self.assertEqual(entry['sample']['guidance_scale'], 1)
         self.assertEqual(entry['model']['qtype'], 'convrot8')
+        self.assertEqual(entry['model']['name_or_path'], 'Qwen/Qwen-Image-2.1')
 
     def test_timestep_embeddings_preserve_fp32_frequencies_across_dtype_and_device_casts(self):
         devices = ['cpu', 'cuda', 'cpu'] if torch.cuda.is_available() else ['cpu']

@@ -77,8 +77,8 @@ scheduler_config = {
     "use_karras_sigmas": False,
 }
 
-# the Comfy-Org repack is the weight source; the original repo supplies the
-# configs and the processor, which the repack does not carry
+# Official weights are the default. Optional Comfy repacks still use the
+# original repository for configs and the processor.
 COMFY_REPO = "Comfy-Org/Qwen-Image-2.1"
 BASE_REPO = "Qwen/Qwen-Image-2.1"
 
@@ -143,14 +143,22 @@ class QwenImage2Model(BaseModel):
     # ------------------------------------------------------------------
     # Loading
     # ------------------------------------------------------------------
+    def component_load_kwargs(self, role: str = "transformer", dtype=None):
+        load_kwargs = super().component_load_kwargs(role, dtype=dtype)
+        if "use_comfy_weights" not in self.model_config.model_kwargs:
+            # An explicit Comfy repository in an existing job remains an opt-in.
+            # Official checkpoints must not silently resolve to Comfy repacks.
+            load_kwargs["use_comfy_weights"] = self.model_config.name_or_path == COMFY_REPO
+        return load_kwargs
+
     def load_model(self):
         self.print_and_status_update("Loading Qwen-Image 2.1 model")
         model_path = self.model_config.name_or_path
         base_model_path = self.model_config.extras_name_or_path
 
         if base_model_path == model_path and not os.path.isdir(base_model_path):
-            # extras default to name_or_path, which is the comfy repack (or a
-            # single file); neither carries the configs or the processor
+            # Repack and single-file sources need the original configs and
+            # processor; the default official source already uses this repo.
             base_model_path = BASE_REPO
         elif os.path.isdir(model_path) and os.path.isdir(
             os.path.join(model_path, "text_encoder")

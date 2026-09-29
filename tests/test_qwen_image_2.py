@@ -176,7 +176,7 @@ class QwenImage2Tests(unittest.TestCase):
                     old_version = BaseModel.get_latent_space_version(holder)
                     self.assertEqual(old_version, custom_version or 'qwen_image_2')
                     self.assertEqual(holder.get_latent_space_version(), old_version + '_posterior_mean_v1')
-                    self.assertEqual(holder.get_text_embedding_space_version(), 'qwen_image_2_rgba_grid_v2_1048576')
+                    self.assertEqual(holder.get_text_embedding_space_version(), 'qwen_image_2_rgba_grid_v3_refmatch_1048576')
                     items = []
                     for model, version in ((holder, old_version), (holder, holder.get_latent_space_version()),
                                            (second_holder, second_holder.get_latent_space_version())):

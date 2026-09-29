@@ -36,6 +36,23 @@ const NV_BATCH_FLUSH_MS = 100;
 // Temperature refresh is decoupled from the tick (see refreshCpuTemp)
 const CPU_TEMP_REFRESH_MS = 5000;
 
+// GB10 has no configurable GPU power limit; this is the shared SoC rating.
+const KNOWN_POWER_LIMITS_W: Readonly<Record<string, number>> = { 'NVIDIA GB10': 140 };
+
+function withSharedMemory(gpu: GPUApiResponse, cpu: CpuInfo | null): GPUApiResponse {
+  if (!cpu || !Number.isFinite(cpu.totalMemory) || cpu.totalMemory <= 0 || !Number.isFinite(cpu.availableMemory)) return gpu;
+  const total = Math.round(cpu.totalMemory);
+  const free = Math.max(0, Math.min(total, Math.round(cpu.availableMemory)));
+  return {
+    ...gpu,
+    gpus: gpu.gpus.map(device =>
+      device.name === 'NVIDIA GB10' && !Number.isFinite(device.memory.total)
+        ? { ...device, memory: { total, free, used: total - free, shared: true } }
+        : device,
+    ),
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
@@ -79,7 +96,7 @@ function parseGpuLine(line: string): GpuInfo | null {
     },
     power: {
       draw: parseFloat(powerDraw),
-      limit: parseFloat(powerLimit),
+      limit: Number.isFinite(parseFloat(powerLimit)) ? parseFloat(powerLimit) : (KNOWN_POWER_LIMITS_W[name] ?? NaN),
     },
     clocks: {
       graphics: parseInt(clockGraphics),
@@ -147,7 +164,7 @@ class SystemMonitor {
     return {
       t: Date.now(),
       cpu: this.latestCpu,
-      gpu: this.getGpuSample(),
+      gpu: withSharedMemory(this.getGpuSample(), this.latestCpu),
       history: [...this.history],
     };
   }
@@ -197,7 +214,7 @@ class SystemMonitor {
       console.error('Monitor: GPU sample failed:', error);
     }
 
-    const sample: MonitorSample = { t, cpu: this.latestCpu, gpu: this.getGpuSample() };
+    const sample: MonitorSample = { t, cpu: this.latestCpu, gpu: withSharedMemory(this.getGpuSample(), this.latestCpu) };
     this.history.push(historyPointFromSample(sample));
     if (this.history.length > MONITOR_HISTORY_LENGTH) {
       this.history.splice(0, this.history.length - MONITOR_HISTORY_LENGTH);

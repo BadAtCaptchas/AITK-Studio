@@ -31,11 +31,11 @@ test('MiniMax H3 preset exposes current checkpoints and distillation choices', (
   assert.match(block, /train\.unload_text_encoder': \[false, false\]/);
   assert.match(block, /network\.type': \['lora', 'lora'\]/);
   assert.match(block, /include_images_in_video_dataset': \[true, false\]/);
-  assert.match(block, /minimax_h3_training_adapter_v1\.safetensors/);
-  assert.match(block, /train\.do_guidance_loss': \[true/);
+  assert.match(block, /minimax_h3_training_adapter_v3\.safetensors/);
+  assert.match(block, /train\.do_guidance_loss': \[false/);
   assert.match(block, /customModelSelectOptions/);
   assert.match(block, /Contrastive guidance/);
-  assert.match(block, /Both \(default\)/);
+  assert.match(block, /Training adapter \(default\)/);
   assert.match(block, /disableSections: \[[^\]]*'model\.quantize'[^\]]*'model\.quantize_te'/);
   const additionalSections = block.slice(block.indexOf('additionalSections:'), block.indexOf('modelNotes:'));
   assert.match(block, /allowedNetworkTypes: \['lora'\]/);
@@ -59,7 +59,7 @@ test('H3 notes and mixed-media control use typed plain option data', () => {
 test('Ref2VA and LTX 2.5 are registered with current controls', () => {
   const options = readSource('src/domain/modelOptions.ts');
   const ref2va = archBlock(options, 'minimax_h3_ref2va');
-  assert.match(ref2va, /minimax_h3_ref2va_training_adapter_v1\.safetensors/);
+  assert.match(ref2va, /minimax_h3_ref2va_training_adapter_v2\.safetensors/);
   assert.match(ref2va, /D-OPSD self-distillation/);
   assert.match(ref2va, /image_refs_as_video/);
   assert.match(ref2va, /image_ref_video_frames/);

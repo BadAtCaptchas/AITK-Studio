@@ -311,6 +311,8 @@ export interface GpuMemory {
   total: number;
   free: number;
   used: number;
+  /** Figures describe system RAM shared with an integrated GPU. */
+  shared?: boolean;
 }
 
 export interface GpuPower {

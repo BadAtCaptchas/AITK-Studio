@@ -1,4 +1,14 @@
-# Ming Image Design and Design-Layer (experimental)
+# Ming Image implementations
+
+## Comfy Design with a training adapter
+
+The `ming_image` architecture loads [Comfy-Org/Ming-Image](https://huggingface.co/Comfy-Org/Ming-Image), vendor weights, or explicit local checkpoints. Older `Kijai/Ming-Image-ComfyUI` names resolve to the Comfy repository. The UI preset uses ConvRot int8 transformer/text-encoder quantization, cached text embeddings, 12 sampling steps, guidance 1, and the `ming_image_01_design_training_adapter_v1.safetensors` assistant adapter. The adapter stays active during training and is disabled for samples.
+
+This implementation supports RGB or RGBA and one optional reference image. Set `model.model_kwargs.rgba: true` and use PNG samples for transparency; include a transparency cue such as `RGBA, 4-channel, transparent background` in the prompt. Its scheduler adjusts to the image resolution. Downloads use the configured Models folder.
+
+The Comfy implementation is separate from the native `ming_image_design` and `ming_image_design_layer` architectures below. Existing native jobs and adapters retain their implementation. Use Design-Layer for layered datasets. Comfy validation covers runtime imports, checkpoint conversion, a tiny real transformer forward/backward pass, and sampling hooks; pretrained-weight training and generation have not been tested for this port.
+
+## Native Design and Design-Layer (experimental)
 
 AITK Studio provides native PyTorch transformer LoRA adapters for
 [Ming Image Design](https://huggingface.co/inclusionAI/Ming-Image-0.1-Design)

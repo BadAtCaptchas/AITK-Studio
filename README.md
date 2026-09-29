@@ -116,3 +116,5 @@ See the [training reference](docs/training.md#cli-training) for configuration an
 [Report a reproducible bug](https://github.com/BadAtCaptchas/AITK-Studio/issues/new?template=bug_report.md) with steps, environment details, logs, and your version or commit. This repository's issue tracker is for bugs in this fork; setup help, usage questions, and feature requests are outside its scope. Report upstream-only bugs to the original project.
 
 Built on [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit). Released under the [MIT license](LICENSE); preserve the original license and attribution when redistributing.
+
+You can [support Ostris's upstream development](https://ostris.com/support).

@@ -301,6 +301,12 @@ class YuE2AudioModel(BaseAudioModel):
 
     def get_latent_space_version(self):
         version = super().get_latent_space_version()
+        # Codec tokens depend on the chosen semantic head. Keep default caches
+        # valid; hash the full non-default path so equal filenames cannot collide.
+        if self.semantic_head_path != f"{HEAD_REPO}/{HEAD_FILE}":
+            import hashlib
+            head_key = hashlib.sha256(str(self.semantic_head_path).encode()).hexdigest()[:16]
+            version = f"{version}_head_{head_key}"
         # stem tokens/sheets only ride the latent cache in separation mode
         return f"{version}_cot_{self.cot}"
 

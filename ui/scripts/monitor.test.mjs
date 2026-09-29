@@ -26,6 +26,33 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const cpu = { name: 'CPU', cores: 8, temperature: 40, totalMemory: 64000, availableMemory: 32000, freeMemory: 10000, currentLoad: 25 };
 const gpu = { hasNvidiaSmi: true, isMac: false, gpus: [] };
 
+test('GB10 reports shared system memory in live samples and initial state without reviving stale readings', async t => {
+  const fixture = monitorFixture(t);
+  await flush();
+  fixture.output('0, NVIDIA GB10, 580, 45, 20, 0, [N/A], [N/A], [N/A], 60, [N/A], 1500, 0, [N/A]\n');
+  await fixture.advance(500);
+  const sample = fixture.samples.at(-1);
+  const device = sample.gpu.gpus[0];
+  assert.equal(device.memory.shared, true);
+  assert.equal(device.memory.total, sample.cpu.totalMemory);
+  assert.equal(device.memory.free, sample.cpu.availableMemory);
+  assert.equal(device.memory.used, sample.cpu.totalMemory - sample.cpu.availableMemory);
+  assert.equal(device.power.limit, 140);
+  assert.deepEqual(fixture.monitor.getInit().gpu.gpus[0].memory, device.memory);
+  await fixture.advance(5500);
+  assert.equal(fixture.monitor.getInit().gpu.stale, true);
+  assert.deepEqual(fixture.monitor.getInit().gpu.gpus, []);
+});
+
+test('missing telemetry on a discrete GPU is not labeled as shared RAM', async t => {
+  const fixture = monitorFixture(t);
+  await flush();
+  fixture.output('0, NVIDIA L40, 580, 45, 20, 0, [N/A], [N/A], [N/A], 60, [N/A], 1500, 0, [N/A]\n');
+  await fixture.advance(500);
+  assert.notEqual(fixture.monitor.getInit().gpu.gpus[0].memory.shared, true);
+  assert.ok(Number.isNaN(fixture.monitor.getInit().gpu.gpus[0].memory.total));
+});
+
 function nvidiaLine(index, used, load = 100) {
   return `${index}, NVIDIA L40, 560, 68, ${load}, 80, 49152, ${49152 - used}, ${used}, 301.6, 300, 1560, 5000, 0\n`;
 }
@@ -62,7 +89,7 @@ function monitorFixture(t) {
     '@/server/cpuStats': {
       createLoadSampler: () => () => 25,
       readCpuTemperature: async () => 40,
-      readMemory: async () => ({ total: 64000, available: 32000 - ++memorySamples, free: 10000 }),
+      readMemory: async () => ({ total: 64000 * 1024 ** 2, available: (32000 - ++memorySamples) * 1024 ** 2, free: 10000 * 1024 ** 2 }),
     },
     '@/utils/monitorSample': monitorSample,
   }, {

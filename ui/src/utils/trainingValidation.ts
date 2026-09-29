@@ -75,7 +75,7 @@ export function validateTrainingConfig(
       message: 'Select or enter a base model path.',
     });
   }
-  if (modelConfig?.arch === 'minimax_h3') {
+  if (modelConfig?.arch === 'minimax_h3' || modelConfig?.arch === 'minimax_h3_vsa_v2') {
     if (modelConfig.layer_offloading) {
       messages.push({
         target: { step: 'raw', label: 'Raw configuration' },

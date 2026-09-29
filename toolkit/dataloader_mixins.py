@@ -2559,14 +2559,17 @@ class TextEmbeddingFileItemDTOMixin:
         # out of their cache key
         if text_only:
             return item
-        if getattr(self, "preserve_image_alpha", False) and self.control_path is not None:
+        is_ming_comfy = self.text_embedding_space_version.endswith('_ming_comfy_v1')
+        if (getattr(self, "preserve_image_alpha", False) or is_ming_comfy) and self.control_path is not None:
             item["reference_crop"] = [self.scale_to_width, self.scale_to_height, self.crop_x, self.crop_y,
                 self.crop_width, self.crop_height, self.flip_x, self.flip_y]
         # if we have a control image, cache the path
         if self.encode_control_in_text_embeddings and self.control_path is not None:
             item["control_path"] = self.control_path
+            if getattr(self, 'text_embedding_uses_target_size', False) and getattr(self, 'crop_width', None):
+                item["control_target_size"] = [self.crop_width, self.crop_height]
             if (
-                self.text_embedding_space_version.startswith(('ming_image_design_conditioning_', 'ming_image_design_layer_conditioning_'))
+                (is_ming_comfy or self.text_embedding_space_version.startswith(('ming_image_design_conditioning_', 'ming_image_design_layer_conditioning_')))
                 and not getattr(self, 'is_layered', False)
                 and not getattr(self, 'is_encrypted', False)
             ):
@@ -2856,6 +2859,9 @@ class TextEmbeddingCachingMixin:
                             ctrl_img = ctrl_img_list[0]
                         else:
                             ctrl_img = ctrl_img_list
+                        target_size = None
+                        if getattr(file_item, 'crop_width', None) and getattr(file_item, 'crop_height', None):
+                            target_size = (file_item.crop_width, file_item.crop_height)
                         for path, caption in encode_targets:
                             if path in dropout_target_paths:
                                 # dropout embeds are plain text. Only fall back to the
@@ -2863,9 +2869,11 @@ class TextEmbeddingCachingMixin:
                                 try:
                                     prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption)
                                 except Exception:
-                                    prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption, control_images=ctrl_img)
+                                    prompt_embeds: PromptEmbeds = self.sd.encode_prompt(
+                                        caption, control_images=ctrl_img, target_size=target_size)
                             else:
-                                prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption, control_images=ctrl_img)
+                                prompt_embeds: PromptEmbeds = self.sd.encode_prompt(
+                                    caption, control_images=ctrl_img, target_size=target_size)
                             prompt_embeds.save(path)
                             del prompt_embeds
                     elif (

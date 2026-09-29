@@ -14,6 +14,8 @@ Browse the model integrations included in AITK Studio. Available training modes 
 
 ## Image
 
+- [Comfy-Org/Ming-Image](https://huggingface.co/Comfy-Org/Ming-Image) (`ming_image`: Design with quantized text encoding, a training adapter, one reference image, RGB/RGBA output, and a dynamic resolution-dependent schedule; [implementation choices and validation](ming-image.md)).
+
 - [black-forest-labs/FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) (FLUX.1)
 - [black-forest-labs/FLUX.2-dev](https://huggingface.co/black-forest-labs/FLUX.2-dev) (FLUX.2)
 - [black-forest-labs/FLUX.2-klein-base-4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B) (FLUX.2-klein-base-4B)
@@ -82,6 +84,7 @@ Browse the model integrations included in AITK Studio. Available training modes 
 - [ACE-Step/Ace-Step1.5](https://huggingface.co/ACE-Step/Ace-Step1.5) (Ace Step 1.5)
 - [ACE-Step/acestep-v15-xl-base](https://huggingface.co/ACE-Step/acestep-v15-xl-base) (Ace Step 1.5 XL)
 - [Comfy-Org/YuE2](https://huggingface.co/Comfy-Org/YuE2) (experimental YuE2 music generation and training, with the community audio tokenizer and SheetSage conditioning). Stem-only/separation training is disabled in this integration.
+  - Semantic heads and NAR adapters accept both original PyTorch files and `.safetensors`. Changing the semantic head path creates a separate latent-cache identity while retaining chain-of-thought mode separation.
 
 ## Multimodal text
 
@@ -92,7 +95,8 @@ Browse the model integrations included in AITK Studio. Available training modes 
 - [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) (MiniMax H3 and MiniMax H3 Ref2VA, joint video/audio and single-image training)
   - Supports T2V, first-frame I2V, image-only training, joint audio/video training, 24 fps defaults, automatic frame counts, and the H3 `17n+5` frame grid.
   - Supports pruned and non-pruned checkpoints, local-first Comfy weights under `MODELS_PATH`, ConvRot/NVFP4 prequantized components, layer offloading, VSA sparse attention when available, and a dense-attention fallback.
-  - The shared base download is approximately 43 GB. Ref2VA supports multiple reference images/videos, picture or static-video presentation, the v1 training adapter, contrastive guidance, and D-OPSD self-distillation.
+  - The shared base download is approximately 43 GB. Ref2VA supports multiple reference images/videos, picture or static-video presentation, the v2 training adapter, contrastive guidance, and D-OPSD self-distillation. New base H3 jobs use the v3 training adapter. New jobs default to the adapter alone; saved contrastive guidance settings remain unchanged.
+- [FastVideo/FastVideo-FastH3-Comfy](https://huggingface.co/FastVideo/FastVideo-FastH3-Comfy) (`minimax_h3_vsa_v2`: FastH3 8-Step V2). Uses the matching v1 training adapter, 80% sparse attention, video shift 10 and audio shift 3. Sample with eight steps and guidance 1. Reference conditioning is unsupported. Existing `minimax_h3_vsa` jobs keep the legacy four-step implementation.
 
 ## Experimental
 

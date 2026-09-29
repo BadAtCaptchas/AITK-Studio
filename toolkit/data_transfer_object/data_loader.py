@@ -147,6 +147,7 @@ class FileItemDTO(
         self.te_padding_side = kwargs.get("te_padding_side", "right")
         self.latent_space_version = kwargs.get("latent_space_version", "sd1")
         self.text_embedding_space_version = kwargs.get("text_embedding_space_version", "sd1")
+        self.text_embedding_uses_target_size = kwargs.get("text_embedding_uses_target_size", False)
         if self.is_encrypted:
             file_key = self.encrypted_item.id
         elif dataset_root is not None:

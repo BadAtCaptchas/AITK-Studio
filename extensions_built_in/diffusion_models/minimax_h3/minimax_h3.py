@@ -122,6 +122,7 @@ COMFY_FILES = {
     "video_vae": "vae/minimax_h3_video_vae_fp16.safetensors",
     "audio_vae": "vae/minimax_h3_audio_vae_fp32.safetensors",
     "dit_fasth3": "diffusion_models/minimax_h3_fasth3_preview_v0.2_int8_convrot.safetensors",
+    "dit_fasth3_v2": "diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors",
 }
 # FastH3 (FastVideo 4-step VSA distill) int8-convrot repack, produced by
 # scripts/convert_minimax_h2_fastvideo.py from the FastVideo diffusers repo.
@@ -182,6 +183,8 @@ class MiniMaxH3VaeBundle(torch.nn.Module):
 
 class MinimaxH3Model(BaseModel):
     arch = "minimax_h3"
+    video_sigma_shift = packing.VIDEO_SIGMA_SHIFT
+    comfy_repo = COMFY_REPO
     use_old_lokr_format = False
 
     def __init__(
@@ -218,9 +221,11 @@ class MinimaxH3Model(BaseModel):
             self.model_config.model_kwargs.get("max_text_length", 512)
         )
 
-    @staticmethod
-    def get_train_scheduler():
-        return CustomFlowMatchEulerDiscreteScheduler(**scheduler_config)
+    @classmethod
+    def get_train_scheduler(cls):
+        return CustomFlowMatchEulerDiscreteScheduler(
+            **{**scheduler_config, "shift": cls.video_sigma_shift}
+        )
 
     def get_bucket_divisibility(self):
         # 16x VAE spatial compression * 2x2 transformer patch
@@ -280,7 +285,7 @@ class MinimaxH3Model(BaseModel):
         )
         return resolve_comfy_file(
             COMFY_FILES[component],
-            repo_id=repo_id_from_name_or_path(name_or_path, COMFY_REPO),
+            repo_id=repo_id_from_name_or_path(name_or_path, self.comfy_repo),
             override_path=self.model_config.model_kwargs.get(f"{component}_path", None),
             extra_roots=extra_roots,
             status_fn=self.print_and_status_update,
@@ -643,7 +648,7 @@ class MinimaxH3Model(BaseModel):
         vae_bundle = self._load_vaes()
         vae_bundle.to(self.vae_device_torch)
 
-        self.noise_scheduler = MinimaxH3Model.get_train_scheduler()
+        self.noise_scheduler = self.get_train_scheduler()
         self.vae = vae_bundle
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
@@ -921,7 +926,7 @@ class MinimaxH3Model(BaseModel):
                 sigma_v = sigma_v.unsqueeze(0)
             if sigma_v.shape[0] != batch_size:
                 sigma_v = sigma_v.expand(batch_size)
-            sigma_a = remap_sigma(sigma_v)
+            sigma_a = remap_sigma(sigma_v, self.video_sigma_shift, packing.AUDIO_SIGMA_SHIFT)
             t_v = 1.0 - sigma_v
             t_a = 1.0 - sigma_a
 
@@ -1812,3 +1817,25 @@ class MinimaxH3FastModel(MinimaxH3Model):
     def text_embedding_space_version(self):
         # same Qwen3-VL presentation as the base model: share the embed cache
         return "minimax_h3"
+
+
+class MinimaxH3FastV2Model(MinimaxH3FastModel):
+    """FastH3 8-Step V2; existing four-step configs keep their original model."""
+
+    arch = "minimax_h3_vsa_v2"
+    video_sigma_shift = 10.0
+    comfy_repo = "FastVideo/FastVideo-FastH3-Comfy"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        kw = self.model_config.model_kwargs
+        self.vsa_sparsity = float(kw.get("vsa_sparsity", 0.8)) if bool(kw.get("vsa", True)) else None
+
+    def _dit_component(self) -> str:
+        return "dit_fasth3_v2"
+
+    def _resolve_comfy_file(self, component: str) -> str:
+        return MinimaxH3Model._resolve_comfy_file(self, component)
+
+    def get_base_model_version(self):
+        return self.arch

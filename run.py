@@ -48,6 +48,11 @@ check_blackwell_cuda_compatibility(torch)
 if os.environ.get("DEBUG_TOOLKIT", "0") == "1":
     torch.autograd.set_detect_anomaly(True)
 
+# Linux NVIDIA integrated GPUs share system RAM; whole-module CPU offloads
+# waste time and do not release physical memory. Tensor transfers stay intact.
+from toolkit.util.unified_memory import apply_unified_memory_patches
+apply_unified_memory_patches()
+
 if seed is not None:
     import random
     import numpy as np

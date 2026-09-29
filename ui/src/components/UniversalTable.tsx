@@ -87,7 +87,7 @@ export default function UniversalTable({
 
                 return (
                   <tr
-                    key={index}
+                    key={row.id ?? index}
                     className={`${rowClass} border-b border-gray-800 last:border-b-0 hover:bg-gray-800/70`}
                   >
                     {columns.map(column => (

@@ -596,6 +596,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                     encrypted_item=encrypted_item,
                     encode_control_in_text_embeddings=self.sd.encode_control_in_text_embeddings if self.sd else False,
                     text_embedding_space_version=text_embedding_space_version,
+                    text_embedding_uses_target_size=getattr(self.sd, 'text_embedding_uses_target_size', False),
                     te_padding_side=self.sd.te_padding_side if self.sd else "right",
                     latent_space_version=latent_space_version,
                     temporal_compression=temporal_compression,

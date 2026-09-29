@@ -2086,7 +2086,7 @@ def validate_configs(
             # bypass the embedding
             train_config.bypass_guidance_embedding = True
 
-    minimax_h3_arches = {'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa'}
+    minimax_h3_arches = {'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2'}
     if model_config.arch in minimax_h3_arches:
         if train_config.train_text_encoder:
             raise ValueError("MiniMax H3 text-encoder training is not supported; keep it frozen.")

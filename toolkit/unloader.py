@@ -37,43 +37,36 @@ def unload_text_encoder(model: "BaseModel"):
     # we need to make it appear as a text encoder module without actually having one so all
     # to functions and what not will work.
 
-    if model.text_encoder is not None:
-        if isinstance(model.text_encoder, list):
-            text_encoder_list = []
-            pipe = model.pipeline
+    replacements = {}
 
-            # the pipeline stores text encoders like text_encoder, text_encoder_2, text_encoder_3, etc.
-            if getattr(pipe, "text_encoder", None) is not None:
-                MemoryManager.free(pipe.text_encoder)
-                te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
-                text_encoder_list.append(te)
-                pipe.text_encoder = te
+    def replace(encoder):
+        if encoder is None or isinstance(encoder, FakeTextEncoder):
+            return encoder
+        identity = id(encoder)
+        if identity not in replacements:
+            MemoryManager.free(encoder)
+            replacements[identity] = FakeTextEncoder(model.device_torch, model.torch_dtype)
+        return replacements[identity]
 
-            i = 2
-            while hasattr(pipe, f"text_encoder_{i}"):
-                real_te = getattr(pipe, f"text_encoder_{i}")
-                if real_te is not None:
-                    MemoryManager.free(real_te)
-                    te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
-                    text_encoder_list.append(te)
-                    setattr(pipe, f"text_encoder_{i}", te)
-                i += 1
-
-            if getattr(pipe, "mllm", None) is not None:
-                real_te = pipe.mllm
-                MemoryManager.free(real_te)
-                te = FakeTextEncoder(device=model.device_torch, dtype=model.torch_dtype)
-                text_encoder_list.append(te)
-                pipe.mllm = te
-                if hasattr(model, "mllm"):
-                    model.mllm = te
-            model.text_encoder = text_encoder_list
-        else:
-            # only has a single text encoder
-            MemoryManager.free(model.text_encoder)
-            model.text_encoder = FakeTextEncoder(
-                device=model.device_torch,
-                dtype=model.torch_dtype,
-            )
+    # The holder owns the encoders even when its pipeline is itself, has no
+    # encoder attribute, or was constructed with text_encoder=None.
+    encoders = model.text_encoder
+    model.text_encoder = (
+        [replace(encoder) for encoder in encoders]
+        if isinstance(encoders, list) else replace(encoders)
+    )
+    pipe = getattr(model, "pipeline", None)
+    if pipe is not None and pipe is not model:
+        if getattr(pipe, "text_encoder", None) is not None:
+            pipe.text_encoder = replace(pipe.text_encoder)
+        i = 2
+        while hasattr(pipe, f"text_encoder_{i}"):
+            name = f"text_encoder_{i}"
+            setattr(pipe, name, replace(getattr(pipe, name)))
+            i += 1
+    # HiDream and other Studio integrations expose the same encoder as mllm.
+    for owner in (model, pipe):
+        if owner is not None and getattr(owner, "mllm", None) is not None:
+            owner.mllm = replace(owner.mllm)
 
     MemoryManager.release_cached_memory()

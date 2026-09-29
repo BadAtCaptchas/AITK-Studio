@@ -15,7 +15,7 @@ Set up the Python runtime, then launch the web UI. Commands start from the repos
 
 ## Requirements
 
-- Python 3.12 is the reference interpreter; Python 3.11 is retained for DGX. These dependency profiles do not support Python 3.13 or newer.
+- Python 3.12 is the reference interpreter, including DGX/Grace; Python 3.11 remains available for manual compatibility profiles. These dependency profiles do not support Python 3.13 or newer.
 - NVIDIA GPU with enough VRAM for the model and workflow you want to run.
 - Python virtual environment support.
 - Git.
@@ -31,7 +31,7 @@ source venv/bin/activate
 python scripts/install_runtime.py
 ```
 
-For devices running **DGX OS** (including DGX Spark), follow the [DGX setup guide](../dgx_instructions.md).
+For devices running **DGX OS** (including DGX Spark), use the [managed DGX setup](../dgx_instructions.md). It uses the standard Linux ARM64 requirements and managed Python with C headers for Triton.
 
 ## Windows
 

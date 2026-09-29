@@ -22,10 +22,11 @@ python3 -m manager doctor      # diagnose problems
   pin (2.13.0 / torchvision 0.28.0 / torchaudio 2.11.0) on every platform:
   cu130 wheels when the driver supports CUDA 13 (cu126 fallback for older
   drivers, refused outright on Blackwell GPUs which need cu130), same stack +
-  Python 3.12 + `dgx_requirements.txt` on DGX/Grace, PyPI wheels on Mac,
+  managed Python 3.12 + standard `requirements.txt` on DGX/Grace, PyPI wheels on Mac,
   rocm7.1 (experimental) for AMD, `--cpu` to force a CPU install. **Torch
-  pins there must be updated together with the README install instructions,
-  run_mac.zsh, and dgx_instructions.md.**
+  pins there must be updated together with the managed-install documentation.**
+  Linux environments are checked for `Python.h`, required by Triton's C launcher.
+  A replacement preserves the previous environment and restores it on failure.
 - **Accelerators everywhere wheels exist**, via per-spec `extra_packages`
   (installed after requirements with `--upgrade` so they override pins) and
   `optional_packages` (installed one-by-one, warn-only on failure):

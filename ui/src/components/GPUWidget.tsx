@@ -63,7 +63,7 @@ export default function GPUWidget({ gpu }: GPUWidgetProps) {
             </div>
             <div className="mb-1 mt-3 flex items-center space-x-2">
               <HardDrive className="h-4 w-4 text-cyan-400" />
-              <p className="text-xs text-gray-400">Memory</p>
+              <p className="text-xs text-gray-400">{gpu.memory.shared ? 'Shared Memory' : 'Memory'}</p>
               <span className="ml-auto text-xs text-gray-300">{memoryPercent.toFixed(1)}%</span>
             </div>
             <div className="h-1 w-full rounded-sm bg-gray-800">

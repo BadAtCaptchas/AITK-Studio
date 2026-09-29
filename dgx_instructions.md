@@ -1,88 +1,20 @@
-# AITK Studio
+# DGX OS and Linux ARM64 setup
 
-## DGX OS installation instructions
+DGX Spark and Grace systems use the standard Linux requirements and the managed installer. Run these commands from the repository root with a system Python 3.8 or newer:
 
-You need to use Python 3.11 to run AITK Studio on DGX OS. The easiest way to do this without affecting the system installation of Python is to create a virtual environment with **miniconda**, which allows you to specify the version of Python to use in the environment.
-
-This guide will assume you have a fresh installation of DGX OS, and will guide you through the installation of all requirements.
-
-### Installation instructions for DGX OS:
-
-**1) Get Python 3.11 (via miniconda)**
-
-Install the latest version of miniconda:
-```
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh
-chmod u+x Miniconda3-latest-Linux-aarch64.sh
-./Miniconda3-latest-Linux-aarch64.sh
+```bash
+python3 -m manager install
+python3 -m manager launch
 ```
 
-Restart your bash or ssh session. If miniconda was installed successfully, it will automatically load the 'base' environment by default. If you want to disable this behaviour, run:
-```
-conda config --set auto_activate_base false
-```
+The manager chooses the NVIDIA runtime for the installed driver, installs Python 3.12 through uv, and provisions the UI dependencies locally. The UI opens at http://localhost:8675. See the [manager guide](manager/README.md) for the current runtime pins and `python3 -m manager doctor` for diagnostics.
 
-Now you can create a Python 3.11 environment for ai-toolkit:
-```
-conda create --name ai-toolkit python=3.11
-```
+Managed Python includes the C headers needed by Triton. If an existing Linux environment has the wrong interpreter or lacks `Python.h`, installation preserves it in a checkout-local backup before creating a replacement. A failed replacement restores the previous environment. No separate DGX requirements file or Conda environment is needed.
 
-Then activate the environment with:
+The manual `dgx-cu130` profile remains an alias for the standard CUDA 13.0 compatibility profile in [manual installation](docs/installation.md); it uses `requirements.txt`. Prefer the manager for new installations.
 
-```
-conda activate ai-toolkit
-```
+## Shared-memory behavior
 
+On NVIDIA GB10, the GPU widget reports system RAM as shared memory when NVIDIA telemetry omits dedicated VRAM totals. Stale GPU readings still expire normally.
 
-**2) Install PyTorch**
-
-DGX Spark and other Blackwell systems need CUDA 12.8+ PyTorch wheels. DGX OS should use the CUDA 13.0 Torch stack:
-
-```
-pip3 install -r requirements_torch_blackwell_cu130.txt
-```
-
-This installs `torch==2.10.0` and `torchcodec==0.10.0`, avoiding the PyTorch 2.9.x stack that HiDream-O1 currently warns against.
-
-
-**3) Install the remaining requirements (dgx_requirements.txt)**
-
-```
-python scripts/install_runtime.py --profile dgx-cu130
-```
-
-### Running the UI on DGX OS:
-
-Running the UI is not that different from doing it on other systems, however, you need to install the ARM64 version of NodeJS for Linux, which is compatible with the NVIDIA Grace CPU.
-
-
-**1) Install Node.js**
-
-Download a Linux ARM64 build of Node.js from: https://nodejs.org (for example: https://nodejs.org/dist/v24.11.1/node-v24.11.1-linux-arm64.tar.xz)
-
-Extract it and add the bin directory to your path. I extracted it to **/opt** and added the following to my ~/.bashrc file:
-```
-export PATH=“/opt/node-v24.11.1-linux-arm64/bin:$PATH”
-```
-
-
-**2) Compile and run the Node.js UI**
-
-Change to the ui directory, then build and run the UI:
-```
-cd ui
-npm run build_and_start
-```
-
-If all went well, you’ll be able to access the UI on port 8675 and start training.
-
-
-<details>
-  <summary>Troubleshooting issues</summary>
-If you’re not getting any output when starting a training job from the UI, it’s probably crashing before the process started, the best way to debug these issues is to run the python training script directly (which is normally started by the UI). To do this, set up a training job in the UI, go to the advanced config screen, copy and paste the configuration into a file like train.yaml, then run the training script like this with the conda virtual environment active:
-
-```
-python run.py path/to/train.yaml
-```
-</details>
-<br>
+On Linux integrated NVIDIA GPUs, training suppresses module moves to CPU because CPU and GPU already share memory. Dtype conversions and tensor transfers remain active. Set `AITK_DISABLE_UNIFIED_MEMORY=1` before launching to disable this optimization.

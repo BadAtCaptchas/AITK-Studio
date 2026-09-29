@@ -92,12 +92,29 @@ def _uv_python_platform(uv_python):
     return None
 
 
+def _venv_has_headers(venv=None):
+    """Probe Python.h; an inconclusive probe must not replace a working venv."""
+    if not venv_exists(venv):
+        return False
+    try:
+        result = subprocess.run(
+            [venv_python(venv), "-c", "import os, sysconfig; print(os.path.isfile(os.path.join(sysconfig.get_paths()['include'], 'Python.h')))"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30, env=clean_env(),
+        )
+        return result.returncode != 0 or result.stdout.decode().strip() != "False"
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+
+
 def venv_matches(spec, venv=None):
     """Check the interpreter itself, not just the installed package state."""
     if venv_python_version(venv) != spec.python_version:
         return False
     want = _uv_python_platform(spec.uv_python)
-    return not want or _venv_platform(venv) == want
+    if want and _venv_platform(venv) != want:
+        return False
+    # Linux Triton compiles a C launcher. Managed Python includes its headers.
+    return not sys.platform.startswith("linux") or _venv_has_headers(venv)
 
 
 def _preserve_venv(target, label):
@@ -160,7 +177,7 @@ def ensure_venv(spec, dry_run=False):
     try:
         if uv:
             info("Creating venv with uv (python %s) at %s" % (python_request, target))
-            run([uv, "venv", target, "--python", python_request, "--seed"], env=clean_env())
+            run([uv, "venv", target, "--managed-python", "--python", python_request, "--seed"], env=clean_env())
         else:
             info("Creating venv at %s" % target)
             run([sys.executable, "-m", "venv", target], env=clean_env())
@@ -399,7 +416,6 @@ def requirements_hash(spec):
         for f in os.listdir(REPO_ROOT)
         if f.startswith("requirements") and f.endswith(".txt")
     ]
-    req_files.append(os.path.join(REPO_ROOT, "dgx_requirements.txt"))
     base = file_hash(req_files)
     import hashlib
 

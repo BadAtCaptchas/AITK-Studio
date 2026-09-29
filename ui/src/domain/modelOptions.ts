@@ -96,6 +96,101 @@ const defaultNameOrPath = '';
 const defaultLinearRank = 32;
 
 const modelPresentation: ModelArch[] = [
+  {
+    name: 'ming_image',
+    label: 'Ming Image Design (Comfy / Training Adapter)',
+    group: 'image',
+    defaults: {
+      'config.process[0].model.name_or_path': ["Comfy-Org/Ming-Image", ""],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ["convrot8", "qfloat8"],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ["convrot8", "qfloat8"],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].model.assistant_lora_path': ["ostris/ming_image_training_adapter/ming_image_01_design_training_adapter_v1.safetensors", undefined],
+      'config.process[0].train.noise_scheduler': ["flowmatch", "flowmatch"],
+      'config.process[0].train.timestep_type': ["shift", "sigmoid"],
+      'config.process[0].train.cache_text_embeddings': [true, false],
+      'config.process[0].sample.sampler': ["flowmatch", "flowmatch"],
+      'config.process[0].sample.guidance_scale': [1, 4],
+      'config.process[0].sample.sample_steps': [12, 25],
+      'config.process[0].sample.format': ["png", "jpg"],
+      'config.process[0].model.model_kwargs': [{"rgba":false}, {}],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: ['model.low_vram', 'model.layer_offloading', 'model.assistant_lora_path', 'sample.ctrl_img'],
+    customModelSelectOptions: [{
+      label: 'Output channels',
+      options: [{ value: 'rgb', label: 'RGB' }, { value: 'rgba', label: 'RGBA / transparency' }],
+      getValue: (config: JobConfig) => config.config.process[0].model.model_kwargs?.rgba ? 'rgba' : 'rgb',
+      onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+        setJobConfig({ ...config.config.process[0].model.model_kwargs, rgba: value === 'rgba' }, 'config.process[0].model.model_kwargs');
+        if (value === 'rgba') setJobConfig('png', 'config.process[0].sample.format');
+      },
+    }],
+    modelNotes: {
+      summary: 'Comfy checkpoint support with a training adapter',
+      paragraphs: ['Loads Comfy-Org/Ming-Image, the vendor checkpoint, or explicit local checkpoints. The training adapter is active during training and disabled for samples. Supports quantized text encoding and a dynamic resolution-dependent schedule.', 'Supports text-to-image and one reference image. Enable RGBA to preserve transparency and use PNG samples. For transparent output, use a transparency trigger such as RGBA, 4-channel, transparent background and sample at 2048 by 2048.', 'Existing native Ming Design and Design-Layer presets remain separate; use Design-Layer for layered datasets.'],
+    },
+  },
+  {
+    name: 'minimax_h3_vsa_v2',
+    label: 'FastH3 8-Step V2',
+    group: 'video',
+    isVideoModel: true,
+    allowedNetworkTypes: ['lora'],
+    defaults: {
+      'config.process[0].model.name_or_path': ["FastVideo/FastVideo-FastH3-Comfy", ""],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ["convrot8", "qfloat8"],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ["nvfp4", "qfloat8"],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].model.layer_offloading': [false, false],
+      'config.process[0].model.base_lora_path': [undefined, undefined],
+      'config.process[0].model.inference_lora_path': [undefined, undefined],
+      'config.process[0].model.assistant_lora_path': ["ostris/minimax_h3_training_adapter/fastvideo_fasth3_8step_v2_training_adapter_v1.safetensors", undefined],
+      'config.process[0].train.train_text_encoder': [false, false],
+      'config.process[0].train.unload_text_encoder': [false, false],
+      'config.process[0].train.cache_text_embeddings': [true, false],
+      'config.process[0].train.noise_scheduler': ["flowmatch", "flowmatch"],
+      'config.process[0].train.timestep_type': ["shift", "sigmoid"],
+      'config.process[0].train.do_guidance_loss': [false, undefined],
+      'config.process[0].train.guidance_loss_target': [undefined, undefined],
+      'config.process[0].train.audio_loss_multiplier': [1, undefined],
+      'config.process[0].network.type': ["lora", "lora"],
+      'config.process[0].network.linear': [16, 32],
+      'config.process[0].network.linear_alpha': [16, 32],
+      'config.process[0].network.network_kwargs.ignore_if_contains': [["adaln_proj"], []],
+      'config.process[0].sample.sampler': ["flowmatch", "flowmatch"],
+      'config.process[0].sample.guidance_scale': [1, 4],
+      'config.process[0].sample.sample_steps': [8, 25],
+      'config.process[0].sample.num_frames': [107, 1],
+      'config.process[0].sample.fps': [24, 1],
+      'config.process[0].sample.width': [768, 1024],
+      'config.process[0].sample.height': [768, 1024],
+      'config.process[0].datasets[x].do_i2v': [false, undefined],
+      'config.process[0].datasets[x].do_audio': [true, undefined],
+      'config.process[0].datasets[x].cache_latents_to_disk': [true, false],
+      'config.process[0].datasets[x].fps': [24, undefined],
+      'config.process[0].datasets[x].num_frames': [39, undefined],
+      'config.process[0].datasets[x].auto_frame_count': [true, undefined],
+    },
+    disableSections: ['network.conv', 'model.quantize', 'model.quantize_te', 'train.train_text_encoder', 'train.unload_text_encoder'],
+    additionalSections: ['datasets.num_frames', 'model.low_vram', 'datasets.do_audio', 'datasets.audio_normalize', 'datasets.audio_preserve_pitch', 'train.audio_loss_multiplier', 'datasets.auto_frame_count', 'model.assistant_lora_path'],
+    customModelSelectOptions: [{
+      label: 'Distillation handling',
+      options: [{ value: 'ta', label: 'Training adapter (default)' }, { value: 'none', label: 'None' }],
+      getValue: (config: JobConfig) => config.config.process[0].model.assistant_lora_path?.trim() ? 'ta' : 'none',
+      onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+        setJobConfig(value === 'ta' ? 'ostris/minimax_h3_training_adapter/fastvideo_fasth3_8step_v2_training_adapter_v1.safetensors' : undefined, 'config.process[0].model.assistant_lora_path');
+      },
+    }],
+    modelNotes: {
+      summary: 'Eight-step MiniMax H3 video and audio generation',
+      paragraphs: ['FastH3 V2 uses 80% sparse attention and a video flow shift of 10. Sample with eight steps and guidance 1. Text-to-video and audio only; reference conditioning is unsupported.', 'Missing files download into the configured Models folder. Base MiniMax text encoder and VAE files can be reused. Existing minimax_h3_vsa configurations retain the original four-step model.'],
+    },
+  },
   ...([false, true] as const).map((layered): ModelArch => ({
     name: layered ? 'ming_image_design_layer' : 'ming_image_design',
     label: layered ? 'Ming Image Design-Layer (experimental)' : 'Ming Image Design (experimental)',
@@ -857,7 +952,7 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
     group: 'image',
     defaults: {
       'config.process[0].model.name_or_path': ['Qwen/Qwen-Image-2.1', defaultNameOrPath],
-      'config.process[0].model.model_kwargs': [{ use_comfy_weights: false }, {}],
+      'config.process[0].model.model_kwargs': [{ use_comfy_weights: false, match_target_res: true }, {}],
       'config.process[0].model.quantize': [true, false],
       'config.process[0].model.quantize_te': [true, false],
       'config.process[0].model.low_vram': [true, false],
@@ -871,6 +966,14 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
     },
     disableSections: ['network.conv', 'train.unload_text_encoder'],
     additionalSections: ['datasets.multi_control_paths', 'sample.multi_ctrl_imgs', 'model.low_vram', 'model.layer_offloading'],
+    customModelSelectOptions: [{
+      label: 'Reference image resolution',
+      options: [{ value: 'match', label: 'Match target pixel area (default)' }, { value: 'cap', label: 'Cap only; keep smaller references' }],
+      getValue: (config: JobConfig) => config.config.process[0].model.model_kwargs?.match_target_res === false ? 'cap' : 'match',
+      onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+        setJobConfig({ ...config.config.process[0].model.model_kwargs, match_target_res: value === 'match' }, 'config.process[0].model.model_kwargs');
+      },
+    }],
     modelNotes: {
       summary: 'Qwen Image 2.1: text-to-image and editing',
       paragraphs: ['One model supports both tasks. Add dataset control paths or sample reference images for editing; omit them for text-to-image. New configurations load the official Qwen weights and quantize the transformer and text encoder locally to ConvRot int8. Automatic Comfy substitution is disabled; set model_kwargs.use_comfy_weights to true to opt in. Existing saved configurations and explicit Comfy sources remain supported.', 'Use guidance 1.0 and dimensions divisible by 32. Existing saved jobs keep their explicit guidance; set it to 1.0 to use this recommendation. Keep the text encoder loaded when using references. RGBA output, 2K quality presets, prefix caching, and optional official prompt expansion are available in the Qwen controls. Up to 10 ordered references are supported; training preserves source alpha.'],
@@ -1157,8 +1260,8 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
       'config.process[0].train.train_text_encoder': [false, false],
       'config.process[0].train.unload_text_encoder': [false, false],
       'config.process[0].train.cache_text_embeddings': [true, false],
-      'config.process[0].train.do_guidance_loss': [true, undefined],
-      'config.process[0].train.guidance_loss_target': [3.5, undefined],
+      'config.process[0].train.do_guidance_loss': [false, undefined],
+      'config.process[0].train.guidance_loss_target': [undefined, undefined],
       'config.process[0].network.linear': [16, defaultLinearRank],
       'config.process[0].network.linear_alpha': [16, defaultLinearRank],
       'config.process[0].network.network_kwargs.ignore_if_contains': [['adaln_proj'], []],
@@ -1178,7 +1281,7 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
       'config.process[0].datasets[x].auto_frame_count': [true, undefined],
       'config.process[0].datasets[x].include_images_in_video_dataset': [true, false],
       'config.process[0].model.assistant_lora_path': [
-        'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_v1.safetensors',
+        'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_v3.safetensors',
         undefined,
       ],
     },
@@ -1226,8 +1329,8 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
         label: 'Distillation handling',
         options: [
           { value: 'cg', label: 'Contrastive guidance' },
-          { value: 'ta', label: 'Training adapter' },
-          { value: 'both', label: 'Both (default)' },
+          { value: 'ta', label: 'Training adapter (default)' },
+          { value: 'both', label: 'Both' },
           { value: 'none', label: 'Neither' },
         ],
         getValue: (config: JobConfig) => {
@@ -1237,7 +1340,7 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
           return adapter && guidance ? 'both' : adapter ? 'ta' : guidance ? 'cg' : 'none';
         },
         onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
-          const adapter = 'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_v1.safetensors';
+          const adapter = 'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_v3.safetensors';
           const guidance = value === 'cg' || value === 'both';
           setJobConfig(guidance || undefined, 'config.process[0].train.do_guidance_loss');
           setJobConfig(
@@ -1252,7 +1355,7 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
         doc: {
           title: 'MiniMax H3 distillation handling',
           description:
-            'Choose contrastive guidance, the v1 training adapter, both, or neither. Saved explicit values remain authoritative.',
+            'Choose contrastive guidance, the v3 training adapter, both, or neither. Saved explicit values remain authoritative.',
         },
       },
     ],
@@ -1271,10 +1374,10 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
       'config.process[0].model.qtype_te': ['nvfp4', 'qfloat8'],
       'config.process[0].model.low_vram': [true, false],
       'config.process[0].train.cache_text_embeddings': [true, false],
-      'config.process[0].train.do_guidance_loss': [true, undefined],
-      'config.process[0].train.guidance_loss_target': [3.5, undefined],
+      'config.process[0].train.do_guidance_loss': [false, undefined],
+      'config.process[0].train.guidance_loss_target': [undefined, undefined],
       'config.process[0].model.assistant_lora_path': [
-        'ostris/minimax_h3_training_adapter/minimax_h3_ref2va_training_adapter_v1.safetensors',
+        'ostris/minimax_h3_training_adapter/minimax_h3_ref2va_training_adapter_v2.safetensors',
         undefined,
       ],
       'config.process[0].network.linear': [16, defaultLinearRank],
@@ -1315,8 +1418,8 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
         label: 'Distillation handling',
         options: [
           { value: 'cg', label: 'Contrastive guidance' },
-          { value: 'ta', label: 'Training adapter' },
-          { value: 'both', label: 'Both (default)' },
+          { value: 'ta', label: 'Training adapter (default)' },
+          { value: 'both', label: 'Both' },
           { value: 'dopsd', label: 'D-OPSD self-distillation' },
           { value: 'none', label: 'Neither' },
         ],
@@ -1346,7 +1449,7 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
           );
           setJobConfig(
             value === 'ta' || value === 'both'
-              ? 'ostris/minimax_h3_training_adapter/minimax_h3_ref2va_training_adapter_v1.safetensors'
+              ? 'ostris/minimax_h3_training_adapter/minimax_h3_ref2va_training_adapter_v2.safetensors'
               : undefined,
             'config.process[0].model.assistant_lora_path',
           );

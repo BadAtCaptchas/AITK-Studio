@@ -14,7 +14,7 @@ PROFILES = {
     'legacy-cu128': ('requirements_torch_legacy_cu128.txt', 'requirements.txt'),
     'blackwell-cu128': ('requirements_torch_blackwell_cu128.txt', 'requirements.txt'),
     'blackwell-cu130': ('requirements_torch_blackwell_cu130.txt', 'requirements.txt'),
-    'dgx-cu130': ('requirements_torch_blackwell_cu130.txt', 'dgx_requirements.txt'),
+    'dgx-cu130': ('requirements_torch_blackwell_cu130.txt', 'requirements.txt'),
     'macos': ('requirements_torch_macos.txt', 'requirements.txt'),
 }
 
@@ -23,7 +23,7 @@ def check_interpreter(version=None, isolated=None):
     """Reject unsupported Python versions and installations outside an environment."""
     version = sys.version_info[:2] if version is None else version
     if version not in {(3, 11), (3, 12)}:
-        raise ValueError('Use Python 3.12 (reference) or 3.11 (DGX). Python 3.13+ is not supported by these profiles.')
+        raise ValueError('Use Python 3.12 (reference) or 3.11 (compatibility). Python 3.13+ is not supported by these profiles.')
     if isolated is None:
         isolated = sys.prefix != sys.base_prefix or bool(os.environ.get('CONDA_PREFIX'))
     if not isolated:

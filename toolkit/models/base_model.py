@@ -26,6 +26,7 @@ from toolkit.prompt_utils import inject_trigger_into_prompt, PromptEmbeds, conca
 from toolkit.reference_adapter import ReferenceAdapter
 from toolkit.sd_device_states_presets import empty_preset
 from toolkit.train_tools import get_torch_dtype, apply_noise_offset
+from toolkit.unloader import FakeTextEncoder
 from toolkit.memory_management import SampleMemoryCoordinator
 import torch
 from toolkit.pipelines import CustomStableDiffusionXLPipeline
@@ -714,7 +715,8 @@ class BaseModel:
                                 gen_config.prompt,
                                 gen_config.prompt_2,
                                 force_all=True,
-                                control_images=ctrl_img
+                                control_images=ctrl_img,
+                                target_size=(gen_config.width, gen_config.height),
                             )
 
                             if isinstance(self.adapter, CustomAdapter):
@@ -723,7 +725,8 @@ class BaseModel:
                                 gen_config.negative_prompt,
                                 gen_config.negative_prompt_2,
                                 force_all=True,
-                                control_images=ctrl_img
+                                control_images=ctrl_img,
+                                target_size=(gen_config.width, gen_config.height),
                             )
                             if isinstance(self.adapter, CustomAdapter):
                                 self.adapter.is_unconditional_run = False
@@ -1225,6 +1228,7 @@ class BaseModel:
             max_length=None,
             dropout_prob=0.0,
             control_images=None,
+            target_size=None,
     ) -> PromptEmbeds:
         # sd1.5 embeddings are (bs, 77, 768)
         prompt = prompt
@@ -1236,7 +1240,11 @@ class BaseModel:
             prompt2 = [prompt2]
         # if control_images in the signature, pass it. This keep from breaking plugins
         if self.encode_control_in_text_embeddings:
-            return self.get_prompt_embeds(prompt, control_images=control_images)
+            kwargs = {"control_images": control_images}
+            # target (width, height) only for models that size references against it
+            if target_size is not None and "target_size" in inspect.signature(self.get_prompt_embeds).parameters:
+                kwargs["target_size"] = target_size
+            return self.get_prompt_embeds(prompt, **kwargs)
 
         return self.get_prompt_embeds(prompt)
 
@@ -1542,8 +1550,10 @@ class BaseModel:
         }
         if isinstance(self.text_encoder, list):
             self.device_state['text_encoder']: List[dict] = []
+            # unloaded TEs are FakeTextEncoder stubs; arch probes into TE internals would raise
+            any_fake = any(isinstance(e, FakeTextEncoder) for e in self.text_encoder)
             for encoder in self.text_encoder:
-                te_has_grad = self.get_te_has_grad()
+                te_has_grad = False if any_fake else self.get_te_has_grad()
                 self.device_state['text_encoder'].append({
                     'training': encoder.training,
                     'device': encoder.device,
@@ -1551,7 +1561,10 @@ class BaseModel:
                     'requires_grad': te_has_grad
                 })
         elif self.text_encoder is not None:
-            te_has_grad = self.get_te_has_grad()
+            if isinstance(self.text_encoder, FakeTextEncoder):
+                te_has_grad = False
+            else:
+                te_has_grad = self.get_te_has_grad()
 
             self.device_state['text_encoder'] = {
                 'training': self.text_encoder.training,

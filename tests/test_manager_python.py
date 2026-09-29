@@ -58,6 +58,40 @@ class ManagerPythonTests(unittest.TestCase):
         self.run.assert_not_called()
         self.assertEqual(list(self.root.glob('*.backup-*')), [])
 
+    def test_missing_linux_headers_preserves_environment_and_uses_managed_python(self):
+        self.write_env(self.target, '3.12')
+        (self.target / 'old-packages').write_text('preserve me')
+        self.mock(env.sys, 'platform', 'linux')
+        self.mock(env, '_venv_has_headers', side_effect=[False, True])
+        env.ensure_venv(self.spec)
+        backup, = self.root.glob('.venv.backup-*')
+        self.assertEqual((backup / 'old-packages').read_text(), 'preserve me')
+        self.assertIn('--managed-python', self.run.call_args.args[0])
+
+    def test_missing_headers_dry_run_does_not_replace_environment(self):
+        self.write_env(self.target, '3.12')
+        self.mock(env.sys, 'platform', 'linux')
+        self.mock(env, '_venv_has_headers', return_value=False)
+        env.ensure_venv(self.spec, dry_run=True)
+        self.run.assert_not_called()
+        self.assertTrue(self.target.exists())
+        self.assertEqual(list(self.root.glob('.venv.backup-*')), [])
+
+    def test_failed_header_probe_does_not_recreate_environment(self):
+        self.write_env(self.target, '3.12')
+        self.mock(env, 'venv_exists', return_value=True)
+        self.mock(env.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stdout=b''))
+        self.assertTrue(env._venv_has_headers(str(self.target)))
+
+    def test_headerless_created_environment_rolls_back(self):
+        self.write_env(self.target, '3.12')
+        (self.target / 'old-packages').write_text('original')
+        self.mock(env.sys, 'platform', 'linux')
+        self.mock(env, '_venv_has_headers', return_value=False)
+        with self.assertRaises(SystemExit):
+            env.ensure_venv(self.spec)
+        self.assertEqual((self.target / 'old-packages').read_text(), 'original')
+
     def test_update_replaces_unsupported_interpreter_and_preserves_old_packages(self):
         for version in ('3.10', '3.13'):
             with self.subTest(version=version):
@@ -69,7 +103,7 @@ class ManagerPythonTests(unittest.TestCase):
                 self.assertTrue(any((backup / 'old-packages').read_text() == version for backup in backups))
                 self.assertFalse((self.target / 'old-packages').exists())
                 self.assertEqual(self.run.call_args.args[0], [
-                    'test-uv', 'venv', str(self.target), '--python', '3.12', '--seed',
+                    'test-uv', 'venv', str(self.target), '--managed-python', '--python', '3.12', '--seed',
                 ])
 
     def test_new_environment_is_validated_before_being_declared_ready(self):

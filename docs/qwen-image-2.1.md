@@ -14,6 +14,8 @@ Original Diffusers transformer checkpoints now convert the separate MLP gate and
 
 ## References and transparency
 
+References now match the target image's pixel area by default (`model.model_kwargs.match_target_res: true`), keeping each reference's aspect ratio and rounding to the 32-pixel grid. This can upscale small references. Training uses the current bucket dimensions; sampling uses the requested output dimensions. The UI's **Reference image resolution** selector can switch to the previous capped-size policy (`false`). Text embedding caches distinguish both the policy and the target bucket dimensions, so old caches are rebuilt where needed. For batches larger than one, each ordered reference must resolve to the same grid dimensions across the batch; use batch size one for mixed reference layouts.
+
 Training sample forms, Native Generate, and Live Generate accept up to 10 reference images in order. Use the Up and Remove controls to manage that order. Annotated images or a separate edit mask can be supplied as references alongside the original image; there is no separate mask-painting editor. CLI/YAML samples use an ordered list:
 
 ```yaml

@@ -13,8 +13,8 @@ function loadSource(filename) {
   filename = path.resolve(filename);
   if (cache.has(filename)) return cache.get(filename);
   if (filename.endsWith('.json')) return JSON.parse(fs.readFileSync(filename, 'utf8'));
-  const module = { exports: {} };
-  cache.set(filename, module.exports);
+  const loadedModule = { exports: {} };
+  cache.set(filename, loadedModule.exports);
   const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   }).outputText;
@@ -26,11 +26,11 @@ function loadSource(filename) {
         : path.resolve(path.dirname(filename), specifier);
       return loadSource(/\.(json|ts)$/.test(target) ? target : target + '.ts');
     },
-    module,
-    module.exports,
+    loadedModule,
+    loadedModule.exports,
   );
-  cache.set(filename, module.exports);
-  return module.exports;
+  cache.set(filename, loadedModule.exports);
+  return loadedModule.exports;
 }
 const { modelArchs, getTransformerQuantizationOptions } = loadSource('src/domain/modelOptions.ts');
 

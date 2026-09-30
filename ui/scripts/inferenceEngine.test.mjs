@@ -41,7 +41,7 @@ test('Qwen Image 2.1 presets reach training and generation through the shared ca
   assert.equal(choice.defaults['config.process[0].train.timestep_type'][0], 'shift');
   const model = getDefaultModelConfig(choice.name);
   assert.equal(model.name_or_path, 'Qwen/Qwen-Image-2.1');
-  assert.deepEqual(model.model_kwargs, { use_comfy_weights: false });
+  assert.deepEqual(model.model_kwargs, { use_comfy_weights: false, match_target_res: true });
   assert.equal(model.quantize, true);
   assert.equal(model.quantize_te, true);
   assert.equal(model.qtype, 'convrot8');
@@ -69,7 +69,7 @@ test('Qwen source defaults apply on selection and preserve existing job source o
   const capture = (value, key) => writes.set(key, value);
   handleModelArchChange('flux', 'qwen_image_2', job, capture);
   assert.equal(writes.get('config.process[0].model.name_or_path'), 'Qwen/Qwen-Image-2.1');
-  assert.deepEqual(writes.get('config.process[0].model.model_kwargs'), { use_comfy_weights: false });
+  assert.deepEqual(writes.get('config.process[0].model.model_kwargs'), { use_comfy_weights: false, match_target_res: true });
   writes.clear();
   handleModelArchChange('qwen_image_2', 'flux', job, capture);
   assert.deepEqual(writes.get('config.process[0].model.model_kwargs'), {});

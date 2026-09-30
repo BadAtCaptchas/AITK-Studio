@@ -8,17 +8,17 @@ function loadSource(relative, dependencies, globals = {}) {
   const code = ts.transpileModule(fs.readFileSync(new URL(relative, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText;
-  const module = { exports: {} };
+  const loadedModule = { exports: {} };
   new Function('require', 'module', 'exports', ...Object.keys(globals), code)(
     name => {
       assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency: ${name}`);
       return dependencies[name];
     },
-    module,
-    module.exports,
+    loadedModule,
+    loadedModule.exports,
     ...Object.values(globals),
   );
-  return module.exports;
+  return loadedModule.exports;
 }
 
 const monitorSample = loadSource('../src/utils/monitorSample.ts', {});

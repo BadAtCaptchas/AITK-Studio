@@ -179,6 +179,7 @@ test('group publication keeps staged and uncommitted root assets out of dataset 
     const root = await fixture(t), source = path.join(root, 'source'), destination = path.join(root, 'dest');
     const group = await writeGroup(source);
     await fs.mkdir(destination);
+    const canonicalDestination = await fs.realpath(destination);
     const originalCopy = fs.copyFile, originalLink = fs.link;
     let published = 0;
     const assertHidden = async () => {
@@ -192,7 +193,7 @@ test('group publication keeps staged and uncommitted root assets out of dataset 
         await assert.rejects(fs.access(path.join(destination, group.composite)), { code: 'ENOENT' });
         await assertHidden();
       }
-      if (!supportsLinks && path.dirname(args[1]) === destination) {
+      if (!supportsLinks && path.dirname(args[1]) === canonicalDestination) {
         published += 1;
         await assertHidden();
       }
@@ -216,10 +217,11 @@ test('cancellation after root publication removes the complete pending group', a
   const root = await fixture(t), source = path.join(root, 'source'), destination = path.join(root, 'dest');
   const group = await writeGroup(source);
   await fs.mkdir(destination);
+  const canonicalDestination = await fs.realpath(destination);
   const controller = new AbortController(), originalLink = fs.link;
   t.mock.method(fs, 'link', async (...args) => {
     await originalLink(...args);
-    if (args[1] === path.join(destination, group.composite)) controller.abort();
+    if (args[1] === path.join(canonicalDestination, group.composite)) controller.abort();
   });
   await assert.rejects(copyLayeredImage(source, group, destination, 'art.png', controller.signal), error => error.status === 499);
   assert.deepEqual(await fs.readdir(destination), ['.layers']);

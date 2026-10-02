@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { setLocalQueueRunning } from '@/server/queueCoordination';
+import { LeaseBusyError } from '@/server/processLease';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ queueID: string }> }) {
   const { queueID } = await params;
@@ -18,17 +20,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json(remoteQueue);
   }
 
-  const queue = await db.queues.findByGpuIds(queueID, workerID);
-
-  if (!queue) {
-    // create it if it doesn't exist
-    const newQueue = await db.queues.create({ worker_id: workerID, gpu_ids: queueID, is_running: true });
-    return NextResponse.json(newQueue);
+  try {
+    return NextResponse.json(await setLocalQueueRunning(queueID, true));
+  } catch (error) {
+    if (error instanceof LeaseBusyError) return NextResponse.json({ error: 'Queue is busy. Retry shortly.' }, { status: 409 });
+    throw error;
   }
-
-  await db.queues.update(queue.id, { is_running: true });
-
-  return NextResponse.json(queue);
 }
 
 export function GET() {

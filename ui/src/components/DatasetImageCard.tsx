@@ -1,4 +1,4 @@
-import React, { useEffect, useState, ReactNode, KeyboardEvent, useRef } from 'react';
+import React, { useCallback, useEffect, useState, ReactNode, KeyboardEvent, useRef } from 'react';
 import { FaTrashAlt, FaPlay } from 'react-icons/fa';
 import { openConfirm } from './ConfirmModal';
 import classNames from 'classnames';
@@ -7,6 +7,12 @@ import AudioPlayer from './AudioPlayer';
 import { isVideo, isAudio, encodeFilePathForUrl } from '@/utils/basic';
 import useCaptionBatch, { setCachedCaption } from '@/hooks/useCaptionBatch';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
+import { createCaptionSaveQueue } from '@/utils/captionSaveQueue';
+
+const writeCaption = createCaptionSaveQueue(async (imgPath, caption) => {
+  await apiClient.post('/api/img/caption', { imgPath, caption });
+  setCachedCaption(imgPath, caption);
+});
 
 interface DatasetImageCardProps {
   imageUrl: string;
@@ -124,10 +130,18 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   const [caption, setCaption] = useState<string>('');
   const [savedCaption, setSavedCaption] = useState<string>('');
   const dirtyRef = useRef<boolean>(false);
+  const pendingSavesRef = useRef(0);
+  const mountedRef = useRef(false);
+  const latestRef = useRef({ caption, savedCaption, imageUrl });
+  useEffect(() => {
+    latestRef.current = { caption, savedCaption, imageUrl };
+  });
 
   useEffect(() => {
     if (!isCaptionLoaded) return;
-    if (dirtyRef.current) return;
+    if (dirtyRef.current || pendingSavesRef.current > 0) return;
+    latestRef.current.caption = fetchedCaption;
+    latestRef.current.savedCaption = fetchedCaption.trim();
     setCaption(fetchedCaption);
     setSavedCaption(fetchedCaption.trim());
   }, [fetchedCaption, isCaptionLoaded]);
@@ -139,41 +153,39 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
     return () => clearInterval(interval);
   }, [caption, isAutoCaptioning, isVisible]);
 
-  const saveCaption = () => {
-    const trimmedCaption = caption.trim();
-    if (trimmedCaption === savedCaption) {
+  const saveCaption = useCallback(() => {
+    const { caption: currentCaption, savedCaption: currentSavedCaption, imageUrl: url } = latestRef.current;
+    const trimmedCaption = currentCaption.trim();
+    if (trimmedCaption === currentSavedCaption && pendingSavesRef.current === 0) {
       dirtyRef.current = false;
       return;
     }
-    apiClient
-      .post('/api/img/caption', { imgPath: imageUrl, caption: trimmedCaption })
+    pendingSavesRef.current += 1;
+    writeCaption(url, trimmedCaption)
       .then(() => {
-        setSavedCaption(trimmedCaption);
-        setCachedCaption(imageUrl, trimmedCaption);
-        dirtyRef.current = false;
+        if (latestRef.current.imageUrl !== url) return;
+        latestRef.current.savedCaption = trimmedCaption;
+        if (mountedRef.current) setSavedCaption(trimmedCaption);
       })
       .catch(error => {
         console.error('Error saving caption:', error);
+      })
+      .finally(() => {
+        pendingSavesRef.current -= 1;
+        dirtyRef.current =
+          pendingSavesRef.current > 0 ||
+          latestRef.current.caption.trim() !== latestRef.current.savedCaption;
       });
-  };
-
-  const latestRef = useRef({ caption, savedCaption, imageUrl });
-  useEffect(() => {
-    latestRef.current = { caption, savedCaption, imageUrl };
-  });
-
-  useEffect(() => {
-    return () => {
-      if (!dirtyRef.current) return;
-      const { caption: c, savedCaption: s, imageUrl: url } = latestRef.current;
-      const trimmed = c.trim();
-      if (trimmed === s) return;
-      apiClient
-        .post('/api/img/caption', { imgPath: url, caption: trimmed })
-        .then(() => setCachedCaption(url, trimmed))
-        .catch(err => console.error('Error saving caption on unmount:', err));
-    };
   }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (!dirtyRef.current) return;
+      saveCaption();
+    };
+  }, [saveCaption]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -183,7 +195,8 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   };
 
   const handleCaptionChange = (value: string) => {
-    dirtyRef.current = value.trim() !== savedCaption;
+    latestRef.current.caption = value;
+    dirtyRef.current = pendingSavesRef.current > 0 || value.trim() !== latestRef.current.savedCaption;
     setCaption(value);
   };
 

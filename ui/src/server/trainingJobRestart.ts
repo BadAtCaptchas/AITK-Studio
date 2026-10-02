@@ -139,7 +139,8 @@ function resetJobPatch(): JobUpdateInput {
     return_to_queue: false,
     save_now: false,
     sample_now: false,
-    status: 'queued',
+    // Publish to cron only when startPreparedJob also prepares the queue/keys.
+    status: 'stopped',
     info: 'Restarting job from scratch...',
   };
 }

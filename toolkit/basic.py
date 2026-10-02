@@ -69,7 +69,7 @@ def get_quick_signature_string(file_path):
     try:
         file_stats = os.stat(file_path)
         # Combine size and mtime into a single string
-        return f"{file_stats.st_size}:{int(file_stats.st_mtime)}"
+        return f"{file_stats.st_size}:{file_stats.st_mtime_ns}"
     except Exception as e:
         print(f"Error accessing file {file_path}: {e}")
         return None

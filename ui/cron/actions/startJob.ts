@@ -1,6 +1,8 @@
 import { db, getDatabaseConfig } from '../../src/server/db';
 import { finishObservedJobProcess } from '../../src/server/jobProcess';
 import { claimJobAttempt } from '../../src/server/jobAttempts';
+import { withLocalQueueTransition } from '../../src/server/queueCoordination';
+import { LeaseBusyError } from '../../src/server/processLease';
 import { jobStorageKey } from '../../src/utils/jobIdentity';
 import { inferenceToken } from '../../src/server/inferenceToken';
 import type { Job } from '../../src/types';
@@ -38,6 +40,7 @@ const LAUNCH_LOG_FILE = 'launch.log';
 
 type StartJobOptions = {
   encryptedDatasetKeys?: EncryptedDatasetStartKey[];
+  requireRunningQueue?: boolean;
 };
 
 function normalizeWorkerBaseUrl(baseUrl: string) {
@@ -350,7 +353,15 @@ export async function startJobNow(jobID: string, options: StartJobOptions = {}):
   }
 
   await assertPythonRuntimeReady();
-  const job = await claimJobAttempt(candidate);
+  const job = options.requireRunningQueue
+    ? await withLocalQueueTransition(candidate.gpu_ids, async () => {
+        const current = await db.jobs.findById(jobID);
+        if (!current || current.status !== 'queued' || current.gpu_ids !== candidate.gpu_ids || current.worker_id !== candidate.worker_id) return null;
+        const queue = await db.queues.findByGpuIds(current.gpu_ids, 'local');
+        if (!queue?.is_running) return null;
+        return claimJobAttempt(current);
+      }, { wait: false })
+    : await claimJobAttempt(candidate);
   if (!job) return false;
 
   startAndWatchJob(job, options).catch(async (error: any) => {
@@ -367,5 +378,9 @@ export async function startJobNow(jobID: string, options: StartJobOptions = {}):
 }
 
 export default async function startJob(jobID: string) {
-  await startJobNow(jobID);
+  try {
+    await startJobNow(jobID, { requireRunningQueue: true });
+  } catch (error) {
+    if (!(error instanceof LeaseBusyError)) throw error;
+  }
 }

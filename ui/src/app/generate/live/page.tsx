@@ -6,6 +6,8 @@ import { QwenImageControls } from '@/components/generate/QwenImageControls';
 import { transparentQwenPrompt } from '@/domain/qwenImage';
 import { apiClient } from '@/utils/api';
 import { startJob, stopJob } from '@/utils/jobs';
+import { startQueue } from '@/utils/queue';
+import { startInferenceEngine } from '@/utils/startInferenceEngine';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import usePollLoop from '@/hooks/usePollLoop';
 import { useModelArchs } from '@/extensions/modelArchs';
@@ -148,8 +150,8 @@ export default function LiveGeneratePage() {
     setError('');
     setMessage('Starting engine…');
     try {
-      let id = jobID;
-      if (!id) {
+      let engine: Pick<EngineJob, 'id' | 'gpu_ids'> | undefined = jobs.find(job => job.id === jobID);
+      if (!jobID) {
         const name = `inference_${Date.now()}`;
         const response: unknown = (
           await apiClient.post<unknown>('/api/jobs', {
@@ -163,11 +165,14 @@ export default function LiveGeneratePage() {
             },
           })
         ).data;
-        if (!record(response) || typeof response.id !== 'string') throw new Error('Invalid engine job response');
-        id = response.id;
-        setJobID(id);
+        if (!record(response) || typeof response.id !== 'string' || typeof response.gpu_ids !== 'string') {
+          throw new Error('Invalid engine job response');
+        }
+        engine = { id: response.id, gpu_ids: response.gpu_ids };
+        setJobID(engine.id);
       }
-      await startJob(id);
+      if (!engine) throw new Error('Selected engine is unavailable. Refresh the page and select it again.');
+      await startInferenceEngine(engine, { startJob, startQueue });
       await refreshJobs();
       setMessage('Engine is starting.');
     } catch (e) {

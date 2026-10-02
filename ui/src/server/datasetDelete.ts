@@ -1,5 +1,6 @@
 import fsp from 'fs/promises';
 import path from 'path';
+import { DatasetMutationPathError, resolveDatasetMutationPath } from './datasetMutationPaths';
 
 export class DatasetDeleteError extends Error {
   status: number;
@@ -38,11 +39,17 @@ export async function deleteDatasetFolder(
   target: unknown,
 ): Promise<DatasetDeleteResult> {
   const datasetPath = resolveDatasetDeletePath(datasetsRoot, target);
-  const stat = await fsp.stat(datasetPath).catch(() => null);
-  if (!stat) {
-    return { success: true, deleted: false, path: datasetPath };
+  let entryPath: string;
+  try {
+    ({ entryPath } = await resolveDatasetMutationPath(datasetsRoot, datasetPath));
+  } catch (error) {
+    if (error instanceof DatasetMutationPathError) throw new DatasetDeleteError(error.message);
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return { success: true, deleted: false, path: datasetPath };
+    }
+    throw error;
   }
 
-  await fsp.rm(datasetPath, { recursive: true, force: true });
+  await fsp.rm(entryPath, { recursive: true, force: true });
   return { success: true, deleted: true, path: datasetPath };
 }

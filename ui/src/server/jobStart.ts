@@ -28,6 +28,8 @@ import { isAnyRemoteOllamaCaptionJob } from './secureRemoteCaptionJobs';
 import { syncRemoteDatasetsForJobConfig, type RemoteDatasetSyncMapping } from './remoteDatasetSync';
 
 import { startJobNow } from '../../cron/actions/startJob';
+import { withLocalQueueTransition } from './queueCoordination';
+import { LeaseBusyError } from './processLease';
 import type { EncryptedDatasetStartKey, Job, RemoteStartProgress } from '../types';
 
 type RequiredEncryptedDataset = { path: string; name: string };
@@ -211,28 +213,33 @@ export async function prepareJobStart(
 
 async function queueLocalJob(prepared: PreparedJobStart, options: { startQueue?: boolean; info?: string } = {}) {
   const { job, jobID } = prepared;
-  const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
-  const queued = await db.jobs.updateIf(jobID, {
-    attempt_id: job.attempt_id ?? null, status: job.status, updated_at: new Date(job.updated_at),
-  }, { queue_position: newQueuePosition, status: 'queued', stop: false, return_to_queue: false, info: options.info || 'Job queued' });
-  if (!queued) failStart({ error: 'Job changed while starting. Refresh and retry.', code: 'JOB_CHANGED' }, 409);
+  return withLocalQueueTransition(job.gpu_ids, async () => {
+    const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
+    const queued = await db.jobs.updateIf(jobID, {
+      attempt_id: job.attempt_id ?? null, status: job.status, updated_at: new Date(job.updated_at),
+    }, { queue_position: newQueuePosition, status: 'queued', stop: false, return_to_queue: false, info: options.info || 'Job queued' });
+    if (!queued) failStart({ error: 'Job changed while starting. Refresh and retry.', code: 'JOB_CHANGED' }, 409);
 
-  try {
-  const queue = await db.queues.findByGpuIds(job.gpu_ids);
-  if (!queue) {
-    await db.queues.create({
-      gpu_ids: job.gpu_ids,
-      is_running: options.startQueue === true,
-    });
-  } else if (options.startQueue === true && !queue.is_running) {
-    await db.queues.update(queue.id, { is_running: true });
-  }
-  } catch (error) {
-    await db.jobs.updateIf(jobID, { attempt_id: queued.attempt_id ?? null, status: 'queued', updated_at: new Date(queued.updated_at) }, { status: job.status, info: 'Queue preparation failed; retry the start command' });
+    try {
+      const queue = await db.queues.findByGpuIds(job.gpu_ids);
+      if (!queue) {
+        await db.queues.create({
+          gpu_ids: job.gpu_ids,
+          is_running: options.startQueue === true,
+        });
+      } else if (options.startQueue === true && !queue.is_running) {
+        await db.queues.update(queue.id, { is_running: true });
+      }
+    } catch (error) {
+      await db.jobs.updateIf(jobID, { attempt_id: queued.attempt_id ?? null, status: 'queued', updated_at: new Date(queued.updated_at) }, { status: job.status, info: 'Queue preparation failed; retry the start command' });
+      throw error;
+    }
+
+    return (await db.jobs.findById(jobID)) || job;
+  }).catch((error: unknown) => {
+    if (error instanceof LeaseBusyError) failStart({ error: 'Queue is busy. Retry shortly.', code: 'QUEUE_BUSY' }, 409);
     throw error;
-  }
-
-  return (await db.jobs.findById(jobID)) || job;
+  });
 }
 
 function scaleUploadPercent(loaded: number, total: number, start: number, end: number) {

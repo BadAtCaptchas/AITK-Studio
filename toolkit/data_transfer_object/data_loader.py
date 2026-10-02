@@ -159,6 +159,7 @@ class FileItemDTO(
         file_signature = self.layered_signature if self.is_layered else self.encrypted_reader.item_signature(self.encrypted_item) if self.is_encrypted else get_quick_signature_string(self.path)
         if file_signature is None:
             raise Exception("Error: Could not get file signature for {self.path}")
+        self.file_signature = file_signature
 
         use_db_entry = False
         if file_key in size_database:

@@ -5,6 +5,7 @@ import json
 import math
 import os
 import random
+import tempfile
 from collections import OrderedDict
 from typing import TYPE_CHECKING, List, Dict, Union
 import traceback
@@ -12,6 +13,7 @@ import traceback
 import cv2
 import numpy as np
 import torch
+from safetensors import SafetensorError, safe_open
 from safetensors.torch import load_file, save_file
 from tqdm import tqdm
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection, SiglipImageProcessor
@@ -2180,6 +2182,7 @@ class LatentCachingFileItemDTOMixin:
     def get_latent_info_dict(self: 'FileItemDTO'):
         item = OrderedDict([
             ("filename", os.path.basename(self.path)),
+            ("file_signature", self.file_signature),
             ("scale_to_width", self.scale_to_width),
             ("scale_to_height", self.scale_to_height),
             ("crop_x", self.crop_x),
@@ -2305,6 +2308,16 @@ class LatentCachingMixin:
             super().__init__(**kwargs)
         self.latent_cache = {}
 
+    def _reuse_published_latent(self, latent_path):
+        try:
+            state_dict = load_file(latent_path, device='cpu')
+            # Exercise the normal decoder before accepting a concurrent winner.
+            # An empty target list validates the state without changing items.
+            self._assign_latent_state_to_file_items([], state_dict)
+            return state_dict
+        except (OSError, SafetensorError, KeyError, ValueError):
+            return None
+
     def _assign_latent_state_to_file_items(
             self: 'AiToolkitDataset',
             file_items: List['FileItemDTO'],
@@ -2423,7 +2436,33 @@ class LatentCachingMixin:
                     disk_state_dict['first_frame_latent'] = _latent_to_uint8(
                         state_dict['first_frame_latent']
                     )
-            save_file(disk_state_dict, latent_path, metadata=meta)
+            # Independent jobs can populate the same dataset cache. Only expose
+            # a complete file, and leave any previous cache intact on failure.
+            descriptor, temporary_path = tempfile.mkstemp(
+                prefix=f'.{os.path.basename(latent_path)}.',
+                suffix='.tmp',
+                dir=os.path.dirname(latent_path),
+            )
+            os.close(descriptor)
+            try:
+                save_file(disk_state_dict, temporary_path, metadata=meta)
+                published_state = self._reuse_published_latent(latent_path)
+                if published_state is None:
+                    try:
+                        os.replace(temporary_path, latent_path)
+                    except PermissionError:
+                        # Windows can reject replacing a just-published file
+                        # while another reader holds its mapped tensors open.
+                        published_state = self._reuse_published_latent(latent_path)
+                        if published_state is None:
+                            raise
+                if published_state is not None:
+                    state_dict = published_state
+            finally:
+                try:
+                    os.remove(temporary_path)
+                except FileNotFoundError:
+                    pass
             del disk_state_dict
 
         del imgs
@@ -2453,11 +2492,27 @@ class LatentCachingMixin:
 
             missing_latent_paths = []
             existing_latent_paths = []
-            for latent_path in file_items_by_latent_path.keys():
-                if (to_disk or to_memory) and os.path.exists(latent_path):
-                    existing_latent_paths.append(latent_path)
-                else:
-                    missing_latent_paths.append(latent_path)
+            for latent_path, file_items in file_items_by_latent_path.items():
+                if to_disk or to_memory:
+                    try:
+                        if to_memory:
+                            state_dict = load_file(latent_path, device='cpu')
+                            self._assign_latent_state_to_file_items(file_items, state_dict)
+                            del state_dict
+                        else:
+                            # Validate the header and file length without loading
+                            # every latent tensor into RAM for disk-only caches.
+                            with safe_open(latent_path, framework='pt', device='cpu') as cached:
+                                if 'latent' not in cached.keys():
+                                    raise ValueError('Latent cache has no latent tensor')
+                    except FileNotFoundError:
+                        pass
+                    except (OSError, SafetensorError, KeyError, ValueError) as error:
+                        print_acc(f"Rebuilding unreadable latent cache {latent_path}: {error}")
+                    else:
+                        existing_latent_paths.append(latent_path)
+                        continue
+                missing_latent_paths.append(latent_path)
 
             if len(missing_latent_paths) == 0 and len(existing_latent_paths) > 0:
                 print_acc(f"Using existing latent cache for {self.dataset_path}")
@@ -2469,14 +2524,6 @@ class LatentCachingMixin:
                     print_acc(f" - Reusing {len(existing_latent_paths)} existing latent files")
             if to_memory:
                 print_acc(" - Keeping latents in memory")
-
-            # Load each unique cached latent only once when memory caching is requested.
-            if to_memory and len(existing_latent_paths) > 0:
-                for latent_path in tqdm(existing_latent_paths, desc='Loading latents from disk'):
-                    file_items = file_items_by_latent_path[latent_path]
-                    state_dict = load_file(latent_path, device='cpu')
-                    self._assign_latent_state_to_file_items(file_items, state_dict)
-                    del state_dict
 
             if len(missing_latent_paths) > 0:
                 # move sd items to cpu except for vae
@@ -2503,9 +2550,28 @@ class LatentCachingMixin:
 
                 if failed_items:
                     failed_ids = {id(item) for item in failed_items}
-                    self.file_list = [
-                        item for item in self.file_list if id(item) not in failed_ids
-                    ]
+                    # Buckets were built before encoding. Remap their indices
+                    # without recomputing crops or changing existing cache keys.
+                    surviving_indices = {}
+                    surviving_items = []
+                    for old_index, item in enumerate(self.file_list):
+                        if id(item) not in failed_ids:
+                            surviving_indices[old_index] = len(surviving_items)
+                            surviving_items.append(item)
+                    self.file_list = surviving_items
+                    if not self.file_list:
+                        raise ValueError(f"No usable samples remain after caching latents for {self.dataset_path}")
+                    if self.dataset_config.buckets:
+                        for bucket in self.buckets.values():
+                            bucket.file_list_idx = [
+                                surviving_indices[index] for index in bucket.file_list_idx
+                                if index in surviving_indices
+                            ]
+                        self.buckets = {
+                            key: bucket for key, bucket in self.buckets.items()
+                            if bucket.file_list_idx
+                        }
+                        self.build_batch_indices()
 
             for file_items in file_items_by_latent_path.values():
                 for file_item in file_items:

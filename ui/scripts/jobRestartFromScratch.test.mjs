@@ -185,11 +185,12 @@ test('restart from scratch resets progress fields before starting', async () => 
     return_to_queue: false,
     save_now: false,
     sample_now: false,
-    status: 'queued',
+    status: 'stopped',
     info: 'Restarting job from scratch...',
   });
   assert.equal(calls.startPreparedJob.length, 1);
   assert.equal(calls.startPreparedJob[0].prepared.job.step, 0);
+  assert.equal(calls.startPreparedJob[0].prepared.job.status, 'stopped', 'cron must not claim the reset before start prepares the queue/keys');
   assert.deepEqual(calls.startPreparedJob[0].options, {
     startQueue: true,
     queueInfo: 'Restarted from scratch and queued',

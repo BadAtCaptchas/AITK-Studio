@@ -39,7 +39,7 @@ import {
   rememberEncryptedDatasetKey,
   unlockEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
-import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
+import { moveEncryptedDatasetItems } from '@/utils/encryptedDatasetMove';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
 import ThemeLogo from '@/components/ThemeLogo';
@@ -568,15 +568,6 @@ export default function DatasetEditorPage({
       removedKeys,
     };
   };
-  const encryptedObjectUpdate = async (objectPath: string) => {
-    const response = await apiClient.post(
-      '/api/datasets/encrypted/object',
-      buildEncryptedObjectRequestBody({ datasetName, workerID, objectPath }),
-      { responseType: 'blob' },
-    );
-    const bytes = await (response.data as Blob).arrayBuffer();
-    return { objectPath, dataBase64: arrayBufferToBase64(bytes) };
-  };
   const handleBulkEncryptedCaptionAction = async (
     request: BulkCaptionActionRequest,
   ): Promise<BulkCaptionActionResult> => {
@@ -618,44 +609,14 @@ export default function DatasetEditorPage({
     if (request.action === 'move') {
       const destinationName = request.destinationName?.trim();
       if (!destinationName) throw new Error('Destination dataset name is required.');
-      const { manifest: emptyManifest } = await encryptCatalog(
-        { version: 1, items: [] },
-        encryptedKey,
-        encryptedManifest,
-      );
-      const createResponse = await apiClient.post('/api/datasets/create', {
-        name: destinationName,
-        worker_id: workerID,
-        encrypted: true,
-        encryptedManifest: emptyManifest,
-      });
-      const createdName = createResponse.data?.name || destinationName;
-      const objects = [];
-      for (const item of matchedItems) {
-        objects.push(await encryptedObjectUpdate(item.objectPath));
-        if (item.captionObjectPath) objects.push(await encryptedObjectUpdate(item.captionObjectPath));
-      }
-      const targetCatalog: EncryptedDatasetCatalog = {
-        version: 1,
-        items: matchedItems.map(item => ({ ...item, updatedAt: now })),
-      };
-      const { manifest: targetManifest } = await encryptCatalog(targetCatalog, encryptedKey, emptyManifest);
-      await apiClient.post('/api/datasets/encrypted/update', {
-        datasetName: createdName,
-        worker_id: workerID,
-        manifest: targetManifest,
-        objects,
-      });
-      const nextCatalog: EncryptedDatasetCatalog = {
-        ...encryptedCatalog,
-        items: encryptedCatalog.items.filter(item => !matchedIDs.has(item.id)),
-      };
-      const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
-      await apiClient.post('/api/datasets/encrypted/update', {
+      const { createdName, nextManifest, nextCatalog } = await moveEncryptedDatasetItems({
         datasetName,
-        worker_id: workerID,
-        manifest: nextManifest,
-        deleteObjects: matchedItems.flatMap(item => [item.objectPath, item.captionObjectPath].filter(Boolean)),
+        destinationName,
+        workerID,
+        key: encryptedKey,
+        manifest: encryptedManifest,
+        catalog: encryptedCatalog,
+        items: matchedItems,
       });
       setEncryptedManifest(nextManifest);
       setEncryptedCatalog(nextCatalog);

@@ -287,7 +287,8 @@ class LayeredLoaderTests(LayeredTestCase):
             # Real loader/caching with a cheap encoder, preserving native C,F axes.
             return images.permute(0, 2, 1, 3, 4).repeat(1, 4, 1, 1, 1).contiguous()
 
-        def encode_prompt(caption, control_images=None):
+        def encode_prompt(caption, control_images=None, target_size=None):
+            self.assertEqual(target_size, (8, 8))
             encoded_controls.append(control_images.clone())
             return PromptEmbeds(torch.zeros(1, 2, 4))
 

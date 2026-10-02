@@ -31,24 +31,32 @@ function normalizeRequestedDatasetName(value: string) {
   return name;
 }
 
-async function uniqueDatasetPath(datasetsRoot: string, requestedName: string) {
+async function reserveDatasetPath(datasetsRoot: string, requestedName: string, sourcePath: string) {
   const root = path.resolve(datasetsRoot);
   await fsp.mkdir(root, { recursive: true });
+  const canonicalRoot = await fsp.realpath(root);
 
-  let candidateName = normalizeRequestedDatasetName(requestedName);
-  if (!candidateName) throw new Error('Dataset copy destination is required');
-
-  let candidatePath = path.resolve(root, candidateName);
-  let counter = 2;
-  while (fs.existsSync(candidatePath)) {
-    candidateName = `${requestedName}_${counter}`;
-    candidatePath = path.resolve(root, candidateName);
-    counter += 1;
+  const baseName = normalizeRequestedDatasetName(requestedName);
+  if (!baseName) throw new Error('Dataset copy destination is required');
+  for (let counter = 1; ; counter += 1) {
+    const candidateName = counter === 1 ? baseName : `${baseName}_${counter}`;
+    const candidatePath = path.resolve(canonicalRoot, candidateName);
+    if (!isPathInside(canonicalRoot, candidatePath) || candidatePath === canonicalRoot) {
+      throw new Error('Invalid dataset copy destination');
+    }
+    // An existing source (or its parent) simply occupies this candidate name.
+    if (isPathInside(candidatePath, sourcePath)) continue;
+    if (isPathInside(sourcePath, candidatePath)) {
+      throw new Error('Dataset copy source and destination cannot contain one another');
+    }
+    try {
+      // The successful mkdir gives this copy ownership of its cleanup target.
+      await fsp.mkdir(candidatePath);
+      return { name: candidateName, path: path.join(root, candidateName), canonicalPath: candidatePath };
+    } catch (error) {
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw error;
+    }
   }
-  if (!isPathInside(root, candidatePath) || candidatePath === root) {
-    throw new Error('Invalid dataset copy destination');
-  }
-  return { name: candidateName, path: candidatePath };
 }
 
 type DatasetCopyEntry = { relativePath: string; kind: 'directory' | 'file' };
@@ -92,7 +100,6 @@ async function copySafeDatasetTree(
   entries: DatasetCopyEntry[],
   canonicalSourceRoot: string,
 ) {
-  await fsp.mkdir(destinationRoot);
   for (const entry of entries.filter(item => item.kind === 'directory')) {
     await fsp.mkdir(path.join(destinationRoot, entry.relativePath), { recursive: true });
   }
@@ -137,21 +144,14 @@ export async function copyDatasetBetweenRoots({
   const destinationName = requestedName?.trim()
     ? normalizeRequestedDatasetName(requestedName)
     : safeDatasetCopyName(sourceName, suffix);
-  const destination = await uniqueDatasetPath(destinationDatasetsRoot, destinationName);
-  if (isPathInside(sourcePath, destination.path) || isPathInside(destination.path, sourcePath)) {
-    throw new Error('Dataset copy source and destination cannot contain one another');
-  }
   const tree = await collectSafeDatasetCopyTree(sourcePath);
+  const destination = await reserveDatasetPath(destinationDatasetsRoot, destinationName, sourcePath);
   try {
-    await copySafeDatasetTree(sourcePath, destination.path, tree.entries, tree.canonicalRoot);
+    await copySafeDatasetTree(sourcePath, destination.canonicalPath, tree.entries, tree.canonicalRoot);
   } catch (error) {
-    const destinationRoot = path.resolve(destinationDatasetsRoot);
-    const safeDestination = path.resolve(destination.path);
-    if (isPathInside(destinationRoot, safeDestination) && safeDestination !== destinationRoot) {
-      await fsp.rm(safeDestination, { recursive: true, force: true }).catch(() => undefined);
-    }
+    await fsp.rm(destination.canonicalPath, { recursive: true, force: true }).catch(() => undefined);
     throw error;
   }
 
-  return destination;
+  return { name: destination.name, path: destination.path };
 }

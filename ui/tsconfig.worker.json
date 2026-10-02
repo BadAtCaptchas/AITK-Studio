@@ -71,6 +71,8 @@
         "src/server/sampleLayers.ts",
         "src/server/layeredImport.ts",
         "src/server/datasetDelete.ts",
+        "src/server/datasetCaptionWrite.ts",
+        "src/utils/encryptedDatasetMove.ts",
         "src/server/datasetCaptionBulk.ts",
         "src/server/datasetSingleRecaption.ts",
         "src/server/datasetWatchers.ts",

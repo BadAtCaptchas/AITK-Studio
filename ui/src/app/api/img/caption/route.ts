@@ -1,14 +1,10 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
-import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
-import { resolveCaptionWritePathAsync } from '@/server/captionFiles';
+import { DatasetCaptionWriteError, writePlainDatasetCaption } from '@/server/datasetCaptionWrite';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
-import { isLayeredImageAssetPath } from '@/domain/layeredImages';
 
 async function postCommand(request: Request) {
   try {
@@ -28,45 +24,13 @@ async function postCommand(request: Request) {
       );
     }
 
-    const { datasetsRoot: datasetsPath } = await resolveDatasetScope();
-    const datasetsRoot = path.resolve(datasetsPath);
-    const resolvedImagePath = path.resolve(imgPath);
-    const relativeImagePath = path.relative(datasetsRoot, resolvedImagePath);
-    if (isLayeredImageAssetPath(relativeImagePath)) {
-      return NextResponse.json({ error: 'Edit layer captions in Layered documents' }, { status: 400 });
-    }
-
-    // make sure the resolved image path is in the dataset path
-    if (relativeImagePath.startsWith('..') || path.isAbsolute(relativeImagePath)) {
-      return NextResponse.json({ error: 'Invalid image path' }, { status: 400 });
-    }
-
-    if (findEncryptedDatasetRoot(resolvedImagePath, datasetsRoot)) {
-      return NextResponse.json(
-        { error: 'Encrypted captions must be saved through the encrypted dataset API' },
-        { status: 403 },
-      );
-    }
-
-    // if img doesnt exist, ignore
-    try {
-      await fs.promises.access(resolvedImagePath);
-    } catch {
-      return NextResponse.json({ error: 'Image does not exist' }, { status: 404 });
-    }
-
-    const captionText = typeof caption === 'string' ? caption : String(caption ?? '');
-    const captionPath = await resolveCaptionWritePathAsync(resolvedImagePath, captionText);
-    // save caption to file
-    await fs.promises.writeFile(captionPath, captionText);
-    const captionedAt = (await fs.promises.stat(captionPath)).mtime.toISOString();
-
-    return NextResponse.json({ success: true, captioned_at: captionedAt });
+    const { datasetsRoot } = await resolveDatasetScope();
+    return NextResponse.json(await writePlainDatasetCaption(datasetsRoot, imgPath, caption));
   } catch (error) {
-    if (error instanceof DatasetScopeError) {
+    if (error instanceof DatasetScopeError || error instanceof DatasetCaptionWriteError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: 'Failed to create dataset' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to save caption' }, { status: 500 });
   }
 }
 

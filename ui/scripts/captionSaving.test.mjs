@@ -12,14 +12,14 @@ function loadSource(relative, dependencies, overrides = {}) {
       esModuleInterop: true,
     },
   }).outputText;
-  const module = { exports: {} };
+  const loadedModule = { exports: {} };
   new Function('require', 'module', 'exports', 'console', code)(
     name => {
       assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency: ${name}`);
       return dependencies[name];
-    }, module, module.exports, overrides.console ?? console,
+    }, loadedModule, loadedModule.exports, overrides.console ?? console,
   );
-  return module.exports;
+  return loadedModule.exports;
 }
 
 const { createCaptionSaveQueue } = loadSource('../src/utils/captionSaveQueue.ts', {});

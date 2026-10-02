@@ -8,13 +8,13 @@ const require = createRequire(import.meta.url);
 const source = ts.transpileModule(fs.readFileSync(new URL('../src/components/UniversalTable.tsx', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
-const module = { exports: {} };
+const loadedModule = { exports: {} };
 new Function('require', 'module', 'exports', source)(name => {
   if (name === './Loading') return () => null;
   if (name === '@/components/OperatorPrimitives') return { PageNotice: () => null };
   return require(name);
-}, module, module.exports);
-const UniversalTable = module.exports.default;
+}, loadedModule, loadedModule.exports);
+const UniversalTable = loadedModule.exports.default;
 
 function rowKeys(rows) {
   const tree = UniversalTable({ rows, columns: [{ key: 'name', title: 'Name' }], isLoading: false });

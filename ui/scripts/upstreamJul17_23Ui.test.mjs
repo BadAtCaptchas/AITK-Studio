@@ -247,7 +247,7 @@ test('polling hooks guard request identity and clear data when their request sco
   const jobs = read('src/hooks/useJobsList.tsx');
 
   assert.match(gpu, /SharedAbortableRequestPool/);
-  assert.match(gpu, /signal => fetchGpuInfo\(\{ signal \}\)/);
+  assert.match(gpu, /usePollLoop\(\s+signal => \{\s+if \(!enabled \|\| useLiveMonitor\) return;\s+return fetchGpuInfo\(\{ signal, force: useLocalMonitor \}\)/);
   assert.match(metrics, /controller\.signal\.aborted \|\|\s+abortRef\.current !== controller/);
   assert.match(metrics, /if \(abortRef\.current === controller\)/);
   assert.match(metrics, /activeScopeRef\.current !== currentRequestScope/);

@@ -40,7 +40,8 @@ async function link(t, target, filename, directory = true) {
 test('concurrent dataset copies reserve different directories without deleting a completed copy', { timeout: 10000 }, async t => {
   const { datasets, source } = await workspace(t);
   await fs.writeFile(path.join(source, 'image.png'), 'source image');
-  const destination = path.join(datasets, 'copy');
+  // Match the canonical reservation path, including Windows short temp paths.
+  const destination = path.join(await fs.realpath(datasets), 'copy');
   const mkdir = fs.mkdir;
   let arrivals = 0;
   let releaseBoth;

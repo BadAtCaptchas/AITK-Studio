@@ -1,0 +1,78 @@
+---
+# 16 GB starting profile; full-model validation status: docs/kroma.md.
+# Replace both path placeholders with your configured workspace locations.
+job: extension
+config:
+  name: kroma_turbo_opd_lora
+  process:
+    - type: diffusion_trainer
+      training_folder: /path/to/configured/training/root
+      device: cuda:0
+      network:
+        type: lora
+        linear: 16
+        linear_alpha: 16
+        # This controls repeated-block-only targeting, not text encoder training.
+        transformer_only: false
+        network_kwargs:
+          ignore_if_contains: ['txtfusion.', 'txtmlp']
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 2
+      datasets:
+        - folder_path: /path/to/images
+          caption_ext: txt
+          resolution: [512]
+          cache_latents_to_disk: true
+          cache_text_embeddings: true
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+      train:
+        batch_size: 1
+        steps: 1000
+        gradient_accumulation: 1
+        train_unet: true
+        train_text_encoder: false
+        cache_text_embeddings: true
+        unload_text_encoder: true
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        timestep_type: linear
+        optimizer: adamw8bit
+        lr: 0.00001
+        dtype: bf16
+      model:
+        arch: krea2:kroma_turbo_opd
+        name_or_path: lodestones/Kroma
+        quantize: true
+        qtype: float8
+        quantize_te: true
+        qtype_te: float8
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_backend: legacy
+        layer_offloading_transformer_percent: 1.0
+        layer_offloading_text_encoder_percent: 1.0
+        model_kwargs:
+          checkpoint_filename: kroma-v0.3.1-turbo-opd.safetensors
+          schedule_mu: 1.15
+        # Experimental opt-in; unverified on Kroma. Leave unset by default.
+        # assistant_lora_path: ostris/krea2_turbo_training_adapter/krea2_turbo_training_adapter_v1.safetensors
+      sample:
+        sampler: flowmatch
+        format: png
+        sample_every: 250
+        keep_low_vram_for_samples: true
+        width: 512
+        height: 512
+        sample_steps: 10
+        # Krea guidance 0 = ComfyUI CFG 1 (the conventions differ by one).
+        guidance_scale: 0
+        neg: ''
+        seed: 42
+        prompts:
+          - 'A red ceramic vase on a wooden table, soft window light.'
+meta:
+  name: '[name]'
+  version: '1.0'

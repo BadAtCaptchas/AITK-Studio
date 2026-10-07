@@ -19,7 +19,7 @@ export function supportsKrea2TextFusionExclusion(
   network?: Pick<NetworkConfig, 'type'>,
 ): boolean {
   return (
-    (model.arch === 'krea2' || model.arch === 'krea2:turbo') &&
+    ['krea2', 'krea2:turbo', 'krea2:kroma_base', 'krea2:kroma_teacher', 'krea2:kroma_turbo_opd'].includes(model.arch) &&
     network?.type === 'lora' &&
     !model.model_kwargs?.edit
   );

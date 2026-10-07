@@ -1768,6 +1768,86 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
     disableSections: ['network.conv', 'model.quantize', 'model.quantize_te', 'train.unload_text_encoder'],
     additionalSections: ['model.low_vram', 'model.layer_offloading', 'model.ideogram_skip_unconditional_transformer'],
   },
+  ...(['base', 'teacher', 'turbo_opd'] as const).map((variant): ModelArch => {
+    const turbo = variant === 'turbo_opd';
+    const checkpoint = {
+      base: 'kroma-v0.3-base.safetensors',
+      teacher: 'kroma-sensei-booru-e6-teacher-velocity-v0.3.safetensors',
+      turbo_opd: 'kroma-v0.3.1-turbo-opd.safetensors',
+    }[variant];
+    const trainingAdapter = 'ostris/krea2_turbo_training_adapter/krea2_turbo_training_adapter_v1.safetensors';
+    return {
+      name: `krea2:kroma_${variant}`,
+      label: turbo ? 'Kroma Turbo OPD (experimental)' : variant === 'teacher' ? 'Kroma Teacher (recommended)' : 'Kroma Base',
+      group: turbo ? 'experimental' : 'image',
+      allowedNetworkTypes: ['lora'],
+      defaults: {
+        'config.process[0].model.name_or_path': ['lodestones/Kroma', defaultNameOrPath],
+        'config.process[0].model.model_kwargs': [{ checkpoint_filename: checkpoint, ...(turbo ? { schedule_mu: 1.15 } : {}) }, {}],
+        'config.process[0].model.assistant_lora_path': [undefined, undefined],
+        'config.process[0].model.quantize': [true, false],
+        'config.process[0].model.quantize_te': [true, false],
+        'config.process[0].model.qtype': ['float8', 'qfloat8'],
+        'config.process[0].model.qtype_te': ['float8', 'qfloat8'],
+        'config.process[0].model.low_vram': [true, false],
+        'config.process[0].model.layer_offloading': [true, false],
+        'config.process[0].model.layer_offloading_backend': ['legacy', 'legacy'],
+        'config.process[0].model.layer_offloading_transformer_percent': [1.0, 1.0],
+        'config.process[0].model.layer_offloading_text_encoder_percent': [1.0, 1.0],
+        'config.process[0].network.type': ['lora', 'lora'],
+        'config.process[0].network.linear': [16, 32],
+        'config.process[0].network.linear_alpha': [16, 32],
+        'config.process[0].network.conv': [undefined, 16],
+        'config.process[0].network.conv_alpha': [undefined, 16],
+        // Target denoiser linears, including text fusion when the exclusion is disabled.
+        'config.process[0].network.transformer_only': [false, true],
+        'config.process[0].network.network_kwargs.ignore_if_contains': [['txtfusion.', 'txtmlp'], []],
+        'config.process[0].train.batch_size': [1, 1],
+        'config.process[0].train.train_unet': [true, true],
+        'config.process[0].train.train_text_encoder': [false, false],
+        'config.process[0].train.dtype': ['bf16', 'bf16'],
+        'config.process[0].train.gradient_checkpointing': [true, true],
+        'config.process[0].train.cache_text_embeddings': [true, false],
+        'config.process[0].train.unload_text_encoder': [true, false],
+        'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+        'config.process[0].train.timestep_type': ['linear', 'sigmoid'],
+        'config.process[0].train.optimizer': ['adamw8bit', 'adamw8bit'],
+        'config.process[0].train.lr': [turbo ? 1e-5 : 1e-4, 1e-4],
+        'config.process[0].datasets[x].resolution': [[512], [512, 768, 1024]],
+        'config.process[0].datasets[x].cache_latents_to_disk': [true, false],
+        'config.process[0].datasets[x].cache_text_embeddings': [true, false],
+        'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+        'config.process[0].sample.width': [512, 1024],
+        'config.process[0].sample.height': [512, 1024],
+        'config.process[0].sample.sample_steps': [turbo ? 10 : 25, 25],
+        'config.process[0].sample.guidance_scale': [turbo ? 0 : 4, 4],
+        'config.process[0].sample.neg': ['', ''],
+        'config.process[0].sample.keep_low_vram_for_samples': [true, false],
+      },
+      disableSections: ['network.conv', 'train.train_text_encoder'],
+      additionalSections: ['model.low_vram', 'model.layer_offloading', ...(turbo ? ['model.assistant_lora_path' as const] : [])],
+      ...(turbo ? { customModelSelectOptions: [{
+        label: 'Experimental Turbo training adapter',
+        options: [{ value: 'none', label: 'None (default)' }, { value: 'adapter', label: 'Krea 2 adapter (quality unverified)' }],
+        getValue: (config: JobConfig) => config.config.process[0].model.assistant_lora_path?.trim() ? 'adapter' : 'none',
+        onChange: (value: string, _config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+          setJobConfig(value === 'adapter' ? trainingAdapter : undefined, 'config.process[0].model.assistant_lora_path');
+        },
+      }] } : {}),
+      modelNotes: {
+        summary: turbo ? 'Experimental direct LoRA training on Kroma Turbo OPD.' : 'Kroma LoRA training using the Krea 2 architecture.',
+        paragraphs: [
+          '512px profile with Float8, caching and legacy offloading. Short synthetic-data runs passed on a 16 GB RTX 5080 with 192 GB system RAM; host RAM peaked around 38–73 GiB. Real datasets and longer prompts may need more memory. Teacher has a smaller download (25.7 GB versus 51.3 GB base).',
+          'The publisher recommends training on base or teacher, then loading the LoRA on Turbo OPD. Text encoder and VAE remain frozen.',
+          turbo
+            ? 'Direct Turbo training may degrade step distillation. The optional Krea 2 adapter’s distillation protection on Kroma is unverified. It is removed during previews and excluded from LoRA exports.'
+            : 'Preview defaults are 25 steps and Krea guidance 4; the schedule varies with resolution.',
+          'Krea guidance 0 equals ComfyUI CFG 1; Krea 0.5 equals ComfyUI CFG 1.5. Turbo previews use 10 steps, guidance 0 and fixed mu 1.15.',
+        ],
+        link: { href: 'https://huggingface.co/lodestones/Kroma', label: 'Kroma model card and checkpoints' },
+      },
+    };
+  }),
   {
     name: 'krea2',
     label: 'Krea 2 (raw)',

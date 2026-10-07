@@ -42,7 +42,7 @@ export function getDefaultModelConfig(archName: string, availableArchs: ModelArc
     model_kwargs:
       (archDefault('config.process[0].model.model_kwargs', {}) as Record<string, unknown>) || {},
     dtype: String(archDefault('config.process[0].train.dtype', 'bf16')),
-    layer_offloading: false,
+    layer_offloading: Boolean(archDefault('config.process[0].model.layer_offloading', false)),
     layer_offloading_backend: String(
       archDefault('config.process[0].model.layer_offloading_backend', memoryProfile.backend),
     ) as LayerOffloadingBackend,

@@ -2641,6 +2641,148 @@
       }
     },
     {
+      "name": "krea2:kroma_base",
+      "arch": "krea2",
+      "label": "Kroma Base",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.train_text_encoder"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 16,
+        "maximum": 8192
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "krea2:kroma_teacher",
+      "arch": "krea2",
+      "label": "Kroma Teacher (recommended)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.train_text_encoder"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 16,
+        "maximum": 8192
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "krea2:kroma_turbo_opd",
+      "arch": "krea2",
+      "label": "Kroma Turbo OPD (experimental)",
+      "group": "experimental",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading",
+        "model.assistant_lora_path"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.train_text_encoder"
+      ],
+      "allowedNetworkTypes": [
+        "lora"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 16,
+        "maximum": 8192
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
       "name": "krea2",
       "arch": "krea2",
       "label": "Krea 2 (raw)",

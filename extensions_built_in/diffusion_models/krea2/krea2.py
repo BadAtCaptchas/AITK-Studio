@@ -374,14 +374,7 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
         self.invert_assistant_lora = True
 
     def get_quantization_exclude_modules(self):
-        return [
-            "first",
-            "tmlp*",
-            "tproj*",
-            "txtmlp*",
-            "txtfusion.projector",
-            "last*",
-        ]
+        return SingleStreamDiT.get_quantization_exclude_modules()
 
     def load_model(self):
         dtype = self.torch_dtype
@@ -737,6 +730,6 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
         return "krea2"
 
     def get_transformer_block_names(self) -> Optional[List[str]]:
-        return ["blocks"]
+        return SingleStreamDiT.get_transformer_block_names()
 
     lora_keys_use_comfy_prefix = True

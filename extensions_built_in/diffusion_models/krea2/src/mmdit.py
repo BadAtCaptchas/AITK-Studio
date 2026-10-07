@@ -408,6 +408,14 @@ class SingleStreamBlock(nn.Module):
 
 
 class SingleStreamDiT(nn.Module, OstrisModelMixin):
+    @classmethod
+    def get_transformer_block_names(cls):
+        return ["blocks"]
+
+    @classmethod
+    def get_quantization_exclude_modules(cls):
+        return ["first", "tmlp*", "tproj*", "txtmlp*", "txtfusion.projector", "last*"]
+
     def get_offload_ignore_modules(self):
         # modulation modules hold tiny live state the offloader must not page
         return [

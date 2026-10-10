@@ -4,6 +4,7 @@
   "private": true,
   "engines": { "node": "^22.12.0 || ^24.0.0 || ^26.0.0" },
   "scripts": {
+    "test:upstream-oct8-9": "node --test scripts/upstreamOct8_9.test.mjs scripts/inferenceEngine.test.mjs scripts/kromaOptions.test.mjs",
     "postinstall": "node scripts/patch-next-middleware.mjs",
     "test:browser": "playwright test",
     "test:execution": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/operations.test.mjs scripts/archiveSafety.test.mjs scripts/executionPersistence.test.mjs",

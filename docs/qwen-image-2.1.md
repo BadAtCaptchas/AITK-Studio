@@ -12,6 +12,32 @@ When Comfy substitution is enabled, the transformer and text encoder support bot
 
 Original Diffusers transformer checkpoints now convert the separate MLP gate and up projections into Studio's fused projection during loading, including when the pair spans different shard files. This preserves the pretrained weights and the module names used by existing Studio adapters. BF16 repacks already use the fused layout.
 
+## Turbo
+
+Select **Qwen-Image-2.1 Turbo (w/ Training Adapter)** for the distilled variant. The preset explicitly selects `Comfy-Org/Qwen-Image-2.1/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors`; base Qwen configurations keep their official weight source. Turbo uses the checkpoint's fixed eight-step sigma schedule at recommended guidance 1, without resolution shifting or terminal stretching. Other requested step counts are ignored; resolution presets keep eight steps.
+
+Training uses a frozen live assistant adapter, applied after quantization and before layer offloading. It is disabled during training previews and excluded from the trained LoRA. Native and Live Generate presets omit the training adapter. Turbo retains ordered references, RGBA output and optional reference KV caching.
+
+```yaml
+model:
+  arch: qwen_image_2:turbo
+  name_or_path: Comfy-Org/Qwen-Image-2.1/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors
+  assistant_lora_path: ostris/qwen_image_2_turbo_training_adapter/qwen_image_2_turbo_training_adapter_v1.safetensors
+  quantize: true
+  qtype: convrot8
+  quantize_te: true
+  qtype_te: convrot8
+  model_kwargs:
+    turbo: true
+    use_comfy_weights: false
+    match_target_res: true
+sample:
+  sample_steps: 8
+  guidance_scale: 1
+```
+
+Omit `assistant_lora_path` for standalone inference. Weight-free regressions cover the exact sigma schedule, cached and uncached reference sampling, and a real tiny frozen adapter that can be disabled without altering base weights. Full-size pretrained Turbo training and generation remain unverified.
+
 ## References and transparency
 
 References now match the target image's pixel area by default (`model.model_kwargs.match_target_res: true`), keeping each reference's aspect ratio and rounding to the 32-pixel grid. This can upscale small references. Training uses the current bucket dimensions; sampling uses the requested output dimensions. The UI's **Reference image resolution** selector can switch to the previous capped-size policy (`false`). Text embedding caches distinguish both the policy and the target bucket dimensions, so old caches are rebuilt where needed. For batches larger than one, each ordered reference must resolve to the same grid dimensions across the batch; use batch size one for mixed reference layouts.

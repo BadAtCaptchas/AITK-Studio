@@ -5,6 +5,7 @@
 Use the [example configurations](../config/examples) as starting points. This guide covers CLI runs, adapters, phases, watermarking, and memory controls. Dataset preparation is covered in the [user guide](user-guide.md#datasets).
 
 - [CLI training](#cli-training)
+- [Batch loading threads](#batch-loading-threads)
 - [LoRA Watermarking](#lora-watermarking)
 - [Multi-step training phases](#multi-step-training-phases)
 - [Auto learn / auto training](#auto-learn--auto-training)
@@ -26,6 +27,12 @@ For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.y
 When training starts, AITK Studio creates the configured training folder and writes checkpoints and samples there. You can stop training with `Ctrl+C`; when you resume, it picks up from the latest checkpoint.
 
 IMPORTANT: If you press `Ctrl+C` while a checkpoint is saving, it will likely corrupt that checkpoint. Wait until saving finishes before stopping the run.
+
+## Batch loading threads
+
+Each dataset accepts `batch_load_threads` in YAML. The default `1` (also `0`) loads samples serially. Set it to `2` or higher to decode and resize samples concurrently within a bucketed batch; the worker count is capped at that batch's item count. Unbucketed loading and single-item batches stay serial. Workers shut down after each batch, including on errors, and returned sample order is preserved.
+
+This setting is separate from DataLoader `num_workers`. Start with a small value: additional threads can increase peak memory and change random augmentation ordering. Existing dataset grouping, encrypted-data handling and layered dataset support are unchanged; upstream dataset pooling is not enabled.
 
 ## LoRA Watermarking
 

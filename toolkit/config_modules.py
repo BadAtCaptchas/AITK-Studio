@@ -1158,6 +1158,9 @@ class ModelConfig:
         
         # allow frontend to pass arch with a color like arch:tag
         # but remove the tag
+        if self.arch == 'qwen_image_2:turbo':
+            self.model_kwargs = dict(self.model_kwargs)
+            self.model_kwargs.setdefault('turbo', True)
         if self.arch is not None:
             if ':' in self.arch:
                 self.arch = self.arch.split(':')[0]
@@ -1443,6 +1446,11 @@ class DatasetConfig:
         self.pin_memory = kwargs.get('pin_memory', False)
         if not isinstance(self.pin_memory, bool):
             raise ValueError("dataset.pin_memory must be a boolean")
+        # Opt-in parallel decoding/resizing within a bucketed batch. Keeping
+        # the default serial preserves existing RNG ordering and memory use.
+        self.batch_load_threads = kwargs.get('batch_load_threads', 1)
+        if isinstance(self.batch_load_threads, bool) or not isinstance(self.batch_load_threads, int) or self.batch_load_threads < 0:
+            raise ValueError("dataset.batch_load_threads must be a non-negative integer")
         self.extra_values: List[float] = kwargs.get('extra_values', [])
         self.square_crop: bool = kwargs.get('square_crop', False)
         # apply same augmentations to control images. Usually want this true unless special case

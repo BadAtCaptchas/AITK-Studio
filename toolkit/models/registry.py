@@ -45,6 +45,8 @@ ARCH_REGISTRY: Dict[str, dict] = {
     "flux2_klein_4b": {"modality": "image", "model": {"name_or_path": "black-forest-labs/FLUX.2-klein-base-4B", "quantize_te": True}, "sample": dict(IMG)},
     "flux2_klein_9b": {"modality": "image", "model": {"name_or_path": "black-forest-labs/FLUX.2-klein-base-9B", "quantize": True, "quantize_te": True}, "sample": dict(IMG)},
     "prx_pixel": {"modality": "image", "model": {"name_or_path": "Photoroom/prxpixel-t2i", "quantize_te": True}, "sample": dict(IMG)},
+    "iris3b": {"modality": "image", "model": {"name_or_path": "speridlabs/iris-3b", "quantize": True, "quantize_te": True, "qtype": "convrot8", "qtype_te": "convrot8", "low_vram": True}, "sample": {**IMG, "num_inference_steps": 30, "guidance_scale": 3.0}},
+    "qwen_image_2:turbo": {"modality": "image", "model": {"name_or_path": "Comfy-Org/Qwen-Image-2.1/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors", "quantize": True, "quantize_te": True, "qtype": "convrot8", "qtype_te": "convrot8", "low_vram": True, "model_kwargs": {"turbo": True, "use_comfy_weights": False, "match_target_res": True}}, "sample": {**IMG, "num_inference_steps": 8, "guidance_scale": 1.0}},
     "f-lite": {"modality": "image", "model": {"name_or_path": "Freepik/F-Lite", "quantize": True, "quantize_te": True}, "sample": dict(IMG)},
     "sd1": {"modality": "image", "model": {"name_or_path": "stable-diffusion-v1-5/stable-diffusion-v1-5"}, "sample": {"width": 512, "height": 512, "num_inference_steps": 20, "guidance_scale": 7.5}},
     "sdxl": {"modality": "image", "model": {"name_or_path": "stabilityai/stable-diffusion-xl-base-1.0"}, "sample": {**IMG, "guidance_scale": 6.0}},

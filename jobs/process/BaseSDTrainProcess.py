@@ -188,6 +188,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 optimizer_params.setdefault('weight_decay', 0.0001)
             if 't0_loss_target' not in raw_train_config:
                 raw_train_config['t0_loss_target'] = True
+        if model_config.get('arch') == 'iris3b':
+            raw_train_config.setdefault('noise_scheduler', 'flowmatch')
+            raw_train_config.setdefault('timestep_type', 'shift')
         if model_config.get('arch') == 'i1':
             raw_train_config.setdefault('noise_scheduler', 'flowmatch')
             raw_train_config.setdefault('dtype', 'bf16')

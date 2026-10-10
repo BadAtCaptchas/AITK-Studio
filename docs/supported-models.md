@@ -28,6 +28,7 @@ Browse the model integrations included in AITK Studio. Available training modes 
 - [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) (Qwen-Image)
 - [Qwen/Qwen-Image-2512](https://huggingface.co/Qwen/Qwen-Image-2512) (Qwen-Image-2512)
 - [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (Qwen Image 2.1; Studio defaults to the official weights with local ConvRot int8 quantization and guidance 1.0. Automatic Comfy substitution is disabled; the [Comfy-Org repack](https://huggingface.co/Comfy-Org/Qwen-Image-2.1) remains available by explicit selection.)
+- Qwen Image 2.1 Turbo (`qwen_image_2:turbo`): fixed eight-step sampling, guidance 1 and a training-only assistant adapter; see [configuration and validation](qwen-image-2.1.md#turbo).
 - [zai-org/GLM-Image](https://huggingface.co/zai-org/GLM-Image) (GLM-Image)
 - [Boogu/Boogu-Image-0.1-Base](https://huggingface.co/Boogu/Boogu-Image-0.1-Base) (Boogu-Image Base)
 - [Boogu/Boogu-Image-0.1-Turbo](https://huggingface.co/Boogu/Boogu-Image-0.1-Turbo) (Boogu-Image Turbo, experimental training)
@@ -51,6 +52,7 @@ Browse the model integrations included in AITK Studio. Available training modes 
 - [stable-diffusion-v1-5/stable-diffusion-v1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) (SD 1.5)
 - [baidu/ERNIE-Image](https://huggingface.co/baidu/ERNIE-Image) (ERNIE-Image)
 - [NucleusAI/Nucleus-Image](https://huggingface.co/NucleusAI/Nucleus-Image) (Nucleus-Image)
+- [speridlabs/iris-3b](https://huggingface.co/speridlabs/iris-3b) (Iris-3B: pixel-space generation with a frozen Qwen3-VL encoder; [configuration and integration notes](../extensions_built_in/diffusion_models/iris3b/README.md)).
 - [Photoroom/prxpixel-t2i](https://huggingface.co/Photoroom/prxpixel-t2i) (PRX Pixel)
 - [microsoft/Mage-Flow-Base](https://huggingface.co/microsoft/Mage-Flow-Base) (Mage-Flow)
 

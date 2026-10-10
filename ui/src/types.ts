@@ -439,6 +439,7 @@ export interface DatasetConfig {
   cache_text_embeddings?: boolean;
   batch_size?: number;
   resolution: number[];
+  batch_load_threads?: number;
   controls: string[];
   control_path?: string | null;
   num_frames: number;

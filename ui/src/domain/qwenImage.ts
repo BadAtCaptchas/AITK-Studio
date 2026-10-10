@@ -1,5 +1,9 @@
 import type { SampleItem } from '@/types';
 
+export function isQwenImage2(arch: string): boolean {
+  return arch.split(':')[0] === 'qwen_image_2';
+}
+
 export const QWEN_IMAGE_PRESETS = [
   { label: 'Quick preview (1024 x 1024, 20 steps)', width: 1024, height: 1024, steps: 20 },
   { label: '2K square (1:1)', width: 2048, height: 2048, steps: 40 },

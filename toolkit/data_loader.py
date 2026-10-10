@@ -3,6 +3,7 @@ import json
 import os
 import random
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from typing import List, TYPE_CHECKING
 
@@ -724,7 +725,13 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 # tried everything to solve this. No way to reset length when redoing things. Pick another index
                 item = random.randint(0, len(self.batch_indices) - 1)
             idx_list = self.batch_indices[item]
-            return [self._get_single_item(idx) for idx in idx_list]
+            n_threads = min(self.dataset_config.batch_load_threads, len(idx_list))
+            if n_threads <= 1:
+                return [self._get_single_item(idx) for idx in idx_list]
+            # Batch-scoped workers always shut down, including after failures.
+            # No executor lives on the dataset or gets pickled to worker processes.
+            with ThreadPoolExecutor(max_workers=n_threads) as pool:
+                return list(pool.map(self._get_single_item, idx_list))
         else:
             # Dataloader is batching
             return self._get_single_item(item)

@@ -305,7 +305,7 @@ class QwenImage2Tests(unittest.TestCase):
     def test_sampler_reports_progress_and_propagates_cancellation(self):
         events = []
         holder = SimpleNamespace(device_torch=torch.device('cpu'), torch_dtype=torch.float32,
-            transformer=tiny_transformer(), get_train_scheduler=QwenImage2Model.get_train_scheduler,
+            transformer=tiny_transformer(), get_sample_scheduler=QwenImage2Model.get_train_scheduler, is_turbo=False,
             encode_condition_images=lambda images: (None, []), pad_prompt_embeds=lambda value: value,
             decode_to_images=lambda latents: [latents], sample_step_hook=True,
             _emit_sample_step=lambda latent, index, total: events.append((index, total, latent.clone())))
@@ -421,7 +421,7 @@ class QwenImage2Tests(unittest.TestCase):
         for editing in (False, True):
             reference = torch.randn(1, 4, 4) if editing else None
             holder = SimpleNamespace(device_torch=torch.device('cpu'), torch_dtype=torch.float32,
-                transformer=model, get_train_scheduler=QwenImage2Model.get_train_scheduler,
+                transformer=model, get_sample_scheduler=QwenImage2Model.get_train_scheduler, is_turbo=False,
                 encode_condition_images=lambda images: (reference, [(2, 2)] if editing else []),
                 pad_prompt_embeds=lambda value: value, decode_to_images=lambda latent: [latent])
             cond = (torch.randn(1, 3, 8), torch.ones(1, 3, dtype=torch.bool), torch.tensor([[False, editing, False]]))

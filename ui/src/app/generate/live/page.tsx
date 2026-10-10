@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { QwenImageControls } from '@/components/generate/QwenImageControls';
-import { transparentQwenPrompt } from '@/domain/qwenImage';
+import { isQwenImage2, transparentQwenPrompt } from '@/domain/qwenImage';
 import { apiClient } from '@/utils/api';
 import { startJob, stopJob } from '@/utils/jobs';
 import { startQueue } from '@/utils/queue';
@@ -130,7 +130,7 @@ export default function LiveGeneratePage() {
     const next: Record<string, unknown> = { arch: name, dtype: 'bf16' };
     for (const [key, pair] of Object.entries(definition?.defaults || {})) {
       const field = key.replace('config.process[0].model.', '');
-      if (key.startsWith('config.process[0].model.') && !field.includes('.') && Array.isArray(pair))
+      if (key.startsWith('config.process[0].model.') && field !== 'assistant_lora_path' && !field.includes('.') && Array.isArray(pair))
         next[field] = pair[0];
     }
     setModel(next);
@@ -143,6 +143,8 @@ export default function LiveGeneratePage() {
     }
     const presetGuidance: unknown = definition?.defaults?.['config.process[0].sample.guidance_scale']?.[0];
     if (typeof presetGuidance === 'number') setGuidance(presetGuidance);
+    const presetSteps: unknown = definition?.defaults?.['config.process[0].sample.sample_steps']?.[0];
+    if (typeof presetSteps === 'number') setSteps(presetSteps);
     setFrames(definition?.isVideoModel ? 33 : 1);
   };
   const start = async () => {
@@ -261,7 +263,7 @@ export default function LiveGeneratePage() {
                 num_frames: frames,
                 fps,
                 duration,
-                ...(arch === 'qwen_image_2' ? { ctrl_imgs: controls } : {}),
+                ...(isQwenImage2(arch) ? { ctrl_imgs: controls } : {}),
                 ctrl_img: controls[0],
                 ctrl_img_1: controls[0],
                 ctrl_img_2: controls[1],
@@ -406,7 +408,7 @@ export default function LiveGeneratePage() {
               placeholder={'{"model_kwargs": {}}'}
             />
           </details>
-          {arch === 'qwen_image_2' && <QwenImageControls
+          {isQwenImage2(arch) && <QwenImageControls
             options={record(model.model_kwargs) ? model.model_kwargs : {}}
             onOption={(key, value) => setModel(current => ({ ...current, model_kwargs: { ...(record(current.model_kwargs) ? current.model_kwargs : {}), [key]: value } }))}
             onPreset={(width, height, steps) => { setWidth(width); setHeight(height); setSteps(steps); }}
@@ -436,7 +438,7 @@ export default function LiveGeneratePage() {
                 try {
                   const uploaded: string[] = [];
                   const files = Array.from(e.target.files || []);
-                  const maxReferences = arch === 'qwen_image_2' ? 10 : 3;
+                  const maxReferences = isQwenImage2(arch) ? 10 : 3;
                   if (files.length > maxReferences) throw new Error(`Choose at most ${maxReferences} references.`);
                   for (const file of files) {
                     const response = await fetch(endpoint(`assets?name=${encodeURIComponent(file.name)}`), {

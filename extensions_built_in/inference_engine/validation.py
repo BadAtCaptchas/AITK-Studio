@@ -25,7 +25,7 @@ def validate_generation(body):
             raise ValueError(f"Invalid {key}")
     from toolkit.sample_controls import validate_control_paths
     validate_control_paths(sample.get("ctrl_imgs"))
-    if sample.get("ctrl_imgs") is not None and model["arch"] != "qwen_image_2":
+    if sample.get("ctrl_imgs") is not None and model["arch"].split(":", 1)[0] != "qwen_image_2":
         raise ValueError("ctrl_imgs is currently supported by Qwen Image 2.1")
     loras = model.get("loras") or []
     if not isinstance(loras, list) or len(loras) > 32:

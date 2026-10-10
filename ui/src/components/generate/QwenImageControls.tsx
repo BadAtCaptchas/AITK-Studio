@@ -14,13 +14,13 @@ export function QwenImageControls({ options, onOption, onPreset, onTransparentPr
     <label className="block text-sm">Qwen Image 2.1 quality preset
       <select className="mt-1 block w-full bg-gray-900 p-2" value="" onChange={event => {
         const preset = QWEN_IMAGE_PRESETS[Number(event.target.value)];
-        if (preset) onPreset(preset.width, preset.height, preset.steps);
+        if (preset) onPreset(preset.width, preset.height, options.turbo === true ? 8 : preset.steps);
       }}>
         <option value="" disabled>Choose a preset</option>
-        {QWEN_IMAGE_PRESETS.map((preset, i) => <option key={preset.label} value={i}>{preset.label}</option>)}
+        {QWEN_IMAGE_PRESETS.map((preset, i) => <option key={preset.label} value={i}>{options.turbo === true ? preset.label.replace('20 steps', '8 steps') : preset.label}</option>)}
       </select>
     </label>
-    <p className="text-xs text-gray-400">2K presets use 40 steps and more memory. Guidance stays at your chosen value; AI Toolkit defaults to 3, Diffusers to 1.</p>
+    <p className="text-xs text-gray-400">{options.turbo === true ? 'Turbo always uses its fixed eight-step schedule. Guidance 1 is recommended; larger canvases use more memory.' : '2K presets use 40 steps and more memory. Guidance stays at your chosen value; new Qwen Image 2.1 jobs default to 1.'}</p>
     <Checkbox label="Transparent output (RGBA)" checked={options.rgba === true} onChange={value => onOption('rgba', value)} />
     {onTransparentPrompt && <button type="button" className="text-sm text-blue-300" onClick={() => { onOption('rgba', true); onTransparentPrompt(); }}>Add transparency instructions to prompt</button>}
     <Checkbox label="Reuse reference and text cache during sampling" checked={options.use_kv_cache !== false} onChange={value => onOption('use_kv_cache', value)} />

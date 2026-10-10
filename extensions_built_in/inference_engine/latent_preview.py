@@ -51,6 +51,7 @@ ARCH_LATENT_FORMAT = {
     "anima": "Wan21",
     "cogview4": "Flux",
     "prx_pixel": None,  # pixel space
+    "iris3b": None,  # pixel space
 }
 
 

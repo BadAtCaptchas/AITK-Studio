@@ -2900,6 +2900,15 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     self.datasets_reg, self.train_config.batch_size, self.sd, pool_datasets=self.train_config.pool_datasets
                 )
 
+            # A fresh text-embedding cache leaves the text encoder on the GPU.
+            # Park it once after both loaders, before accelerator preparation.
+            if (
+                self.is_caching_text_embeddings
+                and self.model_config.low_vram
+                and self.sd.text_encoder is not None
+            ):
+                self.sd.text_encoder_to('cpu')
+
             flush()
             self.last_save_step = self.step_num
             ### HOOK ###

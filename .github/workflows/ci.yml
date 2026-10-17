@@ -94,6 +94,11 @@ jobs:
       - run: .venv/bin/python -c "import torch; assert torch.version.cuda == '13.0', torch.version.cuda"
       - run: .venv/bin/python -c "import run, toolkit.job, toolkit.attempt_process, extensions_built_in.diffusion_models"
       - run: .venv/bin/python scripts/check_model_imports.py
+      - name: FLUX.3 and MOSS CPU regressions
+        # Tiny model forward/backward and checkpoint tests; no weights or GPU required.
+        env:
+          CUDA_VISIBLE_DEVICES: ''
+        run: .venv/bin/python -m unittest -v tests.test_flux3_moss
       - run: .venv/bin/python -m unittest tests.test_dataset_caption_loading
       - uses: actions/upload-artifact@v4
         if: always()

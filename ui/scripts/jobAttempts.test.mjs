@@ -106,6 +106,8 @@ test('dataset relinking previews exact references and rejects active or stale jo
   t.after(async () => { db.settings.get = oldGet; if (auth === undefined) delete process.env.AI_TOOLKIT_AUTH; else process.env.AI_TOOLKIT_AUTH = auth; flushCache(); await fs.rm(root, { recursive: true, force: true }); });
   const source = path.join(root, 'locked'), destination = path.join(root, 'plain');
   await fs.mkdir(source); await fs.mkdir(destination);
+  // Relinking publishes canonical paths, including Windows short-name expansion.
+  const canonicalDestination = await fs.realpath(destination);
   const operation = await enqueueOperation({ kind: 'dataset-decrypt', root, sourceName: 'locked', outputName: 'plain' });
   await assert.rejects(relinkDecryptedDataset(operation.id, 'local'), /Complete dataset decryption/);
   await updateOperation(operation.id, { state: 'completed', result: { sourceName: 'locked', datasetName: 'plain', itemCount: 1, captionCount: 1, renamed: [] } });
@@ -115,7 +117,7 @@ test('dataset relinking previews exact references and rejects active or stale jo
   }
   const preview = await relinkDecryptedDataset(operation.id, 'local');
   assert.equal(preview.jobs.length, 4);
-  for (const candidate of preview.jobs) assert.deepEqual(candidate.replacements, [{ field: 'config.process[0].datasets[0].folder_path[0]', from: source, to: destination }]);
+  for (const candidate of preview.jobs) assert.deepEqual(candidate.replacements, [{ field: 'config.process[0].datasets[0].folder_path[0]', from: source, to: canonicalDestination }]);
   jobs.set('stale', { ...jobs.get('stale'), updated_at: new Date(Date.now() + 10000) });
   const applied = await relinkDecryptedDataset(operation.id, 'local', preview.jobs.map(value => ({ id: value.id, revision: value.revision })));
   assert.deepEqual(applied.outcomes.filter(value => value.success).map(value => value.id), ['idle', 'queued']);
@@ -124,7 +126,7 @@ test('dataset relinking previews exact references and rejects active or stale jo
   assert.equal(jobs.get('idle').step, 42);
   assert.equal(jobs.get('idle').storage_key, 'store-idle');
   const updated = JSON.parse(jobs.get('idle').job_config).config.process[0];
-  assert.deepEqual(updated.datasets[0].folder_path, [destination, source + '-other']);
+  assert.deepEqual(updated.datasets[0].folder_path, [canonicalDestination, source + '-other']);
   assert.equal(updated.sample.prompt, source);
   assert.equal(updated.datasets[0].encrypted, undefined);
   const remoteConfig = { config: { process: [{ datasets: [{ folder_path: ['aitk-dataset://remote/w/old', 'aitk-dataset://remote/other/old'] }] }] } };

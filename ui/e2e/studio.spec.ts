@@ -75,7 +75,7 @@ async function datasetArchive(encrypted: boolean): Promise<Buffer> {
   return finished;
 }
 
-test('archive acceptance survives client detach, replays once, and protects encrypted files', async ({ page }) => {
+test('archive acceptance survives client detach, replays once, and rejects encrypted imports', async ({ page }) => {
   for (const encrypted of [false, true]) {
     const data = await datasetArchive(encrypted),
       uploadID = randomUUID();
@@ -98,8 +98,15 @@ test('archive acceptance survives client detach, replays once, and protects encr
           (await (await page.request.get(`${endpoint}?aitk_upload=status&uploadID=${uploadID}`)).json()).state,
         { timeout: 45000 },
       )
-      .toBe('completed');
+      .toBe(encrypted ? 'failed' : 'completed');
     const result = await (await page.request.get(`${endpoint}?aitk_upload=status&uploadID=${uploadID}`)).json();
+    if (encrypted) {
+      expect(result.error).toBe(
+        'Encrypted datasets have been retired. Decrypt this dataset to a plain copy before using it.',
+      );
+      expect(result.result).toBeFalsy();
+      continue;
+    }
     const replay = await page.request.post(`${endpoint}?aitk_upload=complete&${query}`, {
       headers: { Origin: origin },
     });
@@ -107,17 +114,14 @@ test('archive acceptance survives client detach, replays once, and protects encr
     expect((await replay.json()).operationID).toBe(operationID);
     const file = '/api/files/' + encodeURIComponent(result.result.path + '/sample.png');
     const download = await page.request.get(file);
-    if (encrypted) expect(download.status()).toBe(403);
-    else {
-      expect(download.status()).toBe(200);
-      expect(await download.body()).toEqual(png);
-      const etag = download.headers().etag;
-      expect((await page.request.get(file, { headers: { 'If-None-Match': etag } })).status()).toBe(304);
-      const range = await page.request.get(file, { headers: { Range: 'bytes=0-6' } });
-      expect(range.status()).toBe(206);
-      expect(await range.body()).toEqual(png.subarray(0, 7));
-      expect((await page.request.get(file, { headers: { Range: 'bytes=9999-' } })).status()).toBe(416);
-    }
+    expect(download.status()).toBe(200);
+    expect(await download.body()).toEqual(png);
+    const etag = download.headers().etag;
+    expect((await page.request.get(file, { headers: { 'If-None-Match': etag } })).status()).toBe(304);
+    const range = await page.request.get(file, { headers: { Range: 'bytes=0-6' } });
+    expect(range.status()).toBe(206);
+    expect(await range.body()).toEqual(png.subarray(0, 7));
+    expect((await page.request.get(file, { headers: { Range: 'bytes=9999-' } })).status()).toBe(416);
   }
 });
 test('job creation validates configuration and returns paged summaries', async ({ page }) => {

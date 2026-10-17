@@ -3,17 +3,18 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 from safetensors.torch import load_file, save_file
 
 from extensions_built_in.diffusion_models import Flux3Model, MossImageModel
 from extensions_built_in.diffusion_models.flux3.src.transformer import Flux3Transformer, Flux3TransformerParams
-from extensions_built_in.diffusion_models.moss_image.src.transformer import MossImageTransformer, MossImageParams
+from extensions_built_in.diffusion_models.moss_image.src.transformer import MossImageTransformer, MossImageParams, _attention
 from extensions_built_in.diffusion_models.moss_image.src.checkpoints import merge_safetensors, comfy_transformer_rel
 from toolkit.models.v2.text_encoders.qwen35 import Qwen35TextOnlyEncoder, Qwen35VLEncoder
 from toolkit.models.v2._mixin import OstrisModelMixin, _markers_from_header
+from toolkit.config_modules import ModelConfig
 from toolkit.model_registry import resolve_model
 from toolkit.sample_controls import sample_control_paths
 from toolkit.util.losses import band_loss
@@ -24,6 +25,7 @@ class NewModelTests(unittest.TestCase):
     def test_registry_and_ordered_reference_contract(self):
         self.assertIs(resolve_model('flux3'), Flux3Model)
         self.assertIs(resolve_model('moss_image'), MossImageModel)
+        self.assertIs(resolve_model('moss_image:edit'), MossImageModel)
         self.assertEqual(sample_control_paths(SimpleNamespace(ctrl_imgs=[], ctrl_img='old')), [])
         self.assertEqual(sample_control_paths(SimpleNamespace(ctrl_imgs=['b', 'a', 'b'])), ['b', 'a', 'b'])
 
@@ -41,24 +43,123 @@ class NewModelTests(unittest.TestCase):
         self.assertEqual(actual.shape, x.shape)
         self.assertTrue(torch.isfinite(x.grad).all())
 
+    def test_flux_reference_batches_preserve_framing_and_order(self):
+        model = Flux3Model("cpu", ModelConfig(arch="flux3", name_or_path="unused"), dtype="fp32")
+        self.assertTrue(model.use_raw_control_images)
+        latent = torch.randn(2, 4, 2, 2)
+        model.model = Mock(device=torch.device("cpu"), return_value={"x_image": torch.zeros(2, 4, 4)})
+        encoded = []
+
+        def encode(images, **kwargs):
+            self.assertEqual(images.ndim, 4)
+            encoded.append(images.clone())
+            return images.mean().expand(1, 4, images.shape[-2] // 16, images.shape[-1] // 16)
+
+        model.encode_images = encode
+        single = torch.stack([torch.full((3, 16, 64), v) for v in (.25, .75)])
+        stacked = torch.stack([torch.stack([single[i], 1 - single[i]]) for i in range(2)])
+        for refs in (single, stacked):
+            with self.subTest(shape=refs.shape):
+                encoded.clear()
+                result = model.get_noise_prediction(
+                    latent, torch.tensor([500., 750.]),
+                    SimpleNamespace(text_embeds=[torch.randn(2, 12), torch.randn(3, 12)]),
+                    batch=SimpleNamespace(control_tensor_list=None, control_tensor=refs),
+                )
+                self.assertEqual(result.shape, latent.shape)
+                reference_count = 1 if refs.ndim == 4 else 2
+                self.assertEqual(len(encoded), 2 * reference_count)
+                expected_refs = refs.reshape(-1, 3, 16, 64)
+                for actual, expected in zip(encoded, expected_refs):
+                    torch.testing.assert_close(actual[0], expected * 2 - 1)
+                kwargs = model.model.call_args.kwargs
+                self.assertEqual(kwargs["x_image_cond"].shape, (2, 4 * reference_count, 4))
+                expected_ids = torch.tensor([-1.] * 4 + ([-2.] * 4 if reference_count == 2 else []))
+                torch.testing.assert_close(kwargs["x_image_cond_ids"][0, :, -1], expected_ids)
+                self.assertTrue((kwargs["x_image_cond_timesteps"] == 0).all())
+
+    def test_moss_lora_export_round_trip_and_legacy_weights(self):
+        model = object.__new__(MossImageModel)
+        model.lora_keys_use_comfy_prefix = True
+        base = "transformer.layers.0.proj.qkv."
+        for down_suffix, up_suffix in (("lora_A.weight", "lora_B.weight"), ("lora_down.weight", "lora_up.weight")):
+            with self.subTest(format=down_suffix):
+                original = {
+                    base + down_suffix: torch.randn(2, 8),
+                    base + up_suffix: torch.randn(24, 2),
+                    base + "alpha": torch.tensor(1.),
+                    "transformer.layers.1.proj.qkv.lokr_w1": torch.randn(2, 2),
+                    "transformer.layers.0.ff.weight": torch.randn(8, 8),
+                }
+                exported = model.convert_lora_weights_before_save(original)
+                self.assertNotIn(base + down_suffix, exported)
+                for i, name in enumerate("qkv"):
+                    prefix = f"diffusion_model.layers.0.proj.{name}."
+                    torch.testing.assert_close(exported[prefix + down_suffix], original[base + down_suffix])
+                    torch.testing.assert_close(exported[prefix + up_suffix], original[base + up_suffix][i * 8:(i + 1) * 8])
+                    torch.testing.assert_close(exported[prefix + "alpha"], original[base + "alpha"])
+                with tempfile.TemporaryDirectory() as folder:
+                    filename = os.path.join(folder, "adapter.safetensors")
+                    save_file(exported, filename)
+                    restored = model.convert_lora_weights_before_load(load_file(filename))
+                self.assertEqual(set(restored), set(original))
+                for key, value in original.items():
+                    torch.testing.assert_close(restored[key], value)
+                    torch.testing.assert_close(model.convert_lora_weights_before_load(original)[key], value)
+
+    def test_moss_independent_qkv_loras_keep_their_effective_weights(self):
+        model = object.__new__(MossImageModel)
+        model.lora_keys_use_comfy_prefix = True
+        split, updates = {}, []
+        for name in "qkv":
+            down, up = torch.randn(2, 8), torch.randn(8, 2)
+            prefix = f"diffusion_model.layers.0.proj.{name}."
+            split.update({prefix + "lora_A.weight": down, prefix + "lora_B.weight": up, prefix + "alpha": torch.tensor(1.)})
+            updates.append(up @ down / 2)
+        restored = model.convert_lora_weights_before_load(split)
+        prefix = "transformer.layers.0.proj.qkv."
+        down, up = restored[prefix + "lora_A.weight"], restored[prefix + "lora_B.weight"]
+        self.assertEqual(down.shape, (6, 8))
+        self.assertEqual(len(split), 9)
+        effective = up @ down * (restored[prefix + "alpha"] / down.shape[0])
+        torch.testing.assert_close(effective, torch.cat(updates))
+
+    def test_moss_unmasked_reference_isolation_matches_masked_attention_and_gradients(self):
+        q, k, v = (torch.randn(2, 7, 16, requires_grad=True) for _ in range(3))
+        phases = torch.randn(2, 7, 4)
+        rope = torch.cat((phases.sin(), phases.cos()), dim=-1)
+        mask = torch.ones(1, 1, 7, 7, dtype=torch.bool)
+        mask[:, :, 4:, :4] = False
+        expected = _attention(q, k, v, rope, heads=2, mask=mask)
+        actual = _attention(q, k, v, rope, heads=2, mask=None, isolate_split=4)
+        torch.testing.assert_close(actual, expected)
+        grad_output = torch.randn_like(expected)
+        expected_grads = torch.autograd.grad(expected, (q, k, v), grad_output)
+        actual_grads = torch.autograd.grad(actual, (q, k, v), grad_output)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            torch.testing.assert_close(actual_grad, expected_grad)
+
     def test_moss_tiny_reference_cache_and_checkpoint_gradients(self):
         params = MossImageParams(dim=32, ffn_dim=64, num_heads=4, num_layers=2, text_dim=16, freq_dim=16, latent_channels=4)
         model = MossImageTransformer(params)
         saved = model.convert_state_dict_on_save(model.state_dict())
         reloaded = MossImageTransformer.load_from_state_dict(saved, torch.float32)
-        x = torch.randn(2, 4, 2, 2, requires_grad=True)
-        args = dict(hidden_states=x, timestep=torch.tensor([0., 1000.]), encoder_hidden_states=torch.randn(2, 3, 16), encoder_attention_mask=torch.tensor([[1, 1, 1], [1, 0, 0]]), ref_latents=[[torch.randn(4, 1, 2)], [torch.randn(4, 2, 1)]], isolate_refs=True)
-        expected = model(**args)
         reloaded.enable_gradient_checkpointing()
-        actual = reloaded(**args)
-        torch.testing.assert_close(actual, expected)
-        actual.square().mean().backward()
-        self.assertTrue(torch.isfinite(x.grad).all())
-        cache = {}
-        with torch.no_grad():
-            initial = model(**args, ref_kv_cache=cache)
-            cached = model(**args, ref_kv_cache=cache)
-        torch.testing.assert_close(initial, cached)
+        for padded in (False, True):
+            with self.subTest(padded=padded):
+                x = torch.randn(2, 4, 2, 2, requires_grad=True)
+                text_mask = torch.tensor([[1, 1, 1], [1, 0, 0] if padded else [1, 1, 1]])
+                args = dict(hidden_states=x, timestep=torch.tensor([0., 1000.]), encoder_hidden_states=torch.randn(2, 3, 16), encoder_attention_mask=text_mask, ref_latents=[[torch.randn(4, 1, 2)], [torch.randn(4, 2, 1)]], isolate_refs=True)
+                expected = model(**args)
+                actual = reloaded(**args)
+                torch.testing.assert_close(actual, expected)
+                actual.square().mean().backward()
+                self.assertTrue(torch.isfinite(x.grad).all())
+                cache = {}
+                with torch.no_grad():
+                    initial = model(**args, ref_kv_cache=cache)
+                    cached = model(**args, ref_kv_cache=cache)
+                torch.testing.assert_close(initial, cached)
 
     def test_qwen35_checkpoint_conversion(self):
         weight = torch.randn(4, 4)

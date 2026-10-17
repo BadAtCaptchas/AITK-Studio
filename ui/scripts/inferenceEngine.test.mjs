@@ -87,6 +87,58 @@ test('Qwen source defaults apply on selection and preserve existing job source o
   }
 });
 
+test('MOSS SFT and Base edit presets retain reference training and ComfyUI export guidance', () => {
+  const catalog = loadSource('../src/domain/modelOptions.ts', {
+    './trainingDefaults': loadSource('../src/domain/trainingDefaults.ts'),
+    '@/helpers/defaultSamples': loadSource('../src/helpers/defaultSamples.ts'),
+    './modelCapabilities.json': require('../src/domain/modelCapabilities.json'),
+  });
+  const { getDefaultModelConfig } = loadSource('../src/domain/generationConfig.ts', {
+    './modelOptions': catalog,
+    '../utils/memoryProfiles': loadSource('../src/utils/memoryProfiles.ts'),
+  });
+  const { handleModelArchChange } = loadSource('../src/app/jobs/new/utils.ts', {
+    './options': catalog,
+    '@/utils/basic': loadSource('../src/utils/basic.ts'),
+    '@/utils/memoryProfiles': loadSource('../src/utils/memoryProfiles.ts'),
+    '@/utils/fluxGuidancePolicy': loadSource('../src/utils/fluxGuidancePolicy.ts'),
+  });
+  const job = { config: { process: [{
+    model: { arch: 'flux', name_or_path: 'test/flux', model_kwargs: {} },
+    datasets: [], sample: { samples: [] },
+  }] } };
+  for (const [name, source] of [
+    ['moss_image:edit', 'OpenMOSS-Team/MOSS-Image-SFT'],
+    ['moss_image:base_edit', 'OpenMOSS-Team/MOSS-Image-Base'],
+  ]) {
+    const choice = catalog.modelArchs.find(model => model.name === name);
+    assert.ok(choice);
+    assert.ok(choice.additionalSections.includes('datasets.multi_control_paths'));
+    assert.ok(choice.additionalSections.includes('sample.multi_ctrl_imgs'));
+    assert.ok(choice.disableSections.includes('train.unload_text_encoder'));
+    assert.equal(choice.modelNotes.link.href, 'https://github.com/ostris/ComfyUI-MOSS-Image-Ostris-Edit');
+    const model = getDefaultModelConfig(name);
+    assert.equal(model.name_or_path, source);
+    assert.deepEqual(model.model_kwargs, {
+      edit: true, kv_cache: true, match_target_res: true, uncond_skip_layers: [22],
+    });
+    assert.equal(model.qtype, 'convrot8');
+    assert.equal(model.qtype_te, 'convrot8');
+    assert.equal(model.low_vram, true);
+
+    const writes = new Map();
+    handleModelArchChange('flux', name, job, (value, key) => writes.set(key, value));
+    assert.equal(writes.get('config.process[0].model.name_or_path'), source);
+    assert.deepEqual(writes.get('config.process[0].model.model_kwargs'), model.model_kwargs);
+    assert.equal(writes.get('config.process[0].train.unload_text_encoder'), false);
+    assert.deepEqual(writes.get('config.process[0].network.network_kwargs.ignore_if_contains'), ['layers.22.']);
+    writes.clear();
+    handleModelArchChange(name, 'flux', job, (value, key) => writes.set(key, value));
+    assert.deepEqual(writes.get('config.process[0].model.model_kwargs'), {});
+    assert.deepEqual(writes.get('config.process[0].network.network_kwargs.ignore_if_contains'), []);
+  }
+});
+
 test('generator defaults and controls follow installed model declarations', () => {
   const { getDefaultModelConfig, getDefaultSampler, archSupportsSection } = loadSource('../src/domain/generationConfig.ts', {
     './modelOptions': { modelArchs: [] },

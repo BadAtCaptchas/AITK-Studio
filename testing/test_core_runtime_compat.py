@@ -111,29 +111,36 @@ class ConvRotCompatibilityTest(unittest.TestCase):
         fake_triton = types.ModuleType("triton")
         fake_triton.__path__ = []
         fake_language = types.ModuleType("triton.language")
+        fake_language.__path__ = []
+        fake_extra = types.ModuleType("triton.language.extra")
+        fake_libdevice = types.ModuleType("triton.language.extra.libdevice")
         fake_triton.language = fake_language
-        old_triton = getattr(convrot_quant, "triton", None)
-        old_tl = getattr(convrot_quant, "tl", None)
-        had_triton = hasattr(convrot_quant, "triton")
-        had_tl = hasattr(convrot_quant, "tl")
+        fake_language.extra = fake_extra
+        fake_extra.libdevice = fake_libdevice
+        names = ("triton", "tl", "libdevice")
+        previous = {name: convrot_quant.__dict__[name] for name in names if name in convrot_quant.__dict__}
         try:
             with mock.patch.dict(
                 sys.modules,
-                {"triton": fake_triton, "triton.language": fake_language},
+                {
+                    "triton": fake_triton,
+                    "triton.language": fake_language,
+                    "triton.language.extra": fake_extra,
+                    "triton.language.extra.libdevice": fake_libdevice,
+                },
             ):
                 imported = convrot_quant._import_triton()
-            self.assertEqual(imported, (fake_triton, fake_language))
+            self.assertEqual(imported, (fake_triton, fake_language, fake_libdevice))
+            # Older Triton JIT resolvers look up these through fn.__globals__.
             self.assertIs(convrot_quant.triton, fake_triton)
             self.assertIs(convrot_quant.tl, fake_language)
+            self.assertIs(convrot_quant.libdevice, fake_libdevice)
         finally:
-            if had_triton:
-                convrot_quant.triton = old_triton
-            else:
-                convrot_quant.__dict__.pop("triton", None)
-            if had_tl:
-                convrot_quant.tl = old_tl
-            else:
-                convrot_quant.__dict__.pop("tl", None)
+            for name in names:
+                if name in previous:
+                    convrot_quant.__dict__[name] = previous[name]
+                else:
+                    convrot_quant.__dict__.pop(name, None)
 
     def test_every_lazy_kernel_builder_uses_the_compat_import(self):
         for name in (

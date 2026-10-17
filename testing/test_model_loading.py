@@ -199,6 +199,19 @@ MODEL_TESTS = {
         "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 3.0},
         "needs_control_image": True,
     },
+    "moss_image:edit": {
+        # SFT edit LoRA: vision-tower prompts and isolated reference latents.
+        "model": {
+            "name_or_path": "OpenMOSS-Team/MOSS-Image-SFT",
+            "quantize": True,
+            "quantize_te": True,
+            "qtype": "convrot8",
+            "qtype_te": "convrot8",
+            "model_kwargs": {"edit": True, "kv_cache": True, "match_target_res": True},
+        },
+        "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 3.0},
+        "needs_control_image": True,
+    },
     # ---- legacy monolith archs (components adopted into v2 on load) ----
     "sd1": {
         "model": {"name_or_path": "stable-diffusion-v1-5/stable-diffusion-v1-5"},

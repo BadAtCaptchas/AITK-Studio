@@ -23,7 +23,7 @@
 | :---: | :---: |
 | [![Guided training job setup](assets/readme-ui-new-job.png)](assets/readme-ui-new-job.png) | [![Image generation with a base model or LoRA](assets/readme-ui-generate.png)](assets/readme-ui-generate.png) |
 
-- **Prepare your data.** Organize datasets, edit captions, and use optional dataset encryption.
+- **Prepare your data.** Organize datasets, edit captions, and combine datasets for training.
 - **Train your way.** Run LoRA, LoKr, or supported full fine-tunes, locally or on remote workers.
 - **Review and create.** Track runs, compare samples, generate images, and export jobs from one library.
 
@@ -93,7 +93,7 @@ See the [training reference](docs/training.md#cli-training) for configuration an
 
 ## Supported models
 
-- **Image & editing:** FLUX, Qwen Image / 2.1, Z-Image, SDXL, Ideogram 4, HiDream, Krea 2, and more.
+- **Image & editing:** FLUX (including FLUX.3 Image Klein Base), MOSS-Image SFT / Base, Qwen Image / 2.1, Z-Image, SDXL, Ideogram 4, HiDream, Krea 2, and more. MOSS-Image Base Edit training is experimental.
 - **Video:** Wan 2.1 / 2.2, LTX-2 / 2.3 / 2.5, and MiniMax H3.
 - **Audio:** Ace Step 1.5 and 1.5 XL, plus experimental YuE2; MiniMax H3 also supports joint video/audio workflows.
 - **Multimodal text:** Qwen2.5-Omni instruction tuning with image, audio, or video inputs.

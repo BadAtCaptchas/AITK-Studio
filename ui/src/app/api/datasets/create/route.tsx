@@ -1,19 +1,16 @@
+import { DATASET_MIGRATION_MESSAGE, DATASET_MIGRATION_REQUIRED } from '@/server/datasetDecryption';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
-import path from 'path';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
-import {
-  cleanDatasetName,
-  resolveDatasetFolder,
-  validateEncryptedManifest,
-  writeEncryptedManifest,
-} from '@/server/encryptedDatasets';
+import { cleanDatasetName, resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { resolveDatasetScope } from '@/server/datasetScope';
 
 export async function POST(request: Request) {
   try {
     const body = assertGlobalPayload(await request.json());
+    if (body.encrypted || body.encryptedManifest)
+      return Response.json({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, { status: 410 });
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
     if (!isLocalWorker(workerID)) {
@@ -45,12 +42,6 @@ export async function POST(request: Request) {
       fs.mkdirSync(datasetPath);
     } else if (fs.readdirSync(datasetPath).length > 0) {
       return NextResponse.json({ error: 'Dataset already exists' }, { status: 409 });
-    }
-
-    if (encrypted) {
-      const manifest = validateEncryptedManifest(encryptedManifest);
-      fs.mkdirSync(path.join(datasetPath, 'objects'), { recursive: true });
-      await writeEncryptedManifest(datasetPath, manifest);
     }
 
     return NextResponse.json({ success: true, name: name, encrypted: !!encrypted });

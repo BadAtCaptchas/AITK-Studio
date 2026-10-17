@@ -1,7 +1,12 @@
 import type { ReactNode } from 'react';
 import { ConfigDoc, GroupedSelectOption, SelectOption, JobConfig } from '@/types';
 import { defaultSliderConfig } from './trainingDefaults';
-import { defaultAudioSampleConfig, defaultSampleConfig, defaultYue2SampleConfig, defaultQwen25OmniSampleConfig } from '@/helpers/defaultSamples';
+import {
+  defaultAudioSampleConfig,
+  defaultSampleConfig,
+  defaultYue2SampleConfig,
+  defaultQwen25OmniSampleConfig,
+} from '@/helpers/defaultSamples';
 
 import contract from './modelCapabilities.json';
 
@@ -97,40 +102,211 @@ const defaultLinearRank = 32;
 
 const modelPresentation: ModelArch[] = [
   {
+    name: 'flux3',
+    label: 'FLUX.3 Image Klein (base)',
+    group: 'image',
+    gateUrl: 'https://huggingface.co/black-forest-labs/flux-3-image-klein-base',
+    defaults: {
+      // default updates when [selected, unselected] in the UI
+      'config.process[0].model.name_or_path': ['black-forest-labs/flux-3-image-klein-base', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.width': [1024, 1024],
+      'config.process[0].sample.height': [1024, 1024],
+      'config.process[0].sample.guidance_scale': [3.5, 4],
+      'config.process[0].sample.sample_steps': [28, 25],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+      'config.process[0].model.model_kwargs': [
+        {
+          match_target_res: true,
+        },
+        {},
+      ],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: [
+      'datasets.multi_control_paths',
+      'sample.multi_ctrl_imgs',
+      'model.layer_offloading',
+      'model.low_vram',
+      'model.qie.match_target_res',
+    ],
+  },
+  {
+    name: 'moss_image',
+    label: 'MOSS-Image SFT',
+    group: 'image',
+    defaults: {
+      // default updates when [selected, unselected] in the UI
+      // the vendor repo: its transformer is merged once into the comfy models
+      // folder; a .safetensors path (fine-tune / int8 convrot repack) loads as named
+      'config.process[0].model.name_or_path': ['OpenMOSS-Team/MOSS-Image-SFT', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      // Qwen3.5-9B text encoder
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.width': [1024, 1024],
+      'config.process[0].sample.height': [1024, 1024],
+      // vendor defaults: CFG 3 with block 22 skipped on the negative branch
+      'config.process[0].sample.guidance_scale': [3, 4],
+      'config.process[0].sample.sample_steps': [30, 25],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+      // sampling: the CFG negative branch skips these DiT blocks (zero-based)
+      'config.process[0].model.model_kwargs': [
+        {
+          uncond_skip_layers: [22],
+        },
+        {},
+      ],
+      // keep the LoRA off the block the negative branch skips, so CFG's
+      // skipped-block contrast stays the base model's
+      'config.process[0].network.network_kwargs.ignore_if_contains': [['layers.22.'], []],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: ['model.layer_offloading', 'model.low_vram'],
+  },
+  {
+    name: 'moss_image:base',
+    label: 'MOSS-Image Base',
+    group: 'image',
+    defaults: {
+      // default updates when [selected, unselected] in the UI
+      // the vendor repo: Comfy-Org/MOSS-Image base files on disk win, else the
+      // repack's bf16 (identical weights) is downloaded
+      'config.process[0].model.name_or_path': ['OpenMOSS-Team/MOSS-Image-Base', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      // Qwen3.5-9B text encoder
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
+      'config.process[0].model.low_vram': [true, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.width': [1024, 1024],
+      'config.process[0].sample.height': [1024, 1024],
+      // vendor defaults: CFG 3 with block 22 skipped on the negative branch
+      'config.process[0].sample.guidance_scale': [3, 4],
+      'config.process[0].sample.sample_steps': [30, 25],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+      // sampling: the CFG negative branch skips these DiT blocks (zero-based)
+      'config.process[0].model.model_kwargs': [
+        {
+          uncond_skip_layers: [22],
+        },
+        {},
+      ],
+      // keep the LoRA off the block the negative branch skips, so CFG's
+      // skipped-block contrast stays the base model's
+      'config.process[0].network.network_kwargs.ignore_if_contains': [['layers.22.'], []],
+    },
+    disableSections: ['network.conv'],
+    additionalSections: ['model.layer_offloading', 'model.low_vram'],
+  },
+  {
+    name: 'moss_image:base_edit',
+    label: 'MOSS-Image Base [Edit Training]',
+    group: 'experimental',
+    defaults: {
+      // default updates when [selected, unselected] in the UI
+      'config.process[0].model.name_or_path': ['OpenMOSS-Team/MOSS-Image-Base', defaultNameOrPath],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      // Qwen3.5-9B text encoder + vision tower (references ride in the prompt)
+      'config.process[0].model.quantize_te': [true, false],
+      'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
+      'config.process[0].model.low_vram': [true, false],
+      // prompt embeds depend on the control images, so the TE stays loaded
+      'config.process[0].train.unload_text_encoder': [false, false],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].sample.width': [1024, 1024],
+      'config.process[0].sample.height': [1024, 1024],
+      'config.process[0].sample.guidance_scale': [3, 4],
+      'config.process[0].sample.sample_steps': [30, 25],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+      // edit: references as clean t=0 latents + in the prompt; kv_cache:
+      // references attend only to themselves, so sampling computes their K/V
+      // once (must be trained that way)
+      'config.process[0].model.model_kwargs': [
+        {
+          edit: true,
+          kv_cache: true,
+          match_target_res: true,
+          uncond_skip_layers: [22],
+        },
+        {},
+      ],
+      'config.process[0].network.network_kwargs.ignore_if_contains': [['layers.22.'], []],
+    },
+    disableSections: ['network.conv', 'train.unload_text_encoder'],
+    additionalSections: [
+      'datasets.multi_control_paths',
+      'sample.multi_ctrl_imgs',
+      'model.low_vram',
+      'model.layer_offloading',
+      'model.qie.match_target_res',
+      'model.model_kwargs.kv_cache',
+    ],
+  },
+  {
     name: 'ming_image',
     label: 'Ming Image Design (Comfy / Training Adapter)',
     group: 'image',
     defaults: {
-      'config.process[0].model.name_or_path': ["Comfy-Org/Ming-Image", ""],
+      'config.process[0].model.name_or_path': ['Comfy-Org/Ming-Image', ''],
       'config.process[0].model.quantize': [true, false],
-      'config.process[0].model.qtype': ["convrot8", "qfloat8"],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
       'config.process[0].model.quantize_te': [true, false],
-      'config.process[0].model.qtype_te': ["convrot8", "qfloat8"],
+      'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
       'config.process[0].model.low_vram': [true, false],
-      'config.process[0].model.assistant_lora_path': ["ostris/ming_image_training_adapter/ming_image_01_design_training_adapter_v1.safetensors", undefined],
-      'config.process[0].train.noise_scheduler': ["flowmatch", "flowmatch"],
-      'config.process[0].train.timestep_type': ["shift", "sigmoid"],
+      'config.process[0].model.assistant_lora_path': [
+        'ostris/ming_image_training_adapter/ming_image_01_design_training_adapter_v1.safetensors',
+        undefined,
+      ],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
       'config.process[0].train.cache_text_embeddings': [true, false],
-      'config.process[0].sample.sampler': ["flowmatch", "flowmatch"],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
       'config.process[0].sample.guidance_scale': [1, 4],
       'config.process[0].sample.sample_steps': [12, 25],
-      'config.process[0].sample.format': ["png", "jpg"],
-      'config.process[0].model.model_kwargs': [{"rgba":false}, {}],
+      'config.process[0].sample.format': ['png', 'jpg'],
+      'config.process[0].model.model_kwargs': [{ rgba: false }, {}],
     },
     disableSections: ['network.conv'],
     additionalSections: ['model.low_vram', 'model.layer_offloading', 'model.assistant_lora_path', 'sample.ctrl_img'],
-    customModelSelectOptions: [{
-      label: 'Output channels',
-      options: [{ value: 'rgb', label: 'RGB' }, { value: 'rgba', label: 'RGBA / transparency' }],
-      getValue: (config: JobConfig) => config.config.process[0].model.model_kwargs?.rgba ? 'rgba' : 'rgb',
-      onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
-        setJobConfig({ ...config.config.process[0].model.model_kwargs, rgba: value === 'rgba' }, 'config.process[0].model.model_kwargs');
-        if (value === 'rgba') setJobConfig('png', 'config.process[0].sample.format');
+    customModelSelectOptions: [
+      {
+        label: 'Output channels',
+        options: [
+          { value: 'rgb', label: 'RGB' },
+          { value: 'rgba', label: 'RGBA / transparency' },
+        ],
+        getValue: (config: JobConfig) => (config.config.process[0].model.model_kwargs?.rgba ? 'rgba' : 'rgb'),
+        onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+          setJobConfig(
+            { ...config.config.process[0].model.model_kwargs, rgba: value === 'rgba' },
+            'config.process[0].model.model_kwargs',
+          );
+          if (value === 'rgba') setJobConfig('png', 'config.process[0].sample.format');
+        },
       },
-    }],
+    ],
     modelNotes: {
       summary: 'Comfy checkpoint support with a training adapter',
-      paragraphs: ['Loads Comfy-Org/Ming-Image, the vendor checkpoint, or explicit local checkpoints. The training adapter is active during training and disabled for samples. Supports quantized text encoding and a dynamic resolution-dependent schedule.', 'Supports text-to-image and one reference image. Enable RGBA to preserve transparency and use PNG samples. For transparent output, use a transparency trigger such as RGBA, 4-channel, transparent background and sample at 2048 by 2048.', 'Existing native Ming Design and Design-Layer presets remain separate; use Design-Layer for layered datasets.'],
+      paragraphs: [
+        'Loads Comfy-Org/Ming-Image, the vendor checkpoint, or explicit local checkpoints. The training adapter is active during training and disabled for samples. Supports quantized text encoding and a dynamic resolution-dependent schedule.',
+        'Supports text-to-image and one reference image. Enable RGBA to preserve transparency and use PNG samples. For transparent output, use a transparency trigger such as RGBA, 4-channel, transparent background and sample at 2048 by 2048.',
+        'Existing native Ming Design and Design-Layer presets remain separate; use Design-Layer for layered datasets.',
+      ],
     },
   },
   {
@@ -140,29 +316,32 @@ const modelPresentation: ModelArch[] = [
     isVideoModel: true,
     allowedNetworkTypes: ['lora'],
     defaults: {
-      'config.process[0].model.name_or_path': ["FastVideo/FastVideo-FastH3-Comfy", ""],
+      'config.process[0].model.name_or_path': ['FastVideo/FastVideo-FastH3-Comfy', ''],
       'config.process[0].model.quantize': [true, false],
-      'config.process[0].model.qtype': ["convrot8", "qfloat8"],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
       'config.process[0].model.quantize_te': [true, false],
-      'config.process[0].model.qtype_te': ["nvfp4", "qfloat8"],
+      'config.process[0].model.qtype_te': ['nvfp4', 'qfloat8'],
       'config.process[0].model.low_vram': [true, false],
       'config.process[0].model.layer_offloading': [false, false],
       'config.process[0].model.base_lora_path': [undefined, undefined],
       'config.process[0].model.inference_lora_path': [undefined, undefined],
-      'config.process[0].model.assistant_lora_path': ["ostris/minimax_h3_training_adapter/fastvideo_fasth3_8step_v2_training_adapter_v1.safetensors", undefined],
+      'config.process[0].model.assistant_lora_path': [
+        'ostris/minimax_h3_training_adapter/fastvideo_fasth3_8step_v2_training_adapter_v1.safetensors',
+        undefined,
+      ],
       'config.process[0].train.train_text_encoder': [false, false],
       'config.process[0].train.unload_text_encoder': [false, false],
       'config.process[0].train.cache_text_embeddings': [true, false],
-      'config.process[0].train.noise_scheduler': ["flowmatch", "flowmatch"],
-      'config.process[0].train.timestep_type': ["shift", "sigmoid"],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
       'config.process[0].train.do_guidance_loss': [false, undefined],
       'config.process[0].train.guidance_loss_target': [undefined, undefined],
       'config.process[0].train.audio_loss_multiplier': [1, undefined],
-      'config.process[0].network.type': ["lora", "lora"],
+      'config.process[0].network.type': ['lora', 'lora'],
       'config.process[0].network.linear': [16, 32],
       'config.process[0].network.linear_alpha': [16, 32],
-      'config.process[0].network.network_kwargs.ignore_if_contains': [["adaln_proj"], []],
-      'config.process[0].sample.sampler': ["flowmatch", "flowmatch"],
+      'config.process[0].network.network_kwargs.ignore_if_contains': [['adaln_proj'], []],
+      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
       'config.process[0].sample.guidance_scale': [1, 4],
       'config.process[0].sample.sample_steps': [8, 25],
       'config.process[0].sample.num_frames': [107, 1],
@@ -176,113 +355,156 @@ const modelPresentation: ModelArch[] = [
       'config.process[0].datasets[x].num_frames': [39, undefined],
       'config.process[0].datasets[x].auto_frame_count': [true, undefined],
     },
-    disableSections: ['network.conv', 'model.quantize', 'model.quantize_te', 'train.train_text_encoder', 'train.unload_text_encoder'],
-    additionalSections: ['datasets.num_frames', 'model.low_vram', 'datasets.do_audio', 'datasets.audio_normalize', 'datasets.audio_preserve_pitch', 'train.audio_loss_multiplier', 'datasets.auto_frame_count', 'model.assistant_lora_path'],
-    customModelSelectOptions: [{
-      label: 'Distillation handling',
-      options: [{ value: 'ta', label: 'Training adapter (default)' }, { value: 'none', label: 'None' }],
-      getValue: (config: JobConfig) => config.config.process[0].model.assistant_lora_path?.trim() ? 'ta' : 'none',
-      onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
-        setJobConfig(value === 'ta' ? 'ostris/minimax_h3_training_adapter/fastvideo_fasth3_8step_v2_training_adapter_v1.safetensors' : undefined, 'config.process[0].model.assistant_lora_path');
+    disableSections: [
+      'network.conv',
+      'model.quantize',
+      'model.quantize_te',
+      'train.train_text_encoder',
+      'train.unload_text_encoder',
+    ],
+    additionalSections: [
+      'datasets.num_frames',
+      'model.low_vram',
+      'datasets.do_audio',
+      'datasets.audio_normalize',
+      'datasets.audio_preserve_pitch',
+      'train.audio_loss_multiplier',
+      'datasets.auto_frame_count',
+      'model.assistant_lora_path',
+    ],
+    customModelSelectOptions: [
+      {
+        label: 'Distillation handling',
+        options: [
+          { value: 'ta', label: 'Training adapter (default)' },
+          { value: 'none', label: 'None' },
+        ],
+        getValue: (config: JobConfig) => (config.config.process[0].model.assistant_lora_path?.trim() ? 'ta' : 'none'),
+        onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+          setJobConfig(
+            value === 'ta'
+              ? 'ostris/minimax_h3_training_adapter/fastvideo_fasth3_8step_v2_training_adapter_v1.safetensors'
+              : undefined,
+            'config.process[0].model.assistant_lora_path',
+          );
+        },
       },
-    }],
+    ],
     modelNotes: {
       summary: 'Eight-step MiniMax H3 video and audio generation',
-      paragraphs: ['FastH3 V2 uses 80% sparse attention and a video flow shift of 10. Sample with eight steps and guidance 1. Text-to-video and audio only; reference conditioning is unsupported.', 'Missing files download into the configured Models folder. Base MiniMax text encoder and VAE files can be reused. Existing minimax_h3_vsa configurations retain the original four-step model.'],
+      paragraphs: [
+        'FastH3 V2 uses 80% sparse attention and a video flow shift of 10. Sample with eight steps and guidance 1. Text-to-video and audio only; reference conditioning is unsupported.',
+        'Missing files download into the configured Models folder. Base MiniMax text encoder and VAE files can be reused. Existing minimax_h3_vsa configurations retain the original four-step model.',
+      ],
     },
   },
-  ...([false, true] as const).map((layered): ModelArch => ({
-    name: layered ? 'ming_image_design_layer' : 'ming_image_design',
-    label: layered ? 'Ming Image Design-Layer (experimental)' : 'Ming Image Design (experimental)',
-    group: 'experimental',
-    allowedNetworkTypes: ['lora'],
+  ...([false, true] as const).map(
+    (layered): ModelArch => ({
+      name: layered ? 'ming_image_design_layer' : 'ming_image_design',
+      label: layered ? 'Ming Image Design-Layer (experimental)' : 'Ming Image Design (experimental)',
+      group: 'experimental',
+      allowedNetworkTypes: ['lora'],
+      defaults: {
+        'config.process[0].model.name_or_path': [
+          layered ? 'inclusionAI/Ming-Image-0.1-Design-Layer' : 'inclusionAI/Ming-Image-0.1-Design',
+          defaultNameOrPath,
+        ],
+        'config.process[0].model.quantize': [true, false],
+        'config.process[0].model.qtype': ['ming_fp8', 'qfloat8'],
+        'config.process[0].model.quantize_te': [false, false],
+        'config.process[0].model.low_vram': [true, false],
+        'config.process[0].model.layer_offloading': [true, false],
+        'config.process[0].model.layer_offloading_backend': ['block', 'block'],
+        'config.process[0].model.layer_offloading_transformer_percent': [1, 0],
+        'config.process[0].model.layer_offloading_text_encoder_percent': [1, 0],
+        'config.process[0].train.dtype': ['bf16', 'bf16'],
+        'config.process[0].train.train_text_encoder': [false, false],
+        'config.process[0].train.train_unet': [true, true],
+        'config.process[0].train.cache_text_embeddings': [true, false],
+        'config.process[0].train.unload_text_encoder': [true, false],
+        'config.process[0].train.gradient_checkpointing': [true, true],
+        'config.process[0].train.batch_size': [1, 1],
+        'config.process[0].train.standardize_images': [false, false],
+        'config.process[0].train.img_multiplier': [1, 1],
+        'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+        'config.process[0].train.timestep_type': ['linear', 'sigmoid'],
+        'config.process[0].network.type': ['lora', 'lora'],
+        'config.process[0].network.transformer_only': [true, false],
+        'config.process[0].network.linear': [16, 32],
+        'config.process[0].network.linear_alpha': [16, 32],
+        'config.process[0].network.conv': [undefined, 16],
+        'config.process[0].network.conv_alpha': [undefined, 16],
+        'config.process[0].sample.format': ['png', 'jpg'],
+        'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+        'config.process[0].sample.sample_steps': [12, 25],
+        'config.process[0].sample.guidance_scale': [layered ? 2 : 1, 4],
+        'config.process[0].sample.width': [layered ? 512 : 1024, 1024],
+        'config.process[0].sample.height': [layered ? 512 : 1024, 1024],
+        'config.process[0].sample.num_layers': [layered ? 2 : undefined, undefined],
+        'config.process[0].sample.neg': ['', ''],
+        'config.process[0].datasets[x].type': [layered ? 'layered_image' : 'image', 'image'],
+        'config.process[0].datasets[x].standardize_images': [false, false],
+        'config.process[0].datasets[x].do_i2v': [false, false],
+        'config.process[0].datasets[x].resolution': [[layered ? 512 : 1024], [512, 768, 1024]],
+        'config.process[0].datasets[x].cache_text_embeddings': [true, false],
+        'config.process[0].datasets[x].cache_latents_to_disk': [true, true],
+        'config.process[0].datasets[x].caption_dropout_rate': [0, 0.05],
+        'config.process[0].datasets[x].token_dropout_rate': [0, 0],
+        'config.process[0].datasets[x].random_triggers': [[], []],
+        'config.process[0].datasets[x].shuffle_tokens': [false, false],
+        'config.process[0].datasets[x].random_crop': [false, false],
+        'config.process[0].datasets[x].random_scale': [false, false],
+        'config.process[0].datasets[x].flip_x': [false, false],
+        'config.process[0].datasets[x].flip_y': [false, false],
+      },
+      disableSections: [
+        'network.conv',
+        'train.train_text_encoder',
+        'model.quantize_te',
+        'train.diff_output_preservation',
+        'train.blank_prompt_preservation',
+        'slider',
+      ],
+      additionalSections: ['model.low_vram', 'model.layer_offloading', 'sample.ctrl_img'],
+      modelNotes: {
+        summary: 'Experimental native RGBA LoRA training',
+        paragraphs: [
+          layered
+            ? 'Import PSD/ORA documents or use prepared layered manifests. Each example includes a composite and ordered RGBA targets. Samples require one reference image and a layer count.'
+            : 'Train on RGB or RGBA images with captions. Alpha is preserved in training and PNG samples.',
+          'The 16 GB starting profile uses CPU-staged frozen conditioning, cached embeddings, FP8 transformer weights and block offloading. High system RAM is required. Resolution and layer counts beyond measured validation may need more VRAM. Nonempty negative prompts are unsupported.',
+        ],
+        link: { href: 'https://github.com/vllm-project/vllm-omni/pull/8021', label: 'Pinned inference reference' },
+      },
+    }),
+  ),
+  {
+    name: 'yue2',
+    label: 'YuE2',
+    group: 'audio',
     defaults: {
-      'config.process[0].model.name_or_path': [layered ? 'inclusionAI/Ming-Image-0.1-Design-Layer' : 'inclusionAI/Ming-Image-0.1-Design', defaultNameOrPath],
-      'config.process[0].model.quantize': [true, false],
-      'config.process[0].model.qtype': ['ming_fp8', 'qfloat8'],
-      'config.process[0].model.quantize_te': [false, false],
-      'config.process[0].model.low_vram': [true, false],
-      'config.process[0].model.layer_offloading': [true, false],
-      'config.process[0].model.layer_offloading_backend': ['block', 'block'],
-      'config.process[0].model.layer_offloading_transformer_percent': [1, 0],
-      'config.process[0].model.layer_offloading_text_encoder_percent': [1, 0],
-      'config.process[0].train.dtype': ['bf16', 'bf16'],
-      'config.process[0].train.train_text_encoder': [false, false],
-      'config.process[0].train.train_unet': [true, true],
-      'config.process[0].train.cache_text_embeddings': [true, false],
-      'config.process[0].train.unload_text_encoder': [true, false],
-      'config.process[0].train.gradient_checkpointing': [true, true],
-      'config.process[0].train.batch_size': [1, 1],
-      'config.process[0].train.standardize_images': [false, false],
-      'config.process[0].train.img_multiplier': [1, 1],
-      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
-      'config.process[0].train.timestep_type': ['linear', 'sigmoid'],
-      'config.process[0].network.type': ['lora', 'lora'],
-      'config.process[0].network.transformer_only': [true, false],
-      'config.process[0].network.linear': [16, 32],
-      'config.process[0].network.linear_alpha': [16, 32],
-      'config.process[0].network.conv': [undefined, 16],
-      'config.process[0].network.conv_alpha': [undefined, 16],
-      'config.process[0].sample.format': ['png', 'jpg'],
-      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
-      'config.process[0].sample.sample_steps': [12, 25],
-      'config.process[0].sample.guidance_scale': [layered ? 2 : 1, 4],
-      'config.process[0].sample.width': [layered ? 512 : 1024, 1024],
-      'config.process[0].sample.height': [layered ? 512 : 1024, 1024],
-      'config.process[0].sample.num_layers': [layered ? 2 : undefined, undefined],
-      'config.process[0].sample.neg': ['', ''],
-      'config.process[0].datasets[x].type': [layered ? 'layered_image' : 'image', 'image'],
-      'config.process[0].datasets[x].standardize_images': [false, false],
-      'config.process[0].datasets[x].do_i2v': [false, false],
-      'config.process[0].datasets[x].resolution': [[layered ? 512 : 1024], [512, 768, 1024]],
-      'config.process[0].datasets[x].cache_text_embeddings': [true, false],
-      'config.process[0].datasets[x].cache_latents_to_disk': [true, true],
-      'config.process[0].datasets[x].caption_dropout_rate': [0, 0.05],
-      'config.process[0].datasets[x].token_dropout_rate': [0, 0],
-      'config.process[0].datasets[x].random_triggers': [[], []],
-      'config.process[0].datasets[x].shuffle_tokens': [false, false],
-      'config.process[0].datasets[x].random_crop': [false, false],
-      'config.process[0].datasets[x].random_scale': [false, false],
-      'config.process[0].datasets[x].flip_x': [false, false],
-      'config.process[0].datasets[x].flip_y': [false, false],
-    },
-    disableSections: ['network.conv', 'train.train_text_encoder', 'model.quantize_te', 'train.diff_output_preservation', 'train.blank_prompt_preservation', 'slider'],
-    additionalSections: ['model.low_vram', 'model.layer_offloading', 'sample.ctrl_img'],
-    modelNotes: {
-      summary: 'Experimental native RGBA LoRA training',
-      paragraphs: [layered ? 'Import PSD/ORA documents or use prepared layered manifests. Each example includes a composite and ordered RGBA targets. Samples require one reference image and a layer count.' : 'Train on RGB or RGBA images with captions. Alpha is preserved in training and PNG samples.', 'The 16 GB starting profile uses CPU-staged frozen conditioning, cached embeddings, FP8 transformer weights and block offloading. High system RAM is required. Resolution and layer counts beyond measured validation may need more VRAM. Nonempty negative prompts are unsupported.'],
-      link: { href: 'https://github.com/vllm-project/vllm-omni/pull/8021', label: 'Pinned inference reference' },
-    },
-  })),
-{name: "yue2",
-label: "YuE2",
-group: "audio",
-defaults: {
       // default updates when [selected, unselected] in the UI
-      "config.process[0].model.name_or_path": [
-        "Comfy-Org/YuE2/checkpoints/yue2_3b_int8_convrot.safetensors",
+      'config.process[0].model.name_or_path': [
+        'Comfy-Org/YuE2/checkpoints/yue2_3b_int8_convrot.safetensors',
         defaultNameOrPath,
       ],
-      "config.process[0].model.quantize": [true, false],
-      "config.process[0].model.quantize_te": [false, false],
-      "config.process[0].model.low_vram": [false, false],
-      "config.process[0].train.unload_text_encoder": [false, false],
-      "config.process[0].train.noise_scheduler": ["flowmatch", "flowmatch"],
-      "config.process[0].train.timestep_type": ["sigmoid", "sigmoid"],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.quantize_te': [false, false],
+      'config.process[0].model.low_vram': [false, false],
+      'config.process[0].train.unload_text_encoder': [false, false],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.timestep_type': ['sigmoid', 'sigmoid'],
       // the int8 repack ships convrot8 layers; requesting convrot8 keeps them as-is (no requantization)
-      "config.process[0].model.qtype": ["convrot8", "qfloat8"],
-      "config.process[0].sample": [
-        defaultYue2SampleConfig,
-        defaultSampleConfig,
-      ],
-      "config.process[0].datasets[x].cache_latents_to_disk": [true, true],
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      'config.process[0].sample': [defaultYue2SampleConfig, defaultSampleConfig],
+      'config.process[0].datasets[x].cache_latents_to_disk': [true, true],
       // audio has no resolution; every bucket would duplicate the whole dataset
-      "config.process[0].datasets[x].resolution": [[512], [512, 768, 1024]],
+      'config.process[0].datasets[x].resolution': [[512], [512, 768, 1024]],
       // blank captions break lyric following; the AR must always see the prefix
-      "config.process[0].datasets[x].caption_dropout_rate": [0, 0.05],
-      "config.process[0].model.model_kwargs": [
+      'config.process[0].datasets[x].caption_dropout_rate': [0, 0.05],
+      'config.process[0].model.model_kwargs': [
         {
-          cot: "full",
+          cot: 'full',
           abc_dropout: 0.5,
           sample_ar_repetition_penalty: 1.2,
           ar_kl_weight: 0.2,
@@ -290,55 +512,60 @@ defaults: {
         {},
       ],
     },
-hasMultiLinePrompts: true,
-disableSections: ["network.conv", "model.quantize_te"],
-additionalSections: ["model.low_vram", "sample.duration"],
-modelNotes: {"summary":"Experimental: YuE2 audio training","paragraphs":["Trains AR composition and NAR audio rendering together. Use a large, varied dataset: small collections quickly overfit the AR expert. Keep caption dropout at zero and latent caching enabled.","Uses the community real-audio tokenizer. Training captions contain style tags, then [Lyrics] and the lyrics. Vocal separation training is unavailable."]}},
-{name: "qwen25_omni",
-label: "Qwen2.5-Omni",
-group: "llm",
-defaults: {
-      // default updates when [selected, unselected] in the UI
-      "config.process[0].model.name_or_path": [
-        "ai-toolkit/Qwen2.5-Omni-7B/qwen2_5_omni_7b_convrot8.safetensors",
-        defaultNameOrPath,
-      ],
-      "config.process[0].model.quantize": [true, false],
-      "config.process[0].model.quantize_te": [false, false],
-      "config.process[0].model.low_vram": [false, false],
-      // the single-file thinker ships convrot8 layers; requesting convrot8 keeps them as-is
-      "config.process[0].model.qtype": ["convrot8", "qfloat8"],
-      "config.process[0].train.unload_text_encoder": [false, false],
-      "config.process[0].train.noise_scheduler": ["flowmatch", "flowmatch"],
-      "config.process[0].train.batch_size": [1, 1],
-      "config.process[0].sample": [
-        defaultQwen25OmniSampleConfig,
-        defaultSampleConfig,
-      ],
-      // media is encoded on the GPU per step; the cache is optional and large (~54 MB per 300 s of audio)
-      "config.process[0].datasets[x].cache_latents_to_disk": [false, true],
-      "config.process[0].datasets[x].resolution": [[512], [512, 768, 1024]],
-      // the caption is the training target; a blank one trains nothing
-      "config.process[0].datasets[x].caption_dropout_rate": [0, 0.05],
-      "config.process[0].model.model_kwargs": [
-        { instruction: "Describe this in detail." },
-        {},
+    hasMultiLinePrompts: true,
+    disableSections: ['network.conv', 'model.quantize_te'],
+    additionalSections: ['model.low_vram', 'sample.duration'],
+    modelNotes: {
+      summary: 'Experimental: YuE2 audio training',
+      paragraphs: [
+        'Trains AR composition and NAR audio rendering together. Use a large, varied dataset: small collections quickly overfit the AR expert. Keep caption dropout at zero and latent caching enabled.',
+        'Uses the community real-audio tokenizer. Training captions contain style tags, then [Lyrics] and the lyrics. Vocal separation training is unavailable.',
       ],
     },
-disableSections: [
-      "network.conv",
-      "trigger_word",
-      "train.diff_output_preservation",
-      "train.blank_prompt_preservation",
-      "train.unload_text_encoder",
-      "slider",
+  },
+  {
+    name: 'qwen25_omni',
+    label: 'Qwen2.5-Omni',
+    group: 'llm',
+    defaults: {
+      // default updates when [selected, unselected] in the UI
+      'config.process[0].model.name_or_path': [
+        'ai-toolkit/Qwen2.5-Omni-7B/qwen2_5_omni_7b_convrot8.safetensors',
+        defaultNameOrPath,
+      ],
+      'config.process[0].model.quantize': [true, false],
+      'config.process[0].model.quantize_te': [false, false],
+      'config.process[0].model.low_vram': [false, false],
+      // the single-file thinker ships convrot8 layers; requesting convrot8 keeps them as-is
+      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+      'config.process[0].train.unload_text_encoder': [false, false],
+      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+      'config.process[0].train.batch_size': [1, 1],
+      'config.process[0].sample': [defaultQwen25OmniSampleConfig, defaultSampleConfig],
+      // media is encoded on the GPU per step; the cache is optional and large (~54 MB per 300 s of audio)
+      'config.process[0].datasets[x].cache_latents_to_disk': [false, true],
+      'config.process[0].datasets[x].resolution': [[512], [512, 768, 1024]],
+      // the caption is the training target; a blank one trains nothing
+      'config.process[0].datasets[x].caption_dropout_rate': [0, 0.05],
+      'config.process[0].model.model_kwargs': [{ instruction: 'Describe this in detail.' }, {}],
+    },
+    disableSections: [
+      'network.conv',
+      'trigger_word',
+      'train.diff_output_preservation',
+      'train.blank_prompt_preservation',
+      'train.unload_text_encoder',
+      'slider',
     ],
-additionalSections: [
-      "model.model_kwargs.instruction",
-      "sample.ctrl_img",
-      "datasets.num_frames",
-    ],
-modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Train the text stack from audio, image, or video files paired with text captions. Batch size must be 1. Video uses frames without its audio track.","Use the same instruction when training and captioning. Sampling accepts a media file and writes generated text."]}},
+    additionalSections: ['model.model_kwargs.instruction', 'sample.ctrl_img', 'datasets.num_frames'],
+    modelNotes: {
+      summary: 'Qwen2.5-Omni media-to-text training',
+      paragraphs: [
+        'Train the text stack from audio, image, or video files paired with text captions. Batch size must be 1. Video uses frames without its audio track.',
+        'Use the same instruction when training and captioning. Sampling accepts a media file and writes generated text.',
+      ],
+    },
+  },
   {
     name: 'anima',
     label: 'Anima',
@@ -946,45 +1173,80 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
       '3 bit with ARA': 'uint3|ostris/accuracy_recovery_adapters/qwen_image_edit_2511_torchao_uint3.safetensors',
     },
   },
-  ...([false, true] as const).map((turbo): ModelArch => ({
-    name: turbo ? 'qwen_image_2:turbo' : 'qwen_image_2',
-    label: turbo ? 'Qwen-Image-2.1 Turbo (w/ Training Adapter)' : 'Qwen-Image-2.1',
-    group: 'image',
-    defaults: {
-      'config.process[0].model.name_or_path': [turbo ? 'Comfy-Org/Qwen-Image-2.1/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors' : 'Qwen/Qwen-Image-2.1', defaultNameOrPath],
-      'config.process[0].model.model_kwargs': [{ use_comfy_weights: false, match_target_res: true, ...(turbo ? { turbo: true } : {}) }, {}],
-      'config.process[0].model.quantize': [true, false],
-      'config.process[0].model.quantize_te': [true, false],
-      'config.process[0].model.low_vram': [true, false],
-      'config.process[0].train.unload_text_encoder': [false, false],
-      'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
-      'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
-      'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
-      'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
-      'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
-      'config.process[0].sample.guidance_scale': [1, 4],
-      ...(turbo ? {
-        'config.process[0].sample.sample_steps': [8, 25],
-        'config.process[0].model.assistant_lora_path': [
-          'ostris/qwen_image_2_turbo_training_adapter/qwen_image_2_turbo_training_adapter_v1.safetensors', undefined,
+  ...([false, true] as const).map(
+    (turbo): ModelArch => ({
+      name: turbo ? 'qwen_image_2:turbo' : 'qwen_image_2',
+      label: turbo ? 'Qwen-Image-2.1 Turbo (w/ Training Adapter)' : 'Qwen-Image-2.1',
+      group: 'image',
+      defaults: {
+        'config.process[0].model.name_or_path': [
+          turbo
+            ? 'Comfy-Org/Qwen-Image-2.1/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors'
+            : 'Qwen/Qwen-Image-2.1',
+          defaultNameOrPath,
         ],
-      } : {}),
-    },
-    disableSections: ['network.conv', 'train.unload_text_encoder'],
-    additionalSections: ['datasets.multi_control_paths', 'sample.multi_ctrl_imgs', 'model.low_vram', 'model.layer_offloading'],
-    customModelSelectOptions: [{
-      label: 'Reference image resolution',
-      options: [{ value: 'match', label: 'Match target pixel area (default)' }, { value: 'cap', label: 'Cap only; keep smaller references' }],
-      getValue: (config: JobConfig) => config.config.process[0].model.model_kwargs?.match_target_res === false ? 'cap' : 'match',
-      onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
-        setJobConfig({ ...config.config.process[0].model.model_kwargs, match_target_res: value === 'match' }, 'config.process[0].model.model_kwargs');
+        'config.process[0].model.model_kwargs': [
+          { use_comfy_weights: false, match_target_res: true, ...(turbo ? { turbo: true } : {}) },
+          {},
+        ],
+        'config.process[0].model.quantize': [true, false],
+        'config.process[0].model.quantize_te': [true, false],
+        'config.process[0].model.low_vram': [true, false],
+        'config.process[0].train.unload_text_encoder': [false, false],
+        'config.process[0].sample.sampler': ['flowmatch', 'flowmatch'],
+        'config.process[0].train.noise_scheduler': ['flowmatch', 'flowmatch'],
+        'config.process[0].train.timestep_type': ['shift', 'sigmoid'],
+        'config.process[0].model.qtype': ['convrot8', 'qfloat8'],
+        'config.process[0].model.qtype_te': ['convrot8', 'qfloat8'],
+        'config.process[0].sample.guidance_scale': [1, 4],
+        ...(turbo
+          ? {
+              'config.process[0].sample.sample_steps': [8, 25],
+              'config.process[0].model.assistant_lora_path': [
+                'ostris/qwen_image_2_turbo_training_adapter/qwen_image_2_turbo_training_adapter_v1.safetensors',
+                undefined,
+              ],
+            }
+          : {}),
       },
-    }],
-    modelNotes: {
-      summary: turbo ? 'Qwen Image 2.1 Turbo: eight-step generation' : 'Qwen Image 2.1: text-to-image and editing',
-      paragraphs: [...(turbo ? ['Turbo uses its fixed eight-step schedule at guidance 1. The training adapter is active during training and disabled for previews; generation does not load it. The Turbo preset explicitly selects the ConvRot checkpoint.'] : []), 'One model supports both tasks. Add dataset control paths or sample reference images for editing; omit them for text-to-image. The base preset uses official Qwen weights; Turbo uses its explicit ConvRot checkpoint. Both presets use ConvRot int8 for the transformer and text encoder. Automatic Comfy substitution is disabled; set model_kwargs.use_comfy_weights to true to opt in. Existing saved configurations and explicit Comfy sources remain supported.', 'Use guidance 1.0 and dimensions divisible by 32. Existing saved jobs keep their explicit guidance; set it to 1.0 to use this recommendation. Keep the text encoder loaded when using references. RGBA output, 2K quality presets, prefix caching, and optional official prompt expansion are available in the Qwen controls. Up to 10 ordered references are supported; training preserves source alpha.'],
-    },
-  })),
+      disableSections: ['network.conv', 'train.unload_text_encoder'],
+      additionalSections: [
+        'datasets.multi_control_paths',
+        'sample.multi_ctrl_imgs',
+        'model.low_vram',
+        'model.layer_offloading',
+      ],
+      customModelSelectOptions: [
+        {
+          label: 'Reference image resolution',
+          options: [
+            { value: 'match', label: 'Match target pixel area (default)' },
+            { value: 'cap', label: 'Cap only; keep smaller references' },
+          ],
+          getValue: (config: JobConfig) =>
+            config.config.process[0].model.model_kwargs?.match_target_res === false ? 'cap' : 'match',
+          onChange: (value: string, config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+            setJobConfig(
+              { ...config.config.process[0].model.model_kwargs, match_target_res: value === 'match' },
+              'config.process[0].model.model_kwargs',
+            );
+          },
+        },
+      ],
+      modelNotes: {
+        summary: turbo ? 'Qwen Image 2.1 Turbo: eight-step generation' : 'Qwen Image 2.1: text-to-image and editing',
+        paragraphs: [
+          ...(turbo
+            ? [
+                'Turbo uses its fixed eight-step schedule at guidance 1. The training adapter is active during training and disabled for previews; generation does not load it. The Turbo preset explicitly selects the ConvRot checkpoint.',
+              ]
+            : []),
+          'One model supports both tasks. Add dataset control paths or sample reference images for editing; omit them for text-to-image. The base preset uses official Qwen weights; Turbo uses its explicit ConvRot checkpoint. Both presets use ConvRot int8 for the transformer and text encoder. Automatic Comfy substitution is disabled; set model_kwargs.use_comfy_weights to true to opt in. Existing saved configurations and explicit Comfy sources remain supported.',
+          'Use guidance 1.0 and dimensions divisible by 32. Existing saved jobs keep their explicit guidance; set it to 1.0 to use this recommendation. Keep the text encoder loaded when using references. RGBA output, 2K quality presets, prefix caching, and optional official prompt expansion are available in the Qwen controls. Up to 10 ordered references are supported; training preserves source alpha.',
+        ],
+      },
+    }),
+  ),
   {
     name: 'hidream',
     label: 'HiDream',
@@ -1244,7 +1506,9 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
     additionalSections: ['model.low_vram', 'model.layer_offloading'],
     modelNotes: {
       summary: 'Iris-3B: pixel-space text-to-image',
-      paragraphs: ['Uses a frozen Qwen3-VL text encoder and no VAE. Use dimensions divisible by 16, shifted training timesteps, and guidance 3 with 30 preview steps. Depth and upscaler conditioning are not supported.'],
+      paragraphs: [
+        'Uses a frozen Qwen3-VL text encoder and no VAE. Use dimensions divisible by 16, shifted training timesteps, and guidance 3 with 30 preview steps. Depth and upscaler conditioning are not supported.',
+      ],
     },
   },
   {
@@ -1811,12 +2075,19 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
     const trainingAdapter = 'ostris/krea2_turbo_training_adapter/krea2_turbo_training_adapter_v1.safetensors';
     return {
       name: `krea2:kroma_${variant}`,
-      label: turbo ? 'Kroma Turbo OPD (experimental)' : variant === 'teacher' ? 'Kroma Teacher (recommended)' : 'Kroma Base',
+      label: turbo
+        ? 'Kroma Turbo OPD (experimental)'
+        : variant === 'teacher'
+          ? 'Kroma Teacher (recommended)'
+          : 'Kroma Base',
       group: turbo ? 'experimental' : 'image',
       allowedNetworkTypes: ['lora'],
       defaults: {
         'config.process[0].model.name_or_path': ['lodestones/Kroma', defaultNameOrPath],
-        'config.process[0].model.model_kwargs': [{ checkpoint_filename: checkpoint, ...(turbo ? { schedule_mu: 1.15 } : {}) }, {}],
+        'config.process[0].model.model_kwargs': [
+          { checkpoint_filename: checkpoint, ...(turbo ? { schedule_mu: 1.15 } : {}) },
+          {},
+        ],
         'config.process[0].model.assistant_lora_path': [undefined, undefined],
         'config.process[0].model.quantize': [true, false],
         'config.process[0].model.quantize_te': [true, false],
@@ -1858,17 +2129,36 @@ modelNotes: {"summary":"Qwen2.5-Omni media-to-text training","paragraphs":["Trai
         'config.process[0].sample.keep_low_vram_for_samples': [true, false],
       },
       disableSections: ['network.conv', 'train.train_text_encoder'],
-      additionalSections: ['model.low_vram', 'model.layer_offloading', ...(turbo ? ['model.assistant_lora_path' as const] : [])],
-      ...(turbo ? { customModelSelectOptions: [{
-        label: 'Experimental Turbo training adapter',
-        options: [{ value: 'none', label: 'None (default)' }, { value: 'adapter', label: 'Krea 2 adapter (quality unverified)' }],
-        getValue: (config: JobConfig) => config.config.process[0].model.assistant_lora_path?.trim() ? 'adapter' : 'none',
-        onChange: (value: string, _config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
-          setJobConfig(value === 'adapter' ? trainingAdapter : undefined, 'config.process[0].model.assistant_lora_path');
-        },
-      }] } : {}),
+      additionalSections: [
+        'model.low_vram',
+        'model.layer_offloading',
+        ...(turbo ? ['model.assistant_lora_path' as const] : []),
+      ],
+      ...(turbo
+        ? {
+            customModelSelectOptions: [
+              {
+                label: 'Experimental Turbo training adapter',
+                options: [
+                  { value: 'none', label: 'None (default)' },
+                  { value: 'adapter', label: 'Krea 2 adapter (quality unverified)' },
+                ],
+                getValue: (config: JobConfig) =>
+                  config.config.process[0].model.assistant_lora_path?.trim() ? 'adapter' : 'none',
+                onChange: (value: string, _config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => {
+                  setJobConfig(
+                    value === 'adapter' ? trainingAdapter : undefined,
+                    'config.process[0].model.assistant_lora_path',
+                  );
+                },
+              },
+            ],
+          }
+        : {}),
       modelNotes: {
-        summary: turbo ? 'Experimental direct LoRA training on Kroma Turbo OPD.' : 'Kroma LoRA training using the Krea 2 architecture.',
+        summary: turbo
+          ? 'Experimental direct LoRA training on Kroma Turbo OPD.'
+          : 'Kroma LoRA training using the Krea 2 architecture.',
         paragraphs: [
           '512px profile with Float8, caching and legacy offloading. Short synthetic-data runs passed on a 16 GB RTX 5080 with 192 GB system RAM; host RAM peaked around 38–73 GiB. Real datasets and longer prompts may need more memory. Teacher has a smaller download (25.7 GB versus 51.3 GB base).',
           'The publisher recommends training on base or teacher, then loading the LoRA on Turbo OPD. Text encoder and VAE remain frozen.',
@@ -2295,18 +2585,19 @@ export const modelArchs: ModelArch[] = modelPresentation.map(presentation => {
   };
 });
 
-export const groupModelOptions = (archs: ModelArch[]): GroupedSelectOption[] => archs.reduce((acc, arch) => {
-  const group = acc.find(g => g.label === arch.group);
-  if (group) {
-    group.options.push({ value: arch.name, label: arch.label });
-  } else {
-    acc.push({
-      label: arch.group,
-      options: [{ value: arch.name, label: arch.label }],
-    });
-  }
-  return acc;
-}, [] as GroupedSelectOption[]);
+export const groupModelOptions = (archs: ModelArch[]): GroupedSelectOption[] =>
+  archs.reduce((acc, arch) => {
+    const group = acc.find(g => g.label === arch.group);
+    if (group) {
+      group.options.push({ value: arch.name, label: arch.label });
+    } else {
+      acc.push({
+        label: arch.group,
+        options: [{ value: arch.name, label: arch.label }],
+      });
+    }
+    return acc;
+  }, [] as GroupedSelectOption[]);
 
 export const groupedModelOptions = groupModelOptions(modelArchs);
 

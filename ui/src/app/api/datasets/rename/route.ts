@@ -1,4 +1,5 @@
-import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
+import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import { renameDatasetFolder, DatasetRenameError } from '@/server/datasetRename';
@@ -54,4 +55,4 @@ async function postCommand(request: Request) {
   }
 }
 
-export const POST = withCommandBoundary(postCommand);
+export const POST = withPlainDatasetCommand(postCommand);

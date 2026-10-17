@@ -1,4 +1,5 @@
 'use client';
+import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { createGlobalState } from 'react-global-hooks';
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
 import { FaUpload, FaTimesCircle, FaSpinner } from 'react-icons/fa';
@@ -8,8 +9,6 @@ import { apiClient } from '@/utils/api';
 import type { EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
 import type { EncryptedDatasetItem } from '@/types';
 import {
-  buildEncryptedDatasetItem,
-  encryptCatalog,
   pairMediaAndCaptionFiles,
   readRootCaptionFile,
   readTextFile,
@@ -170,84 +169,6 @@ export default function AddImagesModal() {
     setDoneCount(0);
     setErrorCount(0);
   }, []);
-  const uploadEncryptedFiles = useCallback(
-    async (acceptedFiles: File[]) => {
-      if (!encrypted || acceptedFiles.length === 0) return;
-      const pairs = pairMediaAndCaptionFiles(acceptedFiles);
-      const rootCaption = await readRootCaptionFile(acceptedFiles);
-      if (pairs.length === 0 && rootCaption === null) return;
-      const entries: FileEntry[] = pairs.map(({ file }) => ({
-        id: nextId++,
-        file,
-        status: 'pending',
-        progress: 0,
-      }));
-      setFileEntries(entries);
-      setTotalCount(entries.length);
-      setDoneCount(0);
-      setErrorCount(0);
-      setIsUploading(true);
-      abortRef.current = false;
-      try {
-        const encryptedObjects: Array<{
-          objectPath: string;
-          blob: Blob;
-        }> = [];
-        const newItems: EncryptedDatasetItem[] = [];
-        for (let i = 0; i < pairs.length; i += 1) {
-          if (abortRef.current) return;
-          const entryId = entries[i].id;
-          setFileEntries(prev =>
-            prev.map(entry => (entry.id === entryId ? { ...entry, status: 'uploading', progress: 10 } : entry)),
-          );
-          const { file, captionFile } = pairs[i];
-          const caption = captionFile ? await readTextFile(captionFile) : null;
-          const built = await buildEncryptedDatasetItem(file, encrypted.cryptoKey, caption);
-          newItems.push(built.item);
-          encryptedObjects.push(...built.encryptedObjects);
-          setFileEntries(prev => prev.map(entry => (entry.id === entryId ? { ...entry, progress: 75 } : entry)));
-        }
-        const nextCatalog: EncryptedDatasetCatalog = {
-          ...encrypted.catalog,
-          items: [...encrypted.catalog.items, ...newItems],
-          ...(rootCaption !== null ? { rootCaption } : {}),
-        };
-        const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encrypted.cryptoKey, encrypted.manifest);
-        for (const encryptedObject of encryptedObjects) {
-          await uploadDatasetFile(encryptedObject.blob, {
-            datasetName,
-            filename: encryptedObject.objectPath.replace(/^objects\//, '') || 'object.bin',
-            workerID,
-            encryptedObjectPath: encryptedObject.objectPath,
-          });
-        }
-        await apiClient.post('/api/datasets/encrypted/update', {
-          datasetName,
-          worker_id: workerID,
-          manifest: nextManifest,
-        });
-        encrypted.onUpdate(nextManifest, nextCatalog);
-        setDoneCount(entries.length);
-        setFileEntries([]);
-        modalInfoRef.current?.onComplete?.();
-        setModalInfo(null);
-        resetState();
-      } catch (err) {
-        console.error('Encrypted upload failed:', err);
-        setErrorCount(prev => prev + 1);
-        setFileEntries(prev =>
-          prev.map(entry =>
-            entry.status === 'uploading' || entry.status === 'pending'
-              ? { ...entry, status: 'error', error: err instanceof Error ? err.message : 'Upload failed' }
-              : entry,
-          ),
-        );
-      } finally {
-        setIsUploading(false);
-      }
-    },
-    [datasetName, encrypted, null, resetState, setModalInfo, workerID],
-  );
   const processQueue = useCallback(
     async (entries: FileEntry[]) => {
       setIsUploading(true);
@@ -275,7 +196,7 @@ export default function AddImagesModal() {
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return;
       if (encrypted) {
-        void uploadEncryptedFiles(acceptedFiles);
+        reportWorkflowError('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt this dataset before uploading.');
         return;
       }
       const entries: FileEntry[] = acceptedFiles.map(file => ({
@@ -290,7 +211,7 @@ export default function AddImagesModal() {
       setErrorCount(0);
       processQueue(entries);
     },
-    [encrypted, processQueue, uploadEncryptedFiles],
+    [encrypted, processQueue],
   );
   const handleCancel = useCallback(() => {
     abortRef.current = true;

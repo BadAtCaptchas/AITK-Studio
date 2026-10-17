@@ -1,4 +1,5 @@
-import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
+import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -17,7 +18,9 @@ export const dynamic = 'force-dynamic';
 
 async function postCommand(request: NextRequest) {
   try {
-    const body = assertGlobalPayload(await readJsonCommand(request)) as DatasetCaptionBulkRequest & { worker_id?: string };
+    const body = assertGlobalPayload(await readJsonCommand(request)) as DatasetCaptionBulkRequest & {
+      worker_id?: string;
+    };
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
     if (!isLocalWorker(workerID)) {
@@ -52,4 +55,4 @@ async function postCommand(request: NextRequest) {
   }
 }
 
-export const POST = withCommandBoundary(postCommand);
+export const POST = withPlainDatasetCommand(postCommand);

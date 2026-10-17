@@ -1,4 +1,4 @@
-import { db, getDatabaseConfig } from '../../src/server/db';
+import { db,getDatabaseConfig } from '../../src/server/db';
 import { finishObservedJobProcess } from '../../src/server/jobProcess';
 import { claimJobAttempt } from '../../src/server/jobAttempts';
 import { withLocalQueueTransition } from '../../src/server/queueCoordination';
@@ -9,28 +9,21 @@ import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { TOOLKIT_ROOT, getHFToken, getModelsRoot, getOpenRouterApiKey } from '../paths';
-import { getTensorBoardLogDir, isTensorBoardEnabled } from '../../src/server/tensorboard';
-import { getToolkitPythonPath, assertPythonRuntimeReady } from '../../src/server/pythonPath';
+import { TOOLKIT_ROOT,getHFToken,getModelsRoot,getOpenRouterApiKey } from '../paths';
+import { getTensorBoardLogDir,isTensorBoardEnabled } from '../../src/server/tensorboard';
+import { getToolkitPythonPath,assertPythonRuntimeReady } from '../../src/server/pythonPath';
 import { getJobTrainingRoot } from '../../src/server/trainingPaths';
 import { prepareHfTokenEnv } from '../../src/server/hfTokenEnv';
 import {
-  getEncryptedDatasetsForJobConfig,
-  getKeyForRequiredDataset,
-  normalizeEncryptedKeyMap,
+getEncryptedDatasetsForJobConfig
 } from '../../src/server/encryptedDatasets';
 import {
-  clearDurableEncryptedDatasetKeys,
-  getDurableEncryptedDatasetKeys,
-  getDurableKeySnapshot,
-} from '../../src/server/encryptedDatasetSecrets';
-import {
-  getDirectRemoteOllamaWorkerId,
-  getSecureRemoteOllamaWorkerId,
-  rewriteDirectRemoteOllamaCaptionersForLocalOllama,
+getDirectRemoteOllamaWorkerId,
+getSecureRemoteOllamaWorkerId,
+rewriteDirectRemoteOllamaCaptionersForLocalOllama,
 } from '../../src/server/secureRemoteCaptionJobs';
 import { getRemoteOllamaWorker } from '../../src/server/remoteOllamaWorkers';
-import { hostnamesFromUrls, isOfflineModeEnabled, offlineChildProcessEnv } from '../../src/server/networkPolicy';
+import { hostnamesFromUrls,isOfflineModeEnabled,offlineChildProcessEnv } from '../../src/server/networkPolicy';
 import { isTelemetryEnabled } from '../../src/server/telemetry';
 import { telemetryChildProcessEnv } from '../../src/utils/telemetry';
 import type { EncryptedDatasetStartKey } from '../../src/types';
@@ -92,7 +85,6 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
     let launchLogPath = '';
     let launchLogFd: number | null = null;
     let cleanupHfTokenEnv: (() => Promise<void>) | null = null;
-    let durableKeySnapshot: string | null = null;
 
     const closeLaunchLog = () => {
       if (launchLogFd == null) return;
@@ -165,19 +157,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         }
       }
       const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
-      durableKeySnapshot = await getDurableKeySnapshot(jobID);
-      const durableEncryptedDatasetKeys = await getDurableEncryptedDatasetKeys(jobID);
-      const encryptedKeyMap = normalizeEncryptedKeyMap([
-        ...durableEncryptedDatasetKeys,
-        ...(options.encryptedDatasetKeys || []),
-      ]);
-      const encryptedDatasetKeys = requiredEncryptedDatasets.map(dataset => {
-        const keyB64 = getKeyForRequiredDataset(encryptedKeyMap, dataset);
-        if (!keyB64) {
-          throw new Error(`decryption key required for encrypted dataset: ${dataset.name}`);
-        }
-        return { datasetPath: dataset.path, keyB64 };
-      });
+      if (requiredEncryptedDatasets.length) throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt legacy datasets before training.');
       jobConfig.config.name = jobStorageKey(job);
       if (Array.isArray(jobConfig.config?.process)) {
         jobConfig.config.process.forEach((processConfig: any) => {
@@ -238,13 +218,6 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         additionalEnv.OPENROUTER_API_KEY = openRouterApiKey;
         additionalEnv.AITK_OPENROUTER_API_KEY = openRouterApiKey;
       }
-      if (encryptedDatasetKeys.length > 0) {
-        additionalEnv.AITK_ENCRYPTED_DATASET_KEYS_B64 = Buffer.from(
-          JSON.stringify(encryptedDatasetKeys),
-          'utf-8',
-        ).toString('base64');
-      }
-
       const args = [runFilePath, configPath, '--log', logPath];
       launchLogFd = fs.openSync(launchLogPath, 'a');
       appendLaunchLog(launchLogPath, `[launcher] ${new Date().toISOString()} starting job ${jobID}, attempt ${job.attempt_id}`);
@@ -299,7 +272,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
         cleanupSensitiveEnv();
         if (code === 0 && signal == null) {
           void finishObservedJobProcess(job, 'completed', 'Job completed')
-            .then(updated => updated && updated.status !== 'queued' ? clearDurableEncryptedDatasetKeys(jobID, durableKeySnapshot) : undefined)
+            .then(() => undefined)
             .catch(error => console.error('Error reconciling completed job process:', error));
           return;
         }

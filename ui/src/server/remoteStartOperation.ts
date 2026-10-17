@@ -33,8 +33,6 @@ export async function acceptRemoteStart(jobID: string, request: JobStartRequest)
       request.idempotencyKey,
     ));
   if (['completed', 'failed', 'canceled'].includes(operation.state)) return operation;
-  if (prepared.encryptedKeysForLaunch.length > 0 && !prepared.useDurableEncryptedKeys)
-    rememberOperationKeys(operation.id, prepared.encryptedKeysForLaunch);
   const claimed = await db.jobs.updateIf(
     jobID,
     {
@@ -74,8 +72,7 @@ export async function executeRemoteStart(operation: Operation): Promise<unknown>
     );
     if (!job) throw new Error('Job changed before operation acceptance');
   }
-  const keys = input.needsEphemeralKeys ? await fetchOperationKeys(operation.id) : undefined;
-  const prepared = await prepareJobStart(input.jobID, keys, input.durableKeys, { operationID: operation.id });
+  const prepared = await prepareJobStart(input.jobID, undefined, false, { operationID: operation.id });
   let progressWrites = Promise.resolve();
   const result = await startPreparedJob(prepared, {
     operationID: operation.id,

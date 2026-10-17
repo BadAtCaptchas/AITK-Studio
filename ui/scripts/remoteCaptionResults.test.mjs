@@ -176,34 +176,14 @@ test('remote caption dataset paths must stay inside the datasets root after real
   );
 });
 
-test('encrypted remote caption merge copies caption object and updates catalog', async () => {
+test('legacy encrypted caption merge is rejected without changing originals', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-encrypted-caption-'));
-  const source = path.join(root, 'source');
-  const target = path.join(root, 'target');
-  const item = {
-    id: 'img1',
-    name: 'cat.jpg',
-    extension: 'jpg',
-    mimeType: 'image/jpeg',
-    mediaKind: 'image',
-    objectPath: 'objects/img1.bin',
-    size: 123,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  };
-  await writeEncryptedDataset(source, item, 'remote encrypted caption');
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source'), target = path.join(root, 'target');
+  const item = { id: 'img1', name: 'cat.jpg', extension: 'jpg', mimeType: 'image/jpeg', mediaKind: 'image', objectPath: 'objects/img1.bin', size: 123 };
+  await writeEncryptedDataset(source, item, 'remote caption');
   await writeEncryptedDataset(target, item, null);
-
-  const result = await mergeEncryptedCaptionDataset(source, target, { keyB64: KEY_B64, recaption: false });
-  assert.deepEqual(result, { copied: 1, skipped: 0 });
-
-  const manifest = JSON.parse(await fs.readFile(path.join(target, '.aitk_encrypted_dataset.json'), 'utf8'));
-  const catalog = JSON.parse(decryptPayload(manifest.catalog, CATALOG_AAD).toString('utf8'));
-  assert.equal(catalog.items[0].captionObjectPath, 'objects/img1.caption.bin');
-
-  const copiedCaption = JSON.parse(await fs.readFile(path.join(target, 'objects', 'img1.caption.bin'), 'utf8'));
-  assert.equal(
-    decryptPayload(copiedCaption, objectAad('objects/img1.caption.bin')).toString('utf8'),
-    'remote encrypted caption',
-  );
+  const before = await fs.readFile(path.join(target, '.aitk_encrypted_dataset.json'));
+  await assert.rejects(mergeEncryptedCaptionDataset(source, target, { keyB64: KEY_B64, recaption: false }), /ENCRYPTED_DATASET_MIGRATION_REQUIRED/);
+  assert.deepEqual(await fs.readFile(path.join(target, '.aitk_encrypted_dataset.json')), before);
 });

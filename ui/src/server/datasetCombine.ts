@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { DATASET_MIGRATION_MESSAGE, DATASET_MIGRATION_REQUIRED } from './datasetDecryption';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -19,7 +20,6 @@ import {
   resolveEncryptedObjectPath,
   validateEncryptedCatalogKey,
   validateEncryptedManifest,
-  writeEncryptedManifest,
 } from './encryptedDatasets';
 
 const AES_GCM_AUTH_TAG_BYTES = 16;
@@ -87,14 +87,7 @@ export function datasetCombineRequestHasKeyMaterial(request: Partial<DatasetComb
   );
 }
 
-type SourceContext = {
-  name: string;
-  folder: string;
-  encrypted: boolean;
-  keyB64?: string;
-  manifest?: EncryptedDatasetManifest;
-  catalog?: EncryptedDatasetCatalog;
-};
+type SourceContext = { name: string; folder: string };
 
 type PlainMediaSource = {
   type: 'plain';
@@ -105,14 +98,7 @@ type PlainMediaSource = {
   layered?: LayeredImageManifest;
 };
 
-type EncryptedMediaSource = {
-  type: 'encrypted';
-  datasetFolder: string;
-  keyB64: string;
-  item: EncryptedDatasetItem;
-};
-
-type MediaSource = PlainMediaSource | EncryptedMediaSource;
+type MediaSource = PlainMediaSource;
 
 type AllocatedName = {
   mediaName: string;
@@ -136,111 +122,8 @@ function isPathInside(parent: string, child: string) {
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function base64ToBuffer(value: string, fieldName: string) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
-    throw new DatasetCombineError(`Invalid encrypted dataset ${fieldName}`);
-  }
-  const buffer = Buffer.from(value, 'base64');
-  if (buffer.length !== 32) {
-    throw new DatasetCombineError(`Encrypted dataset ${fieldName} must be 32 bytes`);
-  }
-  return buffer;
-}
-
-function decryptPayload(payload: EncryptedPayload, keyB64: string, aad: string) {
-  const key = base64ToBuffer(keyB64, 'key');
-  const nonce = Buffer.from(payload.nonce, 'base64');
-  const encrypted = Buffer.from(payload.data, 'base64');
-  if (nonce.length !== AES_GCM_NONCE_BYTES || encrypted.length <= AES_GCM_AUTH_TAG_BYTES) {
-    throw new DatasetCombineError('Invalid encrypted dataset payload');
-  }
-
-  const ciphertext = encrypted.subarray(0, encrypted.length - AES_GCM_AUTH_TAG_BYTES);
-  const tag = encrypted.subarray(encrypted.length - AES_GCM_AUTH_TAG_BYTES);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce, {
-    authTagLength: AES_GCM_AUTH_TAG_BYTES,
-  });
-  decipher.setAAD(Buffer.from(aad, 'utf8'));
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-}
-
-function encryptPayload(data: Buffer, keyB64: string, aad: string): EncryptedPayload {
-  const key = base64ToBuffer(keyB64, 'key');
-  const nonce = crypto.randomBytes(AES_GCM_NONCE_BYTES);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce, {
-    authTagLength: AES_GCM_AUTH_TAG_BYTES,
-  });
-  cipher.setAAD(Buffer.from(aad, 'utf8'));
-  const ciphertext = Buffer.concat([cipher.update(data), cipher.final(), cipher.getAuthTag()]);
-  return {
-    nonce: nonce.toString('base64'),
-    data: ciphertext.toString('base64'),
-  };
-}
-
-function decryptCatalog(manifest: EncryptedDatasetManifest, keyB64: string): EncryptedDatasetCatalog {
-  const plaintext = decryptPayload(manifest.catalog, keyB64, CATALOG_AAD);
-  const catalog = JSON.parse(plaintext.toString('utf8')) as EncryptedDatasetCatalog;
-  if (catalog?.version !== 1 || !Array.isArray(catalog.items)) {
-    throw new DatasetCombineError('Invalid encrypted dataset catalog');
-  }
-  return catalog;
-}
-
-function objectAad(objectPath: string) {
-  return `aitk-encrypted-object:${objectPath.replace(/\\/g, '/')}`;
-}
-
 function randomId(bytes = 16) {
   return crypto.randomBytes(bytes).toString('base64url');
-}
-
-function mediaObjectPath(itemId: string) {
-  return `objects/${itemId}.bin`;
-}
-
-function captionObjectPath(itemId: string) {
-  return `objects/${itemId}.caption.bin`;
-}
-
-function mimeTypeForExtension(ext: string) {
-  const normalized = ext.toLowerCase();
-  const map: Record<string, string> = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.webp': 'image/webp',
-    '.jxl': 'image/jxl',
-    '.gif': 'image/gif',
-    '.bmp': 'image/bmp',
-    '.mp4': 'video/mp4',
-    '.avi': 'video/x-msvideo',
-    '.mov': 'video/quicktime',
-    '.mkv': 'video/x-matroska',
-    '.wmv': 'video/x-ms-wmv',
-    '.m4v': 'video/x-m4v',
-    '.flv': 'video/x-flv',
-    '.webm': 'video/webm',
-    '.mp3': 'audio/mpeg',
-    '.wav': 'audio/wav',
-    '.flac': 'audio/flac',
-    '.ogg': 'audio/ogg',
-    '.m4a': 'audio/mp4',
-    '.aac': 'audio/aac',
-  };
-  return map[normalized] || 'application/octet-stream';
-}
-
-function mediaKindForExtension(ext: string): EncryptedDatasetItem['mediaKind'] {
-  const normalized = ext.toLowerCase();
-  if (['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.m4v', '.flv', '.webm'].includes(normalized)) {
-    return 'video';
-  }
-  if (['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac'].includes(normalized)) {
-    return 'audio';
-  }
-  return 'image';
 }
 
 function sanitizeFileName(fileName: string, fallbackExt = '.bin') {
@@ -293,59 +176,14 @@ function normalizeSourceNames(sourceDatasets: unknown) {
   return unique;
 }
 
-function normalizeKeyLookup(keys: DatasetCombineKey[] | undefined, datasetsRoot: string) {
-  const keyMap = new Map<string, string>();
-  if (!Array.isArray(keys)) return keyMap;
-
-  for (const key of keys) {
-    if (!key || typeof key.keyB64 !== 'string') continue;
-    if (typeof key.datasetName === 'string' && key.datasetName.trim()) {
-      keyMap.set(key.datasetName.trim().toLowerCase(), key.keyB64);
-    }
-    if (typeof key.datasetPath === 'string' && key.datasetPath.trim()) {
-      const resolved = path.isAbsolute(key.datasetPath)
-        ? path.resolve(key.datasetPath)
-        : path.resolve(datasetsRoot, key.datasetPath);
-      keyMap.set(resolved.toLowerCase(), key.keyB64);
-      keyMap.set(path.basename(resolved).toLowerCase(), key.keyB64);
-    }
-  }
-
-  return keyMap;
-}
-
-async function resolveSources(datasetsRoot: string, sourceNames: string[], keyMap: Map<string, string>) {
-  const root = path.resolve(datasetsRoot);
+async function resolveSources(datasetsRoot: string, sourceNames: string[]): Promise<SourceContext[]> {
   const sources: SourceContext[] = [];
-
   for (const name of sourceNames) {
-    const folder = resolveDatasetFolder(root, name);
-    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
-      throw new DatasetCombineError(`Dataset not found: ${name}`, 404);
-    }
-
-    const encrypted = isEncryptedDatasetFolder(folder);
-    if (!encrypted) {
-      sources.push({ name, folder, encrypted: false });
-      continue;
-    }
-
-    const manifest = await readEncryptedManifest(folder);
-    const keyB64 = keyMap.get(name.toLowerCase()) || keyMap.get(path.resolve(folder).toLowerCase());
-    if (!keyB64) {
-      throw new DatasetCombineError(`Encrypted dataset key is required for "${name}"`, 403);
-    }
-    validateEncryptedCatalogKey(manifest, keyB64);
-    sources.push({
-      name,
-      folder,
-      encrypted: true,
-      keyB64,
-      manifest,
-      catalog: decryptCatalog(manifest, keyB64),
-    });
+    const folder = resolveDatasetFolder(datasetsRoot, name);
+    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new DatasetCombineError(`Dataset not found: ${name}`, 404);
+    if (isEncryptedDatasetFolder(folder)) throw new DatasetCombineError(DATASET_MIGRATION_REQUIRED, 410);
+    sources.push({ name, folder });
   }
-
   return sources;
 }
 
@@ -391,62 +229,9 @@ async function listPlainMediaSources(datasetFolder: string): Promise<PlainMediaS
 }
 
 async function collectMediaSources(sources: SourceContext[]): Promise<MediaSource[]> {
-  const mediaSources: MediaSource[] = [];
-
-  for (const source of sources) {
-    if (source.encrypted) {
-      const keyB64 = source.keyB64 as string;
-      const catalog = source.catalog as EncryptedDatasetCatalog;
-      for (const item of catalog.items) {
-        mediaSources.push({
-          type: 'encrypted',
-          datasetFolder: source.folder,
-          keyB64,
-          item,
-        });
-      }
-      continue;
-    }
-    mediaSources.push(...(await listPlainMediaSources(source.folder)));
-  }
-
-  return mediaSources;
-}
-
-function encryptedObjectBytes(datasetFolder: string, objectPath: string, keyB64: string) {
-  const resolved = resolveEncryptedObjectPath(datasetFolder, objectPath);
-  const payload = JSON.parse(fs.readFileSync(resolved, 'utf-8')) as EncryptedPayload;
-  return decryptPayload(payload, keyB64, objectAad(objectPath));
-}
-
-function encryptedCaptionBytes(source: EncryptedMediaSource) {
-  if (!source.item.captionObjectPath) return null;
-  return encryptedObjectBytes(source.datasetFolder, source.item.captionObjectPath, source.keyB64);
-}
-
-async function mediaBytes(source: MediaSource) {
-  if (source.type === 'plain') {
-    return fsp.readFile(source.mediaPath);
-  }
-  return encryptedObjectBytes(source.datasetFolder, source.item.objectPath, source.keyB64);
-}
-
-async function captionBytes(source: MediaSource) {
-  if (source.type === 'plain') {
-    if (!source.captionPath) return null;
-    return fsp.readFile(source.captionPath);
-  }
-  return encryptedCaptionBytes(source);
-}
-
-function sourceFileName(source: MediaSource) {
-  if (source.type === 'plain') return source.mediaName;
-  return source.item.name || `${source.item.id}${source.item.extension || '.bin'}`;
-}
-
-function sourceExtension(source: MediaSource) {
-  if (source.type === 'plain') return path.extname(source.mediaName).toLowerCase() || '.bin';
-  return source.item.extension || path.extname(source.item.name || '') || '.bin';
+  const items: MediaSource[] = [];
+  for (const source of sources) items.push(...await listPlainMediaSources(source.folder));
+  return items;
 }
 
 async function writePlainOutput(outputFolder: string, mediaSources: MediaSource[]) {
@@ -454,7 +239,7 @@ async function writePlainOutput(outputFolder: string, mediaSources: MediaSource[
   let itemCount = 0;
 
   for (const source of mediaSources) {
-    const names = allocator.allocate(sourceFileName(source), sourceExtension(source));
+    const names = allocator.allocate(source.mediaName, path.extname(source.mediaName).toLowerCase() || '.bin');
     if (source.type === 'plain' && source.layered) {
       await copyLayeredImage(source.datasetFolder, source.layered, outputFolder, names.mediaName);
       itemCount += 1;
@@ -463,13 +248,8 @@ async function writePlainOutput(outputFolder: string, mediaSources: MediaSource[
     const targetMediaPath = path.join(outputFolder, names.mediaName);
     const targetCaptionPath = path.join(outputFolder, names.captionName);
 
-    if (source.type === 'plain') {
-      await fsp.copyFile(source.mediaPath, targetMediaPath, fs.constants.COPYFILE_EXCL);
-    } else {
-      await fsp.writeFile(targetMediaPath, await mediaBytes(source), { flag: 'wx' });
-    }
-
-    const caption = await captionBytes(source);
+    await fsp.copyFile(source.mediaPath, targetMediaPath, fs.constants.COPYFILE_EXCL);
+    const caption = source.captionPath ? await fsp.readFile(source.captionPath) : null;
     if (caption !== null) {
       await fsp.writeFile(targetCaptionPath, caption, { flag: 'wx' });
     }
@@ -477,78 +257,6 @@ async function writePlainOutput(outputFolder: string, mediaSources: MediaSource[
   }
 
   return itemCount;
-}
-
-async function writeEncryptedObject(outputFolder: string, objectPath: string, data: Buffer, keyB64: string) {
-  const payload = encryptPayload(data, keyB64, objectAad(objectPath));
-  const targetPath = path.join(outputFolder, ...objectPath.split('/'));
-  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
-  await fsp.writeFile(targetPath, JSON.stringify(payload), { flag: 'wx' });
-}
-
-function copyEncryptedMetadata(source: MediaSource, item: EncryptedDatasetItem) {
-  if (source.type !== 'encrypted') return item;
-  return {
-    ...item,
-    width: source.item.width,
-    height: source.item.height,
-    durationMs: source.item.durationMs,
-  };
-}
-
-async function writeEncryptedOutput(
-  outputFolder: string,
-  mediaSources: MediaSource[],
-  manifest: EncryptedDatasetManifest,
-  keyB64: string,
-) {
-  const allocator = new UniqueNameAllocator();
-  const now = new Date().toISOString();
-  const items: EncryptedDatasetItem[] = [];
-
-  await fsp.mkdir(path.join(outputFolder, 'objects'), { recursive: true });
-  for (const source of mediaSources) {
-    const names = allocator.allocate(sourceFileName(source), sourceExtension(source));
-    const ext = path.extname(names.mediaName).toLowerCase() || sourceExtension(source);
-    const itemId = randomId();
-    const objectPath = mediaObjectPath(itemId);
-    const media = await mediaBytes(source);
-
-    await writeEncryptedObject(outputFolder, objectPath, media, keyB64);
-
-    let item: EncryptedDatasetItem = {
-      id: itemId,
-      name: names.mediaName,
-      extension: ext,
-      mimeType: source.type === 'encrypted' ? source.item.mimeType : mimeTypeForExtension(ext),
-      mediaKind: source.type === 'encrypted' ? source.item.mediaKind : mediaKindForExtension(ext),
-      objectPath,
-      size: media.length,
-      createdAt: now,
-      updatedAt: now,
-    };
-    item = copyEncryptedMetadata(source, item);
-
-    const caption = await captionBytes(source);
-    if (caption !== null) {
-      const captionPath = captionObjectPath(randomId());
-      await writeEncryptedObject(outputFolder, captionPath, caption, keyB64);
-      item.captionObjectPath = captionPath;
-    }
-
-    items.push(item);
-  }
-
-  const catalog: EncryptedDatasetCatalog = {
-    version: 1,
-    items,
-  };
-  const nextManifest: EncryptedDatasetManifest = {
-    ...manifest,
-    catalog: encryptPayload(Buffer.from(JSON.stringify(catalog), 'utf8'), keyB64, CATALOG_AAD),
-  };
-  await writeEncryptedManifest(outputFolder, nextManifest);
-  return items.length;
 }
 
 function nextDatasetPath(datasetsRoot: string, requestedName: string) {
@@ -569,28 +277,14 @@ function nextDatasetPath(datasetsRoot: string, requestedName: string) {
   return { requestedName: outputName, finalName: candidateName, finalPath: candidatePath };
 }
 
-function validateOutputEncryption(request: DatasetCombineRequest) {
-  if (!request.outputEncrypted) return null;
-  if (!request.outputEncryptedManifest || typeof request.outputKeyB64 !== 'string') {
-    throw new DatasetCombineError('Encrypted output requires a manifest and key');
-  }
-  const manifest = validateEncryptedManifest(request.outputEncryptedManifest);
-  validateEncryptedCatalogKey(manifest, request.outputKeyB64);
-  return { manifest, keyB64: request.outputKeyB64 };
-}
-
 export async function combineDatasets(datasetsRoot: string, request: DatasetCombineRequest): Promise<DatasetCombineResult> {
+  if (request.outputEncrypted || request.outputEncryptedManifest || request.outputKeyB64 || request.sourceDatasets.some(name => isEncryptedDatasetFolder(resolveDatasetFolder(datasetsRoot, name)))) throw new DatasetCombineError(DATASET_MIGRATION_REQUIRED + ': ' + DATASET_MIGRATION_MESSAGE, 410);
   const root = path.resolve(datasetsRoot);
   await fsp.mkdir(root, { recursive: true });
 
   const sourceNames = normalizeSourceNames(request.sourceDatasets);
-  const keyMap = normalizeKeyLookup(request.encryptedDatasetKeys, root);
-  const outputEncryption = validateOutputEncryption(request);
-  const sources = await resolveSources(root, sourceNames, keyMap);
+  const sources = await resolveSources(root, sourceNames);
   const mediaSources = await collectMediaSources(sources);
-  if (outputEncryption && mediaSources.some(source => source.type === 'plain' && source.layered)) {
-    throw new DatasetCombineError('Layered documents cannot be converted to encrypted datasets. Choose unencrypted output.');
-  }
   if (mediaSources.length === 0) {
     throw new DatasetCombineError('No supported media files were found in the selected datasets', 404);
   }
@@ -601,11 +295,7 @@ export async function combineDatasets(datasetsRoot: string, request: DatasetComb
   try {
     await fsp.mkdir(tempPath, { recursive: false });
     let itemCount = 0;
-    if (outputEncryption) {
-      itemCount = await writeEncryptedOutput(tempPath, mediaSources, outputEncryption.manifest, outputEncryption.keyB64);
-    } else {
-      itemCount = await writePlainOutput(tempPath, mediaSources);
-    }
+    itemCount = await writePlainOutput(tempPath, mediaSources);
 
     if (fs.existsSync(finalPath)) {
       throw new DatasetCombineError('Output dataset already exists', 409);
@@ -615,7 +305,7 @@ export async function combineDatasets(datasetsRoot: string, request: DatasetComb
     return {
       dataset: {
         name: finalName,
-        encrypted: request.outputEncrypted === true,
+        encrypted: false,
         itemCount,
         source: 'local',
         worker_id: 'local',

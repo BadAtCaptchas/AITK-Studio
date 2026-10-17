@@ -1,4 +1,5 @@
 'use client';
+import DatasetDecryption from '@/components/DatasetDecryption';
 import { getTrainingReturnPath } from '@/hooks/useTrainingDraft';
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -31,15 +32,12 @@ import {
   arrayBufferToBase64,
   captionObjectPath,
   decryptCatalog,
-  encryptCaptionObject,
-  encryptCatalog,
   exportRawAesKey,
   getRememberedEncryptedDatasetKey,
   importRawAesKey,
   rememberEncryptedDatasetKey,
   unlockEncryptedDatasetKey,
 } from '@/utils/encryptedDatasets';
-import { moveEncryptedDatasetItems } from '@/utils/encryptedDatasetMove';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
 import ThemeLogo from '@/components/ThemeLogo';
@@ -71,12 +69,6 @@ export default function DatasetEditorPage({
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const { settings } = useSettings();
   const [encryptedManifest, setEncryptedManifest] = useState<EncryptedDatasetManifest | null>(null);
-  const [encryptedCatalog, setEncryptedCatalog] = useState<EncryptedDatasetCatalog | null>(null);
-  const [encryptedKey, setEncryptedKey] = useState<CryptoKey | null>(null);
-  const [encryptedRawKeyB64, setEncryptedRawKeyB64] = useState<string | null>(null);
-  const [unlockPassword, setUnlockPassword] = useState('');
-  const [unlockKeyFile, setUnlockKeyFile] = useState<File | null>(null);
-  const [unlockError, setUnlockError] = useState<string | null>(null);
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renameDatasetName, setRenameDatasetName] = useState(datasetName);
   const [isRenamingDataset, setIsRenamingDataset] = useState(false);
@@ -135,9 +127,6 @@ export default function DatasetEditorPage({
             return;
           }
           setEncryptedManifest(null);
-          setEncryptedCatalog(null);
-          setEncryptedKey(null);
-          setEncryptedRawKeyB64(null);
           const root = typeof record.root === 'string' ? record.root : null;
           const images = Array.isArray(record.images) ? record.images : [];
           setImgList(
@@ -168,72 +157,9 @@ export default function DatasetEditorPage({
     () => aggregateAutoCaptionProgress(datasetWatcherLive.watchers, datasetWatcherLive.statuses, datasetName),
     [datasetName, datasetWatcherLive.statuses, datasetWatcherLive.watchers],
   );
-  const encryptedUploadOptions = useMemo(() => {
-    if (!encryptedManifest || !encryptedCatalog || !encryptedKey) return undefined;
-    return {
-      encrypted: {
-        manifest: encryptedManifest,
-        catalog: encryptedCatalog,
-        cryptoKey: encryptedKey,
-        onUpdate: (manifest: EncryptedDatasetManifest, catalog: EncryptedDatasetCatalog) => {
-          setEncryptedManifest(manifest);
-          setEncryptedCatalog(catalog);
-        },
-      },
-    };
-  }, [encryptedCatalog, encryptedKey, encryptedManifest]);
-  useOpenImagesModalOnDrag(datasetName, () => refreshImageList(datasetName), {
-    ...encryptedUploadOptions,
+  useOpenImagesModalOnDrag(encryptedManifest ? '' : datasetName, () => refreshImageList(datasetName), {
     workerID,
   });
-  const unlockEncryptedDataset = async (key: CryptoKey, manifest: EncryptedDatasetManifest) => {
-    const catalog = await decryptCatalog(manifest, key);
-    const rawKeyB64 = await exportRawAesKey(key);
-    setEncryptedKey(key);
-    setEncryptedCatalog(catalog);
-    setEncryptedRawKeyB64(rawKeyB64);
-    rememberEncryptedDatasetKey(datasetName, rawKeyB64);
-    if (datasetRef) {
-      rememberEncryptedDatasetKey(datasetRef, rawKeyB64);
-      rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, datasetName), rawKeyB64);
-    }
-    if (effectiveDatasetRoot) {
-      rememberEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, datasetName), rawKeyB64);
-    }
-  };
-  const handleUnlock = async () => {
-    if (!encryptedManifest) return;
-    setUnlockError(null);
-    try {
-      const key =
-        encryptedManifest.crypto.kdf.type === 'PBKDF2-SHA256'
-          ? (
-              await unlockEncryptedDatasetKey(encryptedManifest, {
-                provider: 'password',
-                password: unlockPassword,
-              })
-            ).key
-          : encryptedManifest.crypto.kdf.type === 'KEYFILE-SHA256' && unlockKeyFile
-            ? (
-                await unlockEncryptedDatasetKey(encryptedManifest, {
-                  provider: 'keyFile',
-                  file: unlockKeyFile,
-                })
-              ).key
-            : encryptedManifest.crypto.kdf.type === 'WEBAUTHN-PRF'
-              ? (await unlockEncryptedDatasetKey(encryptedManifest, { provider: 'webauthnPrf' })).key
-              : null;
-      if (!key) {
-        setUnlockError('Select the key file for this dataset.');
-        return;
-      }
-      await unlockEncryptedDataset(key, encryptedManifest);
-      setUnlockPassword('');
-      setUnlockKeyFile(null);
-    } catch {
-      setUnlockError('Could not decrypt this dataset with the provided secret.');
-    }
-  };
   const plainStudioItems = useMemo<DatasetStudioItem[]>(
     () =>
       imgList.map(img => ({
@@ -247,10 +173,6 @@ export default function DatasetEditorPage({
       })),
     [imgList],
   );
-  const encryptedStudioItems = useMemo<DatasetStudioItem[]>(
-    () => (encryptedCatalog?.items || []).map(item => ({ kind: 'encrypted' as const, item })),
-    [encryptedCatalog?.items],
-  );
   const handlePlainItemCaptioned = useCallback((targetPath: string, captionedAt: string | null) => {
     setImgList(previous =>
       previous.map(image => (image.img_path === targetPath ? { ...image, captioned_at: captionedAt } : image)),
@@ -259,12 +181,10 @@ export default function DatasetEditorPage({
   const openJsonConversion = useCallback(() => {
     if (isRemoteDataset) return;
     openCaptionDatasetModal(datasetPath, () => refreshImageList(datasetName), {
-      encryptedDatasetKeyB64: encryptedRawKeyB64 || undefined,
       datasetName,
-      rootCaption: encryptedCatalog ? (encryptedCatalog.rootCaption ?? null) : undefined,
       preset: 'ideogram_json',
     });
-  }, [datasetName, datasetPath, encryptedCatalog, encryptedRawKeyB64, isRemoteDataset, refreshImageList]);
+  }, [datasetName, datasetPath, isRemoteDataset, refreshImageList]);
   useEffect(() => {
     if (datasetName) {
       refreshImageList(datasetName);
@@ -300,42 +220,6 @@ export default function DatasetEditorPage({
     };
   }, [datasetName, isRemoteDataset, workerID]);
   useEffect(() => {
-    if (!encryptedManifest || encryptedKey || encryptedCatalog) return;
-    const remembered =
-      (datasetRef ? getRememberedEncryptedDatasetKey(datasetRef) : null) ||
-      null ||
-      getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(workerID, datasetName)) ||
-      getRememberedEncryptedDatasetKey(datasetName) ||
-      (effectiveDatasetRoot ? getRememberedEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, datasetName)) : null);
-    if (!remembered) return;
-    importRawAesKey(remembered)
-      .then(key => unlockEncryptedDataset(key, encryptedManifest))
-      .catch(() => undefined);
-  }, [
-    datasetName,
-    datasetRef,
-    effectiveDatasetRoot,
-    encryptedCatalog,
-    encryptedKey,
-    encryptedManifest,
-    null,
-    workerID,
-  ]);
-  useEffect(() => {
-    if (!encryptedManifest || !encryptedKey) return;
-    let cancelled = false;
-    decryptCatalog(encryptedManifest, encryptedKey)
-      .then(catalog => {
-        if (!cancelled) setEncryptedCatalog(catalog);
-      })
-      .catch(error => {
-        console.warn('Could not refresh encrypted dataset catalog:', error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [encryptedKey, encryptedManifest]);
-  useEffect(() => {
     if (!isRenameModalOpen) {
       setRenameDatasetName(datasetName);
     }
@@ -350,17 +234,6 @@ export default function DatasetEditorPage({
     setIsRenameModalOpen(false);
     setRenameDatasetError('');
   };
-  const rememberRenamedEncryptedKey = (renamedName: string) => {
-    if (!encryptedRawKeyB64) return;
-    rememberEncryptedDatasetKey(renamedName, encryptedRawKeyB64);
-    if (isRemoteDataset) {
-      rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, renamedName), encryptedRawKeyB64);
-      rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, renamedName), encryptedRawKeyB64);
-    }
-    if (effectiveDatasetRoot) {
-      rememberEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, renamedName), encryptedRawKeyB64);
-    }
-  };
   const handleRenameDataset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isRenamingDataset) return;
@@ -374,7 +247,6 @@ export default function DatasetEditorPage({
         worker_id: workerID,
       });
       const renamedName = res.data?.name || renameDatasetName.trim();
-      rememberRenamedEncryptedKey(renamedName);
       setIsRenameModalOpen(false);
       {
         router.replace(
@@ -462,7 +334,6 @@ export default function DatasetEditorPage({
                   className="operator-button whitespace-nowrap border-brand-800 bg-brand-950/70 text-brand-100"
                   onClick={() =>
                     openImagesModal(datasetName, () => refreshImageList(datasetName), {
-                      ...encryptedUploadOptions,
                       workerID,
                     })
                   }
@@ -485,33 +356,6 @@ export default function DatasetEditorPage({
       </div>
     );
   })();
-  const saveEncryptedCaption = async (
-    item: EncryptedDatasetItem,
-    captionPath: string,
-    encryptedCaptionJson: string,
-  ) => {
-    if (!encryptedManifest || !encryptedCatalog || !encryptedKey) return;
-    const updatedItems = encryptedCatalog.items.map(existing =>
-      existing.id === item.id
-        ? { ...existing, captionObjectPath: captionPath, updatedAt: new Date().toISOString() }
-        : existing,
-    );
-    const nextCatalog: EncryptedDatasetCatalog = { ...encryptedCatalog, items: updatedItems };
-    const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
-    await apiClient.post('/api/datasets/encrypted/update', {
-      datasetName,
-      worker_id: workerID,
-      manifest: nextManifest,
-      objects: [
-        {
-          objectPath: captionPath,
-          dataBase64: arrayBufferToBase64(new TextEncoder().encode(encryptedCaptionJson)),
-        },
-      ],
-    });
-    setEncryptedManifest(nextManifest);
-    setEncryptedCatalog(nextCatalog);
-  };
   const handleDeleteImages = async (targetItems: DatasetStudioItem[]): Promise<DeleteImagesResult> => {
     const uniqueItems = Array.from(
       new Map(targetItems.map(item => [item.kind === 'plain' ? item.path : item.item.id, item] as const)).values(),
@@ -537,29 +381,7 @@ export default function DatasetEditorPage({
         setImgList(previous => previous.filter(image => !removedPathSet.has(image.img_path)));
       }
     }
-    if (encryptedItems.length > 0) {
-      if (!encryptedManifest || !encryptedCatalog || !encryptedKey) {
-        throw new Error('Unlock the encrypted dataset first.');
-      }
-      const encryptedIDs = new Set(encryptedItems.map(item => item.id));
-      const nextCatalog: EncryptedDatasetCatalog = {
-        ...encryptedCatalog,
-        items: encryptedCatalog.items.filter(item => !encryptedIDs.has(item.id)),
-      };
-      const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
-      await apiClient.post('/api/datasets/encrypted/update', {
-        datasetName,
-        worker_id: workerID,
-        manifest: nextManifest,
-        deleteObjects: encryptedItems.flatMap(item =>
-          [item.objectPath, item.captionObjectPath].filter((value): value is string => Boolean(value)),
-        ),
-      });
-      setEncryptedManifest(nextManifest);
-      setEncryptedCatalog(nextCatalog);
-      deleted += encryptedItems.length;
-      removedKeys.push(...encryptedItems.map(item => item.id));
-    }
+    if (encryptedItems.length) throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED');
     return {
       requested: uniqueItems.length,
       deleted,
@@ -568,135 +390,17 @@ export default function DatasetEditorPage({
       removedKeys,
     };
   };
-  const handleBulkEncryptedCaptionAction = async (
-    request: BulkCaptionActionRequest,
-  ): Promise<BulkCaptionActionResult> => {
-    if (!encryptedManifest || !encryptedCatalog || !encryptedKey) {
-      throw new Error('Unlock the encrypted dataset first.');
-    }
-    const matches = request.matches.flatMap(match =>
-      match.item.kind === 'encrypted' ? [{ ...match, encryptedItem: match.item.item }] : [],
-    );
-    const matchedItems = Array.from(
-      new Map<string, EncryptedDatasetItem>(
-        matches.map(match => [match.encryptedItem.id, match.encryptedItem] as const),
-      ).values(),
-    );
-    const matchedIDs = new Set(matchedItems.map(item => item.id));
-    const now = new Date().toISOString();
-    if (request.action === 'delete') {
-      const nextCatalog: EncryptedDatasetCatalog = {
-        ...encryptedCatalog,
-        items: encryptedCatalog.items.filter(item => !matchedIDs.has(item.id)),
-      };
-      const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
-      await apiClient.post('/api/datasets/encrypted/update', {
-        datasetName,
-        worker_id: workerID,
-        manifest: nextManifest,
-        deleteObjects: matchedItems.flatMap(item => [item.objectPath, item.captionObjectPath].filter(Boolean)),
-      });
-      setEncryptedManifest(nextManifest);
-      setEncryptedCatalog(nextCatalog);
-      return {
-        action: request.action,
-        found: matches.length,
-        affected: matchedItems.length,
-        deleted: matchedItems.length,
-        removedKeys: matchedItems.map(item => item.id),
-      };
-    }
-    if (request.action === 'move') {
-      const destinationName = request.destinationName?.trim();
-      if (!destinationName) throw new Error('Destination dataset name is required.');
-      const { createdName, nextManifest, nextCatalog } = await moveEncryptedDatasetItems({
-        datasetName,
-        destinationName,
-        workerID,
-        key: encryptedKey,
-        manifest: encryptedManifest,
-        catalog: encryptedCatalog,
-        items: matchedItems,
-      });
-      setEncryptedManifest(nextManifest);
-      setEncryptedCatalog(nextCatalog);
-      if (encryptedRawKeyB64) {
-        rememberEncryptedDatasetKey(createdName, encryptedRawKeyB64);
-        if (effectiveDatasetRoot) {
-          rememberEncryptedDatasetKey(pathJoin(effectiveDatasetRoot, createdName), encryptedRawKeyB64);
-        }
-        if (isRemoteDataset) {
-          rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, createdName), encryptedRawKeyB64);
-          rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, createdName), encryptedRawKeyB64);
-        }
-      }
-      return {
-        action: request.action,
-        found: matches.length,
-        affected: matchedItems.length,
-        moved: matchedItems.length,
-        destinationName: createdName,
-        removedKeys: matchedItems.map(item => item.id),
-      };
-    }
-    const updatedCaptions: Record<string, string> = {};
-    const updatedItems = new Map<string, EncryptedDatasetItem>();
-    const objects: Array<{
-      objectPath: string;
-      dataBase64: string;
-    }> = [];
-    let removedWords = 0;
-    const terms = parseCaptionKeywordQuery(request.query);
-    for (const match of matches) {
-      const result = removeCaptionKeywords(match.caption, terms, request.matchMode);
-      if (!result.changed) continue;
-      const item = match.encryptedItem;
-      const targetCaptionPath = item.captionObjectPath || captionObjectPath();
-      const encryptedCaption = await encryptCaptionObject(encryptedKey, targetCaptionPath, result.caption);
-      objects.push({
-        objectPath: targetCaptionPath,
-        dataBase64: arrayBufferToBase64(new TextEncoder().encode(JSON.stringify(encryptedCaption))),
-      });
-      updatedItems.set(item.id, { ...item, captionObjectPath: targetCaptionPath, updatedAt: now });
-      updatedCaptions[item.id] = result.caption;
-      removedWords += result.removedCount;
-    }
-    if (updatedItems.size === 0) {
-      return { action: request.action, found: matches.length, affected: 0, updated: 0, removedWords: 0 };
-    }
-    const nextCatalog: EncryptedDatasetCatalog = {
-      ...encryptedCatalog,
-      items: encryptedCatalog.items.map(item => updatedItems.get(item.id) || item),
-    };
-    const { manifest: nextManifest } = await encryptCatalog(nextCatalog, encryptedKey, encryptedManifest);
-    await apiClient.post('/api/datasets/encrypted/update', {
-      datasetName,
-      worker_id: workerID,
-      manifest: nextManifest,
-      objects,
-    });
-    setEncryptedManifest(nextManifest);
-    setEncryptedCatalog(nextCatalog);
-    return {
-      action: request.action,
-      found: matches.length,
-      affected: updatedItems.size,
-      updated: updatedItems.size,
-      removedWords,
-      updatedCaptions,
-    };
-  };
   const captionToolbarAction = canUseDatasetCaptionJob ? (
     <AutoCaptionButton
       datasetPath={datasetPath}
       datasetName={datasetName}
       setIsAutoCaptioning={setIsAutoCaptioning}
-      encryptedDatasetKeyB64={encryptedRawKeyB64 || undefined}
-      rootCaption={encryptedCatalog ? (encryptedCatalog.rootCaption ?? null) : undefined}
       idleLabel="Generate captions"
       className="h-[34px] flex-shrink-0 !rounded-[4px] !bg-brand-400 !px-3 !py-0 !text-[12px] !font-semibold !text-[var(--brand-ink)] hover:!bg-brand-300"
     />
   ) : null;
+  if (encryptedManifest) return <div className="p-6"><DatasetDecryption datasetName={datasetName} workerID={workerID} manifest={encryptedManifest} /></div>;
+
   return (
     <>
       <TopBar className="h-[69px] gap-3 border-gray-800 bg-gray-950 px-4">
@@ -737,11 +441,7 @@ export default function DatasetEditorPage({
               Remote
             </span>
           )}
-          {encryptedManifest && (
-            <span className="ml-1 flex-shrink-0 rounded-[3px] border border-violet-900/80 bg-violet-950/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300">
-              {encryptedCatalog ? 'Encrypted · unlocked' : 'Encrypted'}
-            </span>
-          )}
+
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2">
@@ -825,48 +525,9 @@ export default function DatasetEditorPage({
             {datasetActionError}
           </PageNotice>
         )}
-        {encryptedManifest && !encryptedCatalog && (
-          <div className="mx-auto mt-10 max-w-md border border-gray-700 bg-gray-900 p-5 text-gray-200">
-            <h2 className="text-base font-semibold">Encrypted Dataset Locked</h2>
-            <p className="mt-2 text-sm text-gray-400">
-              Unlock in this browser to preview, edit captions, upload, or start encrypted training.
-            </p>
-            <div className="mt-4 space-y-3">
-              {encryptedManifest.crypto.kdf.type === 'PBKDF2-SHA256' ? (
-                <input
-                  type="password"
-                  value={unlockPassword}
-                  onChange={e => setUnlockPassword(e.target.value)}
-                  placeholder="Dataset password"
-                  className="w-full border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                />
-              ) : encryptedManifest.crypto.kdf.type === 'KEYFILE-SHA256' ? (
-                <input
-                  type="file"
-                  onChange={e => setUnlockKeyFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-gray-300 file:mr-3 file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
-                />
-              ) : (
-                <div className="border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
-                  YubiKey / USB Security Key
-                </div>
-              )}
-              {unlockError && <div className="text-sm text-red-400">{unlockError}</div>}
-              <Button
-                className="operator-button w-full border-brand-800 bg-brand-950/60 text-brand-100"
-                onClick={handleUnlock}
-              >
-                Unlock
-              </Button>
-            </div>
-          </div>
-        )}
+
         {PageInfoContent}
-        {status === 'success' && encryptedCatalog && encryptedKey && encryptedCatalog.items.length === 0 && (
-          <PageNotice tone="neutral" title="No images found" className="mx-auto mt-10 max-w-xl">
-            This encrypted dataset is empty. Add images to make it available for training.
-          </PageNotice>
-        )}
+
         {status === 'success' && plainStudioItems.length > 0 && (
           <DatasetImageStudio
             datasetName={datasetName}
@@ -880,7 +541,6 @@ export default function DatasetEditorPage({
             onRefresh={() => refreshImageList(datasetName)}
             onAddImages={() =>
               openImagesModal(datasetName, () => refreshImageList(datasetName), {
-                ...encryptedUploadOptions,
                 workerID,
               })
             }
@@ -889,31 +549,7 @@ export default function DatasetEditorPage({
             onPlainItemCaptioned={handlePlainItemCaptioned}
           />
         )}
-        {status === 'success' && encryptedCatalog && encryptedKey && encryptedStudioItems.length > 0 && (
-          <DatasetImageStudio
-            datasetName={datasetName}
-            workerID={workerID}
-            datasetPath={!isRemoteDataset ? datasetPath : null}
-            items={encryptedStudioItems}
-            isAutoCaptioning={isAutoCaptioning}
-            captionAction={captionToolbarAction}
-            onUnsavedChange={handleStudioUnsavedChange}
-            encryptedKey={encryptedKey}
-            encryptedRawKeyB64={encryptedRawKeyB64}
-            rootCaption={encryptedCatalog.rootCaption ?? null}
-            onRefresh={() => refreshImageList(datasetName)}
-            onAddImages={() =>
-              openImagesModal(datasetName, () => refreshImageList(datasetName), {
-                ...encryptedUploadOptions,
-                workerID,
-              })
-            }
-            onConvertDatasetToJson={!isRemoteDataset ? openJsonConversion : undefined}
-            onDeleteImages={handleDeleteImages}
-            onBulkEncryptedCaptionAction={handleBulkEncryptedCaptionAction}
-            onSaveEncryptedCaption={saveEncryptedCaption}
-          />
-        )}
+
       </MainContent>
       {!isRemoteDataset && !encryptedManifest && <CaptionMonitor datasetPath={datasetPath} />}
       <Modal

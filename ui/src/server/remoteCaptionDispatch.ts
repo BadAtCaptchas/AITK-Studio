@@ -2,11 +2,8 @@ import { beginOperationCommit, checkpointOperation, getOperation } from './opera
 import fsp from 'fs/promises';
 import path from 'path';
 import { db, type WorkerNodeRecord } from './db';
-import {
-  getKeyForRequiredDataset,
-  normalizeEncryptedKeyMap,
-  resolveConfigPath,
-} from './encryptedDatasets';
+import { resolveConfigPath } from './encryptedDatasets';
+import { DATASET_MIGRATION_MESSAGE } from './datasetDecryption';
 import { getDatasetsRoot } from './settings';
 import { resolveDatasetDirectoryInsideRoot } from './remoteCaptionSecurity';
 import { createDatasetExportArchive, datasetExportFileName } from './datasetTransfer';
@@ -44,39 +41,22 @@ function remoteCaptionRemoteJobName(job: Job) {
   return `${job.name}_remote`;
 }
 
-function encryptedKeyForRemoteDataset(
-  originalDatasetPath: string,
-  encryptedKeysForLaunch: EncryptedDatasetStartKey[],
-  remoteDatasetPath: string,
-) {
-  const keyMap = normalizeEncryptedKeyMap(encryptedKeysForLaunch);
-  const keyB64 = getKeyForRequiredDataset(keyMap, {
-    path: originalDatasetPath,
-    name: path.basename(originalDatasetPath),
-  });
-  return keyB64 ? [{ datasetPath: remoteDatasetPath, keyB64 }] : undefined;
-}
-
 async function startRemoteWorkerCaptionJob(
   worker: WorkerNodeRecord,
   remoteJobID: string,
   gpuIds: string,
-  encryptedDatasetKeys?: EncryptedDatasetStartKey[],
   operationID?: string,
 ) {
-  const hasEncryptedDatasetKeys = Array.isArray(encryptedDatasetKeys) && encryptedDatasetKeys.length > 0;
   const startInit: RequestInit = {
     method: 'POST',
     body: JSON.stringify({
-      encryptedDatasetKeys,
       idempotencyKey: operationID,
-      durableEncryptedDatasetKeys: hasEncryptedDatasetKeys,
     }),
   };
   await remoteJson(
     worker,
     `/api/jobs/${encodeURIComponent(remoteJobID)}/start`,
-    hasEncryptedDatasetKeys ? withoutRemoteRedirects(startInit) : startInit,
+    withoutRemoteRedirects(startInit),
   );
   await remoteJson(worker, `/api/queue/${encodeURIComponent(gpuIds)}/start`, { method: 'POST' });
   const queue = await db.queues.findByGpuIds(gpuIds, worker.id);
@@ -122,12 +102,7 @@ export async function dispatchRemoteCaptionJob(options: {
       isOutsideDatasetsRoot ? 400 : 404,
     );
   }
-  if (options.encrypted && !options.durableEncryptedDatasetKeys) {
-    throw new RemoteCaptionDispatchError(
-      'Remote encrypted captioning requires durable encrypted dataset key opt-in.',
-      409,
-    );
-  }
+  if (options.encrypted) throw new RemoteCaptionDispatchError(DATASET_MIGRATION_MESSAGE, 410);
 
   let currentJobConfig = options.jobConfig;
   const now = new Date().toISOString();
@@ -153,13 +128,9 @@ export async function dispatchRemoteCaptionJob(options: {
         }),
       });
     }
-    const encryptedKeys =
-      options.encrypted && typeof state?.remoteDatasetPath === 'string'
-        ? encryptedKeyForRemoteDataset(realOriginalDatasetPath, options.encryptedKeysForLaunch, state.remoteDatasetPath)
-        : undefined;
     if (operationID) await beginOperationCommit(operationID, 'starting-remote-job');
     await checkpoint('start-requested', { captionStartRequested: true, remoteJobID: job.remote_job_id });
-    await startRemoteWorkerCaptionJob(worker, job.remote_job_id, job.gpu_ids, encryptedKeys, operationID);
+    await startRemoteWorkerCaptionJob(worker, job.remote_job_id, job.gpu_ids, operationID);
     const updated = await ownedUpdate({
       job_config: JSON.stringify(
         patchRemoteCaptionState(currentJobConfig, {
@@ -239,13 +210,9 @@ export async function dispatchRemoteCaptionJob(options: {
       remote_sync_at: new Date(),
     });
 
-    const encryptedKeys =
-      options.encrypted && importedDataset.path
-        ? encryptedKeyForRemoteDataset(realOriginalDatasetPath, options.encryptedKeysForLaunch, importedDataset.path)
-        : undefined;
     if (operationID) await beginOperationCommit(operationID, 'starting-remote-job');
     await checkpoint('start-requested', { captionStartRequested: true, remoteJobID: remoteJob.id });
-    await startRemoteWorkerCaptionJob(worker, remoteJob.id, job.gpu_ids, encryptedKeys, operationID);
+    await startRemoteWorkerCaptionJob(worker, remoteJob.id, job.gpu_ids, operationID);
     return syncRemoteJob(localJob, { background: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Remote caption dispatch failed';

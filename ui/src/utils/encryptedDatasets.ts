@@ -240,95 +240,9 @@ async function evaluateWebAuthnPrf(
   return { credential, prfOutput };
 }
 
-async function createWebAuthnPrfCredential(rpId: string, saltB64: string) {
-  ensureWebAuthnPrfAvailable();
-  const salt = base64ToArrayBuffer(saltB64);
-  const credential = requirePublicKeyCredential(
-    await navigator.credentials.create({
-      publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: {
-          name: 'AI Toolkit',
-          ...(explicitRpId(rpId) ? { id: rpId } : {}),
-        },
-        user: {
-          id: crypto.getRandomValues(new Uint8Array(16)),
-          name: 'ai-toolkit-dataset-key',
-          displayName: 'AI Toolkit Dataset Key',
-        },
-        pubKeyCredParams: [
-          { type: 'public-key', alg: -7 },
-          { type: 'public-key', alg: -257 },
-        ],
-        authenticatorSelection: {
-          authenticatorAttachment: 'cross-platform',
-          residentKey: 'discouraged',
-          userVerification: 'preferred',
-        },
-        timeout: WEBAUTHN_TIMEOUT_MS,
-        attestation: 'none',
-        extensions: {
-          prf: { eval: { first: salt } },
-        } as any,
-      },
-    }),
-  );
-  const credentialId = arrayBufferToBase64Url(credential.rawId);
-  const transports = normalizeTransports((credential.response as any).getTransports?.());
-  const prfOutput = getPrfFirstResult(credential);
-  return { credentialId, transports, prfOutput };
-}
 
-async function createWebAuthnPrfDatasetKey(label?: string) {
-  const rpId = currentRpId();
-  const rawDatasetKey = crypto.getRandomValues(new Uint8Array(32));
-  const rawKeyB64 = arrayBufferToBase64(rawDatasetKey);
-  const saltB64 = arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(32)));
-  const created = await createWebAuthnPrfCredential(rpId, saltB64);
-  const unsignedCredential: WebAuthnPrfCredentialDescriptor = {
-    id: created.credentialId,
-    label: label?.trim() || 'YubiKey / USB Security Key',
-    transports: created.transports,
-    saltB64,
-    createdAt: new Date().toISOString(),
-    wrappedKey: {
-      algorithm: 'AES-256-GCM',
-      nonce: '',
-      data: '',
-    },
-  };
-  const prfOutput =
-    created.prfOutput || (await evaluateWebAuthnPrf(rpId, [unsignedCredential])).prfOutput;
-  const wrappedKey = await encryptWithWebAuthnPrfKey(
-    prfOutput,
-    rawDatasetKey,
-    webAuthnPrfWrappedKeyAad(rpId, unsignedCredential.id, saltB64),
-  );
 
-  const kdf: Extract<EncryptedDatasetManifest['crypto']['kdf'], { type: 'WEBAUTHN-PRF' }> = {
-    type: 'WEBAUTHN-PRF',
-    keyLength: 32,
-    rpId,
-    credentials: [
-      {
-        ...unsignedCredential,
-        wrappedKey: {
-          algorithm: 'AES-256-GCM' as const,
-          ...wrappedKey,
-        },
-      },
-    ],
-    nativeUsb: {
-      provider: WEBAUTHN_PRF_NATIVE_USB_PROVIDER,
-      status: 'planned' as const,
-    },
-  };
 
-  return {
-    rawKeyB64,
-    kdf,
-  };
-}
 
 export async function unlockWebAuthnPrfDatasetKey(manifest: EncryptedDatasetManifest) {
   const kdf = manifest.crypto.kdf;
@@ -382,15 +296,7 @@ export function catalogAad() {
   return 'aitk-encrypted-catalog:v1';
 }
 
-export async function encryptBytes(key: CryptoKey, bytes: ArrayBuffer | ArrayBufferView, aad: string) {
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: nonce, additionalData: encodeUtf8(aad), tagLength: 128 },
-    key,
-    copyToArrayBuffer(bytes),
-  );
-  return { nonce: arrayBufferToBase64(nonce), data: arrayBufferToBase64(encrypted) };
-}
+
 
 export async function decryptBytes(key: CryptoKey, nonceB64: string, dataB64: string | ArrayBuffer, aad: string) {
   const ciphertext = typeof dataB64 === 'string' ? base64ToArrayBuffer(dataB64) : dataB64;
@@ -406,58 +312,7 @@ export async function decryptBytes(key: CryptoKey, nonceB64: string, dataB64: st
   );
 }
 
-export async function createEmptyEncryptedManifest(
-  mode: DatasetCredentialMode,
-  secret?: string | File,
-) {
-  let key: CryptoKey | null = null;
-  let rawKeyB64: string | null = null;
-  let kdf: EncryptedDatasetManifest['crypto']['kdf'];
-  if (mode === 'yubiKey') {
-    const result = await createWebAuthnPrfDatasetKey(typeof secret === 'string' ? secret : undefined);
-    rawKeyB64 = result.rawKeyB64;
-    key = await importRawAesKey(rawKeyB64);
-    kdf = result.kdf;
-  } else if (mode === 'password') {
-    if (typeof secret !== 'string') throw new Error('Password is required.');
-    kdf = {
-      type: 'PBKDF2-SHA256',
-      salt: arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(16))),
-      iterations: PBKDF2_ITERATIONS,
-      keyLength: 32,
-    };
-  } else {
-    if (!(secret instanceof File)) throw new Error('Key file is required.');
-    kdf = {
-      type: 'KEYFILE-SHA256',
-      keyLength: 32,
-    };
-  }
 
-  const manifest: EncryptedDatasetManifest = {
-    format: ENCRYPTED_DATASET_FORMAT,
-    version: ENCRYPTED_DATASET_VERSION,
-    crypto: {
-      algorithm: 'AES-256-GCM',
-      kdf,
-    },
-    catalog: { nonce: '', data: '' },
-  };
-
-  if (mode === 'password') {
-    key = await derivePasswordKey(secret as string, manifest);
-    rawKeyB64 = await exportRawAesKey(key);
-  } else if (mode === 'keyFile') {
-    key = await deriveKeyFileKey(secret as File);
-    rawKeyB64 = await exportRawAesKey(key);
-  }
-
-  if (!key || !rawKeyB64) {
-    throw new Error('Encrypted dataset key could not be created.');
-  }
-  const { manifest: encryptedManifest } = await encryptCatalog({ version: 1, items: [] }, key, manifest);
-  return { manifest: encryptedManifest, key, rawKeyB64 };
-}
 
 export async function decryptCatalog(manifest: EncryptedDatasetManifest, key: CryptoKey) {
   if (manifest.format !== ENCRYPTED_DATASET_FORMAT || manifest.version !== ENCRYPTED_DATASET_VERSION) {
@@ -467,19 +322,7 @@ export async function decryptCatalog(manifest: EncryptedDatasetManifest, key: Cr
   return JSON.parse(textDecoder.decode(plaintext)) as EncryptedDatasetCatalog;
 }
 
-export async function encryptCatalog(
-  catalog: EncryptedDatasetCatalog,
-  key: CryptoKey,
-  manifest: EncryptedDatasetManifest,
-) {
-  const encrypted = await encryptBytes(key, textEncoder.encode(JSON.stringify(catalog)), catalogAad());
-  return {
-    manifest: {
-      ...manifest,
-      catalog: encrypted,
-    },
-  };
-}
+
 
 export function getMediaKind(file: File): EncryptedDatasetMediaKind | null {
   if (file.type.startsWith('image/')) return 'image';
@@ -595,57 +438,9 @@ export async function readRootCaptionFile(files: File[], relativePaths?: string[
   return text.trim();
 }
 
-export async function buildEncryptedDatasetItem(
-  file: File,
-  key: CryptoKey,
-  caption: string | null,
-  catalogName = file.name,
-) {
-  const mediaKind = getMediaKind(file);
-  if (!mediaKind) throw new Error(`Unsupported file type: ${file.name}`);
-  const itemId = randomId();
-  const objectPath = mediaObjectPath(itemId);
-  const mediaBytes = await file.arrayBuffer();
-  const encryptedMedia = await encryptBytes(key, mediaBytes, objectAad(objectPath));
-  const now = new Date().toISOString();
-  const item: EncryptedDatasetItem = {
-    id: itemId,
-    name: catalogName,
-    extension: getExtension(catalogName).toLowerCase(),
-    mimeType: getMimeTypeForFile(file, catalogName),
-    mediaKind,
-    objectPath,
-    size: file.size,
-    ...(await extractMediaMetadata(file, mediaKind)),
-    createdAt: now,
-    updatedAt: now,
-  };
 
-  const encryptedObjects: Array<{ objectPath: string; blob: Blob }> = [
-    {
-      objectPath,
-      blob: new Blob([JSON.stringify(encryptedMedia)], { type: 'application/json' }),
-    },
-  ];
-
-  if (caption != null && caption.trim() !== '') {
-    const captionPath = captionObjectPath(randomId());
-    const encryptedCaption = await encryptBytes(key, textEncoder.encode(caption), objectAad(captionPath));
-    item.captionObjectPath = captionPath;
-    encryptedObjects.push({
-      objectPath: captionPath,
-      blob: new Blob([JSON.stringify(encryptedCaption)], { type: 'application/json' }),
-    });
-  }
-
-  return { item, encryptedObjects };
-}
 
 export async function decryptEncryptedObjectBlob(key: CryptoKey, objectPath: string, blob: Blob) {
   const payload = JSON.parse(await blob.text()) as { nonce: string; data: string };
   return decryptBytes(key, payload.nonce, payload.data, objectAad(objectPath));
-}
-
-export async function encryptCaptionObject(key: CryptoKey, objectPath: string, caption: string) {
-  return encryptBytes(key, textEncoder.encode(caption), objectAad(objectPath));
 }

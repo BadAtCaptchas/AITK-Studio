@@ -1,4 +1,5 @@
-import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
+import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -9,7 +10,6 @@ import {
   runDatasetWatcherOnce,
   saveDatasetWatcher,
 } from '@/server/datasetWatchers';
-import { DatasetScopeError } from '@/server/datasetScope';
 import { isLocalWorker } from '@/server/remoteClient';
 
 export const runtime = 'nodejs';
@@ -125,6 +125,6 @@ async function deleteCommand(request: NextRequest) {
   }
 }
 
-export const POST = withCommandBoundary(postCommand);
-export const PATCH = withCommandBoundary(patchCommand);
-export const DELETE = withCommandBoundary(deleteCommand);
+export const POST = withPlainDatasetCommand(postCommand);
+export const PATCH = withPlainDatasetCommand(patchCommand);
+export const DELETE = withPlainDatasetCommand(deleteCommand);

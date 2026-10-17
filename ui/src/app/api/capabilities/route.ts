@@ -18,7 +18,12 @@ export async function GET(request: Request): Promise<Response> {
     }
   }
   return Response.json(
-    { ...contract, platform: process.platform, deviceBackend: process.platform === 'darwin' ? 'mps' : 'cuda' },
+    {
+      ...contract,
+      datasetDecryption: 1,
+      platform: process.platform,
+      deviceBackend: process.platform === 'darwin' ? 'mps' : 'cuda',
+    },
     { headers: { 'Cache-Control': 'private, max-age=60' } },
   );
 }

@@ -5,6 +5,7 @@ import torch
 
 from toolkit.data_transfer_object.data_loader import (
     DataLoaderBatchDTO,
+    FileItemDTO,
     snap_fixed_video_frame_count,
 )
 
@@ -39,6 +40,47 @@ def make_file_item(
 
 
 class DataLoaderBatchDTOTest(unittest.TestCase):
+    def test_uint8_pixels_stay_compact_through_collation_and_pinning(self):
+        items = []
+        for index in range(2):
+            item = FileItemDTO.__new__(FileItemDTO)
+            item.__dict__.update(vars(make_file_item(num_frames=3)))
+            item.__dict__.pop('tensor', None)
+            item.tensor = None
+            item._cached_tensor_uint8 = torch.full((3, 3, 4, 4), index * 255, dtype=torch.uint8)
+            item.dataset_config.pin_memory = True
+            items.append(item)
+        batch = DataLoaderBatchDTO(file_items=items)
+        self.assertIsNone(batch._tensor)
+        self.assertEqual(batch._tensor_uint8.dtype, torch.uint8)
+        if torch.cuda.is_available():
+            batch.pin_memory()
+            self.assertIsNone(batch._tensor)
+            self.assertTrue(batch._tensor_uint8.is_pinned())
+        tensor = batch.tensor
+        self.assertEqual(tensor.shape, (2, 3, 3, 4, 4))
+        self.assertEqual(tensor.dtype, torch.float16)
+        self.assertEqual(tensor[0].min().item(), -1)
+        self.assertEqual(tensor[1].max().item(), 1)
+        self.assertIsNone(batch._tensor_uint8)
+        batch.tensor = torch.zeros_like(tensor)
+        self.assertEqual(batch.tensor.sum().item(), 0)
+        items[0].tensor = torch.ones(3, 4, 4)
+        self.assertIsNone(items[0]._cached_tensor_uint8)
+        del items[0].tensor
+        self.assertIsNone(items[0].tensor)
+
+    def test_mixed_materialized_and_uint8_pixels_collate(self):
+        item = FileItemDTO.__new__(FileItemDTO)
+        item.__dict__.update(vars(make_file_item()))
+        item.__dict__.pop('tensor', None)
+        item.tensor = None
+        item._cached_tensor_uint8 = torch.zeros(1, 2, 2, dtype=torch.uint8)
+        batch = DataLoaderBatchDTO(file_items=[item, make_file_item()])
+        self.assertEqual(batch.tensor.shape, (2, 1, 2, 2))
+        self.assertEqual(batch.tensor[0].min().item(), -1)
+        self.assertEqual(batch.tensor[1].max().item(), 1)
+
     def test_fixed_video_frame_snap_happens_before_batch_audio_geometry(self):
         snapper = lambda frames: 39 if frames == 40 else frames
 

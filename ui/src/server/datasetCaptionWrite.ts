@@ -17,7 +17,7 @@ function assertPlainCaptionPath(target: string, root: string): void {
     throw new DatasetCaptionWriteError('Edit layer captions in Layered documents');
   }
   if (findEncryptedDatasetRoot(target, root)) {
-    throw new DatasetCaptionWriteError('Encrypted captions must be saved through the encrypted dataset API', 403);
+    throw new DatasetCaptionWriteError('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt the dataset to a plain copy before editing', 410);
   }
 }
 

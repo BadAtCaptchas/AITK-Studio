@@ -49,7 +49,14 @@ def _b64encode(value: bytes) -> str:
 
 
 def is_encrypted_dataset_path(dataset_path: str) -> bool:
-    return os.path.exists(os.path.join(dataset_path, ENCRYPTED_DATASET_MANIFEST))
+    current = os.path.realpath(dataset_path)
+    while True:
+        if os.path.isfile(os.path.join(current, ENCRYPTED_DATASET_MANIFEST)):
+            return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
 
 
 def _normalize_key(value: str) -> str:
@@ -139,10 +146,6 @@ class EncryptedDatasetReader:
         except Exception as exc:
             raise EncryptedDatasetError("Encrypted dataset authentication failed") from exc
 
-    def _encrypt_payload(self, plaintext: bytes, aad: bytes) -> dict:
-        nonce = os.urandom(12)
-        ciphertext = self.aesgcm.encrypt(nonce, plaintext, aad)
-        return {"nonce": _b64encode(nonce), "data": _b64encode(ciphertext)}
 
     def _decrypt_catalog(self) -> dict:
         catalog_bytes = self._decrypt_payload(self.manifest["catalog"], CATALOG_AAD)
@@ -151,17 +154,7 @@ class EncryptedDatasetReader:
             raise EncryptedDatasetError("Invalid encrypted dataset catalog")
         return catalog
 
-    def _write_manifest(self) -> None:
-        with open(self.manifest_path, "w", encoding="utf-8") as f:
-            json.dump(self.manifest, f, indent=2)
 
-    def _encrypt_catalog(self) -> None:
-        self.catalog["items"] = [item.__dict__ for item in self.items]
-        self.manifest["catalog"] = self._encrypt_payload(
-            json.dumps(self.catalog, separators=(",", ":")).encode("utf-8"),
-            CATALOG_AAD,
-        )
-        self._write_manifest()
 
     def list_items(self, media_kinds: Optional[List[str]] = None, extensions: Optional[List[str]] = None) -> List[EncryptedDatasetItem]:
         result = self.items
@@ -193,11 +186,6 @@ class EncryptedDatasetReader:
             payload = json.load(f)
         return self._decrypt_payload(payload, _object_aad(object_path))
 
-    def encrypt_object_bytes(self, object_path: str, data: bytes) -> None:
-        os.makedirs(os.path.join(self.dataset_path, "objects"), exist_ok=True)
-        payload = self._encrypt_payload(data, _object_aad(object_path))
-        with open(self._resolve_object_path(object_path), "w", encoding="utf-8") as f:
-            json.dump(payload, f, separators=(",", ":"))
 
     def open_image(
         self,
@@ -219,11 +207,7 @@ class EncryptedDatasetReader:
         return self.decrypt_object_bytes(item.captionObjectPath).decode("utf-8")
 
     def save_caption(self, item: EncryptedDatasetItem, caption: str) -> None:
-        if not item.captionObjectPath:
-            item.captionObjectPath = f"objects/{item.id}.caption.bin"
-        self.encrypt_object_bytes(item.captionObjectPath, caption.encode("utf-8"))
-        item.updatedAt = datetime.now(timezone.utc).isoformat()
-        self._encrypt_catalog()
+        raise EncryptedDatasetError("ENCRYPTED_DATASET_MIGRATION_REQUIRED")
 
     def load_audio_waveform(self, item: EncryptedDatasetItem) -> Tuple[torch.Tensor, int]:
         import torchaudio

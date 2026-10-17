@@ -162,7 +162,7 @@ test('caption aliases cannot bypass encrypted-dataset or layered-asset protectio
   await fs.writeFile(path.join(objects, 'image.png'), 'ciphertext');
   const alias = path.join(source, 'alias');
   if (!(await link(t, objects, alias))) return;
-  await assert.rejects(writePlainDatasetCaption(datasets, path.join(alias, 'image.png'), 'plaintext'), error => error.status === 403);
+  await assert.rejects(writePlainDatasetCaption(datasets, path.join(alias, 'image.png'), 'plaintext'), error => error.status === 410);
   assert.equal(fsSync.existsSync(path.join(objects, 'image.txt')), false);
   const layers = path.join(source, '.layers', 'document');
   await fs.mkdir(layers, { recursive: true });

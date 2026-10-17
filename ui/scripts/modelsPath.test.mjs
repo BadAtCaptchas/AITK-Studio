@@ -55,5 +55,6 @@ test('settings and launcher expose the resolved models path without replacing se
   assert.match(launcher, /MODELS_PATH: modelsRoot/);
   assert.match(launcher, /prepareHfTokenEnv/);
   assert.match(launcher, /offlineChildProcessEnv/);
-  assert.match(launcher, /AITK_ENCRYPTED_DATASET_KEYS_B64/);
+  assert.doesNotMatch(launcher, /AITK_ENCRYPTED_DATASET_KEYS_B64/);
+  assert.match(launcher, /ENCRYPTED_DATASET_MIGRATION_REQUIRED/);
 });

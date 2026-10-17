@@ -1,3 +1,4 @@
+import { assertPlainDatasetPath } from './plainDatasetCommand';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -139,6 +140,7 @@ export async function copyDatasetBetweenRoots({
   }
 
   const sourcePath = await resolveDatasetDirectoryInsideRoot(path.resolve(datasetPath), sourceDatasetsRoot);
+  await assertPlainDatasetPath(sourcePath, sourceDatasetsRoot);
   await listLayeredImages(sourcePath);
   const sourceName = path.basename(sourcePath);
   const destinationName = requestedName?.trim()

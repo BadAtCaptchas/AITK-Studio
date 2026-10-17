@@ -146,7 +146,7 @@ function resetJobPatch(): JobUpdateInput {
 }
 
 async function restartRemoteExistingJob(prepared: PreparedJobStart, deps: TrainingJobRestartDeps) {
-  const { job, requiredEncryptedDatasets, encryptedKeysForLaunch, useDurableEncryptedKeys } = prepared;
+  const { job } = prepared;
   if (!job.remote_job_id) return null;
 
   await deps.assertPreparedJobCanStart(prepared);
@@ -157,10 +157,7 @@ async function restartRemoteExistingJob(prepared: PreparedJobStart, deps: Traini
     const worker = await deps.getRemoteWorker(job.worker_id);
     await deps.remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/restart-from-scratch`, {
       method: 'POST',
-      body: JSON.stringify({
-        encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
-        durableEncryptedDatasetKeys: useDurableEncryptedKeys,
-      }),
+      body: JSON.stringify({}),
     });
     await deps.ensureQueueRunning(job.gpu_ids, job.worker_id);
     const released = await deps.updateOwnedJob(job.id, { attempt_id: owned.attempt_id ?? null, status: 'restarting' }, { status: job.status });

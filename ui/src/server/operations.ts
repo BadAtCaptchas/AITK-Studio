@@ -4,6 +4,7 @@ import { withProcessLease } from './processLease';
 import { isRecord } from './commandInput';
 
 export type OperationInput =
+  | { kind: 'dataset-decrypt'; root: string; sourceName: string; outputName: string }
   | { kind: 'remote-start'; jobID: string; durableKeys: boolean; needsEphemeralKeys: boolean; configHash: string }
   | {
       kind: 'dataset-import' | 'job-import';
@@ -40,7 +41,7 @@ function decode(value: unknown): Operation {
     value.version !== 1 ||
     typeof value.id !== 'string' ||
     !isRecord(value.input) ||
-    !['remote-start', 'dataset-import', 'job-import'].includes(String(value.input.kind)) ||
+    !['remote-start', 'dataset-import', 'job-import', 'dataset-decrypt'].includes(String(value.input.kind)) ||
     !isRecord(value.checkpoint) ||
     !isRecord(value.progress) ||
     typeof value.state !== 'string'
@@ -110,7 +111,8 @@ export async function activeOperationForResource(resource: string): Promise<Oper
 /** The request only accepts work. The supervised worker owns execution and recovery. */
 export async function enqueueOperation(input: OperationInput, key: string = randomUUID()): Promise<Operation> {
   const resource =
-    input.kind === 'remote-start' ? `job:${input.jobID}` : `${input.kind}:${input.root}:${input.uploadID}`;
+    input.kind === 'remote-start' ? `job:${input.jobID}` : input.kind === 'dataset-decrypt'
+      ? `dataset-decrypt:${input.root}:${input.sourceName}` : `${input.kind}:${input.root}:${input.uploadID}`;
   return withProcessLease(`operation-resource:${resource}`, async () => {
     const existing = await activeOperationForResource(resource);
     if (existing) {
@@ -272,6 +274,7 @@ export function publicOperation(operation: Operation) {
   // Input and phase checkpoints are internal; never expose secret handoff metadata.
   return {
     id: operation.id,
+    kind: operation.input.kind,
     state: operation.state,
     phase: operation.phase,
     createdAt: operation.createdAt,

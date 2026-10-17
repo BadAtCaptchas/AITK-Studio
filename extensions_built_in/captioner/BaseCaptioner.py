@@ -466,7 +466,7 @@ class BaseCaptioner(BaseExtensionProcess):
         self.encrypted_reader = None
         self.encrypted_items_by_path = {}
         if os.path.isdir(self.caption_config.path_to_caption) and is_encrypted_dataset_path(self.caption_config.path_to_caption):
-            self.encrypted_reader = EncryptedDatasetReader(self.caption_config.path_to_caption)
+            raise ValueError("ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt this dataset to a plain copy before captioning")
         self.model = None
         self.lora_stack = None
         self.processor = None

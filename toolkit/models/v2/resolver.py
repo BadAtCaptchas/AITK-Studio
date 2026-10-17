@@ -15,6 +15,7 @@ import re
 from typing import Callable, Iterable, Optional
 
 from toolkit.paths import MODELS_PATH
+from toolkit.models.checkpoint_download import download_checkpoint
 
 
 def comfy_precision_rank(filename: str, qtype: Optional[str] = None) -> int:
@@ -124,16 +125,7 @@ def resolve_comfy_candidates(
     local_rel = comfy_local_rel(best)
     if status_fn is not None:
         status_fn(f"Downloading {best} from {repo_id} into {MODELS_PATH}")
-    path = huggingface_hub.hf_hub_download(
-        repo_id=repo_id, filename=best, token=hf_token, local_dir=MODELS_PATH
-    )
-    target = os.path.join(MODELS_PATH, local_rel)
-    if os.path.abspath(path) != os.path.abspath(target):
-        # move out of the packaging prefix into the shared comfy layout
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        os.replace(path, target)
-        return target
-    return path
+    return download_checkpoint(repo_id, best, os.path.join(MODELS_PATH, local_rel), hf_token)
 
 
 def find_file_recursive(root_dir: str, filename: str) -> Optional[str]:
@@ -210,9 +202,7 @@ def resolve_comfy_file(
 
     if status_fn is not None:
         status_fn(f"Downloading {rel_path} from {repo_id} into {MODELS_PATH}")
-    return huggingface_hub.hf_hub_download(
-        repo_id=repo_id, filename=rel_path, token=hf_token, local_dir=MODELS_PATH
-    )
+    return download_checkpoint(repo_id, rel_path, os.path.join(MODELS_PATH, rel_path), hf_token)
 
 
 def resolve_component_file(

@@ -14,7 +14,7 @@ import { isRecord } from './commandInput';
 
 type ArchiveRequest = Request & { nextUrl: URL };
 export function archiveOperationStatus(operation: Operation) {
-  const uploadID = operation.input.kind === 'remote-start' ? '' : operation.input.uploadID;
+  const uploadID = operation.input.kind === 'dataset-import' || operation.input.kind === 'job-import' ? operation.input.uploadID : '';
   return {
     uploadID,
     operationID: operation.id,

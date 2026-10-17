@@ -91,6 +91,7 @@ async function mergeRemoteCaptionDataset(
   sourceDatasetPath: string,
   manifestName: string,
 ) {
+  if (state.encrypted) throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt the legacy dataset before processing caption results.');
   const originalDatasetPath = path.resolve(state.originalDatasetPath);
   const datasetsRoot = await getDatasetsRoot();
   const originalExists = fs.existsSync(originalDatasetPath) && fs.statSync(originalDatasetPath).isDirectory();
@@ -111,18 +112,6 @@ async function mergeRemoteCaptionDataset(
       statePatch: { importedFallbackPath },
       mergeStats: { copied: 0, skipped: 0, fallback: true },
     };
-  }
-
-  if (state.encrypted) {
-    const keyB64 = await durableKeyForRemoteCaption(job, state);
-    if (!keyB64) {
-      throw new Error('Durable encrypted dataset key is required to merge remote captions');
-    }
-    const mergeStats = await mergeEncryptedCaptionDataset(sourceDatasetPath, realOriginalDatasetPath, {
-      keyB64,
-      recaption: state.recaption,
-    });
-    return { jobPatch: {}, statePatch: {}, mergeStats };
   }
 
   const mergeStats = await mergePlainCaptionDataset(sourceDatasetPath, realOriginalDatasetPath, {

@@ -23,7 +23,7 @@ from toolkit.dataloader_mixins import CaptionMixin, BucketsMixin, LatentCachingM
 from toolkit.data_transfer_object.data_loader import FileItemDTO, DataLoaderBatchDTO
 from toolkit.print import print_acc
 from toolkit.accelerator import get_accelerator
-from toolkit.encrypted_dataset import EncryptedDatasetReader, is_encrypted_dataset_path
+from toolkit.encrypted_dataset import is_encrypted_dataset_path
 from toolkit.layered_dataset import discover_layered_samples, validate_layered_config
 
 import platform
@@ -392,6 +392,9 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             batch_size=1,
             sd: 'StableDiffusion' = None,
     ):
+        source_path = dataset_config.dataset_path or dataset_config.folder_path
+        if dataset_config.encrypted or (source_path and is_encrypted_dataset_path(source_path)):
+            raise ValueError('ENCRYPTED_DATASET_MIGRATION_REQUIRED: decrypt this dataset to a plain copy in Studio before training')
         self.dataset_config = dataset_config
         self.is_layered = dataset_config.type == 'layered_image'
         if self.is_layered:
@@ -412,40 +415,6 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         self.dataset_path = dataset_config.dataset_path
         if self.dataset_path is None:
             self.dataset_path = folder_path
-        self.encrypted_reader = None
-        self.is_encrypted_dataset = bool(
-            self.dataset_path and os.path.isdir(self.dataset_path) and is_encrypted_dataset_path(self.dataset_path)
-        )
-        if self.is_encrypted_dataset:
-            if self.is_layered:
-                raise ValueError("Grouped layered-image datasets do not support encrypted storage yet")
-            self.dataset_config.encrypted = True
-            if self.dataset_config.cache_latents_to_disk:
-                print_acc("  -  Disabling disk latent cache for encrypted dataset")
-            if self.dataset_config.cache_latents:
-                print_acc("  -  Disabling latent cache for encrypted dataset")
-            if self.dataset_config.cache_clip_vision_to_disk:
-                print_acc("  -  Disabling disk clip vision cache for encrypted dataset")
-            if self.dataset_config.cache_text_embeddings:
-                print_acc("  -  Disabling disk text embedding cache for encrypted dataset")
-            self.dataset_config.cache_latents = False
-            self.dataset_config.cache_latents_to_disk = False
-            self.dataset_config.cache_clip_vision_to_disk = False
-            self.dataset_config.cache_text_embeddings = False
-            if hasattr(self, "is_caching_text_embeddings"):
-                self.is_caching_text_embeddings = False
-            if len(self.dataset_config.controls) > 0:
-                raise ValueError("Generated controls are disabled for encrypted datasets to avoid plaintext sidecars")
-            if (
-                self.dataset_config.control_path
-                or self.dataset_config.mask_path
-                or self.dataset_config.inpaint_path
-                or self.dataset_config.clip_image_path
-                or self.dataset_config.unconditional_path
-            ):
-                raise ValueError("External control, mask, inpaint, clip, and unconditional paths are not supported for encrypted datasets yet")
-            self.encrypted_reader = EncryptedDatasetReader(self.dataset_path)
-
         self.is_caching_latents = dataset_config.cache_latents or dataset_config.cache_latents_to_disk
         self.is_caching_latents_to_memory = dataset_config.cache_latents
         self.is_caching_latents_to_disk = dataset_config.cache_latents_to_disk
@@ -470,20 +439,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         self.file_list: List['FileItemDTO'] = []
 
         # check if dataset_path is a folder or json
-        if self.is_encrypted_dataset and self.encrypted_reader is not None:
-            if self.is_audio_model:
-                file_list = self.encrypted_reader.list_items(media_kinds=["audio"])
-            elif self.is_multimodal_llm:
-                media_kinds = ["audio", "image"] + (["video"] if self.is_video else [])
-                file_list = self.encrypted_reader.list_items(media_kinds=media_kinds)
-            elif self.is_video:
-                media_kinds = ["video"]
-                if self.dataset_config.include_images_in_video_dataset:
-                    media_kinds.append("image")
-                file_list = self.encrypted_reader.list_items(media_kinds=media_kinds)
-            else:
-                file_list = self.encrypted_reader.list_items(media_kinds=["image"])
-        elif self.is_layered:
+        if self.is_layered:
             layered_samples = discover_layered_samples(self.dataset_path)
             self.layered_samples = {str(sample.composite_path): sample for sample in layered_samples}
             file_list = list(self.layered_samples)
@@ -510,8 +466,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 file_list = list(self.caption_dict.keys())
                 
         # remove items in the _controls_ folder
-        if not self.is_encrypted_dataset:
-            file_list = [x for x in file_list if not os.path.basename(os.path.dirname(x)) == "_controls"]
+        file_list = [x for x in file_list if not os.path.basename(os.path.dirname(x)) == "_controls"]
 
         if self.dataset_config.num_repeats > 1:
             # repeat the list
@@ -548,9 +503,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         
         dataset_size_file = os.path.join(dataset_folder, '.aitk_size.json')
         dataloader_version = "0.1.2"
-        if self.is_encrypted_dataset:
-            self.size_database = {"__version__": dataloader_version}
-        elif os.path.exists(dataset_size_file):
+        if os.path.exists(dataset_size_file):
             try:
                 with open(dataset_size_file, 'r') as f:
                     self.size_database = json.load(f)
@@ -582,19 +535,16 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
         bad_count = 0
         for file in tqdm(file_list):
             try:
-                encrypted_item = file if self.is_encrypted_dataset else None
-                file_path = self.encrypted_reader.virtual_path(file) if encrypted_item is not None else file
+                file_path = file
                 file_item = FileItemDTO(
                     sd=self.sd,
                     path=file_path,
                     layered_sample=self.layered_samples.get(file_path) if self.is_layered else None,
-                    is_audio_model=self.is_audio_model or (self.is_multimodal_llm and (encrypted_item.mediaKind == "audio" if encrypted_item is not None else file_path.lower().endswith(tuple(audio_extensions)))),
+                    is_audio_model=self.is_audio_model or (self.is_multimodal_llm and file_path.lower().endswith(tuple(audio_extensions))),
                     dataset_config=dataset_config,
                     dataloader_transforms=self.transform,
                     size_database=self.size_database,
                     dataset_root=dataset_folder,
-                    encrypted_reader=self.encrypted_reader,
-                    encrypted_item=encrypted_item,
                     encode_control_in_text_embeddings=self.sd.encode_control_in_text_embeddings if self.sd else False,
                     text_embedding_space_version=text_embedding_space_version,
                     text_embedding_uses_target_size=getattr(self.sd, 'text_embedding_uses_target_size', False),
@@ -618,9 +568,8 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                 bad_count += 1
 
         # save the size database
-        if not self.is_encrypted_dataset:
-            with open(dataset_size_file, 'w') as f:
-                json.dump(self.size_database, f)
+        with open(dataset_size_file, 'w') as f:
+            json.dump(self.size_database, f)
         
         if self.is_video:
             video_count = sum(1 for item in self.file_list if item.is_video)
@@ -700,20 +649,20 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                     candidates = [i for i in bucket.file_list_idx if i != index]
                     if candidates:
                         return random.choice(candidates)
-                    break
+                    raise RuntimeError("No compatible replacement for corrupt sample")
         return random.randint(0, len(self.file_list) - 1)
 
     def _get_single_item(self, index, _attempts=0) -> 'FileItemDTO':
         file_item: 'FileItemDTO' = copy.deepcopy(self.file_list[index])
         try:
-            file_item.load_and_process_image(self.transform)
+            file_item.load_and_process_image(file_item.dataloader_transforms or self.transform)
         except Exception as e:
             print(f"Error loading image, skipping and loading a different one: {file_item.path} ({e})")
             if _attempts >= 10:
                 raise
             new_index = self._get_replacement_index(index)
             return self._get_single_item(new_index, _attempts=_attempts + 1)
-        file_item.load_caption(self.caption_dict)
+        file_item.load_caption(getattr(file_item, 'source_caption_dict', self.caption_dict))
         return file_item
 
     def __getitem__(self, item):
@@ -737,10 +686,40 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             return self._get_single_item(item)
 
 
+class PooledDataset(AiToolkitDataset):
+    """Share buckets while each source retains its scanning and cache lifecycle."""
+
+    def __init__(self, sources):
+        self.__dict__.update(sources[0].__dict__)
+        self.sources = sources
+        self.is_pooled = True
+        self.source_configs = [source.dataset_config for source in sources]
+        self.dataset_path = f'pool of {len(sources)} datasets'
+        self.is_video = any(source.is_video for source in sources)
+        self.file_list = []
+        for source in sources:
+            for item in source.file_list:
+                item.source_caption_dict = source.caption_dict
+                self.file_list.append(item)
+        self.epoch_num = 0
+        self.setup_buckets()
+        self.epoch_num = 1
+
+    def setup_epoch(self):
+        for source in self.sources:
+            source.setup_epoch()
+        # Rebuild from per-item config, including sources with points of interest.
+        epoch = self.epoch_num
+        self.epoch_num = 0
+        self.setup_buckets(quiet=True)
+        self.epoch_num = epoch + 1
+
+
 def get_dataloader_from_datasets(
         dataset_options,
         batch_size=1,
         sd: 'StableDiffusion' = None,
+        pool_datasets: bool = False,
 ) -> DataLoader:
     if dataset_options is None or len(dataset_options) == 0:
         return None
@@ -774,6 +753,14 @@ def get_dataloader_from_datasets(
         else:
             raise ValueError(f"invalid dataset type: {config.type}")
 
+    if pool_datasets:
+        ordinary = [dataset for dataset in datasets if not dataset.is_layered and not dataset.dataset_config.is_reg]
+        if len(ordinary) > 1:
+            if len({dataset.batch_size for dataset in ordinary}) != 1:
+                raise ValueError('pool_datasets requires the same batch size for pooled sources')
+            if not all(dataset.dataset_config.buckets for dataset in ordinary):
+                raise ValueError('pool_datasets requires buckets on pooled sources')
+            datasets = [PooledDataset(ordinary)] + [dataset for dataset in datasets if dataset not in ordinary]
     concatenated_dataset = ConcatDataset(datasets)
 
     # todo build scheduler that can get buckets from all datasets that match

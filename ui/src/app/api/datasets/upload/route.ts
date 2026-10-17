@@ -1,3 +1,4 @@
+import { DATASET_MIGRATION_MESSAGE, DATASET_MIGRATION_REQUIRED } from '@/server/datasetDecryption';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 // src/app/api/datasets/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
@@ -5,19 +6,12 @@ import fs from 'fs';
 import { writeFile, mkdir } from 'fs/promises';
 import { basename, dirname, extname, isAbsolute, join, resolve, relative, sep } from 'path';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
-import {
-  isEncryptedDatasetFolder,
-  resolveEncryptedObjectPath,
-  validateEncryptedManifest,
-  writeDatasetImportMetadata,
-  writeEncryptedManifest,
-} from '@/server/encryptedDatasets';
+import { isEncryptedDatasetFolder, writeDatasetImportMetadata } from '@/server/encryptedDatasets';
 import { resolveDatasetScope } from '@/server/datasetScope';
 import {
   cleanupStagedUpload,
   decodedUploadHeader,
   InvalidUploadError,
-  moveStagedUpload,
   moveStagedUploadNoReplace,
   streamRequestToStagingFile,
 } from '@/server/streamedUpload';
@@ -189,6 +183,8 @@ async function streamPlainDatasetFile(request: NextRequest) {
   const requestedRelativePath = decodedUploadHeader(request, 'x-aitk-relative-path', 2_048);
   const sourceFolderPath = decodedUploadHeader(request, 'x-aitk-source-folder', 4_096);
   const encryptedObjectPath = decodedUploadHeader(request, 'x-aitk-encrypted-object-path', 2_048);
+  if (encryptedObjectPath)
+    return Response.json({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, { status: 410 });
   const failIfDatasetExists = request.headers.get('x-aitk-fail-if-dataset-exists') === '1';
 
   if (!datasetName) return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
@@ -215,29 +211,8 @@ async function streamPlainDatasetFile(request: NextRequest) {
   ) {
     return NextResponse.json({ error: 'Dataset already exists' }, { status: 409 });
   }
-  if (encryptedObjectPath) {
-    if (!isEncryptedDatasetFolder(uploadDir)) {
-      return NextResponse.json({ error: 'Encrypted dataset not found' }, { status: 404 });
-    }
-    const targetPath = resolveEncryptedObjectPath(uploadDir, encryptedObjectPath);
-    let stagingPath: string | null = null;
-    try {
-      const staged = await streamRequestToStagingFile(request, dirname(targetPath), {
-        maxBytes: MAX_STREAMED_FILE_BYTES,
-        prefix: 'encrypted-object-upload',
-      });
-      stagingPath = staged.stagingPath;
-      await moveStagedUpload(stagingPath, targetPath);
-      stagingPath = null;
-      await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);
-      return NextResponse.json({ message: 'Encrypted object uploaded successfully', objects: [encryptedObjectPath] });
-    } finally {
-      await cleanupStagedUpload(stagingPath);
-    }
-  }
-  if (isEncryptedDatasetFolder(uploadDir)) {
-    return NextResponse.json({ error: 'Plain uploads are not allowed for encrypted datasets' }, { status: 400 });
-  }
+  if (encryptedObjectPath || isEncryptedDatasetFolder(uploadDir))
+    return Response.json({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, { status: 410 });
 
   const relativeFilePath = requestedRelativePath
     ? cleanRelativeUploadPath(requestedRelativePath, originalFilename)
@@ -323,6 +298,8 @@ export async function POST(request: NextRequest) {
     }
 
     const encrypted = formData.get('encrypted') === '1';
+    if (encrypted)
+      return Response.json({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, { status: 410 });
     const preserveRelativePaths = formData.get('preserveRelativePaths') === '1';
     const failIfDatasetExists = formData.get('failIfDatasetExists') === '1';
     const rawSourceFolderPath = formData.get('sourceFolderPath');
@@ -351,45 +328,8 @@ export async function POST(request: NextRequest) {
 
     await mkdir(uploadDir, { recursive: true });
 
-    if (encrypted) {
-      if (!isEncryptedDatasetFolder(uploadDir)) {
-        return NextResponse.json({ error: 'Encrypted dataset not found' }, { status: 404 });
-      }
-      const manifestText = formData.get('manifest');
-      const objectPathsText = formData.get('objectPaths');
-      if (typeof manifestText !== 'string' || typeof objectPathsText !== 'string') {
-        return NextResponse.json({ error: 'Encrypted upload requires a manifest and object paths' }, { status: 400 });
-      }
-      const manifest = validateEncryptedManifest(JSON.parse(manifestText));
-      const objectPaths = JSON.parse(objectPathsText);
-      if (!Array.isArray(objectPaths) || objectPaths.length !== files.length) {
-        return NextResponse.json({ error: 'Object path count does not match uploaded files' }, { status: 400 });
-      }
-
-      await mkdir(join(uploadDir, 'objects'), { recursive: true });
-      const savedObjects: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i] as File;
-        const objectPath = objectPaths[i];
-        if (typeof objectPath !== 'string') {
-          return NextResponse.json({ error: 'Invalid encrypted object path' }, { status: 400 });
-        }
-        const resolvedObjectPath = resolveEncryptedObjectPath(uploadDir, objectPath);
-        const bytes = await file.arrayBuffer();
-        await writeFile(resolvedObjectPath, Buffer.from(bytes));
-        savedObjects.push(objectPath);
-      }
-      await writeEncryptedManifest(uploadDir, manifest);
-      await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);
-      return NextResponse.json({
-        message: 'Encrypted files uploaded successfully',
-        objects: savedObjects,
-      });
-    }
-
-    if (isEncryptedDatasetFolder(uploadDir)) {
-      return NextResponse.json({ error: 'Plain uploads are not allowed for encrypted datasets' }, { status: 400 });
-    }
+    if (encrypted || isEncryptedDatasetFolder(uploadDir))
+      return Response.json({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, { status: 410 });
 
     const savedFiles: string[] = [];
 

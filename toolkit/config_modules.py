@@ -778,6 +778,7 @@ class TrainConfig:
         self.unload_text_encoder = kwargs.get('unload_text_encoder', False)
         # will toggle all datasets to cache text embeddings
         self.cache_text_embeddings: bool = kwargs.get('cache_text_embeddings', False)
+        self.pool_datasets: bool = kwargs.get('pool_datasets', False)
         # for swapping which parameters are trained during training
         self.do_paramiter_swapping = kwargs.get('do_paramiter_swapping', False)
         # 0.1 is 10% of the parameters active at a time lower is less vram, higher is more
@@ -1510,6 +1511,17 @@ def preprocess_dataset_raw_config(raw_config: List[dict]) -> List[dict]:
     :param raw_config:
     :return:
     """
+    paths_expanded = []
+    for dataset in raw_config:
+        path_key = 'dataset_path' if dataset.get('dataset_path') is not None else 'folder_path'
+        paths = dataset.get(path_key)
+        if isinstance(paths, (list, tuple)):
+            if not paths or any(not isinstance(path, str) or not path.strip() for path in paths):
+                raise ValueError(f'dataset.{path_key} must contain non-empty paths')
+            paths_expanded.extend({**dataset, path_key: path} for path in paths)
+        else:
+            paths_expanded.append(dataset)
+    raw_config = paths_expanded
     # split up datasets by resolutions
     new_config = []
     for dataset in raw_config:

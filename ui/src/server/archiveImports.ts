@@ -25,6 +25,7 @@ import {
 import { withProcessLease } from './processLease';
 import { isPathWithinRoot } from './pathContainment';
 import { getExtractedDatasetPath, readDatasetExportManifest } from './datasetTransfer';
+import { assertPlainDatasetPath } from './plainDatasetCommand';
 import { isEncryptedDatasetFolder } from './encryptedDatasets';
 import { listLayeredImages, validateLayeredImageAssets } from './layeredImages';
 import {
@@ -138,7 +139,7 @@ function trainingManifest(value: unknown): TrainingJobExportManifest {
 
 export async function executeArchiveImport(operation: Operation): Promise<unknown> {
   const input = operation.input;
-  if (input.kind === 'remote-start') throw new Error('Not an archive operation');
+  if (input.kind !== 'dataset-import' && input.kind !== 'job-import') throw new Error('Not an archive operation');
   const root = await importRoot(input.kind);
   if (path.resolve(input.root) !== root)
     throw new Error('Configured storage root changed; restore it before retrying this import');
@@ -170,6 +171,7 @@ export async function executeArchiveImport(operation: Operation): Promise<unknow
   if (input.kind === 'dataset-import') {
     const manifest = await readDatasetExportManifest(extractRoot);
     await listLayeredImages(getExtractedDatasetPath(extractRoot, manifest.dataset.archivePath));
+    await assertPlainDatasetPath(getExtractedDatasetPath(extractRoot, manifest.dataset.archivePath), extractRoot);
     const preferred = input.preferredName || manifest.dataset.name || 'dataset';
     const name = await reserveName(operation, datasetsRoot, preferred, 'datasetName');
     const destination = path.join(datasetsRoot, name);
@@ -222,6 +224,7 @@ export async function executeArchiveImport(operation: Operation): Promise<unknow
           `dataset-${index}`,
         );
         const target = path.join(datasetsRoot, datasetName);
+        await assertPlainDatasetPath(extracted(extractRoot, mapping.archivePath), extractRoot);
         await validateLayeredImageAssets(extracted(extractRoot, mapping.archivePath));
         await publishDirectory(extracted(extractRoot, mapping.archivePath), target, `${operation.id}:dataset-${index}`);
         for (const configPath of mapping.targetConfigPaths) mappings.set(configPath, target);

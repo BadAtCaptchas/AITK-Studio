@@ -221,7 +221,7 @@ test('encrypted catalog preserves root caption metadata', async () => {
     rootCaption: 'Use this as the system prompt.',
     items: [],
   };
-  const { manifest } = await encryptedDatasetUtils.encryptCatalog(catalog, key, manifestForKey(rawKey));
+  const manifest = { ...manifestForKey(rawKey), catalog: encryptedCatalogPayload(rawKey, catalog) };
 
   assert.deepEqual(await encryptedDatasetUtils.decryptCatalog(manifest, key), catalog);
 });

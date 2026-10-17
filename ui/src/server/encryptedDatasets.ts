@@ -1,3 +1,4 @@
+import { parseRemoteDatasetRef } from '../utils/remoteDatasetRefs';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
@@ -361,10 +362,7 @@ export async function validateEncryptedDatasetStartKey(
   return validateEncryptedCatalogKey(manifest, keyB64);
 }
 
-export async function writeEncryptedManifest(datasetFolder: string, manifest: EncryptedDatasetManifest) {
-  validateEncryptedManifest(manifest);
-  await fsp.writeFile(encryptedManifestPath(datasetFolder), JSON.stringify(manifest, null, 2), 'utf-8');
-}
+
 
 export async function listDatasetSummaries(
   datasetsRoot: string,
@@ -464,13 +462,33 @@ function collectConfigPathValues(jobConfig: any) {
 
 export async function getEncryptedDatasetsForJobConfig(jobConfig: any) {
   const required = new Map<string, { path: string; name: string }>();
+  const processes: unknown = jobConfig?.config?.process;
+  if (Array.isArray(processes)) for (const process of processes) {
+    if (process && Array.isArray(process.datasets)) for (const dataset of process.datasets) {
+      if (dataset?.encrypted === true) required.set('legacy-config', { path: 'legacy-config', name: 'Legacy encrypted dataset' });
+    }
+  }
   for (const value of collectConfigPathValues(jobConfig)) {
+    const remote = parseRemoteDatasetRef(value);
+    if (remote) {
+      const { getRemoteWorker, remoteJson, withoutRemoteRedirects } = await import('./remoteClient');
+      const worker = await getRemoteWorker(remote.workerID);
+      const result: unknown = await remoteJson(worker, '/api/datasets/listImages', withoutRemoteRedirects({ method: 'POST', body: JSON.stringify({ datasetName: remote.datasetName, compact: true }) }));
+      if (result && typeof result === 'object' && 'encrypted' in result && result.encrypted === true) required.set(value, { path: value, name: remote.datasetName });
+      continue;
+    }
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) continue;
     const resolved = resolveConfigPath(value);
-    const manifestTarget = fs.existsSync(resolved) && fs.statSync(resolved).isFile() ? path.dirname(resolved) : resolved;
-    if (fs.existsSync(encryptedManifestPath(manifestTarget))) {
-      const realPath = await fsp.realpath(manifestTarget).catch(() => path.resolve(manifestTarget));
-      required.set(realPath, { path: realPath, name: path.basename(realPath) });
+    let current = await fsp.realpath(resolved).catch(() => resolved);
+    if (fs.existsSync(current) && fs.statSync(current).isFile()) current = path.dirname(current);
+    for (;;) {
+      if (isEncryptedDatasetFolder(current)) {
+        required.set(current, { path: current, name: path.basename(current) });
+        break;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
     }
   }
   return Array.from(required.values());

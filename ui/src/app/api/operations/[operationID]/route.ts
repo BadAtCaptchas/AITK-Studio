@@ -1,13 +1,40 @@
+import { getRemoteWorker, isLocalWorker, remoteJson, withoutRemoteRedirects } from '@/server/remoteClient';
 import { getOperation, publicOperation, updateOperation } from '@/server/operations';
 import { db } from '@/server/db';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ operationID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ operationID: string }> }) {
+  const workerID = new URL(request.url).searchParams.get('worker_id');
+  if (workerID && !isLocalWorker(workerID)) {
+    const worker = await getRemoteWorker(workerID);
+    if (new URL(worker.base_url).protocol !== 'https:')
+      return Response.json({ error: 'Migration requires HTTPS' }, { status: 400 });
+    return Response.json(
+      await remoteJson(
+        worker,
+        '/api/operations/' + encodeURIComponent((await params).operationID),
+        withoutRemoteRedirects({ method: 'GET' }),
+      ),
+    );
+  }
   const operation = await getOperation((await params).operationID);
   return operation
     ? Response.json(publicOperation(operation), { headers: { 'Cache-Control': 'no-store' } })
     : Response.json({ error: 'Operation not found' }, { status: 404 });
 }
-export async function DELETE(_request: Request, { params }: { params: Promise<{ operationID: string }> }) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ operationID: string }> }) {
+  const workerID = new URL(request.url).searchParams.get('worker_id');
+  if (workerID && !isLocalWorker(workerID)) {
+    const worker = await getRemoteWorker(workerID);
+    if (new URL(worker.base_url).protocol !== 'https:')
+      return Response.json({ error: 'Migration requires HTTPS' }, { status: 400 });
+    return Response.json(
+      await remoteJson(
+        worker,
+        '/api/operations/' + encodeURIComponent((await params).operationID),
+        withoutRemoteRedirects({ method: 'DELETE' }),
+      ),
+    );
+  }
   const operation = await getOperation((await params).operationID);
   if (!operation) return Response.json({ error: 'Operation not found' }, { status: 404 });
   let updated;

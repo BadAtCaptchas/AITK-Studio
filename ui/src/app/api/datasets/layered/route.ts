@@ -1,3 +1,4 @@
+import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import fsp from 'fs/promises';
 import { resolveDatasetScope } from '@/server/datasetScope';
 import { resolveDatasetFolder, isEncryptedDatasetFolder } from '@/server/encryptedDatasets';
@@ -9,7 +10,7 @@ import {
   saveLayeredCaptions,
   LayeredImageError,
 } from '@/server/layeredImages';
-import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { readJsonCommand } from '@/server/commandInput';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAccess';
 import { getMediaUrl } from '@/utils/media';
@@ -95,4 +96,4 @@ async function postCommand(request: Request) {
     );
   }
 }
-export const POST = withCommandBoundary(postCommand);
+export const POST = withPlainDatasetCommand(postCommand);

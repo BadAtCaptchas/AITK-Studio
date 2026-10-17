@@ -48,7 +48,7 @@ test('combining layered documents into encrypted output fails without publishing
   await fs.writeFile(path.join(folder, '.layers', id, 'manifest.json'), JSON.stringify({ format: 'aitk.layered-image', version: 1, id, composite: 'art.png', caption: 'art.txt', width: 64, height: 64, order: 'bottom-to-top', layers: [{ path: `.layers/${id}/0.png`, name: 'target' }] }));
   const key = crypto.randomBytes(32);
   await writePlainDataset(root, 'plain', [{ path: 'plain.png', caption: 'plain' }]);
-  await assert.rejects(combineDatasets(root, { sourceDatasets: ['layered', 'plain'], outputName: 'encrypted', outputEncrypted: true, outputEncryptedManifest: manifestForKey(key), outputKeyB64: b64(key) }), /Layered documents cannot be converted/);
+  await assert.rejects(combineDatasets(root, { sourceDatasets: ['layered', 'plain'], outputName: 'encrypted', outputEncrypted: true, outputEncryptedManifest: manifestForKey(key), outputKeyB64: b64(key) }), /ENCRYPTED_DATASET_MIGRATION_REQUIRED/);
   assert.equal(fsSync.existsSync(path.join(root, 'encrypted')), false);
   assert.equal(fsSync.existsSync(path.join(folder, 'art.png')), true);
 });
@@ -200,99 +200,151 @@ test('combineDatasets combines plain datasets and renames duplicate stems', asyn
   assert.equal(await fs.readFile(path.join(output, 'same_2.txt'), 'utf8'), 'same beta');
 });
 
-test('combineDatasets requires valid keys for encrypted sources and can decrypt to plain output', async () => {
-  const root = await makeRoot();
+
+const { decryptDataset } = require('../dist/src/server/datasetDecryption.js');
+test('remote migration requires HTTPS and capability before forwarding credentials', async () => {
+  const ts = require('typescript');
+  const code = ts.transpileModule(await fs.readFile(new URL('../src/app/api/datasets/decrypt/route.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+  let baseURL = 'http://worker.invalid', supported = false;
+  const requests = [];
+  const remote = {
+    isLocalWorker: id => id === 'local',
+    getRemoteWorker: async () => ({ base_url: baseURL }),
+    withoutRemoteRedirects: init => ({ ...init, redirect: 'manual' }),
+    remoteJson: async (_worker, route, init) => {
+      requests.push({ route, init });
+      return route === '/api/capabilities' ? { datasetDecryption: supported ? 1 : 0 } : { id: 'migration-id' };
+    },
+  };
+  const loadedModule = { exports: {} };
+  new Function('require', 'module', 'exports', code)(name => name === '@/server/remoteClient' ? remote : name.startsWith('@/') ? require('../dist/src/' + name.slice(2) + '.js') : require(name), loadedModule, loadedModule.exports);
+  const payload = { datasetName: 'locked', outputName: 'plain', worker_id: 'worker', keyB64: b64(crypto.randomBytes(32)) };
+  const start = () => loadedModule.exports.POST(new Request('https://studio.invalid/api/datasets/decrypt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }));
+  assert.equal((await start()).status, 400); assert.equal(requests.length, 0);
+  baseURL = 'https://worker.invalid';
+  const incompatible = await start();
+  assert.equal(incompatible.status, 409); assert.match((await incompatible.json()).error, /Upgrade/);
+  assert.equal(requests.length, 1); assert.equal(requests[0].init.body, undefined);
+  supported = true;
+  assert.equal((await start()).status, 202);
+  assert.equal(requests.at(-1).route, '/api/datasets/decrypt');
+  assert.equal(JSON.parse(requests.at(-1).init.body).keyB64, payload.keyB64);
+  assert.ok(requests.every(request => request.init.redirect === 'manual'));
+});
+test('password, key file and WebAuthn PRF credentials unlock a complete migration', async t => {
+  const { unlockEncryptedDatasetKey } = require('../dist/src/utils/encryptedDatasets.js');
+  const { encryptWithWebAuthnPrfKey, webAuthnPrfWrappedKeyAad } = require('../dist/src/utils/webauthnPrfCrypto.js');
+  for (const provider of ['password', 'keyFile', 'webauthnPrf']) await t.test(provider, async t => {
+    const root = await makeRoot(); t.after(() => fs.rm(root, { recursive: true, force: true }));
+    let key = crypto.randomBytes(32), kdf, credential;
+    if (provider === 'password') {
+      const salt = crypto.randomBytes(16);
+      key = crypto.pbkdf2Sync('migration-password', salt, 600000, 32, 'sha256');
+      kdf = { type: 'PBKDF2-SHA256', salt: b64(salt), iterations: 600000, keyLength: 32 };
+      credential = { provider, password: 'migration-password' };
+    } else if (provider === 'keyFile') {
+      const file = new File(['original-key-file'], 'key.bin');
+      key = crypto.createHash('sha256').update(Buffer.from(await file.arrayBuffer())).digest();
+      kdf = { type: 'KEYFILE-SHA256', keyLength: 32 };
+      credential = { provider, file };
+    } else {
+      const prf = crypto.randomBytes(32), rawID = crypto.randomBytes(24), id = rawID.toString('base64url'), saltB64 = b64(crypto.randomBytes(32));
+      const wrappedKey = await encryptWithWebAuthnPrfKey(prf, key, webAuthnPrfWrappedKeyAad('localhost', id, saltB64));
+      kdf = { type: 'WEBAUTHN-PRF', keyLength: 32, rpId: 'localhost', credentials: [{ id, saltB64, transports: ['usb'], createdAt: new Date().toISOString(), wrappedKey: { algorithm: 'AES-256-GCM', ...wrappedKey } }] };
+      credential = { provider };
+      for (const [name, value] of Object.entries({ window: { isSecureContext: true }, navigator: { credentials: { get: async () => ({ type: 'public-key', id, rawId: rawID, getClientExtensionResults: () => ({ prf: { results: { first: prf } } }) }) } }, PublicKeyCredential: class {} })) {
+        const prior = Object.getOwnPropertyDescriptor(globalThis, name);
+        Object.defineProperty(globalThis, name, { value, configurable: true });
+        t.after(() => { if (prior) Object.defineProperty(globalThis, name, prior); else delete globalThis[name]; });
+      }
+    }
+    const source = await writeEncryptedDataset(root, 'locked', key, [{ name: 'image.png', data: 'unchanged-media', caption: 'unchanged-caption' }]);
+    const manifest = JSON.parse(await fs.readFile(path.join(source, ENCRYPTED_DATASET_MANIFEST), 'utf8'));
+    manifest.crypto.kdf = kdf;
+    await fs.writeFile(path.join(source, ENCRYPTED_DATASET_MANIFEST), JSON.stringify(manifest));
+    const unlocked = await unlockEncryptedDatasetKey(manifest, credential);
+    assert.equal(unlocked.rawKeyB64, b64(key));
+    const result = await decryptDataset(migrationOptions(root, key, { keyB64: unlocked.rawKeyB64 }));
+    assert.equal(await fs.readFile(path.join(root, result.datasetName, 'image.png'), 'utf8'), 'unchanged-media');
+    assert.equal(await fs.readFile(path.join(root, result.datasetName, 'image.txt'), 'utf8'), 'unchanged-caption');
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(source, ENCRYPTED_DATASET_MANIFEST), 'utf8')), manifest);
+  });
+});
+function migrationOptions(root, key, extra = {}) {
+  return { root, sourceName: 'locked', outputName: 'locked_decrypted', keyB64: b64(key), operationID: crypto.randomBytes(32).toString('hex'), progress: async () => {}, beforeCommit: async () => {}, ...extra };
+}
+test('legacy encryption is rejected by combine, even with a valid key', async t => {
+  const root = await makeRoot(); t.after(() => fs.rm(root, { recursive: true, force: true }));
   const key = crypto.randomBytes(32);
-  await writePlainDataset(root, 'plain', [{ path: 'secret.png', data: 'plain bytes', caption: 'plain caption' }]);
-  await writeEncryptedDataset(root, 'locked', key, [
-    { id: 'locked1', name: 'secret.png', data: 'encrypted bytes', caption: 'encrypted caption' },
-  ]);
-
-  await assert.rejects(
-    () => combineDatasets(root, { sourceDatasets: ['plain', 'locked'], outputName: 'missing_key' }),
-    /key is required/i,
-  );
-  await assert.rejects(
-    () =>
-      combineDatasets(root, {
-        sourceDatasets: ['plain', 'locked'],
-        outputName: 'wrong_key',
-        encryptedDatasetKeys: [{ datasetName: 'locked', keyB64: crypto.randomBytes(32).toString('base64') }],
-      }),
-    /auth|decrypt|Unsupported state|authenticate/i,
-  );
-
-  const result = await combineDatasets(root, {
-    sourceDatasets: ['plain', 'locked'],
-    outputName: 'plain_out',
-    encryptedDatasetKeys: [{ datasetName: 'locked', keyB64: key.toString('base64') }],
-  });
-
-  const output = path.join(root, result.dataset.name);
-  assert.equal(await fs.readFile(path.join(output, 'secret.png'), 'utf8'), 'plain bytes');
-  assert.equal(await fs.readFile(path.join(output, 'secret_2.png'), 'utf8'), 'encrypted bytes');
-  assert.equal(await fs.readFile(path.join(output, 'secret_2.txt'), 'utf8'), 'encrypted caption');
+  await writePlainDataset(root, 'plain', [{ path: 'x.png' }]);
+  await writeEncryptedDataset(root, 'locked', key, [{ name: 'x.png', data: 'secret' }]);
+  for (const request of [
+    { sourceDatasets: ['plain', 'locked'], outputName: 'combined', encryptedDatasetKeys: [{ datasetName: 'locked', keyB64: b64(key) }] },
+    { sourceDatasets: ['plain'], outputName: 'combined', outputEncrypted: true },
+  ]) await assert.rejects(combineDatasets(root, request), /ENCRYPTED_DATASET_MIGRATION_REQUIRED/);
+  assert.equal(fsSync.existsSync(path.join(root, 'combined')), false);
 });
-
-test('combineDatasets writes encrypted output without plaintext files', async () => {
-  const root = await makeRoot();
-  const sourceKey = crypto.randomBytes(32);
-  const outputKey = crypto.randomBytes(32);
-  await writePlainDataset(root, 'plain', [{ path: 'image.png', data: 'plain bytes', caption: 'plain caption' }]);
-  await writeEncryptedDataset(root, 'locked', sourceKey, [
-    { id: 'locked1', name: 'image.png', data: 'encrypted bytes', caption: 'encrypted caption' },
+test('migration preserves media, caption bytes, root captions and resolves name collisions', async t => {
+  const root = await makeRoot(); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const key = crypto.randomBytes(32);
+  const source = await writeEncryptedDataset(root, 'locked', key, [
+    { name: 'same.png', data: 'original1', caption: 'caption\r\nbytes\u0000' },
+    { name: 'same.jpg', data: 'original2', caption: '' },
   ]);
-
-  const result = await combineDatasets(root, {
-    sourceDatasets: ['plain', 'locked'],
-    outputName: 'encrypted_out',
-    outputEncrypted: true,
-    encryptedDatasetKeys: [{ datasetName: 'locked', keyB64: sourceKey.toString('base64') }],
-    outputEncryptedManifest: manifestForKey(outputKey),
-    outputKeyB64: outputKey.toString('base64'),
-  });
-
-  const output = path.join(root, result.dataset.name);
-  assert.equal(hasPlaintextEncryptedOutputFiles(output), false);
-  assert.equal(fsSync.existsSync(path.join(output, 'image.png')), false);
-
-  const catalog = await readOutputCatalog(output, outputKey);
-  assert.deepEqual(
-    catalog.items.map(item => item.name).sort(),
-    ['image.png', 'image_2.png'],
-  );
-
-  const second = catalog.items.find(item => item.name === 'image_2.png');
-  const objectPayload = JSON.parse(await fs.readFile(path.join(output, second.objectPath), 'utf8'));
-  assert.equal(
-    decryptPayload(outputKey, objectPayload, `aitk-encrypted-object:${second.objectPath}`).toString('utf8'),
-    'encrypted bytes',
-  );
-  const captionPayload = JSON.parse(await fs.readFile(path.join(output, second.captionObjectPath), 'utf8'));
-  assert.equal(
-    decryptPayload(outputKey, captionPayload, `aitk-encrypted-object:${second.captionObjectPath}`).toString('utf8'),
-    'encrypted caption',
-  );
+  const catalog = await readOutputCatalog(source, key);
+  catalog.rootCaption = 'root\r\ncaption';
+  await fs.writeFile(path.join(source, ENCRYPTED_DATASET_MANIFEST), JSON.stringify(manifestForKey(key, catalog)));
+  const originalManifest = await fs.readFile(path.join(source, ENCRYPTED_DATASET_MANIFEST));
+  const originalObject = await fs.readFile(path.join(source, catalog.items[0].objectPath));
+  const options = migrationOptions(root, key);
+  const result = await decryptDataset(options);
+  assert.equal(result.itemCount, 2); assert.equal(result.captionCount, 2);
+  assert.deepEqual(result.renamed, [{ original: 'same.jpg', name: 'same_2.jpg' }]);
+  const dest = path.join(root, result.datasetName);
+  assert.equal(await fs.readFile(path.join(dest, 'same.png'), 'utf8'), 'original1');
+  assert.equal(await fs.readFile(path.join(dest, 'same.txt'), 'utf8'), 'caption\r\nbytes\u0000');
+  assert.equal(await fs.readFile(path.join(dest, 'same_2.txt'), 'utf8'), '');
+  assert.equal(await fs.readFile(path.join(dest, 'ROOT_CAPTION.txt'), 'utf8'), catalog.rootCaption);
+  assert.deepEqual(await fs.readFile(path.join(source, ENCRYPTED_DATASET_MANIFEST)), originalManifest);
+  assert.deepEqual(await fs.readFile(path.join(source, catalog.items[0].objectPath)), originalObject);
+  assert.deepEqual(await decryptDataset(options), result, 'published retries are idempotent');
+  await assert.rejects(decryptDataset(migrationOptions(root, key)), /already exists/);
 });
-
-test('combineDatasets stores JPEG XL MIME type in encrypted output catalog', async () => {
-  const root = await makeRoot();
-  const outputKey = crypto.randomBytes(32);
-  await writePlainDataset(root, 'plain', [{ path: 'sample.jxl', data: 'jxl bytes', caption: 'jxl caption' }]);
-  await writePlainDataset(root, 'other', [{ path: 'other.png', data: 'png bytes', caption: 'png caption' }]);
-
-  const result = await combineDatasets(root, {
-    sourceDatasets: ['plain', 'other'],
-    outputName: 'encrypted_jxl',
-    outputEncrypted: true,
-    outputEncryptedManifest: manifestForKey(outputKey),
-    outputKeyB64: outputKey.toString('base64'),
-  });
-
-  const catalog = await readOutputCatalog(path.join(root, result.dataset.name), outputKey);
-  const item = catalog.items.find(entry => entry.name === 'sample.jxl');
-
-  assert.equal(item.extension, '.jxl');
-  assert.equal(item.mimeType, 'image/jxl');
-  assert.equal(item.mediaKind, 'image');
+test('failed, canceled and racing migrations retain all originals and clean owned staging', async t => {
+  for (const mode of ['wrong-key', 'corrupt', 'missing', 'traversal', 'unsafe-name', 'cancel', 'race']) {
+    await t.test(mode, async t => {
+      const root = await makeRoot(); t.after(() => fs.rm(root, { recursive: true, force: true }));
+      const key = crypto.randomBytes(32);
+      const source = await writeEncryptedDataset(root, 'locked', key, [{ id: 'media1', name: 'test.png', data: 'media', caption: 'caption' }]);
+      const options = migrationOptions(root, key);
+      if (mode === 'wrong-key') options.keyB64 = b64(crypto.randomBytes(32));
+      if (mode === 'corrupt') await fs.writeFile(path.join(source, 'objects/media1.bin'), '{"nonce":"bad","data":"bad"}');
+      if (mode === 'missing') await fs.unlink(path.join(source, 'objects/media1.bin'));
+      if (mode === 'traversal' || mode === 'unsafe-name') {
+        const catalog = await readOutputCatalog(source, key);
+        if (mode === 'traversal') catalog.items[0].objectPath = '../outside.bin';
+        else catalog.items[0].name = '../escape.png';
+        await fs.writeFile(path.join(source, ENCRYPTED_DATASET_MANIFEST), JSON.stringify(manifestForKey(key, catalog)));
+      }
+      if (mode === 'cancel') options.progress = async () => { throw new Error('Operation canceled'); };
+      if (mode === 'race') options.beforeCommit = async () => { await fs.mkdir(path.join(root, options.outputName)); await fs.writeFile(path.join(root, options.outputName, 'keep'), 'existing'); };
+      const original = await fs.readFile(path.join(source, ENCRYPTED_DATASET_MANIFEST));
+      await assert.rejects(decryptDataset(options));
+      assert.deepEqual(await fs.readFile(path.join(source, ENCRYPTED_DATASET_MANIFEST)), original);
+      assert.equal((await fs.readdir(root)).some(name => name.startsWith('.aitk-decrypt-')), false);
+      if (mode === 'race') assert.equal(await fs.readFile(path.join(root, options.outputName, 'keep'), 'utf8'), 'existing');
+      else assert.equal(fsSync.existsSync(path.join(root, options.outputName)), false);
+    });
+  }
+});
+test('migration rejects objects symlinked outside the encrypted dataset', async t => {
+  const root = await makeRoot(); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const key = crypto.randomBytes(32);
+  const source = await writeEncryptedDataset(root, 'locked', key, [{ id: 'media', name: 'test.png', data: 'media' }]);
+  const object = path.join(source, 'objects/media.bin');
+  const outside = path.join(root, 'outside.bin');
+  await fs.rename(object, outside);
+  try { await fs.symlink(outside, object); } catch (error) { if (error.code === 'EPERM') { t.skip('File symlink privilege unavailable'); return; } throw error; }
+  await assert.rejects(decryptDataset(migrationOptions(root, key)), /escapes/);
+  assert.equal(fsSync.existsSync(outside), true);
 });

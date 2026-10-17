@@ -27,12 +27,7 @@ import { createPortal } from 'react-dom';
 import { apiClient } from '@/utils/api';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { defaultImageCaptionPrompt } from '@/helpers/captionOptions';
-import {
-  captionObjectPath,
-  decryptEncryptedObjectBlob,
-  encryptCaptionObject,
-  randomId,
-} from '@/utils/encryptedDatasets';
+import { captionObjectPath, decryptEncryptedObjectBlob, randomId } from '@/utils/encryptedDatasets';
 import { buildEncryptedObjectRequestBody } from '@/utils/encryptedObjectMediaCache';
 import {
   addIdeogramLayer,
@@ -329,7 +324,9 @@ export default function DatasetImageStudio({
   }, [items.length]);
   const selectedItem = items[selectedIndex] || null;
   const selectedKey = selectedItem ? itemKey(selectedItem) : '';
-  const selectedName = selectedItem ? `${itemName(selectedItem)}${selectedItem.kind === 'plain' && selectedItem.layerCount ? ` · ${selectedItem.layerCount} layers` : ''}` : '';
+  const selectedName = selectedItem
+    ? `${itemName(selectedItem)}${selectedItem.kind === 'plain' && selectedItem.layerCount ? ` · ${selectedItem.layerCount} layers` : ''}`
+    : '';
   const selectedKind = selectedItem ? itemKind(selectedItem) : 'image';
   const hasEncryptedItems = useMemo(() => items.some(item => item.kind === 'encrypted'), [items]);
   const canPersistRecaptionState = !hasEncryptedItems;
@@ -1144,14 +1141,8 @@ export default function DatasetImageStudio({
           targetItem.path,
           typeof response.data?.captioned_at === 'string' ? response.data.captioned_at : null,
         );
-      } else if (encryptedKey && onSaveEncryptedCaption) {
-        const targetCaptionPath =
-          encryptedCaptionPaths[targetKey] || targetItem.item.captionObjectPath || captionObjectPath(randomId());
-        const encryptedCaption = await encryptCaptionObject(encryptedKey, targetCaptionPath, value);
-        await onSaveEncryptedCaption(targetItem.item, targetCaptionPath, JSON.stringify(encryptedCaption));
-        setEncryptedCaptionPaths(previous => ({ ...previous, [targetKey]: targetCaptionPath }));
       } else {
-        throw new Error('Encrypted dataset is locked.');
+        throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt this dataset before editing captions.');
       }
       if (selectedKeyRef.current === targetKey) {
         latestCaptionRef.current = value;

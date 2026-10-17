@@ -11,13 +11,11 @@ import { Button } from '@headlessui/react';
 import {
   AlertTriangle,
   CheckCircle2,
-  CloudDownload,
   Database,
   Download,
   Grid2X2,
   FolderPlus,
   HelpCircle,
-  KeyRound,
   Layers,
   List,
   Loader2,
@@ -38,30 +36,14 @@ import { apiClient } from '@/utils/api';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { aggregateAutoCaptionProgressByDataset } from '@/utils/datasetWatcherStatus';
 import {
-  buildEncryptedDatasetItem,
-  createEmptyEncryptedManifest,
-  decryptCatalog,
-  encryptCatalog,
-  getMediaKind,
-  getRememberedEncryptedDatasetKey,
-  readRootCaptionFile,
-  rememberEncryptedDatasetKey,
-  unlockEncryptedDatasetKey,
-  type DatasetCredentialMode,
-} from '@/utils/encryptedDatasets';
-import {
-  createFlattenedFileNameAllocator,
-  folderImportCaptionKey,
   folderImportExtension,
   folderImportRootName,
   FOLDER_IMPORT_SUPPORTED_EXTENSIONS,
-  isFolderImportCaptionSidecarPath,
   stripFolderImportRoot,
 } from '@/utils/folderImport';
 import { isImage } from '@/utils/basic';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
-import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
-import type { DatasetSummary, EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
+import type { DatasetSummary } from '@/types';
 import { uploadDatasetFile } from '@/utils/streamedUploads';
 type DatasetExplorerView = 'details' | 'icons';
 type DatasetExplorerRow = {
@@ -114,25 +96,6 @@ function datasetRowKey(dataset: DatasetSummary) {
 }
 function datasetWorkerID(dataset: DatasetSummary) {
   return dataset.worker_id || 'local';
-}
-function getRememberedDatasetKey(dataset: DatasetSummary) {
-  const workerID = datasetWorkerID(dataset);
-  return (
-    getRememberedEncryptedDatasetKey(datasetRowKey(dataset)) ||
-    getRememberedEncryptedDatasetKey(dataset.name) ||
-    (dataset.path ? getRememberedEncryptedDatasetKey(dataset.path) : null) ||
-    (workerID !== 'local' ? getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(workerID, dataset.name)) : null)
-  );
-}
-function rememberDatasetKey(dataset: DatasetSummary, rawKeyB64: string) {
-  const workerID = datasetWorkerID(dataset);
-  rememberEncryptedDatasetKey(datasetRowKey(dataset), rawKeyB64);
-  rememberEncryptedDatasetKey(dataset.name, rawKeyB64);
-  if (dataset.path) rememberEncryptedDatasetKey(dataset.path, rawKeyB64);
-  if (workerID !== 'local') {
-    rememberEncryptedDatasetKey(makeRemoteDatasetRef(workerID, dataset.name), rawKeyB64);
-    rememberEncryptedDatasetKey(remoteDatasetRememberKey(workerID, dataset.name), rawKeyB64);
-  }
 }
 function captionStatusSearchText(dataset: DatasetSummary, unlocked = false) {
   if (dataset.encrypted) return unlocked ? 'captions unlocked encrypted' : 'captions locked encrypted';
@@ -349,11 +312,6 @@ export default function Datasets() {
   const [datasetView, setDatasetView] = useState<DatasetExplorerView>('details');
   const [datasetPreviewUrls, setDatasetPreviewUrls] = useState<Record<string, string | null>>({});
   const datasetPreviewRequestsRef = useRef<Set<string>>(new Set());
-  const [newDatasetMode, setNewDatasetMode] = useState<'plain' | 'encrypted'>('plain');
-  const [credentialMode, setCredentialMode] = useState<DatasetCredentialMode>('password');
-  const [datasetPassword, setDatasetPassword] = useState('');
-  const [datasetPasswordConfirm, setDatasetPasswordConfirm] = useState('');
-  const [datasetKeyFile, setDatasetKeyFile] = useState<File | null>(null);
   const [isCreatingDataset, setIsCreatingDataset] = useState(false);
   const [renameDataset, setRenameDataset] = useState<DatasetSummary | null>(null);
   const [renameDatasetName, setRenameDatasetName] = useState('');
@@ -361,39 +319,13 @@ export default function Datasets() {
   const [renameDatasetError, setRenameDatasetError] = useState('');
   const [importingRef, setImportingRef] = useState<string | null>(null);
   const [selectedDatasetRefs, setSelectedDatasetRefs] = useState<Set<string>>(() => new Set());
-  const [unlockedDatasetRefs, setUnlockedDatasetRefs] = useState<Set<string>>(() => new Set());
-  const [isBulkUnlockModalOpen, setIsBulkUnlockModalOpen] = useState(false);
-  const [bulkUnlockTargets, setBulkUnlockTargets] = useState<DatasetSummary[]>([]);
-  const [bulkUnlockManifests, setBulkUnlockManifests] = useState<Record<string, EncryptedDatasetManifest>>({});
-  const [bulkUnlockStatus, setBulkUnlockStatus] = useState<Record<string, BulkUnlockStatus>>({});
-  const [bulkUnlockErrors, setBulkUnlockErrors] = useState<Record<string, string>>({});
-  const [bulkSharedPassword, setBulkSharedPassword] = useState('');
-  const [bulkRowPasswords, setBulkRowPasswords] = useState<Record<string, string>>({});
-  const [bulkRowKeyFiles, setBulkRowKeyFiles] = useState<Record<string, File | null>>({});
-  const [isBulkUnlocking, setIsBulkUnlocking] = useState(false);
   const [isCombineModalOpen, setIsCombineModalOpen] = useState(false);
   const [combineSources, setCombineSources] = useState<DatasetSummary[]>([]);
   const [combineOutputName, setCombineOutputName] = useState('');
-  const [combineOutputMode, setCombineOutputMode] = useState<'plain' | 'encrypted'>('plain');
-  const [combineCredentialMode, setCombineCredentialMode] = useState<DatasetCredentialMode>('password');
-  const [combinePassword, setCombinePassword] = useState('');
-  const [combinePasswordConfirm, setCombinePasswordConfirm] = useState('');
-  const [combineKeyFile, setCombineKeyFile] = useState<File | null>(null);
-  const [combineSourceKeys, setCombineSourceKeys] = useState<Record<string, string>>({});
-  const [combineSourceManifests, setCombineSourceManifests] = useState<Record<string, EncryptedDatasetManifest>>({});
-  const [combineSourcePasswords, setCombineSourcePasswords] = useState<Record<string, string>>({});
-  const [combineSourceKeyFiles, setCombineSourceKeyFiles] = useState<Record<string, File | null>>({});
-  const [combineSourceErrors, setCombineSourceErrors] = useState<Record<string, string>>({});
-  const [combineSourceLoading, setCombineSourceLoading] = useState<Record<string, boolean>>({});
   const [isCombiningDatasets, setIsCombiningDatasets] = useState(false);
   const [isFolderImportModalOpen, setIsFolderImportModalOpen] = useState(false);
   const [folderImportEntries, setFolderImportEntries] = useState<FolderImportEntry[]>([]);
   const [folderImportMode, setFolderImportMode] = useState<'separate' | 'combined'>('separate');
-  const [folderImportOutputMode, setFolderImportOutputMode] = useState<'plain' | 'encrypted'>('plain');
-  const [folderImportCredentialMode, setFolderImportCredentialMode] = useState<DatasetCredentialMode>('password');
-  const [folderImportPassword, setFolderImportPassword] = useState('');
-  const [folderImportPasswordConfirm, setFolderImportPasswordConfirm] = useState('');
-  const [folderImportKeyFile, setFolderImportKeyFile] = useState<File | null>(null);
   const [folderImportWorkerID, setFolderImportWorkerID] = useState('local');
   const [folderImportDatasetName, setFolderImportDatasetName] = useState('');
   const [isImportingFolders, setIsImportingFolders] = useState(false);
@@ -437,22 +369,9 @@ export default function Datasets() {
     setDatasetView(view);
     writeStoredDatasetView(view);
   }, []);
-  const isDatasetUnlocked = useCallback(
-    (dataset: DatasetSummary) =>
-      dataset.encrypted && (unlockedDatasetRefs.has(datasetRowKey(dataset)) || !!getRememberedDatasetKey(dataset)),
-    [unlockedDatasetRefs],
-  );
-  const rememberUnlockedDataset = useCallback((dataset: DatasetSummary, rawKeyB64: string) => {
-    rememberDatasetKey(dataset, rawKeyB64);
-    setUnlockedDatasetRefs(previous => {
-      const next = new Set(previous);
-      next.add(datasetRowKey(dataset));
-      return next;
-    });
-  }, []);
   // Transform datasets array into rows with objects
   const tableRows: DatasetExplorerRow[] = datasets.map(dataset => {
-    const unlocked = isDatasetUnlocked(dataset);
+    const unlocked = false;
     return {
       dataset,
       name: dataset.name,
@@ -504,34 +423,13 @@ export default function Datasets() {
     () => tableRows.filter(row => selectedDatasetRefs.has(row.ref)).map(row => row.dataset),
     [selectedDatasetRefs, tableRows],
   );
-  const selectedEncryptedDatasets = useMemo(
-    () => selectedDatasets.filter(dataset => dataset.encrypted),
-    [selectedDatasets],
-  );
   const selectedWorkerIDs = useMemo(
     () => Array.from(new Set(selectedDatasets.map(datasetWorkerID))),
     [selectedDatasets],
   );
   const selectedWorkerID = selectedWorkerIDs.length === 1 ? selectedWorkerIDs[0] : null;
-  const canCombineSelection = selectedDatasets.length >= 2 && selectedWorkerID !== null;
-  const canBulkUnlockSelection = selectedEncryptedDatasets.length > 0;
-  const bulkPasswordTargetCount = useMemo(
-    () =>
-      bulkUnlockTargets.filter(target => {
-        const ref = datasetRowKey(target);
-        return bulkUnlockStatus[ref] !== 'unlocked' && bulkUnlockManifests[ref]?.crypto.kdf.type === 'PBKDF2-SHA256';
-      }).length,
-    [bulkUnlockManifests, bulkUnlockStatus, bulkUnlockTargets],
-  );
-  const bulkUnlockedCount = useMemo(
-    () => bulkUnlockTargets.filter(target => bulkUnlockStatus[datasetRowKey(target)] === 'unlocked').length,
-    [bulkUnlockStatus, bulkUnlockTargets],
-  );
-  const isBulkUnlockBusy = useMemo(
-    () => isBulkUnlocking || Object.values(bulkUnlockStatus).some(status => status === 'unlocking'),
-    [bulkUnlockStatus, isBulkUnlocking],
-  );
-  const combineEncryptedSources = useMemo(() => combineSources.filter(source => source.encrypted), [combineSources]);
+  const canCombineSelection =
+    selectedDatasets.length >= 2 && selectedWorkerID !== null && selectedDatasets.every(dataset => !dataset.encrypted);
   const combineWorkerID = combineSources.length > 0 ? datasetWorkerID(combineSources[0]) : 'local';
   const folderImportGroups = useMemo(() => {
     const groups = new Map<string, FolderImportEntry[]>();
@@ -573,135 +471,11 @@ export default function Datasets() {
       return next;
     });
   };
-  const loadBulkUnlockManifest = useCallback(async (dataset: DatasetSummary) => {
-    const ref = datasetRowKey(dataset);
-    setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'loading' }));
-    setBulkUnlockErrors(previous => ({ ...previous, [ref]: '' }));
-    try {
-      const res = await apiClient.post('/api/datasets/listImages', {
-        datasetName: dataset.name,
-        worker_id: datasetWorkerID(dataset),
-      });
-      if (res.data?.encrypted && res.data?.manifest) {
-        setBulkUnlockManifests(previous => ({ ...previous, [ref]: res.data.manifest }));
-        setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'locked' }));
-      } else {
-        setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
-        setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Encrypted manifest was not returned.' }));
-      }
-    } catch {
-      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
-      setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Could not load encrypted manifest.' }));
-    }
-  }, []);
-  const closeBulkUnlockModal = () => {
-    if (isBulkUnlockBusy) return;
-    setIsBulkUnlockModalOpen(false);
-    setBulkUnlockTargets([]);
-    setBulkUnlockManifests({});
-    setBulkUnlockStatus({});
-    setBulkUnlockErrors({});
-    setBulkSharedPassword('');
-    setBulkRowPasswords({});
-    setBulkRowKeyFiles({});
-  };
-  const openBulkUnlockModal = () => {
-    if (!canBulkUnlockSelection) {
-      reportWorkflowError('Select at least one encrypted dataset.');
-      return;
-    }
-    const targets = selectedEncryptedDatasets;
-    const initialStatus: Record<string, BulkUnlockStatus> = {};
-    const rememberedRefs = new Set<string>();
-    targets.forEach(target => {
-      const ref = datasetRowKey(target);
-      if (getRememberedDatasetKey(target)) {
-        initialStatus[ref] = 'unlocked';
-        rememberedRefs.add(ref);
-      } else {
-        initialStatus[ref] = 'loading';
-      }
-    });
-    if (rememberedRefs.size > 0) {
-      setUnlockedDatasetRefs(previous => {
-        const next = new Set(previous);
-        rememberedRefs.forEach(ref => next.add(ref));
-        return next;
-      });
-    }
-    setBulkUnlockTargets(targets);
-    setBulkUnlockManifests({});
-    setBulkUnlockStatus(initialStatus);
-    setBulkUnlockErrors({});
-    setBulkSharedPassword('');
-    setBulkRowPasswords({});
-    setBulkRowKeyFiles({});
-    setIsBulkUnlockModalOpen(true);
-    targets.forEach(target => {
-      if (!getRememberedDatasetKey(target)) void loadBulkUnlockManifest(target);
-    });
-  };
-  const unlockBulkDataset = async (
-    dataset: DatasetSummary,
-    request: Parameters<typeof unlockEncryptedDatasetKey>[1],
-    failureMessage = 'Could not unlock this dataset.',
-  ) => {
-    const ref = datasetRowKey(dataset);
-    const manifest = bulkUnlockManifests[ref];
-    if (!manifest) {
-      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
-      setBulkUnlockErrors(previous => ({ ...previous, [ref]: 'Encrypted manifest is still loading.' }));
-      return false;
-    }
-    setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'unlocking' }));
-    setBulkUnlockErrors(previous => ({ ...previous, [ref]: '' }));
-    try {
-      const unlocked = await unlockEncryptedDatasetKey(manifest, request);
-      await decryptCatalog(manifest, unlocked.key);
-      rememberUnlockedDataset(dataset, unlocked.rawKeyB64);
-      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'unlocked' }));
-      setBulkUnlockErrors(previous => ({ ...previous, [ref]: '' }));
-      return true;
-    } catch {
-      setBulkUnlockStatus(previous => ({ ...previous, [ref]: 'error' }));
-      setBulkUnlockErrors(previous => ({ ...previous, [ref]: failureMessage }));
-      return false;
-    }
-  };
-  const handleBulkSharedPasswordUnlock = async () => {
-    if (!bulkSharedPassword || isBulkUnlocking) return;
-    setIsBulkUnlocking(true);
-    try {
-      for (const target of bulkUnlockTargets) {
-        const ref = datasetRowKey(target);
-        const manifest = bulkUnlockManifests[ref];
-        if (bulkUnlockStatus[ref] === 'unlocked' || manifest?.crypto.kdf.type !== 'PBKDF2-SHA256') {
-          continue;
-        }
-        await unlockBulkDataset(
-          target,
-          { provider: 'password', password: bulkSharedPassword },
-          'Needs a different password.',
-        );
-      }
-    } finally {
-      setIsBulkUnlocking(false);
-    }
-  };
   const closeCombineModal = () => {
     if (isCombiningDatasets) return;
     setIsCombineModalOpen(false);
     setCombineSources([]);
     setCombineOutputName('');
-    setCombinePassword('');
-    setCombinePasswordConfirm('');
-    setCombineKeyFile(null);
-    setCombineSourceKeys({});
-    setCombineSourceManifests({});
-    setCombineSourcePasswords({});
-    setCombineSourceKeyFiles({});
-    setCombineSourceErrors({});
-    setCombineSourceLoading({});
   };
   const openCombineModal = () => {
     if (!canCombineSelection) {
@@ -709,18 +483,13 @@ export default function Datasets() {
       return;
     }
     const sources = selectedDatasets;
+    if (sources.some(source => source.encrypted)) {
+      reportWorkflowError('Decrypt legacy datasets before combining.');
+      return;
+    }
     const encrypted = sources.some(source => source.encrypted);
     setCombineSources(sources);
     setCombineOutputName(`${sources[0].name}_combined`);
-    setCombineOutputMode(encrypted ? 'encrypted' : 'plain');
-    setCombineSourceKeys(
-      Object.fromEntries(
-        sources
-          .filter(source => source.encrypted)
-          .map(source => [datasetRowKey(source), getRememberedDatasetKey(source)])
-          .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0),
-      ),
-    );
     setIsCombineModalOpen(true);
   };
   const openRenameDatasetModal = (dataset: DatasetSummary) => {
@@ -752,21 +521,6 @@ export default function Datasets() {
         worker_id: workerID,
       });
       const renamedName = res.data?.name || normalizedName;
-      const rememberedKey = getRememberedDatasetKey(renameDataset);
-      if (rememberedKey) {
-        rememberUnlockedDataset(
-          {
-            ...renameDataset,
-            name: renamedName,
-            worker_id: workerID,
-            ref:
-              workerID === 'local'
-                ? `aitk-dataset://local/${encodeURIComponent(renamedName)}`
-                : makeRemoteDatasetRef(workerID, renamedName),
-          },
-          rememberedKey,
-        );
-      }
       setSelectedDatasetRefs(previous => {
         const next = new Set(previous);
         next.delete(datasetRowKey(renameDataset));
@@ -817,23 +571,6 @@ export default function Datasets() {
       });
       refreshDatasets();
       const importedName = res.data?.dataset?.name;
-      const importedPath = res.data?.path;
-      const remembered =
-        getRememberedEncryptedDatasetKey(ref) ||
-        getRememberedEncryptedDatasetKey(remoteDatasetRememberKey(dataset.worker_id, dataset.name)) ||
-        getRememberedEncryptedDatasetKey(dataset.name);
-      if (remembered && importedName && importedPath) {
-        rememberUnlockedDataset(
-          {
-            name: importedName,
-            encrypted: true,
-            worker_id: 'local',
-            ref: `aitk-dataset://local/${encodeURIComponent(importedName)}`,
-            path: importedPath,
-          },
-          remembered,
-        );
-      }
       if (importedName) {
         router.push(`/datasets/${encodeURIComponent(importedName)}`);
       }
@@ -935,134 +672,20 @@ export default function Datasets() {
       setIsImportingHfDataset(false);
     }
   };
-  useEffect(() => {
-    if (!isCombineModalOpen || combineEncryptedSources.length === 0) return;
-    combineEncryptedSources.forEach(source => {
-      const ref = datasetRowKey(source);
-      if (combineSourceManifests[ref] || combineSourceLoading[ref] || combineSourceErrors[ref]) return;
-      setCombineSourceLoading(previous => ({ ...previous, [ref]: true }));
-      apiClient
-        .post('/api/datasets/listImages', {
-          datasetName: source.name,
-          worker_id: datasetWorkerID(source),
-        })
-        .then(res => {
-          if (res.data?.encrypted && res.data?.manifest) {
-            setCombineSourceManifests(previous => ({ ...previous, [ref]: res.data.manifest }));
-          } else {
-            setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Encrypted manifest was not returned.' }));
-          }
-        })
-        .catch(() => {
-          setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Could not load encrypted manifest.' }));
-        })
-        .finally(() => {
-          setCombineSourceLoading(previous => ({ ...previous, [ref]: false }));
-        });
-    });
-  }, [combineEncryptedSources, combineSourceErrors, combineSourceLoading, combineSourceManifests, isCombineModalOpen]);
-  const unlockCombineSource = async (source: DatasetSummary) => {
-    const ref = datasetRowKey(source);
-    const manifest = combineSourceManifests[ref];
-    if (!manifest) {
-      setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Encrypted manifest is still loading.' }));
-      return;
-    }
-    try {
-      let unlocked;
-      if (manifest.crypto.kdf.type === 'PBKDF2-SHA256') {
-        unlocked = await unlockEncryptedDatasetKey(manifest, {
-          provider: 'password',
-          password: combineSourcePasswords[ref] || '',
-        });
-      } else if (manifest.crypto.kdf.type === 'KEYFILE-SHA256') {
-        if (!combineSourceKeyFiles[ref]) {
-          setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Select the key file for this dataset.' }));
-          return;
-        }
-        unlocked = await unlockEncryptedDatasetKey(manifest, {
-          provider: 'keyFile',
-          file: combineSourceKeyFiles[ref] as File,
-        });
-      } else if (manifest.crypto.kdf.type === 'WEBAUTHN-PRF') {
-        unlocked = await unlockEncryptedDatasetKey(manifest, { provider: 'webauthnPrf' });
-      } else {
-        setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Select the key file for this dataset.' }));
-        return;
-      }
-      const rawKeyB64 = unlocked.rawKeyB64;
-      setCombineSourceKeys(previous => ({ ...previous, [ref]: rawKeyB64 }));
-      setCombineSourceErrors(previous => ({ ...previous, [ref]: '' }));
-      rememberUnlockedDataset(source, rawKeyB64);
-    } catch {
-      setCombineSourceErrors(previous => ({ ...previous, [ref]: 'Could not unlock this dataset.' }));
-    }
-  };
   const handleCombineDatasets = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isCombiningDatasets) return;
     if (combineSources.length < 2) return;
-    const missingKey = combineEncryptedSources.find(source => !combineSourceKeys[datasetRowKey(source)]);
-    if (missingKey) {
-      reportWorkflowError(`Unlock "${missingKey.name}" before combining.`);
-      return;
-    }
     try {
       setIsCombiningDatasets(true);
-      let outputEncryptedManifest = null;
-      let outputKeyB64: string | null = null;
-      if (combineOutputMode === 'encrypted') {
-        if (combineCredentialMode === 'password') {
-          if (!combinePassword || combinePassword !== combinePasswordConfirm) {
-            reportWorkflowError('Password and confirmation must match.');
-            return;
-          }
-          const result = await createEmptyEncryptedManifest('password', combinePassword);
-          outputEncryptedManifest = result.manifest;
-          outputKeyB64 = result.rawKeyB64;
-        } else {
-          if (combineCredentialMode === 'yubiKey') {
-            const result = await createEmptyEncryptedManifest('yubiKey');
-            outputEncryptedManifest = result.manifest;
-            outputKeyB64 = result.rawKeyB64;
-          } else {
-            if (!combineKeyFile) {
-              reportWorkflowError('Select a key file.');
-              return;
-            }
-            const result = await createEmptyEncryptedManifest('keyFile', combineKeyFile);
-            outputEncryptedManifest = result.manifest;
-            outputKeyB64 = result.rawKeyB64;
-          }
-        }
-      }
+
       const res = await apiClient.post('/api/datasets/combine', {
         worker_id: combineWorkerID,
 
         sourceDatasets: combineSources.map(source => source.name),
         outputName: combineOutputName,
-        outputEncrypted: combineOutputMode === 'encrypted',
-        encryptedDatasetKeys: combineEncryptedSources.map(source => ({
-          datasetName: source.name,
-          keyB64: combineSourceKeys[datasetRowKey(source)],
-        })),
-        outputEncryptedManifest,
-        outputKeyB64,
       });
       const combined = res.data?.dataset as DatasetSummary | undefined;
-      if (outputKeyB64 && combined?.name) {
-        rememberUnlockedDataset(
-          {
-            ...combined,
-            worker_id: combineWorkerID,
-            ref:
-              combineWorkerID === 'local'
-                ? combined.ref || `aitk-dataset://local/${encodeURIComponent(combined.name)}`
-                : makeRemoteDatasetRef(combineWorkerID, combined.name),
-          },
-          outputKeyB64,
-        );
-      }
       refreshDatasets();
       setSelectedDatasetRefs(new Set());
       setIsCombineModalOpen(false);
@@ -1114,11 +737,6 @@ export default function Datasets() {
     setFolderImportDatasetName('');
     setFolderImportStatus('');
     setFolderImportMode('separate');
-    setFolderImportOutputMode('plain');
-    setFolderImportCredentialMode('password');
-    setFolderImportPassword('');
-    setFolderImportPasswordConfirm('');
-    setFolderImportKeyFile(null);
     setFolderImportWorkerID('local');
   };
   const uploadFolderImportBatch = async (
@@ -1138,122 +756,6 @@ export default function Datasets() {
         failIfDatasetExists: index === 0,
       });
     }
-  };
-  const createFolderImportEncryption = async () => {
-    if (folderImportCredentialMode === 'password') {
-      if (!folderImportPassword || folderImportPassword !== folderImportPasswordConfirm) {
-        throw new Error('Password and confirmation must match.');
-      }
-      return createEmptyEncryptedManifest('password', folderImportPassword);
-    }
-    if (folderImportCredentialMode === 'yubiKey') {
-      return createEmptyEncryptedManifest('yubiKey');
-    }
-    if (!folderImportKeyFile) {
-      throw new Error('Select a key file.');
-    }
-    return createEmptyEncryptedManifest('keyFile', folderImportKeyFile);
-  };
-  const rememberFolderImportOutputKey = (workerID: string, datasetName: string, rawKeyB64: string) => {
-    rememberUnlockedDataset(
-      {
-        name: datasetName,
-        encrypted: true,
-        worker_id: workerID,
-        ref: workerID === 'local' ? `${workerID}:${datasetName}` : makeRemoteDatasetRef(workerID, datasetName),
-      },
-      rawKeyB64,
-    );
-  };
-  const buildEncryptedFolderImportPayload = async (
-    entries: FolderImportEntry[],
-    relativePaths: string[],
-    manifest: EncryptedDatasetManifest,
-    key: CryptoKey,
-  ) => {
-    const captionFiles = new Map<string, File>();
-    entries.forEach((entry, index) => {
-      const relativePath = relativePaths[index] || entry.relativePath || entry.file.name;
-      if (isFolderImportCaptionSidecarPath(relativePath)) {
-        captionFiles.set(folderImportCaptionKey(relativePath), entry.file);
-      }
-    });
-    const allocateCatalogName = createFlattenedFileNameAllocator();
-    const rootCaption = await readRootCaptionFile(
-      entries.map(entry => entry.file),
-      relativePaths,
-    );
-    const catalog: EncryptedDatasetCatalog = {
-      version: 1,
-      items: [],
-      ...(rootCaption !== null ? { rootCaption } : {}),
-    };
-    const encryptedObjects: Array<{
-      objectPath: string;
-      blob: Blob;
-    }> = [];
-    for (let index = 0; index < entries.length; index += 1) {
-      const entry = entries[index];
-      const mediaKind = getMediaKind(entry.file);
-      if (!mediaKind) continue;
-      const relativePath = relativePaths[index] || entry.relativePath || entry.file.name;
-      const captionFile = captionFiles.get(folderImportCaptionKey(relativePath));
-      const catalogName = allocateCatalogName(relativePath);
-      const { item, encryptedObjects: itemObjects } = await buildEncryptedDatasetItem(
-        entry.file,
-        key,
-        captionFile ? await captionFile.text() : null,
-        catalogName,
-      );
-      catalog.items.push(item);
-      encryptedObjects.push(...itemObjects);
-    }
-    if (catalog.items.length === 0) {
-      throw new Error('No supported media files were found in the selected folders.');
-    }
-    const { manifest: encryptedManifest } = await encryptCatalog(catalog, key, manifest);
-    return { manifest: encryptedManifest, encryptedObjects, itemCount: catalog.items.length };
-  };
-  const uploadEncryptedFolderImportBatch = async (
-    workerID: string,
-    datasetName: string,
-    entries: FolderImportEntry[],
-    relativePaths: string[],
-  ) => {
-    const encryption = await createFolderImportEncryption();
-    const createResult = await apiClient
-      .post('/api/datasets/create', {
-        worker_id: workerID,
-
-        name: datasetName,
-        encrypted: true,
-        encryptedManifest: encryption.manifest,
-      })
-      .then(res => res.data);
-    const createdName = createResult?.name || datasetName;
-    const encryptedPayload = await buildEncryptedFolderImportPayload(
-      entries,
-      relativePaths,
-      encryption.manifest,
-      encryption.key,
-    );
-    const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
-    for (const encryptedObject of encryptedPayload.encryptedObjects) {
-      await uploadDatasetFile(encryptedObject.blob, {
-        datasetName: createdName,
-        filename: encryptedObject.objectPath.split('/').pop() || 'object.bin',
-        workerID,
-        sourceFolderPath,
-        encryptedObjectPath: encryptedObject.objectPath,
-      });
-    }
-    await apiClient.post('/api/datasets/encrypted/update', {
-      datasetName: createdName,
-      worker_id: workerID,
-      manifest: encryptedPayload.manifest,
-    });
-    rememberFolderImportOutputKey(workerID, createdName, encryption.rawKeyB64);
-    return { datasetName: createdName, itemCount: encryptedPayload.itemCount };
   };
   const handleImportFolders = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1275,9 +777,7 @@ export default function Datasets() {
           const datasetName = nextClientDatasetName(group.rootName, targetDatasetNames);
           setFolderImportStatus(`Importing ${datasetName}...`);
           const relativePaths = group.entries.map(entry => stripFolderImportRoot(entry.relativePath, entry.file.name));
-          if (folderImportOutputMode === 'encrypted') {
-            await uploadEncryptedFolderImportBatch(folderImportWorkerID, datasetName, group.entries, relativePaths);
-          } else {
+          {
             await uploadFolderImportBatch(folderImportWorkerID, datasetName, group.entries, relativePaths);
           }
           importedCount += 1;
@@ -1295,17 +795,12 @@ export default function Datasets() {
         }
         setFolderImportStatus(`Importing ${datasetName}...`);
         const relativePaths = folderImportEntries.map(entry => entry.relativePath);
-        const importResult =
-          folderImportOutputMode === 'encrypted'
-            ? await uploadEncryptedFolderImportBatch(
-                folderImportWorkerID,
-                datasetName,
-                folderImportEntries,
-                relativePaths,
-              )
-            : await uploadFolderImportBatch(folderImportWorkerID, datasetName, folderImportEntries, relativePaths).then(
-                () => ({ datasetName }),
-              );
+        const importResult = await uploadFolderImportBatch(
+          folderImportWorkerID,
+          datasetName,
+          folderImportEntries,
+          relativePaths,
+        ).then(() => ({ datasetName }));
         const importedDatasetName = importResult.datasetName;
         setFolderImportStatus(`Imported ${importedDatasetName}.`);
         router.push(
@@ -1319,9 +814,6 @@ export default function Datasets() {
       setFolderImportEntries([]);
       setFolderImportDatasetName('');
       setFolderImportStatus('');
-      setFolderImportPassword('');
-      setFolderImportPasswordConfirm('');
-      setFolderImportKeyFile(null);
     } catch (error: any) {
       reportWorkflowError(error?.response?.data?.error || error?.message || 'Failed to import folders.');
     } finally {
@@ -1333,58 +825,14 @@ export default function Datasets() {
     if (isCreatingDataset) return;
     try {
       setIsCreatingDataset(true);
-      let encryptedManifest = null;
-      let rawKeyB64: string | null = null;
-      if (newDatasetMode === 'encrypted') {
-        if (credentialMode === 'password') {
-          if (!datasetPassword || datasetPassword !== datasetPasswordConfirm) {
-            reportWorkflowError('Password and confirmation must match.');
-            return;
-          }
-          const result = await createEmptyEncryptedManifest('password', datasetPassword);
-          encryptedManifest = result.manifest;
-          rawKeyB64 = result.rawKeyB64;
-        } else {
-          if (credentialMode === 'yubiKey') {
-            const result = await createEmptyEncryptedManifest('yubiKey');
-            encryptedManifest = result.manifest;
-            rawKeyB64 = result.rawKeyB64;
-          } else {
-            if (!datasetKeyFile) {
-              reportWorkflowError('Select a key file.');
-              return;
-            }
-            const result = await createEmptyEncryptedManifest('keyFile', datasetKeyFile);
-            encryptedManifest = result.manifest;
-            rawKeyB64 = result.rawKeyB64;
-          }
-        }
-      }
       const data = await apiClient
         .post('/api/datasets/create', {
           name: newDatasetName,
-
-          encrypted: newDatasetMode === 'encrypted',
-          encryptedManifest,
         })
         .then(res => res.data);
       console.log('New dataset created:', data);
-      if (rawKeyB64 && data.name) {
-        rememberUnlockedDataset(
-          {
-            name: data.name,
-            encrypted: true,
-            worker_id: 'local',
-            ref: `aitk-dataset://local/${encodeURIComponent(data.name)}`,
-          },
-          rawKeyB64,
-        );
-      }
       refreshDatasets();
       setNewDatasetName('');
-      setDatasetPassword('');
-      setDatasetPasswordConfirm('');
-      setDatasetKeyFile(null);
       setIsNewDatasetModalOpen(false);
       if (data.name) {
         router.push(`/datasets/${encodeURIComponent(data.name)}`);
@@ -1432,7 +880,7 @@ export default function Datasets() {
   );
   const renderDatasetActions = (row: DatasetExplorerRow, compact = false) => (
     <div className="flex justify-end gap-1">
-      {row.source === 'remote' && (
+      {row.source === 'remote' && !row.encrypted && (
         <button
           type="button"
           className={`inline-flex items-center justify-center rounded-sm text-gray-300 transition-colors hover:bg-brand-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 ${compact ? 'h-7 w-7' : 'h-8 w-8'}`}
@@ -1458,9 +906,13 @@ export default function Datasets() {
       )}
       <Link
         className="operator-button text-xs"
-        href={`/jobs/new?dataset=${encodeURIComponent(row.dataset.ref || row.dataset.path || row.name)}`}
+        href={
+          row.encrypted
+            ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
+            : `/jobs/new?dataset=${encodeURIComponent(row.dataset.ref || row.dataset.path || row.name)}`
+        }
       >
-        Train
+        {row.encrypted ? 'Decrypt to plain dataset' : 'Train'}
       </Link>
       <button
         type="button"
@@ -1504,7 +956,7 @@ export default function Datasets() {
           : 'border-gray-700 bg-gray-900/80 text-gray-300'
       }`}
     >
-      {row.encrypted ? (row.unlocked ? 'Unlocked' : 'Encrypted') : 'Plain'}
+      {row.encrypted ? 'Legacy encrypted' : 'Plain'}
     </span>
   );
   const renderBrowserState = () => {
@@ -1688,18 +1140,6 @@ export default function Datasets() {
           </div>
         )}
         <div className="flex items-center gap-2">
-          {selectedDatasets.length > 0 && (
-            <Button
-              className="operator-button shrink-0 py-1"
-              disabled={!canBulkUnlockSelection}
-              onClick={() => openBulkUnlockModal()}
-              title="Unlock selected encrypted datasets"
-              aria-label="Unlock selected encrypted datasets"
-            >
-              <KeyRound className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Unlock</span>
-            </Button>
-          )}
           <Button className="operator-button shrink-0" onClick={() => setImportChooserOpen(true)}>
             <FolderPlus size={16} aria-hidden="true" />
             Import data
@@ -1850,102 +1290,6 @@ export default function Datasets() {
             <div className="mt-4">
               <TextInput label="Dataset Name" value={newDatasetName} onChange={value => setNewDatasetName(value)} />
             </div>
-            <p className="mt-4 text-sm text-gray-400">
-              Plain storage keeps files directly accessible. Encrypted storage protects media and captions at rest; you
-              must unlock it to edit or train.
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setNewDatasetMode('plain')}
-                className={`rounded-md border px-3 py-2 text-left ${
-                  newDatasetMode === 'plain'
-                    ? 'border-brand-500 bg-brand-500/10 text-gray-100'
-                    : 'border-gray-700 bg-gray-900 text-gray-300'
-                }`}
-              >
-                Plain
-              </button>
-              <button
-                type="button"
-                onClick={() => setNewDatasetMode('encrypted')}
-                className={`rounded-md border px-3 py-2 text-left ${
-                  newDatasetMode === 'encrypted'
-                    ? 'border-brand-500 bg-brand-500/10 text-gray-100'
-                    : 'border-gray-700 bg-gray-900 text-gray-300'
-                }`}
-              >
-                Encrypted
-              </button>
-            </div>
-
-            {newDatasetMode === 'encrypted' && (
-              <div className="mt-4 space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCredentialMode('password')}
-                    className={`rounded-md px-3 py-2 text-sm ${
-                      credentialMode === 'password'
-                        ? 'bg-brand-500 text-[var(--brand-ink)]'
-                        : 'bg-gray-800 text-gray-300'
-                    }`}
-                  >
-                    Password
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCredentialMode('keyFile')}
-                    className={`rounded-md px-3 py-2 text-sm ${
-                      credentialMode === 'keyFile'
-                        ? 'bg-brand-500 text-[var(--brand-ink)]'
-                        : 'bg-gray-800 text-gray-300'
-                    }`}
-                  >
-                    Key File
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCredentialMode('yubiKey')}
-                    className={`rounded-md px-3 py-2 text-sm ${
-                      credentialMode === 'yubiKey'
-                        ? 'bg-brand-500 text-[var(--brand-ink)]'
-                        : 'bg-gray-800 text-gray-300'
-                    }`}
-                  >
-                    YubiKey
-                  </button>
-                </div>
-                {credentialMode === 'password' ? (
-                  <div className="space-y-3">
-                    <input
-                      type="password"
-                      value={datasetPassword}
-                      onChange={e => setDatasetPassword(e.target.value)}
-                      placeholder="Password"
-                      className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                    />
-                    <input
-                      type="password"
-                      value={datasetPasswordConfirm}
-                      onChange={e => setDatasetPasswordConfirm(e.target.value)}
-                      placeholder="Confirm password"
-                      className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                    />
-                  </div>
-                ) : credentialMode === 'keyFile' ? (
-                  <input
-                    type="file"
-                    onChange={e => setDatasetKeyFile(e.target.files?.[0] || null)}
-                    className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
-                  />
-                ) : (
-                  <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
-                    YubiKey / USB Security Key
-                  </div>
-                )}
-              </div>
-            )}
 
             <div className="mt-6 flex justify-end space-x-3">
               <button
@@ -1964,200 +1308,6 @@ export default function Datasets() {
               </button>
             </div>
           </form>
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={isBulkUnlockModalOpen}
-        onClose={closeBulkUnlockModal}
-        title="Unlock Encrypted Datasets"
-        size="lg"
-        closeOnOverlayClick={!isBulkUnlockBusy}
-      >
-        <div className="space-y-4 text-gray-200">
-          <div className="rounded-md border border-gray-700 bg-gray-900 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-gray-100">
-                  {bulkUnlockedCount} of {bulkUnlockTargets.length} unlocked
-                </div>
-                <div className="mt-0.5 text-xs text-gray-400">
-                  {bulkUnlockTargets.length} encrypted dataset{bulkUnlockTargets.length === 1 ? '' : 's'} selected
-                </div>
-              </div>
-              <span className="text-xs text-gray-400">
-                {selectedWorkerID ? bulkUnlockTargets[0]?.worker_name || 'Local' : 'Mixed workers'}
-              </span>
-            </div>
-          </div>
-
-          {bulkPasswordTargetCount > 0 && (
-            <div className="rounded-md border border-gray-700 bg-gray-900 p-3">
-              <label className="mb-2 block text-sm font-medium text-gray-200">Shared Password</label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  type="password"
-                  value={bulkSharedPassword}
-                  onChange={event => setBulkSharedPassword(event.target.value)}
-                  placeholder="Dataset password"
-                  className="min-w-0 flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                />
-                <button
-                  type="button"
-                  onClick={handleBulkSharedPasswordUnlock}
-                  disabled={!bulkSharedPassword || isBulkUnlockBusy}
-                  className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isBulkUnlocking ? 'Unlocking...' : `Unlock ${bulkPasswordTargetCount}`}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
-            {bulkUnlockTargets.map(target => {
-              const ref = datasetRowKey(target);
-              const manifest = bulkUnlockManifests[ref];
-              const status = bulkUnlockStatus[ref] || 'loading';
-              const error = bulkUnlockErrors[ref];
-              const isUnlocked = status === 'unlocked';
-              const isBusy = status === 'loading' || status === 'unlocking';
-              const rowPassword = bulkRowPasswords[ref] || '';
-              const rowKeyFile = bulkRowKeyFiles[ref] || null;
-              return (
-                <div key={ref} className="rounded-md border border-gray-800 bg-gray-950 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-100">{target.name}</div>
-                      <div className="mt-0.5 text-xs text-gray-500">
-                        {target.worker_name ||
-                          (datasetWorkerID(target) === 'local' ? 'Local' : datasetWorkerID(target))}
-                      </div>
-                    </div>
-                    <div
-                      className={
-                        isUnlocked
-                          ? 'text-sm text-green-300'
-                          : isBusy
-                            ? 'text-sm text-brand-300'
-                            : error
-                              ? 'text-sm text-red-300'
-                              : 'text-sm text-gray-400'
-                      }
-                    >
-                      {isUnlocked
-                        ? 'Unlocked'
-                        : status === 'loading'
-                          ? 'Loading...'
-                          : status === 'unlocking'
-                            ? 'Unlocking...'
-                            : error
-                              ? 'Needs attention'
-                              : 'Locked'}
-                    </div>
-                  </div>
-
-                  {!isUnlocked && !isBusy && manifest?.crypto.kdf.type === 'PBKDF2-SHA256' && (
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <input
-                        type="password"
-                        value={rowPassword}
-                        onChange={event =>
-                          setBulkRowPasswords(previous => ({ ...previous, [ref]: event.target.value }))
-                        }
-                        placeholder="Different password"
-                        className="min-w-0 flex-1 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-gray-100"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          unlockBulkDataset(
-                            target,
-                            { provider: 'password', password: rowPassword },
-                            'Could not decrypt with this password.',
-                          )
-                        }
-                        disabled={!rowPassword || isBulkUnlockBusy}
-                        className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Unlock
-                      </button>
-                    </div>
-                  )}
-
-                  {!isUnlocked && !isBusy && manifest?.crypto.kdf.type === 'KEYFILE-SHA256' && (
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <input
-                        type="file"
-                        onChange={event =>
-                          setBulkRowKeyFiles(previous => ({ ...previous, [ref]: event.target.files?.[0] || null }))
-                        }
-                        className="min-w-0 flex-1 text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          rowKeyFile &&
-                          unlockBulkDataset(
-                            target,
-                            { provider: 'keyFile', file: rowKeyFile },
-                            'Could not decrypt with this key file.',
-                          )
-                        }
-                        disabled={!rowKeyFile || isBulkUnlockBusy}
-                        className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Unlock
-                      </button>
-                    </div>
-                  )}
-
-                  {!isUnlocked && !isBusy && manifest?.crypto.kdf.type === 'WEBAUTHN-PRF' && (
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <div className="min-w-0 flex-1 rounded-md border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-gray-300">
-                        YubiKey / USB Security Key
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          unlockBulkDataset(target, { provider: 'webauthnPrf' }, 'Could not unlock with this YubiKey.')
-                        }
-                        disabled={isBulkUnlockBusy}
-                        className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Unlock
-                      </button>
-                    </div>
-                  )}
-
-                  {!isUnlocked && !isBusy && !manifest && (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => void loadBulkUnlockManifest(target)}
-                        className="rounded-md bg-gray-700 px-3 py-2 text-sm text-gray-100 hover:bg-gray-600"
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  )}
-
-                  {error && <div className="mt-2 text-sm text-red-400">{error}</div>}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
-              onClick={closeBulkUnlockModal}
-              disabled={isBulkUnlockBusy}
-            >
-              Close
-            </button>
-          </div>
         </div>
       </Modal>
 
@@ -2216,10 +1366,6 @@ export default function Datasets() {
             }}
           />
 
-          <p className="text-sm text-gray-400">
-            Plain storage keeps files accessible. Encrypted storage protects media and captions at rest and requires
-            unlocking before use.
-          </p>
           {folderImportWorkerOptions.length > 1 && (
             <div>
               <label className="mb-1 block text-sm text-gray-300">Import To</label>
@@ -2466,35 +1612,6 @@ export default function Datasets() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setFolderImportOutputMode('plain')}
-              className={`rounded-md border px-3 py-2 text-left ${
-                folderImportOutputMode === 'plain'
-                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
-                  : 'border-gray-700 bg-gray-900 text-gray-300'
-              }`}
-            >
-              Plain
-            </button>
-            <button
-              type="button"
-              onClick={() => setFolderImportOutputMode('encrypted')}
-              className={`rounded-md border px-3 py-2 text-left ${
-                folderImportOutputMode === 'encrypted'
-                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
-                  : 'border-gray-700 bg-gray-900 text-gray-300'
-              }`}
-            >
-              Encrypted
-            </button>
-          </div>
-
-          <p className="text-sm text-gray-400">
-            Plain storage keeps files accessible. Encrypted storage protects media and captions at rest and requires
-            unlocking before use.
-          </p>
           {folderImportWorkerOptions.length > 1 && (
             <div>
               <label className="mb-1 block text-sm text-gray-300">Import To</label>
@@ -2518,74 +1635,6 @@ export default function Datasets() {
               value={folderImportDatasetName}
               onChange={setFolderImportDatasetName}
             />
-          )}
-
-          {folderImportOutputMode === 'encrypted' && (
-            <div className="space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFolderImportCredentialMode('password')}
-                  className={`rounded-md px-3 py-2 text-sm ${
-                    folderImportCredentialMode === 'password'
-                      ? 'bg-brand-500 text-[var(--brand-ink)]'
-                      : 'bg-gray-800 text-gray-300'
-                  }`}
-                >
-                  Password
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFolderImportCredentialMode('keyFile')}
-                  className={`rounded-md px-3 py-2 text-sm ${
-                    folderImportCredentialMode === 'keyFile'
-                      ? 'bg-brand-500 text-[var(--brand-ink)]'
-                      : 'bg-gray-800 text-gray-300'
-                  }`}
-                >
-                  Key File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFolderImportCredentialMode('yubiKey')}
-                  className={`rounded-md px-3 py-2 text-sm ${
-                    folderImportCredentialMode === 'yubiKey'
-                      ? 'bg-brand-500 text-[var(--brand-ink)]'
-                      : 'bg-gray-800 text-gray-300'
-                  }`}
-                >
-                  YubiKey
-                </button>
-              </div>
-              {folderImportCredentialMode === 'password' ? (
-                <div className="space-y-3">
-                  <input
-                    type="password"
-                    value={folderImportPassword}
-                    onChange={e => setFolderImportPassword(e.target.value)}
-                    placeholder="Password"
-                    className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                  />
-                  <input
-                    type="password"
-                    value={folderImportPasswordConfirm}
-                    onChange={e => setFolderImportPasswordConfirm(e.target.value)}
-                    placeholder="Confirm password"
-                    className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                  />
-                </div>
-              ) : folderImportCredentialMode === 'keyFile' ? (
-                <input
-                  type="file"
-                  onChange={e => setFolderImportKeyFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
-                />
-              ) : (
-                <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
-                  YubiKey / USB Security Key
-                </div>
-              )}
-            </div>
           )}
 
           <div className="rounded-md border border-gray-700 bg-gray-900 p-3">
@@ -2678,166 +1727,6 @@ export default function Datasets() {
           </div>
 
           <TextInput label="Output Dataset Name" value={combineOutputName} onChange={setCombineOutputName} />
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setCombineOutputMode('plain')}
-              className={`rounded-md border px-3 py-2 text-left ${
-                combineOutputMode === 'plain'
-                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
-                  : 'border-gray-700 bg-gray-900 text-gray-300'
-              }`}
-            >
-              Plain
-            </button>
-            <button
-              type="button"
-              onClick={() => setCombineOutputMode('encrypted')}
-              className={`rounded-md border px-3 py-2 text-left ${
-                combineOutputMode === 'encrypted'
-                  ? 'border-brand-500 bg-brand-500/10 text-gray-100'
-                  : 'border-gray-700 bg-gray-900 text-gray-300'
-              }`}
-            >
-              Encrypted
-            </button>
-          </div>
-
-          {combineEncryptedSources.length > 0 && combineOutputMode === 'plain' && (
-            <div className="rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-sm text-yellow-200">
-              Encrypted source files will be decrypted into a plain output dataset.
-            </div>
-          )}
-
-          {combineEncryptedSources.length > 0 && (
-            <div className="space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
-              <div className="text-sm font-semibold text-gray-200">Encrypted Sources</div>
-              {combineEncryptedSources.map(source => {
-                const ref = datasetRowKey(source);
-                const manifest = combineSourceManifests[ref];
-                const unlocked = !!combineSourceKeys[ref];
-                const loading = !!combineSourceLoading[ref];
-                const error = combineSourceErrors[ref];
-                return (
-                  <div key={ref} className="rounded-md border border-gray-800 bg-gray-950 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 truncate text-sm">{source.name}</div>
-                      <div className={unlocked ? 'text-sm text-green-300' : 'text-sm text-gray-400'}>
-                        {unlocked ? 'Unlocked' : loading ? 'Loading...' : 'Locked'}
-                      </div>
-                    </div>
-                    {!unlocked && manifest && (
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                        {manifest.crypto.kdf.type === 'PBKDF2-SHA256' ? (
-                          <input
-                            type="password"
-                            value={combineSourcePasswords[ref] || ''}
-                            onChange={e =>
-                              setCombineSourcePasswords(previous => ({ ...previous, [ref]: e.target.value }))
-                            }
-                            placeholder="Dataset password"
-                            className="min-w-0 flex-1 rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-gray-100"
-                          />
-                        ) : manifest.crypto.kdf.type === 'KEYFILE-SHA256' ? (
-                          <input
-                            type="file"
-                            onChange={e =>
-                              setCombineSourceKeyFiles(previous => ({
-                                ...previous,
-                                [ref]: e.target.files?.[0] || null,
-                              }))
-                            }
-                            className="min-w-0 flex-1 text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
-                          />
-                        ) : (
-                          <div className="min-w-0 flex-1 rounded-md border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-gray-300">
-                            YubiKey / USB Security Key
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => unlockCombineSource(source)}
-                          className="rounded-md bg-brand-500 px-3 py-2 text-sm text-[var(--brand-ink)] hover:bg-brand-400"
-                        >
-                          Unlock
-                        </button>
-                      </div>
-                    )}
-                    {error && <div className="mt-2 text-sm text-red-400">{error}</div>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {combineOutputMode === 'encrypted' && (
-            <div className="space-y-3 rounded-md border border-gray-700 bg-gray-900 p-3">
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCombineCredentialMode('password')}
-                  className={`rounded-md px-3 py-2 text-sm ${
-                    combineCredentialMode === 'password'
-                      ? 'bg-brand-500 text-[var(--brand-ink)]'
-                      : 'bg-gray-800 text-gray-300'
-                  }`}
-                >
-                  Password
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCombineCredentialMode('keyFile')}
-                  className={`rounded-md px-3 py-2 text-sm ${
-                    combineCredentialMode === 'keyFile'
-                      ? 'bg-brand-500 text-[var(--brand-ink)]'
-                      : 'bg-gray-800 text-gray-300'
-                  }`}
-                >
-                  Key File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCombineCredentialMode('yubiKey')}
-                  className={`rounded-md px-3 py-2 text-sm ${
-                    combineCredentialMode === 'yubiKey'
-                      ? 'bg-brand-500 text-[var(--brand-ink)]'
-                      : 'bg-gray-800 text-gray-300'
-                  }`}
-                >
-                  YubiKey
-                </button>
-              </div>
-              {combineCredentialMode === 'password' ? (
-                <div className="space-y-3">
-                  <input
-                    type="password"
-                    value={combinePassword}
-                    onChange={e => setCombinePassword(e.target.value)}
-                    placeholder="Output password"
-                    className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                  />
-                  <input
-                    type="password"
-                    value={combinePasswordConfirm}
-                    onChange={e => setCombinePasswordConfirm(e.target.value)}
-                    placeholder="Confirm output password"
-                    className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-gray-100"
-                  />
-                </div>
-              ) : combineCredentialMode === 'keyFile' ? (
-                <input
-                  type="file"
-                  onChange={e => setCombineKeyFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-gray-100"
-                />
-              ) : (
-                <div className="rounded-md border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-gray-300">
-                  YubiKey / USB Security Key
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="flex justify-end space-x-3">
             <button

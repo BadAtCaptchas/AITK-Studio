@@ -1,3 +1,4 @@
+import { DATASET_MIGRATION_REQUIRED, DATASET_MIGRATION_MESSAGE } from './datasetDecryption';
 import { configContractErrors } from '../domain/configContract';
 import fsp from 'fs/promises';
 import { assertPythonRuntimeReady } from './pythonPath';
@@ -95,26 +96,6 @@ function isSecureRemoteOllamaCaptionJobConfigJson(jobConfigJson: unknown) {
   }
 }
 
-async function findInvalidEncryptedDatasetKeys(
-  requiredDatasets: RequiredEncryptedDataset[],
-  encryptedKeys: EncryptedDatasetStartKey[],
-) {
-  const keyMap = normalizeEncryptedKeyMap(encryptedKeys);
-  const invalidDatasets: RequiredEncryptedDataset[] = [];
-
-  for (const dataset of requiredDatasets) {
-    const keyB64 = getKeyForRequiredDataset(keyMap, dataset);
-    if (!keyB64) continue;
-    try {
-      await validateEncryptedDatasetStartKey(dataset, keyB64);
-    } catch {
-      invalidDatasets.push(dataset);
-    }
-  }
-
-  return invalidDatasets;
-}
-
 export async function prepareJobStart(
   jobID: string,
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
@@ -147,59 +128,9 @@ export async function prepareJobStart(
   if (contractErrors.length) failStart({ error: contractErrors[0], code: 'INVALID_CONFIG' }, 400);
   if (isLocalWorker(job.worker_id)) await assertPythonRuntimeReady(jobConfig.config?.process?.[0]?.model?.arch);
   const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
-  let encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedDatasetKeys);
-  if (encryptedKeyCoverage.missingDatasets.length > 0) {
-    failStart(
-      {
-        error: 'decryption key required',
-        encryptedDatasets: encryptedKeyCoverage.missingDatasets,
-      },
-      409,
-    );
-  }
-
-  let encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
-  let useDurableEncryptedKeys = requiredEncryptedDatasets.length > 0 && encryptedKeyCoverage.durableKeys.length > 0;
-  let invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(
-    requiredEncryptedDatasets,
-    encryptedKeysForLaunch,
-  );
-  if (invalidEncryptedDatasets.length > 0) {
-    failStart(
-      {
-        error: 'invalid decryption key',
-        encryptedDatasets: invalidEncryptedDatasets,
-        invalidEncryptedDatasets,
-      },
-      409,
-    );
-  }
-
-  if ((durableEncryptedDatasetKeys || useDurableEncryptedKeys) && requiredEncryptedDatasets.length > 0) {
-    try {
-      await storeDurableEncryptedDatasetKeys(jobID, encryptedKeysForLaunch);
-    } catch (error) {
-      if (isDurableEncryptedDatasetKeySecretError(error)) {
-        failStart({ error: error.message, code: 'durable_encrypted_key_secret_unavailable' }, 400);
-      }
-      throw error;
-    }
-
-    encryptedKeyCoverage = await getEncryptedKeyCoverage(jobID, requiredEncryptedDatasets, encryptedKeysForLaunch);
-    encryptedKeysForLaunch = encryptedKeyCoverage.combinedKeys;
-    useDurableEncryptedKeys = true;
-    invalidEncryptedDatasets = await findInvalidEncryptedDatasetKeys(requiredEncryptedDatasets, encryptedKeysForLaunch);
-    if (invalidEncryptedDatasets.length > 0) {
-      failStart(
-        {
-          error: 'invalid decryption key',
-          encryptedDatasets: invalidEncryptedDatasets,
-          invalidEncryptedDatasets,
-        },
-        409,
-      );
-    }
-  }
+  if (requiredEncryptedDatasets.length) failStart({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, 409);
+  const encryptedKeysForLaunch: EncryptedDatasetStartKey[] = [];
+  const useDurableEncryptedKeys = false;
 
   return {
     jobID,
@@ -247,60 +178,9 @@ function scaleUploadPercent(loaded: number, total: number, start: number, end: n
   return start + (end - start) * Math.min(1, loaded / total);
 }
 
-function addRemoteEncryptedDatasetKeyAliases(
-  requiredEncryptedDatasets: RequiredEncryptedDataset[],
-  encryptedKeysForLaunch: EncryptedDatasetStartKey[],
-  datasetMappings: RemoteDatasetSyncMapping[],
-) {
-  if (requiredEncryptedDatasets.length === 0 || datasetMappings.length === 0) return encryptedKeysForLaunch;
-
-  const nextKeys = [...encryptedKeysForLaunch];
-  for (const mapping of datasetMappings) {
-    const requiredDataset = requiredEncryptedDatasets.find(
-      dataset => pathMatches(dataset.path, mapping.localDatasetPath) || dataset.name === mapping.datasetName,
-    );
-    if (!requiredDataset) continue;
-    const keyB64 = getKeyForRequiredDataset(normalizeEncryptedKeyMap(encryptedKeysForLaunch), requiredDataset);
-    if (!keyB64) continue;
-    nextKeys.push({ datasetPath: mapping.remoteDatasetPath, keyB64 });
-    if (mapping.remoteDatasetName !== mapping.datasetName) {
-      nextKeys.push({ datasetPath: mapping.remoteDatasetName, keyB64 });
-    }
-  }
-  return nextKeys;
-}
-
-function pathMatches(left: string, right: string) {
-  return left.replace(/[\\/]+$/, '').toLowerCase() === right.replace(/[\\/]+$/, '').toLowerCase();
-}
-
 export async function assertPreparedJobCanStart(prepared: PreparedJobStart) {
-  const { job, requiredEncryptedDatasets, useDurableEncryptedKeys } = prepared;
-
-  if (!isLocalWorker(job.worker_id)) {
-    if (requiredEncryptedDatasets.length === 0) return;
-    const worker = await getRemoteWorker(job.worker_id);
-    if (
-      !worker.base_url.toLowerCase().startsWith('https://') &&
-      process.env.AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS !== '1'
-    ) {
-      failStart({ error: 'Remote encrypted training requires an HTTPS worker URL.' }, 400);
-    }
-    return;
-  }
-
-  if (requiredEncryptedDatasets.length === 0 || useDurableEncryptedKeys) return;
-
-  const runningJobs = await db.jobs.list({
-    status: ['running', 'stopping'],
-    gpu_ids: job.gpu_ids,
-    worker_id: 'local',
-  });
-  const runningJob = runningJobs.find(
-    candidate => candidate.id !== job.id && !isSecureRemoteOllamaCaptionJobConfigJson(candidate.job_config),
-  );
-  if (runningJob) {
-    failStart({ error: 'Encrypted jobs must start immediately; the selected local GPU is busy.' }, 409);
+  if ((await getEncryptedDatasetsForJobConfig(prepared.jobConfig)).length) {
+    failStart({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, 409);
   }
 }
 
@@ -310,6 +190,7 @@ export async function startPreparedJob(
 ): Promise<Job> {
   const { job, jobID, jobConfig, requiredEncryptedDatasets, encryptedKeysForLaunch, useDurableEncryptedKeys } =
     prepared;
+  await assertPreparedJobCanStart(prepared);
 
   if (!isLocalWorker(job.worker_id)) {
     try {
@@ -363,11 +244,7 @@ export async function startPreparedJob(
         });
         remoteJobConfig = datasetSync.jobConfig;
         remoteWarnings = datasetSync.warnings;
-        remoteEncryptedKeysForLaunch = addRemoteEncryptedDatasetKeyAliases(
-          requiredEncryptedDatasets,
-          encryptedKeysForLaunch,
-          datasetSync.mappings,
-        );
+
 
         onProgress?.({
           status: 'zipping-job',
@@ -455,8 +332,6 @@ export async function startPreparedJob(
       const remoteStartInit: RequestInit = {
         method: 'POST',
         body: JSON.stringify({
-          encryptedDatasetKeys: remoteStartHasKeys ? remoteEncryptedKeysForLaunch : undefined,
-          durableEncryptedDatasetKeys: useDurableEncryptedKeys,
           idempotencyKey: options.operationID,
         }),
       };
@@ -511,22 +386,8 @@ export async function startPreparedJob(
   }
 
   if (isAnyRemoteOllamaCaptionJob(jobConfig)) {
-    const started = await startJobNow(jobID, {
-      encryptedDatasetKeys: requiredEncryptedDatasets.length > 0 ? encryptedKeysForLaunch : undefined,
-    });
+    const started = await startJobNow(jobID);
     if (!started) failStart({ error: 'Job or selected devices are already active', code: 'JOB_ACTIVE' }, 409);
-    return (await db.jobs.findById(jobID)) || job;
-  }
-
-  if (requiredEncryptedDatasets.length > 0 && useDurableEncryptedKeys) {
-    return queueLocalJob(prepared, { startQueue: options.startQueue, info: options.queueInfo });
-  }
-
-  if (requiredEncryptedDatasets.length > 0) {
-    await assertPreparedJobCanStart(prepared);
-    if (!(await startJobNow(jobID, { encryptedDatasetKeys: encryptedKeysForLaunch }))) {
-      failStart({ error: 'Job or selected devices are already active', code: 'JOB_ACTIVE' }, 409);
-    }
     return (await db.jobs.findById(jobID)) || job;
   }
 

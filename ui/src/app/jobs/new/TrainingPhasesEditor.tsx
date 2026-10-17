@@ -58,6 +58,7 @@ const lossTypeOptions = [
   { value: 'mse', label: 'Mean Squared Error' },
   { value: 'mae', label: 'Mean Absolute Error' },
   { value: 'wavelet', label: 'Wavelet' },
+  { value: 'band', label: 'Band (experimental)' },
   { value: 'stepped', label: 'Stepped Recovery' },
   { value: 'pseudo_huber', label: 'Pseudo Huber' },
   { value: 'mean_flow', label: 'Mean Flow' },

@@ -39,6 +39,28 @@ test('acceptance attaches retries, repairs pending links, and does not repeat co
     fixture.restore();
   }
 });
+
+
+test('decryption credentials remain in memory and restart requires unlocking again', async () => {
+  const { rememberOperationKeys, readOperationKeys } = await import('../dist/src/server/operationKeys.js');
+  const fixture = installMemoryRuntime();
+  try {
+    const operation = await enqueueOperation({ kind: 'dataset-decrypt', root: '/test', sourceName: 'old', outputName: 'plain' });
+    const secret = Buffer.alloc(32, 17).toString('base64');
+    rememberOperationKeys(operation.id, [{ datasetPath: 'old', keyB64: secret }]);
+    assert.equal((await readOperationKeys(operation.id))[0].keyB64, secret);
+    assert.equal(JSON.stringify([...fixture.records.values()]).includes(secret), false);
+    globalThis.__aitkOperationKeys.clear();
+    assert.equal(await readOperationKeys(operation.id), null);
+    await runPendingOperations(async () => { throw Object.assign(new Error('Unlock again'), { code: 'OPERATION_KEYS_REQUIRED' }); });
+    assert.equal((await getOperation(operation.id)).state, 'needs-keys');
+    rememberOperationKeys(operation.id, [{ datasetPath: 'old', keyB64: secret }]);
+    await updateOperation(operation.id, { state: 'queued', nextAttemptAt: 0 });
+    await runPendingOperations(async () => ({ datasetName: 'plain' }));
+    assert.equal((await getOperation(operation.id)).state, 'completed');
+    assert.equal(await readOperationKeys(operation.id), null);
+  } finally { fixture.restore(); }
+});
 test('cancellation and missing keys stop before the next side effect', async () => {
   const fixture = installMemoryRuntime();
   try {

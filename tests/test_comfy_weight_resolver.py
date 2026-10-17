@@ -17,11 +17,11 @@ class ComfyWeightResolverTests(unittest.TestCase):
         models_path = os.path.abspath("test-model-root")
         downloaded = []
 
-        def download(*, repo_id, filename, token, local_dir):
+        def download(repo_id, filename, target, token):
             self.assertEqual(repo_id, self.repo)
-            self.assertEqual(local_dir, models_path)
+            self.assertEqual(target, os.path.join(models_path, filename))
             downloaded.append(filename)
-            return os.path.join(local_dir, filename)
+            return target
 
         with (
             patch.object(resolver, "MODELS_PATH", models_path),
@@ -29,7 +29,7 @@ class ComfyWeightResolverTests(unittest.TestCase):
                 resolver, "resolve_comfy_file",
                 side_effect=lambda rel, repo, local_only: cached.get(rel),
             ),
-            patch("huggingface_hub.hf_hub_download", side_effect=download),
+            patch.object(resolver, "download_checkpoint", side_effect=download),
         ):
             result = resolver.resolve_comfy_candidates(candidates, self.repo, **kwargs)
         return result, downloaded

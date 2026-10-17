@@ -1,4 +1,5 @@
-import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
+import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
@@ -35,7 +36,8 @@ function mapRemoteAuditResponse(data: AuditResponse, workerID: string, refByRemo
 async function postCommand(request: Request) {
   const body = assertGlobalPayload(await readJsonCommand(request));
   const datasetName = body?.datasetName;
-  if (typeof datasetName !== 'string' || !datasetName) return NextResponse.json({ error: 'datasetName is required' }, { status: 400 });
+  if (typeof datasetName !== 'string' || !datasetName)
+    return NextResponse.json({ error: 'datasetName is required' }, { status: 400 });
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
   try {
@@ -93,4 +95,4 @@ async function postCommand(request: Request) {
   }
 }
 
-export const POST = withCommandBoundary(postCommand);
+export const POST = withPlainDatasetCommand(postCommand);

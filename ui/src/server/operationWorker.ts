@@ -7,13 +7,16 @@ import { executeRemoteStart } from './remoteStartOperation';
 import { db } from './db';
 import { getDatasetsRoot, getTrainingFolder } from './settings';
 import { isPathWithinRoot } from './pathContainment';
+import { executeDatasetDecryption, cleanupDatasetDecryption } from './datasetDecryptionOperation';
 
 async function execute(operation: Operation): Promise<unknown> {
+  if (operation.input.kind === 'dataset-decrypt') return executeDatasetDecryption(operation);
   if (operation.input.kind === 'remote-start') return executeRemoteStart(operation);
   return executeArchiveImport(operation);
 }
 async function cleanup(operation: Operation): Promise<void> {
   const input = operation.input;
+  if (input.kind === 'dataset-decrypt') return cleanupDatasetDecryption(operation);
   if (input.kind === 'remote-start') {
     if (operation.state !== 'completed')
       await db.jobs.updateIf(

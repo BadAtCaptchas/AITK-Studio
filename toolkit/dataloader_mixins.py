@@ -197,6 +197,44 @@ class Bucket:
         self.file_list_idx: List[int] = []
 
 
+def get_batch_signature(config: 'DatasetConfig') -> tuple:
+    # every dataset-level value the batch DTO / trainer assumes is constant across a batch
+    control_path = config.control_path
+    if control_path is None:
+        num_control_paths = 0
+    elif isinstance(control_path, list):
+        num_control_paths = len(control_path)
+    else:
+        num_control_paths = 1
+    return (
+        num_control_paths,
+        tuple(config.controls),
+        config.control_from_same_folder,
+        config.num_controls_from_same_folder,
+        config.inpaint_path is not None,
+        config.mask_path is not None,
+        config.alpha_mask,
+        config.unconditional_path is not None,
+        config.clip_image_path is not None,
+        config.clip_image_from_same_folder,
+        config.cache_latents,
+        config.cache_latents_to_disk,
+        config.cache_tensors_to_disk,
+        config.cache_text_embeddings,
+        config.load_image_when_caching_latents,
+        config.standardize_images,
+        config.num_frames,
+        config.auto_frame_count,
+        config.fps,
+        config.do_i2v,
+        config.do_audio,
+        config.guidance_type,
+        config.diff_output_preservation,
+        len(config.extra_values),
+    )
+
+
+
 class BucketsMixin:
     def __init__(self):
         self.buckets: Dict[str, Bucket] = {}
@@ -239,8 +277,12 @@ class BucketsMixin:
         # for file_item in enumerate(file_list):
         for idx, file_item in enumerate(file_list):
             file_item: 'FileItemDTO' = file_item
+            item_config = file_item.dataset_config
+            resolution = item_config.resolution
+            signature = get_batch_signature(item_config) if getattr(self, 'is_pooled', False) else ()
+            suffix = repr(signature) if signature else ''
             if file_item.is_audio_model:
-                bucket_key = f"{file_item.width}ms"
+                bucket_key = f"{file_item.width}ms{suffix}"
                 if bucket_key not in self.buckets:
                     self.buckets[bucket_key] = Bucket(file_item.width, 1)
                 self.buckets[bucket_key].file_list_idx.append(idx)
@@ -252,7 +294,7 @@ class BucketsMixin:
             if file_item.has_point_of_interest:
                 # Attempt to process the poi if we can. It wont process if the image is smaller than the resolution
                 did_process_poi = file_item.setup_poi_bucket()
-            if self.dataset_config.square_crop:
+            if item_config.square_crop:
                 # we scale first so smallest size matches resolution
                 scale_factor_x = resolution / width
                 scale_factor_y = resolution / height
@@ -291,19 +333,19 @@ class BucketsMixin:
                 new_width = bucket_resolution["width"]
                 new_height = bucket_resolution["height"]
 
-                if self.dataset_config.random_crop:
+                if item_config.random_crop:
                     # Cached latents need stable crop coordinates so the cache key
                     # survives process restarts.
                     max_crop_x = file_item.scale_to_width - new_width
                     max_crop_y = file_item.scale_to_height - new_height
-                    if getattr(self, 'is_caching_latents', False):
+                    if item_config.cache_latents or item_config.cache_latents_to_disk:
                         crop_seed_info = OrderedDict([
                             ("path", os.path.abspath(file_item.path)),
                             ("width", file_item.width),
                             ("height", file_item.height),
                             ("resolution", resolution),
                             ("bucket_tolerance", bucket_tolerance),
-                            ("scale", self.dataset_config.scale),
+                            ("scale", item_config.scale),
                             ("flip_x", file_item.flip_x),
                             ("flip_y", file_item.flip_y),
                         ])
@@ -332,6 +374,7 @@ class BucketsMixin:
                 # Keep one-frame images separate from every temporal video
                 # bucket even when their spatial dimensions match.
                 bucket_key = f'{bucket_key}x{file_item.num_frames}f'
+            bucket_key += suffix
             if bucket_key not in self.buckets:
                 self.buckets[bucket_key] = Bucket(file_item.crop_width, file_item.crop_height)
             self.buckets[bucket_key].file_list_idx.append(idx)
@@ -2287,8 +2330,7 @@ class LatentCachingFileItemDTOMixin:
             if 'waveform' in state_dict:
                 self._cached_waveform_int16 = state_dict['waveform']
                 self._cached_waveform_sample_rate = int(state_dict['waveform_sample_rate'].item())
-        if self._cached_tensor_uint8 is not None and getattr(self, 'tensor', None) is None:
-            self.tensor = _latent_from_uint8(self._cached_tensor_uint8)
+        # FileItemDTO materializes cached pixels only when a consumer reads them.
         if self._cached_waveform_int16 is not None and self.audio_data is None:
             waveform = _waveform_from_int16(self._cached_waveform_int16)
             self.audio_tensor = waveform

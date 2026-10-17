@@ -16,7 +16,7 @@ from PIL import Image
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from toolkit.config_modules import DatasetConfig
-from toolkit.data_loader import AiToolkitDataset
+from toolkit.data_loader import AiToolkitDataset, PooledDataset, get_dataloader_from_datasets
 import toolkit.dataloader_mixins as dataloader_mixins
 
 
@@ -98,6 +98,47 @@ class LatentCacheReuseTest(unittest.TestCase):
         }
         kwargs.update(overrides)
         return DatasetConfig(**kwargs)
+
+    def test_pooling_preserves_sources_and_keeps_regularization_separate(self):
+        configs = []
+        for index in range(3):
+            folder = os.path.join(self.temp_dir, str(index))
+            os.mkdir(folder)
+            _write_image(os.path.join(folder, "sample.png"))
+            with open(os.path.join(folder, "sample.txt"), "w") as handle:
+                handle.write(f"source {index}")
+            configs.append(DatasetConfig(folder_path=folder, resolution=64, batch_size=2,
+                                         is_reg=index == 2, caption_dropout_rate=0))
+        loader = get_dataloader_from_datasets(configs, sd=FakeSD(), pool_datasets=True)
+        self.assertEqual(len(loader.dataset.datasets), 2)
+        pool = loader.dataset.datasets[0]
+        self.assertIsInstance(pool, PooledDataset)
+        self.assertEqual(len(pool.file_list), 2)
+        self.assertTrue(loader.dataset.datasets[1].dataset_config.is_reg)
+        items = [pool._get_single_item(index) for index in range(2)]
+        self.assertEqual({item.caption for item in items}, {"source 0", "source 1"})
+        self.assertEqual({item.dataset_config.folder_path for item in items}, {configs[0].folder_path, configs[1].folder_path})
+        pool.setup_epoch()
+        self.assertEqual(len(pool.file_list), 2)
+        configs[1].batch_size = 1
+        with self.assertRaisesRegex(ValueError, 'same batch size'):
+            get_dataloader_from_datasets(configs[:2], sd=FakeSD(), pool_datasets=True)
+
+    def test_pooling_keeps_cached_crop_geometry_stable(self):
+        sources = []
+        for index, cache in enumerate([False, True]):
+            folder = os.path.join(self.temp_dir, str(index))
+            os.mkdir(folder)
+            _write_image(os.path.join(folder, "sample.png"), size=(111, 81))
+            config = DatasetConfig(folder_path=folder, resolution=64, random_crop=True, cache_latents_to_disk=cache)
+            sources.append(AiToolkitDataset(config, sd=FakeSD()))
+        cached = sources[1].file_list[0]
+        expected = (cached.crop_x, cached.crop_y, cached.crop_width, cached.crop_height)
+        pool = PooledDataset(sources)
+        self.assertEqual((cached.crop_x, cached.crop_y, cached.crop_width, cached.crop_height), expected)
+        pool.setup_epoch()
+        self.assertEqual((cached.crop_x, cached.crop_y, cached.crop_width, cached.crop_height), expected)
+        self.assertEqual(len(pool.buckets), 2)
 
     def test_resume_reuses_existing_disk_latents_without_device_cache_setup(self):
         _write_image(os.path.join(self.temp_dir, "a.png"))

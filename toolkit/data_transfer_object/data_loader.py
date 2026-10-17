@@ -10,6 +10,7 @@ from toolkit import image_utils
 from toolkit.basic import get_quick_signature_string
 from toolkit.dto import DTO
 from toolkit.dataloader_mixins import (
+    _latent_from_uint8,
     CaptionProcessingDTOMixin,
     ImageProcessingDTOMixin,
     LatentCachingFileItemDTOMixin,
@@ -290,6 +291,25 @@ class FileItemDTO(
         self.cleanup_unconditional()
 
 
+    @property
+    def tensor(self) -> Union[torch.Tensor, None]:
+        tensor = self.__dict__.get('_tensor')
+        cached = getattr(self, '_cached_tensor_uint8', None)
+        if tensor is None and cached is not None:
+            tensor = _latent_from_uint8(cached, dtype=torch.float16)
+            self._tensor = tensor
+        return tensor
+
+    @tensor.setter
+    def tensor(self, value):
+        self._tensor = value
+        self._cached_tensor_uint8 = None
+
+    @tensor.deleter
+    def tensor(self):
+        self.tensor = None
+
+
 class DataLoaderBatchDTO:
     def __init__(self, **kwargs):
         try:
@@ -388,9 +408,10 @@ class DataLoaderBatchDTO:
             ):
                 # only return a tensor if latents are not cached, or if we are explicitly
                 # loading the raw image alongside the cached latents
-                self.tensor: torch.Tensor = torch.cat(
-                    [x.tensor.unsqueeze(0) for x in self.file_items]
-                )
+                if all(x.__dict__.get('_tensor') is None and getattr(x, '_cached_tensor_uint8', None) is not None for x in self.file_items):
+                    self._tensor_uint8 = torch.stack([x._cached_tensor_uint8 for x in self.file_items])
+                else:
+                    self.tensor = torch.cat([x.tensor.unsqueeze(0) for x in self.file_items])
             # if we have encoded latents, we concatenate them
             self.latents: Union[torch.Tensor, None] = None
             if is_latents_cached:
@@ -689,7 +710,7 @@ class DataLoaderBatchDTO:
             return value
 
         for name in (
-            'tensor', 'latents', 'control_tensor', 'control_tensor_list',
+            '_tensor', '_tensor_uint8', 'latents', 'control_tensor', 'control_tensor_list',
             'clip_image_tensor', 'mask_tensor', 'unaugmented_tensor',
             'unconditional_tensor', 'unconditional_latents', 'extra_values',
             'clip_image_embeds', 'clip_image_embeds_unconditional',
@@ -700,6 +721,25 @@ class DataLoaderBatchDTO:
 
     def get_is_reg_list(self):
         return [x.is_reg for x in self.file_items]
+
+    @property
+    def tensor(self) -> Union[torch.Tensor, None]:
+        if self._tensor is None and self._tensor_uint8 is not None:
+            cached = self._tensor_uint8
+            self._tensor = _latent_from_uint8(cached, dtype=torch.float16)
+            if cached.is_pinned():
+                self._tensor = self._tensor.pin_memory()
+            self._tensor_uint8 = None
+        return self._tensor
+
+    @tensor.setter
+    def tensor(self, value):
+        self._tensor = value
+        self._tensor_uint8 = None
+
+    @tensor.deleter
+    def tensor(self):
+        self.tensor = None
 
     def get_network_weight_list(self):
         return [x.network_weight for x in self.file_items]

@@ -354,13 +354,13 @@ export default function SimpleJob({
       );
   }, [datasetOptions, encryptedKeyRefreshKey, jobConfig.config.process[0].datasets]);
   const accessibleRandomPromptDatasets = useMemo(
-    () => randomPromptDatasets.filter(dataset => !dataset.encrypted || dataset.keyB64),
+    () => randomPromptDatasets.filter(dataset => !dataset.encrypted),
     [randomPromptDatasets],
   );
   const randomPromptDisabledReason = useMemo(() => {
     if (randomPromptDatasets.length === 0) return 'Select a dataset before importing a random prompt';
     if (accessibleRandomPromptDatasets.length === 0) {
-      return 'Unlock the encrypted dataset before importing random prompts';
+      return 'Decrypt the legacy dataset to a plain copy before importing random prompts';
     }
     return 'Import random prompt from dataset';
   }, [accessibleRandomPromptDatasets.length, randomPromptDatasets.length]);
@@ -439,17 +439,11 @@ export default function SimpleJob({
     setJobConfig(prompt, `config.process[0].sample.samples[${sampleIndex}].prompt`);
   };
   const importRandomPromptFromDataset = async (sampleIndex: number) => {
-    const datasets = accessibleRandomPromptDatasets.map(dataset => ({
+    const datasets = accessibleRandomPromptDatasets.filter(dataset => !dataset.encrypted).map(dataset => ({
       folderPath: dataset.folderPath,
       captionExt: dataset.captionExt,
       defaultCaption: dataset.defaultCaption,
     }));
-    const encryptedDatasetKeys = accessibleRandomPromptDatasets
-      .filter(dataset => dataset.encrypted && dataset.keyB64)
-      .map(dataset => ({
-        datasetPath: dataset.folderPath,
-        keyB64: dataset.keyB64 as string,
-      }));
     if (datasets.length === 0) {
       reportWorkflowError(randomPromptDisabledReason);
       return;
@@ -458,7 +452,6 @@ export default function SimpleJob({
     try {
       const response = await apiClient.post('/api/datasets/randomPrompt', {
         datasets,
-        encryptedDatasetKeys,
       });
       const prompt = typeof response.data?.prompt === 'string' ? response.data.prompt.trim() : '';
       if (!prompt) {
@@ -652,6 +645,7 @@ export default function SimpleJob({
     { value: 'mse', label: 'Mean Squared Error' },
     { value: 'mae', label: 'Mean Absolute Error' },
     { value: 'wavelet', label: 'Wavelet' },
+    { value: 'band', label: 'Band (experimental)' },
     { value: 'stepped', label: 'Stepped Recovery' },
   ];
   const targetTypeOptions = [
@@ -1408,7 +1402,14 @@ export default function SimpleJob({
                       onChange={value => setJobConfig(value, 'config.process[0].train.loss_type')}
                       options={lossOptions}
                     />
-                    <FormGroup label="EMA">
+                      <FormGroup label="Dataset batching">
+                      <Checkbox
+                        label="Pool compatible datasets"
+                        checked={processConfig.train.pool_datasets ?? false}
+                        onChange={value => setJobConfig(value, 'config.process[0].train.pool_datasets')}
+                      />
+                      </FormGroup>
+                      <FormGroup label="EMA">
                       <Checkbox
                         label="Use EMA"
                         checked={processConfig.train.ema_config?.use_ema || false}

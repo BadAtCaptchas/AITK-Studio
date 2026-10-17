@@ -464,7 +464,7 @@ export interface EMAConfig {
   ema_decay: number;
 }
 
-export type TrainLossType = 'mse' | 'mae' | 'wavelet' | 'stepped' | 'pixelspace' | 'mean_flow' | 'pseudo_huber';
+export type TrainLossType = 'mse' | 'mae' | 'band' | 'wavelet' | 'stepped' | 'pixelspace' | 'mean_flow' | 'pseudo_huber';
 
 export interface PhaseAutoAdvanceConfig {
   type: 'loss_plateau';
@@ -596,6 +596,7 @@ export interface TrainConfig {
   sega_distill_on_reg?: boolean;
   switch_boundary_every: number;
   loss_type: TrainLossType;
+  pool_datasets?: boolean;
   t0_loss_target?: boolean;
   do_guidance_loss?: boolean;
   guidance_loss_target?: number;

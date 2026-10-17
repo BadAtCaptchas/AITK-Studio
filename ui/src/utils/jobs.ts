@@ -5,12 +5,6 @@ import { getDisplayPath, getDownloadUrl } from '@/utils/media';
 import type { EncryptedDatasetStartKey } from '@/types';
 import type { RemoteStartProgress } from '@/types';
 import type { AxiosProgressEvent } from 'axios';
-import {
-  forgetRememberedEncryptedDatasetKey,
-  getRememberedEncryptedDatasetKey,
-  rememberEncryptedDatasetKey,
-  unlockEncryptedDatasetKey,
-} from '@/utils/encryptedDatasets';
 export type TrainingJobCheckpointExportMode = 'latest' | 'all';
 export type TrainingJobExportProgress = {
   exportID: string;
@@ -65,54 +59,15 @@ export type StartJobOptions = {
   background?: boolean;
   onRemoteStartProgress?: (progress: RemoteStartProgress) => void;
 };
-function basenameFromPath(value: string) {
-  return (
-    value
-      .replace(/[\\/]+$/, '')
-      .split(/[\\/]/)
-      .pop() || value
-  );
-}
-function promptForDurableEncryptedResume() {
-  if (typeof window === 'undefined') return false;
-  return window.confirm(
-    'Store a wrapped copy of this encrypted dataset key on the server so the job can resume from the queue after an app restart? This requires AITK_DURABLE_DATASET_KEY_SECRET on the server; changing that secret invalidates durable resume for queued jobs.',
-  );
-}
-function apiErrorMessage(error: any, fallback = 'Request failed') {
-  return error?.response?.data?.error || error?.message || fallback;
-}
-function isDurableEncryptedKeySecretError(error: any) {
-  return error?.response?.status === 400 && error?.response?.data?.code === 'durable_encrypted_key_secret_unavailable';
-}
-function promptStartWithoutDurableEncryptedResume(message: string) {
-  if (typeof window === 'undefined') return false;
-  return window.confirm(`${message}\n\nStart this job now without storing the encrypted dataset key for resume?`);
-}
-async function resolveEncryptedDatasetStartKey(dataset: { path: string; name: string }) {
-  const remembered = getRememberedEncryptedDatasetKey(dataset.path) || getRememberedEncryptedDatasetKey(dataset.name);
-  if (remembered) {
-    return { datasetPath: dataset.path, keyB64: remembered };
+function apiErrorMessage(error: unknown, fallback = 'Request failed') {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = error.response;
+    if (response && typeof response === 'object' && 'data' in response) {
+      const data = response.data;
+      if (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string') return data.error;
+    }
   }
-  const datasetName = dataset.name || basenameFromPath(dataset.path);
-  const res = await apiClient.post('/api/datasets/listImages', { datasetName });
-  const manifest = res.data?.manifest;
-  if (!manifest) throw new Error(`Encrypted dataset key required for ${datasetName}`);
-  if (manifest.crypto?.kdf?.type === 'WEBAUTHN-PRF') {
-    const unlocked = await unlockEncryptedDatasetKey(manifest, { provider: 'webauthnPrf' });
-    rememberEncryptedDatasetKey(dataset.path, unlocked.rawKeyB64);
-    rememberEncryptedDatasetKey(datasetName, unlocked.rawKeyB64);
-    return { datasetPath: dataset.path, keyB64: unlocked.rawKeyB64 };
-  }
-  if (manifest.crypto?.kdf?.type !== 'PBKDF2-SHA256') {
-    throw new Error(`Encrypted dataset ${datasetName} requires its key file. Unlock the dataset page first.`);
-  }
-  const password = window.prompt(`Password for encrypted dataset "${datasetName}"`);
-  if (!password) throw new Error(`Encrypted dataset key required for ${datasetName}`);
-  const { rawKeyB64: keyB64 } = await unlockEncryptedDatasetKey(manifest, { provider: 'password', password });
-  rememberEncryptedDatasetKey(dataset.path, keyB64);
-  rememberEncryptedDatasetKey(datasetName, keyB64);
-  return { datasetPath: dataset.path, keyB64 };
+  return error instanceof Error ? error.message : fallback;
 }
 const runStartLikeJobAction = (
   jobID: string,
@@ -135,12 +90,8 @@ const runStartLikeJobAction = (
         }
       }
     };
-    const postStart = async (payload: {
-      encryptedDatasetKeys?: EncryptedDatasetStartKey[];
-      durableEncryptedDatasetKeys?: boolean;
-    }) => {
+    const postStart = async () => {
       const res = await apiClient.post(`/api/jobs/${jobID}/${actionPath}`, {
-        ...payload,
         ...(actionPath === 'start' ? { idempotencyKey } : {}),
         background: options.background === true && actionPath === 'start',
       });
@@ -150,65 +101,12 @@ const runStartLikeJobAction = (
         await waitForRemoteStart(data.startID);
       }
     };
-    postStart({
-      encryptedDatasetKeys,
-      durableEncryptedDatasetKeys: options.durableEncryptedDatasetKeys === true,
-    })
+    postStart()
       .then(() => {
         console.log(successLabel);
         resolve();
       })
       .catch(async error => {
-        const requiredDatasets = error.response?.status === 409 ? error.response?.data?.encryptedDatasets : null;
-        if (Array.isArray(requiredDatasets)) {
-          try {
-            const invalidDatasets = Array.isArray(error.response?.data?.invalidEncryptedDatasets)
-              ? error.response.data.invalidEncryptedDatasets
-              : [];
-            invalidDatasets.forEach((dataset: any) => {
-              if (typeof dataset?.path === 'string') forgetRememberedEncryptedDatasetKey(dataset.path);
-              if (typeof dataset?.name === 'string') forgetRememberedEncryptedDatasetKey(dataset.name);
-            });
-            const invalidPathKeys = new Set(
-              invalidDatasets
-                .map((dataset: any) =>
-                  typeof dataset?.path === 'string' ? dataset.path.replace(/[\\/]+$/, '').toLowerCase() : null,
-                )
-                .filter((value: string | null): value is string => !!value),
-            );
-            const supplied = (encryptedDatasetKeys || []).filter(
-              key => !invalidPathKeys.has(key.datasetPath.replace(/[\\/]+$/, '').toLowerCase()),
-            );
-            const additional = await Promise.all(requiredDatasets.map(resolveEncryptedDatasetStartKey));
-            const durableEncryptedDatasetKeys =
-              options.durableEncryptedDatasetKeys ?? promptForDurableEncryptedResume();
-            const retryPayload = {
-              encryptedDatasetKeys: [...supplied, ...additional],
-              durableEncryptedDatasetKeys,
-            };
-            try {
-              await postStart(retryPayload);
-            } catch (startError: any) {
-              if (
-                durableEncryptedDatasetKeys &&
-                isDurableEncryptedKeySecretError(startError) &&
-                promptStartWithoutDurableEncryptedResume(apiErrorMessage(startError))
-              ) {
-                await postStart({
-                  ...retryPayload,
-                  durableEncryptedDatasetKeys: false,
-                });
-              } else {
-                throw new Error(apiErrorMessage(startError, failureLabel));
-              }
-            }
-            resolve();
-            return;
-          } catch (keyError) {
-            reject(keyError instanceof Error ? keyError : new Error(apiErrorMessage(keyError, failureLabel)));
-            return;
-          }
-        }
         console.error(`${failureLabel}:`, error);
         reject(new Error(apiErrorMessage(error, failureLabel)));
       });

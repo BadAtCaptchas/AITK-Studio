@@ -85,7 +85,8 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
   const start = loadSource('../src/server/jobStart.ts', {
     '../domain/configContract': {}, 'fs/promises': {}, './pythonPath': {}, './db': { db }, './operations': {},
     './trainingJobBundle': {}, './remoteClient': { isLocalWorker: id => id === 'local' }, './remoteCaptionDispatch': {},
-    './encryptedDatasets': {}, './encryptedDatasetSecrets': {}, './secureRemoteCaptionJobs': caption,
+    './datasetDecryption': { DATASET_MIGRATION_REQUIRED: 'ENCRYPTED_DATASET_MIGRATION_REQUIRED', DATASET_MIGRATION_MESSAGE: 'Decrypt legacy datasets' },
+    './encryptedDatasets': { getEncryptedDatasetsForJobConfig: async () => [] }, './encryptedDatasetSecrets': {}, './secureRemoteCaptionJobs': caption,
     './remoteDatasetSync': {}, '../../cron/actions/startJob': {}, './queueCoordination': coordination, './processLease': lease,
   });
   const scheduler = loadSource('../cron/actions/processQueue.ts', {

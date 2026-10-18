@@ -226,7 +226,7 @@ export async function startPreparedJob(
 
       let remoteJobId = job.remote_job_id;
       let remoteJobConfig = jobConfig;
-      let remoteEncryptedKeysForLaunch = encryptedKeysForLaunch;
+      const remoteEncryptedKeysForLaunch = encryptedKeysForLaunch;
       let remoteWarnings: string[] = [];
 
       if (!remoteJobId) {

@@ -2,6 +2,7 @@ import os from 'os';
 import { randomUUID } from 'crypto';
 import { db } from './db';
 import { getProcessBirth, processBirthMatches } from './processBirth';
+import { setTimeout as delay } from 'timers/promises';
 
 type Owner = { token: string; host: string; pid: number; birth: number; heartbeat: number };
 let identity: Promise<number> | undefined;
@@ -89,8 +90,19 @@ export async function acquireProcessLease(key: string) {
 export async function withProcessLease<T>(
   key: string,
   work: (lease: Awaited<ReturnType<typeof acquireProcessLease>>) => Promise<T>,
+  options: { waitMs?: number } = {},
 ): Promise<T> {
-  const lease = await acquireProcessLease(key);
+  const deadline = Date.now() + (options.waitMs ?? 0);
+  let lease: Awaited<ReturnType<typeof acquireProcessLease>>;
+  while (true) {
+    try {
+      lease = await acquireProcessLease(key);
+      break;
+    } catch (error) {
+      if (!(error instanceof LeaseBusyError) || Date.now() >= deadline) throw error;
+      await delay(25);
+    }
+  }
   try {
     return await work(lease);
   } finally {

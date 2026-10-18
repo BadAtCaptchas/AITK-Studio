@@ -11,6 +11,7 @@ import { withHFDownloadProgress } from '@/server/hfDownloadProgress';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
+import { prepareLocalJobConfig, prepareRemoteJobConfigEdit } from '@/server/trainingPaths';
 
 import type { Job } from '@/types';
 import { isRequestAuthenticated } from '@/utils/authSession';
@@ -142,7 +143,7 @@ async function postCommand(request: Request) {
   try {
     const body = await readJsonCommand(request);
     const { id, name, job_config } = body;
-    const resolvedJobConfig = isRecord(job_config) ? { ...job_config, capability_version: job_config.capability_version ?? 1 } : job_config;
+    let resolvedJobConfig = isRecord(job_config) ? { ...job_config, capability_version: job_config.capability_version ?? 1 } : job_config;
     const worker_id = normalizeWorkerId(body.worker_id);
 
     if (!validJobName(name)) {
@@ -223,7 +224,10 @@ async function postCommand(request: Request) {
       const editing = await claimJobMaintenance(existing, 'editing');
       if (!editing) return NextResponse.json({ error: 'Job changed or its process has not exited. Refresh and retry.' }, { status: 409 });
       try {
-      const workerChanged = existing.worker_id !== worker_id;
+      const workerChanged = normalizeWorkerId(existing.worker_id) !== worker_id;
+      if (isLocalWorker(worker_id)) {
+        resolvedJobConfig = await prepareLocalJobConfig(resolvedJobConfig, workerChanged ? undefined : existing);
+      }
       let remotePatch: JobUpdateInput = {};
       if (!workerChanged && !isLocalWorker(worker_id) && existing.remote_job_id) {
         const worker = await getRemoteWorker(worker_id);
@@ -234,7 +238,7 @@ async function postCommand(request: Request) {
             id: existing.remote_job_id,
             name,
             gpu_ids,
-            job_config: remoteJobConfig,
+            job_config: prepareRemoteJobConfigEdit(remoteJobConfig),
             ...extra,
           }),
         });
@@ -274,6 +278,7 @@ async function postCommand(request: Request) {
       }
 
       // Create new training
+      if (isLocalWorker(worker_id)) resolvedJobConfig = await prepareLocalJobConfig(resolvedJobConfig);
       const training = await db.jobs.create({
         name,
         worker_id,

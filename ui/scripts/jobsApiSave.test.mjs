@@ -30,12 +30,19 @@ const configContract = loadSource('../src/domain/configContract.ts', {
 });
 const jobIdentity = loadSource('../src/utils/jobIdentity.ts');
 const validationConfig = loadSource('../src/utils/validationConfig.ts');
+const workerTrainingRoot = 'D:\\worker-training';
+const trainingPaths = loadSource('../src/server/trainingPaths.ts', {
+  './settings': { getTrainingFolder: async () => workerTrainingRoot },
+  './commandInput': commandInput,
+});
 
 // Exercise the POST handler and real input validation without accessing the user's DB.
 function fixture(existing = null) {
   const created = [];
   const updated = [];
   const lookedUp = [];
+  const remoteRequests = [];
+  const worker = { id: 'worker-1', enabled: true };
   const { POST } = loadSource('../src/app/api/jobs/route.ts', {
     '@/domain/configContract': configContract,
     '@/utils/obsoleteWorkspaceGuard': obsoleteWorkspaceGuard,
@@ -47,6 +54,7 @@ function fixture(existing = null) {
     '@/utils/authSession': { isRequestAuthenticated: async () => true },
     '@/server/db': {
       db: {
+        workerNodes: { findById: async () => worker },
         jobs: {
           maxQueuePosition: async () => 2000,
           findByName: async name => (existing?.name === name ? existing : null),
@@ -67,16 +75,25 @@ function fixture(existing = null) {
       },
     },
     '@/server/jobAttempts': { claimJobMaintenance: async job => ({ ...job, status: 'editing' }) },
-    '@/server/remoteClient': { isLocalWorker: id => id === 'local' },
+    '@/server/remoteClient': {
+      isLocalWorker: id => !id || id === 'local',
+      getRemoteWorker: async () => worker,
+      remoteJson: async (_worker, route, init) => {
+        remoteRequests.push({ route, body: JSON.parse(init.body) });
+        return { name: 'new_run', gpu_ids: '0' };
+      },
+    },
     '@/server/comfyInstallProgress': {},
     '@/server/hfDownloadProgress': {},
     '@/server/jobsApiList': {},
-    '@/server/remoteDatasetPaths': {},
+    '@/server/remoteDatasetPaths': { rewriteSameWorkerRemoteDatasetRefsForWorker: async config => config },
+    '@/server/trainingPaths': trainingPaths,
   });
   return {
     created,
     updated,
     lookedUp,
+    remoteRequests,
     post: body => POST(new Request('http://localhost/api/jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -113,7 +130,11 @@ for (const jobType of ['train', 'caption']) {
       assert.equal(saved.name, body.name);
       assert.equal(saved.job_type, jobType);
       assert.equal(saved.queue_position, 3000);
-      assert.deepEqual(JSON.parse(saved.job_config), { ...body.job_config, capability_version: 1 });
+      assert.deepEqual(JSON.parse(saved.job_config), {
+        ...body.job_config,
+        capability_version: 1,
+        config: { ...body.job_config.config, process: [{ ...body.job_config.config.process[0], training_folder: workerTrainingRoot }] },
+      });
       assert.equal(state.created.length, 1);
       assert.deepEqual(state.lookedUp, []);
       assert.deepEqual(state.updated, []);
@@ -153,4 +174,58 @@ test('non-string, non-null ids remain invalid and cannot create or update jobs',
     assert.deepEqual(state.updated, []);
     assert.deepEqual(state.lookedUp, []);
   }
+});
+
+test('worker edits retain the imported training root instead of a controller path', async () => {
+  const originalRoot = 'E:\\previous-worker-output';
+  const existing = {
+    id: 'remote-job', name: 'old_run', status: 'stopped', worker_id: 'local',
+    job_config: JSON.stringify({ config: { process: [{ training_folder: originalRoot }] } }),
+  };
+  for (const incomingRoot of ['C:\\controller-output', undefined]) {
+    const state = fixture(existing);
+    const body = { ...payload(), id: existing.id };
+    body.job_config.config.process[0].training_folder = incomingRoot;
+    body.job_config.config.process[0].train = { steps: 7000 };
+    const response = await state.post(body);
+    assert.equal(response.status, 200);
+    const saved = await response.json();
+    assert.equal(await trainingPaths.getJobTrainingRoot(saved), originalRoot);
+    assert.equal(JSON.parse(saved.job_config).config.process[0].train.steps, 7000);
+  }
+});
+
+test('new local jobs and jobs moved from a remote worker use the configured local training root', async () => {
+  for (const existing of [null, {
+    id: 'remote-mirror', name: 'old_run', status: 'stopped', worker_id: 'worker-1', remote_job_id: 'remote-job',
+    job_config: JSON.stringify({ config: { process: [{ training_folder: '/remote/output' }] } }),
+  }]) {
+    const state = fixture(existing);
+    const body = { ...payload(), id: existing?.id };
+    body.job_config.config.process[0].training_folder = '/another-machine/output';
+    const response = await state.post(body);
+    assert.equal(response.status, 200);
+    assert.equal(await trainingPaths.getJobTrainingRoot(await response.json()), workerTrainingRoot);
+    assert.deepEqual(state.remoteRequests, []);
+  }
+});
+
+test('remote edits omit controller runtime paths and preserve the local mirror config', async () => {
+  const state = fixture({ id: 'mirror', name: 'old_run', status: 'stopped', worker_id: 'worker-1', remote_job_id: 'remote-job' });
+  const body = { ...payload(), id: 'mirror', worker_id: 'worker-1' };
+  body.job_config.config.process = [
+    { type: 'sd_trainer', training_folder: 'C:\\controller-output', sqlite_db_path: 'C:\\controller.db', train: { steps: 7000 } },
+    { type: 'sd_trainer', training_folder: 'C:\\controller-output', sqlite_db_path: 'C:\\controller.db' },
+  ];
+  const response = await state.post(body);
+  assert.equal(response.status, 200);
+  assert.equal(state.remoteRequests.length, 1);
+  const sent = state.remoteRequests[0].body;
+  assert.equal(sent.id, 'remote-job');
+  for (const process of sent.job_config.config.process) {
+    assert.equal(Object.hasOwn(process, 'training_folder'), false);
+    assert.equal(Object.hasOwn(process, 'sqlite_db_path'), false);
+  }
+  assert.equal(sent.job_config.config.process[0].train.steps, 7000);
+  assert.deepEqual(JSON.parse((await response.json()).job_config).config.process, body.job_config.config.process);
 });

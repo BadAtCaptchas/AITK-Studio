@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import * as timers from 'node:timers/promises';
 import test from 'node:test';
 import ts from 'typescript';
 
@@ -71,7 +72,7 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
     },
   };
   const lease = loadSource('../src/server/processLease.ts', {
-    os, crypto, './db': { db },
+    os, crypto, 'timers/promises': timers, './db': { db },
     './processBirth': { getProcessBirth: async () => 1000, processBirthMatches: (a, b) => a === b },
   });
   const coordination = loadSource('../src/server/queueCoordination.ts', {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Database, Play, Box, Images, Monitor, Loader2 } from 'lucide-react';
 import DashboardHardware from '@/components/DashboardHardware';
+import JobSamplePreview from '@/components/JobSamplePreview';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import useMonitorStream from '@/hooks/useMonitorStream';
 import useJobsList from '@/hooks/useJobsList';
@@ -134,22 +135,20 @@ export default function Dashboard() {
           </p>
         ) : (
           <>
-            <div className="journey-preview" aria-label={previews.length ? 'Dataset preview' : undefined}>
-              {previews.length ? (
-                previews.map(src => <img key={src} src={getMediaUrl(src)} alt="" />)
-              ) : (
-                <div className="journey-preview-empty">
-                  <Images size={48} strokeWidth={1} aria-hidden="true" />
-                  <span>
-                    {dataset?.encrypted
-                      ? 'Encrypted media'
-                      : action.job
-                        ? `Run ${action.job.status}`
-                        : 'Your data starts here'}
-                  </span>
-                </div>
-              )}
-            </div>
+            {action.job ? (
+              <JobSamplePreview key={action.job.id} job={action.job} />
+            ) : (
+              <div className="journey-preview" aria-label={previews.length ? 'Dataset preview' : undefined}>
+                {previews.length ? (
+                  previews.map(src => <img key={src} src={getMediaUrl(src)} alt="" />)
+                ) : (
+                  <div className="journey-preview-empty">
+                    <Images size={48} strokeWidth={1} aria-hidden="true" />
+                    <span>{dataset?.encrypted ? 'Encrypted media' : 'Your data starts here'}</span>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="min-w-0">
               <h2 className="break-words text-3xl font-semibold tracking-tight">{action.title}</h2>
               {dataset && (

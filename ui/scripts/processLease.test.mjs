@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import ts from 'typescript';
+import * as timers from 'node:timers/promises';
 
 function loadSource(relative, dependencies, processObject = process) {
   const code = ts.transpileModule(fs.readFileSync(new URL(relative, import.meta.url), 'utf8'), {
@@ -113,6 +114,7 @@ function leaseFixture(birth = nativeBirth) {
     ...loadSource('../src/server/processLease.ts', {
       os,
       crypto,
+      'timers/promises': timers,
       './db': { db: { runtime } },
       './processBirth': birth,
     }),

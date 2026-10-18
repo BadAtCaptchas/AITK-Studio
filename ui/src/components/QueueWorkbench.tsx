@@ -175,8 +175,8 @@ function WorkerHero({
   onRefresh: () => void;
 }) {
   const queueRunning = queue?.is_running === true;
-  const running = group.totalFor(['running']);
-  const queued = group.totalFor(['queued']);
+  const running = group.jobs.filter(job => job.status === 'running').length;
+  const queued = group.jobs.filter(job => job.status === 'queued').length;
   const activeTotal = group.jobs.length;
   const [togglePending, setTogglePending] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);

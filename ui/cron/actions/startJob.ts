@@ -3,7 +3,7 @@ import { finishObservedJobProcess } from '../../src/server/jobProcess';
 import { claimJobAttempt } from '../../src/server/jobAttempts';
 import { withLocalQueueTransition } from '../../src/server/queueCoordination';
 import { LeaseBusyError } from '../../src/server/processLease';
-import { jobStorageKey } from '../../src/utils/jobIdentity';
+import { applyJobOutputIdentity, jobStorageKey } from '../../src/utils/jobIdentity';
 import { inferenceToken } from '../../src/server/inferenceToken';
 import type { Job } from '../../src/types';
 import { spawn } from 'child_process';
@@ -158,7 +158,7 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       }
       const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
       if (requiredEncryptedDatasets.length) throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt legacy datasets before training.');
-      jobConfig.config.name = jobStorageKey(job);
+      applyJobOutputIdentity(jobConfig, job);
       if (Array.isArray(jobConfig.config?.process)) {
         jobConfig.config.process.forEach((processConfig: any) => {
           processConfig.sqlite_db_path = dbConfig.sqlitePath;

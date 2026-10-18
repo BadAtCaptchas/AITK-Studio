@@ -33,6 +33,12 @@ from toolkit.basic import value_map
 from toolkit.base_lora import fuse_base_lora_into_model
 from toolkit.base_lora_metadata import add_base_lora_metadata
 from toolkit.buckets import get_bucket_for_image_size
+from toolkit.checkpoint_cleanup import (
+    check_save_permissions,
+    load_checkpoint_names,
+    remove_old_save,
+    save_checkpoint_names,
+)
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.data_loader import get_dataloader_from_datasets, trigger_dataloader_setup_epoch
@@ -639,6 +645,24 @@ class BaseSDTrainProcess(BaseTrainProcess):
             info.update(self.phase_manager.training_info(self.step_num))
         return info
 
+    def checkpoint_names(self, name=None):
+        name = self.job.name if name is None else name
+        prefixes = getattr(self, '_checkpoint_prefixes', [self.job.name, self.name])
+        if name == self.job.name or name.startswith(self.job.name + '_'):
+            suffix = name[len(self.job.name):]
+            return list(dict.fromkeys(prefix + suffix for prefix in prefixes))
+        return [name]
+
+    def check_checkpoint_access(self):
+        self._checkpoint_prefixes = load_checkpoint_names(self.save_root, self.job.name, self.name)
+        prefixes = self.checkpoint_names()
+        prefixes += ['CRITIC_' + prefix for prefix in self.checkpoint_names()]
+        if self.embed_config is not None:
+            prefixes.append(self.embed_config.trigger)
+        check_save_permissions(self.save_root, prefixes)
+        if self.accelerator.is_main_process and self.name != self.job.name:
+            save_checkpoint_names(self.save_root, self._checkpoint_prefixes)
+
     def clean_up_saves(self):
         if not self.accelerator.is_main_process:
             return
@@ -647,8 +671,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         latest_item = None
         if os.path.exists(self.save_root):
             # pattern is {job_name}_{zero_filled_step} for both files and directories
-            pattern = f"{self.job.name}_*"
-            items = glob.glob(os.path.join(self.save_root, pattern))
+            items = list(dict.fromkeys(
+                item
+                for name in self.checkpoint_names()
+                for item in glob.glob(os.path.join(self.save_root, f"{glob.escape(name)}_*"))
+            ))
             # Separate files and directories
             safetensors_files = [f for f in items if f.endswith('.safetensors')]
             pt_files = [f for f in items if f.endswith('.pt')]
@@ -662,8 +689,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 embed_files = [f for f in embed_items if f.endswith('.safetensors') or f.endswith('.pt')]
 
             # check for critic files
-            critic_pattern = f"CRITIC_{self.job.name}_*"
-            critic_items = glob.glob(os.path.join(self.save_root, critic_pattern))
+            critic_items = list(dict.fromkeys(
+                item
+                for name in self.checkpoint_names()
+                for item in glob.glob(os.path.join(self.save_root, f"CRITIC_{glob.escape(name)}_*"))
+            ))
 
             # Sort the lists by creation time if they are not empty
             if safetensors_files:
@@ -704,14 +734,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
             for item in items_to_remove:
                 print_acc(f"Removing old save: {item}")
-                if os.path.isdir(item):
-                    shutil.rmtree(item)
-                else:
-                    os.remove(item)
+                if not remove_old_save(item, print_acc):
+                    # Keep its metadata too, and retry retention at the next save.
+                    continue
                 # see if a yaml file with same name exists
                 yaml_file = os.path.splitext(item)[0] + ".yaml"
                 if os.path.exists(yaml_file):
-                    os.remove(yaml_file)
+                    remove_old_save(yaml_file, print_acc)
             if combined_items:
                 latest_item = combined_items[-1]
         return latest_item
@@ -1175,9 +1204,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
         latest_path = None
         if os.path.exists(self.save_root):
             # Define patterns for both files and directories
+            checkpoint_names = self.checkpoint_names(name)
             patterns = [
-                f"{name}*{post}.safetensors",
-                f"{name}*{post}"
+                pattern
+                for prefix in checkpoint_names
+                for pattern in (
+                    f"{glob.escape(prefix)}*{post}.safetensors",
+                    f"{glob.escape(prefix)}*{post}",
+                )
             ]
             # Search for both files and directories
             paths = []
@@ -1187,15 +1221,20 @@ class BaseSDTrainProcess(BaseTrainProcess):
             # Filter out non-existent paths and sort by creation time
             if paths:
                 paths = [p for p in paths if os.path.exists(p) and self.is_loadable_save_path(p)]
-                # remove false positives
-                if '_LoRA' not in name:
-                    paths = [p for p in paths if '_LoRA' not in p]
-                if '_refiner' not in name:
-                    paths = [p for p in paths if '_refiner' not in p]
-                if '_t2i' not in name:
-                    paths = [p for p in paths if '_t2i' not in p]
-                if '_cn' not in name:
-                    paths = [p for p in paths if '_cn' not in p]
+                # Classify suffixes after the matched name, not words in the
+                # LoRA name or its parent folder (including names before rename).
+                matching_paths = []
+                for path in paths:
+                    basename = os.path.basename(path)
+                    prefix = max(
+                        (prefix for prefix in checkpoint_names
+                         if os.path.normcase(basename).startswith(os.path.normcase(prefix))),
+                        key=len,
+                    )
+                    suffix = basename[len(prefix):]
+                    if not any(marker in suffix for marker in ('_LoRA', '_refiner', '_t2i', '_cn')):
+                        matching_paths.append(path)
+                paths = matching_paths
 
                 if len(paths) > 0:
                     latest_path = max(paths, key=os.path.getctime)
@@ -1902,7 +1941,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             suffix = 'ip'
         else:
             suffix = 'adapter'
-        adapter_name = self.name
+        adapter_name = self.job.name
         if self.network_config is not None:
             adapter_name = f"{adapter_name}_{suffix}"
         latest_save_path = self.get_latest_save_path(adapter_name)
@@ -2403,6 +2442,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
     def run(self):
         # torch.autograd.set_detect_anomaly(True)
+        self.check_checkpoint_access()
         # run base process run
         BaseTrainProcess.run(self)
         params = []
@@ -2725,7 +2765,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if self.train_config.gradient_checkpointing:
                     self.network.enable_gradient_checkpointing()
 
-                lora_name = self.name
+                lora_name = self.job.name
                 # need to adapt name so they are not mixed up
                 if self.named_lora:
                     lora_name = f"{lora_name}_LoRA"

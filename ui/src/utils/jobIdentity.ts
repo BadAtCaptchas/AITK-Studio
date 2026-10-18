@@ -1,7 +1,15 @@
-import type { Job } from '../types';
+import type { Job, JobConfig } from '../types';
 
 export function jobStorageKey(job: Pick<Job, 'name' | 'storage_key'>): string {
   return job.storage_key || job.name;
+}
+
+export function applyJobOutputIdentity(config: JobConfig, job: Pick<Job, 'name' | 'storage_key'>): void {
+  config.config.name = job.name;
+  for (const process of config.config.process) {
+    // Python uses the process name for the folder and the job name for saves.
+    process.name = jobStorageKey(job);
+  }
 }
 
 export function validJobName(value: unknown): value is string {

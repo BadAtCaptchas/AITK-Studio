@@ -743,6 +743,7 @@ export interface WatermarkConfig {
 
 export interface ProcessConfig {
   type: string;
+  name?: string;
   sqlite_db_path?: string;
   training_folder: string;
   performance_log_every: number;

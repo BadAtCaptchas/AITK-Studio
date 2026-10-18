@@ -206,3 +206,6 @@ aitk_db.db-shm
 ui/.review-build/
 /testing/.model_test_outputs/
 /issue_review
+
+# Local design QA reports.
+design-qa.md

@@ -8,6 +8,7 @@
 - AITK Studio uses one global training workspace. Resolve configured dataset, training, and model roots through existing settings and path helpers, including `resolveDatasetScope` and `getJobTrainingRoot`; never hard-code runtime folders. Preserve canonical path-containment checks and encrypted-data protections. Retired workspace compatibility belongs only in the database upgrade and obsolete-request guards.
 - Treat `datasets/`, `models/`, `output/`, `projects/`, `aitk_db.db*`, `.tmp/`, and generated runtime artifacts as user/runtime data. Do not clean, rename, or rewrite them unless the task explicitly requires it.
 - Do not hand-edit generated Prisma client files under `ui/src/generated/prisma/`; update the Prisma/schema path and regenerate instead.
+- Keep generated `design-qa.md` reports local; do not commit or push them.
 
 ## Local Commands
 

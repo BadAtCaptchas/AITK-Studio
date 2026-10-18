@@ -36,13 +36,7 @@ export function ToolRail({
   onShowJson,
 }: ToolRailProps) {
   if (presentation === 'standalone') {
-    const toolButton = (
-      label: string,
-      icon: ReactNode,
-      onClick: () => void,
-      active = false,
-      disabled = false,
-    ) => (
+    const toolButton = (label: string, icon: ReactNode, onClick: () => void, active = false, disabled = false) => (
       <button
         key={label}
         type="button"
@@ -53,7 +47,7 @@ export function ToolRail({
         className={classNames(
           'flex h-10 w-10 items-center justify-center rounded-[4px] border transition-colors',
           active
-            ? 'border-brand-500/70 bg-brand-400 text-[var(--brand-ink)]'
+            ? 'border-brand-500/70 bg-brand-500 text-[var(--brand-ink)]'
             : 'border-transparent text-gray-400 hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100',
           disabled && 'cursor-not-allowed opacity-30 hover:border-transparent hover:bg-transparent',
         )}
@@ -64,10 +58,34 @@ export function ToolRail({
 
     return (
       <aside className="operator-scrollbar-none flex w-[65px] flex-none flex-col items-center gap-1 overflow-y-auto border-r border-gray-800 bg-gray-950 py-3">
-        {toolButton('Select', <MousePointer2 className="h-[18px] w-[18px]" />, () => onToolChange('select'), activeTool === 'select', !canAnnotate)}
-        {toolButton('Box', <SquareDashed className="h-[18px] w-[18px]" />, () => onToolChange('box'), activeTool === 'box', !canAnnotate)}
-        {toolButton('Text', <Type className="h-[18px] w-[18px]" />, () => onToolChange('text'), activeTool === 'text', !canAnnotate)}
-        {toolButton('Move', <Move className="h-[18px] w-[18px]" />, () => onToolChange('move'), activeTool === 'move', !canAnnotate)}
+        {toolButton(
+          'Select',
+          <MousePointer2 className="h-[18px] w-[18px]" />,
+          () => onToolChange('select'),
+          activeTool === 'select',
+          !canAnnotate,
+        )}
+        {toolButton(
+          'Box',
+          <SquareDashed className="h-[18px] w-[18px]" />,
+          () => onToolChange('box'),
+          activeTool === 'box',
+          !canAnnotate,
+        )}
+        {toolButton(
+          'Text',
+          <Type className="h-[18px] w-[18px]" />,
+          () => onToolChange('text'),
+          activeTool === 'text',
+          !canAnnotate,
+        )}
+        {toolButton(
+          'Move',
+          <Move className="h-[18px] w-[18px]" />,
+          () => onToolChange('move'),
+          activeTool === 'move',
+          !canAnnotate,
+        )}
         {toolButton('Delete', <Trash2 className="h-[18px] w-[18px]" />, onDelete, false, !canAnnotate || !hasSelection)}
         <div className="my-1 h-px w-8 bg-gray-900" />
         {toolButton('Undo', <Undo2 className="h-[18px] w-[18px]" />, onUndo, false, !canUndo)}
@@ -110,7 +128,12 @@ export function ToolRail({
         icon={<Move className="h-5 w-5" />}
         onClick={() => onToolChange('move')}
       />
-      <ToolButton disabled={!canAnnotate || !hasSelection} label="Delete" icon={<Trash2 className="h-5 w-5" />} onClick={onDelete} />
+      <ToolButton
+        disabled={!canAnnotate || !hasSelection}
+        label="Delete"
+        icon={<Trash2 className="h-5 w-5" />}
+        onClick={onDelete}
+      />
       <div className="hidden h-px w-14 bg-gray-900 md:block" />
       <ToolButton disabled={!canUndo} label="Undo" icon={<Undo2 className="h-5 w-5" />} onClick={onUndo} />
       <ToolButton disabled={!canRedo} label="Redo" icon={<Redo2 className="h-5 w-5" />} onClick={onRedo} />

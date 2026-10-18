@@ -276,8 +276,8 @@ export default function Dashboard() {
       <input ref={fileInputRef} type="file" accept=".zip,.aitk" className="hidden" onChange={handleFileSelected} />
       <MainContent className="studio-queue-page">
         <header className="studio-page-intro">
-          <h2>Your training, in motion.</h2>
-          <p>Manage runs across your local and remote workers.</p>
+          <h2>Training queues</h2>
+          <p>Manage training jobs across your GPUs and workers.</p>
         </header>
         {importStatus && (
           <section
@@ -457,16 +457,16 @@ export default function Dashboard() {
             </div>
           </section>
         )}
-        <div className="mb-5 flex justify-end">
+        <div className="mb-5 flex justify-start">
           {' '}
-          <label className="relative block w-full sm:max-w-md">
+          <label className="relative block w-full sm:max-w-2xl">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
             <input
               value={filterText}
               onChange={event => setFilterText(event.target.value)}
               aria-label="Search jobs"
               placeholder="Search jobs, status, worker..."
-              className="h-9 w-full border border-gray-800 bg-gray-950 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-600"
+              className="h-11 w-full rounded-md border border-gray-700 bg-gray-900 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-600"
             />
           </label>
         </div>

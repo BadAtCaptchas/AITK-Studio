@@ -823,7 +823,9 @@ export default function Settings() {
                   ))}
                 </div>
 
-                <div className="mb-6"><RuntimeDiagnostics /></div>
+                <div className="mb-6">
+                  <RuntimeDiagnostics />
+                </div>
                 <section id="appearance" className="scroll-mt-20">
                   <h2 className="text-base font-semibold">Appearance</h2>
                   <div className="mt-4 flex items-center justify-between rounded-lg border border-gray-800 p-4">
@@ -1265,11 +1267,10 @@ export default function Settings() {
                     <div className="mt-3 flex items-center gap-4 rounded-lg border border-gray-800 p-4">
                       <div className="min-w-0 flex-1">
                         <label htmlFor="training-legacy-view" className="text-sm font-semibold text-gray-100">
-                          Legacy view
+                          Continuous form
                         </label>
                         <p id="training-legacy-view-detail" className="mt-1 text-sm text-gray-400">
-                          Show all training options on one page in a compact, legacy-style layout. Turn off to use the
-                          guided steps.
+                          Show all training options on one page in a compact layout. Turn off to use the guided steps.
                         </p>
                       </div>
                       <input

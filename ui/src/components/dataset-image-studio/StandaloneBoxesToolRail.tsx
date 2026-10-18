@@ -2,17 +2,7 @@
 
 import type { ReactNode } from 'react';
 import classNames from 'classnames';
-import {
-  Hand,
-  Maximize2,
-  MousePointer2,
-  Redo2,
-  ScanSearch,
-  SquareDashed,
-  Type,
-  Undo2,
-  ZoomIn,
-} from 'lucide-react';
+import { Hand, Maximize2, MousePointer2, Redo2, ScanSearch, SquareDashed, Type, Undo2, ZoomIn } from 'lucide-react';
 import type { ToolMode } from './types';
 
 export type StandaloneBoxesToolRailProps = {
@@ -38,14 +28,7 @@ type RailButtonProps = {
   action?: boolean;
 };
 
-function RailButton({
-  label,
-  icon,
-  onClick,
-  active = false,
-  disabled = false,
-  action = false,
-}: RailButtonProps) {
+function RailButton({ label, icon, onClick, active = false, disabled = false, action = false }: RailButtonProps) {
   return (
     <button
       type="button"
@@ -65,7 +48,7 @@ function RailButton({
         className={classNames(
           'flex h-9 w-9 items-center justify-center rounded-[4px] border transition-colors',
           active
-            ? 'border-brand-400 bg-brand-400 text-[var(--brand-ink)] shadow-[0_0_16px_rgb(var(--brand-400)/0.12)]'
+            ? 'border-brand-400 bg-brand-500 text-[var(--brand-ink)] shadow-[0_0_16px_rgb(var(--brand-400)/0.12)]'
             : 'border-transparent text-gray-300 group-hover:border-gray-800 group-hover:text-white',
           disabled && 'group-hover:border-transparent group-hover:text-gray-300',
         )}
@@ -131,12 +114,7 @@ export function StandaloneBoxesToolRail({
 
       <RailDivider />
 
-      <RailButton
-        label="Zoom in"
-        icon={<ZoomIn className="h-[18px] w-[18px]" />}
-        action
-        onClick={onZoomIn}
-      />
+      <RailButton label="Zoom in" icon={<ZoomIn className="h-[18px] w-[18px]" />} action onClick={onZoomIn} />
       <RailButton
         label="Pan"
         icon={<Hand className="h-[18px] w-[18px]" />}
@@ -144,12 +122,7 @@ export function StandaloneBoxesToolRail({
         disabled={!canAnnotate}
         onClick={() => onToolChange('pan')}
       />
-      <RailButton
-        label="Fit"
-        icon={<Maximize2 className="h-[18px] w-[18px]" />}
-        action
-        onClick={onFit}
-      />
+      <RailButton label="Fit" icon={<Maximize2 className="h-[18px] w-[18px]" />} action onClick={onFit} />
 
       <RailDivider />
 

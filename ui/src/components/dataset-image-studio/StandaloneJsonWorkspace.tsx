@@ -470,7 +470,7 @@ export function StandaloneJsonWorkspace({
               type="button"
               disabled={applyDisabled}
               onClick={onApply}
-              className="ml-1 inline-flex h-8 min-w-[78px] items-center justify-center gap-1.5 rounded-[4px] border border-brand-300/70 bg-brand-400 px-2 text-[11px] font-semibold text-[var(--brand-ink)] shadow-[0_1px_8px_rgb(var(--brand-400)/0.12)] transition-colors hover:bg-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+              className="ml-1 inline-flex h-8 min-w-[78px] items-center justify-center gap-1.5 rounded-[4px] border border-brand-300/70 bg-brand-500 px-2 text-[11px] font-semibold text-[var(--brand-ink)] shadow-[0_1px_8px_rgb(var(--brand-400)/0.12)] transition-colors hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
               title={applyDisabled && disabledReason ? disabledReason : 'Apply JSON'}
             >
               {isApplying ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}

@@ -40,7 +40,6 @@ import {
 } from '@/utils/encryptedDatasets';
 import { makeRemoteDatasetRef, remoteDatasetRememberKey } from '@/utils/remoteDatasetRefs';
 import { parseCaptionKeywordQuery, removeCaptionKeywords } from '@/utils/captionKeywordSearch';
-import ThemeLogo from '@/components/ThemeLogo';
 import DatasetActionBar from '@/components/DatasetActionBar';
 import LayeredDocumentsButton from '@/components/LayeredDocumentsButton';
 import CaptionMonitor from '@/components/CaptionMonitor';
@@ -396,20 +395,21 @@ export default function DatasetEditorPage({
       datasetName={datasetName}
       setIsAutoCaptioning={setIsAutoCaptioning}
       idleLabel="Generate captions"
-      className="h-[34px] flex-shrink-0 !rounded-[4px] !bg-brand-400 !px-3 !py-0 !text-[12px] !font-semibold !text-[var(--brand-ink)] hover:!bg-brand-300"
+      className="h-[34px] flex-shrink-0 !rounded-[4px] !bg-brand-500 !px-3 !py-0 !text-[12px] !font-semibold !text-[var(--brand-ink)] hover:!bg-brand-600"
     />
   ) : null;
-  if (encryptedManifest) return <div className="p-6"><DatasetDecryption datasetName={datasetName} workerID={workerID} manifest={encryptedManifest} /></div>;
+  if (encryptedManifest)
+    return (
+      <div className="p-6">
+        <DatasetDecryption datasetName={datasetName} workerID={workerID} manifest={encryptedManifest} />
+      </div>
+    );
 
   return (
     <>
       <TopBar className="h-[69px] gap-3 border-gray-800 bg-gray-950 px-4">
         <div className="flex flex-shrink-0 items-center gap-3">
-          <div className="h-7 w-[70px] overflow-hidden" aria-label="AITK Studio">
-            <ThemeLogo className="!h-7 !w-[116px] max-w-none" />
-          </div>
-          <span className="h-5 w-px bg-gray-800" />
-          <span className="whitespace-nowrap text-[15px] font-semibold text-gray-100">Caption Studio</span>
+          <h1 className="whitespace-nowrap font-semibold text-gray-100">Caption Studio</h1>
         </div>
 
         <button
@@ -441,7 +441,6 @@ export default function DatasetEditorPage({
               Remote
             </span>
           )}
-
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2">
@@ -467,7 +466,13 @@ export default function DatasetEditorPage({
             <DatasetWatcherProgressBadge progress={autoCaptionProgress} className="hidden md:inline-flex" />
           )}
           {!isRemoteDataset && !encryptedManifest && <DatasetActionBar datasetName={datasetName} />}
-          {!encryptedManifest && <LayeredDocumentsButton datasetName={datasetName} workerID={workerID} onChanged={() => refreshImageList(datasetName)} />}
+          {!encryptedManifest && (
+            <LayeredDocumentsButton
+              datasetName={datasetName}
+              workerID={workerID}
+              onChanged={() => refreshImageList(datasetName)}
+            />
+          )}
           <button
             type="button"
             onClick={() => setDatasetMenuOpen(open => !open)}
@@ -549,7 +554,6 @@ export default function DatasetEditorPage({
             onPlainItemCaptioned={handlePlainItemCaptioned}
           />
         )}
-
       </MainContent>
       {!isRemoteDataset && !encryptedManifest && <CaptionMonitor datasetPath={datasetPath} />}
       <Modal
@@ -574,7 +578,7 @@ export default function DatasetEditorPage({
             <button
               type="submit"
               disabled={isRenamingDataset}
-              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRenamingDataset ? 'Renaming...' : 'Rename'}
             </button>

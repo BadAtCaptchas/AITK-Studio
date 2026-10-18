@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     });
     settingsObject.MODELS_PATH = modelsPathState.path;
     settingsObject.MODELS_PATH_LOCKED = modelsPathState.lockedByEnv ? 'true' : 'false';
-    settingsObject.TRAINING_LEGACY_VIEW = normalizeBooleanSetting(settingsObject.TRAINING_LEGACY_VIEW, false);
+    settingsObject.TRAINING_LEGACY_VIEW = normalizeBooleanSetting(settingsObject.TRAINING_LEGACY_VIEW, true);
     const offlineModeState = await getOfflineModeState();
     settingsObject[OFFLINE_MODE_SETTING_KEY] = offlineModeState.enabled ? 'true' : 'false';
     settingsObject.OFFLINE_MODE_LOCKED = offlineModeState.lockedByEnv ? 'true' : 'false';
@@ -197,7 +197,7 @@ async function postCommand(request: NextRequest) {
         ? 'true'
         : normalizeBooleanSetting(existingOfflineMode, false),
       TRAINING_ADVISOR_ENABLED: normalizeBooleanSetting(TRAINING_ADVISOR_ENABLED, false),
-      TRAINING_LEGACY_VIEW: normalizeBooleanSetting(existingTrainingLegacyView, false),
+      TRAINING_LEGACY_VIEW: normalizeBooleanSetting(existingTrainingLegacyView, true),
       [TELEMETRY_ENABLED_SETTING_KEY]: normalizeBooleanSetting(TELEMETRY_ENABLED, false),
       COMFY_AUTO_INSTALL: normalizeBooleanSetting(COMFY_AUTO_INSTALL, false),
       COMFY_EXTERNAL_URL: normalizedExternalComfyUrl,

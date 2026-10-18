@@ -439,11 +439,13 @@ export default function SimpleJob({
     setJobConfig(prompt, `config.process[0].sample.samples[${sampleIndex}].prompt`);
   };
   const importRandomPromptFromDataset = async (sampleIndex: number) => {
-    const datasets = accessibleRandomPromptDatasets.filter(dataset => !dataset.encrypted).map(dataset => ({
-      folderPath: dataset.folderPath,
-      captionExt: dataset.captionExt,
-      defaultCaption: dataset.defaultCaption,
-    }));
+    const datasets = accessibleRandomPromptDatasets
+      .filter(dataset => !dataset.encrypted)
+      .map(dataset => ({
+        folderPath: dataset.folderPath,
+        captionExt: dataset.captionExt,
+        defaultCaption: dataset.defaultCaption,
+      }));
     if (datasets.length === 0) {
       reportWorkflowError(randomPromptDisabledReason);
       return;
@@ -694,11 +696,11 @@ export default function SimpleJob({
     );
   };
   const renderSectionIntro = (title: string, detail: string) => (
-    <div className="mb-5 border-b border-gray-900 pb-4">
+    <div className={legacyView ? 'mb-3 border-b border-gray-800 pb-3' : 'mb-5 border-b border-gray-900 pb-4'}>
       <h2 tabIndex={-1} className="text-2xl font-semibold text-gray-100 outline-none">
         {title}
       </h2>
-      <p className="mt-1 text-sm text-gray-500">{detail}</p>
+      {!legacyView && <p className="mt-1 text-sm text-gray-500">{detail}</p>}
     </div>
   );
   const renderDisclosure = (
@@ -825,7 +827,7 @@ export default function SimpleJob({
           </h2>
           <p>
             {legacyView
-              ? 'All options in one place. Configure your model, training, datasets, and samples.'
+              ? 'Configure your model, training, datasets, and samples. Creating a job does not start training.'
               : 'Choose your model. We will guide you through the rest.'}
           </p>
         </header>
@@ -860,7 +862,7 @@ export default function SimpleJob({
                 'Give your training run a name and choose your base model.',
               )}
 
-              <div className="space-y-5">
+              <div className={legacyView ? 'studio-training-basics-fields' : 'space-y-5'}>
                 <div className="max-w-2xl">
                   <TextInput
                     label="Training name"
@@ -968,7 +970,13 @@ export default function SimpleJob({
                 {modelUiErrors.length > 0 && <p className="text-xs text-amber-400">{modelUiErrors.join('; ')}</p>}
                 {modelArch?.extensionNotes && <div className="text-sm text-gray-300">{modelArch.extensionNotes}</div>}
                 {modelArch?.customSections?.(jobConfig, setJobConfig)}
-                {modelArch?.additionalSections?.includes('model.model_kwargs.instruction') && <TextAreaInput label="Training instruction" value={String(processConfig.model.model_kwargs?.instruction || '')} onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.instruction')} />}
+                {modelArch?.additionalSections?.includes('model.model_kwargs.instruction') && (
+                  <TextAreaInput
+                    label="Training instruction"
+                    value={String(processConfig.model.model_kwargs?.instruction || '')}
+                    onChange={value => setJobConfig(value, 'config.process[0].model.model_kwargs.instruction')}
+                  />
+                )}
                 {modelArch?.modelNotes && (
                   <button
                     type="button"
@@ -1049,7 +1057,7 @@ export default function SimpleJob({
                     </div>
                   )}
                   {!processConfig.model.arch.startsWith('minimax_h3') && (
-                    <details className="studio-disclosure" open={legacyView || undefined}>
+                    <details className="studio-disclosure" open={processConfig.model.base_lora_path ? true : undefined}>
                       <summary>Continue from an existing LoRA</summary>
                       <div>
                         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
@@ -1402,14 +1410,14 @@ export default function SimpleJob({
                       onChange={value => setJobConfig(value, 'config.process[0].train.loss_type')}
                       options={lossOptions}
                     />
-                      <FormGroup label="Dataset batching">
+                    <FormGroup label="Dataset batching">
                       <Checkbox
                         label="Pool compatible datasets"
                         checked={processConfig.train.pool_datasets ?? false}
                         onChange={value => setJobConfig(value, 'config.process[0].train.pool_datasets')}
                       />
-                      </FormGroup>
-                      <FormGroup label="EMA">
+                    </FormGroup>
+                    <FormGroup label="EMA">
                       <Checkbox
                         label="Use EMA"
                         checked={processConfig.train.ema_config?.use_ema || false}
@@ -1972,11 +1980,18 @@ export default function SimpleJob({
                   We will use this to generate previews during training. Add more prompts below.
                 </p>
               </div>
-              {isQwenImage2(processConfig.model.arch) && <QwenImageControls
-                options={processConfig.model.model_kwargs || {}}
-                onOption={(key, value) => { setJobConfig(value, `config.process[0].model.model_kwargs.${key}`); if (key === 'rgba' && value) setJobConfig('png', 'config.process[0].sample.ext'); }}
-                onPreset={(width, height, steps) => setJobConfig({ ...sampleConfig, width, height, sample_steps: steps }, 'config.process[0].sample')}
-              />}
+              {isQwenImage2(processConfig.model.arch) && (
+                <QwenImageControls
+                  options={processConfig.model.model_kwargs || {}}
+                  onOption={(key, value) => {
+                    setJobConfig(value, `config.process[0].model.model_kwargs.${key}`);
+                    if (key === 'rgba' && value) setJobConfig('png', 'config.process[0].sample.ext');
+                  }}
+                  onPreset={(width, height, steps) =>
+                    setJobConfig({ ...sampleConfig, width, height, sample_steps: steps }, 'config.process[0].sample')
+                  }
+                />
+              )}
               <div className="space-y-3">
                 {sampleConfig.samples.map((sample, i) => (
                   <div key={i} className="border border-gray-900 bg-gray-950/35 p-3">
@@ -2027,33 +2042,90 @@ export default function SimpleJob({
                         required
                       />
                     )}
-                    {isQwenImage2(processConfig.model.arch) && <>
-                      <QwenReferenceInputs paths={qwenSampleReferences(sample)} onChange={paths => setJobConfig(paths, `config.process[0].sample.samples[${i}].ctrl_imgs`)} />
-                      <button type="button" className="text-sm text-blue-300" onClick={() => { setSamplePromptValue(i, transparentQwenPrompt(sample.prompt)); setJobConfig(true, 'config.process[0].model.model_kwargs.rgba'); setJobConfig('png', 'config.process[0].sample.ext'); }}>Add transparency instructions</button>
-                    </>}
-                    {processConfig.model.arch === 'ming_image_design_layer' && <NumberInput label="Generated layers" value={sample.num_layers ?? sampleConfig.num_layers ?? 2} min={1} max={32} onChange={value => setJobConfig(value ?? 2, `config.process[0].sample.samples[${i}].num_layers`)} />}
-                    {!isQwenImage2(processConfig.model.arch) && (modelArch?.additionalSections?.includes('sample.ctrl_img') || modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && (
-                      <div className="my-3 space-y-2">
-                        {(modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')
-                          ? (['ctrl_img', 'ctrl_img_2', 'ctrl_img_3'] as const)
-                          : (['ctrl_img'] as const)
-                        ).map((key, referenceIndex) => (
-                          <div key={key} className="space-y-2">
-                            <TextInput label={`Reference media ${referenceIndex + 1}`} value={sample[key] || ''} onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].${key}`)} placeholder="Image, audio, or video file" />
-                            <input aria-label={`Upload sample reference media ${referenceIndex + 1}`} type="file" accept="image/*,audio/*,video/*" onChange={async event => {
-                              const file = event.target.files?.[0]; if (!file) return;
-                              try {
-                                const response = await uploadTemporaryMediaFile(file);
-                                const data: unknown = response.data;
-                                if (!data || typeof data !== 'object' || !('files' in data) || !Array.isArray(data.files) || typeof data.files[0] !== 'string') throw new Error('Invalid media upload response');
-                                setJobConfig(data.files[0], `config.process[0].sample.samples[${i}].${key}`);
-                              } catch (error) { reportWorkflowError(error instanceof Error ? error.message : 'Could not upload reference media'); }
-                            }} className="text-sm" />
-                          </div>
-                        ))}
-                      </div>
+                    {isQwenImage2(processConfig.model.arch) && (
+                      <>
+                        <QwenReferenceInputs
+                          paths={qwenSampleReferences(sample)}
+                          onChange={paths => setJobConfig(paths, `config.process[0].sample.samples[${i}].ctrl_imgs`)}
+                        />
+                        <button
+                          type="button"
+                          className="text-sm text-blue-300"
+                          onClick={() => {
+                            setSamplePromptValue(i, transparentQwenPrompt(sample.prompt));
+                            setJobConfig(true, 'config.process[0].model.model_kwargs.rgba');
+                            setJobConfig('png', 'config.process[0].sample.ext');
+                          }}
+                        >
+                          Add transparency instructions
+                        </button>
+                      </>
                     )}
-                    {modelArch?.additionalSections?.includes('sample.duration') && <NumberInput label="Duration (seconds)" min={1} value={sample.duration ?? sampleConfig.duration ?? 120} onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].duration`)} />}
+                    {processConfig.model.arch === 'ming_image_design_layer' && (
+                      <NumberInput
+                        label="Generated layers"
+                        value={sample.num_layers ?? sampleConfig.num_layers ?? 2}
+                        min={1}
+                        max={32}
+                        onChange={value =>
+                          setJobConfig(value ?? 2, `config.process[0].sample.samples[${i}].num_layers`)
+                        }
+                      />
+                    )}
+                    {!isQwenImage2(processConfig.model.arch) &&
+                      (modelArch?.additionalSections?.includes('sample.ctrl_img') ||
+                        modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')) && (
+                        <div className="my-3 space-y-2">
+                          {(modelArch?.additionalSections?.includes('sample.multi_ctrl_imgs')
+                            ? (['ctrl_img', 'ctrl_img_2', 'ctrl_img_3'] as const)
+                            : (['ctrl_img'] as const)
+                          ).map((key, referenceIndex) => (
+                            <div key={key} className="space-y-2">
+                              <TextInput
+                                label={`Reference media ${referenceIndex + 1}`}
+                                value={sample[key] || ''}
+                                onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].${key}`)}
+                                placeholder="Image, audio, or video file"
+                              />
+                              <input
+                                aria-label={`Upload sample reference media ${referenceIndex + 1}`}
+                                type="file"
+                                accept="image/*,audio/*,video/*"
+                                onChange={async event => {
+                                  const file = event.target.files?.[0];
+                                  if (!file) return;
+                                  try {
+                                    const response = await uploadTemporaryMediaFile(file);
+                                    const data: unknown = response.data;
+                                    if (
+                                      !data ||
+                                      typeof data !== 'object' ||
+                                      !('files' in data) ||
+                                      !Array.isArray(data.files) ||
+                                      typeof data.files[0] !== 'string'
+                                    )
+                                      throw new Error('Invalid media upload response');
+                                    setJobConfig(data.files[0], `config.process[0].sample.samples[${i}].${key}`);
+                                  } catch (error) {
+                                    reportWorkflowError(
+                                      error instanceof Error ? error.message : 'Could not upload reference media',
+                                    );
+                                  }
+                                }}
+                                className="text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    {modelArch?.additionalSections?.includes('sample.duration') && (
+                      <NumberInput
+                        label="Duration (seconds)"
+                        min={1}
+                        value={sample.duration ?? sampleConfig.duration ?? 120}
+                        onChange={value => setJobConfig(value, `config.process[0].sample.samples[${i}].duration`)}
+                      />
+                    )}
                     <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       {!isAudioModel && (
                         <>
@@ -2289,9 +2361,13 @@ export default function SimpleJob({
                     <div className="text-gray-500">Architecture</div>
                     <div className="text-gray-200">{modelArch?.label || processConfig.model.arch}</div>
                     <div className="text-gray-500">Model / artifact</div>
-                    <div className="max-w-64 break-all text-right text-gray-200">{processConfig.model.name_or_path}</div>
+                    <div className="max-w-64 break-all text-right text-gray-200">
+                      {processConfig.model.name_or_path}
+                    </div>
                     <div className="text-gray-500">Sample output</div>
-                    <div className="text-gray-200">{modelArch?.group === 'audio' ? 'Audio' : modelArch?.isVideoModel ? 'Video' : 'Image'}</div>
+                    <div className="text-gray-200">
+                      {modelArch?.group === 'audio' ? 'Audio' : modelArch?.isVideoModel ? 'Video' : 'Image'}
+                    </div>
                     <div className="text-gray-500">Target</div>
                     <div className="text-gray-200">
                       {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}

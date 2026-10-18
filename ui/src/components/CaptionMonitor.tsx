@@ -78,7 +78,7 @@ export default function CaptionMonitor({ datasetPath, onHeightChange }: CaptionM
       >
         {/* Header / action bar */}
         <div
-          className="bg-gray-800 px-3 flex items-center gap-2 flex-shrink-0"
+          className="bg-gray-900 border-b border-gray-800 px-4 flex items-center gap-3 flex-shrink-0"
           style={{ height: `${HEADER_HEIGHT}px` }}
         >
           <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-500 whitespace-nowrap">

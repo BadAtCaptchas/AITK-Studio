@@ -69,7 +69,7 @@ export function AdvancedFilmstrip({
                 />
               )}
               {selected ? (
-                <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-brand-400 text-[var(--brand-ink)] shadow-md shadow-black/50">
+                <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 text-[var(--brand-ink)] shadow-md shadow-black/50">
                   <Check className="h-3.5 w-3.5" />
                 </span>
               ) : null}

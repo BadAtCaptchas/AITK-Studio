@@ -188,9 +188,9 @@ export default function JobOverview({ job }: JobOverviewProps) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-5">
       {/* Job Information Panel */}
-      <div className="col-span-2 flex flex-col overflow-hidden border border-gray-800 bg-gray-900/60">
+      <div className="xl:col-span-3 flex flex-col overflow-hidden rounded-lg border border-gray-800 bg-gray-900/60">
         <div className="flex items-center justify-between gap-3 border-b border-gray-800 bg-gray-900 px-3 py-2">
           <h2 className="min-w-0 truncate text-gray-100">
             <Info className="w-5 h-5 mr-2 -mt-1 text-amber-600 dark:text-amber-400 inline-block" />{' '}
@@ -256,7 +256,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
           </div>
 
           {/* Log - Now using flex-grow to fill remaining space */}
-          <div className="relative min-h-60 flex-grow border border-gray-800 bg-gray-950">
+          <div className="relative min-h-80 flex-grow rounded-md border border-gray-800 bg-gray-950">
             <div
               ref={logRef}
               className="absolute inset-0 overflow-y-auto p-3 text-xs text-gray-300"
@@ -277,7 +277,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
       </div>
 
       {/* GPU Widget Panel */}
-      <div className="col-span-1">
+      <div className="min-w-0 xl:col-span-2">
         <div>{isCPUInfoLoaded && cpuInfo && <CPUWidget cpu={cpuInfo} />}</div>
         <div className="mt-4">
           {gpuStatus === 'error' ? (

@@ -441,7 +441,9 @@ export function TrainingFormContent() {
       : []),
     ...validationMessages,
     ...validateJobBeforeSave(jobConfig),
-    ...configContractErrors(jobConfig, { deviceBackend: gpuData ? gpuData.isMac ? 'mps' : 'cuda' : undefined }).map(message => ({ level: 'error' as const, message, target: { step: 'raw', label: 'Raw configuration' } })),
+    ...configContractErrors(jobConfig, { deviceBackend: gpuData ? (gpuData.isMac ? 'mps' : 'cuda') : undefined }).map(
+      message => ({ level: 'error' as const, message, target: { step: 'raw', label: 'Raw configuration' } }),
+    ),
   ];
   const [focusTarget, setFocusTarget] = useState<(TrainingFieldTarget & { nonce: number }) | null>(null);
   const revealFinding = (message: ValidationMessage) => {
@@ -543,7 +545,7 @@ export function TrainingFormContent() {
     ) : null;
   return (
     <div className="contents" {...draft.formTracking}>
-      <TopBar className="h-16 border-gray-900 bg-gray-950 px-4">
+      <TopBar className="training-topbar h-16 border-gray-900 bg-gray-950 px-4">
         <div className="flex min-w-0 items-center gap-3">
           <Button
             className="operator-icon-button h-9 w-9 flex-none"
@@ -553,7 +555,7 @@ export function TrainingFormContent() {
             <ChevronLeft className="h-5 w-5" />
           </Button>
           <h1 className="truncate text-sm font-semibold text-gray-100 sm:text-lg">
-            {runId ? 'Edit training' : 'New training'}
+            {runId ? 'Edit Training Job' : 'New Training Job'}
           </h1>
         </div>
         <div className="flex-1"></div>
@@ -582,7 +584,7 @@ export function TrainingFormContent() {
           </div>
         )}
         {(showAdvancedView || legacyView) && (
-          <Button className="operator-button hidden py-1 lg:inline-flex" onClick={handleImportConfig}>
+          <Button className="operator-button py-1" onClick={handleImportConfig}>
             Import Config
           </Button>
         )}
@@ -596,15 +598,14 @@ export function TrainingFormContent() {
             title={showAdvancedView ? 'Show Simple' : 'Show Advanced'}
           >
             <SlidersHorizontal className="h-4 w-4" />
-            <span className="hidden sm:inline">
-              {showAdvancedView ? (legacyView ? 'Legacy' : 'Guided') : 'Advanced'}
-            </span>
+            <span className="hidden sm:inline">{showAdvancedView ? (legacyView ? 'Form' : 'Guided') : 'Advanced'}</span>
           </Button>
         </div>
         {(showAdvancedView || legacyView) && (
           <div className="flex-none">
             <Button
               className="operator-button-primary h-10 px-3 sm:px-5"
+              aria-label={runId ? 'Update Job' : 'Create Job'}
               onClick={() => saveJob()}
               disabled={status === 'saving' || validationErrors.length > 0}
             >
@@ -626,12 +627,12 @@ export function TrainingFormContent() {
       />
 
       {showAdvancedView ? (
-        <div className="absolute top-0 left-0 h-full w-full overflow-auto pt-16">
+        <div className="training-content absolute top-0 left-0 h-full w-full overflow-auto pt-16">
           {validationSummary && <div className="px-3 pt-3 sm:px-4">{validationSummary}</div>}
           {renderAdvancedConfigEditor()}
         </div>
       ) : (
-        <MainContent className="bg-gray-950 px-0 pt-16 sm:px-0">
+        <MainContent className="training-content bg-gray-950 px-0 pt-16 sm:px-0">
           {(settingsError || gpuStatus === 'error' || datasetFetchStatus === 'error' || workerStatus === 'error') && (
             <div className="px-4 pb-4">
               <PageNotice tone="danger" title="Some setup information is unavailable">

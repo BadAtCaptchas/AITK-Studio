@@ -319,18 +319,11 @@ export const CaptionDatasetModal: React.FC = () => {
                 </span>
               </label>
             )}
-            <button
-              type="button"
-              className="rounded-md bg-gray-700 px-4 py-2 text-gray-200 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500"
-              onClick={handleClose}
-            >
+            <button type="button" className="operator-button" onClick={handleClose}>
               Cancel
             </button>
-            <button
-              type="submit"
-              className="rounded-md bg-brand-500 px-4 py-2 text-[var(--brand-ink)] hover:bg-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              Add to Queue
+            <button type="submit" disabled={isSaving} className="operator-button-primary">
+              {isSaving ? 'Starting…' : 'Save & start captioning'}
             </button>
           </div>
         </form>

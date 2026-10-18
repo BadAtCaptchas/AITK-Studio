@@ -84,8 +84,8 @@ const THUMB_SIZE_CONFIG: Record<
   }
 > = {
   sm: { label: 'S', tileWidth: 132, imageHeight: 86, tileHeight: 116 },
-  md: { label: 'M', tileWidth: 168, imageHeight: 112, tileHeight: 142 },
-  lg: { label: 'L', tileWidth: 220, imageHeight: 150, tileHeight: 180 },
+  md: { label: 'M', tileWidth: 270, imageHeight: 160, tileHeight: 210 },
+  lg: { label: 'L', tileWidth: 300, imageHeight: 210, tileHeight: 260 },
 };
 function useElementSize<T extends HTMLElement>() {
   const [element, setElement] = useState<T | null>(null);
@@ -242,7 +242,7 @@ function ThumbnailTile({
         <div
           className={classNames(
             'flex items-center gap-2 overflow-hidden border-t border-gray-900 bg-gray-950 px-2 leading-none text-gray-300',
-            compact ? 'h-6 text-[11px] sm:h-7 sm:text-xs' : 'h-7 text-[11px]',
+            compact ? 'h-6 text-[11px] sm:h-7 sm:text-xs' : 'h-7 text-[13px]',
           )}
         >
           <span
@@ -255,9 +255,20 @@ function ThumbnailTile({
           />
           <span className="min-w-0 flex-1 truncate font-medium text-gray-200">{name}</span>
         </div>
+        {!compact && (
+          <div className="px-2 text-xs text-gray-400">
+            {reviewState === 'unknown'
+              ? 'Loading caption'
+              : reviewState === 'missing'
+                ? 'Missing'
+                : reviewState === 'approved'
+                  ? 'Approved'
+                  : 'Needs review'}
+          </div>
+        )}
       </button>
       {selected && (
-        <span className="pointer-events-none absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-brand-400 text-[var(--brand-ink)] shadow-lg">
+        <span className="pointer-events-none absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-brand-500 text-[var(--brand-ink)] shadow-lg">
           <Check className="h-4 w-4" strokeWidth={3} />
         </span>
       )}
@@ -540,7 +551,7 @@ export function ImageNavigator({
   const captionPendingCount = useMemo(() => entries.filter(entry => entry.status === 'unknown').length, [entries]);
   const thumbConfig = THUMB_SIZE_CONFIG[thumbSize];
   const gridColumns = useMemo(
-    () => navigatorColumnCount(gridSize.width, thumbConfig.tileWidth, 4),
+    () => navigatorColumnCount(gridSize.width, thumbConfig.tileWidth, 16),
     [gridSize.width, thumbConfig.tileWidth],
   );
   const gridRows = useMemo(() => groupNavigatorRows(filteredIndexes, gridColumns), [filteredIndexes, gridColumns]);
@@ -962,8 +973,8 @@ export function ImageNavigator({
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-gray-950"
         aria-label="Dataset gallery"
       >
-        <div className="flex h-[61px] flex-shrink-0 items-center gap-2 overflow-x-auto border-b border-gray-800 px-4">
-          <div className="relative w-[230px] flex-shrink-0">
+        <div className="caption-gallery-toolbar">
+          <div className="caption-gallery-search relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
             <input
               value={searchQuery}
@@ -984,7 +995,7 @@ export function ImageNavigator({
             )}
           </div>
 
-          <div className="flex h-[34px] flex-shrink-0 gap-2 text-[12px]">
+          <div className="caption-gallery-filters flex h-[34px] gap-2 text-xs">
             {studioFilters.map(option => (
               <button
                 key={option.value}
@@ -1084,7 +1095,7 @@ export function ImageNavigator({
             <SlidersHorizontal className="h-3.5 w-3.5" />
             <span className="sr-only">Batch actions</span>
             {selectedBulkCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-400 px-1 text-[9px] font-bold text-[var(--brand-ink)]">
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-500 px-1 text-[9px] font-bold text-[var(--brand-ink)]">
                 {selectedBulkCount}
               </span>
             )}
@@ -1092,15 +1103,17 @@ export function ImageNavigator({
 
           <div className="min-w-2 flex-1" />
           {watcherAction}
-          <button
-            type="button"
-            onClick={onAddImages}
-            className="inline-flex h-[34px] flex-shrink-0 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-[12px] font-semibold text-gray-100 hover:border-gray-600 hover:bg-gray-900"
-          >
-            <Upload className="h-4 w-4" />
-            Add images
-          </button>
-          {captionAction}
+          <div className="caption-gallery-actions flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onAddImages}
+              className="inline-flex h-[34px] flex-shrink-0 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-3 text-[12px] font-semibold text-gray-100 hover:border-gray-600 hover:bg-gray-900"
+            >
+              <Upload className="h-4 w-4" />
+              Add images
+            </button>
+            {captionAction}
+          </div>
         </div>
 
         {batchPanelOpen && (
@@ -1207,7 +1220,7 @@ export function ImageNavigator({
                   const row = gridRows[rowIndex] || [];
                   return (
                     <div
-                      className="grid gap-1 pb-1"
+                      className="grid gap-4 pb-4"
                       style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}
                     >
                       {row.map(index => {

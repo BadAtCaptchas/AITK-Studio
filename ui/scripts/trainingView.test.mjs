@@ -38,7 +38,11 @@ function settingsFixture() {
     ),
     'next/server': { NextResponse: { json: (body, options) => ({ body, status: options?.status ?? 200 }) } },
     '@/paths': { defaultTrainFolder: '/training', defaultDatasetsFolder: '/datasets', defaultModelsFolder: '/models' },
-    '@/server/commandInput': { readJsonCommand: request => request.json(), withCommandBoundary: handler => handler, commandError: () => null },
+    '@/server/commandInput': {
+      readJsonCommand: request => request.json(),
+      withCommandBoundary: handler => handler,
+      commandError: () => null,
+    },
     '@/server/settings': { ...evaluate(normalizer.getText(ast)), flushCache() {} },
     '@/server/pathContainment': { normalizeStoragePathSetting: async (value, fallback) => value || fallback },
     '@/server/db': {
@@ -80,11 +84,11 @@ function settingsFixture() {
   return { store, get: () => route.GET({}), post: body => route.POST({ json: async () => body }) };
 }
 
-test('new installations default to guided training', async () => {
+test('new installations default to the continuous training form', async () => {
   const fixture = settingsFixture();
   const result = await fixture.get();
   assert.equal(result.status, 200);
-  assert.equal(result.body.TRAINING_LEGACY_VIEW, 'false');
+  assert.equal(result.body.TRAINING_LEGACY_VIEW, 'true');
 });
 
 test('legacy preference survives saving and reading, and can be disabled', async () => {
@@ -102,8 +106,15 @@ test('older settings clients do not reset the legacy preference when omitting it
   assert.equal((await fixture.get()).body.TRAINING_LEGACY_VIEW, 'true');
 });
 
-test('malformed preference falls back to guided and does not persist arbitrary data', async () => {
+test('malformed preference falls back to the continuous form and does not persist arbitrary data', async () => {
   const fixture = settingsFixture();
   assert.equal((await fixture.post({ TRAINING_LEGACY_VIEW: { invalid: true } })).status, 200);
-  assert.equal(fixture.store.get('TRAINING_LEGACY_VIEW'), 'false');
+  assert.equal(fixture.store.get('TRAINING_LEGACY_VIEW'), 'true');
+});
+
+test('explicit guided preference survives an older settings client', async () => {
+  const fixture = settingsFixture();
+  fixture.store.set('TRAINING_LEGACY_VIEW', 'false');
+  assert.equal((await fixture.post({})).status, 200);
+  assert.equal((await fixture.get()).body.TRAINING_LEGACY_VIEW, 'false');
 });

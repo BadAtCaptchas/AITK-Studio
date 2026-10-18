@@ -195,7 +195,7 @@ function WorkerHero({
     }
   };
   return (
-    <section className="border-b border-gray-800 p-5">
+    <section className="border-b border-gray-800 bg-gray-900 px-4 py-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -352,7 +352,7 @@ function QueueJobCard({
           : undefined
       }
       className={classNames(
-        'group grid select-none gap-3 border-b border-l-2 border-gray-900 px-3 py-3 outline-none transition-[background-color,border-color,box-shadow] hover:bg-gray-900/35 lg:grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_auto] lg:items-center',
+        'group grid select-none gap-3 border-b border-l-2 border-gray-800 px-3 py-3 outline-none transition-[background-color,border-color,box-shadow] hover:bg-gray-900/35 lg:grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_auto] lg:items-center',
         statusAccent(job),
         selected && 'shadow-[inset_2px_0_0_rgb(var(--brand-400)/0.95),inset_0_0_0_1px_rgb(var(--brand-400)/0.18)]',
         dragTarget && !selected && 'bg-brand-950/20',
@@ -475,6 +475,7 @@ function JobListLane({
         </div>
         <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">{sortedJobs.length} jobs</span>
       </div>
+      <QueueColumnHeadings />
       <div>
         {sortedJobs.map((job, index) => (
           <QueueJobCard
@@ -495,6 +496,19 @@ function JobListLane({
         ))}
       </div>
     </section>
+  );
+}
+function QueueColumnHeadings() {
+  return (
+    <div
+      aria-hidden="true"
+      className="hidden grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_auto] gap-3 border-y border-gray-800 bg-gray-900 px-3 py-2 text-xs text-gray-400 lg:grid"
+    >
+      <span>Job / GPU</span>
+      <span>Steps</span>
+      <span>Status / Info</span>
+      <span>Actions</span>
+    </div>
   );
 }
 function ActiveQueueLane({
@@ -582,6 +596,7 @@ function ActiveQueueLane({
             )}
           </div>
         </div>
+        {group.jobs.length > 0 && <QueueColumnHeadings />}
         <div>
           {group.jobs.length === 0 ? (
             <QueueEmptyState queueRunning={queueRunning} action={emptyAction} />
@@ -889,8 +904,8 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
           : null;
   let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading';
   if (Object.keys(jobsDict).length > 0) isLoading = false;
-  const totalFor = (statuses: string[]) => statusCounts
-    ? statuses.reduce((sum, status) => sum + (statusCounts[status] || 0), 0) : '—';
+  const totalFor = (statuses: string[]) =>
+    statusCounts ? statuses.reduce((sum, status) => sum + (statusCounts[status] || 0), 0) : '—';
   const tabs: Array<{
     key: TabKey;
     label: string;
@@ -900,7 +915,12 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
     { key: 'active', label: 'Active', count: totalFor(ACTIVE_JOB_STATUSES), icon: PlayCircle },
     { key: 'history', label: 'History', count: totalFor(['stopped', 'completed', 'error', 'failed']), icon: History },
     { key: 'failed', label: 'Failed', count: totalFor(['error', 'failed']), icon: AlertTriangle },
-    { key: 'all', label: 'All', count: statusCounts ? Object.values(statusCounts).reduce((sum, count) => sum + count, 0) : '—', icon: CircleDashed },
+    {
+      key: 'all',
+      label: 'All',
+      count: statusCounts ? Object.values(statusCounts).reduce((sum, count) => sum + count, 0) : '—',
+      icon: CircleDashed,
+    },
   ];
   const handleDragStart = (jobID: string) => {
     setReorderError(null);
@@ -1150,8 +1170,16 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
         )}
       </div>
 
-      {hasMore && <button className="operator-button" disabled={isRefreshing} onClick={loadMore}>Load more jobs</button>}
-      {freshness && (freshness.failed > 0 || Date.now() - Date.parse(freshness.updatedAt) > 30000) && <p role="status" className="text-sm text-amber-300">Job synchronization is delayed. Last checked {new Date(freshness.updatedAt).toLocaleTimeString()}.</p>}
+      {hasMore && (
+        <button className="operator-button" disabled={isRefreshing} onClick={loadMore}>
+          Load more jobs
+        </button>
+      )}
+      {freshness && (freshness.failed > 0 || Date.now() - Date.parse(freshness.updatedAt) > 30000) && (
+        <p role="status" className="text-sm text-amber-300">
+          Job synchronization is delayed. Last checked {new Date(freshness.updatedAt).toLocaleTimeString()}.
+        </p>
+      )}
       {hasInlineInspector && selectedJob && (
         <div className="min-w-0">
           <div className="mb-2 flex justify-end">

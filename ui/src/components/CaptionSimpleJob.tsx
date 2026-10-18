@@ -204,7 +204,7 @@ const CaptionSimpleJob: React.FC<Props> = ({
   };
 
   return (
-    <div className="text-sm text-gray-400">
+    <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-4 text-sm text-gray-300">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
         <div>
           <SelectInput

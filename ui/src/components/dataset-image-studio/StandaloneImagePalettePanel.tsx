@@ -241,7 +241,7 @@ export function StandaloneImagePalettePanel({
             disabled={extractDisabled}
             onClick={onExtractPalette}
             title={extractTitle}
-            className="mr-1 flex h-8 w-[151px] flex-none items-center justify-center gap-2 rounded-[4px] border border-brand-300/60 bg-brand-400 text-xs font-semibold text-[var(--brand-ink)] shadow-[0_1px_8px_rgb(var(--brand-400)/0.12)] transition-colors hover:bg-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+            className="mr-1 flex h-8 w-[151px] flex-none items-center justify-center gap-2 rounded-[4px] border border-brand-300/60 bg-brand-500 text-xs font-semibold text-[var(--brand-ink)] shadow-[0_1px_8px_rgb(var(--brand-400)/0.12)] transition-colors hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
           >
             {isExtracting ? (
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -257,7 +257,10 @@ export function StandaloneImagePalettePanel({
             <div
               className="grid gap-[5px]"
               style={{
-                width: normalizedPalette.length <= 8 ? '528px' : `${normalizedPalette.length * 62 + (normalizedPalette.length - 1) * 5}px`,
+                width:
+                  normalizedPalette.length <= 8
+                    ? '528px'
+                    : `${normalizedPalette.length * 62 + (normalizedPalette.length - 1) * 5}px`,
                 gridTemplateColumns: `repeat(${normalizedPalette.length}, minmax(54px, 1fr))`,
               }}
             >
@@ -409,7 +412,7 @@ export function StandaloneImagePalettePanel({
                               className={classNames(
                                 'inline-flex h-[18px] w-[18px] items-center justify-center rounded-[2px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-35',
                                 assigned
-                                  ? 'border-brand-300 bg-brand-400 text-[var(--brand-ink)]'
+                                  ? 'border-brand-300 bg-brand-500 text-[var(--brand-ink)]'
                                   : 'border-transparent bg-transparent text-transparent hover:border-gray-600 hover:bg-white/5',
                               )}
                             >

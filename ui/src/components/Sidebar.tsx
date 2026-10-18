@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { Home, Database, Play, Box, Wrench, LogOut, Settings, Wand2 } from 'lucide-react';
+import { Home, Database, Box, Wrench, LogOut, Settings, Wand2, Plus, ListOrdered } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import ThemeToggle from './ThemeToggle';
 import ThemeLogo from './ThemeLogo';
@@ -10,19 +10,20 @@ const Sidebar = () => {
   const pathname = usePathname();
   const [authRequired] = authRequiredState.use();
   const navigation = [
-    { name: 'Home', href: '/dashboard', icon: Home },
-    { name: 'Datasets', href: '/datasets', icon: Database },
-    { name: 'Training', href: '/jobs', icon: Play },
-    { name: 'Models', href: '/models', icon: Box },
+    { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Generate', href: '/generate', icon: Wand2 },
-    { name: 'Tools', href: '/tools', icon: Wrench },
+    { name: 'New Job', href: '/jobs/new', icon: Plus },
+    { name: 'Queue', href: '/jobs', icon: ListOrdered },
+    { name: 'Datasets', href: '/datasets', icon: Database },
     { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Models', href: '/models', icon: Box },
+    { name: 'Tools', href: '/tools', icon: Wrench },
   ];
   const railButtonClass =
     'flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-500 transition-colors hover:border-gray-800 hover:bg-gray-900/60 hover:text-gray-100';
   const isActive = (href: string) => {
     if (href === '/jobs') {
-      return pathname === '/jobs' || pathname.startsWith('/jobs/');
+      return pathname === '/jobs' || (pathname.startsWith('/jobs/') && pathname !== '/jobs/new');
     }
     if (href === '/tools') return ['/tools', '/workflows', '/watermark'].some(route => pathname.startsWith(route));
     return pathname === href || pathname.startsWith(`${href}/`);
@@ -55,7 +56,7 @@ const Sidebar = () => {
           {navigation.map(item => {
             const active = isActive(item.href);
             return (
-              <li key={item.name} className={item.name === 'Tools' ? 'studio-utility-start' : undefined}>
+              <li key={item.name} className={item.name === 'Models' ? 'studio-utility-start' : undefined}>
                 <Link
                   href={item.href}
                   aria-current={active ? 'page' : undefined}

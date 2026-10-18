@@ -263,7 +263,7 @@ export default function DatasetImageStudio({
   const [encryptedCaptionPaths, setEncryptedCaptionPaths] = useState<Record<string, string>>({});
   const [captionCacheVersion, setCaptionCacheVersion] = useState(0);
   const [approvedKeys, setApprovedKeys] = useState<Set<string>>(() => new Set());
-  const [workbenchHeight, setWorkbenchHeight] = useState(254);
+  const [workbenchHeight, setWorkbenchHeight] = useState(318);
   const [workbenchCollapsed, setWorkbenchCollapsed] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
   const [toolsMenuPosition, setToolsMenuPosition] = useState({ left: 0, top: 0 });
@@ -1130,8 +1130,10 @@ export default function DatasetImageStudio({
   }, [boxes, isIdeogram, selectedKey]);
   const saveCaptionForItem = useCallback(
     async (targetItem: DatasetStudioItem, targetKey: string, captionValue: string) => {
-      const draftAtStart = selectedKeyRef.current === targetKey
-        ? latestCaptionRef.current : captionCacheRef.current.get(targetKey)?.caption;
+      const draftAtStart =
+        selectedKeyRef.current === targetKey
+          ? latestCaptionRef.current
+          : captionCacheRef.current.get(targetKey)?.caption;
       const value = isPlainTextCaptionItem(targetItem) ? captionValue : captionValue.trim();
       if (targetItem.kind === 'plain') {
         const response = await apiClient.post('/api/img/caption', {
@@ -1146,8 +1148,10 @@ export default function DatasetImageStudio({
       } else {
         throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt this dataset before editing captions.');
       }
-      const currentDraft = selectedKeyRef.current === targetKey
-        ? latestCaptionRef.current : captionCacheRef.current.get(targetKey)?.caption;
+      const currentDraft =
+        selectedKeyRef.current === targetKey
+          ? latestCaptionRef.current
+          : captionCacheRef.current.get(targetKey)?.caption;
       const caption = currentDraft !== undefined && currentDraft !== draftAtStart ? currentDraft : value;
       if (selectedKeyRef.current === targetKey) {
         latestCaptionRef.current = caption;
@@ -2856,7 +2860,7 @@ export default function DatasetImageStudio({
 
         {!workbenchCollapsed && (
           <section
-            className="relative flex flex-shrink-0 flex-col border-t border-brand-400/80 bg-gray-950"
+            className="relative flex flex-shrink-0 flex-col border-t border-gray-700 bg-gray-900"
             style={{ height: `${workbenchHeight}px` }}
             aria-label="Caption workbench"
           >
@@ -2869,7 +2873,7 @@ export default function DatasetImageStudio({
               <GripHorizontal className="h-4 w-4" />
             </button>
 
-            <div className="operator-scrollbar-none flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
+            <div className="flex min-h-0 flex-1 overflow-auto">
               <button
                 type="button"
                 onClick={() => setWorkbenchCollapsed(true)}
@@ -2879,12 +2883,9 @@ export default function DatasetImageStudio({
               >
                 <ChevronDown className="h-5 w-5" />
               </button>
-              <div
-                className="grid min-h-0 min-w-[1280px] flex-1 gap-4 px-4 py-4"
-                style={{ gridTemplateColumns: '353fr 566fr 320fr 121fr' }}
-              >
-                <div className="flex min-w-[300px] gap-4 overflow-hidden">
-                  <div className="h-full w-[158px] flex-shrink-0 overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
+              <div className="caption-workbench-grid">
+                <div className="caption-workbench-asset">
+                  <div className="caption-workbench-preview">
                     {selectedItem.kind === 'plain' ? (
                       <PlainThumb
                         path={selectedItem.path}
@@ -2914,24 +2915,32 @@ export default function DatasetImageStudio({
                       />
                     </div>
                     <h2
-                      className="mt-2 truncate text-[18px] font-semibold leading-tight text-gray-100"
+                      className="mt-1 truncate text-base font-semibold leading-tight text-gray-100"
                       title={selectedName}
                     >
                       {selectedName}
                     </h2>
-                    <dl className="mt-4 grid grid-cols-[72px_1fr] gap-x-2 gap-y-2 text-[11px] leading-tight">
-                      <dt className="text-gray-600">Dimensions</dt>
-                      <dd className="text-gray-300">
-                        {selectedImageSize ? `${selectedImageSize.width} × ${selectedImageSize.height}` : '—'}
-                      </dd>
-                      <dt className="text-gray-600">File size</dt>
-                      <dd className="text-gray-300">{formatByteSize(selectedSizeBytes)}</dd>
-                      <dt className="text-gray-600">Modified</dt>
-                      <dd className="text-gray-300">{selectedDateLabel}</dd>
-                      <dt className="text-gray-600">Type</dt>
-                      <dd className="capitalize text-gray-300">{selectedKind}</dd>
-                    </dl>
-                    <div className="mt-4 flex items-center gap-2">
+                    <details className="mt-2 text-xs text-gray-400">
+                      <summary className="cursor-pointer">
+                        {selectedImageSize
+                          ? `${selectedImageSize.width} × ${selectedImageSize.height}`
+                          : 'Asset details'}{' '}
+                        · {formatByteSize(selectedSizeBytes)}
+                      </summary>
+                      <dl className="mt-2 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1 text-[11px] leading-tight">
+                        <dt className="text-gray-600">Dimensions</dt>
+                        <dd className="text-gray-300">
+                          {selectedImageSize ? `${selectedImageSize.width} × ${selectedImageSize.height}` : '—'}
+                        </dd>
+                        <dt className="text-gray-600">File size</dt>
+                        <dd className="text-gray-300">{formatByteSize(selectedSizeBytes)}</dd>
+                        <dt className="text-gray-600">Modified</dt>
+                        <dd className="text-gray-300">{selectedDateLabel}</dd>
+                        <dt className="text-gray-600">Type</dt>
+                        <dd className="capitalize text-gray-300">{selectedKind}</dd>
+                      </dl>
+                    </details>
+                    <div className="mt-2 flex items-center gap-2">
                       <button
                         type="button"
                         onClick={handleRecaptionClick}
@@ -2968,7 +2977,7 @@ export default function DatasetImageStudio({
                   </div>
                 </div>
 
-                <div className="flex min-w-[410px] flex-col overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
+                <div className="caption-workbench-editor flex min-w-0 flex-col overflow-hidden rounded-md border border-gray-700 bg-gray-950">
                   <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-800 px-3">
                     <span className={classNames('h-2 w-2 rounded-full', captionStatus.dot)} />
                     <span className="text-[12px] font-semibold text-gray-200">Caption</span>
@@ -2984,7 +2993,7 @@ export default function DatasetImageStudio({
                     onChange={event => handleCaptionDescriptionChange(event.target.value)}
                     disabled={!isCaptionLoaded || isAutoCaptioning}
                     placeholder={isCaptionLoaded ? 'Write a precise caption for this image…' : 'Loading caption…'}
-                    className="min-h-0 flex-1 resize-none bg-transparent px-4 py-3 text-[15px] leading-7 text-gray-100 outline-none placeholder:text-gray-650 disabled:opacity-60"
+                    className="min-h-0 flex-1 resize-none bg-transparent px-4 py-3 text-[15px] leading-7 text-gray-100 outline-none placeholder:text-gray-600 disabled:opacity-60"
                     spellCheck
                     aria-label="Image caption"
                   />
@@ -2996,12 +3005,12 @@ export default function DatasetImageStudio({
                   </div>
                 </div>
 
-                <div className="grid min-w-[320px] grid-cols-2 grid-rows-[56px_50px_51px_1fr] gap-2">
+                <div className="caption-workbench-actions grid min-w-0 grid-cols-2 grid-rows-[44px_40px_40px_1fr] gap-2">
                   <button
                     type="button"
                     onClick={() => void saveAndNext()}
                     disabled={!isCaptionLoaded || isAutoCaptioning || isSaving}
-                    className="col-span-2 inline-flex items-center justify-center gap-2 rounded-[4px] bg-brand-400 text-[16px] font-semibold text-[var(--brand-ink)] hover:bg-brand-300 disabled:cursor-not-allowed disabled:opacity-45"
+                    className="col-span-2 inline-flex items-center justify-center gap-2 rounded-[4px] bg-brand-500 text-[14px] font-semibold text-[var(--brand-ink)] hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     Save & Next
@@ -3044,8 +3053,8 @@ export default function DatasetImageStudio({
                   </div>
                 </div>
 
-                <div className="relative min-w-[110px] overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
-                  <div className="flex h-[42px] w-full items-center border-b border-gray-800 px-3 text-left text-[12px] font-semibold text-gray-200">
+                <div className="caption-workbench-tools">
+                  <div className="sr-only">
                     <Settings2 className="mr-2 h-3.5 w-3.5" />
                     Tools
                   </div>
@@ -3057,7 +3066,7 @@ export default function DatasetImageStudio({
                         type="button"
                         onClick={() => openAdvancedMode(tool.value)}
                         className={classNames(
-                          'flex h-[41px] w-full items-center gap-2 border-b border-gray-800 px-3 text-[12px] last:border-b-0 hover:bg-gray-900',
+                          'operator-button flex-1 px-2 text-xs',
                           advancedMode === tool.value ? 'text-brand-300' : 'text-gray-400',
                         )}
                       >
@@ -3192,7 +3201,7 @@ export default function DatasetImageStudio({
                     className={classNames(
                       'absolute left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-[4px] border shadow-lg shadow-black/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-35',
                       activeImagePaletteSamplerIndex != null
-                        ? 'border-brand-300 bg-brand-400 text-[var(--brand-ink)]'
+                        ? 'border-brand-300 bg-brand-500 text-[var(--brand-ink)]'
                         : 'border-gray-800 bg-gray-950/95 text-gray-200 hover:border-brand-700 hover:text-brand-200',
                     )}
                     title={
@@ -3608,7 +3617,7 @@ export default function DatasetImageStudio({
                         (advancedMode === 'json' && jsonDraftAnalysis.validity !== 'valid')
                       }
                       className={classNames(
-                        'relative inline-flex items-center justify-center rounded-[4px] bg-brand-400 px-3 text-sm font-semibold text-[var(--brand-ink)] hover:bg-brand-300 disabled:cursor-not-allowed disabled:opacity-45',
+                        'relative inline-flex items-center justify-center rounded-[4px] bg-brand-500 px-3 text-sm font-semibold text-[var(--brand-ink)] hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-45',
                         advancedMode === 'palettes' || advancedMode === 'json' ? 'col-span-3' : 'col-span-2',
                       )}
                     >

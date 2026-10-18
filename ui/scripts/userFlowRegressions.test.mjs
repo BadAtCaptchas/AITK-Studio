@@ -7,7 +7,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { stripTypeScriptTypes } from 'node:module';
 
-const source = name => fs.readFileSync(new URL('../src/' + name, import.meta.url), 'utf8');
+const source = name => fs.readFileSync(new URL('../src/' + name, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 function evaluate(code, dependencies = {}, names = []) {
   code = code.replace(/^import[\s\S]*?from ['"]([^'"]+)['"];\s*/gm, (whole, name) => {
     if (whole.startsWith('import type')) return '';

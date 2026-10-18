@@ -154,7 +154,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
   );
 
   const logLines: string[] = useMemo(() => {
-    let splits: string[] = log.split('\n');
+    let splits: string[] = log ? log.split('\n') : [];
 
     // only return last 100 lines max
     const maxLines = 1000;
@@ -257,9 +257,13 @@ export default function JobOverview({ job }: JobOverviewProps) {
 
           {/* Log - Now using flex-grow to fill remaining space */}
           <div className="relative min-h-80 flex-grow rounded-md border border-gray-800 bg-gray-950">
+            <h3 className="border-b border-gray-800 px-3 py-2 text-sm font-medium">Training log</h3>
             <div
               ref={logRef}
-              className="absolute inset-0 overflow-y-auto p-3 text-xs text-gray-300"
+              role="region"
+              aria-label="Training log"
+              tabIndex={0}
+              className="absolute inset-x-0 bottom-0 top-9 overflow-auto p-3 text-xs text-gray-300"
               onScroll={handleScroll}
             >
               {statusLog === 'loading' && 'Loading log...'}

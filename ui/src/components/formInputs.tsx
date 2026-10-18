@@ -10,7 +10,7 @@ import { ConfigDoc, GroupedSelectOption, SelectOption } from '@/types';
 
 const Select = dynamic(() => import('react-select'), { ssr: false });
 
-const labelClasses = 'block text-xs font-medium mb-1.5 mt-3 text-gray-300';
+const labelClasses = 'flex min-h-7 items-center text-xs font-medium mb-1.5 mt-3 text-gray-300';
 const inputClasses =
   'w-full text-sm px-3 py-2 bg-gray-950 border border-gray-700 rounded-md text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-400/30 focus:border-brand-400';
 const getDocTooltip = (doc: ConfigDoc) => doc.tooltip || (typeof doc.title === 'string' ? doc.title : 'Open help');

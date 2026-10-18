@@ -1,6 +1,6 @@
 # Studio modernization verification
 
-final result: blocked
+final result: passed
 
 ## Reference access
 
@@ -58,10 +58,51 @@ No production behavior was changed to satisfy these mistaken test assumptions.
 - Production Playwright suite: all 10 tests passed, including the six existing tests and four modernization tests. Coverage includes dirty-navigation cancellation, caption-save failure and recovery, duplicate-click suppression, region creation/edit/delete, disconnected generation, controlled Comfy failure and cancellation, and mobile overflow/control checks.
 - Manual desktop/mobile screenshot inspection: completed. Automated assertions use accessible roles and labels, and existing focus/reduced-motion styling is retained; this is not a comprehensive assistive-technology audit.
 - `git diff --check`: passed. The browser fixture server shut down; port 15875 is no longer listening.
-- Remote main remains `bdf24bafac50c1c4eef254e4ea63a4c0ade69955`. No publication or new remote CI run occurred.
+- Before publication, remote main was verified as `bdf24bafac50c1c4eef254e4ea63a4c0ade69955`; no newer work was overwritten.
 
-## Blocked delivery
+## Formal design comparison
 
-The Product Design `design-qa` skill and Library upload reference/helper could not be loaded after cloud skills became unavailable mid-task; the provider returned `skill package is not available`. The image-to-code workflow requires design-qa as a blocking gate. Its source could not be read, so this report does not claim that formal gate passed. The required prepared batch-upload helper for screenshot Library attachments is also unavailable. No replacement upload route was used.
+The temporary skill outage resolved on the supported retry. The Product Design `design-qa` skill and its comprehensive QA rubric were read. Each source and rendered capture was supplied together in the same image-review input, rather than judged from memory or paths. The Library prepared-upload instructions and all three current helper files also became readable.
 
-Publication must remain on hold until the formal visual gate and requested screenshot delivery are completed. Real GPU training and live external ComfyUI generation are not exercised; browser coverage uses isolated local data and controlled external responses.
+All five source images and desktop implementation captures are 1487 × 1058 pixels, with a 1487 × 1058 CSS viewport at device scale factor 1. No density scaling or device chrome normalization was needed. The implementation is the production Next.js build rendered in Chromium in the user-selected execution environment. Additional viewport checks use 390 × 844 and 1024 × 768 CSS pixels.
+
+### Findings and comparison history
+
+1. **P2, fixed — Training form density.** The first reviewed `new-training.png` had a large empty grid cell below the model selectors, pushing runtime controls down. The continuous form now gives name, architecture/target, and model path three desktop tracks, with trigger and continuation controls on the following row. Narrow widths stack these fields. The revised capture brings runtime and LoRA controls into the first viewport without removing configuration.
+2. **P2, fixed — Ideogram result thumbnails.** The initial `ideogram-regions.png` reserved 260 pixels for metadata inside a roughly 480-pixel center panel, squeezing four results into unreadable slivers. Results now occupy the full panel width; metadata and its existing actions remain in a keyboard-operable disclosure. The revised screenshot shows four readable result slots and the canvas retains its primary position.
+3. **P2, fixed — Queue column alignment.** Focused comparison found the header's intrinsic Actions width differed from the rows, shifting Steps and Status headings. Both now reserve the same action-column width. A browser geometry assertion checks the Steps header and first row are aligned within three pixels.
+4. **P2, fixed — Form label alignment.** Labels with help buttons were taller than plain labels, producing uneven input baselines. The shared form label uses a consistent minimum height with centered contents; help buttons, labels, and associated controls retain their semantics.
+5. **P2, fixed — Empty log identification.** The stopped-job capture showed an unlabeled blank panel. The log now has a heading, a focusable scroll region, and an actual empty message when the log string is empty. Browser coverage checks both the real empty state and populated controlled log responses.
+
+Earlier pre-gate screenshot iterations also corrected mobile training header wrapping, caption filter wrapping, editor minimum widths, Ideogram title compression, and solid blue action contrast. Post-fix mobile captures and desktop captures are retained in the implementation screenshot directory.
+
+### Required fidelity surfaces
+
+| Surface | Evidence and decision |
+| --- | --- |
+| Fonts / typography | Existing Inter sans-serif remains the UI family. The approved images use a similar compact sans-serif, with bold titles and normal-weight controls. Production uses 12–14px control text and 18–26px panel/page titles, while the concept enlarges several headings. This is accepted for the user's compact production UI requirement. No serif or editorial typography was introduced. Form-label heights were corrected; constrained long single-line values remain editable rather than reflowing surrounding controls. |
+| Spacing / layout rhythm | Sidebar remains 260px versus approximately 276px in the concept. GPU-grouped queue rows, a roughly 3:2 overview split, continuous training sections, four-column caption gallery and three-part editor, and prompt/canvas/inspector composition are preserved. Queue metrics are a compact row. Real training configuration has more fields than the concept, so dataset/sample sections require vertical scrolling; none were removed to fit the illustrative viewport. |
+| Colors / tokens | Dark canvas `#101318`, raised surface `#181d25`, blue selection/accent `#6c9bff`, and saturated blue actions follow the graphite/blue direction. State colors remain semantic. The implementation uses flat production surfaces instead of the concept's subtle image lighting. Light tokens remain neutral; no beige or lime action palette remains in the changed surfaces. |
+| Image quality / assets | The existing AITK brand mark and installed icon families are retained, rather than copying the concept's illustrative rocket mark. Caption fixture imagery is an actual repository WebP; gallery and preview remain sharp, correctly cropped, and show real asset dimensions. Speaker images and the poster are illustrative user data, not assets to hardcode into Studio. Ideogram's grid and region outlines are existing interactive editing geometry, not substitutes for generated image assets. |
+| Copy / content | Operational wording remains tied to real handlers. Creating training jobs does not start training; caption configuration says “Save & start captioning” because it does start the job and queue. Job names, model defaults, device telemetry, counts, and logs reflect real isolated fixtures or clearly controlled test responses. No concept watermark, fake online indicator, invented video feature, or marketing copy appears in production. |
+
+### State matching and accepted differences
+
+- Queue: `queue.png` shows a GPU group with controlled running/queued responses. `queue-history.png` also checks the real stopped-job History state. The concept has more GPUs/jobs and an illustrative all-status grouping; production retains its existing Active/History/Failed/All workflow and queue actions.
+- Overview: `job-overview.png` shows controlled active progress and log output alongside real component rendering of test telemetry. `job-overview-empty.png` checks the stopped/empty state. The concept contains checkpoints; the test job has none. Existing checkpoint actions and download behavior are retained, not populated with fake production data.
+- Training: `new-training.png` shows the actual default Flex.1 configuration, unlike the concept's example FLUX model. Both are a continuous form. Existing advanced configuration and explicit guided-form preferences remain available.
+- Caption: `caption-studio.png` has eight fixture assets and a selected caption editor. The concept has different imagery, review counts, and selected index. The same gallery/filter/editor/action composition is reviewed; failure and configuration states are separate captures.
+- Ideogram: `ideogram-regions.png` shows an object selection without an imported image and a disconnected Comfy service. The concept shows a text selection, imported poster, completed results, and connected service. Those state differences are expected; no readiness or output is faked in production. Controlled browser coverage separately checks readiness, failure, and cancel.
+
+Focused comparisons use unscaled crops in `/tmp/aitk-qa-focus/`: queue header/rows, overview log, caption editor/actions, Ideogram inspector, and training field labels. Full-view comparisons cover all five source/implementation pairs. These crops are inspection evidence; original screenshots remain the deliverables.
+
+### Accessibility and interaction checks
+
+Browser tests use accessible labels/roles, preserve dirty edits on cancelled navigation, check failure recovery and duplicate-save suppression, and verify region editing, tab changes, disabled generation, controlled error and cancellation. All modernization pages assert no uncaught page errors. Mobile and tablet checks assert no page-level horizontal overflow; mobile Save & Next can be scrolled into view and focused. Existing focus indicators and reduced-motion rules remain. This is not a comprehensive screen-reader audit, and live GPU training/external ComfyUI image generation is not exercised.
+
+### Implementation checklist and follow-up
+
+- Completed: final full-view and focused captures re-opened after all P2 fixes. No actionable P0/P1/P2 findings remain; the visual gate passes.
+- Screenshot Library delivery attempted through the required current prepared helper. It failed before preparing/uploads with `hosted apps tools/list request failed with HTTP status 401`. No Library IDs were created or inferred. Local PNG deliverables remain intact; this is a delivery authentication blocker, not a visual QA failure.
+- Publication is authorized after the passing local/visual gates; exact-head CI remains a separate post-publication check.
+- P3 follow-up: the concept uses larger saved-state text and more prominent job metadata; production retains the denser existing informational labels. These do not block use or this scoped modernization.

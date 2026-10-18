@@ -2424,7 +2424,7 @@ export default function IdeogramWorkflowBuilderPage() {
             </section>
 
             <section className="operator-panel flex min-h-[245px] flex-col overflow-hidden">
-              <div className="operator-panel-header">
+              <div className="operator-panel-header ideogram-results-header">
                 <div className="flex items-center gap-2">
                   <span>Results</span>
                   <span className="rounded-md border border-gray-800 bg-gray-950 px-2 py-0.5 text-[11px] text-gray-400">
@@ -2448,7 +2448,7 @@ export default function IdeogramWorkflowBuilderPage() {
                   </div>
                 </div>
               </div>
-              <div className="grid min-h-0 flex-1 gap-2 p-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+              <div className="ideogram-results-grid min-h-0 flex-1 overflow-auto p-3">
                 <div className="grid grid-cols-4 gap-2">
                   {[0, 1, 2, 3].map(index => {
                     const image = results[index];
@@ -2462,7 +2462,7 @@ export default function IdeogramWorkflowBuilderPage() {
                         }}
                         className="relative overflow-hidden rounded-md border border-gray-800 bg-gray-950 text-left transition-colors hover:border-brand-700 focus:border-brand-600 focus:outline-none"
                       >
-                        <div className="flex h-44 w-full items-center justify-center bg-gray-950">
+                        <div className="flex h-24 w-full items-center justify-center bg-gray-950">
                           <img src={image.objectUrl} alt={image.filename} className="h-full w-full object-contain" />
                         </div>
                         <div className="truncate border-t border-gray-800 px-2 py-1 text-xs text-gray-400">
@@ -2472,7 +2472,7 @@ export default function IdeogramWorkflowBuilderPage() {
                     ) : (
                       <div
                         key={index}
-                        className="flex h-full min-h-44 flex-col items-center justify-center rounded-md border border-dashed border-gray-800 bg-gray-950 text-center text-xs text-gray-500"
+                        className="flex min-h-24 flex-col items-center justify-center rounded-md border border-dashed border-gray-800 bg-gray-950 text-center text-xs text-gray-500"
                       >
                         <Sparkles className="mb-3 h-5 w-5" />
                         Waiting
@@ -2480,8 +2480,9 @@ export default function IdeogramWorkflowBuilderPage() {
                     );
                   })}
                 </div>
-                <div className="rounded-md border border-gray-800 bg-gray-950 p-3 text-xs text-gray-400">
-                  <div className="grid grid-cols-[6rem_1fr] gap-y-2">
+                <details className="rounded-md border border-gray-800 bg-gray-950 p-3 text-xs text-gray-400">
+                  <summary className="cursor-pointer font-medium text-gray-200">Run details & actions</summary>
+                  <div className="mt-3 grid grid-cols-[6rem_minmax(0,1fr)] gap-y-2">
                     <span className="text-gray-500">Prompt ID</span>
                     <span className="truncate text-gray-300">{generation.promptId || '-'}</span>
                     <span className="text-gray-500">Filename</span>
@@ -2522,7 +2523,7 @@ export default function IdeogramWorkflowBuilderPage() {
                       <ExternalLink className="h-4 w-4" />
                     </IconButton>
                   </div>
-                </div>
+                </details>
               </div>
             </section>
           </main>

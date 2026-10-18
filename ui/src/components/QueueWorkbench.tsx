@@ -352,7 +352,7 @@ function QueueJobCard({
           : undefined
       }
       className={classNames(
-        'group grid select-none gap-3 border-b border-l-2 border-gray-800 px-3 py-3 outline-none transition-[background-color,border-color,box-shadow] hover:bg-gray-900/35 lg:grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_auto] lg:items-center',
+        'group grid select-none gap-3 border-b border-l-2 border-gray-800 px-3 py-3 outline-none transition-[background-color,border-color,box-shadow] hover:bg-gray-900/35 lg:grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_11rem] lg:items-center',
         statusAccent(job),
         selected && 'shadow-[inset_2px_0_0_rgb(var(--brand-400)/0.95),inset_0_0_0_1px_rgb(var(--brand-400)/0.18)]',
         dragTarget && !selected && 'bg-brand-950/20',
@@ -395,7 +395,7 @@ function QueueJobCard({
         </div>
       </div>
 
-      <div className="min-w-0 pl-9 lg:pl-0">
+      <div data-queue-steps className="min-w-0 pl-9 lg:pl-0">
         <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
           <span>Steps</span>
           <span className="text-gray-300">{totalSteps ? `${job.step} / ${totalSteps}` : `Step ${job.step}`}</span>
@@ -502,10 +502,10 @@ function QueueColumnHeadings() {
   return (
     <div
       aria-hidden="true"
-      className="hidden grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_auto] gap-3 border-y border-gray-800 bg-gray-900 px-3 py-2 text-xs text-gray-400 lg:grid"
+      className="hidden grid-cols-[minmax(0,1.15fr)_minmax(11rem,0.5fr)_minmax(0,1fr)_11rem] gap-3 border-y border-gray-800 bg-gray-900 px-3 py-2 text-xs text-gray-400 lg:grid"
     >
       <span>Job / GPU</span>
-      <span>Steps</span>
+      <span data-queue-steps-heading>Steps</span>
       <span>Status / Info</span>
       <span>Actions</span>
     </div>

@@ -95,13 +95,60 @@ test('continuous training, queue and detail retain navigation and responsive con
   await page.getByRole('button', { name: /^History/ }).click();
   await page.getByLabel('Search jobs').fill(name);
   await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
-  await capture(page, 'queue');
+  await capture(page, 'queue-history');
   await page.getByLabel('Search jobs').fill('no matching visual fixture');
   await expect(page.getByText(name, { exact: true })).toHaveCount(0);
   await page.goto(`/jobs/${job.id}`);
   await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Loading log...', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('No log output yet.', { exact: true })).toBeVisible();
+  await capture(page, 'job-overview-empty');
+  // Render controlled live telemetry without starting a worker or GPU job.
+  const liveJob = { ...job, status: 'running', step: 1560, info: 'Training in progress', speed_string: '2.4 s/step' };
+  await page.route('**/api/jobs?*', route => {
+    const query = new URL(route.request().url()).searchParams;
+    return route.fulfill({
+      json: query.has('id')
+        ? liveJob
+        : {
+            jobs: [
+              liveJob,
+              { ...job, id: 'visual-queued', name: 'Queued fixture', status: 'queued', queue_position: 1 },
+            ],
+            nextCursor: null,
+            statusCounts: { running: 1, queued: 1 },
+          },
+    });
+  });
+  await page.route('**/api/queue', route =>
+    route.fulfill({
+      json: {
+        queues: [{ id: 'visual-queue', gpu_ids: '0', worker_id: 'local', is_running: true }],
+      },
+    }),
+  );
+  await page.route(`**/api/jobs/${job.id}/log*`, route =>
+    route.fulfill({
+      json: {
+        log: 'Dataset loaded: 84 images\nTraining started\nCheckpoint saved at step 1500\nStep 1560 / 3000 — loss 0.081\nTraining...',
+        offset: null,
+        reset: true,
+      },
+    }),
+  );
+  await page.goto('/jobs');
+  await expect(page.getByText('Queue running', { exact: true })).toBeVisible();
+  await expect(page.getByText('Queued fixture', { exact: true })).toBeVisible();
+  const stepsHeading = await page.locator('[data-queue-steps-heading]').first().boundingBox();
+  const stepsCell = await page.locator('[data-queue-steps]').first().boundingBox();
+  expect(stepsHeading).not.toBeNull();
+  expect(stepsCell).not.toBeNull();
+  expect(Math.abs(stepsHeading!.x - stepsCell!.x)).toBeLessThan(3);
+  await capture(page, 'queue');
+  await page.goto(`/jobs/${job.id}`);
+  await expect(page.getByRole('region', { name: 'Training log' })).toContainText('Checkpoint saved at step 1500');
   await capture(page, 'job-overview');
+  await page.unroute('**/api/jobs?*');
   await noPageOverflow(page);
   await page.goto('/jobs/new');
   await expect(page.getByLabel('Training name', { exact: true })).toBeVisible();
@@ -120,6 +167,9 @@ test('continuous training, queue and detail retain navigation and responsive con
   await expect(page.getByRole('heading', { name: 'New Training Job', exact: true })).toBeVisible();
   await expect(page.locator('.training-topbar').getByRole('button', { name: 'Create Job', exact: true })).toBeVisible();
   await capture(page, 'new-training-mobile');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await noPageOverflow(page);
+  await expect(page.locator('.training-topbar').getByRole('button', { name: 'Create Job', exact: true })).toBeVisible();
 });
 
 test('caption gallery keeps dirty edits, reports save failures, and saves once before advancing', async ({ page }) => {
@@ -192,6 +242,14 @@ test('caption gallery keeps dirty edits, reports save failures, and saves once b
   await caption.scrollIntoViewIfNeeded();
   await expect(caption).toBeVisible();
   await capture(page, 'caption-studio-mobile');
+  const saveNext = page.getByRole('button', { name: 'Save & Next', exact: true });
+  await saveNext.scrollIntoViewIfNeeded();
+  await expect(saveNext).toBeVisible();
+  await saveNext.focus();
+  await expect(saveNext).toBeFocused();
+  await capture(page, 'caption-actions-mobile');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await noPageOverflow(page);
 });
 
 test('Ideogram regions retain selection, descriptions, zoom, tabs and disconnected readiness', async ({ page }) => {
@@ -221,6 +279,10 @@ test('Ideogram regions retain selection, descriptions, zoom, tabs and disconnect
   await page.setViewportSize({ width: 390, height: 844 });
   await noPageOverflow(page);
   await capture(page, 'ideogram-regions-mobile');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await noPageOverflow(page);
+  await page.getByText('Run details & actions', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Download JSON', exact: true })).toBeVisible();
 });
 
 test('Ideogram exposes a queue failure and allows cancellation with a controlled Comfy connection', async ({

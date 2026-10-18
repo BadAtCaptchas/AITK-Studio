@@ -231,6 +231,10 @@ test('caption gallery keeps dirty edits, reports save failures, and saves once b
   const modal = page.getByRole('dialog', { name: 'Caption Dataset' });
   await expect(modal.getByRole('heading', { name: 'Caption Dataset' })).toBeVisible();
   await expect(modal.getByRole('button', { name: 'Save & start captioning' })).toBeVisible();
+  // Provider/model selects are lazy-loaded independently of the dialog frame.
+  await expect(modal.getByRole('combobox', { name: 'Captioner Type', exact: true })).toBeEnabled();
+  await expect(modal.getByRole('combobox', { name: 'Name or Path', exact: true })).toBeVisible();
+  await expect(modal.getByRole('combobox', { name: 'Max New Tokens', exact: true })).toBeVisible();
   await capture(page, 'caption-configuration');
   await modal.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(modal).toHaveCount(0);

@@ -49,6 +49,8 @@ Manual comparison checked palette, navigation, panels, control alignment, galler
 
 No production behavior was changed to satisfy these mistaken test assumptions.
 
+The final caption-configuration capture additionally waits for the lazy-loaded provider, model, and token selectors. The four modernization browser tests passed again after adding these readiness assertions, and the recaptured modal visibly includes its complete configuration controls.
+
 ## Validation results
 
 - Full Node suite against a migrated isolated SQLite database: 611 tests, 608 passed, zero failures, three skips (two Windows-only path cases and MongoDB integration without a configured service).

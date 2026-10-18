@@ -6,10 +6,9 @@ import { apiClient } from '@/utils/api';
 
 export default function useWorkers() {
   const [workers, setWorkers] = useState<WorkerNode[]>([]);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('loading');
 
-  const refreshWorkers = () => {
-    setStatus('loading');
+  const loadWorkers = () => {
     apiClient
       .get('/api/workers')
       .then(res => res.data)
@@ -24,8 +23,13 @@ export default function useWorkers() {
   };
 
   useEffect(() => {
-    refreshWorkers();
+    loadWorkers();
   }, []);
+
+  const refreshWorkers = () => {
+    setStatus('loading');
+    loadWorkers();
+  };
 
   return { workers, setWorkers, status, refreshWorkers };
 }

@@ -1,5 +1,7 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import useCommittedRef from './useCommittedRef';
+import useScopedState from './useScopedState';
+import { useCallback } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
@@ -8,11 +10,10 @@ export default function useJobByRef(
   reloadInterval: null | number = null,
   jobType: string | null = null,
 ) {
-  const [job, setJob] = useState<Job | null>(null);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const requestScope = JSON.stringify([jobRef, jobType]);
-  const activeScopeRef = useRef(requestScope);
-  activeScopeRef.current = requestScope;
+  const [job, setJob] = useScopedState<Job | null>(requestScope, null);
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(requestScope, 'idle');
+  const activeScopeRef = useCommittedRef(requestScope);
   const refreshJob = useCallback(
     (signal?: AbortSignal) => {
       if (!jobRef) {
@@ -39,12 +40,8 @@ export default function useJobByRef(
           setStatus('error');
         });
     },
-    [jobRef, jobType, requestScope],
+    [jobRef, jobType, requestScope, setJob, setStatus],
   );
-  useEffect(() => {
-    setJob(null);
-    setStatus('idle');
-  }, [jobRef, jobType]);
   usePollLoop(signal => refreshJob(signal), reloadInterval, [jobRef, jobType]);
   return { job, setJob, status, refreshJob: () => refreshJob() };
 }

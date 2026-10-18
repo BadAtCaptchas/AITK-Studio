@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
+import useScopedState from './useScopedState';
 import { apiClient } from '@/utils/api';
 
 // Module-level batcher: many cards mount at once when the virtualized grid scrolls;
@@ -89,34 +90,22 @@ export function setCachedCaption(path: string, caption: string) {
 // Fetches caption for a path, using the module-level batcher + cache.
 // `refreshKey` busts the cache (e.g. after external edits or auto-captioning poll).
 export default function useCaptionBatch(imgPath: string | null, refreshKey: number = 0) {
-  const [caption, setCaption] = useState<string>(() => (imgPath ? (cache.get(imgPath) ?? '') : ''));
-  const [isLoaded, setIsLoaded] = useState<boolean>(() => Boolean(imgPath && cache.has(imgPath)));
-  const lastPathRef = useRef<string | null>(null);
+  const scope = JSON.stringify([imgPath, refreshKey]);
+  const [caption, setCaption] = useScopedState<string>(scope, () => (imgPath ? (cache.get(imgPath) ?? '') : ''));
+  const [isLoaded, setIsLoaded] = useScopedState(scope, () =>
+    Boolean(imgPath && refreshKey === 0 && cache.has(imgPath)),
+  );
 
   useEffect(() => {
-    if (!imgPath) {
-      setCaption('');
-      setIsLoaded(false);
-      return;
-    }
-
+    if (!imgPath) return;
     if (refreshKey > 0) invalidateCaption(imgPath);
-
-    const cached = cache.get(imgPath);
-    if (cached !== undefined) {
-      setCaption(cached);
-      setIsLoaded(true);
-      lastPathRef.current = imgPath;
-      return;
-    }
+    if (cache.has(imgPath)) return;
 
     let cancelled = false;
     const controller = new AbortController();
-    lastPathRef.current = imgPath;
-    setIsLoaded(false);
     requestCaption(imgPath, controller.signal)
       .then(value => {
-        if (cancelled || lastPathRef.current !== imgPath) return;
+        if (cancelled) return;
         setCaption(value);
         setIsLoaded(true);
       })
@@ -130,7 +119,7 @@ export default function useCaptionBatch(imgPath: string | null, refreshKey: numb
       cancelled = true;
       controller.abort();
     };
-  }, [imgPath, refreshKey]);
+  }, [imgPath, refreshKey, setCaption, setIsLoaded]);
 
   return { caption, isLoaded, setCaption };
 }

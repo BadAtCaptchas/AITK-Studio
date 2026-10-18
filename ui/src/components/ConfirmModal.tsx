@@ -25,7 +25,7 @@ export const openConfirm = (confirmProps: ConfirmState) => {
 
 export default function ConfirmModal() {
   const [confirm, setConfirm] = confirmstate.use();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(Boolean(confirm));
   const [inputValue, setInputValue] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -39,14 +39,16 @@ export default function ConfirmModal() {
     }, 100);
   }, [confirm]);
 
-  useEffect(() => {
+  const [previousConfirm, setPreviousConfirm] = useState(confirm);
+  if (previousConfirm !== confirm) {
+    setPreviousConfirm(confirm);
     if (confirm) {
       setIsOpen(true);
       setInputValue('');
       setIsSubmitting(false);
       setSubmitError(null);
     }
-  }, [confirm]);
+  }
 
   useEffect(() => {
     if (isOpen) {

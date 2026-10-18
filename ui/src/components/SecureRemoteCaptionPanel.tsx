@@ -1,5 +1,7 @@
 'use client';
 
+import useStoredString from '@/hooks/useStoredString';
+import useScopedState from '@/hooks/useScopedState';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -13,13 +15,7 @@ import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import useDatasetList from '@/hooks/useDatasetList';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import useSettings from '@/hooks/useSettings';
-import {
-  Checkbox,
-  CreatableSelectInput,
-  NumberInput,
-  SelectInput,
-  TextAreaInput,
-} from '@/components/formInputs';
+import { Checkbox, CreatableSelectInput, NumberInput, SelectInput, TextAreaInput } from '@/components/formInputs';
 
 const LAST_MODEL_KEY = 'AITK_SECURE_REMOTE_OLLAMA_MODEL';
 const DEFAULT_OLLAMA_VISION_MODEL = 'qwen3.5:35b';
@@ -46,20 +42,25 @@ export default function SecureRemoteCaptionPanel() {
   const { datasets, status: datasetStatus } = useDatasetList();
   const [workerID, setWorkerID] = useState('');
   const [datasetName, setDatasetName] = useState('');
-  const [model, setModel] = useState('');
-  const [models, setModels] = useState<OllamaModel[]>([]);
-  const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [modelError, setModelError] = useState('');
+  const [storedModel] = useStoredString(LAST_MODEL_KEY, DEFAULT_OLLAMA_VISION_MODEL);
+  const [chosenModel, setModel] = useState<string | null>(null);
+  const model = chosenModel ?? storedModel;
+  const [models, setModels] = useScopedState<OllamaModel[]>(workerID, []);
+  const [modelStatus, setModelStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(
+    workerID,
+    workerID ? 'loading' : 'idle',
+  );
+  const [modelError, setModelError] = useScopedState(workerID, '');
   const [captionPrompt, setCaptionPrompt] = useState(DEFAULT_PROMPT);
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [systemPromptStatus, setSystemPromptStatus] = useState<
+  const [systemPrompt, setSystemPrompt] = useScopedState(datasetName, '');
+  const [systemPromptStatus, setSystemPromptStatus] = useScopedState<
     'idle' | 'loading' | 'saving' | 'success' | 'error'
-  >('idle');
-  const [systemPromptError, setSystemPromptError] = useState('');
+  >(datasetName, 'idle');
+  const [systemPromptError, setSystemPromptError] = useScopedState(datasetName, '');
   const [recaption, setRecaption] = useState(false);
   const [maxRes, setMaxRes] = useState(768);
   const [maxNewTokens, setMaxNewTokens] = useState(180);
-  const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useState(false);
+  const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useScopedState(datasetName, false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'starting' | 'success' | 'error'>('idle');
   const [submitError, setSubmitError] = useState('');
   const [startedJobId, setStartedJobId] = useState<string | null>(null);
@@ -97,25 +98,28 @@ export default function SecureRemoteCaptionPanel() {
     [models],
   );
 
-  const loadModels = async (selectedWorkerID = workerID) => {
-    if (!selectedWorkerID) return;
+  const requestModels = (selectedWorkerID = workerID) => {
+    if (!selectedWorkerID) return Promise.resolve();
+    return apiClient
+      .get('/api/ollama-workers/' + encodeURIComponent(selectedWorkerID) + '/models')
+      .then(res => {
+        setModels(res.data?.models || []);
+        setModelStatus('success');
+        setModelError('');
+      })
+      .catch((error: unknown) => {
+        setModels([]);
+        setModelStatus('error');
+        setModelError(error instanceof Error ? error.message : 'Could not reach remote Ollama.');
+      });
+  };
+  const loadModels = (selectedWorkerID = workerID) => {
     setModelStatus('loading');
     setModelError('');
-    try {
-      const res = await apiClient.get(`/api/ollama-workers/${encodeURIComponent(selectedWorkerID)}/models`);
-      setModels(res.data?.models || []);
-      setModelStatus('success');
-    } catch (error: any) {
-      setModels([]);
-      setModelStatus('error');
-      setModelError(error?.response?.data?.error || 'Could not reach remote Ollama.');
-    }
+    return requestModels(selectedWorkerID);
   };
 
-  const saveDatasetSystemPrompt = async (
-    selectedDatasetName = datasetName,
-    selectedSystemPrompt = systemPrompt,
-  ) => {
+  const saveDatasetSystemPrompt = async (selectedDatasetName = datasetName, selectedSystemPrompt = systemPrompt) => {
     if (!selectedDatasetName) return '';
     setSystemPromptStatus('saving');
     setSystemPromptError('');
@@ -129,31 +133,13 @@ export default function SecureRemoteCaptionPanel() {
     return savedSystemPrompt;
   };
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setModel(window.localStorage.getItem(LAST_MODEL_KEY) || DEFAULT_OLLAMA_VISION_MODEL);
-    }
-  }, []);
+  if (!workerID && enabledWorkers.length > 0) setWorkerID(enabledWorkers[0].id);
 
-  useEffect(() => {
-    if (!workerID && enabledWorkers.length > 0) {
-      setWorkerID(enabledWorkers[0].id);
-    }
-  }, [enabledWorkers, workerID]);
-
-  useEffect(() => {
-    if (!datasetName && datasets.length > 0) {
-      setDatasetName(datasets[0].name);
-    }
-  }, [datasetName, datasets]);
-
-  useEffect(() => {
-    setAllowDurableEncryptedResume(false);
-  }, [datasetName]);
+  if (!datasetName && datasets.length > 0) setDatasetName(datasets[0].name);
 
   useEffect(() => {
     if (workerID) {
-      void loadModels(workerID);
+      void requestModels(workerID);
     }
   }, [workerID]);
 
@@ -161,14 +147,7 @@ export default function SecureRemoteCaptionPanel() {
     let cancelled = false;
 
     const loadDatasetSystemPrompt = async () => {
-      if (!datasetName) {
-        setSystemPrompt('');
-        setSystemPromptStatus('idle');
-        setSystemPromptError('');
-        return;
-      }
-      setSystemPromptStatus('loading');
-      setSystemPromptError('');
+      if (!datasetName) return;
       try {
         const res = await apiClient.get('/api/secure-caption/dataset-system-prompt', {
           params: { datasetName },
@@ -188,7 +167,7 @@ export default function SecureRemoteCaptionPanel() {
     return () => {
       cancelled = true;
     };
-  }, [datasetName]);
+  }, [datasetName, setSystemPrompt, setSystemPromptStatus, setSystemPromptError]);
 
   const startSecureCaptionJob = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -246,11 +225,9 @@ export default function SecureRemoteCaptionPanel() {
         selectedDataset?.encrypted && datasetPath
           ? getRememberedEncryptedDatasetKey(datasetPath) || getRememberedEncryptedDatasetKey(datasetName)
           : null;
-      await startJob(
-        saved.id,
-        rememberedKey ? [{ datasetPath, keyB64: rememberedKey }] : undefined,
-        { durableEncryptedDatasetKeys: selectedDataset?.encrypted ? allowDurableEncryptedResume : false },
-      );
+      await startJob(saved.id, rememberedKey ? [{ datasetPath, keyB64: rememberedKey }] : undefined, {
+        durableEncryptedDatasetKeys: selectedDataset?.encrypted ? allowDurableEncryptedResume : false,
+      });
       setStartedJobId(saved.id);
       setSubmitStatus('success');
     } catch (error: any) {
@@ -284,7 +261,10 @@ export default function SecureRemoteCaptionPanel() {
         )}
       </div>
 
-      <form onSubmit={startSecureCaptionJob} className={`space-y-3 ${isLoading ? 'pointer-events-none opacity-60' : ''}`}>
+      <form
+        onSubmit={startSecureCaptionJob}
+        className={`space-y-3 ${isLoading ? 'pointer-events-none opacity-60' : ''}`}
+      >
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <SelectInput
             label="Remote Ollama"
@@ -329,13 +309,7 @@ export default function SecureRemoteCaptionPanel() {
           </div>
         )}
 
-        <TextAreaInput
-          label="Caption Prompt"
-          value={captionPrompt}
-          onChange={setCaptionPrompt}
-          rows={4}
-          required
-        />
+        <TextAreaInput label="Caption Prompt" value={captionPrompt} onChange={setCaptionPrompt} rows={4} required />
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <TextAreaInput
@@ -381,7 +355,8 @@ export default function SecureRemoteCaptionPanel() {
         {selectedDataset?.encrypted && (
           <div className="space-y-2 rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
             <div>
-              Encrypted remote captioning needs a durable wrapped key so the worker can continue while this server is offline.
+              Encrypted remote captioning needs a durable wrapped key so the worker can continue while this server is
+              offline.
             </div>
             <Checkbox
               label="Allow durable encrypted resume"

@@ -364,7 +364,7 @@ test('installed UI extensions compile TSX, tolerate absent roots, and isolate co
     module: { createRequire: () => require },
   });
   const result = await listExtensionUiModules();
-  assert.equal(result.modules.length, 1);
+  assert.equal(result.modules.length, 1, result.errors.join('\n'));
   assert.equal(result.modules[0].id, 'extensions/example');
   const compiled = { exports: {} };
   new Function('require', 'module', 'exports', result.modules[0].code)(require, compiled, compiled.exports);

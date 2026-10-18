@@ -1,4 +1,5 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
 import DatasetDecryption from '@/components/DatasetDecryption';
 import { getTrainingReturnPath } from '@/hooks/useTrainingDraft';
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
@@ -75,7 +76,10 @@ export default function DatasetEditorPage({
   const [isDeletingDataset, setIsDeletingDataset] = useState(false);
   const [datasetActionError, setDatasetActionError] = useState('');
   const [datasetMenuOpen, setDatasetMenuOpen] = useState(false);
-  const [defaultWatchSourcePath, setDefaultWatchSourcePath] = useState('');
+  const [defaultWatchSourcePath, setDefaultWatchSourcePath] = useScopedState(
+    JSON.stringify([datasetName, workerID]),
+    '',
+  );
   const handleStudioUnsavedChange = useCallback((hasUnsavedChanges: boolean) => {
     hasStudioUnsavedChangesRef.current = hasUnsavedChanges;
     setHasStudioUnsavedChanges(hasUnsavedChanges);
@@ -190,10 +194,7 @@ export default function DatasetEditorPage({
     }
   }, [datasetName, refreshImageList]);
   useEffect(() => {
-    if (!datasetName || isRemoteDataset) {
-      setDefaultWatchSourcePath('');
-      return;
-    }
+    if (!datasetName || isRemoteDataset) return;
     let cancelled = false;
     apiClient
       .get('/api/datasets/list', {
@@ -217,12 +218,7 @@ export default function DatasetEditorPage({
     return () => {
       cancelled = true;
     };
-  }, [datasetName, isRemoteDataset, workerID]);
-  useEffect(() => {
-    if (!isRenameModalOpen) {
-      setRenameDatasetName(datasetName);
-    }
-  }, [datasetName, isRenameModalOpen]);
+  }, [datasetName, isRemoteDataset, workerID, setDefaultWatchSourcePath]);
   const openRenameModal = () => {
     setRenameDatasetName(datasetName);
     setRenameDatasetError('');

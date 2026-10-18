@@ -41,19 +41,24 @@ export default function ModelsPage() {
   const [models, setModels] = useState<LibraryModel[]>([]);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [query, setQuery] = useState('');
-  const refresh = useCallback(async () => {
+  const loadModels = useCallback(
+    () =>
+      apiClient
+        .get('/api/generate/loras')
+        .then(response => {
+          setModels(readModels(response.data));
+          setStatus('success');
+        })
+        .catch(() => setStatus('error')),
+    [],
+  );
+  const refresh = () => {
     setStatus('loading');
-    try {
-      const response = await apiClient.get('/api/generate/loras');
-      setModels(readModels(response.data));
-      setStatus('success');
-    } catch {
-      setStatus('error');
-    }
-  }, []);
+    return loadModels();
+  };
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void loadModels();
+  }, [loadModels]);
   const filtered = models.filter(model =>
     `${model.label} ${model.triggerWords.join(' ')}`.toLowerCase().includes(query.toLowerCase()),
   );

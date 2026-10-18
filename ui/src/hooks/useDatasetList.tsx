@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { apiClient } from '@/utils/api';
+import useScopedState from './useScopedState';
 import type { DatasetSummary } from '@/types';
 type DatasetListError = {
   worker_id: string;
@@ -12,26 +13,27 @@ type UseDatasetListOptions = {
   workerID?: string;
 };
 export default function useDatasetList(options: UseDatasetListOptions = {}) {
-  const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
-  const [errors, setErrors] = useState<DatasetListError[]>([]);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const includeRemote = options.includeRemote === true;
   const workerID = options.workerID || 'local';
-  const refreshDatasets = (
+  const scope = JSON.stringify([includeRemote, workerID]);
+  const [datasets, setDatasets] = useScopedState<DatasetSummary[]>(scope, []);
+  const [errors, setErrors] = useScopedState<DatasetListError[]>(scope, []);
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(scope, 'loading');
+  const loadDatasets = (
     refreshOptions: {
       background?: boolean;
+      signal?: AbortSignal;
     } = {},
   ) => {
-    if (!refreshOptions.background) setStatus('loading');
     const params = new URLSearchParams();
     if (includeRemote) params.set('include_remote', '1');
     if (workerID !== 'local') params.set('worker_id', workerID);
     const query = params.toString();
-    apiClient
-      .get(`/api/datasets/list${query ? `?${query}` : ''}`)
+    return apiClient
+      .get(`/api/datasets/list${query ? `?${query}` : ''}`, { signal: refreshOptions.signal })
       .then(res => res.data)
       .then(data => {
-        console.log('Datasets:', data);
+        if (refreshOptions.signal?.aborted) return;
         const rawDatasets = Array.isArray(data) ? data : Array.isArray(data?.datasets) ? data.datasets : [];
         const normalized: DatasetSummary[] = rawDatasets.map((item: DatasetSummary | string) =>
           typeof item === 'string' ? { name: item, encrypted: false } : item,
@@ -48,13 +50,20 @@ export default function useDatasetList(options: UseDatasetListOptions = {}) {
         setStatus('success');
       })
       .catch(error => {
+        if (refreshOptions.signal?.aborted) return;
         console.error('Error fetching datasets:', error);
         setErrors([]);
         if (!refreshOptions.background) setStatus('error');
       });
   };
   useEffect(() => {
-    refreshDatasets();
+    const controller = new AbortController();
+    void loadDatasets({ signal: controller.signal });
+    return () => controller.abort();
   }, [includeRemote, workerID]);
+  const refreshDatasets = (options: { background?: boolean } = {}) => {
+    if (!options.background) setStatus('loading');
+    return loadDatasets(options);
+  };
   return { datasets, setDatasets, errors, status, refreshDatasets };
 }

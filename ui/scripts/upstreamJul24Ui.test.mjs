@@ -60,7 +60,7 @@ test('Next dev indicators are disabled without weakening Studio build checks', (
   assert.match(nextConfig, /devIndicators:\s*false/);
   assert.doesNotMatch(nextConfig, /ignoreBuildErrors/);
   assert.match(nextConfig, /bodySizeLimit:\s*'2mb'/);
-  assert.match(nextConfig, /middlewareClientMaxBodySize:\s*'5gb'/);
+  assert.match(nextConfig, /proxyClientMaxBodySize:\s*'5gb'/);
 });
 
 test('the upstream sqlite3 package upgrade remains incorporated without dependency churn', () => {

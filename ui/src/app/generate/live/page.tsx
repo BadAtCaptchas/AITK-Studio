@@ -95,17 +95,18 @@ export default function LiveGeneratePage() {
     (route: string) => `/api/inference/${route}${route.includes('?') ? '&' : '?'}job_id=${encodeURIComponent(jobID)}`,
     [jobID],
   );
-  const refreshJobs = useCallback(async () => {
-    const data: unknown = (
-      await apiClient.get<unknown>('/api/jobs', { params: { job_type: 'inference', local_only: '1' } })
-    ).data;
-    const next = readJobs(data);
-    setJobs(next);
-    if (!initialJobsLoaded.current) {
-      initialJobsLoaded.current = true;
-      setJobID(next.find(job => job.status === 'running')?.id || next[0]?.id || '');
-    }
-  }, []);
+  const refreshJobs = useCallback(
+    () =>
+      apiClient.get<unknown>('/api/jobs', { params: { job_type: 'inference', local_only: '1' } }).then(({ data }) => {
+        const next = readJobs(data);
+        setJobs(next);
+        if (!initialJobsLoaded.current) {
+          initialJobsLoaded.current = true;
+          setJobID(next.find(job => job.status === 'running')?.id || next[0]?.id || '');
+        }
+      }),
+    [],
+  );
   useEffect(() => {
     void refreshJobs().catch(() => setError('Could not list engines.'));
   }, [refreshJobs]);
@@ -130,7 +131,12 @@ export default function LiveGeneratePage() {
     const next: Record<string, unknown> = { arch: name, dtype: 'bf16' };
     for (const [key, pair] of Object.entries(definition?.defaults || {})) {
       const field = key.replace('config.process[0].model.', '');
-      if (key.startsWith('config.process[0].model.') && field !== 'assistant_lora_path' && !field.includes('.') && Array.isArray(pair))
+      if (
+        key.startsWith('config.process[0].model.') &&
+        field !== 'assistant_lora_path' &&
+        !field.includes('.') &&
+        Array.isArray(pair)
+      )
         next[field] = pair[0];
     }
     setModel(next);
@@ -408,12 +414,23 @@ export default function LiveGeneratePage() {
               placeholder={'{"model_kwargs": {}}'}
             />
           </details>
-          {isQwenImage2(arch) && <QwenImageControls
-            options={record(model.model_kwargs) ? model.model_kwargs : {}}
-            onOption={(key, value) => setModel(current => ({ ...current, model_kwargs: { ...(record(current.model_kwargs) ? current.model_kwargs : {}), [key]: value } }))}
-            onPreset={(width, height, steps) => { setWidth(width); setHeight(height); setSteps(steps); }}
-            onTransparentPrompt={() => setPrompt(transparentQwenPrompt(prompt))}
-          />}
+          {isQwenImage2(arch) && (
+            <QwenImageControls
+              options={record(model.model_kwargs) ? model.model_kwargs : {}}
+              onOption={(key, value) =>
+                setModel(current => ({
+                  ...current,
+                  model_kwargs: { ...(record(current.model_kwargs) ? current.model_kwargs : {}), [key]: value },
+                }))
+              }
+              onPreset={(width, height, steps) => {
+                setWidth(width);
+                setHeight(height);
+                setSteps(steps);
+              }}
+              onTransparentPrompt={() => setPrompt(transparentQwenPrompt(prompt))}
+            />
+          )}
           <TextAreaInput label="Prompt / instruction" value={prompt} onChange={setPrompt} />
           <TextAreaInput label="Negative prompt" value={negative} onChange={setNegative} />
           <div className="grid grid-cols-3 gap-3">
@@ -457,13 +474,37 @@ export default function LiveGeneratePage() {
               }}
             />
           </label>
-          {controls.length > 0 && <ol className="space-y-1 text-sm">
-            {controls.map((path, index) => <li key={`${path}-${index}`} className="flex items-center gap-2">
-              <span className="truncate">{index + 1}. {path.split(/[\\/]/).pop()}</span>
-              <button type="button" disabled={busy || index === 0} onClick={() => setControls(current => { const next = [...current]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })}>Up</button>
-              <button type="button" disabled={busy} onClick={() => setControls(current => current.filter((_, i) => i !== index))}>Remove</button>
-            </li>)}
-          </ol>}
+          {controls.length > 0 && (
+            <ol className="space-y-1 text-sm">
+              {controls.map((path, index) => (
+                <li key={`${path}-${index}`} className="flex items-center gap-2">
+                  <span className="truncate">
+                    {index + 1}. {path.split(/[\\/]/).pop()}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy || index === 0}
+                    onClick={() =>
+                      setControls(current => {
+                        const next = [...current];
+                        [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                        return next;
+                      })
+                    }
+                  >
+                    Up
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setControls(current => current.filter((_, i) => i !== index))}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
           {controls.length > 0 && (
             <button className="text-sm text-gray-400" onClick={() => setControls([])}>
               Clear {controls.length} reference file(s)

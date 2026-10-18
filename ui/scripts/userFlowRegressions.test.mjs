@@ -1,3 +1,4 @@
+import { createHookHarness } from './reactHookHarness.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
@@ -36,21 +37,12 @@ test('upload plans pair original stems, put media first, and reject ambiguous no
   }
 });
 
-function reactHarness() {
-  const slots = [], effects = [];
-  let cursor = 0, pending = [];
-  const react = {
-    useState(value) { const id = cursor++; if (!(id in slots)) slots[id] = value; return [slots[id], next => { slots[id] = typeof next === 'function' ? next(slots[id]) : next; }]; },
-    useRef(value) { const id = cursor++; return slots[id] ??= { current: value }; },
-    useCallback(callback) { cursor++; return callback; },
-    useEffect(callback, deps) { const id = cursor++; if (!effects[id] || deps.some((v, i) => v !== effects[id].deps[i])) pending.push(() => { effects[id]?.cleanup?.(); effects[id] = { deps, cleanup: callback() }; }); },
-  };
-  return { react, render(fn) { cursor = 0; const value = fn(); const run = pending; pending = []; run.forEach(f => f()); return value; }, cleanup() { effects.forEach(e => e?.cleanup?.()); } };
-}
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 test('newer job refresh wins over delayed success/error and old navigation requests', async () => {
-  const harness = reactHarness(), requests = [];
+  const harness = createHookHarness(), requests = [];
   const { useJob } = evaluate(source('hooks/useJob.tsx'), {
+    './useScopedState': evaluate(source('hooks/useScopedState.ts'), { react: harness.react }, ['useScopedState']).useScopedState,
+    './useCommittedRef': evaluate(source('hooks/useCommittedRef.ts'), { react: harness.react }, ['useCommittedRef']).useCommittedRef,
     react: harness.react, '@/utils/api': { apiClient: { get() { const d = deferred(); requests.push(d); return d.promise; } } }, './usePollLoop': () => {},
   }, ['useJob']);
   let scope = 'a';
@@ -75,7 +67,7 @@ test('caption save success updates only the baseline when typing or navigating d
     const pending = deferred(), cache = new Map(); let caption = 'first', saved = 'old';
     const selectedKeyRef = { current: 'image' }, latestCaptionRef = { current: caption };
     const args = { useCallback: fn => fn, isPlainTextCaptionItem: () => true, selectedKeyRef, latestCaptionRef,
-      captionCacheRef: { current: cache }, apiClient: { post: () => pending.promise }, onPlainItemCaptioned: undefined,
+      captionCache: cache, apiClient: { post: () => pending.promise }, onPlainItemCaptioned: undefined,
       setCaptionText: value => { caption = value; }, setSavedCaption: value => { saved = value; },
       writeCaptionCache: (key, value) => cache.set(key, value), encryptedCaptionPaths: null, encryptedKey: null, onSaveEncryptedCaption: null };
     const run = new Function(...Object.keys(args), stripTypeScriptTypes(code) + '\nreturn saveCaptionForItem;')(...Object.values(args));

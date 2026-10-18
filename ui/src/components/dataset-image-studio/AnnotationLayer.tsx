@@ -101,8 +101,16 @@ export function AnnotationLayer({
 
   useEffect(() => {
     onOverlapStackChange([]);
-    setCycleToast(null);
   }, [activeTool, boxes, hiddenElementIndexes, onOverlapStackChange]);
+  const [previousGeometry, setPreviousGeometry] = useState({ activeTool, boxes, hiddenElementIndexes });
+  if (
+    previousGeometry.activeTool !== activeTool ||
+    previousGeometry.boxes !== boxes ||
+    previousGeometry.hiddenElementIndexes !== hiddenElementIndexes
+  ) {
+    setPreviousGeometry({ activeTool, boxes, hiddenElementIndexes });
+    setCycleToast(null);
+  }
 
   useEffect(
     () => () => {
@@ -152,7 +160,10 @@ export function AnnotationLayer({
       }
       const layerPoint = pointToLayer(clientX, clientY);
       if (!layerPoint) return;
-      const index = Math.max(0, hits.findIndex(box => box.elementIndex === selected));
+      const index = Math.max(
+        0,
+        hits.findIndex(box => box.elementIndex === selected),
+      );
       setCycleToast({ ...layerPoint, count: hits.length, index: index + 1 });
       toastTimerRef.current = window.setTimeout(() => setCycleToast(null), 900);
     },
@@ -358,7 +369,8 @@ export function AnnotationLayer({
         return;
       }
 
-      const dragBox = handle && selectedBox ? selectedBox : chooseDragTarget(hits, selectedElementIndex, lockedElementIndexes);
+      const dragBox =
+        handle && selectedBox ? selectedBox : chooseDragTarget(hits, selectedElementIndex, lockedElementIndexes);
       if (!dragBox) return;
       const dragHandle: DragHandle = handle || 'move';
       onSelect(dragBox.elementIndex);
@@ -477,7 +489,9 @@ export function AnnotationLayer({
             </span>
             {selected &&
               !locked &&
-              RESIZE_HANDLES.map(handle => <span key={handle} aria-hidden="true" className={handleClassName(handle)} />)}
+              RESIZE_HANDLES.map(handle => (
+                <span key={handle} aria-hidden="true" className={handleClassName(handle)} />
+              ))}
           </div>
         );
       })}

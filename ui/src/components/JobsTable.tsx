@@ -213,9 +213,7 @@ export default function JobsTable({
       : status === 'success' || hasJobsLoaded
         ? 'ready'
         : 'loading';
-  useEffect(() => {
-    if (status === 'success') setHasJobsLoaded(true);
-  }, [status]);
+  if (status === 'success' && !hasJobsLoaded) setHasJobsLoaded(true);
   useEffect(() => {
     onStatusChange?.(viewStatus);
   }, [onStatusChange, viewStatus]);
@@ -575,7 +573,11 @@ export default function JobsTable({
           />
         </div>
       )}
-      {hasMore && <button className="operator-button" disabled={isRefreshing} onClick={loadMore}>Load more jobs</button>}
+      {hasMore && (
+        <button className="operator-button" disabled={isRefreshing} onClick={loadMore}>
+          Load more jobs
+        </button>
+      )}
     </div>
   );
 }

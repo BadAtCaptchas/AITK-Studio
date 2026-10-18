@@ -1,14 +1,15 @@
 'use client';
+import useCommittedRef from './useCommittedRef';
+import useScopedState from './useScopedState';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
 
 export default function useSampleImages(jobID: string, reloadInterval: null | number = null) {
-  const [sampleImages, setSampleImages] = useState<string[]>([]);
-  const activeJobIDRef = useRef(jobID);
-  activeJobIDRef.current = jobID;
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [sampleImages, setSampleImages] = useScopedState<string[]>(jobID, []);
+  const activeJobIDRef = useCommittedRef(jobID);
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(jobID, 'idle');
 
   const refreshSampleImages = useCallback(
     (signal?: AbortSignal) => {
@@ -37,13 +38,8 @@ export default function useSampleImages(jobID: string, reloadInterval: null | nu
           setStatus('error');
         });
     },
-    [jobID],
+    [jobID, setStatus, setSampleImages],
   );
-
-  useEffect(() => {
-    setSampleImages([]);
-    setStatus('idle');
-  }, [jobID]);
 
   usePollLoop(signal => refreshSampleImages(signal), reloadInterval, [jobID]);
 

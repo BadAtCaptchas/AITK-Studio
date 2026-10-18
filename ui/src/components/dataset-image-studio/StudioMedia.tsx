@@ -1,4 +1,5 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Loader2, Pipette } from 'lucide-react';
 import classNames from 'classnames';
@@ -31,22 +32,18 @@ export function useEncryptedObjectUrl(
   item: EncryptedDatasetItem | null,
   enabled = true,
 ) {
-  const [state, setState] = useState<EncryptedObjectUrlState>({
+  const scope = useMemo(
+    () => ({ datasetName, workerID, cryptoKey, item, enabled }),
+    [datasetName, workerID, cryptoKey, item, enabled],
+  );
+  const [state, setState] = useScopedState<EncryptedObjectUrlState>(scope, {
     url: null,
-    status: 'locked',
+    status: item && enabled && cryptoKey ? 'loading' : 'locked',
     error: null,
   });
   useEffect(() => {
-    if (!item || !enabled) {
-      setState({ url: null, status: 'locked', error: null });
-      return;
-    }
-    if (!cryptoKey) {
-      setState({ url: null, status: 'locked', error: null });
-      return;
-    }
+    if (!item || !enabled || !cryptoKey) return;
     let cancelled = false;
-    setState({ url: null, status: 'loading', error: null });
     loadEncryptedObjectMediaUrl({
       datasetName,
       workerID,
@@ -67,7 +64,7 @@ export function useEncryptedObjectUrl(
     return () => {
       cancelled = true;
     };
-  }, [cryptoKey, datasetName, enabled, item, null, workerID]);
+  }, [cryptoKey, datasetName, enabled, item, null, workerID, setState]);
   return state;
 }
 function useElementSize<T extends HTMLElement>() {
@@ -221,12 +218,11 @@ export function StudioMedia({
   const name = itemName(item);
   const { ref: frameRef, size: frameSize } = useElementSize<HTMLDivElement>();
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const [naturalSize, setNaturalSize] = useState<{
+  const [naturalSize, setNaturalSize] = useScopedState<{
     width: number;
     height: number;
-  } | null>(null);
+  } | null>(src, null);
   useEffect(() => {
-    setNaturalSize(null);
     onNaturalSizeChange?.(null);
     onImageElementChange?.(null);
   }, [onImageElementChange, onNaturalSizeChange, src]);

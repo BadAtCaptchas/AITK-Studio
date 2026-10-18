@@ -1,6 +1,8 @@
 'use client';
+import useCommittedRef from './useCommittedRef';
+import useScopedState from './useScopedState';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
 
@@ -93,20 +95,19 @@ export default function useJobMetrics(
   const maxPoints = normalizedOptions.maxPoints;
   const metricKeys = normalizedOptions.keys.join(',');
   const enabled = normalizedOptions.enabled;
-  const [series, setSeries] = useState<SeriesMap>({});
-  const [latest, setLatest] = useState<LatestMap>({});
-  const [keys, setKeys] = useState<string[]>([]);
-  const [status, setStatus] = useState<Status>('idle');
-  const [version, setVersion] = useState(0);
+  const requestScope = JSON.stringify([enabled, jobID, maxPoints, metricKeys]);
+  const [series, setSeries] = useScopedState<SeriesMap>(requestScope, {});
+  const [latest, setLatest] = useScopedState<LatestMap>(requestScope, {});
+  const [keys, setKeys] = useScopedState<string[]>(requestScope, []);
+  const [status, setStatus] = useScopedState<Status>(requestScope, 'idle');
+  const [version, setVersion] = useScopedState(requestScope, 0);
 
   const didInitialLoadRef = useRef(false);
   const inFlightRef = useRef(false);
   const needsFullRefreshRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const lastStepByKeyRef = useRef<Record<string, number | null>>({});
-  const requestScope = JSON.stringify([enabled, jobID, maxPoints, metricKeys]);
-  const activeScopeRef = useRef(requestScope);
-  activeScopeRef.current = requestScope;
+  const activeScopeRef = useCommittedRef(requestScope);
 
   const refreshMetrics = useCallback(
     async (options: { full?: boolean; signal?: AbortSignal } = {}) => {
@@ -217,7 +218,7 @@ export default function useJobMetrics(
         }
       }
     },
-    [enabled, jobID, maxPoints, metricKeys, requestScope],
+    [enabled, jobID, maxPoints, metricKeys, requestScope, setStatus, setKeys, setLatest, setSeries, setVersion],
   );
 
   useEffect(() => {
@@ -228,11 +229,6 @@ export default function useJobMetrics(
     didInitialLoadRef.current = false;
     needsFullRefreshRef.current = false;
     lastStepByKeyRef.current = {};
-    setSeries({});
-    setLatest({});
-    setKeys([]);
-    setVersion(0);
-    setStatus('idle');
     return () => {
       const controller = abortRef.current;
       abortRef.current = null;
@@ -248,11 +244,12 @@ export default function useJobMetrics(
     return 2_000;
   }, [enabled, jobStatus]);
 
-  usePollLoop(
-    signal => refreshMetrics({ full: needsFullRefreshRef.current, signal }),
-    pollInterval,
-    [enabled, jobID, maxPoints, metricKeys],
-  );
+  usePollLoop(signal => refreshMetrics({ full: needsFullRefreshRef.current, signal }), pollInterval, [
+    enabled,
+    jobID,
+    maxPoints,
+    metricKeys,
+  ]);
 
   const lossKeys = useMemo(() => keys.filter(isChartMetricKey).sort(), [keys]);
   const eventKeys = useMemo(() => keys.filter(key => key.startsWith('event/')).sort(), [keys]);

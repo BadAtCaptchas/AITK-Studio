@@ -1,6 +1,7 @@
 'use client';
+import useCommittedRef from './useCommittedRef';
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import type { DependencyList } from 'react';
 import { startSettledPollLoop } from '@/utils/basic';
 
@@ -17,8 +18,7 @@ export default function usePollLoop(
   intervalMs: number | null | undefined,
   dependencies: DependencyList = [],
 ) {
-  const callbackRef = useRef(callback);
-  callbackRef.current = callback;
+  const callbackRef = useCommittedRef(callback);
 
   useEffect(() => {
     return startSettledPollLoop(signal => callbackRef.current(signal), intervalMs);

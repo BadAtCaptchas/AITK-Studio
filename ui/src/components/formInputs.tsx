@@ -177,10 +177,13 @@ export const NumberInput = (props: NumberInputProps) => {
   // Add controlled internal state to properly handle partial inputs
   const [inputValue, setInputValue] = React.useState<string | number>(value ?? '');
 
-  // Sync internal state with prop value
-  React.useEffect(() => {
+  // Reconcile an external change before rendering; preserve partial typed input
+  // while the parent continues to supply the same numeric value.
+  const [previousValue, setPreviousValue] = React.useState(value);
+  if (!Object.is(previousValue, value)) {
+    setPreviousValue(value);
     setInputValue(value ?? '');
-  }, [value]);
+  }
 
   return (
     <div data-field-label={typeof label === 'string' ? label : undefined} className={classNames(props.className)}>

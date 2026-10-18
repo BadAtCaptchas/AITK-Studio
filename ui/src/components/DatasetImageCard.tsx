@@ -51,7 +51,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   const isItImage = !isItAVideo && !isItAudio;
   const mediaUrl = getMediaUrl(imageUrl);
   const displayName = getDisplayPath(imageUrl);
-  const hasLoadedCaptionRef = useRef(false);
+  const [hasLoadedCaption, setHasLoadedCaption] = useState(false);
 
   useEffect(() => {
     const el = cardRef.current;
@@ -125,7 +125,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
     isVisible ? imageUrl : null,
     combinedRefreshKey,
   );
-  if (isCaptionLoaded) hasLoadedCaptionRef.current = true;
+  if (isCaptionLoaded && !hasLoadedCaption) setHasLoadedCaption(true);
 
   const [caption, setCaption] = useState<string>('');
   const [savedCaption, setSavedCaption] = useState<string>('');
@@ -173,8 +173,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
       .finally(() => {
         pendingSavesRef.current -= 1;
         dirtyRef.current =
-          pendingSavesRef.current > 0 ||
-          latestRef.current.caption.trim() !== latestRef.current.savedCaption;
+          pendingSavesRef.current > 0 || latestRef.current.caption.trim() !== latestRef.current.savedCaption;
       });
   }, []);
 
@@ -286,7 +285,7 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
           'border-transparent border-2': isCaptionCurrent,
         })}
       >
-        {isCaptionLoaded || hasLoadedCaptionRef.current ? (
+        {isCaptionLoaded || hasLoadedCaption ? (
           <form
             onSubmit={e => {
               e.preventDefault();

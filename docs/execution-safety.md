@@ -36,7 +36,7 @@ For LAN/container access, set `AITK_BIND_HOST=0.0.0.0`, `AITK_NETWORK_MODE=1` an
 
 Browser sessions are random opaque handles, stored hashed, with a 24-hour absolute and 2-hour idle limit. Logout revokes the current handle; authenticated DELETE `/api/auth?all=1` revokes all browser sessions. Existing deterministic cookies require a new login. Bearer tokens are machine credentials and do not become browser cookies.
 
-JSON commands are limited to 2 MiB (login: 4 KiB), 15 seconds, depth 32 and bounded collections. The front server enforces byte limits before Next middleware clones a body. Mutations use POST/DELETE; old GET command URLs return 405. Controller and workers must be upgraded together. The installed Next 15 middleware compatibility patch backports [the upstream request-body finalization fix](https://github.com/vercel/next.js/pull/85418); the patch checks the expected implementation and fails closed if it changes.
+JSON commands are limited to 2 MiB (login: 4 KiB), 15 seconds, depth 32 and bounded collections. The front server enforces byte limits before Next Proxy clones a body. Mutations use POST/DELETE; old GET command URLs return 405. Controller and workers must be upgraded together. Next 16.4.2 includes [the upstream request-body finalization fix](https://github.com/vercel/next.js/pull/85418), so no local runtime patch is required. Proxy authenticates without reading command bodies, and production browser tests cover protected POSTs and malformed or oversized requests.
 
 ## Upload and operation recovery
 

@@ -145,7 +145,7 @@ test('DatasetImageStudio gates localStorage persistence for encrypted datasets',
     source,
     /if \(!hasEncryptedItems \|\| typeof window === 'undefined'\)\s+return;[\s\S]*removeItem\(recaptionQueueStorageKeyValue\)[\s\S]*removeItem\(recaptionStorageKey\)/,
   );
-  assert.match(source, /if \(!canPersistRecaptionState\)\s+return;[\s\S]*readPersistedRecaptionQueue\(storageKey\)/);
+  assert.match(source, /canPersistRecaptionState \? readPersistedRecaptionQueue\(recaptionQueueStorageKeyValue\) : null/);
   assert.match(
     source,
     /if \(!canPersistRecaptionState\)\s+return;[\s\S]*window\.localStorage\.setItem\(storageKey, JSON\.stringify\(snapshot\)\)/,

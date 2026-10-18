@@ -1,4 +1,6 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
+import useHydrated from '@/hooks/useHydrated';
 import { deleteSample } from '@/utils/sampleActions';
 import { getAudioArtworkUrl, getSampleThumbnailUrl } from '@/utils/media';
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -32,34 +34,39 @@ export default function SampleImageViewer({
   onChange,
   refreshSampleImages,
 }: Props) {
-  const [mounted, setMounted] = useState(false);
-  const [isOpen, setIsOpen] = useState(Boolean(imgPath));
+  const mounted = useHydrated();
+  const [isOpen, setIsOpen] = useScopedState(imgPath, Boolean(imgPath));
   const [showingControlIdx, setShowingControlIdx] = useState<number | null>(null);
   const [showBoxes, setShowBoxes] = useState(false);
-  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
-  const [layerUrls, setLayerUrls] = useState<string[]>([]);
-  const [showingLayer, setShowingLayer] = useState<number | null>(null);
-  const [layerError, setLayerError] = useState('');
+  const [imageSize, setImageSize] = useScopedState<{ width: number; height: number } | null>(imgPath, null);
+  const [layerUrls, setLayerUrls] = useScopedState<string[]>(imgPath, []);
+  const [showingLayer, setShowingLayer] = useScopedState<number | null>(imgPath, null);
+  const [layerError, setLayerError] = useScopedState(imgPath, '');
 
   useEffect(() => {
-    setLayerUrls([]); setShowingLayer(null); setLayerError('');
     const url = imgPath ? getSampleLayersUrl(imgPath) : null;
     if (!url) return;
     const controller = new AbortController();
-    apiClient.get<unknown>(url, { signal: controller.signal }).then(response => {
-      const data = response.data;
-      if (!data || typeof data !== 'object' || !('layers' in data) || !Array.isArray(data.layers) || data.layers.length > 32 || !data.layers.every((layer: unknown) => typeof layer === 'string' && layer.startsWith('/api/jobs/'))) throw new Error('Invalid sample layers');
-      setLayerUrls(data.layers);
-    }).catch(() => { if (!controller.signal.aborted) setLayerError('Layer previews unavailable'); });
+    apiClient
+      .get<unknown>(url, { signal: controller.signal })
+      .then(response => {
+        const data = response.data;
+        if (
+          !data ||
+          typeof data !== 'object' ||
+          !('layers' in data) ||
+          !Array.isArray(data.layers) ||
+          data.layers.length > 32 ||
+          !data.layers.every((layer: unknown) => typeof layer === 'string' && layer.startsWith('/api/jobs/'))
+        )
+          throw new Error('Invalid sample layers');
+        setLayerUrls(data.layers);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLayerError('Layer previews unavailable');
+      });
     return () => controller.abort();
-  }, [imgPath]);
-
-  useEffect(() => setMounted(true), []);
-
-  // open/close based on external value
-  useEffect(() => {
-    setIsOpen(Boolean(imgPath));
-  }, [imgPath]);
+  }, [imgPath, setLayerUrls, setLayerError]);
 
   // after close, clear parent state post-transition
   useEffect(() => {
@@ -69,14 +76,10 @@ export default function SampleImageViewer({
     }
   }, [isOpen, imgPath, onChange]);
 
-  useEffect(() => {
-    setImageSize(null);
-  }, [imgPath]);
-
   const onCancel = useCallback(() => {
     setShowingControlIdx(null);
     setIsOpen(false);
-  }, []);
+  }, [setIsOpen]);
 
   const imgInfo = useMemo(() => {
     // handle windows C:\\Apps\\AI-Toolkit\\AI-Toolkit\\output\\LoRA-Name\\samples\\1763563000704__000004000_0.jpg
@@ -222,7 +225,7 @@ export default function SampleImageViewer({
       return sampleConfig.seed + imgInfo.promptIdx;
     }
     return sampleConfig?.seed ?? '?';
-  }, [sampleItem, sampleConfig]);
+  }, [sampleItem, sampleConfig, imgInfo.promptIdx]);
 
   const displayedImgPath = useMemo(() => {
     if (showingLayer !== null && layerUrls[showingLayer]) return layerUrls[showingLayer];
@@ -233,12 +236,9 @@ export default function SampleImageViewer({
   }, [showingControlIdx, controlImages, imgPath, showingLayer, layerUrls]);
 
   // text samples (LLM models): the file body is the sample
-  const [sampleText, setSampleText] = useState<string | null>(null);
+  const [sampleText, setSampleText] = useScopedState<string | null>(displayedImgPath, null);
   useEffect(() => {
-    if (!displayedImgPath || !isText(displayedImgPath)) {
-      setSampleText(null);
-      return;
-    }
+    if (!displayedImgPath || !isText(displayedImgPath)) return;
     const controller = new AbortController();
     fetch(getMediaUrl(displayedImgPath), { signal: controller.signal })
       .then(r => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
@@ -247,17 +247,16 @@ export default function SampleImageViewer({
         if (err?.name !== 'AbortError') console.error('Sample text fetch failed:', err);
       });
     return () => controller.abort();
-  }, [displayedImgPath]);
+  }, [displayedImgPath, setSampleText]);
 
   // control thumbnails: audio has no image thumb, it gets its waveform art
-  const thumbSrc = (p: string) =>
-    isAudio(p) ? getAudioArtworkUrl(p) : getSampleThumbnailUrl(p);
+  const thumbSrc = (p: string) => (isAudio(p) ? getAudioArtworkUrl(p) : getSampleThumbnailUrl(p));
 
   // The sample's prompt is what generated it; if it's an Ideogram bbox-JSON we can
   // overlay the boxes on the generated image. Only on the main image (not controls).
   const boundingBoxes = useMemo(
     () => (sampleItem?.prompt ? parseBoundingBoxes(sampleItem.prompt, imageSize ?? undefined) : null),
-    [sampleItem?.prompt, imageSize],
+    [sampleItem, imageSize],
   );
   const canShowBoxes = Boolean(
     boundingBoxes &&
@@ -339,7 +338,19 @@ export default function SampleImageViewer({
                     controls={true}
                   />
                 ) : (
-                  <div className="relative inline-block leading-[0px]" style={showingLayer !== null ? { backgroundColor: '#334155', backgroundImage: 'conic-gradient(#475569 25%, transparent 0 50%, #475569 0 75%, transparent 0)', backgroundSize: '20px 20px' } : undefined}>
+                  <div
+                    className="relative inline-block leading-[0px]"
+                    style={
+                      showingLayer !== null
+                        ? {
+                            backgroundColor: '#334155',
+                            backgroundImage:
+                              'conic-gradient(#475569 25%, transparent 0 50%, #475569 0 75%, transparent 0)',
+                            backgroundSize: '20px 20px',
+                          }
+                        : undefined
+                    }
+                  >
                     <img
                       src={getMediaUrl(displayedImgPath)}
                       alt="Sample Image"
@@ -356,12 +367,48 @@ export default function SampleImageViewer({
                 ))}
             </div>
             {/* # make full width */}
-            {layerUrls.length > 0 && <div className="flex max-w-[95vw] items-center gap-3 overflow-x-auto bg-gray-950 px-4 py-2 text-xs">
-              <button type="button" onClick={() => { setShowingLayer(null); setShowingControlIdx(null); }} className={classNames('operator-button shrink-0', showingLayer === null && showingControlIdx === null && 'text-brand-300')}>Composite</button>
-              <span className="shrink-0 text-gray-400">Bottom → top</span>
-              {layerUrls.map((url, index) => <div key={url} className="flex shrink-0 flex-col items-center gap-1"><button type="button" onClick={() => { setShowingLayer(index); setShowingControlIdx(null); }} aria-label={`Preview layer ${index + 1}`} className={classNames('rounded border p-1', showingLayer === index ? 'border-brand-400' : 'border-gray-700')}><img src={url} alt={`Layer ${index + 1}`} className="h-12 w-16 object-contain" /></button><a href={url} download={`layer-${index + 1}.png`} className="text-brand-300">Layer {index + 1} PNG</a></div>)}
-            </div>}
-            {layerError && sampleConfig?.num_layers && <p className="bg-gray-950 px-4 py-1 text-xs text-amber-300">{layerError}</p>}
+            {layerUrls.length > 0 && (
+              <div className="flex max-w-[95vw] items-center gap-3 overflow-x-auto bg-gray-950 px-4 py-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowingLayer(null);
+                    setShowingControlIdx(null);
+                  }}
+                  className={classNames(
+                    'operator-button shrink-0',
+                    showingLayer === null && showingControlIdx === null && 'text-brand-300',
+                  )}
+                >
+                  Composite
+                </button>
+                <span className="shrink-0 text-gray-400">Bottom → top</span>
+                {layerUrls.map((url, index) => (
+                  <div key={url} className="flex shrink-0 flex-col items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowingLayer(index);
+                        setShowingControlIdx(null);
+                      }}
+                      aria-label={`Preview layer ${index + 1}`}
+                      className={classNames(
+                        'rounded border p-1',
+                        showingLayer === index ? 'border-brand-400' : 'border-gray-700',
+                      )}
+                    >
+                      <img src={url} alt={`Layer ${index + 1}`} className="h-12 w-16 object-contain" />
+                    </button>
+                    <a href={url} download={`layer-${index + 1}.png`} className="text-brand-300">
+                      Layer {index + 1} PNG
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
+            {layerError && sampleConfig?.num_layers && (
+              <p className="bg-gray-950 px-4 py-1 text-xs text-amber-300">{layerError}</p>
+            )}
             <div className="bg-gray-950 text-sm flex justify-between items-center px-4 py-2">
               <div className="flex-1 relative h-10 min-w-0">
                 {sampleItem?.prompt && (
@@ -401,7 +448,10 @@ export default function SampleImageViewer({
                       className={`max-h-12 max-w-12 object-contain bg-black border-2 rounded cursor-pointer ${
                         showingControlIdx === idx ? 'border-brand-500' : 'border-gray-700 hover:border-gray-500'
                       }`}
-                      onClick={() => { setShowingLayer(null); setShowingControlIdx(idx); }}
+                      onClick={() => {
+                        setShowingLayer(null);
+                        setShowingControlIdx(idx);
+                      }}
                       title={`Control image ${idx + 1}`}
                     />
                   ))}

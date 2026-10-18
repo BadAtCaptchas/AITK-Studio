@@ -1,5 +1,6 @@
 'use client';
 
+import useScopedState from '@/hooks/useScopedState';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, EyeOff, Info, Loader2, RefreshCw } from 'lucide-react';
 import classNames from 'classnames';
@@ -90,9 +91,7 @@ function FindingCard({ finding }: { finding: AdvisorFinding }) {
       <div className="mt-2 font-medium text-gray-100">{finding.title}</div>
       <div className="mt-1 text-sm text-gray-300">{finding.message}</div>
       <div className="mt-2 text-sm text-gray-200">{finding.recommendation}</div>
-      {!!finding.evidence?.length && (
-        <div className="mt-2 text-xs text-gray-400">{finding.evidence.join(' | ')}</div>
-      )}
+      {!!finding.evidence?.length && <div className="mt-2 text-xs text-gray-400">{finding.evidence.join(' | ')}</div>}
       {!!finding.relatedConfigPaths?.length && (
         <div className="mt-2 flex flex-wrap gap-1">
           {finding.relatedConfigPaths.map(configPath => (
@@ -198,9 +197,7 @@ function AdvisorResultPanel({
             <span className={classNames('rounded-sm px-1.5 py-0.5', severityBadgeClasses.warning)}>
               {warningCount} warning
             </span>
-            <span className={classNames('rounded-sm px-1.5 py-0.5', severityBadgeClasses.info)}>
-              {infoCount} notes
-            </span>
+            <span className={classNames('rounded-sm px-1.5 py-0.5', severityBadgeClasses.info)}>{infoCount} notes</span>
           </div>
         )}
 
@@ -214,7 +211,10 @@ function AdvisorResultPanel({
         {hasFindings && (
           <div className="mt-3 space-y-2">
             {result.findings.slice(0, 2).map(finding => (
-              <div key={finding.id} className={classNames('border px-2 py-1.5 text-xs', severityClasses[finding.severity])}>
+              <div
+                key={finding.id}
+                className={classNames('border px-2 py-1.5 text-xs', severityClasses[finding.severity])}
+              >
                 <div className="font-medium">{finding.title}</div>
                 <div className="mt-0.5 opacity-85">{finding.recommendation}</div>
               </div>
@@ -239,10 +239,7 @@ function AdvisorResultPanel({
 
   return (
     <section
-      className={classNames(
-        'border border-gray-800',
-        variant === 'card' ? 'bg-gray-900 p-4' : 'bg-gray-950/50 p-3',
-      )}
+      className={classNames('border border-gray-800', variant === 'card' ? 'bg-gray-900 p-4' : 'bg-gray-950/50 p-3')}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -293,7 +290,11 @@ function AdvisorResultPanel({
         </div>
       </div>
 
-      {error && <div className="mt-3 rounded-sm border border-rose-800 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">{error}</div>}
+      {error && (
+        <div className="mt-3 rounded-sm border border-rose-800 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">
+          {error}
+        </div>
+      )}
 
       {stats && (
         <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
@@ -379,7 +380,7 @@ export function TrainingAdvisorPanel({
           setStatus('error');
         });
     },
-    [payload],
+    [payload, setStatus, setError, setResult],
   );
 
   useEffect(() => {
@@ -421,7 +422,9 @@ export function TrainingAdvisorPanel({
     return (
       <section className="border border-gray-800 bg-gray-950/50 p-3">
         <div className="text-sm font-semibold text-gray-100">Advisor checks off</div>
-        <p className="mt-1 text-xs leading-5 text-gray-400">Enable Training Advisor in Settings to check this setup for common issues.</p>
+        <p className="mt-1 text-xs leading-5 text-gray-400">
+          Enable Training Advisor in Settings to check this setup for common issues.
+        </p>
       </section>
     );
   }
@@ -440,25 +443,19 @@ export function TrainingAdvisorPanel({
 }
 
 export function JobAdvisorPanel({ job }: { job: Job }) {
-  const [result, setResult] = useState<AdvisorResult | null>(null);
-  const [status, setStatus] = useState<AdvisorStatus>('idle');
-  const [error, setError] = useState<string | null>(null);
   const advisorVisibility = useTrainingAdvisorVisibility();
   const isLive = isLiveStatus(job.status);
+  const scope = JSON.stringify([job.id, isLive, advisorVisibility.loaded, advisorVisibility.enabled]);
+  const [result, setResult] = useScopedState<AdvisorResult | null>(scope, null);
+  const [status, setStatus] = useScopedState<AdvisorStatus>(scope, 'loading');
+  const [error, setError] = useScopedState<string | null>(scope, null);
 
   useEffect(() => {
-    if (isLive) {
-      setResult(null);
-      setStatus('idle');
-      setError(null);
-      return;
-    }
+    if (isLive) return;
     if (!advisorVisibility.loaded || !advisorVisibility.enabled) return;
 
     let stopped = false;
     const controller = new AbortController();
-    setStatus(current => (current === 'success' ? 'refreshing' : 'loading'));
-    setError(null);
     apiClient
       .get(`/api/jobs/${job.id}/advisor`, { signal: controller.signal })
       .then(res => {
@@ -477,7 +474,7 @@ export function JobAdvisorPanel({ job }: { job: Job }) {
       stopped = true;
       controller.abort();
     };
-  }, [advisorVisibility.enabled, advisorVisibility.loaded, job.id, isLive]);
+  }, [advisorVisibility.enabled, advisorVisibility.loaded, job.id, isLive, setResult, setStatus, setError]);
 
   if (isLive) return null;
   if (!advisorVisibility.loaded || !advisorVisibility.enabled) return null;

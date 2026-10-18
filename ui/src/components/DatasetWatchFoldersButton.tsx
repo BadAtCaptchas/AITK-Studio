@@ -1,4 +1,5 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
 import { Eye, FolderSync, Loader2, Play, Plus, Save, Trash2, X } from 'lucide-react';
@@ -169,7 +170,7 @@ export default function DatasetWatchFoldersButton({
   const [watchers, setWatchers] = useState<DatasetWatcher[]>([]);
   const [statuses, setStatuses] = useState<Record<string, DatasetWatcherStatus>>({});
   const [form, setForm] = useState<DatasetWatcherForm>(() => emptyForm(defaultSourcePath || ''));
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useScopedState(JSON.stringify([open, datasetName, workerID]), open);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const statusRefreshSignatureRef = useRef('');
@@ -192,83 +193,80 @@ export default function DatasetWatchFoldersButton({
   useEffect(() => {
     statusRefreshSignatureRef.current = '';
   }, [datasetName, null, workerID]);
-  useEffect(() => {
-    if (form.provider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
-    if (form.remoteWorkerId && remoteWorkerOptionValues.has(form.remoteWorkerId)) return;
-    setForm(current =>
-      current.provider === 'remote_ollama' &&
-      (!current.remoteWorkerId || !remoteWorkerOptionValues.has(current.remoteWorkerId))
-        ? { ...current, remoteWorkerId: remoteWorkerOptions[0].value }
-        : current,
-    );
-  }, [form.provider, form.remoteWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
-  const loadWatchers = useCallback(async () => {
-    if (!open) return;
-    setIsLoading(true);
-    setError('');
-    try {
-      const res = await apiClient.get('/api/datasets/watchers', {
+  if (
+    form.provider === 'remote_ollama' &&
+    remoteWorkerOptions.length > 0 &&
+    (!form.remoteWorkerId || !remoteWorkerOptionValues.has(form.remoteWorkerId))
+  ) {
+    setForm({ ...form, remoteWorkerId: remoteWorkerOptions[0].value });
+  }
+  const requestWatchers = useCallback(() => {
+    if (!open) return Promise.resolve();
+    return apiClient
+      .get('/api/datasets/watchers', {
         params: {
           datasetName,
           worker_id: workerID,
         },
-      });
-      setWatchers(res.data?.watchers || []);
-      const nextStatuses = res.data?.statuses || {};
-      setStatuses(nextStatuses);
-      const refreshSignature = Object.entries(nextStatuses)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([id, status]) => {
+      })
+      .then(res => {
+        setError('');
+        setWatchers(res.data?.watchers || []);
+        const nextStatuses = res.data?.statuses || {};
+        setStatuses(nextStatuses);
+        const refreshSignature = Object.entries(nextStatuses)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([id, status]) => {
+            const watcherStatus = status as DatasetWatcherStatus;
+            return [
+              id,
+              watcherStatus.lastImportedAt || '',
+              watcherStatus.lastImportedCount || 0,
+              watcherStatus.lastCaptionedCount || 0,
+              watcherStatus.autoCaptionTotalCount || 0,
+              watcherStatus.autoCaptionPendingCount || 0,
+              watcherStatus.autoCaptionCompletedCount || 0,
+              watcherStatus.autoCaptionActivePath || '',
+            ].join(':');
+          })
+          .join('|');
+        const hasImportedWork = Object.values(nextStatuses).some(status => {
           const watcherStatus = status as DatasetWatcherStatus;
-          return [
-            id,
-            watcherStatus.lastImportedAt || '',
-            watcherStatus.lastImportedCount || 0,
-            watcherStatus.lastCaptionedCount || 0,
-            watcherStatus.autoCaptionTotalCount || 0,
-            watcherStatus.autoCaptionPendingCount || 0,
-            watcherStatus.autoCaptionCompletedCount || 0,
-            watcherStatus.autoCaptionActivePath || '',
-          ].join(':');
-        })
-        .join('|');
-      const hasImportedWork = Object.values(nextStatuses).some(status => {
-        const watcherStatus = status as DatasetWatcherStatus;
-        return Boolean(
-          watcherStatus.lastImportedAt ||
-            watcherStatus.lastImportedCount ||
-            watcherStatus.lastCaptionedCount ||
-            watcherStatus.autoCaptionPendingCount ||
-            watcherStatus.autoCaptionCompletedCount,
-        );
-      });
-      if (
-        (statusRefreshSignatureRef.current && refreshSignature !== statusRefreshSignatureRef.current) ||
-        (!statusRefreshSignatureRef.current && hasImportedWork)
-      ) {
-        onRefresh?.();
-      }
-      statusRefreshSignatureRef.current = refreshSignature;
-    } catch (requestError: any) {
-      setError(requestError?.response?.data?.error || requestError?.message || 'Failed to load watch folders.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [datasetName, onRefresh, open, null, workerID]);
+          return Boolean(
+            watcherStatus.lastImportedAt ||
+              watcherStatus.lastImportedCount ||
+              watcherStatus.lastCaptionedCount ||
+              watcherStatus.autoCaptionPendingCount ||
+              watcherStatus.autoCaptionCompletedCount,
+          );
+        });
+        if (
+          (statusRefreshSignatureRef.current && refreshSignature !== statusRefreshSignatureRef.current) ||
+          (!statusRefreshSignatureRef.current && hasImportedWork)
+        ) {
+          onRefresh?.();
+        }
+        statusRefreshSignatureRef.current = refreshSignature;
+      })
+      .catch((requestError: unknown) => {
+        setError(requestError instanceof Error ? requestError.message : 'Failed to load watch folders.');
+      })
+      .finally(() => setIsLoading(false));
+  }, [datasetName, onRefresh, open, workerID, setIsLoading]);
+  const loadWatchers = useCallback(() => {
+    setIsLoading(true);
+    setError('');
+    return requestWatchers();
+  }, [requestWatchers, setIsLoading]);
   useEffect(() => {
-    void loadWatchers();
-  }, [loadWatchers]);
+    void requestWatchers();
+  }, [requestWatchers]);
   useEffect(() => {
     if (!open) return;
     const interval = window.setInterval(() => void loadWatchers(), 5000);
     return () => window.clearInterval(interval);
   }, [loadWatchers, open]);
-  useEffect(() => {
-    if (!defaultSourcePath) return;
-    setForm(current =>
-      current.id || current.sourcePath.trim() ? current : { ...current, sourcePath: defaultSourcePath },
-    );
-  }, [defaultSourcePath]);
+  if (defaultSourcePath && !form.id && !form.sourcePath.trim()) setForm({ ...form, sourcePath: defaultSourcePath });
   useEffect(() => {
     if (!open || !form.autoCaptionEnabled) return;
     const sourcePath = form.sourcePath.trim();

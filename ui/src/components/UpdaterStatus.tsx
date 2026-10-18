@@ -277,7 +277,9 @@ function getTitle(status: RepoUpdateStatus | null, detail: string) {
   if (status.needsRestart) parts.push('Restart the app to use the update.');
   if (status.sourceRemoteMatchesCanonical === false && status.sourceRemoteWebUrl) {
     parts.push(`Local git remote: ${status.sourceRemoteWebUrl}`);
-    const recommendedRemote = status.remote || `${(status.repoWebUrl || status.remoteWebUrl || 'https://github.com/BadAtCaptchas/AITK-Studio').replace(/\.git$/, '')}.git`;
+    const recommendedRemote =
+      status.remote ||
+      `${(status.repoWebUrl || status.remoteWebUrl || 'https://github.com/BadAtCaptchas/AITK-Studio').replace(/\.git$/, '')}.git`;
     parts.push(`Suggested origin: ${recommendedRemote}`);
     parts.push(`git remote set-url origin ${recommendedRemote}`);
   }
@@ -323,7 +325,7 @@ function isRepoUpdateStatus(value: unknown): value is RepoUpdateStatus {
 
 export default function UpdaterStatus({ compact = false, minimal = false }: { compact?: boolean; minimal?: boolean }) {
   const [status, setStatus] = useState<RepoUpdateStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -332,40 +334,41 @@ export default function UpdaterStatus({ compact = false, minimal = false }: { co
   const restartRequestedAtRef = useRef<number | null>(null);
   const restartPollRef = useRef<number | null>(null);
 
-  const refresh = async () => {
+  const loadStatus = () =>
+    apiClient
+      .get('/api/updater')
+      .then(res => {
+        const nextStatus = res.data as RepoUpdateStatus;
+        const applyRequestedAt = applyRequestedAtRef.current;
+
+        if (applyRequestedAt) {
+          const statusTime = getStatusTime(nextStatus);
+          const expiresAt = applyFeedbackExpiresAtRef.current || 0;
+          const staleStatus = statusTime == null || statusTime < applyRequestedAt;
+
+          if (staleStatus && Date.now() < expiresAt) {
+            return;
+          }
+
+          if (nextStatus.state !== 'checking' && nextStatus.state !== 'updating') {
+            applyRequestedAtRef.current = null;
+            applyFeedbackExpiresAtRef.current = null;
+            setApplying(false);
+          }
+        }
+
+        setStatus(nextStatus);
+        broadcastUpdaterStatus(nextStatus);
+      })
+      .catch(error => console.error('Error fetching updater status:', error))
+      .finally(() => setLoading(false));
+  const refresh = () => {
     setLoading(true);
-    try {
-      const res = await apiClient.get('/api/updater');
-      const nextStatus = res.data as RepoUpdateStatus;
-      const applyRequestedAt = applyRequestedAtRef.current;
-
-      if (applyRequestedAt) {
-        const statusTime = getStatusTime(nextStatus);
-        const expiresAt = applyFeedbackExpiresAtRef.current || 0;
-        const staleStatus = statusTime == null || statusTime < applyRequestedAt;
-
-        if (staleStatus && Date.now() < expiresAt) {
-          return;
-        }
-
-        if (nextStatus.state !== 'checking' && nextStatus.state !== 'updating') {
-          applyRequestedAtRef.current = null;
-          applyFeedbackExpiresAtRef.current = null;
-          setApplying(false);
-        }
-      }
-
-      setStatus(nextStatus);
-      broadcastUpdaterStatus(nextStatus);
-    } catch (error) {
-      console.error('Error fetching updater status:', error);
-    } finally {
-      setLoading(false);
-    }
+    return loadStatus();
   };
 
   useEffect(() => {
-    void refresh();
+    void loadStatus();
     const interval = window.setInterval(
       () => {
         void refresh();

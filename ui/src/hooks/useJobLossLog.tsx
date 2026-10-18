@@ -1,6 +1,7 @@
 'use client';
+import useScopedState from './useScopedState';
 
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
 
@@ -18,9 +19,9 @@ function isMarkerKey(key: string) {
 }
 
 export default function useJobLossLog(jobID: string, reloadInterval: null | number = null) {
-  const [series, setSeries] = useState<SeriesMap>({});
-  const [keys, setKeys] = useState<string[]>([]);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>('idle');
+  const [series, setSeries] = useScopedState<SeriesMap>(jobID, {});
+  const [keys, setKeys] = useScopedState<string[]>(jobID, []);
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>(jobID, 'idle');
 
   const didInitialLoadRef = useRef(false);
   const inFlightRef = useRef(false);
@@ -127,7 +128,7 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
         }
       }
     },
-    [jobID, reloadInterval],
+    [jobID, reloadInterval, setStatus, setKeys, setSeries],
   );
 
   useEffect(() => {
@@ -136,9 +137,6 @@ export default function useJobLossLog(jobID: string, reloadInterval: null | numb
     inFlightRef.current = false;
     didInitialLoadRef.current = false;
     lastStepByKeyRef.current = {};
-    setSeries({});
-    setKeys([]);
-    setStatus('idle');
   }, [jobID]);
 
   usePollLoop(signal => refreshLoss(signal), reloadInterval, [jobID]);

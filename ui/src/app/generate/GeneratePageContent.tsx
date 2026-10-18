@@ -2,7 +2,12 @@
 import Link from 'next/link';
 import { QwenImageControls, QwenReferenceInputs } from '@/components/generate/QwenImageControls';
 import { isQwenImage2, transparentQwenPrompt } from '@/domain/qwenImage';
-import { getDefaultModelConfig, getDefaultSampler, archSupportsSection, type GeneratorModelConfig } from '@/domain/generationConfig';
+import {
+  getDefaultModelConfig,
+  getDefaultSampler,
+  archSupportsSection,
+  type GeneratorModelConfig,
+} from '@/domain/generationConfig';
 import { configContractErrors, CAPABILITY_VERSION } from '@/domain/configContract';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -244,7 +249,7 @@ export function GeneratePageContent() {
   const [useLora, setUseLora] = useState(false);
   const [loraPath, setLoraPath] = useState('');
   const [loras, setLoras] = useState<GeneratedLora[]>([]);
-  const [loraStatus, setLoraStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [loraStatus, setLoraStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('loading');
   const [loraUploadStatus, setLoraUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [loraUploadProgress, setLoraUploadProgress] = useState(0);
   const [loraUploadTriggerWords, setLoraUploadTriggerWords] = useState('');
@@ -278,26 +283,31 @@ export function GeneratePageContent() {
   const [inlineMessage, setInlineMessage] = useState('');
   const [cancelRequested, setCancelRequested] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const appliedModelRef = useRef('');
-  useEffect(() => {
-    if (isGPUInfoLoaded && gpuIDs === null) {
-      setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
-    }
-  }, [gpuIDs, gpuList, isGPUInfoLoaded]);
-  const refreshLoras = useCallback(async () => {
+  const [appliedModel, setAppliedModel] = useState('');
+  if (isGPUInfoLoaded && gpuIDs === null) {
+    setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
+  }
+  const loadLoras = useCallback(
+    () =>
+      apiClient
+        .get('/api/generate/loras')
+        .then(res => {
+          setLoras(res.data.loras || []);
+          setLoraStatus('success');
+        })
+        .catch(error => {
+          console.error('Error fetching LoRAs:', error);
+          setLoraStatus('error');
+        }),
+    [],
+  );
+  const refreshLoras = () => {
     setLoraStatus('loading');
-    try {
-      const res = await apiClient.get('/api/generate/loras');
-      setLoras(res.data.loras || []);
-      setLoraStatus('success');
-    } catch (error) {
-      console.error('Error fetching LoRAs:', error);
-      setLoraStatus('error');
-    }
-  }, []);
+    return loadLoras();
+  };
   useEffect(() => {
-    void refreshLoras();
-  }, [refreshLoras]);
+    void loadLoras();
+  }, [loadLoras]);
   useEffect(() => {
     return () => {
       inlineAbortControllerRef.current?.abort();
@@ -312,20 +322,6 @@ export function GeneratePageContent() {
     [loras],
   );
   const selectedLora = useMemo(() => loras.find(lora => lora.path === loraPath), [loras, loraPath]);
-  useEffect(() => {
-    const modelRef = searchParams.get('model_ref')?.trim() || '';
-    if (!modelRef || appliedModelRef.current === modelRef || loras.length === 0) return;
-    const matching = loras.find(
-      lora => lora.portableRef === modelRef || lora.path === modelRef || lora.id === modelRef,
-    );
-    if (!matching) return;
-    appliedModelRef.current = modelRef;
-    setUseLora(true);
-    setLoraPath(matching.path);
-    applyLoraModelDefaults(matching);
-    setLoraUploadTriggerWords(matching.triggerWords?.join(', ') || '');
-    if (matching.triggerWords?.length) setPrompts(matching.triggerWords.join(', ') + ', ');
-  }, [loras, searchParams]);
   const requestedModel = searchParams.get('model_ref')?.trim();
   const missingRequestedModel = Boolean(
     requestedModel &&
@@ -340,7 +336,8 @@ export function GeneratePageContent() {
     return currentPromptItems.length * repeats;
   }, [currentPromptItems, numRepeats]);
   const supportsLayerOffloading = useMemo(
-    () => archSupportsSection(modelConfig.arch, 'model.layer_offloading', archs) || Boolean(modelConfig.layer_offloading),
+    () =>
+      archSupportsSection(modelConfig.arch, 'model.layer_offloading', archs) || Boolean(modelConfig.layer_offloading),
     [modelConfig.arch, modelConfig.layer_offloading, archs],
   );
   const layerOffloadingMemoryProfile = useMemo(
@@ -385,6 +382,19 @@ export function GeneratePageContent() {
       setSampler(getDefaultSampler(String(lora.model.arch), archs));
     }
   };
+  const requestedModelRef = searchParams.get('model_ref')?.trim() || '';
+  const matchingRequestedModel = loras.find(
+    lora => lora.portableRef === requestedModelRef || lora.path === requestedModelRef || lora.id === requestedModelRef,
+  );
+  if (requestedModelRef && appliedModel !== requestedModelRef && matchingRequestedModel) {
+    const matching = matchingRequestedModel;
+    setAppliedModel(requestedModelRef);
+    setUseLora(true);
+    setLoraPath(matching.path);
+    applyLoraModelDefaults(matching);
+    setLoraUploadTriggerWords(matching.triggerWords?.join(', ') || '');
+    if (matching.triggerWords?.length) setPrompts(matching.triggerWords.join(', ') + ', ');
+  }
   const handleLoraPathChange = (value: string) => {
     setLoraPath(value);
     const lora = loras.find(item => item.path === value);
@@ -464,9 +474,13 @@ export function GeneratePageContent() {
   const handleArchChange = (archName: string) => {
     setModelConfig(getDefaultModelConfig(archName, archs));
     setSampler(getDefaultSampler(archName, archs));
-    const presetGuidance: unknown = archs.find(item => item.name === archName)?.defaults?.['config.process[0].sample.guidance_scale']?.[0];
+    const presetGuidance: unknown = archs.find(item => item.name === archName)?.defaults?.[
+      'config.process[0].sample.guidance_scale'
+    ]?.[0];
     if (typeof presetGuidance === 'number') setGuidanceScale(presetGuidance);
-    const presetSteps: unknown = archs.find(item => item.name === archName)?.defaults?.['config.process[0].sample.sample_steps']?.[0];
+    const presetSteps: unknown = archs.find(item => item.name === archName)?.defaults?.[
+      'config.process[0].sample.sample_steps'
+    ]?.[0];
     if (typeof presetSteps === 'number') setSampleSteps(presetSteps);
   };
   const handleLayerOffloadingChange = (checked: boolean) => {
@@ -547,7 +561,8 @@ export function GeneratePageContent() {
     }
     if (isQwenImage2(model.arch)) {
       if (qwenReferences.some(path => !path.trim())) errors.push('Fill or remove empty reference paths.');
-      if (model.model_kwargs?.rgba === true && imageFormat === 'jpg') errors.push('Use PNG, WebP, or JXL for transparent output.');
+      if (model.model_kwargs?.rgba === true && imageFormat === 'jpg')
+        errors.push('Use PNG, WebP, or JXL for transparent output.');
     }
     if (promptItems.length === 0) {
       errors.push('Enter at least one prompt.');
@@ -605,7 +620,14 @@ export function GeneratePageContent() {
     model: GeneratorModelConfig,
   ) => {
     if (isQwenImage2(model.arch)) {
-      promptItems = promptItems.map(item => ({ ...item, ...(item.ctrl_imgs !== undefined ? { ctrl_imgs: item.ctrl_imgs } : qwenReferences.length ? { ctrl_imgs: qwenReferences } : {}) }));
+      promptItems = promptItems.map(item => ({
+        ...item,
+        ...(item.ctrl_imgs !== undefined
+          ? { ctrl_imgs: item.ctrl_imgs }
+          : qwenReferences.length
+            ? { ctrl_imgs: qwenReferences }
+            : {}),
+      }));
     }
     const promptList = promptItems.map(item => item.prompt);
     const sampleItems = promptItems.map(item => ({
@@ -690,7 +712,10 @@ export function GeneratePageContent() {
     if (!selectedGpuIDs) return;
     const jobConfig = buildGenerateJobConfig(promptItems, normalizedJobName, model);
     const contractErrors = configContractErrors(jobConfig);
-    if (contractErrors.length) { setValidationErrors(contractErrors); return; }
+    if (contractErrors.length) {
+      setValidationErrors(contractErrors);
+      return;
+    }
     clearStatusResetTimeout();
     setStatus('saving');
     try {
@@ -737,7 +762,10 @@ export function GeneratePageContent() {
     }
     const jobConfig = buildGenerateJobConfig(promptItems, normalizedJobName, model);
     const contractErrors = configContractErrors(jobConfig);
-    if (contractErrors.length) { setValidationErrors(contractErrors); return; }
+    if (contractErrors.length) {
+      setValidationErrors(contractErrors);
+      return;
+    }
     const abortController = new AbortController();
     let generationCanceled = false;
     inlineAbortControllerRef.current = abortController;
@@ -793,7 +821,9 @@ export function GeneratePageContent() {
         <div className="flex shrink-0 items-center gap-2">
           <Wand2 className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Generate</h1>
-          <Link href="/generate/live" className="operator-button text-xs">Live inference</Link>
+          <Link href="/generate/live" className="operator-button text-xs">
+            Live inference
+          </Link>
           <span className="hidden text-sm text-gray-400 sm:inline">/ {'Local workspace'}</span>
         </div>
         <div className="flex-1"></div>
@@ -1111,14 +1141,34 @@ export function GeneratePageContent() {
                   placeholder="Path or Hugging Face repo"
                 />
 
-                {isQwenImage2(modelConfig.arch) && <>
-                  <QwenImageControls options={modelConfig.model_kwargs || {}}
-                    onOption={(key, value) => { setModelConfig(current => ({ ...current, model_kwargs: { ...current.model_kwargs, [key]: value } })); if (key === 'rgba' && value) setImageFormat('png'); }}
-                    onPreset={(width, height, steps) => { setWidth(width); setHeight(height); setSampleSteps(steps); }}
-                    onTransparentPrompt={() => { const items = currentPromptItems.map(item => ({ ...item, prompt: transparentQwenPrompt(item.prompt) })); setJsonPromptItems(items); setPrompts(items.map(item => item.prompt).join('\n')); }}
-                  />
-                  <QwenReferenceInputs paths={qwenReferences} onChange={setQwenReferences} />
-                </>}
+                {isQwenImage2(modelConfig.arch) && (
+                  <>
+                    <QwenImageControls
+                      options={modelConfig.model_kwargs || {}}
+                      onOption={(key, value) => {
+                        setModelConfig(current => ({
+                          ...current,
+                          model_kwargs: { ...current.model_kwargs, [key]: value },
+                        }));
+                        if (key === 'rgba' && value) setImageFormat('png');
+                      }}
+                      onPreset={(width, height, steps) => {
+                        setWidth(width);
+                        setHeight(height);
+                        setSampleSteps(steps);
+                      }}
+                      onTransparentPrompt={() => {
+                        const items = currentPromptItems.map(item => ({
+                          ...item,
+                          prompt: transparentQwenPrompt(item.prompt),
+                        }));
+                        setJsonPromptItems(items);
+                        setPrompts(items.map(item => item.prompt).join('\n'));
+                      }}
+                    />
+                    <QwenReferenceInputs paths={qwenReferences} onChange={setQwenReferences} />
+                  </>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <NumberInput label="Width" value={width} onChange={setWidth} min={64} max={4096} />
                   <NumberInput label="Height" value={height} onChange={setHeight} min={64} max={4096} />

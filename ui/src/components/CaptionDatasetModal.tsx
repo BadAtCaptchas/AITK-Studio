@@ -152,13 +152,11 @@ export const CaptionDatasetModal: React.FC = () => {
         .finally(() => setHasLoadedExistingJob(true));
     }
   }, [modalInfo?.jobId]);
-  useEffect(() => {
-    if (isGPUInfoLoaded) {
-      if (gpuIDs === null && gpuList.length > 0) {
-        setGpuIDs(`${gpuList[0].index}`);
-      }
+  if (isGPUInfoLoaded) {
+    if (gpuIDs === null && gpuList.length > 0) {
+      setGpuIDs(`${gpuList[0].index}`);
     }
-  }, [gpuList, isGPUInfoLoaded]);
+  }
   const handleClose = () => {
     if (modalInfo?.onClose) {
       modalInfo.onClose();

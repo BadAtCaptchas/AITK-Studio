@@ -1,4 +1,5 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Database, Play, Box, Images, Monitor, Loader2 } from 'lucide-react';
@@ -22,20 +23,17 @@ export default function Dashboard() {
     errors: datasetErrors,
     refreshDatasets,
   } = useDatasetList({ includeRemote: true });
-  const [hasLoaded, setHasLoaded] = useState(false);
-  useEffect(() => {
-    if (jobsStatus === 'success' && datasetsStatus === 'success') setHasLoaded(true);
-  }, [jobsStatus, datasetsStatus]);
-  const [previews, setPreviews] = useState<string[]>([]);
+  const [hasLoaded, setHasLoaded] = useState(jobsStatus === 'success' && datasetsStatus === 'success');
+  if (!hasLoaded && jobsStatus === 'success' && datasetsStatus === 'success') setHasLoaded(true);
   const action = nextHomeAction(jobs, datasets);
   const dataset = action.dataset;
+  const [previews, setPreviews] = useScopedState<string[]>(JSON.stringify([dataset?.name, dataset?.worker_id]), []);
   const initialLoading =
     !hasLoaded &&
     ((!jobs.length && ['idle', 'loading'].includes(jobsStatus)) || ['idle', 'loading'].includes(datasetsStatus));
   const unavailable =
     jobsStatus === 'error' || datasetsStatus === 'error' || (datasets.length === 0 && datasetErrors.length > 0);
   useEffect(() => {
-    setPreviews([]);
     if (!dataset || dataset.encrypted) return;
     const controller = new AbortController();
     apiClient
@@ -60,7 +58,7 @@ export default function Dashboard() {
         /* Previews are optional; never imply that the dataset itself failed. */
       });
     return () => controller.abort();
-  }, [dataset?.name, dataset?.worker_id, dataset?.encrypted]);
+  }, [dataset?.name, dataset?.worker_id, dataset?.encrypted, setPreviews]);
   return (
     <div className="journey-page">
       <header className="journey-heading">

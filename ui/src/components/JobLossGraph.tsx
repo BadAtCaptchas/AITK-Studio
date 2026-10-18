@@ -1,5 +1,6 @@
 'use client';
 
+import useHydrated from '@/hooks/useHydrated';
 import type { Job, GpuInfo } from '@/types';
 import useJobMetrics, { type MetricPoint } from '@/hooks/useJobMetrics';
 import useGPUInfo from '@/hooks/useGPUInfo';
@@ -615,6 +616,35 @@ function buildChartData({
 }
 
 export default function JobLossGraph({ job }: Props) {
+  const hydrated = useHydrated();
+  return hydrated ? <JobLossGraphContent key={job.id} job={job} /> : null;
+}
+
+function readGraphSettings(): Partial<PersistedGraphSettings> {
+  try {
+    const key = settingsStorageKey();
+    const value: unknown = key ? JSON.parse(localStorage.getItem(key) || '{}') : {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const data = value as Record<string, unknown>;
+    const settings: Partial<PersistedGraphSettings> = {};
+    const tabs: ChartTab[] = ['loss', 'learning_rate', 'throughput', 'timesteps', 'gradients', 'memory'];
+    settings.chartTab = tabs.find(tab => tab === data.chartTab);
+    for (const name of ['useLogScale', 'showRaw', 'showSmoothed', 'showTrend', 'clipOutliers'] as const) {
+      if (typeof data[name] === 'boolean') settings[name] = data[name];
+    }
+    if (typeof data.smoothing === 'number') settings.smoothing = clamp(data.smoothing, 0, 100);
+    if (data.enabledLoss && typeof data.enabledLoss === 'object' && !Array.isArray(data.enabledLoss)) {
+      settings.enabledLoss = Object.fromEntries(
+        Object.entries(data.enabledLoss).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'),
+      );
+    }
+    return settings;
+  } catch {
+    return {};
+  }
+}
+
+function JobLossGraphContent({ job }: Props) {
   const { series, latest, lossKeys, phasePoints, phaseNamePoints, status, version, refreshMetrics } = useJobMetrics(
     job.id,
     job.stop && job.status === 'running' ? 'stopping' : job.status,
@@ -631,89 +661,32 @@ export default function JobLossGraph({ job }: Props) {
       : null;
   const { gpuList } = useGPUInfo(gpuIds, gpuPollInterval);
 
-  const [chartTab, setChartTab] = useState<ChartTab>('loss');
-  const [useLogScale, setUseLogScale] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
-  const [showSmoothed, setShowSmoothed] = useState(true);
-  const [showTrend, setShowTrend] = useState(true);
-  const [clipOutliers, setClipOutliers] = useState(false);
-  const [smoothing, setSmoothing] = useState(82);
+  const [initialSettings] = useState(readGraphSettings);
+  const [chartTab, setChartTab] = useState<ChartTab>(initialSettings.chartTab ?? 'loss');
+  const [useLogScale, setUseLogScale] = useState(initialSettings.useLogScale ?? false);
+  const [showRaw, setShowRaw] = useState(initialSettings.showRaw ?? false);
+  const [showSmoothed, setShowSmoothed] = useState(initialSettings.showSmoothed ?? true);
+  const [showTrend, setShowTrend] = useState(initialSettings.showTrend ?? true);
+  const [clipOutliers, setClipOutliers] = useState(initialSettings.clipOutliers ?? false);
+  const [smoothing, setSmoothing] = useState(initialSettings.smoothing ?? 82);
   const deferredSmoothing = useDeferredValue(smoothing);
-  const [enabledLoss, setEnabledLoss] = useState<Record<string, boolean>>({});
-  const [hydrated, setHydrated] = useState(false);
-  const persistedEnabledRef = useRef<Record<string, boolean> | null>(null);
+  const [enabledChoices, setEnabledLoss] = useState<Record<string, boolean>>(initialSettings.enabledLoss ?? {});
+  const defaultLossKey =
+    (lossKeys.includes('loss/loss') && 'loss/loss') ||
+    (lossKeys.includes('loss') && 'loss') ||
+    lossKeys.find(key => /loss/i.test(key)) ||
+    lossKeys[0];
+  const enabledLoss = useMemo(
+    () =>
+      Object.fromEntries(
+        lossKeys.map(key => [key, enabledChoices[key] ?? (key === defaultLossKey || key === 'val/loss')]),
+      ),
+    [lossKeys, enabledChoices, defaultLossKey],
+  );
   const [isZoomed, setIsZoomed] = useState(false);
   const [hover, setHover] = useState<HoverState | null>(null);
 
   useEffect(() => {
-    setHydrated(false);
-    persistedEnabledRef.current = null;
-    setChartTab('loss');
-    setUseLogScale(false);
-    setShowRaw(false);
-    setShowSmoothed(true);
-    setShowTrend(true);
-    setClipOutliers(false);
-    setSmoothing(82);
-    setEnabledLoss({});
-
-    const key = settingsStorageKey();
-    if (!key) {
-      setHydrated(true);
-      return;
-    }
-
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const settings = JSON.parse(raw) as Partial<PersistedGraphSettings>;
-        if (
-          settings.chartTab &&
-          ['loss', 'learning_rate', 'throughput', 'timesteps', 'gradients', 'memory'].includes(settings.chartTab)
-        ) {
-          setChartTab(settings.chartTab);
-        }
-        if (typeof settings.useLogScale === 'boolean') setUseLogScale(settings.useLogScale);
-        if (typeof settings.showRaw === 'boolean') setShowRaw(settings.showRaw);
-        if (typeof settings.showSmoothed === 'boolean') setShowSmoothed(settings.showSmoothed);
-        if (typeof settings.showTrend === 'boolean') setShowTrend(settings.showTrend);
-        if (typeof settings.clipOutliers === 'boolean') setClipOutliers(settings.clipOutliers);
-        if (typeof settings.smoothing === 'number') setSmoothing(clamp(settings.smoothing, 0, 100));
-        if (settings.enabledLoss && typeof settings.enabledLoss === 'object') {
-          persistedEnabledRef.current = settings.enabledLoss;
-          setEnabledLoss(settings.enabledLoss);
-        }
-      }
-    } catch {
-      // Ignore malformed or unavailable storage.
-    }
-
-    setHydrated(true);
-  }, [job.id]);
-
-  useEffect(() => {
-    setEnabledLoss(prev => {
-      if (lossKeys.length === 0) return prev;
-      const next = { ...prev };
-      const defaultKey =
-        (lossKeys.includes('loss/loss') && 'loss/loss') ||
-        (lossKeys.includes('loss') && 'loss') ||
-        lossKeys.find(key => /loss/i.test(key)) ||
-        lossKeys[0];
-      for (const key of lossKeys) {
-        if (next[key] === undefined) {
-          next[key] = persistedEnabledRef.current?.[key] ?? (key === defaultKey || key === 'val/loss');
-        }
-      }
-      for (const key of Object.keys(next)) {
-        if (!lossKeys.includes(key)) delete next[key];
-      }
-      return next;
-    });
-  }, [lossKeys]);
-
-  useEffect(() => {
-    if (!hydrated) return;
     const key = settingsStorageKey();
     if (!key) return;
     try {
@@ -725,13 +698,14 @@ export default function JobLossGraph({ job }: Props) {
         showTrend,
         clipOutliers,
         smoothing,
-        enabledLoss,
+        // Keep saved choices while the first metrics response is still pending.
+        enabledLoss: version > 0 ? enabledLoss : enabledChoices,
       };
       localStorage.setItem(key, JSON.stringify(payload));
     } catch {
       // Ignore unavailable storage.
     }
-  }, [chartTab, clipOutliers, enabledLoss, hydrated, showRaw, showSmoothed, showTrend, smoothing, useLogScale]);
+  }, [chartTab, clipOutliers, enabledChoices, enabledLoss, showRaw, showSmoothed, showTrend, smoothing, useLogScale, version]);
 
   const activeLossKeys = useMemo(
     () => lossKeys.filter(key => enabledLoss[key] !== false && (series[key]?.length ?? 0) > 0),
@@ -1303,7 +1277,7 @@ export default function JobLossGraph({ job }: Props) {
                     <button
                       key={key}
                       type="button"
-                      onClick={() => setEnabledLoss(prev => ({ ...prev, [key]: !(prev[key] ?? true) }))}
+                      onClick={() => setEnabledLoss(prev => ({ ...prev, [key]: !enabledLoss[key] }))}
                       className={[
                         'px-2.5 py-1 rounded-md text-xs border transition-colors max-w-full truncate',
                         enabledLoss[key] === false

@@ -17,13 +17,14 @@ interface CaptionMonitorProps {
 // info, and the live log.
 export default function CaptionMonitor({ datasetPath, onHeightChange }: CaptionMonitorProps) {
   const { job, refreshJob } = useJobByRef(datasetPath, 3000, 'caption');
-  // Start collapsed; an active run pops it open via the effect below.
-  const [collapsed, setCollapsed] = useState(true);
   const isActive = !!(job && (job.status === 'running' || job.status === 'queued'));
-  // Reset the collapsed state whenever a new captioning run starts.
-  useEffect(() => {
+  const [collapsed, setCollapsed] = useState(!isActive);
+  const runScope = JSON.stringify([job?.id, isActive]);
+  const [previousRun, setPreviousRun] = useState(runScope);
+  if (previousRun !== runScope) {
+    setPreviousRun(runScope);
     if (isActive) setCollapsed(false);
-  }, [job?.id, isActive]);
+  }
   const gpuIds = useMemo(() => {
     if (!job) return [];
     if (job.gpu_ids === 'mps') return [0];

@@ -33,7 +33,12 @@ try {
   const jobs = await fetch(origin + '/api/jobs?limit=1', { headers: { Cookie: cookie } });
   assert.equal(jobs.status, 200);
   assert.deepEqual((await jobs.json()).jobs, []);
-  console.log('Production-only stack authentication and database read passed.');
+  const extensions = await fetch(origin + '/api/model_archs', { headers: { Cookie: cookie } });
+  assert.equal(extensions.status, 200);
+  const extensionPayload = await extensions.json();
+  assert.ok(Array.isArray(extensionPayload.modules));
+  assert.ok(Array.isArray(extensionPayload.errors));
+  console.log('Stack authentication, database read, and extension compiler passed.');
 } finally {
   if (server.connected) server.send({ type: 'aitk-test-shutdown' });
   else server.kill('SIGTERM');

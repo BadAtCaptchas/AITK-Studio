@@ -1,15 +1,16 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import useCommittedRef from './useCommittedRef';
+import useScopedState from './useScopedState';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
 export default function useJob(jobID: string, reloadInterval: null | number = null) {
-  const [job, setJob] = useState<Job | null>(null);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [job, setJob] = useScopedState<Job | null>(jobID, null);
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(jobID, 'idle');
   const requestGeneration = useRef(0);
   const requestScope = jobID;
-  const activeScopeRef = useRef(requestScope);
-  activeScopeRef.current = requestScope;
+  const activeScopeRef = useCommittedRef(requestScope);
   const refreshJob = useCallback(
     (signal?: AbortSignal) => {
       if (!jobID) return;
@@ -26,24 +27,32 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
         })
         .then(res => res.data)
         .then(data => {
-          if (signal?.aborted || activeScopeRef.current !== currentRequestScope || generation !== requestGeneration.current) return;
+          if (
+            signal?.aborted ||
+            activeScopeRef.current !== currentRequestScope ||
+            generation !== requestGeneration.current
+          )
+            return;
           setJob(data);
           setStatus('success');
         })
         .catch(error => {
-          if (signal?.aborted || activeScopeRef.current !== currentRequestScope || generation !== requestGeneration.current) return;
+          if (
+            signal?.aborted ||
+            activeScopeRef.current !== currentRequestScope ||
+            generation !== requestGeneration.current
+          )
+            return;
           console.error('Error fetching training run:', error);
           setStatus('error');
         });
     },
-    [jobID, requestScope],
+    [jobID, requestScope, setStatus, setJob],
   );
   useEffect(() => {
-    return () => { requestGeneration.current += 1; };
-  }, [jobID]);
-  useEffect(() => {
-    setJob(null);
-    setStatus('idle');
+    return () => {
+      requestGeneration.current += 1;
+    };
   }, [jobID]);
   usePollLoop(signal => refreshJob(signal), reloadInterval, [jobID]);
   return { job, setJob, status, refreshJob: () => refreshJob() };

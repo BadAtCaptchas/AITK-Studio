@@ -36,6 +36,7 @@ function fixture({ jobStatus: status = 'running', samples = [], sampleStatus = '
   const { default: Dashboard } = loadSource('../src/app/dashboard/page.tsx', {
     react: React, 'next/link': ({ children, ...props }) => React.createElement('a', props, children), 'lucide-react': icons,
     '@/components/DashboardHardware': () => null, '@/components/JobSamplePreview': preview,
+    '@/hooks/useScopedState': loadSource('../src/hooks/useScopedState.ts', { react: React }).default,
     '@/hooks/useGPUInfo': () => ({ status: 'success', isGPUInfoLoaded: true, gpuList: [] }),
     '@/hooks/useMonitorStream': () => ({}),
     '@/hooks/useJobsList': () => ({ jobs: [job], status: 'success', refreshJobs() {} }),

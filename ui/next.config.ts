@@ -13,6 +13,8 @@ function getAppVersion() {
 }
 
 const nextConfig: NextConfig = {
+  // Project instructions are maintained in the repository's root AGENTS.md.
+  agentRules: false,
   distDir: process.env.AITK_NEXT_DIST_DIR || '.next',
   env: {
     NEXT_PUBLIC_APP_VERSION: getAppVersion(),
@@ -38,7 +40,7 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '2mb',
     },
-    middlewareClientMaxBodySize: '5gb',
+    proxyClientMaxBodySize: '5gb',
   },
 };
 

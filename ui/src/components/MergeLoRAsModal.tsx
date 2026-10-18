@@ -72,7 +72,9 @@ const MergeLoRAsModal: React.FC = () => {
     [modalInfo?.availableLoRAs, selectedPaths],
   );
 
-  useEffect(() => {
+  const [previousModal, setPreviousModal] = useState(modalInfo);
+  if (previousModal !== modalInfo) {
+    setPreviousModal(modalInfo);
     if (!modalInfo) {
       setSelectedLoRAs([]);
       setIsRunning(false);
@@ -80,7 +82,7 @@ const MergeLoRAsModal: React.FC = () => {
       setHasError(false);
       setLogOutput('');
     }
-  }, [modalInfo]);
+  }
 
   useEffect(() => {
     if (logRef.current) {
@@ -156,7 +158,14 @@ const MergeLoRAsModal: React.FC = () => {
   const outputName = cleanOutputName(modalInfo?.outputName ?? '');
 
   return (
-    <Modal isOpen={isOpen} onClose={close} title="Merge LoRAs" size="lg" showCloseButton={!isRunning} closeOnOverlayClick={!isRunning}>
+    <Modal
+      isOpen={isOpen}
+      onClose={close}
+      title="Merge LoRAs"
+      size="lg"
+      showCloseButton={!isRunning}
+      closeOnOverlayClick={!isRunning}
+    >
       {showLog ? (
         <div>
           <div className="mb-2 flex items-center gap-2 text-sm">
@@ -205,7 +214,9 @@ const MergeLoRAsModal: React.FC = () => {
               className="min-w-0 flex-1 bg-transparent px-3 py-1 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none"
               required
             />
-            <span className="flex items-center border-l border-gray-700 bg-gray-900/60 px-2 text-sm text-gray-400">.safetensors</span>
+            <span className="flex items-center border-l border-gray-700 bg-gray-900/60 px-2 text-sm text-gray-400">
+              .safetensors
+            </span>
           </div>
 
           <label className="block text-xs mb-1 mt-4 text-gray-300">Add LoRA</label>
@@ -230,7 +241,10 @@ const MergeLoRAsModal: React.FC = () => {
               <div className="max-h-48 space-y-1 overflow-y-auto rounded-md bg-gray-950 p-2">
                 {selectedLoRAs.map(item => (
                   <div key={item.path} className="flex items-center gap-2 px-2 py-1">
-                    <div className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-gray-200" title={item.label}>
+                    <div
+                      className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-gray-200"
+                      title={item.label}
+                    >
                       {item.label}
                     </div>
                     <input
@@ -258,7 +272,11 @@ const MergeLoRAsModal: React.FC = () => {
           )}
 
           <div className="mt-6 flex justify-end gap-2">
-            <button type="button" onClick={close} className="rounded-md px-4 py-2 text-sm text-gray-300 hover:text-gray-100">
+            <button
+              type="button"
+              onClick={close}
+              className="rounded-md px-4 py-2 text-sm text-gray-300 hover:text-gray-100"
+            >
               Cancel
             </button>
             <button

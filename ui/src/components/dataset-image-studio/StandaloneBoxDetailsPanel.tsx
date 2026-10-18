@@ -1,8 +1,9 @@
 'use client';
 
+import useScopedState from '@/hooks/useScopedState';
 import classNames from 'classnames';
 import { ChevronRight, ChevronUp, Loader2, Lock, Unlock, WandSparkles } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { rectToBox, type IdeogramElementType, type NormalizedBox } from '@/utils/ideogramCaption';
 import { AUTO_BOX_PROVIDERS, OLLAMA_VISION_MODELS, OPENROUTER_BOX_MODELS } from './constants';
 import type { BoxRect } from './types';
@@ -84,22 +85,19 @@ export function StandaloneBoxDetailsPanel({
   const label = isText
     ? stringValue(element?.text) || stringValue(element?.label) || description
     : stringValue(element?.label) || description;
-  const [labelDraft, setLabelDraft] = useState(label);
-  const [descriptionDraft, setDescriptionDraft] = useState(description);
-  const [rectDraft, setRectDraft] = useState<BoxRect | null>(selectedRect);
+  const [labelDraft, setLabelDraft] = useScopedState(JSON.stringify([selectedElementIndex, label, description]), label);
+  const [descriptionDraft, setDescriptionDraft] = useScopedState(
+    JSON.stringify([selectedElementIndex, label, description]),
+    description,
+  );
+  const [rectDraft, setRectDraft] = useScopedState<BoxRect | null>(
+    JSON.stringify([selectedElementIndex, selectedRect]),
+    selectedRect,
+  );
   const mutationDisabled = Boolean(mutationDisabledReason);
   const editDisabled = mutationDisabled || selectedLocked;
   const autoBoxModels = autoBoxProvider === 'openrouter' ? OPENROUTER_BOX_MODELS : OLLAMA_VISION_MODELS;
   const modelListId = `standalone-auto-box-models-${autoBoxProvider}`;
-
-  useEffect(() => {
-    setLabelDraft(label);
-    setDescriptionDraft(description);
-  }, [description, label, selectedElementIndex]);
-
-  useEffect(() => {
-    setRectDraft(selectedRect);
-  }, [selectedElementIndex, selectedRect]);
 
   const selectedId = useMemo(
     () => (selectedElementIndex == null ? '' : String(selectedElementIndex + 1).padStart(2, '0')),
@@ -145,7 +143,10 @@ export function StandaloneBoxDetailsPanel({
               <label className="min-w-0">
                 <span className="mb-1 block text-[11px] text-gray-500">Label</span>
                 <span className="flex h-8 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2.5 focus-within:border-brand-600">
-                  <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ backgroundColor: selectedLayerColor }} />
+                  <span
+                    className="h-2.5 w-2.5 flex-none rounded-full"
+                    style={{ backgroundColor: selectedLayerColor }}
+                  />
                   <input
                     value={labelDraft}
                     disabled={editDisabled}
@@ -166,7 +167,12 @@ export function StandaloneBoxDetailsPanel({
                 </span>
               </label>
               <div className="grid h-8 grid-cols-2 overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
-                {([['obj', 'Object'], ['text', 'Text']] as const).map(([value, text]) => {
+                {(
+                  [
+                    ['obj', 'Object'],
+                    ['text', 'Text'],
+                  ] as const
+                ).map(([value, text]) => {
                   const active = value === (isText ? 'text' : 'obj');
                   return (
                     <button
@@ -206,7 +212,11 @@ export function StandaloneBoxDetailsPanel({
                         max={1000}
                         value={rectDraft[field]}
                         disabled={editDisabled}
-                        onChange={event => setRectDraft(current => current ? { ...current, [field]: Number(event.target.value) } : current)}
+                        onChange={event =>
+                          setRectDraft(current =>
+                            current ? { ...current, [field]: Number(event.target.value) } : current,
+                          )
+                        }
                         onBlur={commitRect}
                         onKeyDown={event => {
                           if (event.key === 'Enter') event.currentTarget.blur();
@@ -282,7 +292,11 @@ export function StandaloneBoxDetailsPanel({
                 title={autoBoxDisabledReason || `Generate boxes with ${autoBoxProviderLabel}`}
                 className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-brand-600/50 bg-brand-500/15 px-3 text-[11px] font-medium text-brand-100 hover:bg-brand-500/25 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-900 disabled:text-gray-500"
               >
-                {isGeneratingBoxes ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <WandSparkles className="h-3.5 w-3.5" />}
+                {isGeneratingBoxes ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <WandSparkles className="h-3.5 w-3.5" />
+                )}
                 Generate
               </button>
             </div>
@@ -295,7 +309,9 @@ export function StandaloneBoxDetailsPanel({
                   className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] text-gray-100 outline-none focus:border-brand-600"
                 >
                   {AUTO_BOX_PROVIDERS.map(provider => (
-                    <option key={provider.value} value={provider.value}>{provider.label}</option>
+                    <option key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -308,7 +324,11 @@ export function StandaloneBoxDetailsPanel({
                   className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] text-gray-100 outline-none focus:border-brand-600"
                 />
                 <datalist id={modelListId}>
-                  {autoBoxModels.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}
+                  {autoBoxModels.map(model => (
+                    <option key={model.value} value={model.value}>
+                      {model.label}
+                    </option>
+                  ))}
                 </datalist>
               </label>
               {autoBoxProvider === 'remote_ollama' ? (
@@ -319,7 +339,11 @@ export function StandaloneBoxDetailsPanel({
                     onChange={event => onRemoteWorkerChange(event.target.value)}
                     className="h-8 w-full rounded-[4px] border border-gray-800 bg-gray-950 px-2 text-[11px] text-gray-100 outline-none focus:border-brand-600"
                   >
-                    {remoteWorkerOptions.map(worker => <option key={worker.value} value={worker.value}>{worker.label}</option>)}
+                    {remoteWorkerOptions.map(worker => (
+                      <option key={worker.value} value={worker.value}>
+                        {worker.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
               ) : null}
@@ -354,7 +378,11 @@ export function StandaloneBoxDetailsPanel({
           <span className="block font-medium">Auto Boxes</span>
           <span className="block truncate text-[10px] text-gray-600">Generate suggested boxes for this image</span>
         </span>
-        {autoBoxesOpen ? <ChevronUp className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+        {autoBoxesOpen ? (
+          <ChevronUp className="h-4 w-4 text-gray-500" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-gray-500" />
+        )}
       </button>
     </section>
   );

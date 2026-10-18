@@ -1,4 +1,6 @@
 'use client';
+import useStoredString from '@/hooks/useStoredString';
+import useScopedState from '@/hooks/useScopedState';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiClient } from '@/utils/api';
@@ -43,7 +45,10 @@ export default function DatasetDecryption({
   workerID: string;
   manifest: EncryptedDatasetManifest;
 }) {
-  const [outputName, setOutputName] = useState(`${datasetName}_decrypted`);
+  const storageKey = `dataset-decrypt:${workerID}:${datasetName}`;
+  const [savedDestination] = useStoredString(storageKey + ':destination', `${datasetName}_decrypted`);
+  const [editedDestination, setOutputName] = useScopedState<string | null>(storageKey, null);
+  const outputName = editedDestination ?? savedDestination;
   const [password, setPassword] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [operation, setOperation] = useState<Progress | null>(null);
@@ -52,10 +57,7 @@ export default function DatasetDecryption({
   const [jobs, setJobs] = useState<RelinkPreview[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [outcomes, setOutcomes] = useState<string[]>([]);
-  const storageKey = `dataset-decrypt:${workerID}:${datasetName}`;
   useEffect(() => {
-    const savedDestination = window.localStorage.getItem(storageKey + ':destination');
-    if (savedDestination) setOutputName(savedDestination);
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {

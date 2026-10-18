@@ -1,16 +1,15 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
 import { useEffect, useState } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
 export default function JobNotes({ job }: { job: Job }) {
-  const [notes, setNotes] = useState('');
-  const [loaded, setLoaded] = useState(false);
+  const [notes, setNotes] = useScopedState(job.id, '');
+  const [loaded, setLoaded] = useScopedState(job.id, false);
   const [status, setStatus] = useState('Loading…');
   useEffect(() => {
     const controller = new AbortController();
-    setLoaded(false);
-    setNotes('');
     void apiClient
       .get<{ notes?: unknown }>(`/api/jobs/${job.id}/notes`, { signal: controller.signal })
       .then(({ data }) => {
@@ -25,7 +24,7 @@ export default function JobNotes({ job }: { job: Job }) {
         if (!controller.signal.aborted) setStatus('Could not load notes.');
       });
     return () => controller.abort();
-  }, [job.id]);
+  }, [job.id, setNotes, setLoaded]);
   return (
     <div className="space-y-3 p-5">
       <label htmlFor="job-notes" className="block font-semibold">

@@ -37,18 +37,21 @@ function ProgressBar({ progress, compact = false }: { progress: ComfyInstallProg
       {percent == null ? (
         <div className="absolute inset-y-0 w-1/2 animate-pulse rounded-full bg-gradient-to-r from-violet-500/20 via-violet-300 to-violet-500/20" />
       ) : (
-        <div className={classNames('h-full rounded-full transition-all duration-500', fillColor)} style={{ width: `${percent}%` }} />
+        <div
+          className={classNames('h-full rounded-full transition-all duration-500', fillColor)}
+          style={{ width: `${percent}%` }}
+        />
       )}
     </div>
   );
 }
 
-function iconForProgress(progress: ComfyInstallProgressType) {
-  if (progress.status === 'failed') return AlertCircle;
-  if (progress.status === 'completed' || progress.status === 'ready') return CheckCircle2;
-  if (progress.status === 'launching') return ServerCog;
-  if (progress.status === 'installing') return Download;
-  return Loader2;
+function ProgressIcon({ progress, className }: { progress: ComfyInstallProgressType; className: string }) {
+  if (progress.status === 'failed') return <AlertCircle className={className} />;
+  if (progress.status === 'completed' || progress.status === 'ready') return <CheckCircle2 className={className} />;
+  if (progress.status === 'launching') return <ServerCog className={className} />;
+  if (progress.status === 'installing') return <Download className={className} />;
+  return <Loader2 className={className} />;
 }
 
 export function ComfyInstallProgressBand({ progress }: { progress: ComfyInstallProgressType | null }) {
@@ -57,7 +60,6 @@ export function ComfyInstallProgressBand({ progress }: { progress: ComfyInstallP
   const percent = getPercent(progress);
   const isFailed = progress.status === 'failed';
   const isComplete = progress.status === 'completed' || progress.status === 'ready';
-  const Icon = iconForProgress(progress);
 
   return (
     <div
@@ -75,10 +77,17 @@ export function ComfyInstallProgressBand({ progress }: { progress: ComfyInstallP
         <div
           className={classNames(
             'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md',
-            isFailed ? 'bg-rose-500/15 text-rose-300' : isComplete ? 'bg-emerald-500/15 text-emerald-300' : 'bg-violet-500/15 text-violet-300',
+            isFailed
+              ? 'bg-rose-500/15 text-rose-300'
+              : isComplete
+                ? 'bg-emerald-500/15 text-emerald-300'
+                : 'bg-violet-500/15 text-violet-300',
           )}
         >
-          <Icon className={classNames('h-4 w-4', !isFailed && !isComplete && 'animate-pulse')} />
+          <ProgressIcon
+            progress={progress}
+            className={classNames('h-4 w-4', !isFailed && !isComplete && 'animate-pulse')}
+          />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3 text-sm">
@@ -91,7 +100,12 @@ export function ComfyInstallProgressBand({ progress }: { progress: ComfyInstallP
               {progress.error && <p className="mt-1 truncate text-xs text-rose-300">{progress.error}</p>}
             </div>
             <div className="shrink-0 text-right">
-              <p className={classNames('font-mono text-sm', isFailed ? 'text-rose-300' : isComplete ? 'text-emerald-300' : 'text-violet-200')}>
+              <p
+                className={classNames(
+                  'font-mono text-sm',
+                  isFailed ? 'text-rose-300' : isComplete ? 'text-emerald-300' : 'text-violet-200',
+                )}
+              >
                 {percent == null ? 'Active' : `${Math.round(percent)}%`}
               </p>
               <p className="text-xs text-gray-500">{progress.step.replaceAll('_', ' ')}</p>
@@ -130,7 +144,9 @@ export function ComfyInstallProgressInline({
         >
           {progress.message}
         </span>
-        <span className="shrink-0 font-mono text-[11px] text-gray-400">{percent == null ? '' : `${Math.round(percent)}%`}</span>
+        <span className="shrink-0 font-mono text-[11px] text-gray-400">
+          {percent == null ? '' : `${Math.round(percent)}%`}
+        </span>
       </div>
       <ProgressBar progress={progress} compact />
       {fallback && <div className="truncate text-[11px] text-gray-500">{fallback}</div>}

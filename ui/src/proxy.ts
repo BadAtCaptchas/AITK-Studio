@@ -1,4 +1,3 @@
-// middleware.ts (at the root of your project)
 import { hasObsoleteWorkspaceScope, hasObsoleteWorkspaceHeaders } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
@@ -17,7 +16,7 @@ function signedRemoteDatasetAssetRequest(params: URLSearchParams, method: string
     params.get('expires'), params.get('sig'), type, method);
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const ingressError = browserRequestError(request.headers, request.url, request.method);
   if (ingressError) return NextResponse.json({ error: ingressError }, { status: 403 });
   if (hasObsoleteWorkspaceScope(request.nextUrl.searchParams) || hasObsoleteWorkspaceHeaders(request.headers)) {
@@ -59,9 +58,8 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// Configure which paths this middleware will run on
+// Configure which paths this proxy will run on.
 export const config = {
-  runtime: 'nodejs',
   matcher: [
     // Apply to all API routes
     '/api/:path*',

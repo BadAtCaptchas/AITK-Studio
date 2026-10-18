@@ -1,14 +1,9 @@
 'use client';
 
+import useStoredString from '@/hooks/useStoredString';
 import { useEffect, useMemo, useState } from 'react';
 import { Checkbox, NumberInput, SelectInput, TextInput } from '@/components/formInputs';
-import type {
-  NetworkConfig,
-  PhaseAutoAdvanceConfig,
-  TrainConfig,
-  TrainingPhaseConfig,
-  TrainLossType,
-} from '@/types';
+import type { NetworkConfig, PhaseAutoAdvanceConfig, TrainConfig, TrainingPhaseConfig, TrainLossType } from '@/types';
 import { Copy, Plus, Save, Trash2 } from 'lucide-react';
 import {
   builtInAutoTrainingProfiles,
@@ -166,19 +161,16 @@ export default function TrainingPhasesEditor({
   const autoTrain = !!train.auto_train;
   const phases = train.phases ?? [];
   const phaseTotal = sumPhaseSteps(phases);
-  const [customProfiles, setCustomProfiles] = useState<AutoTrainingProfile[]>([]);
-  const [selectedProfileID, setSelectedProfileID] = useState(defaultAutoTrainingProfileId ?? builtInAutoTrainingProfiles[0]?.id ?? '');
+  const [storedProfiles, setStoredProfiles] = useStoredString(CUSTOM_PROFILE_STORAGE_KEY, '[]');
+  const customProfiles = useMemo(() => {
+    try {
+      return sanitizeStoredProfiles(JSON.parse(storedProfiles));
+    } catch {
+      return [];
+    }
+  }, [storedProfiles]);
   const [customProfileName, setCustomProfileName] = useState('');
   const activeArch = modelArchName ?? currentArch;
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(CUSTOM_PROFILE_STORAGE_KEY);
-      if (raw) setCustomProfiles(sanitizeStoredProfiles(JSON.parse(raw)));
-    } catch {
-      setCustomProfiles([]);
-    }
-  }, []);
 
   const availableBuiltInProfiles = useMemo(
     () => builtInAutoTrainingProfiles.filter(profile => isAutoTrainingProfileCompatible(profile, activeArch)),
@@ -199,23 +191,26 @@ export default function TrainingPhasesEditor({
     () =>
       defaultAutoTrainingProfileId && allProfiles.some(profile => profile.id === defaultAutoTrainingProfileId)
         ? defaultAutoTrainingProfileId
-        : allProfiles[0]?.id ?? '',
+        : (allProfiles[0]?.id ?? ''),
     [allProfiles, defaultAutoTrainingProfileId],
   );
 
-  useEffect(() => {
+  const [selectedProfileID, setSelectedProfileID] = useState(defaultAutoTrainingProfileId ?? builtInAutoTrainingProfiles[0]?.id ?? '');
+  const profileScope = JSON.stringify([activeArch, defaultAutoTrainingProfileId, preferredProfileID]);
+  const [previousProfileScope, setPreviousProfileScope] = useState(profileScope);
+  const [pendingAutoProfile, setPendingAutoProfile] = useState<{ profile: AutoTrainingProfile } | null>(null);
+  if (previousProfileScope !== profileScope) {
+    setPreviousProfileScope(profileScope);
     if (preferredProfileID) setSelectedProfileID(preferredProfileID);
-  }, [activeArch, defaultAutoTrainingProfileId, preferredProfileID]);
-
-  useEffect(() => {
-    if (!allProfiles.length) {
-      setSelectedProfileID('');
-      return;
+  }
+  if (!allProfiles.some(profile => profile.id === selectedProfileID)) {
+    const fallback = allProfiles[0];
+    const nextID = autoTrain && fallback ? fallback.id : preferredProfileID;
+    if (selectedProfileID !== nextID) {
+      setSelectedProfileID(nextID);
+      if (autoTrain && fallback) setPendingAutoProfile({ profile: fallback });
     }
-    if (!allProfiles.some(profile => profile.id === selectedProfileID)) {
-      setSelectedProfileID(preferredProfileID);
-    }
-  }, [allProfiles, selectedProfileID, preferredProfileID]);
+  }
 
   const profileOptions = useMemo(
     () => [
@@ -232,8 +227,7 @@ export default function TrainingPhasesEditor({
   );
 
   const persistCustomProfiles = (profiles: AutoTrainingProfile[]) => {
-    setCustomProfiles(profiles);
-    window.localStorage.setItem(CUSTOM_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
+    setStoredProfiles(JSON.stringify(profiles));
   };
 
   const buildPhase = (index: number, steps?: number): TrainingPhaseConfig => {
@@ -285,10 +279,9 @@ export default function TrainingPhasesEditor({
     updatePhase(index, { auto_advance: autoAdvance });
   };
 
-  const applyAutoProfile = (profile: AutoTrainingProfile) => {
+  const applyProfileConfiguration = (profile: AutoTrainingProfile) => {
     const nextProfile = cloneProfile(profile);
     const profileNetworkType = nextProfile.network?.type ?? network?.type;
-    setSelectedProfileID(nextProfile.id);
     setJobConfig(true, 'config.process[0].train.auto_train');
 
     if (!('sega_distill' in (nextProfile.train ?? {}))) {
@@ -325,22 +318,15 @@ export default function TrainingPhasesEditor({
     setPhases(nextPhases, true);
   };
 
+  const applyAutoProfile = (profile: AutoTrainingProfile) => {
+    setSelectedProfileID(profile.id);
+    applyProfileConfiguration(profile);
+  };
   useEffect(() => {
-    if (allProfiles.some(profile => profile.id === selectedProfileID)) return;
-
-    const fallbackProfile = allProfiles[0];
-    if (!fallbackProfile) {
-      setSelectedProfileID('');
-      return;
-    }
-
-    if (autoTrain) {
-      applyAutoProfile(fallbackProfile);
-      return;
-    }
-
-    setSelectedProfileID(fallbackProfile.id);
-  }, [allProfiles, autoTrain, selectedProfileID]);
+    // A profile becoming incompatible is an action on the parent form. Apply
+    // its fallback once; ordinary parent edits must not reapply the preset.
+    if (pendingAutoProfile) applyProfileConfiguration(pendingAutoProfile.profile);
+  }, [pendingAutoProfile]);
 
   const toggleAutoTrain = (enabled: boolean) => {
     if (!enabled) {
@@ -638,7 +624,13 @@ export default function TrainingPhasesEditor({
                   />
                 )}
                 {autoAdvance && (
-                  <div className={autoTrain ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3' : 'mt-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3'}>
+                  <div
+                    className={
+                      autoTrain
+                        ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3'
+                        : 'mt-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3'
+                    }
+                  >
                     <TextInput
                       label="Metric"
                       value={autoAdvance.metric ?? 'loss/loss'}

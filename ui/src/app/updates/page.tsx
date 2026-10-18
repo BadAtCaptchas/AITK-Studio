@@ -141,7 +141,8 @@ function getStatusDetail(status: RepoUpdateStatus | null) {
   if (status.state === 'restarting') return status.restartStep?.replaceAll('-', ' ') || 'Restarting app';
   if (status.state === 'updated' && status.needsRestart) return 'Restart required';
   if (status.state === 'update_blocked') return status.applyUpdateUnavailableReason || status.message;
-  if (status.state === 'update_conflict') return status.stashRef ? `Local changes saved in ${status.stashRef}` : status.message;
+  if (status.state === 'update_conflict')
+    return status.stashRef ? `Local changes saved in ${status.stashRef}` : status.message;
   if (status.state === 'update_failed') return status.updateError || status.error || status.message;
   return status.message || `Checked ${formatDate(status.checkedAt)}`;
 }
@@ -185,7 +186,7 @@ function isRepoUpdateStatus(value: unknown): value is RepoUpdateStatus {
 
 export default function UpdatesPage() {
   const [status, setStatus] = useState<RepoUpdateStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -194,40 +195,41 @@ export default function UpdatesPage() {
   const restartRequestedAtRef = useRef<number | null>(null);
   const restartPollRef = useRef<number | null>(null);
 
-  const refresh = async () => {
+  const loadStatus = () =>
+    apiClient
+      .get('/api/updater')
+      .then(res => {
+        const nextStatus = res.data as RepoUpdateStatus;
+        const applyRequestedAt = applyRequestedAtRef.current;
+
+        if (applyRequestedAt) {
+          const statusTime = getStatusTime(nextStatus);
+          const expiresAt = applyFeedbackExpiresAtRef.current || 0;
+          const staleStatus = statusTime == null || statusTime < applyRequestedAt;
+
+          if (staleStatus && Date.now() < expiresAt) {
+            return;
+          }
+
+          if (nextStatus.state !== 'checking' && nextStatus.state !== 'updating') {
+            applyRequestedAtRef.current = null;
+            applyFeedbackExpiresAtRef.current = null;
+            setApplying(false);
+          }
+        }
+
+        setStatus(nextStatus);
+        broadcastUpdaterStatus(nextStatus);
+      })
+      .catch(error => console.error('Error fetching updater status:', error))
+      .finally(() => setLoading(false));
+  const refresh = () => {
     setLoading(true);
-    try {
-      const res = await apiClient.get('/api/updater');
-      const nextStatus = res.data as RepoUpdateStatus;
-      const applyRequestedAt = applyRequestedAtRef.current;
-
-      if (applyRequestedAt) {
-        const statusTime = getStatusTime(nextStatus);
-        const expiresAt = applyFeedbackExpiresAtRef.current || 0;
-        const staleStatus = statusTime == null || statusTime < applyRequestedAt;
-
-        if (staleStatus && Date.now() < expiresAt) {
-          return;
-        }
-
-        if (nextStatus.state !== 'checking' && nextStatus.state !== 'updating') {
-          applyRequestedAtRef.current = null;
-          applyFeedbackExpiresAtRef.current = null;
-          setApplying(false);
-        }
-      }
-
-      setStatus(nextStatus);
-      broadcastUpdaterStatus(nextStatus);
-    } catch (error) {
-      console.error('Error fetching updater status:', error);
-    } finally {
-      setLoading(false);
-    }
+    return loadStatus();
   };
 
   useEffect(() => {
-    void refresh();
+    void loadStatus();
   }, []);
 
   useEffect(() => {
@@ -361,7 +363,12 @@ export default function UpdatesPage() {
   const commits = status?.recentCommits || [];
   const repoUrl = status?.repoWebUrl || 'https://github.com/BadAtCaptchas/AITK-Studio';
   const statusTone = toneByState[status?.state || ''] || 'border-gray-800 bg-gray-900/60 text-gray-100';
-  const StatusIcon = status?.state === 'updating' || status?.state === 'checking' || status?.state === 'restarting' ? Loader2 : status?.state?.includes('fail') || status?.state === 'error' ? AlertCircle : CheckCircle2;
+  const StatusIcon =
+    status?.state === 'updating' || status?.state === 'checking' || status?.state === 'restarting'
+      ? Loader2
+      : status?.state?.includes('fail') || status?.state === 'error'
+        ? AlertCircle
+        : CheckCircle2;
   const repoName = status?.repoFullName || 'BadAtCaptchas/AITK-Studio';
   const isBusy = status?.state === 'checking' || status?.state === 'updating' || status?.state === 'restarting';
   const isRestarting = restarting || status?.state === 'restarting';
@@ -388,18 +395,41 @@ export default function UpdatesPage() {
           <h1 className="text-base font-semibold">Updates</h1>
         </div>
         <div className="flex-1"></div>
-        <button type="button" onClick={requestCheck} disabled={checking || isBusy} className="operator-button py-1 text-xs">
-          {checking || status?.state === 'checking' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        <button
+          type="button"
+          onClick={requestCheck}
+          disabled={checking || isBusy}
+          className="operator-button py-1 text-xs"
+        >
+          {checking || status?.state === 'checking' ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" />
+          )}
           Check
         </button>
         {(status?.canApplyUpdate || applying || status?.state === 'updating') && (
-          <button type="button" onClick={requestApply} disabled={applying || isBusy} className="operator-button border-amber-800 bg-amber-950/40 py-1 text-xs text-amber-100 hover:bg-amber-900/50">
-            {applying || status?.state === 'updating' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          <button
+            type="button"
+            onClick={requestApply}
+            disabled={applying || isBusy}
+            className="operator-button border-amber-800 bg-amber-950/40 py-1 text-xs text-amber-100 hover:bg-amber-900/50"
+          >
+            {applying || status?.state === 'updating' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
             {applying || status?.state === 'updating' ? 'Updating' : 'Update'}
           </button>
         )}
         {canRestart && (
-          <button type="button" onClick={requestRestart} disabled={isRestarting} className="operator-button border-brand-800 bg-brand-950/30 py-1 text-xs text-brand-100 hover:bg-brand-900/40">
+          <button
+            type="button"
+            onClick={requestRestart}
+            disabled={isRestarting}
+            className="operator-button border-brand-800 bg-brand-950/30 py-1 text-xs text-brand-100 hover:bg-brand-900/40"
+          >
             {isRestarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Power className="h-3.5 w-3.5" />}
             {isRestarting ? 'Restarting' : 'Restart'}
           </button>
@@ -420,7 +450,12 @@ export default function UpdatesPage() {
               <p className="mt-1 text-xs opacity-85">{getStatusDetail(status)}</p>
             </div>
             {status?.compareUrl && (
-              <a href={status.compareUrl} target="_blank" rel="noreferrer" className="operator-button shrink-0 py-1 text-xs">
+              <a
+                href={status.compareUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="operator-button shrink-0 py-1 text-xs"
+              >
                 <GitCompareArrows className="h-3.5 w-3.5" />
                 Compare
               </a>
@@ -478,7 +513,14 @@ export default function UpdatesPage() {
                       {commit.shortSha}
                     </code>
                     {commit.url && (
-                      <a href={commit.url} target="_blank" rel="noreferrer" className="operator-icon-button" title="Open commit" aria-label="Open commit">
+                      <a
+                        href={commit.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="operator-icon-button"
+                        title="Open commit"
+                        aria-label="Open commit"
+                      >
                         <ExternalLink className="h-4 w-4" />
                       </a>
                     )}

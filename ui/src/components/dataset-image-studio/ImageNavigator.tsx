@@ -1,4 +1,5 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
 import classNames from 'classnames';
 import {
   ArrowLeft,
@@ -164,7 +165,7 @@ function ThumbnailTile({
   datasetName: string;
   workerID: string;
   encryptedKey?: CryptoKey | null;
-  captionCache: Map<string, CaptionCacheEntry>;
+  captionCache: ReadonlyMap<string, CaptionCacheEntry>;
   approvedKeys: Set<string>;
   onSelect: (index: number) => void;
   onToggleBulkSelect?: (index: number) => void;
@@ -334,12 +335,12 @@ export function ImageNavigator({
   liveCaptionRefresh,
   captionCache,
   captionCacheVersion,
+  onSetCaptionCache,
   approvedKeys,
   captionAction,
   watcherAction,
   onAddImages,
   presentation = 'studio',
-  onCaptionCacheChange,
   onSelectIndex,
   onBulkCaptionAction,
   onDeleteImages,
@@ -351,14 +352,14 @@ export function ImageNavigator({
   encryptedKey?: CryptoKey | null;
   isAutoCaptioning?: boolean;
   liveCaptionRefresh?: boolean;
-  captionCache: Map<string, CaptionCacheEntry>;
+  captionCache: ReadonlyMap<string, CaptionCacheEntry>;
+  onSetCaptionCache: (key: string, entry: CaptionCacheEntry) => void;
   captionCacheVersion: number;
   approvedKeys: Set<string>;
   captionAction?: ReactNode;
   watcherAction?: ReactNode;
   onAddImages: () => void;
   presentation?: 'studio' | 'legacy';
-  onCaptionCacheChange: () => void;
   onSelectIndex: (index: number) => void;
   onBulkCaptionAction?: (request: {
     action: BulkCaptionAction;
@@ -369,25 +370,34 @@ export function ImageNavigator({
   }) => Promise<BulkCaptionActionResult>;
   onDeleteImages?: (items: DatasetStudioItem[], label?: string) => Promise<DeleteImagesResult>;
 }) {
+  const scope = JSON.stringify([datasetName, workerID]);
+  const selectionScope = JSON.stringify([selectedIndex, items.length]);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [batchPanelOpen, setBatchPanelOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [captionKeywordQuery, setCaptionKeywordQuery] = useState('');
-  const [captionKeywordMode, setCaptionKeywordMode] = useState<CaptionKeywordMatchMode>('whole-word');
-  const [bulkDestinationName, setBulkDestinationName] = useState(`${datasetName}_matches`);
-  const [bulkBusyAction, setBulkBusyAction] = useState<BulkCaptionAction | null>(null);
-  const [bulkMessage, setBulkMessage] = useState('');
-  const [selectedBulkKeys, setSelectedBulkKeys] = useState<Set<string>>(() => new Set());
-  const [isBulkDeletingImages, setIsBulkDeletingImages] = useState(false);
-  const [deleteSelectionMessage, setDeleteSelectionMessage] = useState('');
-  const [filter, setFilter] = useState<CaptionStudioFilter>('all');
-  const [sortMode, setSortMode] = useState<DatasetNavigatorSortMode>('original');
-  const [sortDirection, setSortDirection] = useState<DatasetNavigatorSortDirection>('desc');
+  const [searchQuery, setSearchQuery] = useScopedState(scope, '');
+  const [captionKeywordQuery, setCaptionKeywordQuery] = useScopedState(scope, '');
+  const [captionKeywordMode, setCaptionKeywordMode] = useScopedState<CaptionKeywordMatchMode>(scope, 'whole-word');
+  const [bulkDestinationName, setBulkDestinationName] = useScopedState(scope, `${datasetName}_matches`);
+  const [bulkBusyAction, setBulkBusyAction] = useScopedState<BulkCaptionAction | null>(scope, null);
+  const [bulkMessage, setBulkMessage] = useScopedState(scope, '');
+  const [selectedBulkKeys, setSelectedBulkKeys] = useScopedState<Set<string>>(scope, () => new Set());
+  const [isBulkDeletingImages, setIsBulkDeletingImages] = useScopedState(scope, false);
+  const [deleteSelectionMessage, setDeleteSelectionMessage] = useScopedState(scope, '');
+  const [filter, setFilter] = useScopedState<CaptionStudioFilter>(scope, 'all');
+  const [sortMode, setSortMode] = useScopedState<DatasetNavigatorSortMode>(scope, 'original');
+  const [sortDirection, setSortDirection] = useScopedState<DatasetNavigatorSortDirection>(scope, 'desc');
   const [thumbSize, setThumbSize] = useState<ThumbSize>('md');
-  const [jumpText, setJumpText] = useState('');
-  const [scrubValue, setScrubValue] = useState(selectedIndex + 1);
+  const [jumpText, setJumpText] = useScopedState(
+    selectionScope,
+    `${selectedIndex + 1} / ${items.length.toLocaleString()}`,
+  );
+  const [scrubValue, setScrubValue] = useScopedState(selectionScope, selectedIndex + 1);
   const [localCacheVersion, setLocalCacheVersion] = useState(0);
-  const [scanState, setScanState] = useState<ScanState>({ status: 'idle', scanned: 0, total: items.length });
+  const [scanState, setScanState] = useScopedState<ScanState>(JSON.stringify([scope, items.length]), {
+    status: 'idle',
+    scanned: 0,
+    total: items.length,
+  });
   const scanStartedRef = useRef(false);
   const scanControllerRef = useRef<AbortController | null>(null);
   const gridRowsRef = useRef<number[][]>([]);
@@ -396,44 +406,22 @@ export function ImageNavigator({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { ref: gridMeasureRef, size: gridSize } = useElementSize<HTMLDivElement>();
   useEffect(() => {
-    setJumpText(`${selectedIndex + 1} / ${items.length.toLocaleString()}`);
-    setScrubValue(selectedIndex + 1);
-  }, [items.length, selectedIndex]);
-  useEffect(() => {
     scanControllerRef.current?.abort();
     scanControllerRef.current = null;
     scanStartedRef.current = false;
-    setScanState({ status: 'idle', scanned: 0, total: items.length });
-  }, [items.length]);
-  useEffect(() => {
-    scanControllerRef.current?.abort();
-    scanControllerRef.current = null;
-    scanStartedRef.current = false;
-    setScanState({ status: 'idle', scanned: 0, total: items.length });
-    setSearchQuery('');
-    setCaptionKeywordQuery('');
-    setCaptionKeywordMode('whole-word');
-    setBulkDestinationName(`${datasetName}_matches`);
-    setBulkBusyAction(null);
-    setBulkMessage('');
-    setSelectedBulkKeys(new Set());
-    setIsBulkDeletingImages(false);
-    setDeleteSelectionMessage('');
-    setFilter('all');
-    setSortMode('original');
-    setSortDirection('desc');
-  }, [datasetName, workerID]);
+  }, [scope, items.length]);
   const notifyCaptionCacheChange = useCallback(() => {
     setLocalCacheVersion(version => version + 1);
-    onCaptionCacheChange();
-  }, [onCaptionCacheChange]);
-  useEffect(() => {
+  }, []);
+  const [previousItems, setPreviousItems] = useState(items);
+  if (previousItems !== items) {
+    setPreviousItems(items);
     const availableKeys = new Set(items.map(item => itemKey(item)));
     setSelectedBulkKeys(previous => {
       const next = new Set([...previous].filter(key => availableKeys.has(key)));
       return next.size === previous.size ? previous : next;
     });
-  }, [items]);
+  }
   const entries = useMemo(
     () =>
       items.map((item, index) => {
@@ -598,7 +586,7 @@ export function ImageNavigator({
     const parsed = parseNavigatorJump(jumpText, items.length);
     if (parsed != null) commitIndex(parsed);
     setJumpText(`${(parsed ?? selectedIndex) + 1} / ${items.length.toLocaleString()}`);
-  }, [commitIndex, items.length, jumpText, selectedIndex]);
+  }, [commitIndex, items.length, jumpText, selectedIndex, setJumpText]);
   const commitScrub = useCallback(() => {
     commitIndex(scrubValue - 1);
   }, [commitIndex, scrubValue]);
@@ -618,7 +606,7 @@ export function ImageNavigator({
         return next;
       });
     },
-    [items],
+    [items, setDeleteSelectionMessage, setSelectedBulkKeys],
   );
   const selectShownBulkItems = useCallback(() => {
     setDeleteSelectionMessage('');
@@ -630,11 +618,11 @@ export function ImageNavigator({
       });
       return next;
     });
-  }, [filteredIndexes, items]);
+  }, [filteredIndexes, items, setDeleteSelectionMessage, setSelectedBulkKeys]);
   const clearBulkSelection = useCallback(() => {
     setDeleteSelectionMessage('');
     setSelectedBulkKeys(new Set());
-  }, []);
+  }, [setDeleteSelectionMessage, setSelectedBulkKeys]);
   const runSelectedImageDelete = useCallback(async () => {
     if (!onDeleteImages || selectedBulkItems.length === 0 || isBulkDeletingImages) return;
     setIsBulkDeletingImages(true);
@@ -666,7 +654,14 @@ export function ImageNavigator({
     } finally {
       setIsBulkDeletingImages(false);
     }
-  }, [isBulkDeletingImages, onDeleteImages, selectedBulkItems]);
+  }, [
+    isBulkDeletingImages,
+    onDeleteImages,
+    selectedBulkItems,
+    setIsBulkDeletingImages,
+    setDeleteSelectionMessage,
+    setSelectedBulkKeys,
+  ]);
   const bulkResultMessage = useCallback((result: BulkCaptionActionResult) => {
     if (result.action === 'move') {
       return `${result.found.toLocaleString()} found, ${result.affected.toLocaleString()} moved${result.destinationName ? ` to ${result.destinationName}` : ''}.`;
@@ -720,11 +715,13 @@ export function ImageNavigator({
       captionKeywordQuery,
       onBulkCaptionAction,
       shownCaptionKeywordMatches,
+      setBulkMessage,
+      setBulkBusyAction,
     ],
   );
   const setCacheEntry = useCallback(
     (item: DatasetStudioItem, caption: string) => {
-      captionCache.set(itemKey(item), { caption, saved: caption, loaded: true });
+      onSetCaptionCache(itemKey(item), { caption, saved: caption, loaded: true });
     },
     [captionCache],
   );
@@ -816,7 +813,7 @@ export function ImageNavigator({
       );
       return completed;
     },
-    [datasetName, encryptedKey, null, setCacheEntry, workerID],
+    [datasetName, encryptedKey, setCacheEntry, workerID],
   );
   useEffect(() => {
     if (!drawerOpen || scanStartedRef.current) return;
@@ -863,7 +860,7 @@ export function ImageNavigator({
       }
     };
     void runScan();
-  }, [captionCache, drawerOpen, items, notifyCaptionCacheChange, scanEncryptedChunk, scanPlainChunk]);
+  }, [captionCache, drawerOpen, items, notifyCaptionCacheChange, scanEncryptedChunk, scanPlainChunk, setScanState]);
   useEffect(() => {
     const shouldLiveRefreshCaptions = isAutoCaptioning || liveCaptionRefresh;
     if (!shouldLiveRefreshCaptions || items.length === 0) return;

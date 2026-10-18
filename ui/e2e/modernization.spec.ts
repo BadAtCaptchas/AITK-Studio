@@ -1,11 +1,15 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { pathJoin } from '../src/utils/basic';
 
 const origin = 'http://127.0.0.1:15875';
 const headers = { Origin: origin };
 const screenshotDir = '.review-build/modernization';
 const pageErrors = new WeakMap<Page, string[]>();
+// These workflows share authentication, while each test keeps an isolated browser context.
+// Reusing only the session cookie avoids consuming the login rate limit for every workflow.
+let sessionCookies: Awaited<ReturnType<BrowserContext['cookies']>> = [];
 
 async function capture(page: Page, name: string) {
   await page.screenshot({ path: `${screenshotDir}/${name}.png`, fullPage: true });
@@ -53,9 +57,14 @@ test.beforeEach(async ({ page }) => {
       },
     }),
   );
+  if (sessionCookies.length) await page.context().addCookies(sessionCookies);
   await page.goto('/');
-  await page.getByLabel('Password', { exact: true }).fill('browser-fixture-local-only');
-  await page.getByRole('button', { name: 'Check Password' }).click();
+  if (!sessionCookies.length) {
+    await page.getByLabel('Password', { exact: true }).fill('browser-fixture-local-only');
+    await page.getByRole('button', { name: 'Check Password' }).click();
+    await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
+    sessionCookies = (await page.context().cookies()).filter(cookie => cookie.name === 'aitk_session');
+  }
   await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
 });
 
@@ -103,6 +112,19 @@ test('continuous training, queue and detail retain navigation and responsive con
   await expect(page.getByText('Loading log...', { exact: true })).toHaveCount(0);
   await expect(page.getByText('No log output yet.', { exact: true })).toBeVisible();
   await capture(page, 'job-overview-empty');
+  const graphSettingsKey = `jobLossGraph:/jobs/${job.id}`;
+  await page.evaluate(key => localStorage.setItem(key, JSON.stringify({ enabledLoss: { 'loss/loss': false } })), graphSettingsKey);
+  let finishMetrics: (() => Promise<void>) | undefined;
+  await page.route(`**/api/jobs/${job.id}/metrics*`, route => {
+    finishMetrics = () => route.fulfill({ json: { keys: [], series: {} } });
+  });
+  await page.getByRole('button', { name: 'Training Monitor', exact: true }).click();
+  await expect.poll(() => Boolean(finishMetrics)).toBe(true);
+  await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key) || '{}').smoothing, graphSettingsKey)).toBe(82);
+  expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key) || '{}').enabledLoss, graphSettingsKey)).toEqual({ 'loss/loss': false });
+  await finishMetrics!();
+  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await page.unroute(`**/api/jobs/${job.id}/metrics*`);
   // Render controlled live telemetry without starting a worker or GPU job.
   const liveJob = { ...job, status: 'running', step: 1560, info: 'Training in progress', speed_string: '2.4 s/step' };
   await page.route('**/api/jobs?*', route => {
@@ -333,4 +355,87 @@ test('Ideogram exposes a queue failure and allows cancellation with a controlled
   await page.locator('.ideogram-topbar').getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Generate', exact: true })).toBeEnabled();
   expect(interrupted).toBe(1);
+});
+
+test('restored recaption work runs once per image and preserves selection while requests finish', async ({ page }) => {
+  const dataset = 'queue-refactor-' + randomUUID().slice(0, 8);
+  const photo = await readFile('public/images/graphite-studio-hero.webp');
+  for (let index = 1; index <= 2; index++) {
+    const group = randomUUID();
+    for (const [filename, data] of [
+      ['image-' + index + '.webp', photo],
+      ['image-' + index + '.txt', Buffer.from('Queue original ' + index)],
+    ] as const) {
+      const response = await page.request.post('/api/datasets/upload', {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/octet-stream',
+          'X-AITK-Dataset-Name': encodeURIComponent(dataset),
+          'X-AITK-File-Name': filename,
+          'X-AITK-Upload-Group': group,
+        },
+        data,
+      });
+      expect(response.status()).toBe(200);
+    }
+  }
+  const listing = await (
+    await page.request.post('/api/datasets/listImages', { headers, data: { datasetName: dataset } })
+  ).json();
+  const settings = await (await page.request.get('/api/settings')).json();
+  const datasetPath = pathJoin(settings.DATASETS_FOLDER, dataset);
+  const storageKey =
+    'aitk.datasetEditor.recaptionQueue.v2:' + encodeURIComponent(datasetPath) + ':' + encodeURIComponent(dataset);
+  const entries = listing.images.map((item: { img_path: string }, index: number) => ({
+    id: 'restored-' + index,
+    key: item.img_path,
+    name: 'image-' + (index + 1) + '.webp',
+    status: 'queued',
+    settings: {
+      provider: 'openrouter',
+      model: 'fixture/model',
+      outputFormat: 'text',
+      prompt: 'Fixture caption',
+      systemPrompt: '',
+      remoteWorkerId: '',
+      maxNewTokens: 256,
+    },
+  }));
+  await page.evaluate(
+    ({ storageKey, entries }) =>
+      localStorage.setItem(storageKey, JSON.stringify({ version: 2, active: entries[0], queue: [entries[1]] })),
+    { storageKey, entries },
+  );
+  const pending: Array<() => Promise<void>> = [];
+  const requested: string[] = [];
+  await page.route('**/api/datasets/recaption-single', async route => {
+    const body = route.request().postDataJSON();
+    requested.push(body.imgPath);
+    const index = requested.length;
+    await new Promise<void>(resolve =>
+      pending.push(async () => {
+        await route.fulfill({ json: { caption: 'Processed ' + index } });
+        resolve();
+      }),
+    );
+  });
+  await page.goto('/datasets/' + dataset);
+  const caption = page.getByRole('textbox', { name: 'Image caption', exact: true });
+  await expect.poll(() => pending.length).toBe(1);
+  await expect(caption).toHaveValue('Queue original 1');
+  await page.getByRole('button', { name: 'Next', exact: true }).first().click();
+  await expect(caption).toHaveValue('Queue original 2');
+  expect(requested).toEqual([entries[0].key]);
+  const stored = await page.evaluate(key => localStorage.getItem(key), storageKey);
+  expect(stored).not.toContain('Queue original');
+  expect(stored).not.toContain('existingCaption');
+  await pending[0]();
+  await expect.poll(() => pending.length).toBe(2);
+  await expect(caption).toHaveValue('Queue original 2');
+  await pending[1]();
+  await expect(caption).toHaveValue('Processed 2');
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), storageKey)).toBeNull();
+  expect(requested).toEqual(entries.map((entry: { key: string }) => entry.key));
+  await page.getByRole('button', { name: 'Previous', exact: true }).first().click();
+  await expect(caption).toHaveValue('Processed 1');
 });

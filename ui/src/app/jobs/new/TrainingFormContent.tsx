@@ -49,7 +49,7 @@ export function TrainingFormContent() {
   const cloneId = searchParams.get('cloneId');
   const draftKey = runId || (cloneId ? `clone:${cloneId}` : 'new');
   const appliedDataset = useRef<string | null>(null);
-  const restoredDraft = useRef(readTrainingDraft(draftKey)).current;
+  const [restoredDraft] = useState(() => readTrainingDraft(draftKey));
   const [gpuIDs, setGpuIDs] = useState<string | null>(restoredDraft?.gpuIDs ?? null);
   const [workerID, setWorkerID] = useState(restoredDraft?.workerID || 'local');
   const { settings, isSettingsLoaded, settingsStatus, settingsError, refreshSettings } = useSettings();
@@ -57,18 +57,6 @@ export function TrainingFormContent() {
   const { workers, status: workerStatus, refreshWorkers } = useWorkers();
   const { gpuData, gpuList, isGPUInfoLoaded, status: gpuStatus, refreshGpuInfo } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus, refreshDatasets } = useDatasetList({ includeRemote: true });
-  const [datasetOptions, setDatasetOptions] = useState<
-    Array<
-      SelectOption & {
-        encrypted: boolean;
-        name: string;
-        source: 'local' | 'remote';
-        worker_id: string;
-        ref: string;
-        detectedCaptionExt?: string | null;
-      }
-    >
-  >([]);
   const [showAdvancedView, setShowAdvancedView] = useState(false);
   const [rawEditorValid, setRawEditorValid] = useState(true);
   const closeRawConfig = () => {
@@ -125,30 +113,28 @@ export function TrainingFormContent() {
     // Reset so the same file can be re-imported
     e.target.value = '';
   };
+  const datasetOptions = datasets.map(dataset => {
+    const source = (dataset.source || 'local') as 'local' | 'remote';
+    const workerID = dataset.worker_id || 'local';
+    const ref = source === 'remote' ? dataset.ref || makeRemoteDatasetRef(workerID, dataset.name) : dataset.ref || '';
+    return {
+      value: source === 'remote' ? ref : dataset.path || path.join(settings.DATASETS_FOLDER, dataset.name),
+      label:
+        source === 'remote'
+          ? `${dataset.name}${dataset.encrypted ? ' (encrypted)' : ''} - ${dataset.worker_name || workerID}`
+          : dataset.encrypted
+            ? `${dataset.name} (encrypted)`
+            : dataset.name,
+      encrypted: dataset.encrypted,
+      name: dataset.name,
+      source,
+      worker_id: workerID,
+      ref,
+      detectedCaptionExt: dataset.detectedCaptionExt ?? null,
+    };
+  });
   useEffect(() => {
-    if (!isSettingsLoaded) return;
-    if (datasetFetchStatus !== 'success') return;
-    const datasetOptions = datasets.map(dataset => {
-      const source = (dataset.source || 'local') as 'local' | 'remote';
-      const workerID = dataset.worker_id || 'local';
-      const ref = source === 'remote' ? dataset.ref || makeRemoteDatasetRef(workerID, dataset.name) : dataset.ref || '';
-      return {
-        value: source === 'remote' ? ref : dataset.path || path.join(settings.DATASETS_FOLDER, dataset.name),
-        label:
-          source === 'remote'
-            ? `${dataset.name}${dataset.encrypted ? ' (encrypted)' : ''} - ${dataset.worker_name || workerID}`
-            : dataset.encrypted
-              ? `${dataset.name} (encrypted)`
-              : dataset.name,
-        encrypted: dataset.encrypted,
-        name: dataset.name,
-        source,
-        worker_id: workerID,
-        ref,
-        detectedCaptionExt: dataset.detectedCaptionExt ?? null,
-      };
-    });
-    setDatasetOptions(datasetOptions);
+    if (!isSettingsLoaded || datasetFetchStatus !== 'success') return;
     const requestedDataset = searchParams.get('dataset');
     const chosenDataset = datasetOptions.find(
       option =>
@@ -207,13 +193,11 @@ export function TrainingFormContent() {
         .catch(error => console.error('Error fetching training:', error));
     }
   }, [runId]);
-  useEffect(() => {
-    if (isGPUInfoLoaded) {
-      if (gpuIDs === null) {
-        setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
-      }
+  if (isGPUInfoLoaded) {
+    if (gpuIDs === null) {
+      setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
     }
-  }, [gpuList, isGPUInfoLoaded]);
+  }
   useEffect(() => {
     if (isSettingsLoaded) {
       setJobConfig(settings.TRAINING_FOLDER, 'config.process[0].training_folder');
@@ -456,11 +440,17 @@ export function TrainingFormContent() {
       return;
     }
     setShowAdvancedView(false);
-    setFocusTarget({ ...message.target, nonce: Date.now() });
+    setFocusTarget(previous => ({ ...message.target, nonce: (previous?.nonce ?? 0) + 1 }));
   };
-  useEffect(() => {
+  const [validatedInput, setValidatedInput] = useState({ jobConfig, workerID, gpuIDs });
+  if (
+    validatedInput.jobConfig !== jobConfig ||
+    validatedInput.workerID !== workerID ||
+    validatedInput.gpuIDs !== gpuIDs
+  ) {
+    setValidatedInput({ jobConfig, workerID, gpuIDs });
     setValidationMessages([]);
-  }, [jobConfig, workerID, gpuIDs]);
+  }
   const validationErrors = currentFindings.filter(message => message.level === 'error');
   const validationWarnings = currentFindings.filter(message => message.level === 'warning');
   const workerOptions = [

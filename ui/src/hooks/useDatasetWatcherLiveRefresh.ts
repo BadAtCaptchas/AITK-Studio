@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import useScopedState from './useScopedState';
 import { apiClient } from '@/utils/api';
 import type { DatasetWatcherListItem, DatasetWatcherStatus } from '@/utils/datasetWatcherStatus';
 type DatasetWatcherLiveRefreshOptions = {
@@ -61,15 +62,16 @@ export default function useDatasetWatcherLiveRefresh({
   intervalMs = 5000,
   onRefresh,
 }: DatasetWatcherLiveRefreshOptions) {
-  const [hasActiveWatchers, setHasActiveWatchers] = useState(false);
-  const [watchers, setWatchers] = useState<DatasetWatcherListItem[]>([]);
-  const [statuses, setStatuses] = useState<Record<string, DatasetWatcherStatus>>({});
+  const scope = JSON.stringify([enabled, datasetName, workerID]);
+  const [hasActiveWatchers, setHasActiveWatchers] = useScopedState(scope, false);
+  const [watchers, setWatchers] = useScopedState<DatasetWatcherListItem[]>(scope, []);
+  const [statuses, setStatuses] = useScopedState<Record<string, DatasetWatcherStatus>>(scope, {});
   const onRefreshRef = useRef(onRefresh);
   const statusSignatureRef = useRef('');
   const refreshSignatureRef = useRef('');
   const initializedRef = useRef(false);
   const busyRef = useRef(false);
-  const startedAtRef = useRef(Date.now());
+  const startedAtRef = useRef(0);
   useEffect(() => {
     onRefreshRef.current = onRefresh;
   }, [onRefresh]);
@@ -80,12 +82,7 @@ export default function useDatasetWatcherLiveRefresh({
     startedAtRef.current = Date.now();
   }, [datasetName, enabled, null, workerID]);
   useEffect(() => {
-    if (!enabled) {
-      setHasActiveWatchers(false);
-      setWatchers([]);
-      setStatuses({});
-      return;
-    }
+    if (!enabled) return;
     let cancelled = false;
     const pollWatchers = async () => {
       if (busyRef.current) return;
@@ -130,6 +127,6 @@ export default function useDatasetWatcherLiveRefresh({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [datasetName, enabled, intervalMs, null, workerID]);
+  }, [datasetName, enabled, intervalMs, null, workerID, setHasActiveWatchers, setWatchers, setStatuses]);
   return { hasActiveWatchers, watchers, statuses };
 }

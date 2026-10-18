@@ -1,6 +1,7 @@
 'use client';
+import useScopedState from './useScopedState';
 
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import { TerminalEmulator } from '@/utils/terminalEmulator';
 import usePollLoop from './usePollLoop';
@@ -26,7 +27,7 @@ function parseJobLogResponse(data: unknown): JobLogResponse {
 }
 
 export default function useJobLog(jobID: string, reloadInterval: null | number = null) {
-  const [log, setLog] = useState<string>('');
+  const [log, setLog] = useScopedState<string>(jobID, '');
   const terminalRef = useRef<TerminalEmulator | null>(null);
   if (terminalRef.current === null) {
     terminalRef.current = new TerminalEmulator();
@@ -35,7 +36,7 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
   const offsetRef = useRef<number | null>(null);
   const isRefreshingRef = useRef(false);
   const activeJobIDRef = useRef(jobID);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>('idle');
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>(jobID, 'idle');
 
   const refresh = useCallback(
     (signal?: AbortSignal) => {
@@ -80,7 +81,7 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
           }
         });
     },
-    [jobID],
+    [jobID, setStatus, setLog],
   );
 
   useEffect(() => {
@@ -89,7 +90,6 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
     offsetRef.current = null;
     didInitialLoadRef.current = false;
     terminalRef.current?.reset();
-    setLog('');
   }, [jobID]);
 
   usePollLoop(signal => refresh(signal), reloadInterval, [jobID]);

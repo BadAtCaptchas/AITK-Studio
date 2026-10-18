@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useState, use } from 'react';
 import { FaChevronLeft } from 'react-icons/fa';
 import { MdDashboard, MdImage, MdShowChart, MdCode } from 'react-icons/md';
 import { Button } from '@headlessui/react';
@@ -77,10 +77,8 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
   const { job, status, refreshJob } = useJob(jobID, jobReloadInterval);
   const [pageKey, setPageKey] = useState<PageKey>('overview');
 
-  useEffect(() => {
-    const nextInterval = shouldPollJob(job) ? 5000 : null;
-    setJobReloadInterval(currentInterval => (currentInterval === nextInterval ? currentInterval : nextInterval));
-  }, [job?.status]);
+  const nextInterval = shouldPollJob(job) ? 5000 : null;
+  if (jobReloadInterval !== nextInterval) setJobReloadInterval(nextInterval);
 
   const page = pages.find(p => p.value === pageKey);
 
@@ -145,33 +143,33 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
         )}
       </MainContent>
       {job && (
-      <div className="operator-scrollbar-none absolute left-0 top-[72px] flex h-9 w-full items-center overflow-x-auto border-b border-gray-800 bg-gray-900 px-5 text-sm sm:px-8">
-        {pages.map(page => {
-          if (page.jobTypes && !page.jobTypes.includes(jobType)) {
-            return null;
-          }
-          return (
-            <Button
-              key={page.value}
-              onClick={() => setPageKey(page.value)}
-              className={`flex h-8 items-center gap-1.5 border-b-2 px-3 py-1 ${
-                page.value === pageKey
-                  ? 'border-brand-400 text-brand-100'
-                  : 'border-transparent text-gray-400 hover:text-gray-100'
-              }`}
-            >
-              <page.icon className="text-sm" />
-              {page.name}
-            </Button>
-          );
-        })}
-        {page?.menuItem && (
-          <>
-            <div className="flex-grow"></div>
-            <page.menuItem job={job} />
-          </>
-        )}
-      </div>
+        <div className="operator-scrollbar-none absolute left-0 top-[72px] flex h-9 w-full items-center overflow-x-auto border-b border-gray-800 bg-gray-900 px-5 text-sm sm:px-8">
+          {pages.map(page => {
+            if (page.jobTypes && !page.jobTypes.includes(jobType)) {
+              return null;
+            }
+            return (
+              <Button
+                key={page.value}
+                onClick={() => setPageKey(page.value)}
+                className={`flex h-8 items-center gap-1.5 border-b-2 px-3 py-1 ${
+                  page.value === pageKey
+                    ? 'border-brand-400 text-brand-100'
+                    : 'border-transparent text-gray-400 hover:text-gray-100'
+                }`}
+              >
+                <page.icon className="text-sm" />
+                {page.name}
+              </Button>
+            );
+          })}
+          {page?.menuItem && (
+            <>
+              <div className="flex-grow"></div>
+              <page.menuItem job={job} />
+            </>
+          )}
+        </div>
       )}
     </>
   );

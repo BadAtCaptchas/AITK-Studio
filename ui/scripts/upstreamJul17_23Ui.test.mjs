@@ -150,7 +150,7 @@ test('validation uploads and previews use protected global storage', () => {
   const fileServing = read('src/server/fileServing.ts');
   assert.match(fileServing, /realpathIfExists\(filepath\)/);
   assert.match(fileServing, /isPathWithinRoot\(root, canonicalPath\)/);
-  const middleware = read('src/middleware.ts');
+  const middleware = read('src/proxy.ts');
   assert.match(middleware, /hasObsoleteWorkspaceScope\(request\.nextUrl\.searchParams\)/);
   assert.match(middleware, /hasObsoleteWorkspaceHeaders\(request\.headers\)/);
   assert.match(jobConfig, /resolution: 1024/);
@@ -198,7 +198,7 @@ test('updates to global remote jobs rewrite dataset references and retain the re
     /rewriteSameWorkerRemoteDatasetRefsForWorker\(resolvedJobConfig, worker\)/,
   );
   assert.match(jobsRoute, /id: existing\.remote_job_id/);
-  assert.match(jobsRoute, /job_config: remoteJobConfig/);
+  assert.match(jobsRoute, /job_config: prepareRemoteJobConfigEdit\(remoteJobConfig\)/);
   assert.match(jobsRoute, /remote_job_id: workerChanged \? null : existing\.remote_job_id/);
   assert.doesNotMatch(jobsRoute, /prepareProjectJobReplica|projectSync|project_id/);
 });
@@ -209,8 +209,8 @@ test('sample grids and validation loss defaults include the upstream behavior', 
 
   assert.match(samples, /gridTemplateColumns: `repeat\(\$\{gridCols\}, minmax\(0, 1fr\)\)`/);
   assert.doesNotMatch(samples, /grid-cols-40/);
-  assert.match(lossGraph, /key === defaultKey \|\| key === 'val\/loss'/);
-  assert.match(lossGraph, /persistedEnabledRef\.current\?\.\[key\] \?\?/);
+  assert.match(lossGraph, /key === defaultLossKey \|\| key === 'val\/loss'/);
+  assert.match(lossGraph, /enabledChoices\[key\] \?\?/);
 });
 
 test('network polling hooks use the settled loop instead of setInterval', () => {
@@ -253,15 +253,15 @@ test('polling hooks guard request identity and clear data when their request sco
   assert.match(metrics, /activeScopeRef\.current !== currentRequestScope/);
   assert.match(metrics, /signal => refreshMetrics\(\{ full: needsFullRefreshRef\.current, signal \}\)/);
 
-  assert.match(job, /setJob\(null\);\s+setStatus\('idle'\);/);
+  assert.match(job, /useScopedState<Job \| null>\(jobID, null\)/);
   assert.match(job, /const requestScope = jobID;/);
   assert.match(job, /activeScopeRef\.current !== currentRequestScope/);
   assert.match(job, /usePollLoop\(signal => refreshJob\(signal\), reloadInterval, \[jobID\]\)/);
   assert.doesNotMatch(job, /projectID|project_id/);
   assert.match(files, /activeJobIDRef\.current !== requestJobID/);
-  assert.match(files, /setFiles\(\[\]\);/);
+  assert.match(files, /useScopedState<FileObject\[\]>\(jobID, \[\]\)/);
   assert.match(samples, /activeJobIDRef\.current !== requestJobID/);
-  assert.match(samples, /setSampleImages\(\[\]\);/);
+  assert.match(samples, /useScopedState<string\[\]>\(jobID, \[\]\)/);
   assert.match(jobs, /activeScope\.current !== scope/);
-  assert.match(jobs, /setJobs\(\[\]\);/);
+  assert.match(jobs, /useScopedState<Job\[\]>\(scope, \[\]\)/);
 });

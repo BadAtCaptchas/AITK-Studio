@@ -29,9 +29,8 @@ export default function AutoCaptionButton({
   const { job, refreshJob } = useJobByRef(datasetPath, reloadInterval, 'caption');
   const isActiveCaptionJob = !!job && job.job_type === 'caption' && ACTIVE_CAPTION_STATUSES.has(job.status);
   const isCaptionEditLocked = !!job && job.job_type === 'caption' && EDIT_LOCK_CAPTION_STATUSES.has(job.status);
-  useEffect(() => {
-    setReloadInterval(isActiveCaptionJob ? 5000 : null);
-  }, [isActiveCaptionJob]);
+  const nextInterval = isActiveCaptionJob ? 5000 : null;
+  if (reloadInterval !== nextInterval) setReloadInterval(nextInterval);
   useEffect(() => {
     if (setIsAutoCaptioning) {
       setIsAutoCaptioning(isCaptionEditLocked);

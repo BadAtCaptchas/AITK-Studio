@@ -1,4 +1,6 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
+import useHydrated from '@/hooks/useHydrated';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, DialogBackdrop, DialogPanel } from '@headlessui/react';
@@ -36,34 +38,20 @@ interface Props {
 }
 
 export default function DatasetImageViewer({ imgPath, imageList, onChange, refreshImages, onCaptionSaved }: Props) {
-  const [mounted, setMounted] = useState(false);
-  const [isOpen, setIsOpen] = useState(Boolean(imgPath));
-  const [caption, setCaption] = useState<string>('');
-  const [savedCaption, setSavedCaption] = useState<string>('');
-  const [isCaptionLoaded, setIsCaptionLoaded] = useState<boolean>(false);
+  const mounted = useHydrated();
+  const [isOpen, setIsOpen] = useScopedState(imgPath, Boolean(imgPath));
+  const [caption, setCaption] = useScopedState<string>(imgPath, '');
+  const [savedCaption, setSavedCaption] = useScopedState<string>(imgPath, '');
+  const [isCaptionLoaded, setIsCaptionLoaded] = useScopedState<boolean>(imgPath, false);
   const [showBoxes, setShowBoxes] = useState<boolean>(false);
-  const [isEditingBoxes, setIsEditingBoxes] = useState<boolean>(false);
-  const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | null>(null);
-  const [isDrawingBox, setIsDrawingBox] = useState<boolean>(false);
-  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [isEditingBoxes, setIsEditingBoxes] = useScopedState<boolean>(imgPath, false);
+  const [selectedBoxIndex, setSelectedBoxIndex] = useScopedState<number | null>(imgPath, null);
+  const [isDrawingBox, setIsDrawingBox] = useScopedState<boolean>(imgPath, false);
+  const [imageSize, setImageSize] = useScopedState<{ width: number; height: number } | null>(imgPath, null);
   const captionRef = useRef<string>('');
   const savedCaptionRef = useRef<string>('');
   const currentImgPathRef = useRef<string | null>(null);
   const captionAbortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => setMounted(true), []);
-
-  useEffect(() => {
-    setIsEditingBoxes(false);
-    setSelectedBoxIndex(null);
-    setIsDrawingBox(false);
-    setImageSize(null);
-  }, [imgPath]);
-
-  // open/close based on external value
-  useEffect(() => {
-    setIsOpen(Boolean(imgPath));
-  }, [imgPath]);
 
   // after close, clear parent state post-transition
   useEffect(() => {
@@ -115,7 +103,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
           console.error('Error saving caption:', error);
         });
     },
-    [onCaptionSaved],
+    [onCaptionSaved, setSavedCaption],
   );
   const saveCaptionForPathRef = useRef(saveCaptionForPath);
   useEffect(() => {
@@ -129,25 +117,13 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
 
   // Fetch caption whenever the image changes; save any pending edits on the previous image first
   useEffect(() => {
-    const previousPath = currentImgPathRef.current;
-    if (previousPath && previousPath !== imgPath) {
-      saveCaptionForPathRef.current(previousPath, captionRef.current, savedCaptionRef.current);
-    }
     currentImgPathRef.current = imgPath;
 
-    if (!imgPath) {
-      setCaption('');
-      setSavedCaption('');
-      setIsCaptionLoaded(false);
-      return;
-    }
+    if (!imgPath) return;
 
     captionAbortRef.current?.abort();
     const controller = new AbortController();
     captionAbortRef.current = controller;
-    setIsCaptionLoaded(false);
-    setCaption('');
-    setSavedCaption('');
 
     apiClient
       .post('/api/caption/get', { imgPath }, { signal: controller.signal })
@@ -167,23 +143,14 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
 
     return () => {
       controller.abort();
+      saveCaptionForPathRef.current(imgPath, captionRef.current, savedCaptionRef.current);
     };
-  }, [imgPath]);
-
-  // Save any pending caption when the viewer fully unmounts
-  useEffect(() => {
-    return () => {
-      const path = currentImgPathRef.current;
-      if (path) {
-        saveCaptionForPathRef.current(path, captionRef.current, savedCaptionRef.current);
-      }
-    };
-  }, []);
+  }, [imgPath, setCaption, setSavedCaption, setIsCaptionLoaded]);
 
   const onCancel = useCallback(() => {
     saveCaption();
     setIsOpen(false);
-  }, [saveCaption]);
+  }, [saveCaption, setIsOpen]);
 
   const setImageAtIndex = useCallback(
     (idx: number) => {
@@ -234,7 +201,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
       setCaption(JSON.stringify(data, null, 2));
       return result;
     },
-    [caption],
+    [caption, setCaption],
   );
 
   const handleBoxChange = useCallback(
@@ -257,7 +224,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
       setIsDrawingBox(false);
       setShowBoxes(true);
     },
-    [updateCaptionJson],
+    [updateCaptionJson, setSelectedBoxIndex, setIsDrawingBox],
   );
 
   const handleDeleteBox = useCallback(
@@ -269,7 +236,7 @@ export default function DatasetImageViewer({ imgPath, imageList, onChange, refre
       setSelectedBoxIndex(null);
       setIsDrawingBox(false);
     },
-    [updateCaptionJson],
+    [updateCaptionJson, setSelectedBoxIndex, setIsDrawingBox],
   );
 
   const handleSelectedFieldChange = useCallback(

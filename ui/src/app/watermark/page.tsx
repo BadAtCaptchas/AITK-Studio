@@ -81,14 +81,10 @@ export default function WatermarkCheckerPage() {
   const expectedSecretValid = !expectedSecret || (expectedSecret.length === msgBits && /^[01]+$/.test(expectedSecret));
 
   useEffect(() => {
-    if (!file) {
-      setPreviewUrl(null);
-      return;
-    }
-    const nextUrl = URL.createObjectURL(file);
-    setPreviewUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [file]);
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const resultTone = useMemo<NoticeTone>(() => {
     if (!result) return 'neutral';
@@ -118,6 +114,7 @@ export default function WatermarkCheckerPage() {
 
   const handleFile = (nextFile: File | null) => {
     setFile(nextFile);
+    setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
     setResult(null);
     setError(null);
     setCopied(false);
@@ -198,7 +195,11 @@ export default function WatermarkCheckerPage() {
                 className="flex min-h-[360px] w-full items-center justify-center border border-dashed border-gray-800 bg-gray-950/55 p-4 text-left transition-colors hover:border-brand-900 hover:bg-gray-950"
               >
                 {previewUrl ? (
-                  <img src={previewUrl} alt={file?.name || 'Selected image'} className="max-h-[620px] max-w-full object-contain" />
+                  <img
+                    src={previewUrl}
+                    alt={file?.name || 'Selected image'}
+                    className="max-h-[620px] max-w-full object-contain"
+                  />
                 ) : (
                   <span className="flex flex-col items-center gap-3 text-center text-gray-400">
                     <Upload className="h-8 w-8 text-gray-500" />
@@ -219,7 +220,12 @@ export default function WatermarkCheckerPage() {
           <aside className="space-y-4">
             <section className="operator-panel p-4">
               <div className="grid grid-cols-1 gap-3">
-                <SelectInput label="Codec" value={selectedCodec} onChange={handleCodecChange} options={AUTHENLORA_CODEC_OPTIONS} />
+                <SelectInput
+                  label="Codec"
+                  value={selectedCodec}
+                  onChange={handleCodecChange}
+                  options={AUTHENLORA_CODEC_OPTIONS}
+                />
                 {selectedCodec === 'custom' ? (
                   <TextInput
                     label="Codec path"
@@ -229,8 +235,19 @@ export default function WatermarkCheckerPage() {
                   />
                 ) : null}
                 <NumberInput label="Message bits" value={msgBits} onChange={value => setMsgBits(value ?? 48)} min={1} />
-                <TextInput label="Expected secret" value={expectedSecret} onChange={setExpectedSecret} placeholder="optional binary secret" />
-                <NumberInput label="Match threshold" value={threshold} onChange={value => setThreshold(value ?? 0.75)} min={0} max={1} />
+                <TextInput
+                  label="Expected secret"
+                  value={expectedSecret}
+                  onChange={setExpectedSecret}
+                  placeholder="optional binary secret"
+                />
+                <NumberInput
+                  label="Match threshold"
+                  value={threshold}
+                  onChange={value => setThreshold(value ?? 0.75)}
+                  min={0}
+                  max={1}
+                />
               </div>
 
               {!expectedSecretValid ? (
@@ -276,12 +293,18 @@ export default function WatermarkCheckerPage() {
                   <PageNotice tone={resultTone} title={resultTitle}>
                     <div className="space-y-1">
                       <div>
-                        {result.image.width}x{result.image.height} / {result.msg_bits} bits / codec {shortHash(result.codec_sha256)}
+                        {result.image.width}x{result.image.height} / {result.msg_bits} bits / codec{' '}
+                        {shortHash(result.codec_sha256)}
                       </div>
                       {result.watermark_status === 'not_detected' ? (
-                        <div>The decoder returned the all-zero clean message, so this image is treated as unwatermarked.</div>
+                        <div>
+                          The decoder returned the all-zero clean message, so this image is treated as unwatermarked.
+                        </div>
                       ) : result.watermark_status === 'candidate' ? (
-                        <div>Enter the expected secret to verify a watermark match. Decoder confidence alone is not a presence signal.</div>
+                        <div>
+                          Enter the expected secret to verify a watermark match. Decoder confidence alone is not a
+                          presence signal.
+                        </div>
                       ) : null}
                     </div>
                   </PageNotice>
@@ -291,7 +314,11 @@ export default function WatermarkCheckerPage() {
                       <div className="text-xs text-gray-500">Detection</div>
                       <div className="mt-1 font-semibold text-gray-100">{detectionLabel(result.watermark_status)}</div>
                       <div className="mt-2 text-[11px] text-gray-500">
-                        {result.zero_message ? 'All-zero clean message' : result.watermark_detected === true ? 'Secret verified' : 'Secret required'}
+                        {result.zero_message
+                          ? 'All-zero clean message'
+                          : result.watermark_detected === true
+                            ? 'Secret verified'
+                            : 'Secret required'}
                       </div>
                     </div>
                     <div className="border border-gray-900 bg-gray-950/60 p-3">
@@ -305,13 +332,19 @@ export default function WatermarkCheckerPage() {
                     <div className="border border-gray-900 bg-gray-950/60 p-3">
                       <div className="text-xs text-gray-500">Bit accuracy</div>
                       <div className="mt-1 font-semibold text-gray-100">{bitAccuracyText(result.bit_accuracy)}</div>
-                      <ProgressBar value={(result.bit_accuracy ?? 0) * 100} tone={bitAccuracyTone(result)} className="mt-2" />
+                      <ProgressBar
+                        value={(result.bit_accuracy ?? 0) * 100}
+                        tone={bitAccuracyTone(result)}
+                        className="mt-2"
+                      />
                     </div>
 
                     <div className="border border-gray-900 bg-gray-950/60 p-3 text-sm">
                       <div className="text-xs text-gray-500">Bit errors</div>
                       <div className="mt-1 font-semibold text-gray-100">
-                        {result.hamming_errors === null ? 'Not checked' : `${result.hamming_errors} / ${result.msg_bits}`}
+                        {result.hamming_errors === null
+                          ? 'Not checked'
+                          : `${result.hamming_errors} / ${result.msg_bits}`}
                       </div>
                     </div>
                   </div>

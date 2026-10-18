@@ -1,3 +1,4 @@
+import useScopedState from '@/hooks/useScopedState';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import LoraBrowserModal, { LoraPick } from '@/components/generate/LoraBrowserModal';
@@ -107,8 +108,21 @@ const CaptionSimpleJob: React.FC<Props> = ({
     () => enabledWorkers.map(worker => ({ value: worker.id, label: worker.name })),
     [enabledWorkers],
   );
-  const [estimate, setEstimate] = useState<CaptionEstimate | null>(null);
-  const [estimateStatus, setEstimateStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const estimateScope = JSON.stringify([
+    usesOpenRouter,
+    datasetPath,
+    captionConfig.model_name_or_path,
+    captionConfig.extensions,
+    captionConfig.caption_extension,
+    captionConfig.recaption,
+    captionConfig.max_new_tokens,
+    outputFormat,
+  ]);
+  const [estimate, setEstimate] = useScopedState<CaptionEstimate | null>(estimateScope, null);
+  const [estimateStatus, setEstimateStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(
+    estimateScope,
+    'idle',
+  );
 
   useEffect(() => {
     if (!usesRemoteOllama || captionConfig.remote_ollama_worker_id || enabledWorkers.length === 0) return;
@@ -116,11 +130,7 @@ const CaptionSimpleJob: React.FC<Props> = ({
   }, [captionConfig.remote_ollama_worker_id, enabledWorkers, setJobConfig, usesRemoteOllama]);
 
   useEffect(() => {
-    if (!usesOpenRouter || !datasetPath || !captionConfig.model_name_or_path) {
-      setEstimate(null);
-      setEstimateStatus('idle');
-      return;
-    }
+    if (!usesOpenRouter || !datasetPath || !captionConfig.model_name_or_path) return;
 
     const timeout = window.setTimeout(() => {
       setEstimateStatus('loading');
@@ -158,6 +168,8 @@ const CaptionSimpleJob: React.FC<Props> = ({
     isJsonOutput,
     outputFormat,
     usesOpenRouter,
+    setEstimateStatus,
+    setEstimate,
   ]);
 
   const setOutputFormat = (value: string) => {

@@ -43,7 +43,7 @@ export default function LoraBrowserModal({
   const [triggerWords, setTriggerWords] = useState('');
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
-  const refresh = async () => setItems(picks((await apiClient.get<unknown>('/api/generate/loras')).data));
+  const refresh = () => apiClient.get<unknown>('/api/generate/loras').then(response => setItems(picks(response.data)));
   useEffect(() => {
     if (isOpen) void refresh().catch(() => setError('Could not load the LoRA library.'));
   }, [isOpen]);

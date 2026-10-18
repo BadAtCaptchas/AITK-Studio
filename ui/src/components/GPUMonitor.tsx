@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import Loading from '@/components/Loading';
 import GPUWidget from '@/components/GPUWidget';
 import useGPUInfo from '@/hooks/useGPUInfo';
@@ -6,14 +6,7 @@ import { RotateCcw } from 'lucide-react';
 import { PageNotice } from '@/components/OperatorPrimitives';
 
 const GpuMonitor: React.FC = () => {
-  const { gpuData, gpuList, isGPUInfoLoaded, status, refreshGpuInfo } = useGPUInfo();
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  useEffect(() => {
-    if (status === 'success') {
-      setLastUpdated(new Date());
-    }
-  }, [gpuList, status]);
+  const { gpuData, gpuList, isGPUInfoLoaded, status, refreshGpuInfo, lastUpdated } = useGPUInfo();
 
   const getGridClasses = (gpuCount: number): string => {
     switch (gpuCount) {

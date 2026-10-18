@@ -1,19 +1,22 @@
 'use client';
 
 import { CpuInfo } from '@/types';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
+import useScopedState from './useScopedState';
+import useCommittedRef from './useCommittedRef';
 import useMonitorStream from './useMonitorStream';
 
 export default function useCPUInfo(reloadInterval: null | number = null, workerID = 'local') {
-  const [cpuInfo, setCpuInfo] = useState<CpuInfo | null>(null);
-  const [isCPUInfoLoaded, setIsLoaded] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const activeWorkerRef = useRef(workerID);
   const monitor = useMonitorStream();
   const useLocalMonitor = workerID === 'local';
-  activeWorkerRef.current = workerID;
+  const useLiveMonitor = useLocalMonitor && monitor.connected && !!monitor.cpu;
+  const scope = JSON.stringify([workerID, useLiveMonitor]);
+  const [cpuInfo, setCpuInfo] = useScopedState<CpuInfo | null>(scope, null);
+  const [isCPUInfoLoaded, setIsLoaded] = useScopedState(scope, false);
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(scope, 'idle');
+  const activeWorkerRef = useCommittedRef(workerID);
 
   const fetchCpuInfo = useCallback(
     async (signal?: AbortSignal) => {
@@ -34,36 +37,22 @@ export default function useCPUInfo(reloadInterval: null | number = null, workerI
         if (!signal?.aborted && activeWorkerRef.current === requestWorkerID) setIsLoaded(true);
       }
     },
-    [workerID],
+    [workerID, setStatus, setCpuInfo, setIsLoaded],
   );
 
-  useEffect(() => {
-    setCpuInfo(null);
-    setIsLoaded(false);
-    setStatus('idle');
-  }, [workerID]);
-
-  useEffect(() => {
-    if (!useLocalMonitor || !monitor.cpu) return;
-    setCpuInfo(monitor.cpu);
-    setIsLoaded(true);
-    setStatus('success');
-  }, [monitor.cpu, useLocalMonitor]);
-
-  const useLiveMonitor = useLocalMonitor && monitor.connected;
   usePollLoop(
     signal => {
       if (useLiveMonitor) return;
       return fetchCpuInfo(signal);
     },
-    useLiveMonitor ? null : useLocalMonitor ? reloadInterval ?? 5000 : reloadInterval,
+    useLiveMonitor ? null : useLocalMonitor ? (reloadInterval ?? 5000) : reloadInterval,
     [workerID, useLiveMonitor],
   );
 
   return {
-    cpuInfo,
-    isCPUInfoLoaded,
-    status,
+    cpuInfo: useLiveMonitor ? monitor.cpu : cpuInfo,
+    isCPUInfoLoaded: useLiveMonitor ? true : isCPUInfoLoaded,
+    status: useLiveMonitor ? ('success' as const) : status,
     refreshCpuInfo: () => fetchCpuInfo(),
   };
 }

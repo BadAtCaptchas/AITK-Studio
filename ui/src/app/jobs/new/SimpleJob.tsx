@@ -740,10 +740,13 @@ export default function SimpleJob({
     setActiveStepId(id);
     window.history.replaceState(null, '', `#${id}`);
   };
+  const [previousFocusTarget, setPreviousFocusTarget] = useState(focusTarget);
+  if (previousFocusTarget !== focusTarget) {
+    setPreviousFocusTarget(focusTarget);
+    if (focusTarget) setActiveStepId(focusTarget.step);
+  }
   useEffect(() => {
-    if (!focusTarget) return;
-    didSelectStep.current = false;
-    setActiveStepId(focusTarget.step);
+    if (focusTarget) didSelectStep.current = false;
   }, [focusTarget]);
   useEffect(() => {
     if (!focusTarget || focusTarget.step !== activeStepId) return;

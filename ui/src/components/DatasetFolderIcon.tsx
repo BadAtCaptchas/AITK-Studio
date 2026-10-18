@@ -1,6 +1,6 @@
 'use client';
+import useScopedState from '@/hooks/useScopedState';
 
-import { useEffect, useState } from 'react';
 import classNames from 'classnames';
 import { CheckCircle2, Cloud, Image as ImageIcon, LockKeyhole } from 'lucide-react';
 
@@ -69,7 +69,7 @@ export default function DatasetFolderIcon({
   className,
 }: DatasetFolderIconProps) {
   const classes = sizeClasses[size];
-  const [previewFailed, setPreviewFailed] = useState(false);
+  const [previewFailed, setPreviewFailed] = useScopedState(previewSrc ?? null, false);
   const showPreview = !!previewSrc && !previewFailed;
   const badgeClass = encrypted
     ? unlocked
@@ -78,10 +78,6 @@ export default function DatasetFolderIcon({
     : remote
       ? 'border-sky-500/50 bg-sky-950 text-sky-200'
       : 'border-amber-300/40 bg-amber-950 text-amber-100';
-
-  useEffect(() => {
-    setPreviewFailed(false);
-  }, [previewSrc]);
 
   return (
     <span className={classNames('relative block flex-none', classes.wrap, className)} aria-hidden="true">

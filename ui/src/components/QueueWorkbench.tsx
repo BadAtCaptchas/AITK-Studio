@@ -881,16 +881,19 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
       })
       .map(key => jobsDict[key]);
   }, [focusGpuIDs, jobsDict]);
-  useEffect(() => {
-    if (!pendingReorder) return;
+  if (pendingReorder) {
     const group = jobsDict[pendingReorder.laneKey];
     if (!group) {
       setPendingReorder(null);
-      return;
     }
-    const queuedIDs = group.jobs.filter(isQueuedJob).map(job => job.id);
+    const queuedIDs = group?.jobs.filter(isQueuedJob).map(job => job.id) ?? [];
     if (!hasSameIDs(queuedIDs, pendingReorder.jobIDs)) setPendingReorder(null);
-  }, [jobsDict, pendingReorder]);
+  }
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
   const idleJobs = jobsDict.idle?.jobs || [];
   const failedJobs = filteredJobs.filter(job => job.status === 'error' || job.status === 'failed');
   const selectedJob = filteredJobs.find(job => job.id === selectedJobID) || null;
@@ -1175,7 +1178,7 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
           Load more jobs
         </button>
       )}
-      {freshness && (freshness.failed > 0 || Date.now() - Date.parse(freshness.updatedAt) > 30000) && (
+      {freshness && (freshness.failed > 0 || now - Date.parse(freshness.updatedAt) > 30000) && (
         <p role="status" className="text-sm text-amber-300">
           Job synchronization is delayed. Last checked {new Date(freshness.updatedAt).toLocaleTimeString()}.
         </p>

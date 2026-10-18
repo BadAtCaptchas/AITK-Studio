@@ -1,4 +1,5 @@
 'use client';
+import useCommittedRef from '@/hooks/useCommittedRef';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { createGlobalState } from 'react-global-hooks';
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
@@ -8,11 +9,7 @@ import { useDropzone } from 'react-dropzone';
 import { apiClient } from '@/utils/api';
 import type { EncryptedDatasetCatalog, EncryptedDatasetManifest } from '@/types';
 import type { EncryptedDatasetItem } from '@/types';
-import {
-  pairMediaAndCaptionFiles,
-  readRootCaptionFile,
-  readTextFile,
-} from '@/utils/encryptedDatasets';
+import { pairMediaAndCaptionFiles, readRootCaptionFile, readTextFile } from '@/utils/encryptedDatasets';
 import { FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS } from '@/utils/folderImport';
 import { planDatasetUploads } from '@/utils/datasetUploadPlan';
 import { uploadDatasetFile } from '@/utils/streamedUploads';
@@ -47,8 +44,7 @@ export function useOpenImagesModalOnDrag(
   onComplete: () => void,
   options?: Pick<AddImagesModalState, 'encrypted' | 'workerID'>,
 ) {
-  const onCompleteRef = useRef(onComplete);
-  onCompleteRef.current = onComplete;
+  const onCompleteRef = useCommittedRef(onComplete);
   useEffect(() => {
     if (!datasetName) return;
     let depth = 0;
@@ -184,7 +180,10 @@ export default function AddImagesModal() {
       let succeeded = 0;
       let failed = 0;
       try {
-        const groups = planDatasetUploads(entries.map(entry => entry.file.name), () => crypto.randomUUID());
+        const groups = planDatasetUploads(
+          entries.map(entry => entry.file.name),
+          () => crypto.randomUUID(),
+        );
         let nextGroup = 0;
         const runNext = async () => {
           while (nextGroup < groups.length && !abortRef.current && generation === batchGenerationRef.current) {
@@ -196,13 +195,25 @@ export default function AddImagesModal() {
               if (blocked) {
                 failed++;
                 setErrorCount(count => count + 1);
-                setFileEntries(previous => previous.map(file => file.id === entry.id
-                  ? { ...file, status: 'error' as FileStatus, error: 'Associated upload failed; caption was not uploaded.' } : file));
+                setFileEntries(previous =>
+                  previous.map(file =>
+                    file.id === entry.id
+                      ? {
+                          ...file,
+                          status: 'error' as FileStatus,
+                          error: 'Associated upload failed; caption was not uploaded.',
+                        }
+                      : file,
+                  ),
+                );
                 continue;
               }
               const result = await uploadSingleFile({ ...entry, uploadGroup: group.id }, generation);
               if (result === 'done') succeeded++;
-              else { failed++; blocked = true; }
+              else {
+                failed++;
+                blocked = true;
+              }
             }
           }
         };
@@ -210,12 +221,22 @@ export default function AddImagesModal() {
       } catch (error) {
         failed = entries.length;
         setErrorCount(failed);
-        setFileEntries(previous => previous.map(entry => ({ ...entry, status: 'error' as FileStatus,
-          error: error instanceof Error ? error.message : 'Invalid upload names' })));
-      } finally { if (generation === batchGenerationRef.current) setIsUploading(false); }
+        setFileEntries(previous =>
+          previous.map(entry => ({
+            ...entry,
+            status: 'error' as FileStatus,
+            error: error instanceof Error ? error.message : 'Invalid upload names',
+          })),
+        );
+      } finally {
+        if (generation === batchGenerationRef.current) setIsUploading(false);
+      }
       if (!abortRef.current && generation === batchGenerationRef.current) {
         if (succeeded > 0) modalInfoRef.current?.onComplete?.();
-        if (failed === 0) { setModalInfo(null); resetState(); }
+        if (failed === 0) {
+          setModalInfo(null);
+          resetState();
+        }
       }
     },
     [uploadSingleFile, setModalInfo, resetState],

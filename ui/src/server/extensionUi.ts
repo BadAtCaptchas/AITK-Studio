@@ -13,8 +13,11 @@ export async function listExtensionUiModules(): Promise<{ modules: ExtensionUiMo
     errors: string[] = [];
   const nodeModule = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'module');
   const loadModule = nodeModule.createRequire(path.join(TOOLKIT_ROOT, 'ui', 'package.json'));
-  const swc: { transform: (source: string, options: Record<string, unknown>) => Promise<{ code: string }> } =
-    loadModule('next/dist/build/swc');
+  const swc: {
+    loadBindings: () => Promise<unknown>;
+    transform: (source: string, options: Record<string, unknown>) => Promise<{ code: string }>;
+  } = loadModule('next/dist/build/swc');
+  await swc.loadBindings();
   for (const dir of ['extensions_built_in', 'extensions']) {
     const root = await fs.realpath(path.join(TOOLKIT_ROOT, dir)).catch((error: unknown) => {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;

@@ -1,4 +1,5 @@
 'use client';
+import { useSyncExternalStore } from 'react';
 import { getTrainingReturnPath } from '@/hooks/useTrainingDraft';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -91,6 +92,10 @@ function writeStoredDatasetView(view: DatasetExplorerView) {
   } catch {
     // If both storage mechanisms are blocked, the current in-memory state still updates.
   }
+}
+function subscribeDatasetView(listener: () => void) {
+  window.addEventListener('storage', listener);
+  return () => window.removeEventListener('storage', listener);
 }
 function datasetRowKey(dataset: DatasetSummary) {
   return dataset.ref || `global:${dataset.worker_id || 'local'}:${dataset.name}`;
@@ -293,10 +298,13 @@ export default function Datasets() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnToTraining = searchParams.get('returnTo') === 'training';
-  const [importChooserOpen, setImportChooserOpen] = useState(false);
-  useEffect(() => {
-    if (searchParams.get('action') === 'import') setImportChooserOpen(true);
-  }, [searchParams]);
+  const importAction = searchParams.get('action');
+  const [importChooserOpen, setImportChooserOpen] = useState(importAction === 'import');
+  const [previousAction, setPreviousAction] = useState(importAction);
+  if (previousAction !== importAction) {
+    setPreviousAction(importAction);
+    if (importAction === 'import') setImportChooserOpen(true);
+  }
   const folderImportInputRef = useRef<HTMLInputElement | null>(null);
   const setFolderImportInputRef = useCallback((node: HTMLInputElement | null) => {
     folderImportInputRef.current = node;
@@ -310,7 +318,13 @@ export default function Datasets() {
   const [newDatasetName, setNewDatasetName] = useState('');
   const [isNewDatasetModalOpen, setIsNewDatasetModalOpen] = useState(false);
   const [datasetFilter, setDatasetFilter] = useState('');
-  const [datasetView, setDatasetView] = useState<DatasetExplorerView>('details');
+  const storedView = useSyncExternalStore(
+    subscribeDatasetView,
+    () => readStoredDatasetView() ?? 'details',
+    () => 'details',
+  );
+  const [selectedView, setDatasetView] = useState<DatasetExplorerView | null>(null);
+  const datasetView = selectedView ?? storedView;
   const [datasetPreviewUrls, setDatasetPreviewUrls] = useState<Record<string, string | null>>({});
   const datasetPreviewRequestsRef = useRef<Set<string>>(new Set());
   const [isCreatingDataset, setIsCreatingDataset] = useState(false);
@@ -356,8 +370,6 @@ export default function Datasets() {
     [datasetWatcherLive.statuses, datasetWatcherLive.watchers],
   );
   useEffect(() => {
-    const rememberedView = readStoredDatasetView();
-    if (rememberedView) setDatasetView(rememberedView);
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== DATASET_VIEW_STORAGE_KEY) return;
       const nextView = parseDatasetExplorerView(event.newValue);
@@ -747,20 +759,24 @@ export default function Datasets() {
     relativePaths: string[],
   ) => {
     const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
-    const groups = planDatasetUploads(entries.map((entry, index) => relativePaths[index] || entry.relativePath || entry.file.name), () => crypto.randomUUID());
+    const groups = planDatasetUploads(
+      entries.map((entry, index) => relativePaths[index] || entry.relativePath || entry.file.name),
+      () => crypto.randomUUID(),
+    );
     let first = true;
-    for (const group of groups) for (const index of group.indexes) {
-      const entry = entries[index];
-      await uploadDatasetFile(entry.file, {
-        uploadGroup: group.id,
-        datasetName,
-        workerID,
-        relativePath: relativePaths[index] || entry.relativePath || entry.file.name,
-        sourceFolderPath,
-        failIfDatasetExists: first,
-      });
-      first = false;
-    }
+    for (const group of groups)
+      for (const index of group.indexes) {
+        const entry = entries[index];
+        await uploadDatasetFile(entry.file, {
+          uploadGroup: group.id,
+          datasetName,
+          workerID,
+          relativePath: relativePaths[index] || entry.relativePath || entry.file.name,
+          sourceFolderPath,
+          failIfDatasetExists: first,
+        });
+        first = false;
+      }
   };
   const handleImportFolders = async (e: React.FormEvent) => {
     e.preventDefault();

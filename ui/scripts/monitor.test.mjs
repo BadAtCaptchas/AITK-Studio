@@ -1,3 +1,4 @@
+import { createHookHarness } from './reactHookHarness.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
@@ -128,8 +129,11 @@ function streamFixture(t, withChannel = false) {
   }
   const hooks = loadSource('../src/hooks/useMonitorStream.tsx', {
     react: {
-      useState: initial => [initial, next => snapshots.push(next)],
-      useEffect: effect => cleanups.push(effect()),
+      useSyncExternalStore: (subscribe, getSnapshot) => {
+        cleanups.push(subscribe(() => snapshots.push(getSnapshot())));
+        snapshots.push(getSnapshot());
+        return getSnapshot();
+      },
     },
     '@/utils/api': { isAuthorizedState: { set() {} } },
     '@/utils/monitorSample': monitorSample,
@@ -235,13 +239,11 @@ for (const resource of ['CPU', 'GPU']) {
     const monitor = { connected: false, cpu: null, gpu: null };
     const requests = [];
     const polls = [];
+    const harness = createHookHarness();
     const hooks = loadSource(`../src/hooks/use${resource}Info.tsx`, {
-      react: {
-        useState: initial => [initial, () => {}],
-        useEffect() {},
-        useRef: initial => ({ current: initial }),
-        useCallback: callback => callback,
-      },
+      react: harness.react,
+      './useScopedState': loadSource('../src/hooks/useScopedState.ts', { react: harness.react }),
+      './useCommittedRef': loadSource('../src/hooks/useCommittedRef.ts', { react: harness.react }),
       '@/utils/api': { apiClient: { get: async (url, options) => {
         requests.push({ url, options });
         return { data: resource === 'GPU' ? gpu : cpu };
@@ -250,9 +252,9 @@ for (const resource of ['CPU', 'GPU']) {
       './useMonitorStream': { default: () => ({ ...monitor }), __esModule: true },
       './usePollLoop': { default: (callback, interval) => polls.push({ callback, interval }), __esModule: true },
     });
-    const render = (interval = null, worker = 'local', enabled = true) => resource === 'GPU'
+    const render = (interval = null, worker = 'local', enabled = true) => harness.render(() => resource === 'GPU'
       ? hooks.default(null, interval, worker, { enabled })
-      : hooks.default(interval, worker);
+      : hooks.default(interval, worker));
     const poll = () => polls.at(-1).callback(new AbortController().signal);
 
     render();
@@ -265,6 +267,7 @@ for (const resource of ['CPU', 'GPU']) {
 
     monitor.connected = true;
     monitor.gpu = gpu;
+    monitor.cpu = cpu;
     const result = render();
     assert.equal(polls.at(-1).interval, null);
     await poll();
@@ -315,35 +318,13 @@ test('stale GPU stream updates preserve fresh fallback readings and failed polls
   const busy = { index: 0, memory: { used: 43320 }, utilization: { gpu: 100 } };
   const idle = { index: 0, memory: { used: 608 }, utilization: { gpu: 0 } };
   const monitor = { connected: true, gpu: { ...gpu, sampledAt: Date.now(), gpus: [busy] } };
-  const states = [];
-  const refs = [];
-  const dependencies = [];
+  const harness = createHookHarness();
   const polls = [];
-  let stateIndex = 0;
-  let refIndex = 0;
-  let effectIndex = 0;
-  let effects = [];
   let failRequest = false;
   const hooks = loadSource('../src/hooks/useGPUInfo.tsx', {
-    react: {
-      useState: initial => {
-        const index = stateIndex++;
-        if (!(index in states)) states[index] = initial;
-        return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }];
-      },
-      useRef: initial => {
-        const index = refIndex++;
-        return refs[index] ??= { current: initial };
-      },
-      useEffect: (effect, next) => {
-        const index = effectIndex++;
-        if (!dependencies[index] || next.some((value, position) => !Object.is(value, dependencies[index][position]))) {
-          dependencies[index] = next;
-          effects.push(effect);
-        }
-      },
-      useCallback: callback => callback,
-    },
+    react: harness.react,
+    './useScopedState': loadSource('../src/hooks/useScopedState.ts', { react: harness.react }),
+    './useCommittedRef': loadSource('../src/hooks/useCommittedRef.ts', { react: harness.react }),
     '@/utils/api': { apiClient: { get: async (_url, options) => {
       assert.equal(options.timeout, 10000, 'fallback requests must have a finite deadline');
       if (failRequest) throw new Error('GPU query timed out');
@@ -353,15 +334,7 @@ test('stale GPU stream updates preserve fresh fallback readings and failed polls
     './useMonitorStream': { default: () => monitor, __esModule: true },
     './usePollLoop': { default: (callback, interval) => polls.push({ callback, interval }), __esModule: true },
   }, { console: { error() {} } });
-  function render() {
-    stateIndex = 0;
-    refIndex = 0;
-    effectIndex = 0;
-    effects = [];
-    const result = hooks.default();
-    effects.forEach(effect => effect());
-    return result;
-  }
+  const render = () => harness.render(() => hooks.default());
 
   render();
   assert.equal(render().gpuList[0].memory.used, 43320);

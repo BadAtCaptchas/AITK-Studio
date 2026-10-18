@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { CpuInfo, GPUApiResponse, MonitorHistoryPoint, MonitorInit, MonitorSample } from '@/types';
 import { isAuthorizedState } from '@/utils/api';
 import { historyPointFromSample, MONITOR_HISTORY_LENGTH } from '@/utils/monitorSample';
@@ -29,13 +29,14 @@ export interface MonitorStreamState {
  * Native EventSource can't send the Authorization header the middleware
  * expects, so the leader reads the SSE stream through fetch.
  */
-let state: MonitorStreamState = {
+const initialState: MonitorStreamState = {
   connected: false,
   lastUpdated: null,
   cpu: null,
   gpu: null,
   history: [],
 };
+let state = initialState;
 const listeners = new Set<(s: MonitorStreamState) => void>();
 let refCount = 0;
 let running = false;
@@ -303,25 +304,21 @@ function stop() {
   }
 }
 
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  refCount++;
+  if (refCount === 1) start();
+  return () => {
+    listeners.delete(listener);
+    refCount--;
+    if (refCount <= 0) stop();
+  };
+}
+
 export default function useMonitorStream(): MonitorStreamState {
-  const [snapshot, setSnapshot] = useState(state);
-
-  useEffect(() => {
-    const listener = (s: MonitorStreamState) => setSnapshot(s);
-    listeners.add(listener);
-    refCount++;
-    setSnapshot(state);
-    if (refCount === 1) {
-      start();
-    }
-    return () => {
-      listeners.delete(listener);
-      refCount--;
-      if (refCount <= 0) {
-        stop();
-      }
-    };
-  }, []);
-
-  return snapshot;
+  return useSyncExternalStore(
+    subscribe,
+    () => state,
+    () => initialState,
+  );
 }

@@ -203,6 +203,7 @@ export default function JobActionBar({
   const startInFlight = useRef(false);
   const captionResultInFlight = useRef(false);
   const activeExportID = useRef<string | null>(null);
+  const [exportID, setExportID] = useState<string | null>(null);
   const cancelExportInFlight = useRef(false);
   const isMounted = useRef(true);
   const isExporting = exportStatus?.phase === 'exporting';
@@ -259,9 +260,10 @@ export default function JobActionBar({
         window.clearTimeout(remoteStartStatusTimeout.current);
       }
       activeExportID.current = null;
+      setExportID(null);
     };
   }, []);
-  if (!afterDelete) afterDelete = onRefresh;
+  const onAfterDelete = afterDelete ?? onRefresh;
   const clearExportStatusSoon = () => {
     if (exportStatusTimeout.current !== null) {
       window.clearTimeout(exportStatusTimeout.current);
@@ -337,6 +339,7 @@ export default function JobActionBar({
     try {
       const started = await startTrainingJobExport(job.id, includeDatasets, checkpointMode);
       activeExportID.current = started.exportID;
+      setExportID(started.exportID);
       updateExportStatus(exportMode, started.progress);
       const progress = await waitForExport(exportMode, started.exportID);
       if (progress.status === 'canceled') {
@@ -520,7 +523,7 @@ export default function JobActionBar({
   );
   const canCancelExport =
     isExporting &&
-    !!(activeExportID.current || exportStatus?.progress?.exportID) &&
+    !!(exportID || exportStatus?.progress?.exportID) &&
     exportStatus?.progress?.status !== 'canceling' &&
     exportStatus?.progress?.cancelRequested !== true;
   const isResuming = job.step > 0 && ['stopped', 'error', 'completed'].includes(job.status);
@@ -649,7 +652,7 @@ export default function JobActionBar({
                   }
                 }
                 await deleteJob(job.id);
-                if (afterDelete) afterDelete();
+                if (onAfterDelete) onAfterDelete();
               }),
           });
         }}

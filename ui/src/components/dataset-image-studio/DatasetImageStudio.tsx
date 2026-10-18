@@ -1,4 +1,8 @@
 'use client';
+import useHydrated from '@/hooks/useHydrated';
+import useScopedState from '@/hooks/useScopedState';
+import { useSyncExternalStore } from 'react';
+import { createCaptionCache } from './captionCache';
 import classNames from 'classnames';
 import {
   Braces,
@@ -184,7 +188,17 @@ function formatStudioDate(value?: string | null) {
   if (Number.isNaN(date.getTime())) return '—';
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
 }
-export default function DatasetImageStudio({
+export default function DatasetImageStudio(props: DatasetImageStudioProps) {
+  const hydrated = useHydrated();
+  return hydrated ? (
+    <DatasetImageStudioContent
+      key={JSON.stringify([props.datasetName, props.workerID, props.datasetPath])}
+      {...props}
+    />
+  ) : null;
+}
+
+function DatasetImageStudioContent({
   datasetName,
   workerID,
   datasetPath,
@@ -207,9 +221,44 @@ export default function DatasetImageStudio({
 }: DatasetImageStudioProps) {
   const { workers } = useRemoteOllamaWorkers();
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [captionText, setCaptionText] = useState('');
-  const [savedCaption, setSavedCaption] = useState('');
-  const [isCaptionLoaded, setIsCaptionLoaded] = useState(false);
+  const selectedItem = items[selectedIndex] || null;
+  const selectedKey = selectedItem ? itemKey(selectedItem) : '';
+  const hasEncryptedItems = useMemo(() => items.some(item => item.kind === 'encrypted'), [items]);
+
+  const canPersistRecaptionState = !hasEncryptedItems;
+
+  const recaptionStorageKey = useMemo(
+    () => recaptionSettingsStorageKey({ datasetName, datasetPath, workerID }),
+    [datasetName, datasetPath, workerID],
+  );
+
+  const recaptionQueueStorageKeyValue = useMemo(
+    () => recaptionQueueStorageKey({ datasetName, datasetPath, workerID }),
+    [datasetName, datasetPath, workerID],
+  );
+
+  const approvalStorageKey = useMemo(
+    () => `caption-studio:approvals:${'global'}:${workerID}:${datasetName}`,
+    [datasetName, workerID],
+  );
+
+  const settingsScope = JSON.stringify([canPersistRecaptionState, recaptionStorageKey, rootCaption]);
+  const [initialPreset] = useScopedState(settingsScope, () =>
+    canPersistRecaptionState ? readRecaptionSettingsPreset(recaptionStorageKey) : null,
+  );
+  const [captionCache] = useState(createCaptionCache);
+  const { entries: captionCacheSnapshot, version: captionCacheVersion } = useSyncExternalStore(
+    captionCache.subscribe,
+    captionCache.getSnapshot,
+    captionCache.getSnapshot,
+  );
+
+  const [captionText, setCaptionText] = useScopedState(selectedKey, () => captionCache.get(selectedKey)?.caption ?? '');
+  const [savedCaption, setSavedCaption] = useScopedState(selectedKey, () => captionCache.get(selectedKey)?.saved ?? '');
+  const [isCaptionLoaded, setIsCaptionLoaded] = useScopedState(
+    selectedKey,
+    () => captionCache.get(selectedKey)?.loaded ?? false,
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [isDeletingImages, setIsDeletingImages] = useState(false);
   const [deleteMessage, setDeleteMessage] = useState('');
@@ -221,48 +270,110 @@ export default function DatasetImageStudio({
   const [redoStack, setRedoStack] = useState<CaptionHistoryEntry[]>([]);
   const [autoBoxProvider, setAutoBoxProvider] = useState<StudioBoxProvider>('openrouter');
   const [autoBoxModel, setAutoBoxModel] = useState(DEFAULT_OPENROUTER_BOX_MODEL);
-  const [recaptionProvider, setRecaptionProvider] = useState<RecaptionProvider>('openrouter');
-  const [recaptionModel, setRecaptionModel] = useState(DEFAULT_OPENROUTER_BOX_MODEL);
-  const [recaptionOutputFormat, setRecaptionOutputFormat] = useState<RecaptionOutputFormat>('text');
-  const [recaptionPrompt, setRecaptionPrompt] = useState(defaultImageCaptionPrompt);
-  const [recaptionSystemPrompt, setRecaptionSystemPrompt] = useState('');
-  const [recaptionMaxNewTokens, setRecaptionMaxNewTokens] = useState(256);
+  const [recaptionProvider, setRecaptionProvider] = useScopedState<RecaptionProvider>(
+    settingsScope,
+    initialPreset?.provider ?? 'openrouter',
+  );
+  const [recaptionModel, setRecaptionModel] = useScopedState(
+    settingsScope,
+    initialPreset?.model ?? DEFAULT_OPENROUTER_BOX_MODEL,
+  );
+  const [recaptionOutputFormat, setRecaptionOutputFormat] = useScopedState<RecaptionOutputFormat>(
+    settingsScope,
+    initialPreset?.outputFormat ?? 'text',
+  );
+  const [recaptionPrompt, setRecaptionPrompt] = useScopedState(
+    settingsScope,
+    initialPreset?.prompt ?? defaultImageCaptionPrompt,
+  );
+  const [recaptionSystemPrompt, setRecaptionSystemPrompt] = useScopedState(
+    settingsScope,
+    initialPreset?.systemPrompt ?? (rootCaption?.trim() || ''),
+  );
+  const [recaptionMaxNewTokens, setRecaptionMaxNewTokens] = useScopedState(
+    settingsScope,
+    initialPreset?.maxNewTokens ?? 256,
+  );
   const [isRecaptionModalOpen, setIsRecaptionModalOpen] = useState(false);
-  const [isRecaptioning, setIsRecaptioning] = useState(false);
   const [recaptionMessage, setRecaptionMessage] = useState('');
-  const [hasRecaptionSettingsForDataset, setHasRecaptionSettingsForDataset] = useState(false);
-  const [recaptionQueue, setRecaptionQueue] = useState<RecaptionQueueEntry[]>([]);
-  const [activeRecaptionEntry, setActiveRecaptionEntry] = useState<RecaptionQueueEntry | null>(null);
-  const [activeRecaptionLabel, setActiveRecaptionLabel] = useState('');
-  const [activeRecaptionKey, setActiveRecaptionKey] = useState('');
-  const [recaptionRootPrompt, setRecaptionRootPrompt] = useState('');
-  const [recaptionRootPromptStatus, setRecaptionRootPromptStatus] = useState<RecaptionLoadStatus>('idle');
-  const [recaptionRemoteModelOptions, setRecaptionRemoteModelOptions] = useState<RecaptionModelOption[]>([]);
-  const [recaptionRemoteModelStatus, setRecaptionRemoteModelStatus] = useState<RecaptionLoadStatus>('idle');
-  const [recaptionRemoteModelError, setRecaptionRemoteModelError] = useState('');
+  const [hasRecaptionSettingsForDataset, setHasRecaptionSettingsForDataset] = useScopedState(
+    settingsScope,
+    Boolean(initialPreset),
+  );
+  const [recaptionEntries, setRecaptionEntries] = useState<RecaptionQueueEntry[]>([]);
+  const activeRecaptionEntry = recaptionEntries[0] ?? null;
+  const recaptionQueue = useMemo(() => recaptionEntries.slice(1), [recaptionEntries]);
+  const isRecaptioning = activeRecaptionEntry !== null;
+  const activeRecaptionLabel = activeRecaptionEntry?.name ?? '';
+  const activeRecaptionKey = activeRecaptionEntry?.key ?? '';
+  const runningRecaptionRef = useRef<string | null>(null);
+  const [persistedQueue] = useState(() =>
+    canPersistRecaptionState ? readPersistedRecaptionQueue(recaptionQueueStorageKeyValue) : null,
+  );
+  const [queueRestored, setQueueRestored] = useState(!persistedQueue);
+  const [recaptionRootPrompt, setRecaptionRootPrompt] = useScopedState(settingsScope, rootCaption?.trim() || '');
+  const [recaptionRootPromptStatus, setRecaptionRootPromptStatus] = useScopedState<RecaptionLoadStatus>(
+    settingsScope,
+    rootCaption !== undefined
+      ? rootCaption?.trim()
+        ? 'success'
+        : 'idle'
+      : datasetName && workerID === 'local'
+        ? 'loading'
+        : 'idle',
+  );
+  const [recaptionRemoteWorkerId, setRecaptionRemoteWorkerId] = useScopedState(
+    settingsScope,
+    initialPreset?.remoteWorkerId ?? '',
+  );
+  const remoteModelScope = JSON.stringify([recaptionProvider, recaptionRemoteWorkerId]);
+  const [recaptionRemoteModelOptions, setRecaptionRemoteModelOptions] = useScopedState<RecaptionModelOption[]>(
+    remoteModelScope,
+    [],
+  );
+  const [recaptionRemoteModelStatus, setRecaptionRemoteModelStatus] = useScopedState<RecaptionLoadStatus>(
+    remoteModelScope,
+    recaptionProvider === 'remote_ollama' && recaptionRemoteWorkerId ? 'loading' : 'idle',
+  );
+  const [recaptionRemoteModelError, setRecaptionRemoteModelError] = useScopedState(remoteModelScope, '');
   const [remoteOllamaWorkerId, setRemoteOllamaWorkerId] = useState('');
-  const [recaptionRemoteWorkerId, setRecaptionRemoteWorkerId] = useState('');
   const [autoBoxRefine, setAutoBoxRefine] = useState(false);
   const [isGeneratingBoxes, setIsGeneratingBoxes] = useState(false);
-  const [autoBoxMessage, setAutoBoxMessage] = useState('');
+  const [autoBoxMessage, setAutoBoxMessage] = useScopedState(selectedKey, '');
   const [captioningLayerKeys, setCaptioningLayerKeys] = useState<Set<string>>(() => new Set());
   const [layerCaptionMessages, setLayerCaptionMessages] = useState<Record<string, string>>({});
   const [encryptedProviderConfirmations, setEncryptedProviderConfirmations] = useState<Record<string, boolean>>({});
-  const [selectedImageSize, setSelectedImageSize] = useState<ImageSize | null>(null);
-  const [hiddenLayerIndexes, setHiddenLayerIndexes] = useState<Set<number>>(() => new Set());
-  const [lockedLayerIndexes, setLockedLayerIndexes] = useState<Set<number>>(() => new Set());
-  const [overlapElementStack, setOverlapElementStack] = useState<number[]>([]);
-  const [activePaletteSamplerIndex, setActivePaletteSamplerIndex] = useState<number | null>(null);
-  const [activeImagePaletteSamplerIndex, setActiveImagePaletteSamplerIndex] = useState<number | null>(null);
-  const [paletteImageElement, setPaletteImageElement] = useState<HTMLImageElement | null>(null);
-  const [paletteExtraction, setPaletteExtraction] = useState<ImagePaletteExtraction | null>(null);
-  const [appliedPaletteExtractionKey, setAppliedPaletteExtractionKey] = useState<string | null>(null);
+  const [selectedImageSize, setSelectedImageSize] = useScopedState<ImageSize | null>(selectedKey, null);
+  const [hiddenLayerIndexes, setHiddenLayerIndexes] = useScopedState<Set<number>>(selectedKey, () => new Set());
+  const [lockedLayerIndexes, setLockedLayerIndexes] = useScopedState<Set<number>>(selectedKey, () => new Set());
+  const [overlapElementStack, setOverlapElementStack] = useScopedState<number[]>(selectedKey, []);
+  const [activePaletteSamplerIndex, setActivePaletteSamplerIndex] = useScopedState<number | null>(selectedKey, null);
+  const [activeImagePaletteSamplerIndex, setActiveImagePaletteSamplerIndex] = useScopedState<number | null>(
+    selectedKey,
+    null,
+  );
+  const [paletteImageElement, setPaletteImageElement] = useScopedState<HTMLImageElement | null>(selectedKey, null);
+  const [paletteExtraction, setPaletteExtraction] = useScopedState<ImagePaletteExtraction | null>(selectedKey, null);
+  const [appliedPaletteExtractionKey, setAppliedPaletteExtractionKey] = useScopedState<string | null>(
+    selectedKey,
+    null,
+  );
   const [isExtractingPalette, setIsExtractingPalette] = useState(false);
-  const [paletteExtractionMessage, setPaletteExtractionMessage] = useState('');
-  const [selectedImagePaletteColor, setSelectedImagePaletteColor] = useState<string | null>(null);
+  const [paletteExtractionMessage, setPaletteExtractionMessage] = useScopedState(selectedKey, '');
+  const [selectedImagePaletteColor, setSelectedImagePaletteColor] = useScopedState<string | null>(selectedKey, null);
   const [encryptedCaptionPaths, setEncryptedCaptionPaths] = useState<Record<string, string>>({});
-  const [captionCacheVersion, setCaptionCacheVersion] = useState(0);
-  const [approvedKeys, setApprovedKeys] = useState<Set<string>>(() => new Set());
+  const [storedApprovedKeys, setApprovedKeys] = useScopedState<Set<string>>(approvalStorageKey, () => {
+    try {
+      const stored: unknown = JSON.parse(window.localStorage.getItem(approvalStorageKey) || '[]');
+      return new Set(Array.isArray(stored) ? stored.filter((value): value is string => typeof value === 'string') : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const approvedKeys = useMemo(
+    () => new Set(items.map(itemKey).filter(key => storedApprovedKeys.has(key))),
+    [items, storedApprovedKeys],
+  );
   const [workbenchHeight, setWorkbenchHeight] = useState(318);
   const [workbenchCollapsed, setWorkbenchCollapsed] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
@@ -276,17 +387,14 @@ export default function DatasetImageStudio({
   const [jsonDraftKey, setJsonDraftKey] = useState('');
   const [jsonSelectedSectionId, setJsonSelectedSectionId] = useState('elements');
   const [jsonSelectedPath, setJsonSelectedPath] = useState('compositional_deconstruction.elements');
-  const captionCacheRef = useRef(new Map<string, CaptionCacheEntry>());
   const saveCaptionRef = useRef<() => Promise<boolean>>(async () => true);
   const isSavingRef = useRef(false);
-  const autoSelectKeyRef = useRef('');
   const latestCaptionRef = useRef('');
   const savedCaptionRef = useRef('');
   const isDirtyRef = useRef(false);
   const selectedKeyRef = useRef('');
   const isRecaptioningRef = useRef(false);
   const recaptionQueueRef = useRef<RecaptionQueueEntry[]>([]);
-  const hydratedRecaptionQueueKeyRef = useRef('');
   const recaptionModelRef = useRef(DEFAULT_OPENROUTER_BOX_MODEL);
   const recaptionSystemPromptRef = useRef('');
   const recaptionSystemPromptTouchedRef = useRef(false);
@@ -300,36 +408,36 @@ export default function DatasetImageStudio({
     }),
     [hiddenLayerIndexes, lockedLayerIndexes, overlapElementStack, selectedElementIndex],
   );
-  const restoreHistoryEntry = useCallback((entry: CaptionHistoryEntry) => {
-    latestCaptionRef.current = entry.caption;
-    setCaptionText(entry.caption);
-    setJsonDraft(entry.caption);
-    setJsonDraftBaseCaption(entry.caption);
-    setJsonDraftKey(selectedKeyRef.current);
-    setSelectedElementIndex(entry.selectedElementIndex);
-    setHiddenLayerIndexes(new Set(entry.hiddenLayerIndexes));
-    setLockedLayerIndexes(new Set(entry.lockedLayerIndexes));
-    setOverlapElementStack(entry.overlapElementStack);
-    setActivePaletteSamplerIndex(null);
-  }, []);
+  const restoreHistoryEntry = useCallback(
+    (entry: CaptionHistoryEntry) => {
+      latestCaptionRef.current = entry.caption;
+      setCaptionText(entry.caption);
+      setJsonDraft(entry.caption);
+      setJsonDraftBaseCaption(entry.caption);
+      setJsonDraftKey(selectedKeyRef.current);
+      setSelectedElementIndex(entry.selectedElementIndex);
+      setHiddenLayerIndexes(new Set(entry.hiddenLayerIndexes));
+      setLockedLayerIndexes(new Set(entry.lockedLayerIndexes));
+      setOverlapElementStack(entry.overlapElementStack);
+      setActivePaletteSamplerIndex(null);
+    },
+    [
+      setCaptionText,
+      setHiddenLayerIndexes,
+      setLockedLayerIndexes,
+      setOverlapElementStack,
+      setActivePaletteSamplerIndex,
+    ],
+  );
   const writeCaptionCache = useCallback((key: string, entry: CaptionCacheEntry) => {
-    captionCacheRef.current.set(key, entry);
-    setCaptionCacheVersion(version => version + 1);
+    captionCache.set(key, entry);
   }, []);
-  const bumpCaptionCacheVersion = useCallback(() => {
-    setCaptionCacheVersion(version => version + 1);
-  }, []);
-  useEffect(() => {
-    setSelectedIndex(index => clampIndex(index, items.length));
-  }, [items.length]);
-  const selectedItem = items[selectedIndex] || null;
-  const selectedKey = selectedItem ? itemKey(selectedItem) : '';
+  const clampedSelectedIndex = clampIndex(selectedIndex, items.length);
+  if (selectedIndex !== clampedSelectedIndex) setSelectedIndex(clampedSelectedIndex);
   const selectedName = selectedItem
     ? `${itemName(selectedItem)}${selectedItem.kind === 'plain' && selectedItem.layerCount ? ` · ${selectedItem.layerCount} layers` : ''}`
     : '';
   const selectedKind = selectedItem ? itemKind(selectedItem) : 'image';
-  const hasEncryptedItems = useMemo(() => items.some(item => item.kind === 'encrypted'), [items]);
-  const canPersistRecaptionState = !hasEncryptedItems;
   const plainAuditItemPaths = useMemo(() => items.flatMap(item => (item.kind === 'plain' ? [item.path] : [])), [items]);
   const plainAuditKey = useMemo(() => plainAuditItemPaths.join('\n'), [plainAuditItemPaths]);
   const remoteWorkerOptions = useMemo(
@@ -339,18 +447,6 @@ export default function DatasetImageStudio({
   const remoteWorkerOptionValues = useMemo(
     () => new Set(remoteWorkerOptions.map(option => option.value)),
     [remoteWorkerOptions],
-  );
-  const recaptionStorageKey = useMemo(
-    () => recaptionSettingsStorageKey({ datasetName, datasetPath, workerID }),
-    [datasetName, datasetPath, null, workerID],
-  );
-  const recaptionQueueStorageKeyValue = useMemo(
-    () => recaptionQueueStorageKey({ datasetName, datasetPath, workerID }),
-    [datasetName, datasetPath, null, workerID],
-  );
-  const approvalStorageKey = useMemo(
-    () => `caption-studio:approvals:${'global'}:${workerID}:${datasetName}`,
-    [datasetName, null, workerID],
   );
   const autoBoxProviderLabel = providerLabel(autoBoxProvider);
   const recaptionModelOptions = useMemo(() => {
@@ -481,23 +577,6 @@ export default function DatasetImageStudio({
     : recaptionQueue.length
       ? `${recaptionQueue.length} recaption${recaptionQueue.length === 1 ? '' : 's'} queued.`
       : recaptionMessage;
-  useEffect(() => {
-    try {
-      const stored: unknown = JSON.parse(window.localStorage.getItem(approvalStorageKey) || '[]');
-      setApprovedKeys(
-        new Set(Array.isArray(stored) ? stored.filter((value): value is string => typeof value === 'string') : []),
-      );
-    } catch {
-      setApprovedKeys(new Set());
-    }
-  }, [approvalStorageKey]);
-  useEffect(() => {
-    const availableKeys = new Set(items.map(item => itemKey(item)));
-    setApprovedKeys(previous => {
-      const next = new Set([...previous].filter(key => availableKeys.has(key)));
-      return next.size === previous.size ? previous : next;
-    });
-  }, [items]);
   const persistApprovedKeys = useCallback(
     (next: Set<string>) => {
       setApprovedKeys(next);
@@ -507,7 +586,7 @@ export default function DatasetImageStudio({
         // Approval state is a convenience layer; caption saves remain authoritative.
       }
     },
-    [approvalStorageKey],
+    [approvalStorageKey, setApprovedKeys],
   );
   useEffect(() => {
     latestCaptionRef.current = captionText;
@@ -525,9 +604,6 @@ export default function DatasetImageStudio({
     recaptionQueueRef.current = recaptionQueue;
   }, [recaptionQueue]);
   useEffect(() => {
-    hydratedRecaptionQueueKeyRef.current = '';
-  }, [canPersistRecaptionState, recaptionQueueStorageKeyValue]);
-  useEffect(() => {
     purgeLegacyPersistedRecaptionQueues();
   }, []);
   useEffect(() => {
@@ -535,47 +611,35 @@ export default function DatasetImageStudio({
     if (recaptionQueueStorageKeyValue) window.localStorage.removeItem(recaptionQueueStorageKeyValue);
     if (recaptionStorageKey) window.localStorage.removeItem(recaptionStorageKey);
   }, [hasEncryptedItems, recaptionQueueStorageKeyValue, recaptionStorageKey]);
+  if (!queueRestored && items.length > 0) {
+    setQueueRestored(true);
+    if (canPersistRecaptionState && persistedQueue) {
+      const itemByKey = new Map(items.map(item => [itemKey(item), item] as const));
+      const seen = new Set<string>();
+      const restored = [persistedQueue.active, ...persistedQueue.queue].flatMap(entry => {
+        if (!entry || seen.has(entry.key)) return [];
+        const item = itemByKey.get(entry.key);
+        if (!item) return [];
+        seen.add(entry.key);
+        return [
+          {
+            id: entry.id || 'restored:' + entry.key,
+            item,
+            key: entry.key,
+            name: entry.name || itemName(item),
+            existingCaption: null,
+            settings: entry.settings,
+          },
+        ];
+      });
+      setRecaptionEntries(restored);
+      if (restored.length) setRecaptionMessage('Restored ' + restored.length + ' recaptions after refresh.');
+    }
+  }
   useEffect(() => {
     const storageKey = recaptionQueueStorageKeyValue;
     if (!canPersistRecaptionState) return;
-    if (!storageKey || hydratedRecaptionQueueKeyRef.current === storageKey) return;
-    if (isRecaptioning || recaptionQueue.length > 0) return;
-    const persisted = readPersistedRecaptionQueue(storageKey);
-    if (!persisted || (!persisted.active && persisted.queue.length === 0)) {
-      hydratedRecaptionQueueKeyRef.current = storageKey;
-      return;
-    }
-    const itemByKey = new Map(items.map(item => [itemKey(item), item] as const));
-    if (itemByKey.size === 0) return;
-    const seen = new Set<string>();
-    const restored = [persisted.active, ...persisted.queue].flatMap(persistedEntry => {
-      if (!persistedEntry || seen.has(persistedEntry.key)) return [];
-      const item = itemByKey.get(persistedEntry.key);
-      if (!item) return [];
-      seen.add(persistedEntry.key);
-      return [
-        {
-          id: persistedEntry.id || randomId(),
-          item,
-          key: persistedEntry.key,
-          name: persistedEntry.name || itemName(item),
-          existingCaption: null,
-          settings: persistedEntry.settings,
-        },
-      ];
-    });
-    hydratedRecaptionQueueKeyRef.current = storageKey;
-    if (restored.length === 0) {
-      window.localStorage.removeItem(storageKey);
-      return;
-    }
-    setRecaptionQueue(restored);
-    setRecaptionMessage(`Restored ${restored.length} recaption${restored.length === 1 ? '' : 's'} after refresh.`);
-  }, [canPersistRecaptionState, isRecaptioning, items, recaptionQueue.length, recaptionQueueStorageKeyValue]);
-  useEffect(() => {
-    const storageKey = recaptionQueueStorageKeyValue;
-    if (!canPersistRecaptionState) return;
-    if (!storageKey || hydratedRecaptionQueueKeyRef.current !== storageKey || typeof window === 'undefined') return;
+    if (!storageKey || !queueRestored || typeof window === 'undefined') return;
     if (!activeRecaptionEntry && recaptionQueue.length === 0) {
       window.localStorage.removeItem(storageKey);
       return;
@@ -587,7 +651,7 @@ export default function DatasetImageStudio({
       updatedAt: new Date().toISOString(),
     };
     window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
-  }, [activeRecaptionEntry, canPersistRecaptionState, recaptionQueue, recaptionQueueStorageKeyValue]);
+  }, [activeRecaptionEntry, canPersistRecaptionState, queueRestored, recaptionQueue, recaptionQueueStorageKeyValue]);
   useEffect(() => {
     savedCaptionRef.current = savedCaption;
     isDirtyRef.current = hasUnsavedChanges;
@@ -667,22 +731,13 @@ export default function DatasetImageStudio({
   }, [hasUnsavedChanges]);
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
+  }, [selectedKey]);
+  const [previousSelectedItem, setPreviousSelectedItem] = useState(selectedItem);
+  if (previousSelectedItem !== selectedItem) {
+    setPreviousSelectedItem(selectedItem);
     if (isPlainTextCaptionItem(selectedItem)) setCaptionTab('caption');
-    setAutoBoxMessage('');
-    setSelectedImageSize(null);
-    setHiddenLayerIndexes(new Set());
-    setLockedLayerIndexes(new Set());
-    setOverlapElementStack([]);
-    setActivePaletteSamplerIndex(null);
-    setActiveImagePaletteSamplerIndex(null);
-    setPaletteImageElement(null);
-    setPaletteExtraction(null);
-    setAppliedPaletteExtractionKey(null);
-    setPaletteExtractionMessage('');
-    setSelectedImagePaletteColor(null);
-  }, [selectedItem, selectedKey]);
-  useEffect(() => {
-    if (advancedMode !== 'json' || !selectedKey || !isCaptionLoaded || jsonDraftKey === selectedKey) return;
+  }
+  if (advancedMode === 'json' && selectedKey && isCaptionLoaded && jsonDraftKey !== selectedKey) {
     setJsonDraft(captionText);
     setJsonDraftBaseCaption(captionText);
     setJsonDraftKey(selectedKey);
@@ -692,39 +747,35 @@ export default function DatasetImageStudio({
         ? 'compositional_deconstruction.elements'
         : `compositional_deconstruction.elements[${selectedElementIndex}]`,
     );
-  }, [advancedMode, captionText, isCaptionLoaded, jsonDraftKey, selectedElementIndex, selectedKey]);
-  useEffect(() => {
-    if (
-      advancedMode !== 'json' ||
-      jsonDraftKey !== selectedKey ||
-      jsonDraft !== jsonDraftBaseCaption ||
-      jsonDraftBaseCaption === captionText
-    ) {
-      return;
-    }
+  }
+  if (
+    advancedMode === 'json' &&
+    jsonDraftKey === selectedKey &&
+    jsonDraft === jsonDraftBaseCaption &&
+    jsonDraftBaseCaption !== captionText
+  ) {
     setJsonDraft(captionText);
     setJsonDraftBaseCaption(captionText);
-  }, [advancedMode, captionText, jsonDraft, jsonDraftBaseCaption, jsonDraftKey, selectedKey]);
-  useEffect(() => {
-    if (advancedMode !== 'json' || selectedElementIndex == null) return;
-    const elementPath =
-      jsonNavigatorAnalysis.elements.find(element => element.index === selectedElementIndex)?.path ||
-      `compositional_deconstruction.elements[${selectedElementIndex}]`;
-    setJsonSelectedSectionId('elements');
-    setJsonSelectedPath(elementPath);
-  }, [advancedMode, jsonNavigatorAnalysis.elements, selectedElementIndex]);
-  useEffect(() => {
-    if (imagePaletteColors.length === 0) {
-      if (selectedImagePaletteColor !== null) setSelectedImagePaletteColor(null);
-      return;
+  }
+  const jsonElementPath =
+    jsonNavigatorAnalysis.elements.find(element => element.index === selectedElementIndex)?.path ||
+    'compositional_deconstruction.elements[' + selectedElementIndex + ']';
+  const jsonSelectionScope = JSON.stringify([advancedMode, selectedElementIndex, jsonElementPath]);
+  const [previousJsonSelection, setPreviousJsonSelection] = useState(jsonSelectionScope);
+  if (previousJsonSelection !== jsonSelectionScope) {
+    setPreviousJsonSelection(jsonSelectionScope);
+    if (advancedMode === 'json' && selectedElementIndex != null) {
+      setJsonSelectedSectionId('elements');
+      setJsonSelectedPath(jsonElementPath);
     }
-    if (selectedImagePaletteColor && !imagePaletteColors.includes(selectedImagePaletteColor)) {
-      setSelectedImagePaletteColor(null);
-    }
-  }, [imagePaletteColors, selectedImagePaletteColor]);
-  useEffect(() => {
+  }
+  if (selectedImagePaletteColor && !imagePaletteColors.includes(selectedImagePaletteColor))
+    setSelectedImagePaletteColor(null);
+  const [previousElementIndex, setPreviousElementIndex] = useState(selectedElementIndex);
+  if (previousElementIndex !== selectedElementIndex) {
+    setPreviousElementIndex(selectedElementIndex);
     setActivePaletteSamplerIndex(null);
-  }, [selectedElementIndex]);
+  }
   useEffect(() => {
     if (advancedMode !== 'palettes' || !paletteImageElement) return;
     let cancelled = false;
@@ -740,41 +791,34 @@ export default function DatasetImageStudio({
       cancelled = true;
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [advancedMode, paletteImageElement, selectedKey]);
-  useEffect(() => {
-    if (autoBoxProvider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
-    if (remoteOllamaWorkerId && remoteWorkerOptionValues.has(remoteOllamaWorkerId)) return;
+  }, [advancedMode, paletteImageElement, selectedKey, setPaletteExtraction]);
+  if (
+    autoBoxProvider === 'remote_ollama' &&
+    remoteWorkerOptions.length > 0 &&
+    (!remoteOllamaWorkerId || !remoteWorkerOptionValues.has(remoteOllamaWorkerId))
+  )
     setRemoteOllamaWorkerId(remoteWorkerOptions[0].value);
-  }, [autoBoxProvider, remoteOllamaWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
-  useEffect(() => {
-    if (recaptionProvider !== 'remote_ollama' || remoteWorkerOptions.length === 0) return;
-    if (recaptionRemoteWorkerId && remoteWorkerOptionValues.has(recaptionRemoteWorkerId)) return;
+  if (
+    recaptionProvider === 'remote_ollama' &&
+    remoteWorkerOptions.length > 0 &&
+    (!recaptionRemoteWorkerId || !remoteWorkerOptionValues.has(recaptionRemoteWorkerId))
+  )
     setRecaptionRemoteWorkerId(remoteWorkerOptions[0].value);
-  }, [recaptionProvider, recaptionRemoteWorkerId, remoteWorkerOptionValues, remoteWorkerOptions]);
-  const applyRecaptionRootPrompt = useCallback((value: string) => {
-    const trimmed = value.trim();
-    setRecaptionRootPrompt(trimmed);
-    if (!trimmed || recaptionSystemPromptTouchedRef.current || recaptionSystemPromptRef.current.trim()) return;
-    recaptionSystemPromptRef.current = trimmed;
-    setRecaptionSystemPrompt(trimmed);
-  }, []);
+  const applyRecaptionRootPrompt = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      setRecaptionRootPrompt(trimmed);
+      if (!trimmed || recaptionSystemPromptTouchedRef.current || recaptionSystemPromptRef.current.trim()) return;
+      recaptionSystemPromptRef.current = trimmed;
+      setRecaptionSystemPrompt(trimmed);
+    },
+    [setRecaptionRootPrompt, setRecaptionSystemPrompt],
+  );
   useEffect(() => {
     let cancelled = false;
-    recaptionSystemPromptTouchedRef.current = false;
-    recaptionSystemPromptRef.current = '';
-    setRecaptionRootPrompt('');
-    setRecaptionSystemPrompt('');
-    if (rootCaption !== undefined) {
-      const value = rootCaption || '';
-      applyRecaptionRootPrompt(value);
-      setRecaptionRootPromptStatus(value.trim() ? 'success' : 'idle');
-      return;
-    }
-    if (!datasetName || workerID !== 'local') {
-      setRecaptionRootPromptStatus('idle');
-      return;
-    }
-    setRecaptionRootPromptStatus('loading');
+    recaptionSystemPromptTouchedRef.current = Boolean(initialPreset);
+    recaptionSystemPromptRef.current = initialPreset?.systemPrompt ?? rootCaption?.trim() ?? '';
+    if (rootCaption !== undefined || !datasetName || workerID !== 'local') return;
     apiClient
       .post('/api/datasets/root-caption', {
         datasetName,
@@ -796,64 +840,70 @@ export default function DatasetImageStudio({
     return () => {
       cancelled = true;
     };
-  }, [applyRecaptionRootPrompt, datasetName, rootCaption, workerID]);
-  useEffect(() => {
-    setHasRecaptionSettingsForDataset(false);
-    if (!canPersistRecaptionState) return;
-    const preset = readRecaptionSettingsPreset(recaptionStorageKey);
-    if (!preset) return;
-    setRecaptionProvider(preset.provider);
-    setRecaptionModel(preset.model);
-    setRecaptionOutputFormat(preset.outputFormat);
-    setRecaptionPrompt(preset.prompt);
-    setRecaptionSystemPrompt(preset.systemPrompt);
-    recaptionSystemPromptRef.current = preset.systemPrompt;
-    recaptionSystemPromptTouchedRef.current = true;
-    setRecaptionRemoteWorkerId(preset.remoteWorkerId);
-    setRecaptionMaxNewTokens(preset.maxNewTokens);
-    setHasRecaptionSettingsForDataset(true);
-  }, [canPersistRecaptionState, recaptionStorageKey, rootCaption]);
+  }, [applyRecaptionRootPrompt, datasetName, rootCaption, workerID, setRecaptionRootPromptStatus]);
   const useRecaptionRootPrompt = useCallback(() => {
     recaptionSystemPromptTouchedRef.current = true;
     recaptionSystemPromptRef.current = recaptionRootPrompt;
     setRecaptionSystemPrompt(recaptionRootPrompt);
-  }, [recaptionRootPrompt]);
-  const handleRecaptionSystemPromptChange = useCallback((value: string) => {
-    recaptionSystemPromptTouchedRef.current = true;
-    recaptionSystemPromptRef.current = value;
-    setRecaptionSystemPrompt(value);
-  }, []);
-  const loadRecaptionRemoteModels = useCallback(
-    async (workerId = recaptionRemoteWorkerId, preferredModel = recaptionModelRef.current) => {
-      if (!workerId) return;
+  }, [recaptionRootPrompt, setRecaptionSystemPrompt]);
+  const handleRecaptionSystemPromptChange = useCallback(
+    (value: string) => {
+      recaptionSystemPromptTouchedRef.current = true;
+      recaptionSystemPromptRef.current = value;
+      setRecaptionSystemPrompt(value);
+    },
+    [setRecaptionSystemPrompt],
+  );
+  const requestRecaptionRemoteModels = useCallback(
+    (workerId = recaptionRemoteWorkerId, preferredModel = recaptionModelRef.current) => {
+      if (!workerId) return Promise.resolve();
       const preferred = preferredModel.trim();
+      return apiClient
+        .get('/api/ollama-workers/' + encodeURIComponent(workerId) + '/models')
+        .then(response => {
+          const options = ollamaModelOptions(response.data?.models);
+          setRecaptionRemoteModelOptions(options);
+          setRecaptionRemoteModelStatus('success');
+          setRecaptionRemoteModelError('');
+          setRecaptionModel(currentModel => {
+            const trimmed = preferred || currentModel.trim();
+            if (!options.length) return '';
+            return options.some(option => option.value === trimmed) ? trimmed : options[0].value;
+          });
+        })
+        .catch((error: unknown) => {
+          setRecaptionRemoteModelOptions([]);
+          setRecaptionRemoteModelStatus('error');
+          setRecaptionRemoteModelError(responseErrorMessage(error, 'Could not load Remote Ollama models.'));
+        });
+    },
+    [
+      recaptionRemoteWorkerId,
+      setRecaptionModel,
+      setRecaptionRemoteModelOptions,
+      setRecaptionRemoteModelStatus,
+      setRecaptionRemoteModelError,
+    ],
+  );
+  const loadRecaptionRemoteModels = useCallback(
+    (workerId = recaptionRemoteWorkerId, preferredModel = recaptionModelRef.current) => {
       setRecaptionRemoteModelStatus('loading');
       setRecaptionRemoteModelError('');
       setRecaptionRemoteModelOptions([]);
-      try {
-        const response = await apiClient.get(`/api/ollama-workers/${encodeURIComponent(workerId)}/models`);
-        const options = ollamaModelOptions(response.data?.models);
-        setRecaptionRemoteModelOptions(options);
-        setRecaptionRemoteModelStatus('success');
-        setRecaptionModel(currentModel => {
-          const trimmed = preferred || currentModel.trim();
-          if (!options.length) return '';
-          return options.some(option => option.value === trimmed) ? trimmed : options[0].value;
-        });
-      } catch (error: any) {
-        setRecaptionRemoteModelOptions([]);
-        setRecaptionRemoteModelStatus('error');
-        setRecaptionRemoteModelError(
-          error?.response?.data?.error || error?.message || 'Could not load Remote Ollama models.',
-        );
-      }
+      return requestRecaptionRemoteModels(workerId, preferredModel);
     },
-    [recaptionRemoteWorkerId],
+    [
+      recaptionRemoteWorkerId,
+      requestRecaptionRemoteModels,
+      setRecaptionRemoteModelStatus,
+      setRecaptionRemoteModelError,
+      setRecaptionRemoteModelOptions,
+    ],
   );
   useEffect(() => {
     if (recaptionProvider !== 'remote_ollama' || !recaptionRemoteWorkerId) return;
-    void loadRecaptionRemoteModels(recaptionRemoteWorkerId);
-  }, [loadRecaptionRemoteModels, recaptionProvider, recaptionRemoteWorkerId]);
+    void requestRecaptionRemoteModels(recaptionRemoteWorkerId);
+  }, [requestRecaptionRemoteModels, recaptionProvider, recaptionRemoteWorkerId]);
   const handleAutoBoxProviderChange = useCallback((value: string) => {
     const nextProvider = normalizeStudioBoxProvider(value);
     setAutoBoxProvider(nextProvider);
@@ -871,13 +921,22 @@ export default function DatasetImageStudio({
         nextRecaptionModelForProvider(nextProvider, currentModel, recaptionRemoteModelOptions),
       );
     },
-    [recaptionRemoteModelOptions],
+    [
+      recaptionRemoteModelOptions,
+      setRecaptionProvider,
+      setRecaptionRemoteModelStatus,
+      setRecaptionRemoteModelError,
+      setRecaptionModel,
+    ],
   );
-  const handleRecaptionOutputFormatChange = useCallback((value: RecaptionOutputFormat) => {
-    setRecaptionOutputFormat(value);
-    setRecaptionPrompt(currentPrompt => promptForRecaptionOutputFormat(value, currentPrompt));
-    setRecaptionMaxNewTokens(current => maxNewTokensForRecaptionOutputFormat(value, current));
-  }, []);
+  const handleRecaptionOutputFormatChange = useCallback(
+    (value: RecaptionOutputFormat) => {
+      setRecaptionOutputFormat(value);
+      setRecaptionPrompt(currentPrompt => promptForRecaptionOutputFormat(value, currentPrompt));
+      setRecaptionMaxNewTokens(current => maxNewTokensForRecaptionOutputFormat(value, current));
+    },
+    [setRecaptionOutputFormat, setRecaptionPrompt, setRecaptionMaxNewTokens],
+  );
   const currentRecaptionSettings = useCallback(
     (): RecaptionSettingsPreset => ({
       provider: recaptionProvider,
@@ -915,7 +974,7 @@ export default function DatasetImageStudio({
       }
       setHasRecaptionSettingsForDataset(true);
     },
-    [canPersistRecaptionState, recaptionStorageKey],
+    [canPersistRecaptionState, recaptionStorageKey, setHasRecaptionSettingsForDataset],
   );
   const readCaptionForItem = useCallback(
     async (item: DatasetStudioItem, signal?: AbortSignal) => {
@@ -945,42 +1004,15 @@ export default function DatasetImageStudio({
       }
       return text;
     },
-    [datasetName, encryptedKey, null, workerID],
+    [datasetName, encryptedKey, workerID],
   );
   useEffect(() => {
     const activeKeys = new Set(items.map(itemKey));
-    let cacheChanged = false;
-    for (const key of Array.from(captionCacheRef.current.keys())) {
-      if (activeKeys.has(key)) continue;
-      cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
-    }
-    const selectedKey = selectedKeyRef.current;
-    if (selectedKey && !activeKeys.has(selectedKey) && !isDirtyRef.current) {
-      latestCaptionRef.current = '';
-      setCaptionText('');
-      setSavedCaption('');
-      setIsCaptionLoaded(false);
-    }
-    if (cacheChanged) bumpCaptionCacheVersion();
-  }, [bumpCaptionCacheVersion, items]);
+    for (const key of captionCache.keys()) if (!activeKeys.has(key)) captionCache.delete(key);
+  }, [captionCache, items]);
   useEffect(() => {
-    if (!selectedKey) {
-      setCaptionText('');
-      setSavedCaption('');
-      setIsCaptionLoaded(false);
-      return;
-    }
-    const cached = captionCacheRef.current.get(selectedKey);
-    if (cached?.loaded) {
-      setCaptionText(cached.caption);
-      setSavedCaption(cached.saved);
-      setIsCaptionLoaded(true);
-      return;
-    }
+    if (!selectedKey || captionCache.get(selectedKey)?.loaded) return;
     let cancelled = false;
-    setCaptionText('');
-    setSavedCaption('');
-    setIsCaptionLoaded(false);
     async function loadCaption() {
       try {
         if (!selectedItem) return;
@@ -1002,7 +1034,15 @@ export default function DatasetImageStudio({
     return () => {
       cancelled = true;
     };
-  }, [readCaptionForItem, selectedItem, selectedKey, writeCaptionCache]);
+  }, [
+    readCaptionForItem,
+    selectedItem,
+    selectedKey,
+    writeCaptionCache,
+    setCaptionText,
+    setSavedCaption,
+    setIsCaptionLoaded,
+  ]);
   useEffect(() => {
     if (!selectedKey) return;
     writeCaptionCache(selectedKey, { caption: captionText, saved: savedCaption, loaded: isCaptionLoaded });
@@ -1024,13 +1064,13 @@ export default function DatasetImageStudio({
         );
         if (cancelled || controller.signal.aborted) return;
         const refusals = response.data?.refusals || {};
-        let cacheChanged = false;
+
         Object.entries(refusals).forEach(([key, captionValue]) => {
           if (typeof captionValue !== 'string') return;
-          const previous = captionCacheRef.current.get(key);
+          const previous = captionCache.get(key);
           if (previous?.loaded && previous.caption === captionValue && previous.saved === captionValue) return;
-          captionCacheRef.current.set(key, { caption: captionValue, saved: captionValue, loaded: true });
-          cacheChanged = true;
+          captionCache.set(key, { caption: captionValue, saved: captionValue, loaded: true });
+
           if (selectedKeyRef.current === key && !isDirtyRef.current) {
             latestCaptionRef.current = captionValue;
             setCaptionText(captionValue);
@@ -1040,9 +1080,6 @@ export default function DatasetImageStudio({
             setRedoStack([]);
           }
         });
-        if (cacheChanged) {
-          setCaptionCacheVersion(version => version + 1);
-        }
       } catch (error: any) {
         if (error?.name !== 'CanceledError' && error?.name !== 'AbortError' && !controller.signal.aborted) {
           console.warn('Caption refusal audit failed:', error);
@@ -1055,7 +1092,7 @@ export default function DatasetImageStudio({
       controller.abort();
       cancelScheduledAudit();
     };
-  }, [datasetName, plainAuditItemPaths, plainAuditKey, workerID]);
+  }, [datasetName, plainAuditItemPaths, plainAuditKey, workerID, setCaptionText, setSavedCaption, setIsCaptionLoaded]);
   useEffect(() => {
     const shouldLiveRefreshCaption = isAutoCaptioning || liveCaptionRefresh;
     if (!shouldLiveRefreshCaption || !selectedItem || !selectedKey) return;
@@ -1068,10 +1105,9 @@ export default function DatasetImageStudio({
       try {
         const text = await readCaptionForItem(selectedItem, controller.signal);
         if (controller.signal.aborted || selectedKeyRef.current !== requestKey) return;
-        const cached = captionCacheRef.current.get(requestKey);
+        const cached = captionCache.get(requestKey);
         if (cached?.caption === text && cached.saved === text && cached.loaded) return;
-        captionCacheRef.current.set(requestKey, { caption: text, saved: text, loaded: true });
-        setCaptionCacheVersion(version => version + 1);
+        captionCache.set(requestKey, { caption: text, saved: text, loaded: true });
         if (!isDirtyRef.current && savedCaptionRef.current !== text) {
           latestCaptionRef.current = text;
           setCaptionText(text);
@@ -1094,46 +1130,40 @@ export default function DatasetImageStudio({
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [isAutoCaptioning, liveCaptionRefresh, readCaptionForItem, selectedItem, selectedKey]);
+  }, [
+    isAutoCaptioning,
+    liveCaptionRefresh,
+    readCaptionForItem,
+    selectedItem,
+    selectedKey,
+    setCaptionText,
+    setSavedCaption,
+    setIsCaptionLoaded,
+  ]);
   useEffect(() => {
     if (!isAutoCaptioning || !encryptedKey || !onRefresh) return;
     const interval = window.setInterval(() => onRefresh(), 5000);
     return () => window.clearInterval(interval);
   }, [encryptedKey, isAutoCaptioning, onRefresh]);
-  useEffect(() => {
-    if (!isIdeogram || selectedElementIndex == null) return;
-    if (!captionParse.elements[selectedElementIndex]) setSelectedElementIndex(null);
-  }, [captionParse, isIdeogram, selectedElementIndex]);
-  useEffect(() => {
-    if (!isIdeogram) {
-      setHiddenLayerIndexes(new Set());
-      setLockedLayerIndexes(new Set());
-      setOverlapElementStack([]);
-      return;
-    }
-    const elementCount = captionParse.elements.length;
-    setHiddenLayerIndexes(previous => {
-      const next = new Set([...previous].filter(elementIndex => elementIndex < elementCount));
-      return next.size === previous.size ? previous : next;
-    });
-    setLockedLayerIndexes(previous => {
-      const next = new Set([...previous].filter(elementIndex => elementIndex < elementCount));
-      return next.size === previous.size ? previous : next;
-    });
-    setOverlapElementStack(previous => previous.filter(elementIndex => elementIndex < elementCount));
-  }, [captionParse, isIdeogram]);
-  useEffect(() => {
-    if (!selectedKey || autoSelectKeyRef.current === selectedKey) return;
-    if (!isIdeogram || boxes.length === 0) return;
-    autoSelectKeyRef.current = selectedKey;
+  if (isIdeogram && selectedElementIndex != null && !captionParse.elements[selectedElementIndex])
+    setSelectedElementIndex(null);
+  const elementCount = captionParse.kind === 'ideogram' ? captionParse.elements.length : 0;
+  const [previousElementCount, setPreviousElementCount] = useState(elementCount);
+  if (previousElementCount !== elementCount) {
+    setPreviousElementCount(elementCount);
+    setHiddenLayerIndexes(previous => new Set([...previous].filter(index => index < elementCount)));
+    setLockedLayerIndexes(previous => new Set([...previous].filter(index => index < elementCount)));
+    setOverlapElementStack(previous => previous.filter(index => index < elementCount));
+  }
+  const [autoSelectKey, setAutoSelectKey] = useState('');
+  if (selectedKey && autoSelectKey !== selectedKey && isIdeogram && boxes.length > 0) {
+    setAutoSelectKey(selectedKey);
     setSelectedElementIndex(boxes[0].elementIndex);
-  }, [boxes, isIdeogram, selectedKey]);
+  }
   const saveCaptionForItem = useCallback(
     async (targetItem: DatasetStudioItem, targetKey: string, captionValue: string) => {
       const draftAtStart =
-        selectedKeyRef.current === targetKey
-          ? latestCaptionRef.current
-          : captionCacheRef.current.get(targetKey)?.caption;
+        selectedKeyRef.current === targetKey ? latestCaptionRef.current : captionCache.get(targetKey)?.caption;
       const value = isPlainTextCaptionItem(targetItem) ? captionValue : captionValue.trim();
       if (targetItem.kind === 'plain') {
         const response = await apiClient.post('/api/img/caption', {
@@ -1149,9 +1179,7 @@ export default function DatasetImageStudio({
         throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt this dataset before editing captions.');
       }
       const currentDraft =
-        selectedKeyRef.current === targetKey
-          ? latestCaptionRef.current
-          : captionCacheRef.current.get(targetKey)?.caption;
+        selectedKeyRef.current === targetKey ? latestCaptionRef.current : captionCache.get(targetKey)?.caption;
       const caption = currentDraft !== undefined && currentDraft !== draftAtStart ? currentDraft : value;
       if (selectedKeyRef.current === targetKey) {
         latestCaptionRef.current = caption;
@@ -1160,7 +1188,15 @@ export default function DatasetImageStudio({
       }
       writeCaptionCache(targetKey, { caption, saved: value, loaded: true });
     },
-    [encryptedCaptionPaths, encryptedKey, onPlainItemCaptioned, onSaveEncryptedCaption, writeCaptionCache],
+    [
+      encryptedCaptionPaths,
+      encryptedKey,
+      onPlainItemCaptioned,
+      onSaveEncryptedCaption,
+      writeCaptionCache,
+      setCaptionText,
+      setSavedCaption,
+    ],
   );
   const saveCaption = useCallback(
     async (captionOverride?: string) => {
@@ -1190,29 +1226,13 @@ export default function DatasetImageStudio({
     saveCaptionRef.current = saveCaption;
   }, [saveCaption]);
   const runRecaptionQueueEntry = useCallback(
-    async (entry: RecaptionQueueEntry) => {
+    (entry: RecaptionQueueEntry) => {
       const { item, key, name, existingCaption, settings } = entry;
-      if (!settings.model.trim()) {
-        setRecaptionMessage('Select a model before recaptioning.');
-        return;
-      }
-      if (settings.provider === 'remote_ollama' && !settings.remoteWorkerId) {
-        setRecaptionMessage('Select a Remote Ollama endpoint.');
-        return;
-      }
-      if (item.kind === 'encrypted' && !encryptedKey) {
-        setRecaptionMessage('Unlock the encrypted dataset first.');
-        return;
-      }
-      const recaptionProviderLabel = providerLabel(settings.provider);
-      setActiveRecaptionEntry(entry);
-      setIsRecaptioning(true);
-      setActiveRecaptionLabel(name);
-      setActiveRecaptionKey(key);
-      setRecaptionMessage(
-        `Recaptioning ${name}${recaptionQueueRef.current.length ? ` (${recaptionQueueRef.current.length} queued)` : ''}.`,
-      );
-      try {
+      const requestCaption = async () => {
+        if (!settings.model.trim()) throw new Error('Select a model before recaptioning.');
+        if (settings.provider === 'remote_ollama' && !settings.remoteWorkerId)
+          throw new Error('Select a Remote Ollama endpoint.');
+        if (item.kind === 'encrypted' && !encryptedKey) throw new Error('Unlock the encrypted dataset first.');
         const requestExistingCaption = existingCaption ?? (await readCaptionForItem(item));
         let response;
         if (item.kind === 'plain') {
@@ -1234,22 +1254,15 @@ export default function DatasetImageStudio({
             { timeout: 0 },
           );
         } else {
-          if (!encryptedProviderConfirmations[`recaption:${settings.provider}`]) {
-            const confirmed = window.confirm(
-              `Recaption will send this decrypted image to ${recaptionProviderLabel}. Continue?`,
-            );
-            if (!confirmed) {
-              setRecaptionMessage('Recaption canceled.');
-              return;
-            }
-            setEncryptedProviderConfirmations(previous => ({ ...previous, [`recaption:${settings.provider}`]: true }));
-          }
-          const formData = await createEncryptedImageFormData({
-            datasetName,
-            workerID,
-            encryptedKey: encryptedKey as CryptoKey,
-            item: item.item,
-          });
+          if (!encryptedKey) throw new Error('Unlock the encrypted dataset first.');
+          if (
+            !encryptedProviderConfirmations['recaption:' + settings.provider] &&
+            !window.confirm(
+              'Recaption will send this decrypted image to ' + providerLabel(settings.provider) + '. Continue?',
+            )
+          )
+            throw new Error('Recaption canceled.');
+          const formData = await createEncryptedImageFormData({ datasetName, workerID, encryptedKey, item: item.item });
           appendRecaptionFields(formData, settings, requestExistingCaption, datasetName);
           response = await apiClient.post('/api/datasets/recaption-single', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
@@ -1258,44 +1271,51 @@ export default function DatasetImageStudio({
         }
         const caption = String(response.data?.caption || '').trim();
         if (!caption) throw new Error('Recaption returned an empty caption.');
-        if (selectedKeyRef.current === key) {
-          setUndoStack(previous => [
-            ...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)),
-            captureHistoryEntry(latestCaptionRef.current),
-          ]);
-          setRedoStack([]);
-          if (settings.outputFormat === 'ideogram_json') setCaptionTab('json');
-        }
-        await saveCaptionForItem(item, key, caption);
-        setRecaptionMessage(
-          `${name} recaptioned${recaptionQueueRef.current.length ? `, ${recaptionQueueRef.current.length} queued` : ''}.`,
-        );
-      } catch (error) {
-        setRecaptionMessage(`${name}: ${responseErrorMessage(error, 'Recaption failed. Please try again.')}`);
-      } finally {
-        setActiveRecaptionEntry(null);
-        setIsRecaptioning(false);
-        setActiveRecaptionLabel('');
-        setActiveRecaptionKey('');
-      }
+        return caption;
+      };
+      return requestCaption()
+        .then(async caption => {
+          if (item.kind === 'encrypted')
+            setEncryptedProviderConfirmations(previous => ({ ...previous, ['recaption:' + settings.provider]: true }));
+          if (selectedKeyRef.current === key) {
+            setUndoStack(previous => [
+              ...previous.slice(Math.max(0, previous.length - MAX_HISTORY + 1)),
+              captureHistoryEntry(latestCaptionRef.current),
+            ]);
+            setRedoStack([]);
+            if (settings.outputFormat === 'ideogram_json') setCaptionTab('json');
+          }
+          await saveCaptionForItem(item, key, caption);
+          setRecaptionMessage(
+            name +
+              ' recaptioned' +
+              (recaptionQueueRef.current.length ? ', ' + recaptionQueueRef.current.length + ' queued' : '') +
+              '.',
+          );
+        })
+        .catch(error => {
+          setRecaptionMessage(name + ': ' + responseErrorMessage(error, 'Recaption failed. Please try again.'));
+        })
+        .finally(() => {
+          runningRecaptionRef.current = null;
+          setRecaptionEntries(previous => previous.filter(candidate => candidate.id !== entry.id));
+        });
     },
     [
       captureHistoryEntry,
       datasetName,
       encryptedKey,
       encryptedProviderConfirmations,
-      null,
       readCaptionForItem,
       saveCaptionForItem,
       workerID,
     ],
   );
   useEffect(() => {
-    if (isRecaptioning || recaptionQueue.length === 0) return;
-    const [nextEntry] = recaptionQueue;
-    setRecaptionQueue(previous => previous.slice(1));
-    void runRecaptionQueueEntry(nextEntry);
-  }, [isRecaptioning, recaptionQueue, runRecaptionQueueEntry]);
+    if (!activeRecaptionEntry || runningRecaptionRef.current === activeRecaptionEntry.id) return;
+    runningRecaptionRef.current = activeRecaptionEntry.id;
+    void runRecaptionQueueEntry(activeRecaptionEntry);
+  }, [activeRecaptionEntry, runRecaptionQueueEntry]);
   const queueSelectedRecaption = useCallback(() => {
     if (!selectedItem || !canRecaptionSelectedImage) return;
     if (selectedRecaptionIsRunning) {
@@ -1331,7 +1351,7 @@ export default function DatasetImageStudio({
       settings,
     };
     persistRecaptionSettingsForDataset(settings);
-    setRecaptionQueue(previous => [...previous, entry]);
+    setRecaptionEntries(previous => [...previous, entry]);
     const queuedTotal = recaptionQueueRef.current.length + (isRecaptioningRef.current ? 1 : 0) + 1;
     setRecaptionMessage(queuedTotal > 1 ? `${selectedName} queued (${queuedTotal} total).` : `${selectedName} queued.`);
     setIsRecaptionModalOpen(false);
@@ -1468,11 +1488,10 @@ export default function DatasetImageStudio({
             : [];
       if (removedKeys.length === 0) return;
       const removedKeySet = new Set(removedKeys);
-      let cacheChanged = false;
+
       removedKeySet.forEach(key => {
-        cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
+        captionCache.delete(key);
       });
-      if (cacheChanged) bumpCaptionCacheVersion();
       const remainingItems = items.filter(item => !removedKeySet.has(itemKey(item)));
       const currentSelectedKey = selectedKeyRef.current;
       const currentWasDeleted = removedKeySet.has(currentSelectedKey);
@@ -1492,7 +1511,7 @@ export default function DatasetImageStudio({
       }
       if (nextSelectedIndex >= 0) setSelectedIndex(nextSelectedIndex);
     },
-    [bumpCaptionCacheVersion, items, selectedIndex],
+    [items, selectedIndex, setCaptionText, setSavedCaption],
   );
   const handleDeleteImages = useCallback(
     async (targetItems: DatasetStudioItem[], label = 'selected image(s)'): Promise<DeleteImagesResult> => {
@@ -1536,11 +1555,10 @@ export default function DatasetImageStudio({
   }, [handleDeleteImages, selectedItem]);
   const applyBulkCaptionResult = useCallback(
     (result: BulkCaptionActionResult) => {
-      let cacheChanged = false;
       if (result.updatedCaptions) {
         Object.entries(result.updatedCaptions).forEach(([key, caption]) => {
-          captionCacheRef.current.set(key, { caption, saved: caption, loaded: true });
-          cacheChanged = true;
+          captionCache.set(key, { caption, saved: caption, loaded: true });
+
           if (selectedKeyRef.current === key) {
             latestCaptionRef.current = caption;
             setCaptionText(caption);
@@ -1553,7 +1571,7 @@ export default function DatasetImageStudio({
       }
       if (result.removedKeys) {
         result.removedKeys.forEach(key => {
-          cacheChanged = captionCacheRef.current.delete(key) || cacheChanged;
+          captionCache.delete(key);
           if (selectedKeyRef.current === key) {
             latestCaptionRef.current = '';
             setCaptionText('');
@@ -1564,9 +1582,8 @@ export default function DatasetImageStudio({
           }
         });
       }
-      if (cacheChanged) bumpCaptionCacheVersion();
     },
-    [bumpCaptionCacheVersion],
+    [setCaptionText, setSavedCaption, setIsCaptionLoaded],
   );
   const handleBulkCaptionAction = useCallback(
     async (request: BulkCaptionActionRequest): Promise<BulkCaptionActionResult> => {
@@ -1631,7 +1648,7 @@ export default function DatasetImageStudio({
       setCaptionText(next);
       if (nextSelectedElementIndex !== undefined) setSelectedElementIndex(nextSelectedElementIndex);
     },
-    [captionText, captureHistoryEntry, selectedImageSize],
+    [captionText, captureHistoryEntry, selectedImageSize, setCaptionText],
   );
   const mutateLatestCaption = useCallback(
     (mutator: (data: Record<string, any>) => void, nextSelectedElementIndex?: number | null) => {
@@ -1652,7 +1669,7 @@ export default function DatasetImageStudio({
       if (nextSelectedElementIndex !== undefined) setSelectedElementIndex(nextSelectedElementIndex);
       return true;
     },
-    [captureHistoryEntry, selectedImageSize],
+    [captureHistoryEntry, selectedImageSize, setCaptionText],
   );
   const setLayerCaptionMessageForKey = useCallback((requestLayerKey: string, message: string) => {
     setLayerCaptionMessages(previous => {
@@ -1778,13 +1795,13 @@ export default function DatasetImageStudio({
     encryptedProviderConfirmations,
     isGeneratingBoxes,
     mutateCaption,
-    null,
     remoteOllamaWorkerId,
     selectedElementIndex,
     selectedImageSize,
     selectedItem,
     selectedKey,
     workerID,
+    setAutoBoxMessage,
   ]);
   const handleCaptionSelectedLayer = useCallback(async () => {
     if (
@@ -1910,7 +1927,6 @@ export default function DatasetImageStudio({
     encryptedProviderConfirmations,
     layerCaptionDisabledReason,
     mutateLatestCaption,
-    null,
     remoteOllamaWorkerId,
     selectedElement,
     selectedElementIndex,
@@ -1960,7 +1976,7 @@ export default function DatasetImageStudio({
       setJsonDraftKey(selectedKey);
       return nextCaption;
     },
-    [captionText, captureHistoryEntry, selectedKey],
+    [captionText, captureHistoryEntry, selectedKey, setCaptionText],
   );
   const applyJsonDraft = useCallback(() => {
     if (jsonDraftKey !== selectedKey) return null;
@@ -2072,14 +2088,21 @@ export default function DatasetImageStudio({
         createdIndex = addIdeogramLayer(data, type);
       });
       if (!changed || createdIndex == null) return false;
-      autoSelectKeyRef.current = selectedKey;
+      setAutoSelectKey(selectedKey);
       setSelectedElementIndex(createdIndex);
       setActiveTool('select');
       setOverlapElementStack([]);
       setActivePaletteSamplerIndex(null);
       return true;
     },
-    [layerStructureDisabledReason, mutateLatestCaption, selectedImageSize, selectedKey],
+    [
+      layerStructureDisabledReason,
+      mutateLatestCaption,
+      selectedImageSize,
+      selectedKey,
+      setOverlapElementStack,
+      setActivePaletteSamplerIndex,
+    ],
   );
   const handleReorderLayer = useCallback(
     (fromIndex: number, toIndex: number) => {
@@ -2102,7 +2125,7 @@ export default function DatasetImageStudio({
         moveIdeogramElement(data, fromIndex, toIndex);
       }, nextSelectedIndex);
       if (!changed) return false;
-      autoSelectKeyRef.current = selectedKey;
+      setAutoSelectKey(selectedKey);
       setHiddenLayerIndexes(previous => remapLayerIndexSetForMove(previous, fromIndex, toIndex));
       setLockedLayerIndexes(previous => remapLayerIndexSetForMove(previous, fromIndex, toIndex));
       setOverlapElementStack(previous => remapLayerIndexArrayForMove(previous, fromIndex, toIndex));
@@ -2114,7 +2137,17 @@ export default function DatasetImageStudio({
       setActivePaletteSamplerIndex(null);
       return true;
     },
-    [layerStructureDisabledReason, mutateLatestCaption, selectedElementIndex, selectedImageSize, selectedKey],
+    [
+      layerStructureDisabledReason,
+      mutateLatestCaption,
+      selectedElementIndex,
+      selectedImageSize,
+      selectedKey,
+      setHiddenLayerIndexes,
+      setLockedLayerIndexes,
+      setOverlapElementStack,
+      setActivePaletteSamplerIndex,
+    ],
   );
   const handleCreateBox = useCallback(
     (type: IdeogramElementType, box: NormalizedBox) => {
@@ -2134,7 +2167,7 @@ export default function DatasetImageStudio({
         createdIndex = addIdeogramElement(data, type, box);
       });
       if (changed && createdIndex != null) {
-        autoSelectKeyRef.current = selectedKey;
+        setAutoSelectKey(selectedKey);
         setSelectedElementIndex(createdIndex);
         setActiveTool('select');
       }
@@ -2147,28 +2180,34 @@ export default function DatasetImageStudio({
     },
     [mutateCaption],
   );
-  const handleToggleLayerHidden = useCallback((elementIndex: number) => {
-    setHiddenLayerIndexes(previous => {
-      const next = new Set(previous);
-      if (next.has(elementIndex)) {
-        next.delete(elementIndex);
-      } else {
-        next.add(elementIndex);
-      }
-      return next;
-    });
-  }, []);
-  const handleToggleLayerLocked = useCallback((elementIndex: number) => {
-    setLockedLayerIndexes(previous => {
-      const next = new Set(previous);
-      if (next.has(elementIndex)) {
-        next.delete(elementIndex);
-      } else {
-        next.add(elementIndex);
-      }
-      return next;
-    });
-  }, []);
+  const handleToggleLayerHidden = useCallback(
+    (elementIndex: number) => {
+      setHiddenLayerIndexes(previous => {
+        const next = new Set(previous);
+        if (next.has(elementIndex)) {
+          next.delete(elementIndex);
+        } else {
+          next.add(elementIndex);
+        }
+        return next;
+      });
+    },
+    [setHiddenLayerIndexes],
+  );
+  const handleToggleLayerLocked = useCallback(
+    (elementIndex: number) => {
+      setLockedLayerIndexes(previous => {
+        const next = new Set(previous);
+        if (next.has(elementIndex)) {
+          next.delete(elementIndex);
+        } else {
+          next.add(elementIndex);
+        }
+        return next;
+      });
+    },
+    [setLockedLayerIndexes],
+  );
   const cycleOverlapSelection = useCallback(
     (direction: 1 | -1) => {
       if (overlapElementStack.length === 0) return;
@@ -2199,7 +2238,14 @@ export default function DatasetImageStudio({
       setLockedLayerIndexes(previous => reindexLayerIndexSetAfterInsert(previous, duplicateIndex));
       setOverlapElementStack([]);
     },
-    [layerStructureDisabledReason, mutateLatestCaption, selectedImageSize],
+    [
+      layerStructureDisabledReason,
+      mutateLatestCaption,
+      selectedImageSize,
+      setHiddenLayerIndexes,
+      setLockedLayerIndexes,
+      setOverlapElementStack,
+    ],
   );
   const handleDeleteElement = useCallback(
     (elementIndex: number) => {
@@ -2224,7 +2270,15 @@ export default function DatasetImageStudio({
         previous.flatMap(index => (index === elementIndex ? [] : [index > elementIndex ? index - 1 : index])),
       );
     },
-    [layerStructureDisabledReason, mutateLatestCaption, selectedElementIndex, selectedImageSize],
+    [
+      layerStructureDisabledReason,
+      mutateLatestCaption,
+      selectedElementIndex,
+      selectedImageSize,
+      setHiddenLayerIndexes,
+      setLockedLayerIndexes,
+      setOverlapElementStack,
+    ],
   );
   const handleDeleteSelectedElement = useCallback(() => {
     if (selectedElementIndex == null) return;
@@ -2273,11 +2327,14 @@ export default function DatasetImageStudio({
     },
     [mutateCaption],
   );
-  const handleStartPaletteSample = useCallback((index: number) => {
-    setActiveImagePaletteSamplerIndex(null);
-    setActivePaletteSamplerIndex(index);
-    setActiveTool('select');
-  }, []);
+  const handleStartPaletteSample = useCallback(
+    (index: number) => {
+      setActiveImagePaletteSamplerIndex(null);
+      setActivePaletteSamplerIndex(index);
+      setActiveTool('select');
+    },
+    [setActiveImagePaletteSamplerIndex, setActivePaletteSamplerIndex],
+  );
   const handleStartImagePaletteSample = useCallback(
     (index: number) => {
       if (index < 0 || index >= imagePaletteColors.length) return;
@@ -2287,13 +2344,19 @@ export default function DatasetImageStudio({
       setPaletteExtractionMessage('Click the image to replace this color. Double-click to cancel.');
       setActiveTool('select');
     },
-    [imagePaletteColors],
+    [
+      imagePaletteColors,
+      setActivePaletteSamplerIndex,
+      setActiveImagePaletteSamplerIndex,
+      setSelectedImagePaletteColor,
+      setPaletteExtractionMessage,
+    ],
   );
   const handleCancelPaletteSample = useCallback(() => {
     setActivePaletteSamplerIndex(null);
     setActiveImagePaletteSamplerIndex(null);
     setPaletteExtractionMessage('');
-  }, []);
+  }, [setActivePaletteSamplerIndex, setActiveImagePaletteSamplerIndex, setPaletteExtractionMessage]);
   const handleSamplePaletteColor = useCallback(
     (color: string) => {
       if (activeImagePaletteSamplerIndex != null) {
@@ -2317,6 +2380,10 @@ export default function DatasetImageStudio({
       handleImagePaletteChange,
       handleSelectedPaletteColorChange,
       imagePaletteColors,
+      setSelectedImagePaletteColor,
+      setActiveImagePaletteSamplerIndex,
+      setPaletteExtractionMessage,
+      setActivePaletteSamplerIndex,
     ],
   );
   const handleExtractImagePalette = useCallback(() => {
@@ -2339,14 +2406,22 @@ export default function DatasetImageStudio({
         setIsExtractingPalette(false);
       }
     });
-  }, [handleImagePaletteChange, isExtractingPalette, paletteImageElement]);
+  }, [
+    handleImagePaletteChange,
+    isExtractingPalette,
+    paletteImageElement,
+    setPaletteExtractionMessage,
+    setPaletteExtraction,
+    setAppliedPaletteExtractionKey,
+    setSelectedImagePaletteColor,
+  ]);
   const handleMergePaletteColors = useCallback(
     (keepColor: string, removeColor: string) => {
       mutateCaption(data => mergeIdeogramPaletteColors(data, keepColor, removeColor));
       setSelectedImagePaletteColor(keepColor);
       setPaletteExtractionMessage(`Merged ${removeColor} into ${keepColor}.`);
     },
-    [mutateCaption],
+    [mutateCaption, setSelectedImagePaletteColor, setPaletteExtractionMessage],
   );
   const handleToggleLayerPaletteColor = useCallback(
     (elementIndex: number, color: string, assigned: boolean) => {
@@ -2365,7 +2440,7 @@ export default function DatasetImageStudio({
         `${assigned ? 'Assigned' : 'Removed'} ${color} ${assigned ? 'to' : 'from'} ${layer.label}.`,
       );
     },
-    [handleElementPaletteChange, paletteLayers],
+    [handleElementPaletteChange, paletteLayers, setPaletteExtractionMessage],
   );
   const handleAssignPaletteColor = useCallback(
     (color: string) => {
@@ -2384,7 +2459,7 @@ export default function DatasetImageStudio({
       setSelectedElementIndex(targetLayer.elementIndex);
       handleToggleLayerPaletteColor(targetLayer.elementIndex, color, true);
     },
-    [handleToggleLayerPaletteColor, paletteLayers, selectedElementIndex],
+    [handleToggleLayerPaletteColor, paletteLayers, selectedElementIndex, setPaletteExtractionMessage],
   );
   const handleCaptionDescriptionChange = useCallback(
     (value: string) => {
@@ -2395,7 +2470,7 @@ export default function DatasetImageStudio({
       }
       mutateCaption(data => updateIdeogramHighLevelDescription(data, value));
     },
-    [isIdeogram, mutateCaption],
+    [isIdeogram, mutateCaption, setCaptionText],
   );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2604,10 +2679,13 @@ export default function DatasetImageStudio({
     (selectedLayerIsCaptioning ? 'Captioning layer...' : selectedLayerCaptionMessage) ||
     (selectedElement && layerCaptionDisabledReason ? layerCaptionDisabledReason : '');
   const selectedRect = selectedBox ? boxToRect(selectedBox) : null;
-  const handleCaptionTextChange = useCallback((value: string) => {
-    latestCaptionRef.current = value;
-    setCaptionText(value);
-  }, []);
+  const handleCaptionTextChange = useCallback(
+    (value: string) => {
+      latestCaptionRef.current = value;
+      setCaptionText(value);
+    },
+    [setCaptionText],
+  );
   if (items.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-gray-400">
@@ -2700,14 +2778,14 @@ export default function DatasetImageStudio({
                 encryptedKey={encryptedKey}
                 isAutoCaptioning={isAutoCaptioning}
                 liveCaptionRefresh={liveCaptionRefresh}
-                captionCache={captionCacheRef.current}
+                captionCache={captionCacheSnapshot}
+                onSetCaptionCache={writeCaptionCache}
                 captionCacheVersion={captionCacheVersion}
                 approvedKeys={approvedKeys}
                 captionAction={captionAction}
                 watcherAction={watcherAction}
                 onAddImages={onAddImages}
                 presentation="legacy"
-                onCaptionCacheChange={bumpCaptionCacheVersion}
                 onSelectIndex={selectIndex}
                 onBulkCaptionAction={handleBulkCaptionAction}
                 onDeleteImages={handleDeleteImages}
@@ -2846,13 +2924,13 @@ export default function DatasetImageStudio({
           encryptedKey={encryptedKey}
           isAutoCaptioning={isAutoCaptioning}
           liveCaptionRefresh={liveCaptionRefresh}
-          captionCache={captionCacheRef.current}
+          captionCache={captionCacheSnapshot}
+          onSetCaptionCache={writeCaptionCache}
           captionCacheVersion={captionCacheVersion}
           approvedKeys={approvedKeys}
           captionAction={captionAction}
           watcherAction={watcherAction}
           onAddImages={onAddImages}
-          onCaptionCacheChange={bumpCaptionCacheVersion}
           onSelectIndex={selectIndex}
           onBulkCaptionAction={handleBulkCaptionAction}
           onDeleteImages={handleDeleteImages}

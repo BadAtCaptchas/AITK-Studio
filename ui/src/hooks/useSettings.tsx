@@ -78,21 +78,29 @@ export default function useSettings() {
   const [isSettingsLoaded, setIsLoaded] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsStatus, setSettingsStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const refreshSettings = useCallback(async () => {
+  const loadSettings = useCallback(
+    () =>
+      apiClient
+        .get('/api/settings')
+        .then(res => {
+          setSettings(normalizeSettings(res.data || {}));
+          setIsLoaded(true);
+          setSettingsStatus('success');
+          setSettingsError(null);
+        })
+        .catch(() => {
+          setSettingsError('Settings could not be loaded. Retry to use your saved storage and training preferences.');
+          setSettingsStatus('error');
+        }),
+    [],
+  );
+  const refreshSettings = useCallback(() => {
     setSettingsStatus('loading');
     setSettingsError(null);
-    try {
-      const res = await apiClient.get('/api/settings');
-      setSettings(normalizeSettings(res.data || {}));
-      setIsLoaded(true);
-      setSettingsStatus('success');
-    } catch {
-      setSettingsError('Settings could not be loaded. Retry to use your saved storage and training preferences.');
-      setSettingsStatus('error');
-    }
-  }, []);
+    return loadSettings();
+  }, [loadSettings]);
   useEffect(() => {
-    refreshSettings().catch(error => console.error('Error fetching settings:', error));
+    loadSettings().catch(error => console.error('Error fetching settings:', error));
     const handleSettingsUpdated = (event: Event) => {
       const detail = (event as CustomEvent<Partial<Settings> | undefined>).detail;
       if (detail) {
@@ -106,6 +114,6 @@ export default function useSettings() {
     };
     window.addEventListener(SETTINGS_UPDATED_EVENT, handleSettingsUpdated);
     return () => window.removeEventListener(SETTINGS_UPDATED_EVENT, handleSettingsUpdated);
-  }, [refreshSettings]);
+  }, [loadSettings, refreshSettings]);
   return { settings, setSettings, isSettingsLoaded, settingsStatus, settingsError, refreshSettings };
 }

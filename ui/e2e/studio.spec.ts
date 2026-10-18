@@ -45,6 +45,13 @@ test('fresh production stack authenticates, protects commands, and revokes the c
   ).toBe(413);
   expect((await page.request.delete('/api/auth', { headers: { Origin: origin } })).status()).toBe(200);
   expect((await page.request.get('/api/jobs')).status()).toBe(401);
+  expect(
+    (
+      await page.request.get('/api/jobs?limit=1', {
+        headers: { Authorization: 'Bearer browser-fixture-local-only' },
+      })
+    ).status(),
+  ).toBe(200);
 });
 
 async function datasetArchive(encrypted: boolean): Promise<Buffer> {
@@ -177,11 +184,17 @@ test('training drafts ignore unchanged interactions and guard edited navigation'
 
 test('streamed media and captions stay paired and collisions leave existing content untouched', async ({ page }) => {
   const datasetName = `paired-${randomUUID()}`;
-  const upload = (filename: string, data: Buffer, group: string) => page.request.post('/api/datasets/upload', {
-    headers: { Origin: origin, 'Content-Type': 'application/octet-stream',
-      'X-AITK-Dataset-Name': encodeURIComponent(datasetName), 'X-AITK-File-Name': encodeURIComponent(filename),
-      'X-AITK-Upload-Group': group }, data,
-  });
+  const upload = (filename: string, data: Buffer, group: string) =>
+    page.request.post('/api/datasets/upload', {
+      headers: {
+        Origin: origin,
+        'Content-Type': 'application/octet-stream',
+        'X-AITK-Dataset-Name': encodeURIComponent(datasetName),
+        'X-AITK-File-Name': encodeURIComponent(filename),
+        'X-AITK-Upload-Group': group,
+      },
+      data,
+    });
   const original = randomUUID();
   expect((await upload('photo.png', png, original)).status()).toBe(200);
   expect((await upload('photo.txt', Buffer.from('original caption'), original)).status()).toBe(200);
@@ -193,7 +206,10 @@ test('streamed media and captions stay paired and collisions leave existing cont
   const dataset = listing.find((item: { name: string }) => item.name === datasetName);
   expect(dataset).toBeTruthy();
   const imagePath = dataset.path + '/photo.png';
-  const caption = await page.request.post('/api/caption/get', { headers: { Origin: origin }, data: { imgPath: imagePath } });
+  const caption = await page.request.post('/api/caption/get', {
+    headers: { Origin: origin },
+    data: { imgPath: imagePath },
+  });
   expect(caption.ok()).toBe(true);
   expect(await caption.text()).toBe('original caption');
   const image = await page.request.get('/api/files/' + encodeURIComponent(imagePath));

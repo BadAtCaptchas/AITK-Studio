@@ -1,5 +1,6 @@
 'use client';
 
+import useScopedState from '@/hooks/useScopedState';
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from 'react';
 import classNames from 'classnames';
 import {
@@ -512,11 +513,7 @@ function PaletteColorRow({
   onDelete: () => void;
 }) {
   const normalizedColor = normalizeHexColorInput(color) || '#64748B';
-  const [draft, setDraft] = useState(normalizedColor);
-
-  useEffect(() => {
-    setDraft(normalizedColor);
-  }, [normalizedColor]);
+  const [draft, setDraft] = useScopedState(normalizedColor, normalizedColor);
 
   const updateDraft = (value: string) => {
     setDraft(value);

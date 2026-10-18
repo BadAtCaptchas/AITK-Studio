@@ -31,7 +31,7 @@ test('upload plans pair original stems, put media first, and reject ambiguous no
   const plans = planDatasetUploads(['folder/photo.txt', 'folder/photo.png', 'folder/photo.json', 'other/photo.png'], crypto.randomUUID);
   assert.deepEqual(plans.map(group => group.indexes), [[1, 0, 2], [3]]);
   assert.notEqual(plans[0].id, plans[1].id);
-  for (const names of [['a b.png', 'a_b.png', 'a_b.txt'], ['photo.png', 'photo.jpg'], ['a.png', 'a.png'], ['../a.png']]) {
+  for (const names of [['a b.png', 'a_b.png', 'a_b.txt'], ['photo.png', 'photo.jpg'], ['Photo.png', 'photo.txt'], ['a.png', 'a.png'], ['../a.png']]) {
     assert.throws(() => planDatasetUploads(names, crypto.randomUUID));
   }
 });

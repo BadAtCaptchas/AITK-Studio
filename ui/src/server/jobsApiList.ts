@@ -3,7 +3,8 @@ import { db } from './db';
 import { CommandInputError, isRecord } from './commandInput';
 import type { Job } from '../types';
 
-export const ACTIVE_JOB_STATUSES = ['queued', 'starting', 'remote-starting', 'running', 'stopping'];
+import { ACTIVE_JOB_STATUSES } from '../utils/jobStatus';
+export { ACTIVE_JOB_STATUSES } from '../utils/jobStatus';
 export function encodeJobCursor(job: Job): string {
   return Buffer.from(JSON.stringify({ created_at: new Date(job.created_at).toISOString(), id: job.id })).toString('base64url');
 }
@@ -38,7 +39,8 @@ export function summarizeJob(job: Job): Job & { is_summary: true } {
 }
 export async function listJobsForJobsApi(
   options: { jobType?: string | null; localOnly?: boolean; cursor?: string | null; limit?: string | null; view?: string | null; summary?: boolean },
-  deps = { listJobs: db.jobs.list, runtimeGet: db.runtime.get },
+  deps: { listJobs: typeof db.jobs.list; runtimeGet: typeof db.runtime.get; statusCounts?: typeof db.jobs.statusCounts } =
+    { listJobs: db.jobs.list, runtimeGet: db.runtime.get, statusCounts: db.jobs.statusCounts },
 ) {
   assertGlobalPayload(options);
   const limit = options.limit ? Number(options.limit) : 50;
@@ -62,7 +64,8 @@ export async function listJobsForJobsApi(
   }
   const jobs = selected.filter(job => !isLegacyScopedRecord(job));
   const freshness = await deps.runtimeGet('job-read-model:freshness');
+  const statusCounts = await deps.statusCounts?.({ job_type: options.jobType, worker_id: options.localOnly ? 'local' : undefined });
   return { jobs: options.summary === false ? jobs : jobs.map(summarizeJob),
     nextCursor: rows.length > selected.length ? encodeJobCursor(selected[selected.length - 1]) : null,
-    freshness: freshness?.value ?? null };
+    freshness: freshness?.value ?? null, statusCounts: statusCounts ?? null };
 }

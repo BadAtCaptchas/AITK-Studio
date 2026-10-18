@@ -1016,6 +1016,22 @@ export const db = {
   },
 
   jobs: {
+    async statusCounts(options: { job_type?: string | null; worker_id?: string } = {}): Promise<Record<string, number>> {
+      if (isMongoProvider()) {
+        const filter: Document = {};
+        if (options.job_type) filter.job_type = options.job_type;
+        if (options.worker_id) filter.worker_id = options.worker_id;
+        for (const key of ['project_id', 'projectID', 'projectId', 'remote_project_id']) filter[key] = { $in: [null, ''] };
+        const rows = await (await getMongoDb()).collection('jobs').aggregate<{ _id: string; count: number }>([
+          { $match: filter }, { $group: { _id: '$status', count: { $sum: 1 } } },
+        ]).toArray();
+        return Object.fromEntries(rows.map(row => [row._id, row.count]));
+      }
+      const rows = await getPrisma().job.groupBy({ by: ['status'],
+        where: { ...(options.job_type ? { job_type: options.job_type } : {}),
+          ...(options.worker_id ? { worker_id: options.worker_id } : {}) }, _count: { _all: true } });
+      return Object.fromEntries(rows.map(row => [row.status, row._count._all]));
+    },
     async updateIf(id: string, expected: { attempt_id: string | null; status?: string | string[]; updated_at?: Date | string }, data: JobUpdateInput): Promise<Job | null> {
       if (isMongoProvider()) {
         const filter: Document = { id, attempt_id: expected.attempt_id };

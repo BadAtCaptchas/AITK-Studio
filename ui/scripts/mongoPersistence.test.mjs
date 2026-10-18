@@ -47,6 +47,8 @@ test(
       const raw = await observer.db(databaseName).collection('jobs').findOne({ id: job.id });
       assert.equal(raw.attempt_id, winner.attempt_id);
       assert.equal(await db.jobs.updateIf(job.id, { attempt_id: 'stale' }, { status: 'completed' }), null);
+      assert.deepEqual(await db.jobs.statusCounts(), { queued: 19, starting: 1 });
+      assert.deepEqual(await db.jobs.statusCounts({ worker_id: 'absent' }), {});
       const first = await db.jobs.list({ limit: 3 });
       assert.equal(first.length, 3);
       const second = await db.jobs.list({

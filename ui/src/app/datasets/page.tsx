@@ -44,6 +44,7 @@ import {
 import { isImage } from '@/utils/basic';
 import { getDisplayPath, getMediaUrl } from '@/utils/media';
 import type { DatasetSummary } from '@/types';
+import { planDatasetUploads } from '@/utils/datasetUploadPlan';
 import { uploadDatasetFile } from '@/utils/streamedUploads';
 type DatasetExplorerView = 'details' | 'icons';
 type DatasetExplorerRow = {
@@ -746,15 +747,19 @@ export default function Datasets() {
     relativePaths: string[],
   ) => {
     const sourceFolderPath = workerID === 'local' ? sourceFolderPathForEntries(entries) : '';
-    for (let index = 0; index < entries.length; index += 1) {
+    const groups = planDatasetUploads(entries.map((entry, index) => relativePaths[index] || entry.relativePath || entry.file.name), () => crypto.randomUUID());
+    let first = true;
+    for (const group of groups) for (const index of group.indexes) {
       const entry = entries[index];
       await uploadDatasetFile(entry.file, {
+        uploadGroup: group.id,
         datasetName,
         workerID,
         relativePath: relativePaths[index] || entry.relativePath || entry.file.name,
         sourceFolderPath,
-        failIfDatasetExists: index === 0,
+        failIfDatasetExists: first,
       });
+      first = false;
     }
   };
   const handleImportFolders = async (e: React.FormEvent) => {

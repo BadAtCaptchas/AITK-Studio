@@ -44,6 +44,7 @@ export async function uploadDatasetFile(
   file: File | Blob,
   options: {
     datasetName: string;
+    uploadGroup?: string;
     filename?: string;
     workerID?: string;
     relativePath?: string;
@@ -54,10 +55,11 @@ export async function uploadDatasetFile(
   },
 ) {
   const filename = options.filename || (file instanceof File ? file.name : 'upload.bin');
-  return apiClient.post('/api/datasets/upload', file, {
+  const response = await apiClient.post<{ uploadGroup?: string }>('/api/datasets/upload', file, {
     headers: {
       'Content-Type': 'application/octet-stream',
       'X-AITK-Dataset-Name': encodedHeaderValue(options.datasetName),
+      ...(options.uploadGroup ? { 'X-AITK-Upload-Group': options.uploadGroup } : {}),
       'X-AITK-File-Name': encodedHeaderValue(filename),
       ...(options.workerID && options.workerID !== 'local'
         ? { 'X-AITK-Worker-ID': encodedHeaderValue(options.workerID) }
@@ -73,4 +75,8 @@ export async function uploadDatasetFile(
     onUploadProgress: options.onUploadProgress,
     timeout: 0,
   });
+  if (options.uploadGroup && response.data.uploadGroup !== options.uploadGroup) {
+    throw new Error('This worker does not support paired uploads. Update the worker before uploading media with captions.');
+  }
+  return response;
 }

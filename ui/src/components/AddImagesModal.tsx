@@ -14,6 +14,7 @@ import {
   readTextFile,
 } from '@/utils/encryptedDatasets';
 import { FOLDER_IMPORT_CAPTION_SIDECAR_EXTENSIONS } from '@/utils/folderImport';
+import { planDatasetUploads } from '@/utils/datasetUploadPlan';
 import { uploadDatasetFile } from '@/utils/streamedUploads';
 export interface AddImagesModalState {
   datasetName: string;
@@ -110,6 +111,7 @@ interface FileEntry {
   status: FileStatus;
   progress: number;
   error?: string;
+  uploadGroup?: string;
 }
 const MAX_CONCURRENT = 3;
 const ROW_HEIGHT = 32;
@@ -124,14 +126,15 @@ export default function AddImagesModal() {
   const [doneCount, setDoneCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
   const abortRef = useRef(false);
+  const batchGenerationRef = useRef(0);
   const modalInfoRef = useRef(modalInfo);
   modalInfoRef.current = modalInfo;
   const datasetName = modalInfo?.datasetName ?? '';
   const workerID = modalInfo?.workerID ?? 'local';
   const encrypted = modalInfo?.encrypted ?? null;
   const uploadSingleFile = useCallback(
-    async (entry: FileEntry): Promise<'done' | 'error'> => {
-      if (abortRef.current) return 'error';
+    async (entry: FileEntry, generation: number): Promise<'done' | 'error'> => {
+      if (abortRef.current || generation !== batchGenerationRef.current) return 'error';
       const id = entry.id;
       setFileEntries(prev =>
         prev.map(e => (e.id === id ? { ...e, status: 'uploading' as FileStatus, progress: 0 } : e)),
@@ -140,15 +143,19 @@ export default function AddImagesModal() {
         await uploadDatasetFile(entry.file, {
           datasetName,
           workerID,
+          uploadGroup: entry.uploadGroup,
           onUploadProgress: pe => {
+            if (generation !== batchGenerationRef.current) return;
             const percent = Math.round(((pe.loaded || 0) * 100) / (pe.total || pe.loaded || 1));
             setFileEntries(prev => prev.map(e => (e.id === id ? { ...e, progress: percent } : e)));
           },
         });
+        if (generation !== batchGenerationRef.current) return 'error';
         setFileEntries(prev => prev.filter(e => e.id !== id));
         setDoneCount(prev => prev + 1);
         return 'done';
       } catch (err) {
+        if (generation !== batchGenerationRef.current) return 'error';
         console.error(`Upload failed for ${entry.file.name}:`, err);
         setFileEntries(prev =>
           prev.map(e =>
@@ -171,23 +178,44 @@ export default function AddImagesModal() {
   }, []);
   const processQueue = useCallback(
     async (entries: FileEntry[]) => {
+      const generation = ++batchGenerationRef.current;
       setIsUploading(true);
       abortRef.current = false;
-      let nextIndex = 0;
-      const runNext = async (): Promise<void> => {
-        while (nextIndex < entries.length) {
-          if (abortRef.current) return;
-          const idx = nextIndex++;
-          await uploadSingleFile(entries[idx]);
-        }
-      };
-      const workers = Array.from({ length: Math.min(MAX_CONCURRENT, entries.length) }, () => runNext());
-      await Promise.all(workers);
-      setIsUploading(false);
-      if (!abortRef.current) {
-        modalInfoRef.current?.onComplete?.();
-        setModalInfo(null);
-        resetState();
+      let succeeded = 0;
+      let failed = 0;
+      try {
+        const groups = planDatasetUploads(entries.map(entry => entry.file.name), () => crypto.randomUUID());
+        let nextGroup = 0;
+        const runNext = async () => {
+          while (nextGroup < groups.length && !abortRef.current && generation === batchGenerationRef.current) {
+            const group = groups[nextGroup++];
+            let blocked = false;
+            for (const index of group.indexes) {
+              if (abortRef.current || generation !== batchGenerationRef.current) return;
+              const entry = entries[index];
+              if (blocked) {
+                failed++;
+                setErrorCount(count => count + 1);
+                setFileEntries(previous => previous.map(file => file.id === entry.id
+                  ? { ...file, status: 'error' as FileStatus, error: 'Associated upload failed; caption was not uploaded.' } : file));
+                continue;
+              }
+              const result = await uploadSingleFile({ ...entry, uploadGroup: group.id }, generation);
+              if (result === 'done') succeeded++;
+              else { failed++; blocked = true; }
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, groups.length) }, runNext));
+      } catch (error) {
+        failed = entries.length;
+        setErrorCount(failed);
+        setFileEntries(previous => previous.map(entry => ({ ...entry, status: 'error' as FileStatus,
+          error: error instanceof Error ? error.message : 'Invalid upload names' })));
+      } finally { if (generation === batchGenerationRef.current) setIsUploading(false); }
+      if (!abortRef.current && generation === batchGenerationRef.current) {
+        if (succeeded > 0) modalInfoRef.current?.onComplete?.();
+        if (failed === 0) { setModalInfo(null); resetState(); }
       }
     },
     [uploadSingleFile, setModalInfo, resetState],
@@ -214,6 +242,7 @@ export default function AddImagesModal() {
     [encrypted, processQueue],
   );
   const handleCancel = useCallback(() => {
+    batchGenerationRef.current += 1;
     abortRef.current = true;
     setIsUploading(false);
     setModalInfo(null);
@@ -236,6 +265,7 @@ export default function AddImagesModal() {
     open: openFilePicker,
   } = useDropzone({
     onDrop,
+    disabled: isUploading,
     accept: dropAccept,
     multiple: true,
     noClick: true,
@@ -291,7 +321,7 @@ export default function AddImagesModal() {
                         </p>
                       </>
                     ) : (
-                      <p className="text-sm text-gray-200 text-center">Drop more files to add to queue</p>
+                      <p className="text-sm text-gray-200 text-center">Uploading selected files…</p>
                     )}
                   </div>
                 </div>

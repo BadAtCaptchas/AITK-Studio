@@ -1,4 +1,5 @@
 'use client';
+import { ACTIVE_JOB_STATUSES } from '@/utils/jobStatus';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, ReactNode } from 'react';
 import Link from 'next/link';
@@ -55,7 +56,7 @@ type PendingReorder = {
   gpuIDs: string;
   jobIDs: string[];
 };
-const activeJobStatuses = new Set(['queued', 'starting', 'remote-starting', 'running', 'stopping']);
+const activeJobStatuses = new Set(ACTIVE_JOB_STATUSES);
 function getLaneKey(workerID: string, gpuIDs: string | null) {
   return `${workerID}:${gpuIDs || ''}`;
 }
@@ -174,8 +175,8 @@ function WorkerHero({
   onRefresh: () => void;
 }) {
   const queueRunning = queue?.is_running === true;
-  const running = group.jobs.filter(job => job.status === 'running').length;
-  const queued = group.jobs.filter(job => job.status === 'queued').length;
+  const running = group.totalFor(['running']);
+  const queued = group.totalFor(['queued']);
   const activeTotal = group.jobs.length;
   const [togglePending, setTogglePending] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
@@ -740,7 +741,7 @@ function SelectedJobInspector({ job, onRefresh }: { job: Job; onRefresh: () => v
 export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }: QueueWorkbenchProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>('active');
-  const { jobs, status, refreshJobs, hasMore, loadMore, isRefreshing, freshness } = useJobsList({
+  const { jobs, status, refreshJobs, hasMore, loadMore, isRefreshing, freshness, statusCounts } = useJobsList({
     view: activeTab,
     reloadInterval: 5000,
   });
@@ -877,7 +878,6 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
   }, [jobsDict, pendingReorder]);
   const idleJobs = jobsDict.idle?.jobs || [];
   const failedJobs = filteredJobs.filter(job => job.status === 'error' || job.status === 'failed');
-  const activeJobs = filteredJobs.filter(job => activeJobStatuses.has(job.status));
   const selectedJob = filteredJobs.find(job => job.id === selectedJobID) || null;
   const tableError =
     status === 'error'
@@ -889,16 +889,18 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
           : null;
   let isLoading = status === 'loading' || queueStatus === 'loading' || workerStatus === 'loading';
   if (Object.keys(jobsDict).length > 0) isLoading = false;
+  const totalFor = (statuses: string[]) => statusCounts
+    ? statuses.reduce((sum, status) => sum + (statusCounts[status] || 0), 0) : '—';
   const tabs: Array<{
     key: TabKey;
     label: string;
-    count: number;
+    count: number | string;
     icon: typeof PlayCircle;
   }> = [
-    { key: 'active', label: 'Active', count: activeJobs.length, icon: PlayCircle },
-    { key: 'history', label: 'History', count: idleJobs.length, icon: History },
-    { key: 'failed', label: 'Failed', count: failedJobs.length, icon: AlertTriangle },
-    { key: 'all', label: 'All', count: filteredJobs.length, icon: CircleDashed },
+    { key: 'active', label: 'Active', count: totalFor(ACTIVE_JOB_STATUSES), icon: PlayCircle },
+    { key: 'history', label: 'History', count: totalFor(['stopped', 'completed', 'error', 'failed']), icon: History },
+    { key: 'failed', label: 'Failed', count: totalFor(['error', 'failed']), icon: AlertTriangle },
+    { key: 'all', label: 'All', count: statusCounts ? Object.values(statusCounts).reduce((sum, count) => sum + count, 0) : '—', icon: CircleDashed },
   ];
   const handleDragStart = (jobID: string) => {
     setReorderError(null);
@@ -979,9 +981,9 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
     >
       <div className="studio-queue-metrics xl:col-span-full">
         {[
-          ['Running', jobs.filter(job => job.status === 'running').length],
-          ['Queued', jobs.filter(job => job.status === 'queued').length],
-          ['Completed', jobs.filter(job => job.status === 'completed').length],
+          ['Running', totalFor(['running'])],
+          ['Queued', totalFor(['queued'])],
+          ['Completed', totalFor(['completed'])],
           ['Local GPUs', isGPUInfoLoaded ? gpuList.length : 'Unavailable'],
         ].map(([label, value]) => (
           <div key={label}>

@@ -3,6 +3,10 @@ import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 // src/app/api/datasets/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
+import { publishDatasetUpload } from '@/server/datasetUploadReservation';
+import { planDatasetUploads } from '@/utils/datasetUploadPlan';
+import { normalizeStoragePathSetting } from '@/server/pathContainment';
 import { writeFile, mkdir } from 'fs/promises';
 import { basename, dirname, extname, isAbsolute, join, resolve, relative, sep } from 'path';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
@@ -53,20 +57,6 @@ function cleanRelativeUploadPath(relativePath: string, fallbackName: string) {
     index === rawParts.length - 1 ? cleanUploadFileName(part) : cleanPathSegment(part, `folder_${index + 1}`),
   );
   return join(...parts);
-}
-
-function nextAvailableFilePath(uploadDir: string, relativeFilePath: string) {
-  const targetDir = resolve(uploadDir, dirname(relativeFilePath));
-  const fileName = basename(relativeFilePath);
-  const ext = extname(fileName);
-  const stem = ext ? fileName.slice(0, -ext.length) : fileName;
-  let candidate = resolve(targetDir, fileName);
-  let suffix = 2;
-  while (fs.existsSync(candidate)) {
-    candidate = resolve(targetDir, `${stem}_${suffix}${ext}`);
-    suffix += 1;
-  }
-  return candidate;
 }
 
 async function writeDatasetImportMetadataBestEffort(uploadDir: string, sourceFolderPath: string) {
@@ -140,10 +130,6 @@ function assertMultipartUploadBounds(files: FormDataEntryValue[]) {
   }
 }
 
-function isDestinationCollision(error: unknown) {
-  return error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST';
-}
-
 function assertedRelativeUploadPath(uploadDir: string, targetPath: string) {
   const targetRelative = relative(uploadDir, targetPath);
   if (
@@ -164,6 +150,7 @@ function forwardedStreamHeaders(request: NextRequest) {
     'content-length',
     'x-aitk-dataset-name',
     'x-aitk-file-name',
+    'x-aitk-upload-group',
     'x-aitk-relative-path',
     'x-aitk-source-folder',
     'x-aitk-fail-if-dataset-exists',
@@ -179,6 +166,8 @@ async function streamPlainDatasetFile(request: NextRequest) {
   const datasetName = decodedUploadHeader(request, 'x-aitk-dataset-name', 256).trim();
   const workerID = decodedUploadHeader(request, 'x-aitk-worker-id', 256).trim() || 'local';
 
+  const groupID = decodedUploadHeader(request, 'x-aitk-upload-group', 64) || randomUUID();
+  if (!/^[a-f0-9-]{36}$/i.test(groupID)) throw new InvalidUploadError('Invalid upload group');
   const originalFilename = decodedUploadHeader(request, 'x-aitk-file-name', 512);
   const requestedRelativePath = decodedUploadHeader(request, 'x-aitk-relative-path', 2_048);
   const sourceFolderPath = decodedUploadHeader(request, 'x-aitk-source-folder', 4_096);
@@ -217,8 +206,9 @@ async function streamPlainDatasetFile(request: NextRequest) {
   const relativeFilePath = requestedRelativePath
     ? cleanRelativeUploadPath(requestedRelativePath, originalFilename)
     : cleanUploadFileName(originalFilename);
-  let targetPath = nextAvailableFilePath(uploadDir, relativeFilePath);
+  const targetPath = resolve(uploadDir, relativeFilePath);
   assertedRelativeUploadPath(uploadDir, targetPath);
+  if (!(await normalizeStoragePathSetting(targetPath, datasetsRoot))) throw new InvalidUploadError('Upload path escapes datasets root');
 
   let stagingPath: string | null = null;
   try {
@@ -229,25 +219,13 @@ async function streamPlainDatasetFile(request: NextRequest) {
     const pendingUploadPath = staged.stagingPath;
     stagingPath = pendingUploadPath;
     await mkdir(uploadDir, { recursive: true });
-    let committed = false;
-    for (let attempt = 0; attempt < 1_000; attempt += 1) {
-      try {
-        await moveStagedUploadNoReplace(pendingUploadPath, targetPath);
-        stagingPath = null;
-        committed = true;
-        break;
-      } catch (error) {
-        if (!isDestinationCollision(error)) throw error;
-        targetPath = nextAvailableFilePath(uploadDir, relativeFilePath);
-        assertedRelativeUploadPath(uploadDir, targetPath);
-      }
-    }
-    if (!committed) {
-      throw new InvalidUploadError('Could not reserve a unique upload filename');
-    }
+    await publishDatasetUpload(uploadDir, targetPath, groupID, async () => {
+      await moveStagedUploadNoReplace(pendingUploadPath, targetPath);
+      stagingPath = null;
+    });
     const targetRelative = assertedRelativeUploadPath(uploadDir, targetPath);
     await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);
-    return NextResponse.json({ message: 'File uploaded successfully', files: [targetRelative] });
+    return NextResponse.json({ message: 'File uploaded successfully', files: [targetRelative], uploadGroup: groupID });
   } finally {
     await cleanupStagedUpload(stagingPath);
   }
@@ -333,8 +311,9 @@ export async function POST(request: NextRequest) {
 
     const savedFiles: string[] = [];
 
-    // Process files sequentially to avoid overwhelming the system
-    for (let i = 0; i < files.length; i++) {
+    const groups = planDatasetUploads(files.map((entry, i) =>
+      preserveRelativePaths && relativePaths[i] ? relativePaths[i] : (entry as File).name), randomUUID);
+    for (const group of groups) for (const i of group.indexes) {
       const file = files[i] as File;
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
@@ -343,24 +322,11 @@ export async function POST(request: NextRequest) {
         preserveRelativePaths && relativePaths[i]
           ? cleanRelativeUploadPath(relativePaths[i], file.name)
           : cleanUploadFileName(file.name);
-      let filePath = nextAvailableFilePath(uploadDir, requestedPath);
-      let saved = false;
-      for (let attempt = 0; attempt < 1_000; attempt += 1) {
-        const filePathRelative = assertedRelativeUploadPath(uploadDir, filePath);
-        await mkdir(dirname(filePath), { recursive: true });
-        try {
-          await writeFile(filePath, buffer, { flag: 'wx' });
-          savedFiles.push(filePathRelative);
-          saved = true;
-          break;
-        } catch (error) {
-          if (!isDestinationCollision(error)) throw error;
-          filePath = nextAvailableFilePath(uploadDir, requestedPath);
-        }
-      }
-      if (!saved) {
-        throw new InvalidUploadError('Could not reserve a unique upload filename');
-      }
+      const filePath = resolve(uploadDir, requestedPath);
+      const filePathRelative = assertedRelativeUploadPath(uploadDir, filePath);
+      if (!(await normalizeStoragePathSetting(filePath, datasetsRoot))) throw new InvalidUploadError('Upload path escapes datasets root');
+      await publishDatasetUpload(uploadDir, filePath, group.id, () => writeFile(filePath, buffer, { flag: 'wx' }));
+      savedFiles.push(filePathRelative);
     }
 
     await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);

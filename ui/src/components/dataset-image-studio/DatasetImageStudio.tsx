@@ -1130,6 +1130,8 @@ export default function DatasetImageStudio({
   }, [boxes, isIdeogram, selectedKey]);
   const saveCaptionForItem = useCallback(
     async (targetItem: DatasetStudioItem, targetKey: string, captionValue: string) => {
+      const draftAtStart = selectedKeyRef.current === targetKey
+        ? latestCaptionRef.current : captionCacheRef.current.get(targetKey)?.caption;
       const value = isPlainTextCaptionItem(targetItem) ? captionValue : captionValue.trim();
       if (targetItem.kind === 'plain') {
         const response = await apiClient.post('/api/img/caption', {
@@ -1144,12 +1146,15 @@ export default function DatasetImageStudio({
       } else {
         throw new Error('ENCRYPTED_DATASET_MIGRATION_REQUIRED: Decrypt this dataset before editing captions.');
       }
+      const currentDraft = selectedKeyRef.current === targetKey
+        ? latestCaptionRef.current : captionCacheRef.current.get(targetKey)?.caption;
+      const caption = currentDraft !== undefined && currentDraft !== draftAtStart ? currentDraft : value;
       if (selectedKeyRef.current === targetKey) {
-        latestCaptionRef.current = value;
-        setCaptionText(value);
+        latestCaptionRef.current = caption;
+        setCaptionText(caption);
         setSavedCaption(value);
       }
-      writeCaptionCache(targetKey, { caption: value, saved: value, loaded: true });
+      writeCaptionCache(targetKey, { caption, saved: value, loaded: true });
     },
     [encryptedCaptionPaths, encryptedKey, onPlainItemCaptioned, onSaveEncryptedCaption, writeCaptionCache],
   );

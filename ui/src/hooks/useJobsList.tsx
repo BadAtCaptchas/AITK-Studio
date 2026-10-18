@@ -4,12 +4,13 @@ import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
 type UseJobsListProps = { onlyActive?: boolean; reloadInterval?: number | null; job_type?: string | null; view?: 'active' | 'history' | 'failed' | 'all' };
-type Page = { jobs: Job[]; nextCursor: string | null; freshness?: { updatedAt: string; failed: number } | null };
+type Page = { statusCounts?: Record<string, number> | null; jobs: Job[]; nextCursor: string | null; freshness?: { updatedAt: string; failed: number } | null };
 export default function useJobsList({ onlyActive = false, reloadInterval = null, job_type = null, view = 'all' }: UseJobsListProps = {}) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [isRefreshing, setRefreshing] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number> | null>(null);
   const [freshness, setFreshness] = useState<Page['freshness']>(null);
   const scope = JSON.stringify([job_type, onlyActive, view]);
   const activeScope = useRef(scope); activeScope.current = scope;
@@ -39,6 +40,7 @@ export default function useJobsList({ onlyActive = false, reloadInterval = null,
       else if (pages.current[index + 1]) pages.current[index + 1].cursor = data.nextCursor;
       pollPage.current = index + 1;
       setFreshness(data.freshness);
+      setStatusCounts(data.statusCounts ?? null);
       setJobs([...new Map(pages.current.flatMap(page => page.jobs).map(job => [job.id, job])).values()]);
       setNextCursor(pages.current.at(-1)?.nextCursor ?? null); setStatus('success');
     } catch {
@@ -46,10 +48,10 @@ export default function useJobsList({ onlyActive = false, reloadInterval = null,
     } finally { signal?.removeEventListener('abort', abort); if (inflight.current === controller) inflight.current = null; if (activeScope.current === scope) setRefreshing(false); }
   }, [job_type, onlyActive, view, scope]);
   useEffect(() => {
-    pages.current = []; pollPage.current = 0; setJobs([]); setNextCursor(null); setFreshness(null); setStatus('idle');
+    pages.current = []; pollPage.current = 0; setJobs([]); setNextCursor(null); setFreshness(null); setStatusCounts(null); setStatus('idle');
     return () => { inflight.current?.abort(); inflight.current = null; };
   }, [scope]);
   usePollLoop(signal => refreshJobs(signal), reloadInterval, [scope]);
-  return { jobs, setJobs, status, isRefreshing, freshness, hasMore: !!nextCursor,
+  return { jobs, setJobs, statusCounts, status, isRefreshing, freshness, hasMore: !!nextCursor,
     loadMore: () => refreshJobs(undefined, true), refreshJobs: () => refreshJobs() };
 }

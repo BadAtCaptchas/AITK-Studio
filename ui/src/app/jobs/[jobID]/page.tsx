@@ -6,6 +6,7 @@ import { MdDashboard, MdImage, MdShowChart, MdCode } from 'react-icons/md';
 import { Button } from '@headlessui/react';
 import { TopBar, MainContent } from '@/components/layout';
 import useJob from '@/hooks/useJob';
+import { isActiveJobStatus } from '@/utils/jobStatus';
 import SampleImages, { SampleImagesMenu } from '@/components/SampleImages';
 import JobNotes from '@/components/JobNotes';
 import JobOverview from '@/components/JobOverview';
@@ -65,7 +66,7 @@ const pages: Page[] = [
 
 function shouldPollJob(job: Job | null) {
   if (!job) return true;
-  return job.status === 'queued' || job.status === 'running' || job.status === 'stopping';
+  return isActiveJobStatus(job.status);
 }
 
 export default function JobPage({ params }: { params: Promise<{ jobID: string }> }) {

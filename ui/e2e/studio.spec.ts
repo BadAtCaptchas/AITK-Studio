@@ -174,3 +174,40 @@ test('training drafts ignore unchanged interactions and guard edited navigation'
   await canceled;
   await expect(name).toHaveValue('unsaved browser draft');
 });
+
+test('streamed media and captions stay paired and collisions leave existing content untouched', async ({ page }) => {
+  const datasetName = `paired-${randomUUID()}`;
+  const upload = (filename: string, data: Buffer, group: string) => page.request.post('/api/datasets/upload', {
+    headers: { Origin: origin, 'Content-Type': 'application/octet-stream',
+      'X-AITK-Dataset-Name': encodeURIComponent(datasetName), 'X-AITK-File-Name': encodeURIComponent(filename),
+      'X-AITK-Upload-Group': group }, data,
+  });
+  const original = randomUUID();
+  expect((await upload('photo.png', png, original)).status()).toBe(200);
+  expect((await upload('photo.txt', Buffer.from('original caption'), original)).status()).toBe(200);
+  const conflicting = randomUUID();
+  expect((await upload('photo.png', Buffer.from('different image'), conflicting)).status()).toBe(409);
+  expect((await upload('photo.txt', Buffer.from('wrong caption'), conflicting)).status()).toBe(409);
+  expect((await upload('photo.json', Buffer.from('wrong caption'), conflicting)).status()).toBe(409);
+  const listing = await (await page.request.get('/api/datasets/list')).json();
+  const dataset = listing.find((item: { name: string }) => item.name === datasetName);
+  expect(dataset).toBeTruthy();
+  const imagePath = dataset.path + '/photo.png';
+  const caption = await page.request.post('/api/caption/get', { headers: { Origin: origin }, data: { imgPath: imagePath } });
+  expect(caption.ok()).toBe(true);
+  expect(await caption.text()).toBe('original caption');
+  const image = await page.request.get('/api/files/' + encodeURIComponent(imagePath));
+  expect(await image.body()).toEqual(png);
+  const pair = randomUUID();
+  expect((await upload('second.png', png, pair)).status()).toBe(200);
+  expect((await upload('second.txt', Buffer.from('second caption'), pair)).status()).toBe(200);
+});
+
+test('queue counts stay independent of the requested view and page size', async ({ page }) => {
+  const all = await (await page.request.get('/api/jobs?view=all&limit=1')).json();
+  expect(all.statusCounts).toBeTruthy();
+  for (const view of ['active', 'history', 'failed']) {
+    const filtered = await (await page.request.get(`/api/jobs?view=${view}&limit=1`)).json();
+    expect(filtered.statusCounts).toEqual(all.statusCounts);
+  }
+});

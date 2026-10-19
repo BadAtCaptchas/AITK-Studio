@@ -5,11 +5,29 @@
 Tools for working on AITK Studio itself.
 
 - [Local UI development](#local-ui-development)
+- [Python CI groups](#python-ci-groups)
 - [Sync local changes](#sync-local-changes)
 
 ## Local UI development
 
 See the [UI README](../ui/README.md) for development commands and focused tests, and [Python linting](python-lint.md) for Python checks.
+
+## Python CI groups
+
+The full-runtime CPU job runs the pinned CUDA-profile packages with GPUs hidden
+and Hugging Face offline flags enabled. It includes training configuration and
+phases, Kromoss/distillation, adapter/optimizer checkpoints, inference parity,
+dataset-cache identity, EMA/scheduler lifecycle, training batch math and trainer
+paths. CUDA-only tests explicitly skip on this runner. The lightweight Python
+behavior matrix remains separate and compiles both `tests/` and `testing/`.
+
+Keep the runtime groups in `.github/workflows/ci.yml` in separate Python
+processes when reproducing locally. Broad discovery is unsafe: some suites
+install framework stubs in `sys.modules`, and Pylint/Astroid changes inference
+state. Install `requirements_dev.txt` and verify Pylint 4.0.5 before running
+`tests.test_pylint_regressions` in its own process, so missing development tooling
+cannot silently skip native-inference coverage. MOSS batching tests build tiny
+random Qwen3.5 encoders locally; no pretrained weights are needed.
 
 ## Sync local changes
 

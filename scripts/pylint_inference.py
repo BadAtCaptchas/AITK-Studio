@@ -112,6 +112,8 @@ _CONFIG_CLASSES = {
     'transformers.models.qwen2.configuration_qwen2.Qwen2Config',
     'transformers.models.qwen3.configuration_qwen3.Qwen3Config',
     'transformers.models.qwen3_5.configuration_qwen3_5.Qwen3_5TextConfig',
+    'transformers.models.qwen3_5.configuration_qwen3_5.Qwen3_5Config',
+    'transformers.models.qwen3_5.configuration_qwen3_5.Qwen3_5VisionConfig',
     'transformers.models.qwen3_vl.configuration_qwen3_vl.Qwen3VLConfig',
     'transformers.models.gemma3.configuration_gemma3.Gemma3Config',
 }

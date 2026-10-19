@@ -33,6 +33,33 @@ augmentation. The full preset excludes transformer layer 22 from the user
 adapter because the negative sampling branch skips that layer. Turbo uses only
 the conditional branch and trains layer 22 normally.
 
+## Optional live text-encoder batching
+
+MOSS and Kromoss accept a bounded encoder batch size under `model.model_kwargs`:
+
+```yaml
+model_kwargs:
+  text_encoder_batch_size: 2
+```
+
+The default is `1` (the existing sequential path). Only integers from 1 to 32
+are accepted; choose a small value that fits your available encoder memory.
+Text-only prompts are right-padded in chunks of at most this size and returned
+in their original order. Reference-image prompts still encode individually.
+Singleton chunks remain unpadded. Tokenizer mask lengths preserve valid EOS
+tokens even when EOS and padding share an ID; returned prefixes own their storage.
+The encoder runs without a KV cache, as before. Cache formats and checkpoint
+identities are unchanged, and the 16 GB presets remain sequential.
+
+This can reduce encoder forwards for uncached live batches containing multiple
+text prompts. Current embedding-cache writers and sample generation encode one
+prompt at a time, so this option offers no batching gain there. No throughput or
+VRAM improvement is claimed without a hardware benchmark. Tiny CPU Qwen3.5 tests
+cover valid-prefix parity through both full attention and linear attention.
+CUDA, ConvRot and offload parity require hardware validation: ConvRot scales are
+row-independent, but its CUDA dispatch can depend on row count. There is no
+automatic OOM retry; reduce the option if encoder memory is insufficient.
+
 ## Checkpoints and precision
 
 `model.name_or_path: lodestones/Kromoss` resolves Kromoss's own

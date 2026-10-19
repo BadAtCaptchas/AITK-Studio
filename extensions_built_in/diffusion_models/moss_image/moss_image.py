@@ -170,6 +170,10 @@ class MossImageModel(BaseModel):
         self.latent_space_version = "moss_image"
 
         kw = self.model_config.model_kwargs
+        self.text_encoder_batch_size = kw.get("text_encoder_batch_size", 1)
+        if (type(self.text_encoder_batch_size) is not int
+                or not 1 <= self.text_encoder_batch_size <= 32):
+            raise ValueError("model_kwargs.text_encoder_batch_size must be an integer from 1 to 32")
         self.distillation_lora_path = kw.get("distillation_lora_path")
         self.inference_lora_prepend_hooks = self.distillation_lora_path is not None
         self._distillation_identity = None
@@ -623,6 +627,13 @@ class MossImageModel(BaseModel):
         )
         return out.last_hidden_state[0]
 
+    def _encode_text_prompt(self, text: str) -> torch.Tensor:
+        input_ids = self.tokenizer(
+            self._chat(text), return_tensors="pt", truncation=True,
+            max_length=self.max_text_length,
+        )["input_ids"].to(self.device_torch)
+        return self.text_encoder(input_ids=input_ids, use_cache=False).last_hidden_state[0]
+
     @torch.no_grad()
     def get_prompt_embeds(self, prompt, control_images=None) -> AdvancedPromptEmbeds:
         if isinstance(prompt, str):
@@ -645,21 +656,39 @@ class MossImageModel(BaseModel):
         else:
             control_images = [None] * len(prompt)
 
-        embeds = []
-        # one unpadded forward per prompt, like the vendor (padding would leak
-        # into the gated-delta recurrence)
-        for text, images in zip(prompt, control_images):
-            if images:
-                states = self._encode_with_images(text, images)
+        if self.text_encoder_batch_size == 1:
+            return AdvancedPromptEmbeds(text_embeds=[
+                (self._encode_with_images(text, images) if images else self._encode_text_prompt(text))
+                .to(self.torch_dtype)
+                for text, images in zip(prompt, control_images)
+            ])
+
+        embeds = [None] * len(prompt)
+        text_only = [i for i, images in enumerate(control_images) if not images]
+        for start in range(0, len(text_only), self.text_encoder_batch_size):
+            indices = text_only[start:start + self.text_encoder_batch_size]
+            if len(indices) == 1:
+                # Preserve the unpadded single-item path, including the default.
+                embeds[indices[0]] = self._encode_text_prompt(prompt[indices[0]]).to(self.torch_dtype)
             else:
-                input_ids = self.tokenizer(
-                    self._chat(text),
-                    return_tensors="pt",
-                    truncation=True,
+                encoded = self.tokenizer(
+                    [self._chat(prompt[i]) for i in indices], return_tensors="pt",
+                    padding=True, padding_side="right", truncation=True,
                     max_length=self.max_text_length,
-                )["input_ids"].to(self.device_torch)
-                states = self.text_encoder(input_ids=input_ids, use_cache=False).last_hidden_state[0]
-            embeds.append(states.to(self.torch_dtype))
+                )
+                # Causal attention and DeltaNet cannot read future right padding.
+                # Use mask lengths (EOS may equal PAD), but no forward mask/cache.
+                lengths = encoded["attention_mask"].sum(1).tolist()
+                states = self.text_encoder(
+                    input_ids=encoded["input_ids"].to(self.device_torch), use_cache=False,
+                ).last_hidden_state
+                for row, (i, length) in enumerate(zip(indices, lengths)):
+                    # Own the valid prefix: a view would retain the whole chunk.
+                    embeds[i] = states[row, :length].to(self.torch_dtype).clone()
+                del states
+        for i, (text, images) in enumerate(zip(prompt, control_images)):
+            if images:
+                embeds[i] = self._encode_with_images(text, images).to(self.torch_dtype)
         return AdvancedPromptEmbeds(text_embeds=embeds)
 
     def get_loss_target(self, *args, **kwargs):

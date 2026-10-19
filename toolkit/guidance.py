@@ -13,6 +13,18 @@ GuidanceType = Literal["targeted", "polarity", "targeted_polarity", "direct"]
 DIFFERENTIAL_SCALER = 0.2
 
 
+def _backward_guidance_loss(loss, kwargs, scaler=None):
+    """Apply the trainer's batch reduction before an internal backward pass."""
+    scaled_loss = loss * kwargs.get('backward_scale', 1.0)
+    backward = kwargs.get('backward_fn')
+    if backward is not None:
+        backward(scaled_loss)
+    elif scaler is not None:
+        scaler.scale(scaled_loss).backward()
+    else:
+        scaled_loss.backward()
+
+
 # DIFFERENTIAL_SCALER = 0.25
 
 
@@ -180,7 +192,7 @@ def get_targeted_polarity_loss(
     loss = pred_loss + pred_neg_loss
 
     loss = loss.mean()
-    loss.backward()
+    _backward_guidance_loss(loss, kwargs)
 
     # detach it so parent class can run backward on no grads without throwing error
     loss = loss.detach()
@@ -265,7 +277,7 @@ def get_direct_guidance_loss(
     # loss = guidance_loss + masked_noise_loss
     loss = guidance_loss
 
-    loss.backward()
+    _backward_guidance_loss(loss, kwargs)
 
     # detach it so parent class can run backward on no grads without throwing error
     loss = loss.detach()
@@ -390,7 +402,7 @@ def get_targeted_guidance_loss(
     positive_loss = positive_loss.mean() + polar_loss.mean()
 
 
-    positive_loss.backward()
+    _backward_guidance_loss(positive_loss, kwargs)
     # loss = positive_loss.detach() + negative_loss.detach()
     loss = positive_loss.detach()
 
@@ -505,10 +517,7 @@ def get_guided_loss_polarity(
 
     loss = loss.mean([1, 2, 3])
     loss = loss.mean()
-    if scaler is not None:
-        scaler.scale(loss).backward()
-    else:
-        loss.backward()
+    _backward_guidance_loss(loss, kwargs, scaler=scaler)
 
     # detach it so parent class can run backward on no grads without throwing error
     loss = loss.detach()
@@ -601,7 +610,7 @@ def get_guided_tnt(
 
     loss = loss.mean()
 
-    loss.backward()
+    _backward_guidance_loss(loss, kwargs)
 
     # detach it so parent class can run backward on no grads without throwing error
     loss = loss.detach()

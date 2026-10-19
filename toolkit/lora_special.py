@@ -134,7 +134,8 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         alpha = self.lora_dim if alpha is None or alpha == 0 else alpha
         self.scale = float(alpha) / self.lora_dim
         self._set_runtime_scale(self.scale)
-        self.register_buffer("alpha", torch.tensor(alpha))  # 定数として扱える
+        self.register_buffer("alpha", torch.tensor(float(alpha)))
+        self.register_load_state_dict_post_hook(self._load_runtime_scale)
 
         # same as microsoft's
         torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
@@ -148,6 +149,11 @@ class LoRAModule(ToolkitModuleMixin, ExtractableModuleMixin, torch.nn.Module):
         self.rank_dropout = rank_dropout
         self.module_dropout = module_dropout
         self.is_checkpointing = False
+
+    def _load_runtime_scale(self, module, incompatible_keys):
+        # Alpha is serialized, while the compiled-forward scale is deliberately
+        # non-persistent. Refresh it when loading an adapter with another alpha.
+        self._set_runtime_scale(float(self.alpha.detach().float().item()) / self.lora_dim)
 
     def apply_to(self):
         self.org_forward = self.org_module[0].forward

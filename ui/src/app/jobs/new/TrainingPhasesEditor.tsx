@@ -110,7 +110,6 @@ function normalizePhase(phase: TrainingPhaseConfig, index: number, autoTrain: bo
   };
 
   if (autoTrain) {
-    delete normalized.steps;
     normalized.auto_advance = normalized.auto_advance ? { ...normalized.auto_advance } : defaultAutoAdvance();
   } else {
     normalized.steps = Math.max(1, Number(phase.steps) || 1);

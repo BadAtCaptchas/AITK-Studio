@@ -557,6 +557,8 @@ export interface TrainConfig {
   bypass_guidance_embedding?: boolean;
   steps: number;
   auto_train?: boolean;
+  /** Legacy alias, canonicalized to auto_train when loading a job. */
+  auto_learn?: boolean;
   phases?: TrainingPhaseConfig[];
   save_on_phase_change?: boolean;
   gradient_accumulation: number;

@@ -22,6 +22,7 @@ SD_TRAINER_PATH = (
 )
 BASE_SD_TRAIN_PROCESS_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
 UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
+UI_MODEL_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "domain" / "modelOptions.ts"
 HIDREAM_O1_EXAMPLE_PATH = PROJECT_ROOT / "config" / "examples" / "train_lora_hidream_o1_48gb.yaml"
 
 
@@ -131,7 +132,8 @@ class HidreamO1DefaultConfigTest(unittest.TestCase):
         self.assertIn("raw_train_config['t0_loss_target'] = True", source)
 
     def test_ui_preset_defaults_o1_to_t0_loss(self):
-        source = UI_OPTIONS_PATH.read_text(encoding="utf-8")
+        self.assertIn("export * from '@/domain/modelOptions'", UI_OPTIONS_PATH.read_text(encoding="utf-8"))
+        source = UI_MODEL_OPTIONS_PATH.read_text(encoding="utf-8")
         start = source.index("name: 'hidream_o1'")
         end = source.index("disableSections", start)
         hidream_o1_block = source[start:end]

@@ -2,8 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
-from importlib.machinery import ModuleSpec
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest import mock
 
 import cv2
@@ -12,21 +11,15 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-torchaudio_module = ModuleType("torchaudio")
-torchaudio_module.__spec__ = ModuleSpec("torchaudio", loader=None)
-torchaudio_module.save = mock.Mock()
-album_artwork_module = ModuleType("toolkit.audio.album_artwork")
-album_artwork_module.__spec__ = ModuleSpec("toolkit.audio.album_artwork", loader=None)
-album_artwork_module.add_album_artwork = mock.Mock()
+import toolkit.dataloader_mixins as dataloader_mixins
+from toolkit.config_modules import DatasetConfig
+from toolkit.dto import DISK_PREFIX
 
-with mock.patch.dict(
-    "sys.modules",
-    {
-        "torchaudio": torchaudio_module,
-        "toolkit.audio.album_artwork": album_artwork_module,
-    },
-):
-    import toolkit.dataloader_mixins as dataloader_mixins
+
+class CacheDataset(dataloader_mixins.LatentCachingMixin):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.__dict__.update(kwargs)
 
 
 class FakeVideoCapture:
@@ -250,15 +243,17 @@ class Uint8PixelCacheTest(unittest.TestCase):
                 tensor=source_frames.clone(),
                 audio_data={"waveform": torch.ones(1, 4), "sample_rate": 4},
                 num_frames=2,
+                is_audio_model=False,
                 path="fixture.mp4",
+                is_video=True,
                 load_and_process_image=lambda _transform, only_load_latents: None,
                 get_latent_info_dict=lambda: {},
                 cleanup=lambda: None,
             )
-            dataset = SimpleNamespace(
+            dataset = CacheDataset(
                 transform=None,
                 sd=FakePixelSD(),
-                dataset_config=SimpleNamespace(
+                dataset_config=DatasetConfig(
                     auto_frame_count=False,
                     num_frames=2,
                     do_i2v=True,
@@ -280,8 +275,8 @@ class Uint8PixelCacheTest(unittest.TestCase):
             self.assertTrue(torch.equal(memory_state["first_frame_latent"], source_frames[0]))
             self.assertEqual(disk_state["latent"].dtype, torch.uint8)
             self.assertEqual(disk_state["first_frame_latent"].dtype, torch.uint8)
-            self.assertEqual(disk_state["audio_latent"].dtype, torch.float32)
-            self.assertTrue(torch.equal(disk_state["audio_latent"], source_audio))
+            self.assertEqual(disk_state[f"{DISK_PREFIX}audio"].dtype, torch.float32)
+            self.assertTrue(torch.equal(disk_state[f"{DISK_PREFIX}audio"], source_audio))
 
             native_memory = SimpleNamespace()
             dataloader_mixins.LatentCachingMixin._assign_latent_state_to_file_items(
@@ -289,7 +284,7 @@ class Uint8PixelCacheTest(unittest.TestCase):
                 [native_memory],
                 memory_state,
             )
-            self.assertTrue(torch.equal(native_memory._encoded_latent, source_frames))
+            self.assertTrue(torch.equal(native_memory._encoded_latent.tensor, source_frames))
             self.assertTrue(torch.equal(native_memory._cached_first_frame_latent, source_frames[0]))
 
             assigned = SimpleNamespace()
@@ -299,7 +294,7 @@ class Uint8PixelCacheTest(unittest.TestCase):
                 disk_state,
             )
             self.assertEqual(assigned._encoded_latent.dtype, torch.float32)
-            self.assertTrue(torch.allclose(assigned._encoded_latent, source_frames, atol=1.0 / 255.0))
+            self.assertTrue(torch.allclose(assigned._encoded_latent.tensor, source_frames, atol=1.0 / 255.0))
             self.assertTrue(
                 torch.allclose(
                     assigned._cached_first_frame_latent,
@@ -314,11 +309,12 @@ class Uint8PixelCacheTest(unittest.TestCase):
                 _encoded_latent=None,
                 _cached_first_frame_latent=None,
                 _cached_audio_latent=None,
+                _cached_waveform_int16=None,
                 get_latent_path=lambda: latent_path,
             )
             lazy_latent = dataloader_mixins.LatentCachingFileItemDTOMixin.get_latent(lazy_item)
             self.assertEqual(lazy_latent.dtype, torch.float32)
-            self.assertTrue(torch.allclose(lazy_latent, source_frames, atol=1.0 / 255.0))
+            self.assertTrue(torch.allclose(lazy_latent.tensor, source_frames, atol=1.0 / 255.0))
             self.assertTrue(
                 torch.allclose(
                     lazy_item._cached_first_frame_latent,
@@ -326,7 +322,7 @@ class Uint8PixelCacheTest(unittest.TestCase):
                     atol=1.0 / 255.0,
                 )
             )
-            self.assertTrue(torch.equal(lazy_item._cached_audio_latent, source_audio))
+            self.assertTrue(torch.equal(lazy_latent.extras['audio'], source_audio))
 
     def test_flag_disabled_preserves_float_disk_cache(self):
         source = torch.tensor([[[[-0.5, 0.25]]]], dtype=torch.float32)
@@ -343,15 +339,17 @@ class Uint8PixelCacheTest(unittest.TestCase):
                 tensor=source.clone(),
                 audio_data=None,
                 num_frames=1,
+                is_audio_model=False,
                 path="fixture.png",
+                is_video=False,
                 load_and_process_image=lambda _transform, only_load_latents: None,
                 get_latent_info_dict=lambda: {},
                 cleanup=lambda: None,
             )
-            dataset = SimpleNamespace(
+            dataset = CacheDataset(
                 transform=None,
                 sd=sd,
-                dataset_config=SimpleNamespace(
+                dataset_config=DatasetConfig(
                     auto_frame_count=False,
                     num_frames=1,
                     do_i2v=False,

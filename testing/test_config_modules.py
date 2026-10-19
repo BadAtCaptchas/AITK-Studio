@@ -235,7 +235,7 @@ class OrbitModelConfigTest(unittest.TestCase):
                     ModelConfig(name_or_path="base-model", quantize=True, qtype="orbit4"),
                     SaveConfig(),
                     [],
-                    NetworkConfig(type=network_type),
+                    NetworkConfig(type=network_type, linear=16, lokr_full_rank=False),
                 )
 
     def test_convrot_accepts_lora_and_constrained_lokr(self):
@@ -259,7 +259,7 @@ class OrbitModelConfigTest(unittest.TestCase):
                         ModelConfig(name_or_path="base-model", quantize=True, qtype=qtype),
                         SaveConfig(),
                         [],
-                        NetworkConfig(type=network_type),
+                        NetworkConfig(type=network_type, linear=16, lokr_full_rank=False),
                     )
 
     def test_convrot_rejects_full_training_dora_and_full_weight_lokr(self):
@@ -282,7 +282,7 @@ class OrbitModelConfigTest(unittest.TestCase):
         for network_config, message in (
             (NetworkConfig(type="lora", all_layers=True), "network\\.all_layers"),
             (NetworkConfig(type="lokr", lokr_full_rank=True), "full-rank LoKr"),
-            (NetworkConfig(type="lokr", lokr_weight_decompose=True), "LoKr weight decomposition"),
+            (NetworkConfig(type="lokr", lokr_full_rank=False, lokr_weight_decompose=True), "LoKr weight decomposition"),
         ):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
@@ -316,7 +316,7 @@ class OrbitModelConfigTest(unittest.TestCase):
             (NetworkConfig(type="lora", all_layers=True), "network\\.all_layers"),
             (NetworkConfig(type="lokr", lokr_full_rank=True), "full-rank LoKr"),
             (
-                NetworkConfig(type="lokr", lokr_weight_decompose=True),
+                NetworkConfig(type="lokr", lokr_full_rank=False, lokr_weight_decompose=True),
                 "LoKr weight decomposition",
             ),
         )
@@ -633,6 +633,44 @@ class FluxGuidanceBypassConfigTest(unittest.TestCase):
                 ],
                 NetworkConfig(type="lora"),
             )
+
+    def test_minimax_h3_ref_partitions_accept_explicit_reference_controls(self):
+        for arch in ("minimax_h3", "minimax_h3_ref2va"):
+            for partition in ("ref2va", "ref2va_pruned"):
+                with self.subTest(arch=arch, partition=partition):
+                    validate_configs(
+                        TrainConfig(train_text_encoder=False),
+                        ModelConfig(
+                            arch=arch,
+                            name_or_path="Comfy-Org/MiniMax-H3",
+                            quantize=True,
+                            qtype="convrot8",
+                            quantize_te=True,
+                            qtype_te="nvfp4",
+                            model_kwargs={"partition": partition},
+                        ),
+                        SaveConfig(save_format="diffusers"),
+                        [config_modules.DatasetConfig(
+                            num_frames=39, do_i2v=True, cache_text_embeddings=True,
+                            control_path="matching-reference-images",
+                        )],
+                        NetworkConfig(type="lora"),
+                    )
+
+    def test_minimax_h3_ref_partition_checks_every_dataset_and_automatic_frame_count(self):
+        for partition in ("ref2va", "ref2va_pruned"):
+            with self.subTest(partition=partition):
+                with self.assertRaisesRegex(ValueError, "without dataset.control_path"):
+                    validate_configs(
+                        TrainConfig(),
+                        ModelConfig(arch="minimax_h3", name_or_path="Comfy-Org/MiniMax-H3",
+                                    model_kwargs={"partition": partition}),
+                        SaveConfig(),
+                        [config_modules.DatasetConfig(num_frames=39, do_i2v=True,
+                                                      control_path="matching-reference-images"),
+                         config_modules.DatasetConfig(num_frames=1, auto_frame_count=True, do_i2v=True)],
+                        NetworkConfig(type="lora"),
+                    )
 
 
 class SegaDistillConfigTest(unittest.TestCase):

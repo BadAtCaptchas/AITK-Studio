@@ -426,6 +426,7 @@ class UpstreamJuly1823TrainingTest(unittest.TestCase):
         )
         torch.nn.Module.__init__(extractor)
         extractor.vae = _RecordingVAE()
+        extractor.sd_ref = None  # Constructor default when no model is supplied.
         extractor.losses = {'older_loss': 2.0}
         extractor.log_every = 1
         extractor.step = 1

@@ -75,6 +75,7 @@ import { applySelectedDatasetDefaults } from '@/utils/jobDatasetDefaults';
 import { IoFlaskSharp } from 'react-icons/io5';
 import { isMac } from '@/helpers/basic';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
+import { hasTextEmbeddingCache, updateTextEncoderControls, type TextEncoderControl } from '@/utils/textEncoderControls';
 import {
   hasKrea2TextFusionExclusion,
   setKrea2TextFusionExclusion,
@@ -594,6 +595,12 @@ export default function SimpleJob({
     sampleTopStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3';
   }
   const processConfig = jobConfig.config.process[0];
+  const textEmbeddingCacheEnabled = hasTextEmbeddingCache(processConfig.train, processConfig.datasets);
+  const handleTextEncoderControlChange = (control: TextEncoderControl, enabled: boolean) => {
+    const updated = updateTextEncoderControls(processConfig, control, enabled);
+    setJobConfig(updated.train, 'config.process[0].train');
+    setJobConfig(updated.datasets, 'config.process[0].datasets');
+  };
   const datasetsConfig = processConfig.datasets || [];
   const sampleConfig = processConfig.sample;
   const validationConfig = processConfig.train.validation_config;
@@ -1433,19 +1440,7 @@ export default function SimpleJob({
                           label="Train TE"
                           checked={processConfig.train.train_text_encoder || false}
                           docKey={'train.train_text_encoder'}
-                          onChange={value => {
-                            setJobConfig(value, 'config.process[0].train.train_text_encoder');
-                            if (value) {
-                              setJobConfig(false, 'config.process[0].train.unload_text_encoder');
-                              setJobConfig(false, 'config.process[0].train.cache_text_embeddings');
-                              if (processConfig.datasets.some(dataset => dataset.cache_text_embeddings)) {
-                                setJobConfig(
-                                  processConfig.datasets.map(dataset => ({ ...dataset, cache_text_embeddings: false })),
-                                  'config.process[0].datasets',
-                                );
-                              }
-                            }
-                          }}
+                          onChange={value => handleTextEncoderControlChange('training', value)}
                         />
                       )}
                       {textEncoderTrainingEnabled && (
@@ -1463,24 +1458,18 @@ export default function SimpleJob({
                       {!disableSections.includes('train.unload_text_encoder') && (
                         <Checkbox
                           label="Unload TE"
-                          checked={processConfig.train.unload_text_encoder || false}
+                          checked={Boolean(processConfig.train.unload_text_encoder) && !textEmbeddingCacheEnabled}
                           docKey={'train.unload_text_encoder'}
                           disabled={textEncoderTrainingEnabled}
-                          onChange={value => {
-                            setJobConfig(value, 'config.process[0].train.unload_text_encoder');
-                            if (value) setJobConfig(false, 'config.process[0].train.cache_text_embeddings');
-                          }}
+                          onChange={value => handleTextEncoderControlChange('unload', value)}
                         />
                       )}
                       <Checkbox
                         label="Cache embeddings"
-                        checked={processConfig.train.cache_text_embeddings || false}
+                        checked={textEmbeddingCacheEnabled}
                         docKey={'train.cache_text_embeddings'}
                         disabled={textEncoderTrainingEnabled}
-                        onChange={value => {
-                          setJobConfig(value, 'config.process[0].train.cache_text_embeddings');
-                          if (value) setJobConfig(false, 'config.process[0].train.unload_text_encoder');
-                        }}
+                        onChange={value => handleTextEncoderControlChange('cache', value)}
                       />
                     </FormGroup>
                     {disableSections.includes('train.diff_output_preservation') ? null : (

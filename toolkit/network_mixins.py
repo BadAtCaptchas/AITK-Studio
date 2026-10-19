@@ -50,8 +50,8 @@ UNMERGEABLE_MODULES = {
     'Nvfp4Linear',
 }
 
-ExtractMode = Union[
-    'existing'
+ExtractMode = Literal[
+    'existing',
     'fixed',
     'threshold',
     'ratio',
@@ -861,6 +861,8 @@ class ToolkitNetworkMixin:
                 load_key = load_key.replace('.', '$$')
                 load_key = load_key.replace('$$lora_down$$', '.lora_down.')
                 load_key = load_key.replace('$$lora_up$$', '.lora_up.')
+                if load_key.endswith('$$magnitude'):
+                    load_key = load_key[:-len('$$magnitude')] + '.magnitude'
                 if load_key.endswith('$$diff'):
                     load_key = load_key[:-len('$$diff')] + '.diff'
                 elif load_key.endswith('$$diff_b'):
@@ -1031,6 +1033,119 @@ class ToolkitNetworkMixin:
         if hasattr(self, 'text_encoder_loras'):
             loras += self.text_encoder_loras
         return loras
+
+    def _optimizer_resume_module_config(self):
+        if getattr(self, "network_type", "").lower() != "lokr":
+            return {}
+        return {
+            module.lora_name: {
+                "rank": module.lora_dim,
+                "scalar": isinstance(module.scalar, nn.Parameter),
+                "rs_lora": module.rs_lora,
+                "use_w1": module.use_w1,
+                "use_w2": module.use_w2,
+                "tucker": module.tucker,
+                "weight_decompose": module.wd,
+                "wd_on_out": module.wd_on_out,
+            }
+            for module in self.get_all_modules()
+        }
+
+    def get_optimizer_resume_state(self):
+        """Keep raw parameters when portable export changes parameterization.
+
+        LoKr folds a trainable scalar (and full-factor RS scaling) into its
+        portable factors. Adam moments refer to the original parameters. Save
+        all network parameters here, before EMA swapping or export rounding,
+        so those moments can be restored without changing their meaning.
+        """
+        config = self._optimizer_resume_module_config()
+        if not any(
+            item["scalar"] or (item["rs_lora"] and item["use_w1"] and item["use_w2"])
+            for item in config.values()
+        ):
+            return None
+        return {
+            "format_version": 1,
+            "modules": config,
+            "parameters": {
+                name: parameter.detach().cpu().clone()
+                for name, parameter in self.named_parameters()
+            },
+            "scales": {
+                module.lora_name: {
+                    "alpha": module.alpha.detach().cpu().clone(),
+                    "runtime_scale": float(module.scale),
+                }
+                for module in self.get_all_modules()
+            },
+        }
+
+    @torch.no_grad()
+    def restore_optimizer_resume_state(self, state):
+        """Validate the entire snapshot before restoring any live parameter."""
+        from toolkit.optimizer_checkpoint import OptimizerCheckpointValidationError
+        import math
+
+        config = self._optimizer_resume_module_config()
+        requires_raw = any(
+            item["scalar"] or (item["rs_lora"] and item["use_w1"] and item["use_w2"])
+            for item in config.values()
+        )
+        if state is None:
+            # Older full-factor RS files kept the original factors and alpha;
+            # their moments still match when loaded with the original config.
+            # Canonical alpha=1 files have folded that scale into w1 instead.
+            reparameterized = any(item["scalar"] for item in config.values()) or any(
+                item["rs_lora"] and item["use_w1"] and item["use_w2"]
+                and item["rank"] != 1 and float(module.alpha.detach().float().item()) == 1.0
+                for module in self.get_all_modules()
+                if (item := config.get(module.lora_name)) is not None
+            )
+            if reparameterized:
+                raise OptimizerCheckpointValidationError(
+                    "LoKr checkpoint has no raw training parameters; keeping the "
+                    "portable adapter weights and skipping incompatible optimizer moments"
+                )
+            return
+        if not isinstance(state, dict) or state.get("format_version") != 1:
+            raise OptimizerCheckpointValidationError("Unsupported adapter resume state")
+        if not requires_raw or state.get("modules") != config:
+            raise OptimizerCheckpointValidationError("Adapter resume module configuration does not match")
+        parameters = dict(self.named_parameters())
+        saved_parameters = state.get("parameters")
+        scales = state.get("scales")
+        if not isinstance(saved_parameters, dict) or saved_parameters.keys() != parameters.keys():
+            raise OptimizerCheckpointValidationError("Adapter resume parameter names do not match")
+        if not isinstance(scales, dict) or scales.keys() != config.keys():
+            raise OptimizerCheckpointValidationError("Adapter resume scale names do not match")
+
+        def validate_tensor(value, target, label):
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.shape != target.shape
+                or not value.is_floating_point()
+                or not torch.isfinite(value).all().item()
+            ):
+                raise OptimizerCheckpointValidationError(f"Invalid adapter resume tensor: {label}")
+
+        for name, parameter in parameters.items():
+            validate_tensor(saved_parameters[name], parameter, name)
+        for module in self.get_all_modules():
+            saved = scales[module.lora_name]
+            if not isinstance(saved, dict):
+                raise OptimizerCheckpointValidationError("Invalid adapter resume scale")
+            validate_tensor(saved.get("alpha"), module.alpha, module.lora_name + ".alpha")
+            value = saved.get("runtime_scale")
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise OptimizerCheckpointValidationError("Invalid adapter resume runtime scale")
+
+        for name, parameter in parameters.items():
+            parameter.copy_(saved_parameters[name].to(device=parameter.device, dtype=parameter.dtype))
+        for module in self.get_all_modules():
+            saved = scales[module.lora_name]
+            module.alpha.copy_(saved["alpha"].to(module.alpha))
+            module._set_runtime_scale(saved["runtime_scale"])
 
     def _update_checkpointing(self: Network):
         for module in self.get_all_modules():

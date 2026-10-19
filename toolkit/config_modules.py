@@ -574,7 +574,7 @@ class TrainConfig:
     def __init__(self, **kwargs):
         self.noise_scheduler = kwargs.get('noise_scheduler', 'ddpm')
         self.content_or_style: ContentOrStyleType = kwargs.get('content_or_style', 'balanced')
-        self.content_or_style_reg: ContentOrStyleType = kwargs.get('content_or_style', 'balanced')
+        self.content_or_style_reg: ContentOrStyleType = kwargs.get('content_or_style_reg', self.content_or_style)
         self.steps: int = kwargs.get('steps', 1000)
         self.auto_train: bool = bool(kwargs.get('auto_train', kwargs.get('auto_learn', False)))
         self.phases = kwargs.get('phases', None)
@@ -2148,6 +2148,16 @@ def validate_configs(
             raise ValueError("MiniMax H3 text-encoder training is not supported; keep it frozen.")
         if network_config is None or str(network_config.type or '').lower() != 'lora':
             raise ValueError("MiniMax H3 training currently requires network.type lora.")
+
+        partition = str(model_config.model_kwargs.get('partition', 'fl2va_pruned')).lower()
+        if model_config.arch == 'minimax_h3' and partition in {'ref2va', 'ref2va_pruned'}:
+            if any(dataset.do_i2v and (dataset.num_frames > 1 or dataset.auto_frame_count)
+                   and not dataset.control_path for dataset in dataset_configs):
+                raise ValueError(
+                    "MiniMax H3 ref2va I2V training is not supported without dataset.control_path: "
+                    "reference partitions do not condition on the target video's first frame. "
+                    "Provide matching reference controls, or use the fl2va partition for first-frame I2V."
+                )
 
         dopsd = bool(model_config.model_kwargs.get('dopsd', False))
         if dopsd and model_config.arch != 'minimax_h3_ref2va':

@@ -8,6 +8,7 @@ import torch
 from toolkit.optimizer_checkpoint import (
     OptimizerCheckpointValidationError,
     atomic_save_optimizer_checkpoint,
+    build_optimizer_checkpoint,
     load_optimizer_checkpoint,
     parse_optimizer_checkpoint,
 )
@@ -46,6 +47,34 @@ class OptimizerCheckpointTest(unittest.TestCase):
 
         with self.assertRaisesRegex(OptimizerCheckpointValidationError, "does not match"):
             parse_optimizer_checkpoint(payload, expected_step=11)
+
+    def test_version_two_requires_raw_state_and_digest_and_preserves_version_one(self):
+        ordinary = build_optimizer_checkpoint(optimizer_state(), step=3)
+        self.assertEqual(ordinary["format_version"], 1)
+        self.assertIs(parse_optimizer_checkpoint(ordinary, 3), ordinary["optimizer_state_dict"])
+        with tempfile.TemporaryDirectory() as folder:
+            checkpoint = os.path.join(folder, "adapter.safetensors")
+            with open(checkpoint, "wb") as output:
+                output.write(b"adapter identity")
+            payload = build_optimizer_checkpoint(
+                optimizer_state(), step=3, checkpoint_path=checkpoint,
+                adapter_resume_state={"format_version": 1},
+            )
+            optimizer_path = os.path.join(folder, "optimizer.pt")
+            torch.save(payload, optimizer_path)
+            with self.assertRaisesRegex(OptimizerCheckpointValidationError, "load_optimizer_checkpoint_for_resume"):
+                load_optimizer_checkpoint(optimizer_path, expected_step=3)
+        self.assertEqual(payload["format_version"], 2)
+        self.assertIs(parse_optimizer_checkpoint(payload, 3), payload["optimizer_state_dict"])
+        for key in ("adapter_resume_state", "model_checkpoint_sha256"):
+            bad = dict(payload)
+            del bad[key]
+            with self.assertRaises(OptimizerCheckpointValidationError):
+                parse_optimizer_checkpoint(bad, 3)
+        for version in (3, True, "2"):
+            bad = dict(payload, format_version=version)
+            with self.assertRaisesRegex(OptimizerCheckpointValidationError, "unsupported format"):
+                parse_optimizer_checkpoint(bad, 3)
 
     def test_legacy_unversioned_optimizer_is_rejected(self):
         with self.assertRaisesRegex(OptimizerCheckpointValidationError, "legacy"):

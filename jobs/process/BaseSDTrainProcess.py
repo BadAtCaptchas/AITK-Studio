@@ -59,7 +59,7 @@ from toolkit.optimizer_checkpoint import (
     OptimizerCheckpointValidationError,
     atomic_save_optimizer_checkpoint,
     invalidate_optimizer_checkpoint,
-    load_optimizer_checkpoint,
+    load_optimizer_checkpoint_for_resume,
 )
 from toolkit.paths import CONFIG_ROOT
 from toolkit.progress_bar import ToolkitProgressBar
@@ -783,6 +783,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if not self.accelerator.is_main_process:
             return
         flush()
+        # Portable LoKr exports can fold trainable scalars/rank scaling into
+        # factors. Capture the actual optimizer parameters before EMA swapping.
+        adapter_resume_state = None
+        if self.optimizer is not None and self.network is not None:
+            adapter_resume_state = self.network.get_optimizer_resume_state()
         if self.ema is not None:
             # always save params as ema
             self.ema.eval()
@@ -1007,6 +1012,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     state_dict,
                     step=self.step_num,
                     checkpoint_path=checkpoint_save_path,
+                    adapter_resume_state=adapter_resume_state,
                 )
                 print_acc(f"Saved optimizer to {optimizer_path}")
             except Exception as error:
@@ -2103,12 +2109,19 @@ class BaseSDTrainProcess(BaseTrainProcess):
             else:
                 try:
                     print_acc(f"Loading optimizer state from {optimizer_state_file_path}")
-                    optimizer_state_dict = load_optimizer_checkpoint(
+                    optimizer_state_dict, adapter_resume_state = load_optimizer_checkpoint_for_resume(
                         optimizer_state_file_path,
                         expected_step=self._resume_checkpoint_step,
+                        checkpoint_path=self._resume_checkpoint_path,
                     )
+                    if self.network is not None:
+                        self.network.restore_optimizer_resume_state(adapter_resume_state)
+                    elif adapter_resume_state is not None:
+                        raise OptimizerCheckpointValidationError(
+                            "Optimizer checkpoint requires an adapter network"
+                        )
                     self.optimizer.load_state_dict(optimizer_state_dict)
-                    del optimizer_state_dict
+                    del optimizer_state_dict, adapter_resume_state
                     flush()
                 except OptimizerCheckpointValidationError as error:
                     print_acc(f"Skipping incompatible optimizer state from {optimizer_state_file_path}")

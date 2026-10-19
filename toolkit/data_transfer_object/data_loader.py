@@ -25,7 +25,7 @@ from toolkit.dataloader_mixins import (
     TextEmbeddingFileItemDTOMixin,
     AudioProcessingDTOMixin,
 )
-from toolkit.prompt_utils import PromptEmbeds, concat_prompt_embeds
+from toolkit.prompt_utils import AdvancedPromptEmbeds, PromptEmbeds, concat_prompt_embeds
 
 if TYPE_CHECKING:
     from toolkit.config_modules import DatasetConfig
@@ -686,6 +686,90 @@ class DataLoaderBatchDTO:
         except Exception as e:
             print(e)
             raise e
+
+    def select_item(self, index: int, batch_size: Optional[int] = None) -> 'DataLoaderBatchDTO':
+        """Select one training row without modifying the source batch or file caches.
+
+        Caption augmentation can repeat the original rows. Some tensors have
+        already been repeated by preprocessing, while cached streams and file
+        metadata still have the original batch size.
+        """
+        source_size = len(self.file_items)
+        batch_size = source_size if batch_size is None else batch_size
+        if source_size == 0 or batch_size % source_size or not 0 <= index < batch_size:
+            raise ValueError("Invalid training batch item selection")
+
+        def row_index(size):
+            if size == batch_size:
+                return index
+            if size == source_size:
+                return index % source_size
+            return None
+
+        def select_tensor(value):
+            if value.ndim:
+                row = row_index(value.shape[0])
+                if row is not None:
+                    return value[row:row + 1]
+            return value
+
+        def select(value):
+            if isinstance(value, DTO):
+                return DTO(select_tensor(value.tensor), **{
+                    key: select(extra) for key, extra in value.extras.items()
+                })
+            if isinstance(value, torch.Tensor):
+                return select_tensor(value)
+            if isinstance(value, dict):
+                return {key: select(item) for key, item in value.items()}
+            if isinstance(value, (list, tuple)):
+                return type(value)(select(item) for item in value)
+            return value
+
+        def select_rows(value):
+            if value is None:
+                return None
+            row = row_index(len(value))
+            if row is None:
+                return copy.copy(value)
+            # A selected row can contain unbatched waveforms or reference
+            # images; do not interpret their channel dimension as a batch.
+            return value[row:row + 1]
+
+        def select_prompt(value):
+            result = copy.copy(value)
+            if isinstance(value, AdvancedPromptEmbeds):
+                result.__dict__['_store'] = {
+                    key: select_rows(rows) for key, rows in value._store.items()
+                }
+                result.__dict__['_frozen_dtype_keys'] = list(value._frozen_dtype_keys)
+            else:
+                per_item_text = (
+                    isinstance(value.text_embeds, (list, tuple))
+                    and bool(value.text_embeds)
+                    and value.text_embeds[0].ndim == 2
+                )
+                for key, item in value.__dict__.items():
+                    if per_item_text and key in ('text_embeds', 'attention_mask') and isinstance(item, (list, tuple)):
+                        result.__dict__[key] = select_rows(item)
+                    else:
+                        result.__dict__[key] = select(item)
+            return result
+
+        row_lists = {
+            'file_items', 'control_tensor_list', 'control_video_paths_list',
+            'clip_image_embeds', 'clip_image_embeds_unconditional', 'audio_data',
+            'loss_multiplier_list',
+        }
+        result = copy.copy(self)
+        for name, value in self.__dict__.items():
+            if isinstance(value, (PromptEmbeds, AdvancedPromptEmbeds)):
+                result.__dict__[name] = select_prompt(value)
+            elif name in row_lists:
+                result.__dict__[name] = select_rows(value)
+            else:
+                result.__dict__[name] = select(value)
+        return result
 
     def pin_memory(self):
         """Pin batch-owned payloads without traversing or mutating file caches."""

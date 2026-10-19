@@ -26,6 +26,8 @@ For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.y
 
 When training starts, AITK Studio creates the configured training folder and writes checkpoints and samples there. You can stop training with `Ctrl+C`; when you resume, it picks up from the latest checkpoint.
 
+Latent cache identities include `standardize_images`. Caches created before this field was tracked rebuild once, because their pixel transform cannot be identified reliably. Existing cache files are retained. Reference-conditioned text caches also track ordinary reference image contents, so replacing a reference at the same path triggers re-encoding.
+
 IMPORTANT: If you press `Ctrl+C` while a checkpoint is saving, it will likely corrupt that checkpoint. Wait until saving finishes before stopping the run.
 
 ## Batch loading threads
@@ -321,6 +323,10 @@ Current LoKr options can be set either from the UI (`New Job` -> `Target Type: L
 Supported advanced keys include `lokr_use_tucker`, `lokr_use_scalar`, `lokr_decompose_both`, `lokr_rank_dropout_scale`, `lokr_weight_decompose`, `lokr_wd_on_output`, `lokr_full_matrix`, `lokr_bypass_mode`, `lokr_rs_lora`, `lokr_unbalanced_factorization`, and `lokr_legacy_factorization`. The loader also accepts upstream-style aliases such as `factor`, `use_tucker`, `use_scalar`, `decompose_both`, `rank_dropout_scale`, `weight_decompose`, `dora_wd`, `wd_on_output`, `full_matrix`, `bypass_mode`, `rs_lora`, `unbalanced_factorization`, and `legacy_factorization`.
 
 Everything else should work the same, including layer targeting with `network_kwargs`.
+
+For scalar LoKr or rank-stabilized LoKr with two full factors, keep the matching `optimizer.pt` alongside the adapter checkpoint to resume the original training parameters and optimizer moments. New portable exports fold scalar and rank scaling into the factors; the optimizer checkpoint stores the original parameters separately and verifies the matching adapter file. If those original parameters are missing for scalar LoKr or a new full-factor RS export, incompatible optimizer moments are skipped with a warning, allowing training to continue from the portable adapter with a fresh optimizer. Older full-factor RS exports without a trainable scalar retain their original factors, so their matching optimizer state can still resume with the original rank and RS configuration.
+
+New rank-stabilized LoKr exports with two full factors preserve their strength in inference loaders that cannot infer rank from those factors. Older exports need to be loaded with their original rank and `lokr_rs_lora` configuration, then re-exported to obtain this portable scaling.
 
 ## Quantized model cache
 

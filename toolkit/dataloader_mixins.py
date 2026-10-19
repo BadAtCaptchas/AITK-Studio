@@ -2234,6 +2234,8 @@ class LatentCachingFileItemDTOMixin:
             ("crop_height", self.crop_height),
             ("latent_space_version", self.latent_space_version),
             ("latent_version", self.latent_version),
+            # Include both values: legacy caches could contain either transform.
+            ("standardize_images", self.dataset_config.standardize_images),
         ])
         if getattr(self, "preserve_image_alpha", False):
             item["image_channels"] = 4
@@ -2677,12 +2679,11 @@ class TextEmbeddingFileItemDTOMixin:
             if getattr(self, 'text_embedding_uses_target_size', False) and getattr(self, 'crop_width', None):
                 item["control_target_size"] = [self.crop_width, self.crop_height]
             if (
-                (is_ming_comfy or self.text_embedding_space_version.startswith(('ming_image_design_conditioning_', 'ming_image_design_layer_conditioning_')))
-                and not getattr(self, 'is_layered', False)
+                not getattr(self, 'is_layered', False)
                 and not getattr(self, 'is_encrypted', False)
             ):
-                # Ming encodes reference pixels through both its MLLM and VAE.
-                # A replacement image at the same path must invalidate embeds.
+                # Every reference-conditioned encoder depends on the pixels,
+                # including replacements that preserve the path and file stats.
                 paths = self.control_path if isinstance(self.control_path, list) else [self.control_path]
                 signatures = []
                 for path in paths:
@@ -2691,7 +2692,11 @@ class TextEmbeddingFileItemDTOMixin:
                         for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                             digest.update(chunk)
                     signatures.append(digest.hexdigest())
-                item['ming_reference_contents'] = signatures
+                is_ming = is_ming_comfy or self.text_embedding_space_version.startswith(
+                    ('ming_image_design_conditioning_', 'ming_image_design_layer_conditioning_')
+                )
+                # Preserve Ming's already content-aware cache identity.
+                item['ming_reference_contents' if is_ming else 'control_reference_contents'] = signatures
         if self.encode_control_in_text_embeddings and getattr(self, 'control_video_paths', None):
             item["control_videos"] = sorted(self.control_video_paths)
             # v2: reference-video vision blocks are no longer resampled by the

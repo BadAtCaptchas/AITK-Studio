@@ -702,6 +702,10 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         # a rank; preserve that behavior when loaded under another rank setting.
         if not (self.use_w1 and self.use_w2):
             self._set_runtime_scale(float(self.alpha.detach().float().item()) / self.lora_dim)
+        elif float(self.alpha.detach().float().item()) == 1.0:
+            # Canonical full-factor exports already fold rank stabilization
+            # into w1. Alpha=1 is also the ordinary full-factor convention.
+            self._set_runtime_scale(1.0)
         missing_keys = incompatible_keys.missing_keys
         for key in list(missing_keys):
             if key.endswith("scalar"):
@@ -717,11 +721,20 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         def save_tensor(name, tensor):
             destination[prefix + name] = tensor if keep_vars else tensor.detach()
 
-        save_tensor("alpha", self.alpha)
+        full_factors = self.use_w1 and self.use_w2
+        # Full factors do not encode a rank, so inference loaders ignore alpha.
+        # Fold any runtime scaling into w1 and mark the canonical factors with
+        # alpha=1, including when re-exporting a previously canonical adapter.
+        canonical_full = full_factors and (
+            self.rs_lora or float(self.alpha.detach().float().item()) == 1.0
+        )
+        save_tensor("alpha", torch.ones_like(self.alpha) if canonical_full else self.alpha)
         if self.wd:
             save_tensor("dora_scale", self.dora_scale)
 
         scalar = self.scalar
+        if canonical_full:
+            scalar = scalar * self._runtime_scale
         if self.use_w1:
             save_tensor("lokr_w1", self.lokr_w1 * scalar)
         else:

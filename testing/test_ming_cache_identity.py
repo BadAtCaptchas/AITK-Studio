@@ -68,8 +68,9 @@ class MingCacheIdentityTests(unittest.TestCase):
             self.assertNotEqual(before['ming_reference_contents'], after['ming_reference_contents'])
             self.assertNotIn('ming_reference_contents', info(item, text_only=True))
             item.text_embedding_space_version = 'unrelated-model'
-            reference.unlink()
             self.assertNotIn('ming_reference_contents', info(item))
+            self.assertEqual(info(item)['control_reference_contents'], after['ming_reference_contents'])
+            reference.unlink()
             item.text_embedding_space_version = 'ming_image_design_conditioning_pr8021_v1_test'
             item.is_encrypted = True
             self.assertNotIn('ming_reference_contents', info(item))

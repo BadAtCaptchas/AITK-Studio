@@ -734,16 +734,21 @@ class SDTrainer(BaseSDTrainProcess):
                     # resize to size of noise_pred
                     prior_mask = torch.nn.functional.interpolate(prior_mask, size=(lat_height, lat_width), mode='bicubic')
                     # stack first channel to match channels of noise_pred
-                    prior_mask = torch.cat([prior_mask[:1]] * noise_pred.shape[1], dim=1)
+                    prior_mask = prior_mask[:, :1].expand(-1, noise_pred.shape[1], -1, -1)
 
                     if len(noise_pred.shape) == 5:
                         prior_mask = prior_mask.unsqueeze(2)  # add time dimension back for video
                         prior_mask = prior_mask.repeat(1, 1, noise_pred.shape[2], 1, 1)
 
-                    prior_mask_multiplier = 1.0 - prior_mask
+                    prior_mask_multiplier = (1.0 - prior_mask).clamp_min(0)
 
                     # scale so it is a mean of 1
-                    prior_mask_multiplier = prior_mask_multiplier / prior_mask_multiplier.mean()
+                    mask_mean = prior_mask_multiplier.mean(
+                        dim=tuple(range(1, prior_mask_multiplier.ndim)), keepdim=True
+                    )
+                    prior_mask_multiplier = prior_mask_multiplier / torch.where(
+                        mask_mean > 0, mask_mean, torch.ones_like(mask_mean)
+                    )
                 if hasattr(self.sd, 'get_loss_target'):
                     target = self.sd.get_loss_target(
                         noise=noise,
@@ -775,7 +780,7 @@ class SDTrainer(BaseSDTrainProcess):
                     dopsd_normal_target = noise
         elif self.sd.prediction_type == 'v_prediction':
             # v-parameterization training
-            target = self.sd.noise_scheduler.get_velocity(batch.tensor, noise, timesteps)
+            target = self.sd.noise_scheduler.get_velocity(batch.latents, noise, timesteps)
         elif self.train_config.do_signal_amplification:
             if not self.sd.is_flow_matching:
                 raise ValueError("Signal amplification is only supported for flow matching models")
@@ -1351,6 +1356,7 @@ class SDTrainer(BaseSDTrainProcess):
             sd=self.sd,
             unconditional_embeds=unconditional_embeds,
             train_config=self.train_config,
+            backward_fn=self.accelerator.backward,
             **kwargs
         )
 
@@ -1476,7 +1482,7 @@ class SDTrainer(BaseSDTrainProcess):
         if loss.item() > 1e3:
             pass
         with self.cuda_memory_phase("backward"):
-            self.accelerator.backward(loss)
+            self.accelerator.backward(loss * kwargs.get('backward_scale', 1.0))
         return pure_loss
 
 
@@ -1991,7 +1997,7 @@ class SDTrainer(BaseSDTrainProcess):
                         negative_prompts.append(this_neg_prompt)
                     self.batch_negative_prompt = negative_prompts
                 else:
-                    self.batch_negative_prompt = ['' for _ in range(batch.latents.shape[0])]
+                    self.batch_negative_prompt = ['' for _ in range(noisy_latents.shape[0])]
 
             if self.adapter and isinstance(self.adapter, CustomAdapter):
                 # condition the prompt
@@ -1999,8 +2005,8 @@ class SDTrainer(BaseSDTrainProcess):
                 conditioned_prompts = self.adapter.condition_prompt(conditioned_prompts)
 
             network_weight_list = batch.get_network_weight_list()
-            if self.train_config.single_item_batching:
-                network_weight_list = network_weight_list + network_weight_list
+            if noisy_latents.shape[0] != len(network_weight_list):
+                network_weight_list = network_weight_list * (noisy_latents.shape[0] // len(network_weight_list))
 
             has_adapter_img = batch.control_tensor is not None
             has_clip_image = batch.clip_image_tensor is not None
@@ -2036,7 +2042,8 @@ class SDTrainer(BaseSDTrainProcess):
 
             is_reg = False
             loss_multiplier = torch.ones((noisy_latents.shape[0], 1, 1, 1), device=self.device_torch, dtype=dtype)
-            for idx, file_item in enumerate(batch.file_items):
+            for idx in range(noisy_latents.shape[0]):
+                file_item = batch.file_items[idx % len(batch.file_items)]
                 if file_item.is_reg:
                     loss_multiplier[idx] = loss_multiplier[idx] * self.train_config.reg_weight
                     is_reg = True
@@ -2148,35 +2155,45 @@ class SDTrainer(BaseSDTrainProcess):
             prompts_1 = batch.get_caption_short_list()
             prompts_2 = conditioned_prompts
 
-            # make the batch splits
+        # Keep the existing batch-level regularization reduction. Dataset loss
+        # weights are applied per image by calculate_loss, before its mean.
+        regularization_multiplier = loss_multiplier.mean()
+        negative_prompts = self.batch_negative_prompt
         if self.train_config.single_item_batching:
             if self.model_config.refiner_name_or_path is not None:
                 raise ValueError("Single item batching is not supported when training the refiner")
             batch_size = noisy_latents.shape[0]
+            batch_list = [batch.select_item(i, batch_size) for i in range(batch_size)]
+            network_weights_list = [[weight] for weight in network_weight_list]
+
+            def split_prompts(prompts):
+                return [[prompts[i % len(prompts)]] for i in range(batch_size)] if prompts is not None else [None] * batch_size
+
+            negative_prompts_list = split_prompts(negative_prompts)
             # chunk/split everything
             noisy_latents_list = torch.chunk(noisy_latents, batch_size, dim=0)
             noise_list = torch.chunk(noise, batch_size, dim=0)
             timesteps_list = torch.chunk(timesteps, batch_size, dim=0)
-            conditioned_prompts_list = [[prompt] for prompt in prompts_1]
+            conditioned_prompts_list = split_prompts(prompts_1)
             if imgs is not None:
-                imgs_list = torch.chunk(imgs, batch_size, dim=0)
+                imgs_list = [imgs[i % imgs.shape[0]:i % imgs.shape[0] + 1] for i in range(batch_size)]
             else:
                 imgs_list = [None for _ in range(batch_size)]
             if adapter_images is not None:
-                adapter_images_list = torch.chunk(adapter_images, batch_size, dim=0)
+                adapter_images_list = [adapter_images[i % adapter_images.shape[0]:i % adapter_images.shape[0] + 1] for i in range(batch_size)]
             else:
                 adapter_images_list = [None for _ in range(batch_size)]
             if clip_images is not None:
-                clip_images_list = torch.chunk(clip_images, batch_size, dim=0)
+                clip_images_list = [clip_images[i % clip_images.shape[0]:i % clip_images.shape[0] + 1] for i in range(batch_size)]
             else:
                 clip_images_list = [None for _ in range(batch_size)]
             mask_multiplier_list = torch.chunk(mask_multiplier, batch_size, dim=0)
-            if prompts_2 is None:
-                prompt_2_list = [None for _ in range(batch_size)]
-            else:
-                prompt_2_list = [[prompt] for prompt in prompts_2]
+            prompt_2_list = split_prompts(prompts_2)
 
         else:
+            batch_list = [batch]
+            network_weights_list = [network_weight_list]
+            negative_prompts_list = [negative_prompts]
             noisy_latents_list = [noisy_latents]
             noise_list = [noise]
             timesteps_list = [timesteps]
@@ -2190,7 +2207,12 @@ class SDTrainer(BaseSDTrainProcess):
             else:
                 prompt_2_list = [prompts_2]
 
-        for noisy_latents, noise, timesteps, conditioned_prompts, imgs, adapter_images, clip_images, mask_multiplier, prompt_2 in zip(
+        total_loss = None
+        backward_scale = regularization_multiplier / len(batch_list)
+        for batch, network_weight_list, negative_prompts, noisy_latents, noise, timesteps, conditioned_prompts, imgs, adapter_images, clip_images, mask_multiplier, prompt_2 in zip(
+                batch_list,
+                network_weights_list,
+                negative_prompts_list,
                 noisy_latents_list,
                 noise_list,
                 timesteps_list,
@@ -2201,6 +2223,15 @@ class SDTrainer(BaseSDTrainProcess):
                 mask_multiplier_list,
                 prompt_2_list
         ):
+            network.multiplier = network_weight_list
+            is_reg = any(batch.get_is_reg_list())
+            do_reg_prior = any(item.prior_reg for item in batch.file_items)
+            has_adapter_img = batch.control_tensor is not None
+            has_clip_image = batch.clip_image_tensor is not None or is_reg
+            has_clip_image_embeds = batch.clip_image_embeds is not None
+            if is_reg and self._clip_image_embeds_unconditional is not None:
+                has_clip_image_embeds = True
+                has_clip_image = False
 
             # if self.train_config.negative_prompt is not None:
             #     # add negative prompt
@@ -2296,8 +2327,8 @@ class SDTrainer(BaseSDTrainProcess):
                                     self.adapter.is_unconditional_run = True
                                 # todo only do one and repeat it
                                 unconditional_embeds = self.sd.encode_prompt(
-                                    self.batch_negative_prompt,
-                                    self.batch_negative_prompt,
+                                    negative_prompts,
+                                    negative_prompts,
                                     dropout_prob=self.train_config.prompt_dropout_prob,
                                     long_prompts=self.do_long_prompts,
                                     **prompt_kwargs
@@ -2328,7 +2359,7 @@ class SDTrainer(BaseSDTrainProcess):
                                 if isinstance(self.adapter, CustomAdapter):
                                     self.adapter.is_unconditional_run = True
                                 unconditional_embeds = self.sd.encode_prompt(
-                                    self.batch_negative_prompt,
+                                    negative_prompts,
                                     dropout_prob=self.train_config.prompt_dropout_prob,
                                     long_prompts=self.do_long_prompts,
                                     **prompt_kwargs
@@ -2724,6 +2755,7 @@ class SDTrainer(BaseSDTrainProcess):
                         unconditional_embeds=unconditional_embeds,
                         mask_multiplier=mask_multiplier,
                         prior_pred=prior_pred,
+                        backward_scale=backward_scale,
                     )
 
                 elif self.train_config.loss_type == 'mean_flow':
@@ -2740,6 +2772,7 @@ class SDTrainer(BaseSDTrainProcess):
                         noise=noise,
                         unconditional_embeds=unconditional_embeds,
                         prior_pred=prior_pred,
+                        backward_scale=backward_scale,
                     )
                 else:
                     authenlora_clean_latents = noisy_latents
@@ -2858,7 +2891,7 @@ class SDTrainer(BaseSDTrainProcess):
 
                 with self.timer('backward'):
                     # todo we have multiplier seperated. works for now as res are not in same batch, but need to change
-                    loss = loss * loss_multiplier.mean()
+                    loss = loss * backward_scale
                     # IMPORTANT if gradient checkpointing do not leave with network when doing backward
                     # it will destroy the gradients. This is because the network is a context manager
                     # and will change the multipliers back to 0.0 when exiting. They will be
@@ -2871,8 +2904,9 @@ class SDTrainer(BaseSDTrainProcess):
                     with self.cuda_memory_phase("backward"):
                         self.accelerator.backward(loss)
                     self._clear_authenlora_batch(network)
+                    total_loss = loss.detach() if total_loss is None else total_loss + loss.detach()
 
-        return loss.detach()
+        return total_loss
         # flush()
 
     def hook_train_loop(self, batch: Union[DataLoaderBatchDTO, List[DataLoaderBatchDTO]]):
@@ -2941,22 +2975,14 @@ class SDTrainer(BaseSDTrainProcess):
                             if param.grad is not None and id(param) not in seen:
                                 param.grad.div_(divisor)
                                 seen.add(id(param))
-            # fix this for multi params
             if self.train_config.optimizer != 'adafactor':
-                grad_norm_values = []
-                if isinstance(self.params[0], dict):
-                    for i in range(len(self.params)):
-                        grad_norm = self.accelerator.clip_grad_norm_(self.params[i]['params'], self.train_config.max_grad_norm)
-                        if grad_norm is not None:
-                            grad_norm_values.append(grad_norm)
-                else:
-                    grad_norm = self.accelerator.clip_grad_norm_(self.params, self.train_config.max_grad_norm)
-                    if grad_norm is not None:
-                        grad_norm_values.append(grad_norm)
-                if getattr(self.logging_config, 'monitor_grad_stats', True) and grad_norm_values:
-                    grad_norm_tensor = torch.stack([g.detach().float() if torch.is_tensor(g) else torch.tensor(float(g), device=self.device_torch) for g in grad_norm_values])
-                    self._record_monitor_metric('train/grad_norm', grad_norm_tensor.max())
-                    self._record_monitor_metric('train/grad_norm_mean', grad_norm_tensor.mean())
+                # Accelerate unscales the entire optimizer here. Calling it per
+                # group unscales twice under AMP and clips the wrong joint norm.
+                clip_params = list({id(param): param for group in self.optimizer.param_groups for param in group['params']}.values())
+                grad_norm = self.accelerator.clip_grad_norm_(clip_params, self.train_config.max_grad_norm)
+                if getattr(self.logging_config, 'monitor_grad_stats', True) and grad_norm is not None:
+                    self._record_monitor_metric('train/grad_norm', grad_norm)
+                    self._record_monitor_metric('train/grad_norm_mean', grad_norm)
                     self._record_monitor_metric('train/grad_norm_limit', self.train_config.max_grad_norm)
             # only step if we are not accumulating
             with self.timer('optimizer_step'):

@@ -30,7 +30,7 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
   const records = new Map();
   let revision = Date.now();
   let job = {
-    id: 'job', worker_id: 'local', gpu_ids: gpuIds, status: 'stopped', attempt_id: null,
+    id: 'job', worker_id: 'local', gpu_ids: gpuIds, job_type: 'train', status: 'stopped', attempt_id: null,
     job_config: '{"config":{"process":[]}}', updated_at: new Date(++revision), return_to_queue: false,
   };
   let queue = missingQueue ? null : { id: 1, worker_id: 'local', gpu_ids: gpuIds, is_running: running };
@@ -84,7 +84,8 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
   });
   const caption = { isAnyRemoteOllamaCaptionJob: () => false };
   const start = loadSource('../src/server/jobStart.ts', {
-    '../domain/configContract': {}, 'fs/promises': {}, './pythonPath': {}, './db': { db }, './operations': {},
+    '../domain/configContract': { configContractErrors: () => [] }, 'fs/promises': {},
+    './pythonPath': { assertPythonRuntimeReady: async () => {} }, './db': { db }, './operations': {},
     './trainingJobBundle': {}, './remoteClient': { isLocalWorker: id => id === 'local' }, './remoteCaptionDispatch': {},
     './datasetDecryption': { DATASET_MIGRATION_REQUIRED: 'ENCRYPTED_DATASET_MIGRATION_REQUIRED', DATASET_MIGRATION_MESSAGE: 'Decrypt legacy datasets' },
     './encryptedDatasets': { getEncryptedDatasetsForJobConfig: async () => [] }, './encryptedDatasetSecrets': {}, './secureRemoteCaptionJobs': caption,
@@ -103,6 +104,7 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
   return {
     db, scheduler, launches, coordination, prepared,
     enqueue: options => start.startPreparedJob(prepared(), options),
+    start: () => start.startJobFromRequest(job.id),
     get job() { return job; }, get queue() { return queue; },
     setJob: patch => { job = { ...job, ...patch }; },
     holdRetries: () => { pauseRetries = true; return { contended: contended.promise, release: retry.resolve }; },
@@ -183,6 +185,74 @@ test('ordinary enqueue preserves paused queues and running queues', async () => 
     await f.enqueue();
     assert.equal(f.job.status, 'queued');
     assert.equal(f.queue.is_running, options.running === true);
+  }
+});
+
+test('training start and resume activate new, stopped, and running queues', async () => {
+  for (const status of ['stopped', 'error', 'completed']) {
+    for (const options of [{ missingQueue: true }, { running: false }, { running: true }]) {
+      const f = fixture({ ...options, gpuIds: '2' });
+      f.setJob({ status });
+      const job = await f.start();
+      assert.equal(job.status, 'queued');
+      assert.equal(f.queue.gpu_ids, '2');
+      assert.equal(f.queue.is_running, true);
+      await f.scheduler();
+      assert.deepEqual(f.launches, ['job']);
+    }
+  }
+});
+
+test('training start preserves the order of work already queued', async () => {
+  const f = fixture({ running: false });
+  f.db.jobs.maxQueuePosition = async () => 5000;
+  f.db.jobs.findFirst = async query => {
+    assert.equal(query.order, 'queue_asc');
+    return { ...f.job, id: 'earlier-job', queue_position: 5000 };
+  };
+  await f.start();
+  assert.equal(f.job.queue_position, 6000);
+  await f.scheduler();
+  assert.deepEqual(f.launches, ['earlier-job']);
+});
+
+test('training start waits for an active job on the selected GPU', async () => {
+  const f = fixture({ running: false });
+  await f.start();
+  f.db.jobs.list = async () => [{ ...f.job, id: 'active-job', status: 'running' }];
+  await f.scheduler();
+  assert.equal(f.queue.is_running, true);
+  assert.equal(f.job.status, 'queued');
+  assert.deepEqual(f.launches, []);
+});
+
+test('rejected training starts leave the queue stopped', async () => {
+  const f = fixture({ running: false });
+  f.setJob({ status: 'running' });
+  await assert.rejects(f.start(), error => error.status === 409);
+  assert.equal(f.queue.is_running, false);
+});
+
+test('queue activation failure rolls the training job back for a retry', async () => {
+  const f = fixture({ running: false });
+  const updateQueue = f.db.queues.update;
+  f.db.queues.update = async () => { throw new Error('Queue update failed'); };
+  await assert.rejects(f.start(), /Queue update failed/);
+  assert.equal(f.job.status, 'stopped');
+  assert.equal(f.queue.is_running, false);
+  f.db.queues.update = updateQueue;
+  await f.start();
+  assert.equal(f.job.status, 'queued');
+  assert.equal(f.queue.is_running, true);
+});
+
+test('other job types keep their existing queue start behavior', async () => {
+  for (const job_type of ['caption', 'generate']) {
+    const f = fixture({ running: false });
+    f.setJob({ job_type });
+    await f.start();
+    assert.equal(f.job.status, 'queued');
+    assert.equal(f.queue.is_running, false);
   }
 });
 

@@ -432,7 +432,8 @@ export default function JobActionBar({
           });
         },
       });
-      if (autoStartQueue) {
+      // Training starts activate their queue in the server's queue transition.
+      if (autoStartQueue && job.job_type !== 'train') {
         await startQueue(job.gpu_ids, job.worker_id);
       }
       await onRefresh?.();

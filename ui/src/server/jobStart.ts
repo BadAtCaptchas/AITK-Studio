@@ -399,5 +399,6 @@ export async function startJobFromRequest(
   encryptedDatasetKeys?: EncryptedDatasetStartKey[],
   durableEncryptedDatasetKeys = false,
 ) {
-  return startPreparedJob(await prepareJobStart(jobID, encryptedDatasetKeys, durableEncryptedDatasetKeys));
+  const prepared = await prepareJobStart(jobID, encryptedDatasetKeys, durableEncryptedDatasetKeys);
+  return startPreparedJob(prepared, { startQueue: prepared.job.job_type === 'train' });
 }

@@ -3896,6 +3896,104 @@
       }
     },
     {
+      "name": "moss_image:kromoss",
+      "arch": "moss_image",
+      "label": "Kromoss",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.train_text_encoder"
+      ],
+      "allowedNetworkTypes": [
+        "lora",
+        "lokr"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 16,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
+      "name": "moss_image:kromoss_turbo",
+      "arch": "moss_image",
+      "label": "Kromoss Turbo (8 steps)",
+      "group": "image",
+      "isVideoModel": false,
+      "additionalSections": [
+        "model.low_vram",
+        "model.layer_offloading"
+      ],
+      "disableSections": [
+        "network.conv",
+        "train.train_text_encoder"
+      ],
+      "allowedNetworkTypes": [
+        "lora",
+        "lokr"
+      ],
+      "controls": [],
+      "tasks": [
+        "train",
+        "generate"
+      ],
+      "deviceBackends": [
+        "cuda",
+        "mps"
+      ],
+      "precisions": [
+        "bf16",
+        "bfloat16",
+        "fp16",
+        "float16",
+        "fp32",
+        "float32"
+      ],
+      "outputType": "image",
+      "dimensions": {
+        "minimum": 16,
+        "maximum": 32768
+      },
+      "frames": {
+        "minimum": 1,
+        "maximum": 100000,
+        "multipleAfterFirst": 1
+      },
+      "offloading": {
+        "layers": true
+      }
+    },
+    {
       "name": "moss_image:edit",
       "arch": "moss_image",
       "label": "MOSS-Image SFT [Edit Training]",

@@ -23,6 +23,50 @@ ARCH_REGISTRY: Dict[str, dict] = {
     "moss_image:base": {"modality": "image", "model": {"name_or_path": "OpenMOSS-Team/MOSS-Image-Base", "quantize": True, "qtype": "convrot8", "quantize_te": True, "qtype_te": "convrot8", "low_vram": True, "model_kwargs": {"uncond_skip_layers": [22]}}, "sample": {"width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 3.0}},
     "moss_image:edit": {"modality": "image", "model": {"name_or_path": "OpenMOSS-Team/MOSS-Image-SFT", "quantize": True, "qtype": "convrot8", "quantize_te": True, "qtype_te": "convrot8", "low_vram": True, "model_kwargs": {"edit": True, "kv_cache": True, "match_target_res": True, "uncond_skip_layers": [22]}}, "sample": {"width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 3.0}, "needs_control_image": True},
     "moss_image:base_edit": {"modality": "image", "model": {"name_or_path": "OpenMOSS-Team/MOSS-Image-Base", "quantize": True, "qtype": "convrot8", "quantize_te": True, "qtype_te": "convrot8", "low_vram": True, "model_kwargs": {"edit": True, "kv_cache": True, "match_target_res": True, "uncond_skip_layers": [22]}}, "sample": {"width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 3.0}, "needs_control_image": True},
+    "moss_image:kromoss": {
+        "modality": "image",
+        "model": {
+            "name_or_path": "lodestones/Kromoss",
+            "dtype": "bf16",
+            "vae_path": "lodestones/Kromoss/vae/flux2-vae_small.safetensors",
+            "vae_dtype": "fp32",
+            "quantize": True,
+            "qtype": "convrot8",
+            "quantize_te": True,
+            "qtype_te": "convrot8",
+            "low_vram": True,
+            "layer_offloading": True,
+            "layer_offloading_backend": "legacy",
+            "layer_offloading_transformer_percent": 1.0,
+            "layer_offloading_text_encoder_percent": 1.0,
+            "model_kwargs": {"sample_shift": 5, "uncond_skip_layers": [22]},
+        },
+        "sample": {**IMG, "num_inference_steps": 50, "guidance_scale": 3.0},
+    },
+    "moss_image:kromoss_turbo": {
+        "modality": "image",
+        "model": {
+            "name_or_path": "lodestones/Kromoss",
+            "dtype": "bf16",
+            "vae_path": "lodestones/Kromoss/vae/flux2-vae_small.safetensors",
+            "vae_dtype": "fp32",
+            "quantize": True,
+            "qtype": "convrot8",
+            "quantize_te": True,
+            "qtype_te": "convrot8",
+            "low_vram": True,
+            "layer_offloading": True,
+            "layer_offloading_backend": "legacy",
+            "layer_offloading_transformer_percent": 1.0,
+            "layer_offloading_text_encoder_percent": 1.0,
+            "model_kwargs": {
+                "sample_shift": 5,
+                "uncond_skip_layers": [],
+                "distillation_lora_path": "lodestones/Kromoss/8-steps-dmd-lora.safetensors",
+            },
+        },
+        "sample": {**IMG, "num_inference_steps": 8, "guidance_scale": 1.0},
+    },
     "zimage": {"modality": "image", "model": {"name_or_path": "Tongyi-MAI/Z-Image-Turbo"}, "sample": {**IMG, "num_inference_steps": 8, "guidance_scale": 1.0}},
     "zimage_l2p": {"modality": "image", "model": {"name_or_path": "zhen-nan/L2P/model-1k-merge.safetensors", "extras_name_or_path": "Tongyi-MAI/Z-Image-Turbo", "quantize_te": True}, "sample": {**IMG, "num_inference_steps": 8, "guidance_scale": 1.0}},
     "qwen_image": {"modality": "image", "model": {"name_or_path": "Qwen/Qwen-Image", "quantize": True, "quantize_te": True}, "sample": {**IMG, "num_inference_steps": 20}},
@@ -88,6 +132,10 @@ def list_archs() -> List[str]:
 
     archs = {m.arch for m in get_all_models() if getattr(m, "arch", None)}
     archs |= LEGACY_ARCHS
+    archs |= {
+        name for name in ARCH_REGISTRY
+        if ":" in name and name.split(":", 1)[0] in archs
+    }
     return sorted(archs)
 
 

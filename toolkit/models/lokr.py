@@ -697,6 +697,11 @@ class LokrModule(ToolkitModuleMixin, nn.Module):
         return base + diff
 
     def load_weight_hook(self, module, incompatible_keys):
+        # The serialized alpha already includes any rank-stabilized scaling.
+        # Full Kronecker factors ignore alpha at construction and do not encode
+        # a rank; preserve that behavior when loaded under another rank setting.
+        if not (self.use_w1 and self.use_w2):
+            self._set_runtime_scale(float(self.alpha.detach().float().item()) / self.lora_dim)
         missing_keys = incompatible_keys.missing_keys
         for key in list(missing_keys):
             if key.endswith("scalar"):

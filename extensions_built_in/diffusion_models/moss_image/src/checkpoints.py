@@ -13,6 +13,8 @@ Comfy-Org/MOSS-Image repack (DiT: the vendor's keys with q/k/v fused).
   substituted.
 - ``Comfy-Org/MOSS-Image``: the repack's SFT DiT (int8 convrot only; a local
   merged bf16 SFT also counts).
+- ``lodestones/Kromoss``: its own BF16/convrot repacks; selecting this fine-tune
+  never reuses the ancestor's Base or SFT weights.
 - ``org/repo/path/file.safetensors``: that file, downloaded to its comfy spot.
 
 The vendor text_encoder/ is stock Qwen3.5-9B (A_log / gated norm stored in
@@ -49,6 +51,13 @@ SFT_REPO = "OpenMOSS-Team/MOSS-Image-SFT"
 BASE_REPO = "OpenMOSS-Team/MOSS-Image-Base"
 COMFY_REPO = "Comfy-Org/MOSS-Image"
 QWEN35_9B_REPO = "Qwen/Qwen3.5-9B"
+KROMOSS_REPO = "lodestones/Kromoss"
+KROMOSS_VAE_FILE = "vae/flux2-vae_small.safetensors"
+KROMOSS_DISTILLATION_FILE = "8-steps-dmd-lora.safetensors"
+KROMOSS_TRANSFORMER_FILES = [
+    "diffusion_models/kromoss_bf16.safetensors",
+    "diffusion_models/kromoss_int8_convrot.safetensors",
+]
 
 VENDOR_VAE_FILE = "vae/diffusion_pytorch_model.safetensors"
 VENDOR_TRANSFORMER_INDEX = "transformer/diffusion_pytorch_model.safetensors.index.json"
@@ -103,6 +112,11 @@ def resolve_hub_file(
         raise FileNotFoundError(
             f"{ref} is not a local file or an 'org/repo/path/file.safetensors' reference"
         )
+    repo_id, filename = "/".join(parts[:2]), "/".join(parts[2:])
+    if repo_id == KROMOSS_REPO and filename in (*KROMOSS_TRANSFORMER_FILES, KROMOSS_VAE_FILE):
+        return resolve_comfy_candidates(
+            [filename], repo_id=repo_id, hf_token=hf_token, status_fn=status_fn
+        )
     if "/".join(parts[:2]) != COMFY_REPO:
         filename = "/".join(parts[2:])
         return download_checkpoint("/".join(parts[:2]), filename, os.path.join(MODELS_PATH, "diffusion_models", repository_filename("/".join(parts), filename)), hf_token)
@@ -114,6 +128,24 @@ def resolve_hub_file(
     )
 
 
+def resolve_distillation_file(ref: str, hf_token: Optional[str] = None) -> str:
+    """Resolve a persistent adapter without merging it into denoiser weights."""
+    if os.path.isfile(ref):
+        return ref
+    parts = ref.split("/")
+    if len(parts) < 3 or not ref.endswith(".safetensors"):
+        raise FileNotFoundError("distillation_lora_path must be a local file or org/repo/file.safetensors")
+    repo_id, filename = "/".join(parts[:2]), "/".join(parts[2:])
+    local_name = (
+        "kromoss_8_steps_dmd.safetensors"
+        if repo_id == KROMOSS_REPO and filename == KROMOSS_DISTILLATION_FILE
+        else repository_filename(ref, filename)
+    )
+    return download_checkpoint(
+        repo_id, filename, os.path.join(MODELS_PATH, "loras", local_name), hf_token
+    )
+
+
 def comfy_transformer_file(
     repo_id: str,
     qtype: Optional[str] = None,
@@ -121,6 +153,15 @@ def comfy_transformer_file(
     status_fn: Optional[Callable[[str], None]] = None,
     use_comfy_weights: bool = True,
 ) -> str:
+    if repo_id == KROMOSS_REPO and use_comfy_weights:
+        # These are Kromoss weights, never the ancestor's Base/SFT repack.
+        candidates = KROMOSS_TRANSFORMER_FILES
+        if not (qtype or "").lower().startswith("convrot"):
+            candidates = [name for name in candidates if "int8" not in name]
+        return resolve_comfy_candidates(
+            candidates, repo_id=KROMOSS_REPO, qtype=qtype,
+            hf_token=hf_token, status_fn=status_fn,
+        )
     variant = REPO_VARIANT.get(repo_id)
     if variant is not None and (use_comfy_weights or repo_id == COMFY_REPO):
         repo_files, local_extra = COMFY_TRANSFORMER_FILES[variant]

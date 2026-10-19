@@ -630,6 +630,7 @@ export interface ModelConfig {
   use_flux_cfg?: boolean;
   extras_name_or_path?: string;
   vae_path?: string;
+  vae_dtype?: string;
   refiner_name_or_path?: string;
   te_name_or_path?: string;
   lora_path?: string;

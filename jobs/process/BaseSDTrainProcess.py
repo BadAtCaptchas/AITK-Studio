@@ -31,7 +31,7 @@ from toolkit.memory_management.cuda_telemetry import (
 
 from toolkit.basic import value_map
 from toolkit.base_lora import fuse_base_lora_into_model
-from toolkit.base_lora_metadata import add_base_lora_metadata
+from toolkit.base_lora_metadata import add_base_lora_metadata, add_distillation_lora_metadata
 from toolkit.buckets import get_bucket_for_image_size
 from toolkit.checkpoint_cleanup import (
     check_save_permissions,
@@ -613,6 +613,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         })
         o_dict['ss_base_model_version'] = self.sd.get_base_model_version()
         add_base_lora_metadata(o_dict, self.model_config)
+        add_distillation_lora_metadata(o_dict, self.model_config)
 
         # o_dict = add_base_model_info_to_meta(
         #     o_dict,

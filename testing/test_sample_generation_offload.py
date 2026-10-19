@@ -193,29 +193,8 @@ class SampleGenerationOffloadTest(unittest.TestCase):
 
 
 class GeneratePageMemoryDefaultsTest(unittest.TestCase):
-    def test_generate_page_does_not_inherit_training_cpu_offload_defaults(self):
-        source = GENERATE_PAGE_PATH.read_text(encoding="utf-8")
-        start = source.index("function getDefaultModelConfig")
-        end = source.index("function getDefaultSampler", start)
-        block = source[start:end]
-
-        self.assertIn("low_vram: false", block)
-        self.assertIn("layer_offloading: false", block)
-        self.assertIn("layer_offloading_backend:", block)
-        self.assertNotIn("low_vram: Boolean(getArchDefault", block)
-        self.assertNotIn("layer_offloading: Boolean(getArchDefault", block)
-
-    def test_generate_page_keeps_manual_memory_toggles_when_lora_selected(self):
-        source = GENERATE_PAGE_PATH.read_text(encoding="utf-8")
-        start = source.index("const applyLoraModelDefaults")
-        end = source.index("const handleLoraPathChange", start)
-        block = source[start:end]
-
-        self.assertIn("low_vram: current.low_vram", block)
-        self.assertIn("layer_offloading: current.layer_offloading", block)
-        self.assertIn("layer_offloading_backend: current.layer_offloading_backend", block)
-        self.assertIn("layer_offloading_transformer_percent: current.layer_offloading_transformer_percent", block)
-        self.assertIn("layer_offloading_text_encoder_percent: current.layer_offloading_text_encoder_percent", block)
+    # Defaults and LoRA selection behavior are exercised in
+    # ui/scripts/generationConfig.test.mjs against the shared TypeScript helpers.
 
     def test_generate_page_exposes_layer_offloading_backend_selector(self):
         source = GENERATE_PAGE_PATH.read_text(encoding="utf-8")

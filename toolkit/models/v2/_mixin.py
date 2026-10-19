@@ -474,6 +474,7 @@ class OstrisModelMixin:
         subfolder: Optional[str] = None,
         use_comfy_weights: bool = True,
         quantize_on_load: bool = True,
+        pool_namespace: Optional[str] = None,
         **kwargs,
     ):
         """Load a model universally from a given name or path.
@@ -496,6 +497,8 @@ class OstrisModelMixin:
         device: move the finished model there before returning.
         subfolder: overrides the class's aitk_subfolder; pass "" to explicitly
         load from the checkpoint root (e.g. a raw hub repo).
+        pool_namespace: holder-specific identity for persistent adapters; used
+        only in the component cache key, never passed to checkpoint loaders.
         """
         if subfolder is None:
             subfolder = cls.aitk_subfolder
@@ -520,6 +523,7 @@ class OstrisModelMixin:
                 # a resident int8 repack must not satisfy a BF16 request.
                 qtype=qtype,
                 quantize_on_load=quantize_on_load,
+                pool_namespace=pool_namespace,
                 kwargs=kwargs,
             )
             resident = pool.get(pool_key)

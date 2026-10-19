@@ -159,10 +159,17 @@ export const handleModelArchChange = (
 
   // update samples
   const hasSampleCtrlImg = newArch?.additionalSections?.includes('sample.ctrl_img') || false;
+  const hasSampleMultiCtrlImgs = newArch?.additionalSections?.includes('sample.multi_ctrl_imgs') || false;
   const samples = jobConfig.config.process[0].sample.samples.map(sample => {
     const newSample = objectCopy(sample);
     if (!hasSampleCtrlImg) {
       delete newSample.ctrl_img; // remove ctrl_img if not applicable
+    }
+    if (!hasSampleMultiCtrlImgs) {
+      delete newSample.ctrl_imgs;
+      delete newSample.ctrl_img_1;
+      delete newSample.ctrl_img_2;
+      delete newSample.ctrl_img_3;
     }
     return newSample;
   });

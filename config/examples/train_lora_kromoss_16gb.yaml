@@ -1,0 +1,87 @@
+---
+# 16 GB starting profile; validation and compatibility: docs/kromoss.md.
+# Replace both path placeholders with your configured workspace locations.
+job: extension
+config:
+  name: kromoss_lora
+  process:
+    - type: diffusion_trainer
+      training_folder: /path/to/configured/training/root
+      device: cuda:0
+      network:
+        type: lora # lokr is also supported; its QKV export requires a fused MOSS loader.
+        linear: 16
+        linear_alpha: 16
+        lokr_full_rank: false
+        lokr_factor: -1
+        transformer_only: true
+        network_kwargs:
+          ignore_if_contains: ['layers.22.']
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 2
+      datasets:
+        - folder_path: /path/to/images
+          caption_ext: txt
+          resolution: [1024]
+          cache_latents_to_disk: true
+          cache_text_embeddings: true
+          caption_dropout_rate: 0
+          shuffle_tokens: false
+          token_dropout_rate: 0
+          random_triggers: []
+          random_crop: false
+          random_scale: false
+          flip_x: false
+          flip_y: false
+          augments: []
+          augmentations: []
+      train:
+        batch_size: 1
+        steps: 1000
+        gradient_accumulation: 1
+        train_unet: true
+        train_text_encoder: false
+        cache_text_embeddings: true
+        unload_text_encoder: true
+        gradient_checkpointing: true
+        noise_scheduler: flowmatch
+        timestep_type: shift
+        optimizer: adamw8bit
+        lr: 0.00010
+        dtype: bf16
+      model:
+        arch: moss_image:kromoss
+        name_or_path: lodestones/Kromoss
+        dtype: bf16
+        vae_path: lodestones/Kromoss/vae/flux2-vae_small.safetensors
+        vae_dtype: fp32
+        quantize: true
+        qtype: convrot8
+        quantize_te: true
+        qtype_te: convrot8
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_backend: legacy
+        layer_offloading_transformer_percent: 1.0
+        layer_offloading_text_encoder_percent: 1.0
+        model_kwargs:
+          sample_shift: 5
+          uncond_skip_layers: [22]
+      sample:
+        sampler: flowmatch
+        format: png
+        sample_every: 250
+        keep_low_vram_for_samples: true
+        width: 1024
+        height: 1024
+        sample_steps: 50
+        guidance_scale: 3
+        neg: ''
+        seed: 42
+        prompts:
+          - 'A red ceramic vase on a wooden table, soft window light.'
+meta:
+  name: '[name]'
+  version: '1.0'

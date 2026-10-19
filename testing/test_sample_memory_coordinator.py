@@ -72,6 +72,37 @@ class SampleMemoryCoordinatorTest(unittest.TestCase):
         self.assertFalse(owner.model.training)
         self.assertEqual(owner.vae.device, torch.device("meta"))
 
+    def test_legacy_phase_parks_old_component_before_activating_new_one(self):
+        owner = self.make_owner()
+        events = []
+        for module in (owner.model, owner.text_encoder[0]):
+            module._memory_manager = SimpleNamespace(
+                resident_device=torch.device("cpu"),
+                activate_for_forward=lambda device, m=module: events.append((m.name, "activate", device)),
+                deactivate_to_cpu=lambda m=module: events.append((m.name, "park")),
+            )
+        coordinator = SampleMemoryCoordinator(owner)
+        coordinator.activate(("unet",), phase_name="generate")
+        self.assertEqual(events, [("text", "park"), ("model", "activate", torch.device("cuda"))])
+        self.assertFalse(owner.model.moves)
+        self.assertFalse(owner.text_encoder[0].moves)
+
+    def test_restore_parks_current_phase_before_restoring_saved_cuda_component(self):
+        owner = self.make_owner()
+        owner.text_encoder[0].device = torch.device("cuda")
+        coordinator = SampleMemoryCoordinator(owner)
+        coordinator.capture()
+        coordinator.activate(("unet",), phase_name="generate")
+        events = []
+        for module in (owner.model, owner.text_encoder[0]):
+            original_to = module.to
+            def record(device, m=module, move=original_to):
+                events.append((m.name, torch.device(device)))
+                return move(device)
+            module.to = record
+        coordinator.restore()
+        self.assertEqual(events, [("model", torch.device("cpu")), ("text", torch.device("cuda"))])
+
     def test_null_components_and_requires_grad_are_safe(self):
         linear = torch.nn.Linear(1, 1)
         linear.bias.requires_grad_(False)

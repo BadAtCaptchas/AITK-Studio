@@ -54,14 +54,66 @@ class MemoryManager:
     ):
         self.module: torch.nn.Module = module
         self.process_device: torch.device = process_device
+        self.resident_device: torch.device = torch.device(process_device)
         self.unmanaged_modules: list[torch.nn.Module] = []
+
+    def _move_resident_tensors(self, device: torch.device):
+        # Bouncing layers keep their pinned CPU weights. Everything else,
+        # including quantized buffers and bare root tensors, belongs to the
+        # phase's resident set. Preserve tied parameters when wrappers must
+        # be replaced instead of moving through .data.
+        registered = {id(tensor) for tensor in self.module.parameters()} | {
+            id(tensor) for tensor in self.module.buffers()
+        }
+        moved_params = {}
+        for sub in self.module.modules():
+            if hasattr(sub, "_layer_memory_manager"):
+                continue
+            for name, param in list(sub.named_parameters(recurse=False, remove_duplicate=False)):
+                if id(param) in moved_params:
+                    setattr(sub, name, moved_params[id(param)])
+                elif _storage_device(param) != device:
+                    moved_params[id(param)] = _move_own_param(sub, name, param, device)
+                    if param.grad is not None:
+                        moved_params[id(param)].grad = param.grad.to(device)
+            for name, buffer in sub._buffers.items():
+                if buffer is not None and buffer.device != device:
+                    sub._buffers[name] = buffer.to(device)
+        # ignore_modules also accepts unregistered tensor attributes. They
+        # are not reachable through the module tree, but still need the
+        # historical explicit placement behavior. Do not recurse through
+        # ignored modules here: they may contain managed CPU children.
+        for tensor in self.unmanaged_modules:
+            if isinstance(tensor, torch.Tensor) and id(tensor) not in registered:
+                tensor.data = tensor.data.to(device)
+        self.resident_device = device
+        staged = getattr(self.module, "aitk_on_device_staged", None)
+        if callable(staged):
+            staged(device)
+        return self.module
+
+    def activate_for_forward(self, device: torch.device):
+        """Restore the resident set after explicit sample-phase parking."""
+        self.process_device = torch.device(device)
+        for sub in self.module.modules():
+            if hasattr(sub, "_memory_management_device"):
+                sub._memory_management_device = self.process_device
+        return self._move_resident_tensors(self.process_device)
+
+    def deactivate_to_cpu(self):
+        """Park resident tensors without changing the forward compute device.
+
+        Ordinary .to('cpu') remains a legacy parking hint; only a coordinator
+        that also guarantees explicit reactivation may actually park them.
+        """
+        return self._move_resident_tensors(torch.device("cpu"))
 
     def memory_managed_to(self, *args, **kwargs):
         # the manager owns placement: the resident (unmanaged/ignore) set must
         # live on the compute device for forwards to work. Legacy parking
-        # gestures (.to("cpu") between phases) would strand it there — the
-        # swapped .device property keeps reporting the compute device, so no
-        # holder heal ever brings it back. Honor device moves only TO the
+        # gestures (.to("cpu") between phases) must not silently deactivate
+        # it; explicit phase parking provides a matching reactivation path.
+        # Honor ordinary device moves only TO the
         # compute device; skip the device part of anything else (dtype
         # handling below is unaffected).
         target_device = kwargs.get("device", None)
@@ -76,7 +128,9 @@ class MemoryManager:
         move_resident = target_device is not None and (
             torch.device(target_device) == torch.device(self.process_device)
         )
-        if target_device is None or move_resident:
+        if move_resident:
+            self.activate_for_forward(torch.device(target_device))
+        elif target_device is None:
             # first move all the unmanaged modules
             for module in self.unmanaged_modules:
                 if isinstance(module, torch.Tensor):
@@ -118,7 +172,8 @@ class MemoryManager:
         # a fully offloaded module's parameters all live on cpu, which makes
         # ModelMixin.device (and pipelines deriving their execution device
         # from it) report "cpu" and plant latents/timesteps there. Report the
-        # compute device instead via an in-place subclass (same class-swap
+        # compute device while active, or CPU after explicit phase parking,
+        # via an in-place subclass (same class-swap
         # pattern as OstrisLinear/adopt_component); detach() restores it.
         try:
             module._mm_orig_class = module.__class__
@@ -127,7 +182,7 @@ class MemoryManager:
                 (module.__class__,),
                 {
                     "device": property(
-                        lambda self: self._memory_manager.process_device,
+                        lambda self: self._memory_manager.resident_device,
                         lambda self, value: self.__dict__.__setitem__(
                             "_mm_device_shadow", value
                         ),
@@ -248,18 +303,7 @@ class MemoryManager:
         # on cpu and the first forward explodes on a device mismatch. Managed
         # layers (pinned-cpu weights, cpu-resident bouncing embeddings) are
         # skipped via their _layer_memory_manager.
-        moved_params = {}
-        for sub in module.modules():
-            if hasattr(sub, "_layer_memory_manager"):
-                continue
-            for name, p in list(sub.named_parameters(recurse=False, remove_duplicate=False)):
-                if id(p) in moved_params:
-                    setattr(sub, name, moved_params[id(p)])
-                elif _storage_device(p) != device:
-                    moved_params[id(p)] = _move_own_param(sub, name, p, device)
-            for name, b in sub._buffers.items():
-                if b is not None and b.device != device:
-                    sub._buffers[name] = b.to(device)
+        module._memory_manager._move_resident_tensors(torch.device(device))
 
     @classmethod
     def detach(cls, module: torch.nn.Module):

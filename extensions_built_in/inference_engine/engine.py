@@ -360,6 +360,17 @@ class Engine:
             model.setdefault(k, v)
         lora_specs = [l for l in (model.get("loras") or []) if l.get("path")]
         lora_mode = model.get("lora_mode") or "hook"
+        if model["arch"].split(":", 1)[0] == "moss_image":
+            # The queued generator gives its user adapter to the holder as
+            # lora_path. In the live engine all user adapters belong to the
+            # dynamic stack; otherwise a request carrying both forms applies
+            # that adapter twice. Explicit stack strengths take precedence.
+            legacy_path = model.pop("lora_path", None)
+            if legacy_path:
+                def source_key(path):
+                    return os.path.normcase(os.path.realpath(path)) if os.path.isfile(path) else path
+                if not any(source_key(l["path"]) == source_key(legacy_path) for l in lora_specs):
+                    lora_specs.insert(0, {"path": legacy_path, "strength": 1.0})
         model = _without(model, LORA_KEYS)
         key = _model_key(model)
         if self.holder is not None and key == self.holder_key:

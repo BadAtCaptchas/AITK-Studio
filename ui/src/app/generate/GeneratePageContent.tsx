@@ -5,6 +5,7 @@ import { isQwenImage2, transparentQwenPrompt } from '@/domain/qwenImage';
 import {
   getDefaultModelConfig,
   getDefaultSampler,
+  getLoraModelConfig,
   archSupportsSection,
   type GeneratorModelConfig,
 } from '@/domain/generationConfig';
@@ -368,18 +369,23 @@ export function GeneratePageContent() {
       statusResetTimeoutRef.current = null;
     }, 1500);
   };
+  const applyArchSampleDefaults = (archName: string) => {
+    setSampler(getDefaultSampler(archName, archs));
+    const presetGuidance: unknown = archs.find(item => item.name === archName)?.defaults?.[
+      'config.process[0].sample.guidance_scale'
+    ]?.[0];
+    if (typeof presetGuidance === 'number') setGuidanceScale(presetGuidance);
+    const presetSteps: unknown = archs.find(item => item.name === archName)?.defaults?.[
+      'config.process[0].sample.sample_steps'
+    ]?.[0];
+    if (typeof presetSteps === 'number') setSampleSteps(presetSteps);
+  };
   const applyLoraModelDefaults = (lora: GeneratedLora) => {
     if (!lora.model) return;
-    setModelConfig(current => ({
-      ...current,
-      ...lora.model,
-      name_or_path: String(lora.model?.name_or_path || current.name_or_path),
-      arch: String(lora.model?.arch || current.arch),
-      dtype: String((lora.model as GeneratorModelConfig).dtype || current.dtype || 'bf16'),
-      model_kwargs: (lora.model?.model_kwargs as Record<string, unknown>) || current.model_kwargs || {},
-    }));
-    if (lora.model.arch) {
-      setSampler(getDefaultSampler(String(lora.model.arch), archs));
+    const savedModel = lora.model;
+    setModelConfig(current => getLoraModelConfig(current, savedModel, archs));
+    if (lora.model.arch && lora.model.arch !== modelConfig.arch) {
+      applyArchSampleDefaults(lora.model.arch);
     }
   };
   const requestedModelRef = searchParams.get('model_ref')?.trim() || '';
@@ -473,15 +479,7 @@ export function GeneratePageContent() {
   };
   const handleArchChange = (archName: string) => {
     setModelConfig(getDefaultModelConfig(archName, archs));
-    setSampler(getDefaultSampler(archName, archs));
-    const presetGuidance: unknown = archs.find(item => item.name === archName)?.defaults?.[
-      'config.process[0].sample.guidance_scale'
-    ]?.[0];
-    if (typeof presetGuidance === 'number') setGuidanceScale(presetGuidance);
-    const presetSteps: unknown = archs.find(item => item.name === archName)?.defaults?.[
-      'config.process[0].sample.sample_steps'
-    ]?.[0];
-    if (typeof presetSteps === 'number') setSampleSteps(presetSteps);
+    applyArchSampleDefaults(archName);
   };
   const handleLayerOffloadingChange = (checked: boolean) => {
     setModelConfig(current => ({

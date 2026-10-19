@@ -156,10 +156,15 @@ class InferenceLoRA:
         self.num_skipped_keys = 0  # keys with no recognized lora/diff/lokr suffix
         self.convert_error: Optional[str] = None
         self._hooks: List = []
+        self.prepend_hooks = False
 
     # ---- loading / key resolution ----
     def load(self, holder, status_fn=None) -> "InferenceLoRA":
         from toolkit.models.v2.resolver import resolve_lora_file
+
+        # Persistent base adapters may run as forward hooks. Trainable LoRA
+        # forwards run before those hooks; preserve that order after export.
+        self.prepend_hooks = bool(getattr(holder, "inference_lora_prepend_hooks", False))
 
         # a spec path may be a hub reference (org/repo/file.safetensors); it is
         # searched for under the models folder before anything is downloaded.
@@ -333,7 +338,7 @@ class InferenceLoRA:
 
                 return hook
 
-            self._hooks.append(e.module.register_forward_hook(make(e)))
+            self._hooks.append(e.module.register_forward_hook(make(e), prepend=self.prepend_hooks))
         return self
 
     def detach(self):

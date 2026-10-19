@@ -211,6 +211,15 @@ class MossImageTransformer(nn.Module, OstrisModelMixin):
 
     @classmethod
     def convert_state_dict_on_load(cls, state_dict):
+        # Kromoss's native convrot repack includes the Comfy checkpoint
+        # namespace. Strip only a uniform known prefix; mixed layouts are an
+        # invalid checkpoint, not permission to discard unrelated weights.
+        for prefix in ("model.diffusion_model.", "diffusion_model."):
+            if any(key.startswith(prefix) for key in state_dict):
+                if not all(key.startswith(prefix) for key in state_dict):
+                    raise ValueError("MOSS checkpoint mixes prefixed and unprefixed weights")
+                state_dict = {key[len(prefix):]: value for key, value in state_dict.items()}
+                break
         # derived constants; recomputed in fp32 every forward
         state_dict = {k: v for k, v in state_dict.items() if k != "rope.bands"}
         fuse_split_qkv(state_dict)
@@ -277,6 +286,31 @@ class MossImageTransformer(nn.Module, OstrisModelMixin):
 
     def disable_gradient_checkpointing(self):
         self.gradient_checkpointing = False
+
+    def _apply(self, fn, recurse=True):
+        result = super()._apply(fn, recurse=recurse)
+        self.aitk_on_device_staged(self.final_norm_video.weight.device)
+        return result
+
+    def aitk_on_device_staged(self, device):
+        # Explicit memory-manager phase moves bypass Module._apply while
+        # leaving hooks installed. Stage their non-registered tensors too.
+        controller = getattr(self, "_moss_distillation_adapter", None)
+        if controller is not None:
+            if device.type == "meta":
+                controller.close()
+            else:
+                controller.to(device)
+        user_lora = getattr(self, "_moss_user_lora", None)
+        if user_lora is not None:
+            # Drop hook-local device caches when the transformer is staged or
+            # evicted. The source adapter tensors remain on CPU.
+            user_lora.detach()
+            if device.type == "meta":
+                delattr(self, "_moss_user_lora")
+                delattr(self, "_moss_user_lora_identity")
+            else:
+                user_lora.attach()
 
     def _ckpt(self, module, *args):
         if self.gradient_checkpointing and torch.is_grad_enabled():

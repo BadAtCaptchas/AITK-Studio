@@ -1059,7 +1059,12 @@ class ModelConfig:
         self.unet_path = kwargs.get("unet_path", None)
         self.unet_sample_size = kwargs.get("unet_sample_size", None)
         self.vae_device = kwargs.get("vae_device", None)
-        self.vae_dtype = kwargs.get("vae_dtype", self.dtype)
+        model_ref = str(kwargs.get("name_or_path", ""))
+        is_kromoss = (
+            model_ref == "lodestones/Kromoss" or model_ref.startswith("lodestones/Kromoss/")
+            or str(kwargs.get("arch", "")).startswith("moss_image:kromoss")
+        )
+        self.vae_dtype = kwargs.get("vae_dtype", "fp32" if is_kromoss else self.dtype)
         self.te_device = kwargs.get("te_device", None)
         self.te_dtype = kwargs.get("te_dtype", self.dtype)
 
@@ -1162,6 +1167,14 @@ class ModelConfig:
         if self.arch == 'qwen_image_2:turbo':
             self.model_kwargs = dict(self.model_kwargs)
             self.model_kwargs.setdefault('turbo', True)
+        if self.arch == 'moss_image:kromoss_turbo':
+            self.model_kwargs = dict(self.model_kwargs)
+            self.model_kwargs.setdefault('distillation_lora_path', 'lodestones/Kromoss/8-steps-dmd-lora.safetensors')
+            self.model_kwargs.setdefault('sample_shift', 5.0)
+            self.model_kwargs.setdefault('uncond_skip_layers', [])
+            distillation_path = self.model_kwargs['distillation_lora_path']
+            if not isinstance(distillation_path, str) or not distillation_path.strip():
+                raise ValueError('Kromoss Turbo requires a nonempty distillation_lora_path')
         if self.arch is not None:
             if ':' in self.arch:
                 self.arch = self.arch.split(':')[0]
@@ -1997,6 +2010,29 @@ def validate_configs(
     network_config: Optional[NetworkConfig] = None,
 ):
     from toolkit.memory_management.offload import is_block_offload_arch_supported
+
+    model_ref = str(model_config.name_or_path_original or model_config.name_or_path)
+    is_kromoss = model_config.arch == "moss_image" and (
+        model_ref == "lodestones/Kromoss" or model_ref.startswith("lodestones/Kromoss/")
+        or str(model_config.arch_original or "").startswith("moss_image:kromoss")
+        or bool(model_config.model_kwargs.get("distillation_lora_path"))
+    )
+    if is_kromoss:
+        if network_config is None or network_config.type.lower() not in {"lora", "lokr"}:
+            raise ValueError("Kromoss training requires a separate LoRA or LoKr network; full fine-tuning is unsupported")
+        if network_config.all_layers or network_config.network_kwargs.get("full_if_contains") or network_config.network_kwargs.get("full_train_in_out"):
+            raise ValueError("Kromoss does not support full-weight adapter modules")
+        if train_config.train_text_encoder:
+            raise ValueError("Kromoss requires frozen text conditioning; disable text encoder training")
+        if model_config.model_kwargs.get("edit", False):
+            raise ValueError("Kromoss supports text-to-image training only")
+    if model_config.arch == "moss_image" and model_config.model_kwargs.get("distillation_lora_path"):
+        if train_config.merge_network_on_save:
+            raise ValueError("Kromoss Turbo requires separate adapter saves; disable merge_network_on_save")
+        conflicts = [name for name in ("lora_path", "base_lora_path", "assistant_lora_path", "inference_lora_path")
+                     if getattr(model_config, name, None)]
+        if conflicts:
+            raise ValueError("Persistent Kromoss distillation cannot be combined with " + ", ".join(conflicts))
 
     if model_config.arch in {'ming_image_design', 'ming_image_design_layer'}:
         if model_config.arch == 'ming_image_design_layer' and train_config.validation_config is not None:

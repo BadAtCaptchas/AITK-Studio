@@ -30,6 +30,7 @@ type LoraModelSummary = {
   model_kwargs?: Record<string, unknown>;
   extras_name_or_path?: string;
   vae_path?: string;
+  vae_dtype?: string;
   refiner_name_or_path?: string;
   te_name_or_path?: string;
   quantize_kwargs?: Record<string, unknown>;
@@ -81,6 +82,7 @@ function getModelSummary(jobConfig: any): LoraModelSummary {
     model_kwargs: model.model_kwargs,
     extras_name_or_path: model.extras_name_or_path,
     vae_path: model.vae_path,
+    vae_dtype: model.vae_dtype,
     refiner_name_or_path: model.refiner_name_or_path,
     te_name_or_path: model.te_name_or_path,
     quantize_kwargs: model.quantize_kwargs,

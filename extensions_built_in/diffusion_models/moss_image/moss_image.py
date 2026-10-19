@@ -23,6 +23,7 @@ Flow convention matches ai-toolkit (sigma 1 = noise, target = noise - clean).
 
 import math
 import os
+import json
 from typing import TYPE_CHECKING, List, Optional
 
 import torch
@@ -53,13 +54,17 @@ from toolkit.samplers.custom_flowmatch_sampler import (
 from .src.checkpoints import (
     COMFY_REPO,
     QWEN35_9B_REPO,
+    KROMOSS_REPO,
+    KROMOSS_VAE_FILE,
     SFT_REPO,
     VENDOR_VAE_FILE,
     comfy_text_encoder_file,
     comfy_transformer_file,
     comfy_vae_file,
     resolve_hub_file,
+    resolve_distillation_file,
 )
+from .src.distillation import FrozenMossDistillationAdapter, get_distillation_adapter
 from .src.pipeline import (
     DEFAULT_SHIFT,
     DEFAULT_UNCOND_SKIP_LAYERS,
@@ -165,6 +170,20 @@ class MossImageModel(BaseModel):
         self.latent_space_version = "moss_image"
 
         kw = self.model_config.model_kwargs
+        self.distillation_lora_path = kw.get("distillation_lora_path")
+        self.inference_lora_prepend_hooks = self.distillation_lora_path is not None
+        self._distillation_identity = None
+        self._user_lora_identity = None
+        self._user_lora = None
+        if self.distillation_lora_path is not None:
+            if not isinstance(self.distillation_lora_path, str) or not self.distillation_lora_path.strip():
+                raise ValueError("model_kwargs.distillation_lora_path must be a nonempty path")
+            conflicts = [name for name in ("base_lora_path", "assistant_lora_path", "inference_lora_path")
+                         if getattr(model_config, name, None)]
+            if conflicts:
+                raise ValueError("Persistent Kromoss distillation cannot be combined with " + ", ".join(conflicts))
+            if kw.get("edit", False):
+                raise ValueError("Kromoss distillation supports text-to-image training only")
         self.max_text_length = int(kw.get("max_text_length", MAX_TEXT_TOKENS))
         self.sample_shift = float(kw.get("sample_shift", DEFAULT_SHIFT))
         self.uncond_skip_layers = tuple(
@@ -226,7 +245,9 @@ class MossImageModel(BaseModel):
             )
         self.print_and_status_update(f" - transformer weights: {path}")
         return MossImageTransformer.load_model(
-            path, dtype=self.torch_dtype, qtype=qtype, quantize_on_load=False
+            path, dtype=self.torch_dtype, qtype=qtype, quantize_on_load=False,
+            pool_namespace=json.dumps([self._distillation_identity, self._user_lora_identity])
+            if self._distillation_identity or self._user_lora_identity else None,
         )
 
     def _load_text_encoder(self):
@@ -296,6 +317,11 @@ class MossImageModel(BaseModel):
             local = os.path.join(base, VENDOR_VAE_FILE)
             if os.path.exists(local):
                 path = local
+            elif os.path.exists(os.path.join(base, KROMOSS_VAE_FILE)):
+                path = os.path.join(base, KROMOSS_VAE_FILE)
+        is_kromoss = base == KROMOSS_REPO or base.startswith(KROMOSS_REPO + "/") or "kromoss" in str(self.model_config.arch_original or "")
+        if path is None and is_kromoss and self.model_config.model_kwargs.get("use_comfy_weights", True):
+            path = f"{KROMOSS_REPO}/{KROMOSS_VAE_FILE}"
         if path is None and not self.model_config.model_kwargs.get("use_comfy_weights", True):
             repo = base if _is_hub_repo(base) and base != COMFY_REPO else SFT_REPO
             path = download_checkpoint(repo, VENDOR_VAE_FILE, os.path.join(MODELS_PATH, "vae", repository_filename(repo, "moss_vae.safetensors")), token=HF_TOKEN)
@@ -314,21 +340,57 @@ class MossImageModel(BaseModel):
         vae = AutoEncoder.load_from_state_dict(state_dict, self.vae_torch_dtype)
         return vae.eval().requires_grad_(False)
 
+    def _park_loaded_component(self, module):
+        if not self.model_config.low_vram:
+            return
+        manager = getattr(module, "_block_offload_manager", None) or getattr(module, "_memory_manager", None)
+        if manager is not None:
+            manager.deactivate_to_cpu()
+        else:
+            module.to("cpu")
+
     def load_model(self):
         self.print_and_status_update("Loading MOSS-Image model")
 
+        distillation_weights = None
+        if self.distillation_lora_path is not None:
+            adapter_path = resolve_distillation_file(self.distillation_lora_path, hf_token=HF_TOKEN)
+            stat = os.stat(adapter_path)
+            self._distillation_identity = json.dumps(
+                [os.path.normcase(os.path.realpath(adapter_path)), stat.st_size, stat.st_mtime_ns]
+            )
+            # Resolve before consulting the component pool: Turbo and plain
+            # holders must never share a transformer carrying persistent hooks.
+            distillation_weights = load_file(adapter_path, device="cpu")
+        user_lora_path = self.model_config.lora_path
+        if user_lora_path:
+            from toolkit.models.v2.resolver import resolve_lora_file
+
+            user_lora_path = resolve_lora_file(user_lora_path, status_fn=self.print_and_status_update)
+            stat = os.stat(user_lora_path)
+            self._user_lora_identity = json.dumps(
+                [os.path.normcase(os.path.realpath(user_lora_path)), stat.st_size, stat.st_mtime_ns]
+            )
         transformer = self._load_transformer()
         # quantize + offload + placement, all driven by model_config
         transformer.aitk_post_load(**self.component_load_kwargs("transformer"))
+        if distillation_weights is not None:
+            FrozenMossDistillationAdapter.attach(
+                transformer, distillation_weights, identity=self._distillation_identity
+            )
+            del distillation_weights
+        self._park_loaded_component(transformer)
         flush()
 
         text_encoder = self._load_text_encoder()
         text_encoder.aitk_post_load(**self.component_load_kwargs("te"))
+        self._park_loaded_component(text_encoder)
         flush()
         tokenizer = self._load_tokenizer()
 
         vae = self._load_vae()
         vae.to(self.vae_device_torch)
+        self._park_loaded_component(vae)
 
         self.noise_scheduler = MossImageModel.get_train_scheduler()
 
@@ -337,6 +399,22 @@ class MossImageModel(BaseModel):
         self.tokenizer = tokenizer
         self.model = transformer
         self.pipeline = MossImagePipeline(self)
+        if user_lora_path:
+            from toolkit.inference_lora import InferenceLoRA
+
+            existing = getattr(transformer, "_moss_user_lora", None)
+            if existing is not None:
+                if getattr(transformer, "_moss_user_lora_identity", None) != self._user_lora_identity:
+                    raise ValueError("Transformer already carries a different user adapter")
+                self._user_lora = existing
+            else:
+                user_lora = InferenceLoRA(user_lora_path).load(self, status_fn=self.print_and_status_update)
+                if not user_lora.entries or user_lora.unmatched or user_lora.convert_error:
+                    raise ValueError(f"User adapter is incompatible with MOSS-Image: {user_lora.report()}")
+                user_lora.attach()
+                transformer._moss_user_lora = user_lora
+                transformer._moss_user_lora_identity = self._user_lora_identity
+                self._user_lora = user_lora
         self.print_and_status_update("Model Loaded")
 
     # ------------------------------------------------------------------
@@ -354,6 +432,8 @@ class MossImageModel(BaseModel):
         generator: torch.Generator,
         extra: dict,
     ):
+        if self._user_lora is not None:
+            self._user_lora.strength = gen_config.network_multiplier
         if self.model.device == torch.device("cpu"):
             self.model.to(self.device_torch)
 
@@ -622,6 +702,8 @@ class MossImageModel(BaseModel):
     # Saving / bookkeeping
     # ------------------------------------------------------------------
     def save_model(self, output_path, meta, save_dtype):
+        if self.distillation_lora_path is not None:
+            raise ValueError("Kromoss Turbo exports the trained adapter separately; full-model/merged saves are unsupported")
         if not output_path.endswith(".safetensors"):
             output_path = output_path + ".safetensors"
         transformer: MossImageTransformer = unwrap_model(self.model)
@@ -649,6 +731,11 @@ class MossImageModel(BaseModel):
             elif suffix in self._QKV_SPLIT_ROWS:
                 for name, part in zip(("q", "k", "v"), value.chunk(3, dim=0)):
                     out[f"{base}.proj.{name}.{suffix}"] = part.contiguous()
+            elif suffix == "alpha" and not any(
+                f"{base}.proj.qkv.{name}" in state_dict
+                for name in ("lora_A.weight", "lora_down.weight")
+            ):
+                out[key] = value  # LoKr alpha belongs to its fused projection.
             elif suffix in self._QKV_SHARED:
                 for name in ("q", "k", "v"):
                     out[f"{base}.proj.{name}.{suffix}"] = value.clone()
@@ -695,3 +782,9 @@ class MossImageModel(BaseModel):
 
     def get_quantization_exclude_modules(self):
         return MossImageTransformer.get_quantization_exclude_modules()
+
+    def set_device_state(self, state):
+        super().set_device_state(state)
+        controller = get_distillation_adapter(unwrap_model(self.model))
+        if controller is not None:
+            controller.to(state["unet"]["device"])

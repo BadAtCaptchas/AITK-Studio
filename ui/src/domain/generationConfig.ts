@@ -31,6 +31,8 @@ export function archSupportsSection(archName: string, section: 'model.layer_offl
 export function getDefaultModelConfig(archName: string, availableArchs: ModelArch[] = modelArchs): GeneratorModelConfig {
   const memoryProfile = getLayerOffloadingMemoryProfile(archName);
   const archDefault = (key: string, fallback: unknown) => getArchDefault(archName, key, fallback, availableArchs);
+  const vaePath = archDefault('config.process[0].model.vae_path', undefined);
+  const vaeDtype = archDefault('config.process[0].model.vae_dtype', undefined);
   return {
     name_or_path: String(archDefault('config.process[0].model.name_or_path', '')),
     arch: archName,
@@ -39,6 +41,8 @@ export function getDefaultModelConfig(archName: string, availableArchs: ModelArc
     qtype: String(archDefault('config.process[0].model.qtype', 'qfloat8')),
     qtype_te: String(archDefault('config.process[0].model.qtype_te', 'qfloat8')),
     low_vram: Boolean(archDefault('config.process[0].model.low_vram', false)),
+    vae_path: typeof vaePath === 'string' ? vaePath : undefined,
+    vae_dtype: typeof vaeDtype === 'string' ? vaeDtype : undefined,
     model_kwargs:
       (archDefault('config.process[0].model.model_kwargs', {}) as Record<string, unknown>) || {},
     dtype: String(archDefault('config.process[0].train.dtype', 'bf16')),
@@ -62,4 +66,23 @@ export function getDefaultModelConfig(archName: string, availableArchs: ModelArc
 }
 export function getDefaultSampler(archName: string, availableArchs: ModelArch[] = modelArchs) {
   return String(getArchDefault(archName, 'config.process[0].sample.sampler', 'flowmatch', availableArchs));
+}
+
+export function getLoraModelConfig(
+  current: GeneratorModelConfig,
+  savedModel: Partial<GeneratorModelConfig>,
+  availableArchs: ModelArch[] = modelArchs,
+): GeneratorModelConfig {
+  const arch = savedModel.arch || current.arch;
+  // Same-architecture selections retain omitted settings. Architecture changes
+  // start from the target preset; explicit saved settings take precedence.
+  const defaults = arch === current.arch ? current : getDefaultModelConfig(arch, availableArchs);
+  return {
+    ...defaults,
+    ...savedModel,
+    name_or_path: String(savedModel.name_or_path || defaults.name_or_path),
+    arch,
+    dtype: String(savedModel.dtype || defaults.dtype || 'bf16'),
+    model_kwargs: savedModel.model_kwargs || defaults.model_kwargs || {},
+  };
 }

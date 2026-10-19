@@ -22,6 +22,11 @@ def _as_device(value) -> torch.device:
 def _module_device(module) -> torch.device:
     if module is None:
         return torch.device("cpu")
+    legacy_manager = getattr(module, "_memory_manager", None)
+    if legacy_manager is not None:
+        resident_device = getattr(legacy_manager, "resident_device", None)
+        if resident_device is not None:
+            return _as_device(resident_device)
     device = getattr(module, "device", None)
     if device is not None:
         return _as_device(device)
@@ -98,7 +103,11 @@ class SampleMemoryCoordinator:
             )
 
     def restore(self) -> None:
-        for state in reversed(list(self._states.values())):
+        states = list(reversed(list(self._states.values())))
+        # A standalone context may restore directly from an active phase.
+        # Park its inactive components before restoring any CUDA residents.
+        states.sort(key=lambda state: state.device.type == "cuda")
+        for state in states:
             self._move_module(state.module, state.device)
             if state.training is not None:
                 try:
@@ -158,9 +167,15 @@ class SampleMemoryCoordinator:
         elif active != self._active_components:
             self._status(f"Low-VRAM sample: {phase_name}")
 
-        for module in self.iter_known_modules():
-            target = self.device if id(module) in active_ids else self.offload_device
-            self._move_module(module, target)
+        modules = list(self.iter_known_modules())
+        # Free the old phase first. Loading the DiT before parking the text
+        # encoder can exceed VRAM even when each phase fits on its own.
+        for module in modules:
+            if id(module) not in active_ids:
+                self._move_module(module, self.offload_device)
+        for module in modules:
+            if id(module) in active_ids:
+                self._move_module(module, self.device)
         self._active_components = active
         flush()
 
@@ -227,14 +242,15 @@ class SampleMemoryCoordinator:
         if module is None:
             return
         block_manager = getattr(module, "_block_offload_manager", None)
-        if block_manager is not None:
+        manager = block_manager or getattr(module, "_memory_manager", None)
+        if manager is not None:
             if device.type == "cuda":
-                activate = getattr(block_manager, "activate_for_forward", None)
+                activate = getattr(manager, "activate_for_forward", None)
                 if activate is not None:
                     activate(device)
                     return
             elif device.type == "cpu":
-                deactivate = getattr(block_manager, "deactivate_to_cpu", None)
+                deactivate = getattr(manager, "deactivate_to_cpu", None)
                 if deactivate is not None:
                     deactivate()
                     return

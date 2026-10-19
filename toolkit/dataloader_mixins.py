@@ -647,10 +647,10 @@ class ImageProcessingDTOMixin:
                 for img in selected_frames:
                     img = img.convert('RGB')
                     if self.flip_x:
-                        img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                        img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                     if self.flip_y:
-                        img = img.transpose(Image.FLIP_TOP_BOTTOM)
-                    img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+                        img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                    img = img.resize((self.scale_to_width, self.scale_to_height), Image.Resampling.BICUBIC)
                     img = img.crop((
                         self.crop_x,
                         self.crop_y,
@@ -825,10 +825,10 @@ class ImageProcessingDTOMixin:
             def process_rgb_frame(rgb_frame):
                 img = Image.fromarray(rgb_frame).convert('RGB')
                 if self.flip_x:
-                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                    img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                 if self.flip_y:
-                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
-                img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+                    img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                img = img.resize((self.scale_to_width, self.scale_to_height), Image.Resampling.BICUBIC)
                 img = img.crop((
                     self.crop_x,
                     self.crop_y,
@@ -1177,14 +1177,14 @@ class ImageProcessingDTOMixin:
 
         if self.flip_x:
             # do a flip
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if self.flip_y:
             # do a flip
-            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
         if self.dataset_config.buckets:
             # scale and crop based on file item
-            img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+            img = img.resize((self.scale_to_width, self.scale_to_height), Image.Resampling.BICUBIC)
             # crop to x_crop, y_crop, x_crop + crop_width, y_crop + crop_height
             if img.width < self.crop_x + self.crop_width or img.height < self.crop_y + self.crop_height:
                 # todo look into this. This still happens sometimes
@@ -1202,7 +1202,7 @@ class ImageProcessingDTOMixin:
             # TODO this is nto right
             img = img.resize(
                 (int(img.size[0] * self.dataset_config.scale), int(img.size[1] * self.dataset_config.scale)),
-                Image.BICUBIC)
+                Image.Resampling.BICUBIC)
             min_img_size = min(img.size)
             if self.dataset_config.random_crop:
                 if self.dataset_config.random_scale and min_img_size > self.dataset_config.resolution:
@@ -1215,11 +1215,11 @@ class ImageProcessingDTOMixin:
                     scaler = scale_size / min_img_size
                     scale_width = int((img.width + 5) * scaler)
                     scale_height = int((img.height + 5) * scaler)
-                    img = img.resize((scale_width, scale_height), Image.BICUBIC)
+                    img = img.resize((scale_width, scale_height), Image.Resampling.BICUBIC)
                 img = transforms.RandomCrop(self.dataset_config.resolution)(img)
             else:
                 img = transforms.CenterCrop(min_img_size)(img)
-                img = img.resize((self.dataset_config.resolution, self.dataset_config.resolution), Image.BICUBIC)
+                img = img.resize((self.dataset_config.resolution, self.dataset_config.resolution), Image.Resampling.BICUBIC)
 
         if self.augments is not None and len(self.augments) > 0:
             # do augmentations
@@ -1292,14 +1292,14 @@ class InpaintControlFileItemDTOMixin:
 
             if self.flip_x:
                 # do a flip
-                img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             if self.flip_y:
                 # do a flip
-                img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
             if self.dataset_config.buckets:
                 # scale and crop based on file item
-                img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+                img = img.resize((self.scale_to_width, self.scale_to_height), Image.Resampling.BICUBIC)
                 # img = transforms.CenterCrop((self.crop_height, self.crop_width))(img)
                 # crop
                 img = img.crop((
@@ -1441,20 +1441,20 @@ class ControlFileItemDTOMixin:
             if not self.full_size_control_images:
                 # we just scale them to 512x512:
                 w, h = img.size
-                img = img.resize((512, 512), Image.BICUBIC)
+                img = img.resize((512, 512), Image.Resampling.BICUBIC)
 
             elif not self.use_raw_control_images:
                 w, h = img.size
                 if self.flip_x:
                     # do a flip
-                    img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                    img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                 if self.flip_y:
                     # do a flip
-                    img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                    img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
                 if self.dataset_config.buckets:
                     # scale and crop based on file item
-                    img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+                    img = img.resize((self.scale_to_width, self.scale_to_height), Image.Resampling.BICUBIC)
                     # img = transforms.CenterCrop((self.crop_height, self.crop_width))(img)
                     # crop
                     img = img.crop((
@@ -1659,10 +1659,10 @@ class ClipImageFileItemDTOMixin:
 
         if self.flip_x:
             # do a flip
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if self.flip_y:
             # do a flip
-            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
             
         if is_dynamic_size_and_aspect:
             pass  # let the image processor handle it
@@ -1674,7 +1674,7 @@ class ClipImageFileItemDTOMixin:
             else:
                 # image must be square. If it is not, we will resize/squish it so it is, that way we don't crop out data
                 # resize to the smallest dimension
-                img = img.resize((min_size, min_size), Image.BICUBIC)
+                img = img.resize((min_size, min_size), Image.Resampling.BICUBIC)
 
         if self.has_clip_augmentations:
             self.clip_image_tensor = self.augment_clip_image(img, transform=None)
@@ -1898,10 +1898,10 @@ class MaskFileItemDTOMixin:
 
         if self.flip_x:
             # do a flip
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if self.flip_y:
             # do a flip
-            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
         # randomly apply a blur up to 0.5% of the size of the min (width, height)
         min_size = min(img.width, img.height)
@@ -1913,7 +1913,7 @@ class MaskFileItemDTOMixin:
 
         if self.dataset_config.buckets:
             # scale and crop based on file item
-            img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+            img = img.resize((self.scale_to_width, self.scale_to_height), Image.Resampling.BICUBIC)
             # img = transforms.CenterCrop((self.crop_height, self.crop_width))(img)
             # crop
             img = img.crop((
@@ -1981,14 +1981,14 @@ class UnconditionalFileItemDTOMixin:
 
         if self.flip_x:
             # do a flip
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if self.flip_y:
             # do a flip
-            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
         if self.dataset_config.buckets:
             # scale and crop based on file item
-            img = img.resize((self.scale_to_width, self.scale_to_height), Image.BICUBIC)
+            img = img.resize((self.scale_to_width, self.scale_to_height), Image.Resampling.BICUBIC)
             # img = transforms.CenterCrop((self.crop_height, self.crop_width))(img)
             # crop
             img = img.crop((
@@ -2665,8 +2665,7 @@ class TextEmbeddingFileItemDTOMixin:
             # teacher embeds carry the item's own media as the vision reference
             item["dopsd_self_ref"] = True
             return item
-        # dropout embeds are encoded as plain text, keep control conditioning
-        # out of their cache key
+        # Explicit text-only callers omit reference conditioning from the key.
         if text_only:
             return item
         is_ming_comfy = self.text_embedding_space_version.endswith('_ming_comfy_v1')
@@ -2780,9 +2779,9 @@ class TextEmbeddingFileItemDTOMixin:
         else:
             # if the DOP dropout caption matches the dropout caption, this hashes to
             # the same path as the blank embedding and the cache file is shared.
-            # text_only: dropout embeds carry no control conditioning
+            # Caption dropout retains the references, just like live encoding.
             self._dop_blank_text_embedding_path = self._build_text_embedding_path(
-                caption_override=self.get_dop_dropout_caption(), text_only=True
+                caption_override=self.get_dop_dropout_caption()
             )
 
         return self._dop_blank_text_embedding_path
@@ -2810,7 +2809,7 @@ class TextEmbeddingFileItemDTOMixin:
     def get_dopsd_blank_text_embedding_path(self: 'FileItemDTO', recalculate=False):
         if self._dopsd_blank_text_embedding_path is not None and not recalculate:
             return self._dopsd_blank_text_embedding_path
-        # unlike DOP, dropout embeds keep the vision reference
+        # Dropout embeds keep the vision reference.
         self._dopsd_blank_text_embedding_path = self._build_text_embedding_path(
             caption_override=self.get_dopsd_dropout_caption(), dopsd_self_ref=True
         )
@@ -2823,9 +2822,9 @@ class TextEmbeddingFileItemDTOMixin:
             # if the dropout caption matches the normal caption (and the item has no
             # control conditioning), this hashes to the same path as the normal
             # embedding and the cache file is shared.
-            # text_only: dropout embeds carry no control conditioning
+            # Caption dropout retains the references, just like live encoding.
             self._blank_text_embedding_path = self._build_text_embedding_path(
-                caption_override=self.get_dropout_caption(), text_only=True
+                caption_override=self.get_dropout_caption()
             )
 
         return self._blank_text_embedding_path
@@ -2901,20 +2900,17 @@ class TextEmbeddingCachingMixin:
                     if dop_path != text_embedding_path:
                         # trigger word was in the caption, cache the DOP version too
                         encode_targets.append((dop_path, file_item.caption_dop))
-                # dropout embeds are encoded as plain text (no control images)
-                dropout_target_paths = set()
+                # Only the caption is dropped; reference conditioning is retained.
                 if self.dataset_config.caption_dropout_rate > 0:
                     blank_path = file_item.get_blank_text_embedding_path(recalculate=True)
                     if blank_path != text_embedding_path:
                         # cache the dropout caption embedding (blank, or trigger word only)
                         encode_targets.append((blank_path, file_item.get_dropout_caption()))
-                        dropout_target_paths.add(blank_path)
                     if self.dataset_config.diff_output_preservation:
                         # cache the DOP version of the dropout caption (class only)
                         dop_blank_path = file_item.get_dop_blank_text_embedding_path(recalculate=True)
                         if dop_blank_path not in [t[0] for t in encode_targets] + [text_embedding_path]:
                             encode_targets.append((dop_blank_path, file_item.get_dop_dropout_caption()))
-                            dropout_target_paths.add(dop_blank_path)
                 # A normal caption can be cached while newly enabled dropout or
                 # preservation captions still need their own entries.
                 encode_targets = [
@@ -2976,17 +2972,8 @@ class TextEmbeddingCachingMixin:
                         if getattr(file_item, 'crop_width', None) and getattr(file_item, 'crop_height', None):
                             target_size = (file_item.crop_width, file_item.crop_height)
                         for path, caption in encode_targets:
-                            if path in dropout_target_paths:
-                                # dropout embeds are plain text. Only fall back to the
-                                # control images if the model cannot encode without them
-                                try:
-                                    prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption)
-                                except Exception:
-                                    prompt_embeds: PromptEmbeds = self.sd.encode_prompt(
-                                        caption, control_images=ctrl_img, target_size=target_size)
-                            else:
-                                prompt_embeds: PromptEmbeds = self.sd.encode_prompt(
-                                    caption, control_images=ctrl_img, target_size=target_size)
+                            prompt_embeds: PromptEmbeds = self.sd.encode_prompt(
+                                caption, control_images=ctrl_img, target_size=target_size)
                             prompt_embeds.save(path)
                             del prompt_embeds
                     elif (
@@ -3009,15 +2996,7 @@ class TextEmbeddingCachingMixin:
                         if self.sd.has_multiple_control_images:
                             ctrl_img = [ctrl_img]
                         for path, caption in encode_targets:
-                            if path in dropout_target_paths:
-                                # dropout embeds are plain text. Only fall back to the
-                                # control images if the model cannot encode without them
-                                try:
-                                    prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption)
-                                except Exception:
-                                    prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption, control_images=ctrl_img)
-                            else:
-                                prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption, control_images=ctrl_img)
+                            prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption, control_images=ctrl_img)
                             prompt_embeds.save(path)
                             del prompt_embeds
                         file_item.tensor = None

@@ -190,6 +190,7 @@ class YuE2Pipeline:
         generator = torch.Generator(device=device).manual_seed(seed)
         capacity = prefix_len + max_tokens
         graph = None
+        logits = None
         if self.use_cuda_graphs and device.type == "cuda":
             try:
                 graph = ARDecodeGraph(ar, capacity, device, ar.dtype)
@@ -205,6 +206,8 @@ class YuE2Pipeline:
         if graph is None:
             cache = KVCache(self.model.cfg, 1, capacity, device, ar.dtype)
             logits = ar.prefill_into_cache(prefix_embeds.to(ar.dtype), cache)[0]
+        if logits is None:
+            raise RuntimeError("YuE2 prefill did not produce next-token logits")
         history: List[int] = []
         min_tokens = min(min_tokens, max_tokens)
         end = ABC_END if phase == "abc" else MUSIC_END

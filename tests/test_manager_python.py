@@ -24,8 +24,9 @@ class ManagerPythonTests(unittest.TestCase):
         self.mock(env, '_venv_platform', side_effect=lambda target=None: self.read(target, 'platform'))
         self.uv = self.mock(env, 'find_uv', return_value='test-uv')
         self.run = self.mock(env, 'run', side_effect=self.create)
-        for name in ('info', 'warn', 'ok'):
+        for name in ('info', 'warn'):
             self.mock(env, name)
+        self.ok = self.mock(env, 'ok')
         self.mock(util, 'error')
 
     def mock(self, obj, name, *args, **kwargs):
@@ -110,7 +111,7 @@ class ManagerPythonTests(unittest.TestCase):
         self.created_version = '3.13'
         with self.assertRaises(SystemExit):
             env.ensure_venv(self.spec)
-        env.ok.assert_not_called()
+        self.ok.assert_not_called()
 
     def test_explicit_dgx_python_311_spec_is_preserved(self):
         self.spec.python_version = '3.11'
@@ -190,7 +191,7 @@ class ManagerPythonTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             env.ensure_venv(self.spec)
         self.assertEqual(self.read(self.target, 'version'), '3.10')
-        env.ok.assert_not_called()
+        self.ok.assert_not_called()
 
     def test_failed_backup_does_not_start_installing(self):
         self.write_env(self.target, '3.10')

@@ -27,7 +27,7 @@ test('live metrics override config fallback', () => {
     index: { value: 2 },
     name: { value: null, value_text: 'Metric phase' },
     step: { value: 17 },
-    reason: { value: null, value_text: 'loss_plateau' },
+    reason: { value: null, value_text: 'steps' },
   });
 
   assert.equal(summary?.source, 'metrics');
@@ -35,51 +35,16 @@ test('live metrics override config fallback', () => {
   assert.equal(summary?.name, 'Metric phase');
   assert.equal(summary?.phaseStep, 17);
   assert.equal(summary?.phaseSteps, 500);
-  assert.equal(summary?.reason, 'loss_plateau');
+  assert.equal(summary?.reason, 'steps');
 });
 
-test('auto-train phases use live metric phase when fixed steps are omitted', () => {
-  const summary = buildTrainingPhaseSummary(
-    {
-      auto_train: true,
-      phases: [{ name: 'Teach subject' }, { name: 'Stabilize' }, { name: 'Polish style' }],
-    },
-    900,
-    {
-      index: { value: 1 },
-      step: { value: 42 },
-    },
-  );
-
-  assert.equal(summary?.source, 'metrics');
-  assert.equal(summary?.telemetryPending, false);
-  assert.equal(summary?.index, 1);
-  assert.equal(summary?.name, 'Stabilize');
-  assert.equal(summary?.phaseStep, 42);
-  assert.equal(summary?.phaseSteps, null);
-  assert.equal(summary?.progress, null);
-});
-
-test('auto-train phases without metrics fall back to first phase and mark telemetry pending', () => {
-  const summary = buildTrainingPhaseSummary(
-    {
-      auto_train: true,
-      phases: [{ name: 'Teach subject' }, { name: 'Stabilize' }],
-    },
-    900,
-  );
-
-  assert.equal(summary?.source, 'config');
-  assert.equal(summary?.telemetryPending, true);
-  assert.equal(summary?.index, 0);
-  assert.equal(summary?.name, 'Teach subject');
-  assert.equal(summary?.phaseStep, null);
-  assert.equal(summary?.phaseSteps, null);
+test('invalid step-less phases are not presented as a supported running mode', () => {
+  assert.equal(buildTrainingPhaseSummary({ phases: [{ name: 'Unbounded' }] }, 900), null);
 });
 
 test('jobs without phases return no phase summary', () => {
   assert.equal(hasTrainingPhases({ phases: [] }), false);
-  assert.equal(hasTrainingPhases({ auto_train: true }), false);
-  assert.equal(buildTrainingPhaseSummary({ auto_train: true }, 100), null);
+  assert.equal(hasTrainingPhases({}), false);
+  assert.equal(buildTrainingPhaseSummary({}, 100), null);
   assert.equal(buildTrainingPhaseSummary(null, 100), null);
 });

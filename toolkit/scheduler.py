@@ -21,7 +21,8 @@ def get_lr_scheduler(
             optimizer, **kwargs
         )
     elif name == "step":
-
+        # StepLR uses step_size rather than the trainer's run/phase horizon.
+        kwargs.pop('total_iters', None)
         return torch.optim.lr_scheduler.StepLR(
             optimizer, **kwargs
         )

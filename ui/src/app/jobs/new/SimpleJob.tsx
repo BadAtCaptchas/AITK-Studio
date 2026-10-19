@@ -209,7 +209,6 @@ export default function SimpleJob({
   const supportsNormalNetworkDropout = networkType !== 'lokr';
   const lokrFullMatrix = !!(networkConfig?.lokr_full_matrix || networkConfig?.lokr_full_rank);
   const isAudioModel = !!(modelArch?.group === 'audio');
-  const autoTrain = !!jobConfig.config.process[0].train.auto_train;
   const trainConfig = jobConfig.config.process[0].train;
   const textEncoderTrainingEnabled = !!trainConfig.train_text_encoder;
   const modelArchName = jobConfig.config.process[0].model.arch;
@@ -275,7 +274,6 @@ export default function SimpleJob({
     }
   };
   const handleTrainingStepsChange = (value: number | null) => {
-    if (autoTrain) return;
     const requestedSteps = Math.max(1, Number(value ?? 1));
     const phases = jobConfig.config.process[0].train.phases;
     if (!phases?.length) {
@@ -286,7 +284,6 @@ export default function SimpleJob({
       ...phase,
       optimizer_params: phase.optimizer_params ? { ...phase.optimizer_params } : undefined,
       lr_scheduler_params: phase.lr_scheduler_params ? { ...phase.lr_scheduler_params } : undefined,
-      auto_advance: phase.auto_advance ? { ...phase.auto_advance } : undefined,
     }));
     const currentTotal = nextPhases.reduce((sum, phase) => sum + Math.max(1, Number(phase.steps) || 1), 0);
     const lastPhase = nextPhases[nextPhases.length - 1];
@@ -1129,17 +1126,15 @@ export default function SimpleJob({
                     Quick training settings <Info className="h-3.5 w-3.5 text-gray-500" />
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {!autoTrain && (
-                      <NumberInput
-                        label="Steps"
-                        error={fieldError('Steps')}
-                        value={processConfig.train.steps}
-                        onChange={handleTrainingStepsChange}
-                        placeholder="3000"
-                        min={1}
-                        required
-                      />
-                    )}
+                    <NumberInput
+                      label="Steps"
+                      error={fieldError('Steps')}
+                      value={processConfig.train.steps}
+                      onChange={handleTrainingStepsChange}
+                      placeholder="3000"
+                      min={1}
+                      required
+                    />
                     <NumberInput
                       label="Batch size"
                       error={fieldError('Batch size')}
@@ -1626,12 +1621,8 @@ export default function SimpleJob({
                   )}
                   <TrainingPhasesEditor
                     train={processConfig.train}
-                    network={processConfig.network}
-                    currentArch={processConfig.model.arch}
                     setJobConfig={setJobConfig}
                     disableTimestepType={disableSections.includes('train.timestep_type')}
-                    modelArchName={modelArch?.name}
-                    defaultAutoTrainingProfileId={modelArch?.defaultAutoTrainingProfileId}
                   />
                 </div>,
               )}
@@ -2365,7 +2356,7 @@ export default function SimpleJob({
                       {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}
                     </div>
                     <div className="text-gray-500">Steps</div>
-                    <div className="text-gray-200">{autoTrain ? 'Auto' : formatNumber(processConfig.train.steps)}</div>
+                    <div className="text-gray-200">{formatNumber(processConfig.train.steps)}</div>
                     <div className="text-gray-500">Batch size</div>
                     <div className="text-gray-200">{formatNumber(processConfig.train.batch_size)}</div>
                     <div className="text-gray-500">Learning rate</div>
@@ -2495,7 +2486,7 @@ export default function SimpleJob({
                   <>
                     <dt className="text-gray-400">Steps</dt>
                     <dd className="text-right text-gray-100">
-                      {autoTrain ? 'Auto' : formatNumber(processConfig.train.steps)}
+                      {formatNumber(processConfig.train.steps)}
                     </dd>
                     <dt className="text-gray-400">Learning rate</dt>
                     <dd className="text-right text-gray-100">{processConfig.train.lr}</dd>

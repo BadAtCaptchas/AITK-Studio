@@ -34,7 +34,7 @@ function load(relative) {
 const { modelArchs } = load('domain/modelOptions.ts');
 const { handleModelArchChange } = load('app/jobs/new/utils.ts');
 const { defaultJobConfig } = load('app/jobs/new/jobConfig.ts');
-const { getDefaultModelConfig, getDefaultSampler, getLoraModelConfig } = load('domain/generationConfig.ts');
+const { getDefaultModelConfig, getDefaultGenerationSettings, getLoraModelConfig } = load('domain/generationConfig.ts');
 const { configContractErrors } = load('domain/configContract.ts');
 const variants = ['moss_image:kromoss', 'moss_image:kromoss_turbo'];
 const distillationPath = 'lodestones/Kromoss/8-steps-dmd-lora.safetensors';
@@ -254,7 +254,8 @@ test('Generate library selection applies the selected variant sample defaults on
       let guidance = 2.5;
       let steps = 17;
       const applyArchSampleDefaults = loadFunction(page, 'applyArchSampleDefaults', {
-        archs: modelArchs, getDefaultSampler,
+        archs: modelArchs, getDefaultGenerationSettings,
+        setWidth: () => {}, setHeight: () => {},
         setSampler: value => { sampler = value; },
         setGuidanceScale: value => { guidance = value; },
         setSampleSteps: value => { steps = value; },

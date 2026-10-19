@@ -6,7 +6,7 @@ import os
 import io
 import struct
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -511,7 +511,7 @@ def main(argv=None):
 
 is_window_shown = False
 display_lock = threading.Lock()
-current_img = None
+current_img: Optional[Tuple[np.ndarray, str]] = None
 update_event = threading.Event()
 
 def update_image(img, name):
@@ -528,8 +528,8 @@ def display_image_in_thread():
         while True:
             update_event.wait()
             with display_lock:
-                if current_img:
-                    img, name = current_img
+                if isinstance(current_img, tuple):
+                    img, name = tuple(current_img)
                     cv2.imshow(name, img)
                     current_img = None
                     update_event.clear()

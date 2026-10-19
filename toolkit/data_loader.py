@@ -152,7 +152,7 @@ class ImageDataset(Dataset, CaptionMixin):
             img = Image.fromarray(np.random.randint(0, 255, (1024, 1024, 3), dtype=np.uint8))
 
         # Downscale the source image first
-        img = img.resize((int(img.size[0] * self.scale), int(img.size[1] * self.scale)), Image.BICUBIC)
+        img = img.resize((int(img.size[0] * self.scale), int(img.size[1] * self.scale)), Image.Resampling.BICUBIC)
         min_img_size = min(img.size)
 
         if self.random_crop:
@@ -166,11 +166,11 @@ class ImageDataset(Dataset, CaptionMixin):
                 scaler = scale_size / min_img_size
                 scale_width = int((img.width + 5) * scaler)
                 scale_height = int((img.height + 5) * scaler)
-                img = img.resize((scale_width, scale_height), Image.BICUBIC)
+                img = img.resize((scale_width, scale_height), Image.Resampling.BICUBIC)
             img = transforms.RandomCrop(self.resolution)(img)
         else:
             img = transforms.CenterCrop(min_img_size)(img)
-            img = img.resize((self.resolution, self.resolution), Image.BICUBIC)
+            img = img.resize((self.resolution, self.resolution), Image.Resampling.BICUBIC)
 
         img = self.transform(img)
 
@@ -359,9 +359,9 @@ class PairedImageDataset(Dataset):
             img2_crop_width = bucket_resolution["width"]
 
             # scale then center crop images
-            img1 = img1.resize((img1_scale_to_width, img1_scale_to_height), Image.BICUBIC)
+            img1 = img1.resize((img1_scale_to_width, img1_scale_to_height), Image.Resampling.BICUBIC)
             img1 = transforms.CenterCrop((img1_crop_height, img1_crop_width))(img1)
-            img2 = img2.resize((img2_scale_to_width, img2_scale_to_height), Image.BICUBIC)
+            img2 = img2.resize((img2_scale_to_width, img2_scale_to_height), Image.Resampling.BICUBIC)
             img2 = transforms.CenterCrop((img2_crop_height, img2_crop_width))(img2)
 
             # combine them side by side
@@ -376,7 +376,7 @@ class PairedImageDataset(Dataset):
             width = int(img.size[0] * height / img.size[1])
 
             # Downscale the source image first
-            img = img.resize((width, height), Image.BICUBIC)
+            img = img.resize((width, height), Image.Resampling.BICUBIC)
 
         prompt = self.get_prompt_item(index)
         img = self.transform(img)

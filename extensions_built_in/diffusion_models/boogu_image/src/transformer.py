@@ -43,13 +43,13 @@ from .attention_processor import (
     BooguImageAttnProcessor,
     BooguImageDoubleStreamSelfAttnProcessor,
 )
-from .block_lumina2 import (
+from .boogu.models.transformers.block_lumina2 import (
     Lumina2CombinedTimestepCaptionEmbedding,
     LuminaFeedForward,
     LuminaLayerNormContinuous,
     LuminaRMSNormZero,
 )
-from .rope import BooguImageDoubleStreamRotaryPosEmbed
+from .boogu.models.transformers.rope import BooguImageDoubleStreamRotaryPosEmbed
 
 logger = logging.get_logger(__name__)
 

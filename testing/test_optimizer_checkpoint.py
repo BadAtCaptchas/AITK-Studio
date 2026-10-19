@@ -71,7 +71,7 @@ class OptimizerCheckpointTest(unittest.TestCase):
             del bad[key]
             with self.assertRaises(OptimizerCheckpointValidationError):
                 parse_optimizer_checkpoint(bad, 3)
-        for version in (3, True, "2"):
+        for version in (4, True, "2"):
             bad = dict(payload, format_version=version)
             with self.assertRaisesRegex(OptimizerCheckpointValidationError, "unsupported format"):
                 parse_optimizer_checkpoint(bad, 3)

@@ -33,7 +33,7 @@ export function summarizeJob(job: Job): Job & { is_summary: true } {
     }
   } catch { /* Corrupt legacy configuration does not break the history list. */ }
   return { ...job, is_summary: true, job_config: JSON.stringify({ config: {
-    process: [{ type: process.type, train: { steps: isRecord(process.train) ? process.train.steps : 0, auto_train: isRecord(process.train) ? process.train.auto_train : undefined } }],
+    process: [{ type: process.type, train: { steps: isRecord(process.train) ? process.train.steps : 0 } }],
     remote_caption: remoteCaption,
   } }) };
 }

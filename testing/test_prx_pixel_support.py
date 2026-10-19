@@ -13,10 +13,9 @@ PRX_ROOT = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "prx_pixe
 REGISTRY_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__init__.py"
 CONFIG_MODULES_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
 OFFLOAD_PATH = PROJECT_ROOT / "toolkit" / "memory_management" / "offload.py"
-README_PATH = PROJECT_ROOT / "README.md"
-UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
+README_PATH = PROJECT_ROOT / "docs" / "supported-models.md"
+UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "domain" / "modelOptions.ts"
 MEMORY_PROFILE_PATH = PROJECT_ROOT / "ui" / "src" / "utils" / "memoryProfiles.ts"
-AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
 
 
 try:
@@ -51,18 +50,16 @@ def require_prx_imports():
 
 class PRXPixelStaticSupportTest(unittest.TestCase):
     def test_backend_registry_config_and_docs_include_prx_pixel(self):
-        registry = REGISTRY_PATH.read_text(encoding="utf-8")
+        from toolkit.model_registry import BY_ARCH
         config = CONFIG_MODULES_PATH.read_text(encoding="utf-8")
         offload = OFFLOAD_PATH.read_text(encoding="utf-8")
         readme = README_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('PRXPixelT2IModel, = _optional_models(', registry)
-        self.assertIn('"PRXPixelT2IModel", "prx_pixel"', registry)
-        self.assertIn("PRXPixelT2IModel,", registry)
+        self.assertEqual(BY_ARCH['prx_pixel'].class_name, 'PRXPixelT2IModel')
+        self.assertEqual(BY_ARCH['prx_pixel'].module, 'extensions_built_in.diffusion_models.prx_pixel_t2i')
         self.assertIn("'prx_pixel'", config)
         self.assertIn('"prx_pixel"', offload)
         self.assertIn("Photoroom/prxpixel-t2i", readme)
-        self.assertIn("direct x0 loss targets", readme)
 
     def test_model_class_resolves_when_optional_dependencies_are_available(self):
         require_prx_imports()
@@ -74,29 +71,17 @@ class PRXPixelStaticSupportTest(unittest.TestCase):
             if model_class.arch == "prx_pixel"
         )
 
-        self.assertIs(resolved, PRXPixelT2IModel)
+        self.assertIs(resolved.load(), PRXPixelT2IModel)
 
-    def test_optional_import_fallback_raises_on_instantiation(self):
-        import extensions_built_in.diffusion_models as registry
+    def test_broken_dependency_raises_when_model_is_resolved(self):
+        from toolkit.model_registry import BrokenModelIntegration, resolve_model
+        with mock.patch('toolkit.model_registry.import_module', side_effect=ImportError('missing PRX dependency')):
+            with self.assertRaisesRegex(BrokenModelIntegration, 'missing PRX dependency'):
+                resolve_model('prx_pixel')
 
-        with mock.patch.object(
-            registry,
-            "import_module",
-            side_effect=ImportError("missing PRX dependency"),
-        ):
-            MissingPRXModel, = registry._optional_models(
-                ".prx_pixel_t2i", (("MissingPRXModel", "prx_pixel"),)
-            )
-
-        self.assertEqual(MissingPRXModel.__name__, "MissingPRXModel")
-        self.assertEqual(MissingPRXModel.arch, "prx_pixel")
-        with self.assertRaisesRegex(ImportError, "missing PRX dependency"):
-            MissingPRXModel()
-
-    def test_ui_defaults_memory_profile_and_auto_profile(self):
+    def test_ui_defaults_and_memory_profile(self):
         options = UI_OPTIONS_PATH.read_text(encoding="utf-8")
         memory = MEMORY_PROFILE_PATH.read_text(encoding="utf-8")
-        profiles = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
 
         start = options.index("name: 'prx_pixel'")
         end = options.index("disableSections", start)
@@ -115,7 +100,6 @@ class PRXPixelStaticSupportTest(unittest.TestCase):
         self.assertIn("'config.process[0].sample.sample_steps': [28, 20]", block)
         self.assertIn("'config.process[0].sample.guidance_scale': [5, 7]", block)
         self.assertIn("'prx_pixel'", memory)
-        self.assertIn("'prx_pixel'", profiles)
 
     def test_vendored_source_has_attribution_and_no_external_pipeline_requirement(self):
         transformer = (PRX_ROOT / "src" / "transformer_prx.py").read_text(

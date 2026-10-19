@@ -8,7 +8,6 @@ Use the [example configurations](../config/examples) as starting points. This gu
 - [Batch loading threads](#batch-loading-threads)
 - [LoRA Watermarking](#lora-watermarking)
 - [Multi-step training phases](#multi-step-training-phases)
-- [Auto learn / auto training](#auto-learn--auto-training)
 - [Layer Targeting](#layer-targeting)
 - [LoKr Training](#lokr-training)
 - [Quantized model cache](#quantized-model-cache)
@@ -97,9 +96,6 @@ train:
       loss_type: mse
       optimizer_params:
         weight_decay: 0.0001
-      auto_advance:
-        type: loss_plateau
-        min_steps: 500
 
     - name: stabilize
       steps: 1000
@@ -122,83 +118,9 @@ Phase overrides inherit from the top-level `train` block. Supported phase-local 
 
 At each phase boundary the trainer saves by default, rebuilds the optimizer and LR scheduler, clears gradients, and continues. Phase changes only happen after a completed optimizer update, so boundaries defer cleanly during gradient accumulation. Checkpoints store the current phase index/name and phase-local step so resumes return to the correct phase.
 
-Phases can also advance early by logged metric plateau:
+The UI loss graph shows phase boundary markers when phase metrics are present. Training always has a finite step count. Older configs that enable `auto_train`/`auto_learn` or contain phase `auto_advance` settings must remove those settings and provide explicit positive phase steps before they can run.
 
-```yaml
-auto_advance:
-  type: loss_plateau
-  metric: loss/loss
-  mode: min
-  min_steps: 500
-  window: 100
-  patience: 2
-  min_delta_pct: 1.0
-```
-
-Defaults are `metric: loss/loss`, `mode: min`, `window: 100`, `patience: 2`, `min_steps: max(200, window * 2)`, and `min_delta_pct: 1.0`. Generated sample images are not scored directly; future evaluators can feed numeric metrics into the same logging system. The UI loss graph shows phase boundary markers when phase metrics are present.
-
-## Auto learn / auto training
-
-Auto learn lets a training job keep running until the configured metric stops improving, then move to the next training phase. When the final phase plateaus, the trainer stops the job. This is useful when the correct number of steps is not known up front.
-
-In the UI, open `New Job`, go to `Training Phases`, and enable `Auto learn`. Fixed step inputs are hidden because auto learn does not know the total step count ahead of time. Profiles can be global or scoped to the selected model architecture; legacy profiles without a model scope remain visible for every model, and newly saved custom profiles record the active model architecture.
-
-The profile dropdown includes an `Anatomy LoKr` preset with three open-ended stages:
-
-- Teach: AdamW, `lr: 0.00002`, weighted high-noise timesteps, MSE loss, `weight_decay: 0.0001`, LoKr factor 8.
-- Stabilize: AdamW, `lr: 0.00001`, weighted balanced timesteps, MSE loss.
-- Fine detail cleanup: AdamW, `lr: 0.000005`, weighted low-noise timesteps, MSE loss.
-
-For GLM-Image, the UI defaults Auto learn to `glm-image-balanced-lora` instead of the generic Anatomy profile. The GLM profiles are open-ended, use loss-plateau auto advance, save on each phase change, and do not set fixed phase step counts:
-
-- `glm-image-balanced-lora`: LoRA rank/alpha `32`, `adamw8bit`, weighted timesteps, MSE loss, and LR phases `0.00005 -> 0.00003 -> 0.000015` for content, balanced, and style stages.
-- `glm-image-low-vram-lora`: LoRA rank/alpha `16`, dropout `0.05`, `adamw8bit`, weighted timesteps, MSE loss, batch size `1`, gradient accumulation `2`, and LR phases `0.00003 -> 0.00002 -> 0.00001`.
-
-For Ideogram 4 NF4, FP8, and Comfy NVFP4, the UI defaults Auto learn to `ideogram4-balanced-lora`. It uses transformer-only LoRA rank/alpha `32`, cached text embeddings, weighted timesteps, caption-aware phases, and LR phases `0.00004 -> 0.000025 -> 0.00001`.
-
-You can also save the current auto-learn settings as a custom profile from the same editor. Custom profiles are stored in the browser's local storage.
-
-For CLI configs, set `train.auto_train: true` and omit phase `steps`. Each phase must have plateau auto-advance settings, either explicitly or by relying on the defaults:
-
-```yaml
-train:
-  auto_train: true
-  save_on_phase_change: true
-  optimizer: adamw
-  lr: 0.00002
-  timestep_type: weighted
-  content_or_style: content
-  loss_type: mse
-  optimizer_params:
-    weight_decay: 0.0001
-  phases:
-    - name: teach anatomy
-      lr: 0.00002
-      content_or_style: content
-      auto_advance:
-        type: loss_plateau
-        metric: loss/loss
-        mode: min
-        window: 100
-        patience: 2
-        min_delta_pct: 1.0
-
-    - name: stabilize
-      lr: 0.00001
-      content_or_style: balanced
-      auto_advance:
-        type: loss_plateau
-
-    - name: fine detail cleanup
-      lr: 0.000005
-      content_or_style: style
-      auto_advance:
-        type: loss_plateau
-```
-
-Progress displays use the current step without a percentage bar while auto learn is active, because there is no planned final step. Resuming a checkpoint restores the current phase and continues plateau tracking from the saved training state.
-
-For a GLM-Image auto-train starting point, see `config/examples/train_lora_glm_image_auto_24gb.yaml`. For Boogu-Image LoRA starts, see `config/examples/train_lora_boogu_image_24gb.yaml`, `config/examples/train_lora_boogu_image_edit_24gb.yaml`, and `config/examples/train_lora_boogu_image_turbo_experimental_24gb.yaml`. For i1-3B LoRA, see `config/examples/train_lora_i1_24gb.yaml`. For Ideogram 4 LoRA and full fine-tune starting points, see `config/examples/train_lora_ideogram4_48gb.yaml`, `config/examples/train_lora_ideogram4_fp8_48gb.yaml`, `config/examples/train_lora_ideogram4_nvfp4_48gb.yaml`, and `config/examples/train_full_fine_tune_ideogram4.yaml`.
+When EMA is enabled, exported checkpoints contain the averaged weights. Keep the matching `optimizer.pt` to resume from the live training weights, optimizer moments, and EMA history. Resuming with EMA disabled still restores the live weights and optimizer moments from that file.
 
 ## Layer Targeting
 

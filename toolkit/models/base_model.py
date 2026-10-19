@@ -45,6 +45,7 @@ from toolkit.accelerator import get_accelerator, unwrap_model
 from typing import TYPE_CHECKING
 from toolkit.print import print_acc
 from toolkit.basic import flush
+from toolkit.vae_cache_identity import with_vae_cache_identity
 
 if TYPE_CHECKING:
     from toolkit.lora_special import LoRASpecialNetwork
@@ -155,7 +156,7 @@ class BaseModel:
         # to hold network if there is one
         self.network = None
         self.adapter: Union['ControlNetModel', 'T2IAdapter',
-                            'IPAdapter', 'ReferenceAdapter', None] = None
+                            'IPAdapter', 'ReferenceAdapter', 'ClipVisionAdapter', 'CustomAdapter', None] = None
         self.decorator: Union[Decorator, None] = None
         self.arch: ModelArch = model_config.arch
 
@@ -291,22 +292,20 @@ class BaseModel:
         return self.arch
 
     def get_latent_space_version(self) -> str:
-        """Latent cache key. Override to invalidate caches when model_kwargs change what gets cached."""
+        """Include custom VAE weights and precision in the latent cache key."""
         if self.model_config.latent_space_version is not None:
             return self.model_config.latent_space_version
         if self.latent_space_version is not None:
-            return self.latent_space_version
-        if self.is_xl:
-            return 'sdxl'
-        if self.is_v3:
-            return 'sd3'
-        if self.is_auraflow:
-            return 'sdxl'
-        if self.is_flux:
-            return 'flux1'
-        if self.model_config.is_pixart_sigma:
-            return 'sdxl'
-        return self.model_config.arch
+            version = self.latent_space_version
+        elif self.is_xl or self.is_auraflow or self.model_config.is_pixart_sigma:
+            version = 'sdxl'
+        elif self.is_v3:
+            version = 'sd3'
+        elif self.is_flux:
+            version = 'flux1'
+        else:
+            version = self.model_config.arch
+        return with_vae_cache_identity(self, version)
 
     def get_text_embedding_space_version(self) -> str:
         """Text embedding cache key. Override like get_latent_space_version."""
@@ -624,7 +623,7 @@ class BaseModel:
                             # run through the adapter to saturate the embeds
                             conditional_clip_embeds = self.adapter.get_clip_image_embeds_from_tensors(
                                 validation_image)
-                            self.adapter(conditional_clip_embeds)
+                            self.adapter.__call__(conditional_clip_embeds)
 
                         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
                             # handle condition the prompts
@@ -751,9 +750,9 @@ class BaseModel:
                                 validation_image)
                             unconditional_clip_embeds = self.adapter.get_clip_image_embeds_from_tensors(validation_image,
                                                                                                         True)
-                            conditional_embeds = self.adapter(
+                            conditional_embeds = self.adapter.__call__(
                                 conditional_embeds, conditional_clip_embeds, is_unconditional=False)
-                            unconditional_embeds = self.adapter(
+                            unconditional_embeds = self.adapter.__call__(
                                 unconditional_embeds, unconditional_clip_embeds, is_unconditional=True)
 
                         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):

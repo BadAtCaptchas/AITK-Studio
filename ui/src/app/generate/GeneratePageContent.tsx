@@ -4,7 +4,7 @@ import { QwenImageControls, QwenReferenceInputs } from '@/components/generate/Qw
 import { isQwenImage2, transparentQwenPrompt } from '@/domain/qwenImage';
 import {
   getDefaultModelConfig,
-  getDefaultSampler,
+  getDefaultGenerationSettings,
   getLoraModelConfig,
   archSupportsSection,
   type GeneratorModelConfig,
@@ -260,13 +260,13 @@ export function GeneratePageContent() {
   const [importSummary, setImportSummary] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [qwenReferences, setQwenReferences] = useState<string[]>([]);
-  const [width, setWidth] = useState<number | null>(1024);
-  const [height, setHeight] = useState<number | null>(1024);
+  const [width, setWidth] = useState<number | null>(() => getDefaultGenerationSettings('flux').width);
+  const [height, setHeight] = useState<number | null>(() => getDefaultGenerationSettings('flux').height);
   const [seed, setSeed] = useState<number | null>(-1);
-  const [guidanceScale, setGuidanceScale] = useState<number | null>(4);
-  const [sampleSteps, setSampleSteps] = useState<number | null>(20);
+  const [guidanceScale, setGuidanceScale] = useState<number | null>(() => getDefaultGenerationSettings('flux').guidanceScale);
+  const [sampleSteps, setSampleSteps] = useState<number | null>(() => getDefaultGenerationSettings('flux').sampleSteps);
   const [numRepeats, setNumRepeats] = useState<number | null>(1);
-  const [sampler, setSampler] = useState(getDefaultSampler('flux'));
+  const [sampler, setSampler] = useState(() => getDefaultGenerationSettings('flux').sampler);
   const [imageFormat, setImageFormat] = useState('png');
   const [writePromptFile, setWritePromptFile] = useState(true);
   const [startImmediately, setStartImmediately] = useState(true);
@@ -370,15 +370,12 @@ export function GeneratePageContent() {
     }, 1500);
   };
   const applyArchSampleDefaults = (archName: string) => {
-    setSampler(getDefaultSampler(archName, archs));
-    const presetGuidance: unknown = archs.find(item => item.name === archName)?.defaults?.[
-      'config.process[0].sample.guidance_scale'
-    ]?.[0];
-    if (typeof presetGuidance === 'number') setGuidanceScale(presetGuidance);
-    const presetSteps: unknown = archs.find(item => item.name === archName)?.defaults?.[
-      'config.process[0].sample.sample_steps'
-    ]?.[0];
-    if (typeof presetSteps === 'number') setSampleSteps(presetSteps);
+    const defaults = getDefaultGenerationSettings(archName, archs);
+    setSampler(defaults.sampler);
+    setGuidanceScale(defaults.guidanceScale);
+    setSampleSteps(defaults.sampleSteps);
+    setWidth(defaults.width);
+    setHeight(defaults.height);
   };
   const applyLoraModelDefaults = (lora: GeneratedLora) => {
     if (!lora.model) return;

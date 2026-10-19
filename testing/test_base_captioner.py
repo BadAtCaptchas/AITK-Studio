@@ -68,7 +68,7 @@ class BaseCaptionerTest(unittest.TestCase):
         tqdm_module.tqdm = FakeTqdm
         modules["tqdm"] = tqdm_module
         tqdm_auto_module = types.ModuleType("tqdm.auto")
-        tqdm_auto_module.tqdm = tqdm_module.tqdm
+        tqdm_auto_module.tqdm = FakeTqdm
         modules["tqdm.auto"] = tqdm_auto_module
 
         sys.modules.pop("extensions_built_in.captioner.BaseCaptioner", None)

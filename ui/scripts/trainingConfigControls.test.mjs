@@ -44,7 +44,7 @@ function loadFunction(relative, name, bindings = {}) {
   }
   visit(source);
   assert.ok(expression, `Missing ${name}`);
-  return evaluate(expression, bindings);
+  return evaluate(expression.replace(/^export\s+/, ''), bindings);
 }
 function evaluate(expression, bindings) {
   const code = ts.transpileModule(`const selected = ${expression};`, {
@@ -61,51 +61,92 @@ function setter(job) {
   };
 }
 
-test('legacy Auto Learn migration preserves automatic phases, total steps, and explicit phase caps', () => {
-  const job = structuredClone(defaultJobConfig);
-  const train = job.config.process[0].train;
-  delete train.auto_train;
-  train.auto_learn = true;
-  train.phases = [
-    { name: 'Warmup', lr: 0.0001 },
-    { name: 'Detail', steps: 700, lr: 0.00001, auto_advance: { min_steps: 200, window: 50 } },
-  ];
-  const phases = structuredClone(train.phases);
-  const steps = train.steps;
-  const migrated = migrateJobConfig(job);
-  assert.equal(migrated.config.process[0].train.auto_train, true);
-  assert.equal(migrated.config.process[0].train.auto_learn, undefined);
-  assert.equal(migrated.config.process[0].train.steps, steps);
-  assert.deepEqual(migrated.config.process[0].train.phases, phases);
-  assert.deepEqual(migrateJobConfig(structuredClone(migrated)), migrated);
+const { configContractErrors } = load('domain/configContract.ts');
+const { trainingPhaseErrors } = load('utils/trainingPhases.ts');
+
+test('saved-job start and resume reject removed automatic settings before launch preparation', async () => {
+  for (const status of ['stopped', 'completed', 'error', 'queued']) {
+    const config = structuredClone(defaultJobConfig);
+    config.config.process[0].train.auto_learn = true;
+    const prepareJobStart = loadFunction('server/jobStart.ts', 'prepareJobStart', {
+      isValidJobId: () => true,
+      db: { jobs: { findById: async () => ({ status, worker_id: 'local', job_config: JSON.stringify(config) }) } },
+      isLocalWorker: () => true,
+      assertPythonRuntimeReady: async () => {},
+      configContractErrors,
+      failStart: (payload, code) => { throw Object.assign(new Error(payload.error), { payload, status: code }); },
+      process,
+    });
+    await assert.rejects(prepareJobStart('saved-job', undefined, false, { allowQueued: true }), error => {
+      assert.equal(error.status, 400);
+      assert.equal(error.payload.code, 'INVALID_CONFIG');
+      assert.match(error.message, /no longer supported/);
+      return true;
+    });
+  }
 });
 
-test('explicit auto_train takes precedence over either legacy alias value and migration remains idempotent', () => {
-  for (const [canonical, legacy, expected] of [
-    [undefined, false, false], [false, true, false], [true, false, true], [undefined, undefined, false],
+test('already queued jobs reject automatic or invalid manual phases before filesystem work or spawning', async () => {
+  for (const train of [
+    { auto_train: true }, { auto_learn: true },
+    { steps: 10, phases: [{ steps: 10, auto_advance: {} }] },
+    { steps: 10, phases: [{ steps: 10, auto_advance: null }] },
+    { steps: 10, phases: [{}] }, { steps: 20, phases: [{ steps: 10 }] },
+  ]) {
+    const updates = [];
+    const startAndWatchJob = loadFunction('../cron/actions/startJob.ts', 'startAndWatchJob', {
+      trainingPhaseErrors,
+      getJobTrainingRoot: async () => assert.fail('Invalid phases must fail before filesystem preparation'),
+      db: { jobs: { updateIf: async (_id, _expected, update) => { updates.push(update); } } },
+      console: { error: () => {} },
+    });
+    await startAndWatchJob({ id: 'queued-job', attempt_id: 'attempt', job_config: JSON.stringify({ config: { process: [{ train }] } }) });
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].status, 'error');
+    assert.equal(updates[0].info, `Error launching job: ${trainingPhaseErrors(train).join('\n')}`);
+  }
+});
+test('removed automatic settings stay visible and fail validation without rewriting saved steps', () => {
+  for (const raw of [
+    { auto_train: true }, { auto_learn: true }, { auto_train: false, auto_learn: true },
+    { phases: [{ name: 'Saved', steps: 750, auto_advance: null }] },
+    { phases: [{ name: 'Saved', auto_advance: { type: 'loss_plateau' } }] },
   ]) {
     const job = structuredClone(defaultJobConfig);
-    const train = job.config.process[0].train;
-    if (canonical === undefined) delete train.auto_train;
-    else train.auto_train = canonical;
-    if (legacy !== undefined) train.auto_learn = legacy;
-    train.steps = 50;
-    train.phases = [{ name: 'Warmup', steps: 20 }, { name: 'Detail', steps: 30 }];
+    Object.assign(job.config.process[0].train, { steps: 750, phases: [{ name: 'Saved', steps: 750 }] }, raw);
+    const before = structuredClone(job.config.process[0].train);
     const migrated = migrateJobConfig(job);
-    assert.equal(migrated.config.process[0].train.auto_train, expected);
-    assert.equal(migrated.config.process[0].train.auto_learn, undefined);
-    assert.equal(migrated.config.process[0].train.steps, 50);
-    assert.deepEqual(migrated.config.process[0].train.phases.map(phase => phase.steps), [20, 30]);
+    assert.equal(migrated.config.process[0].train.steps, before.steps);
+    assert.deepEqual(migrated.config.process[0].train.phases, before.phases);
+    assert.ok(configContractErrors(migrated).some(error => error.includes('no longer supported')));
     assert.deepEqual(migrateJobConfig(structuredClone(migrated)), migrated);
   }
 });
 
-test('editing automatic phases keeps explicit step caps and leaves uncapped phases uncapped', () => {
-  const relative = 'app/jobs/new/TrainingPhasesEditor.tsx';
-  const defaultAutoAdvance = loadFunction(relative, 'defaultAutoAdvance');
-  const normalizePhase = loadFunction(relative, 'normalizePhase', { defaultAutoAdvance });
-  assert.equal(normalizePhase({ name: 'Capped', steps: 700 }, 0, true).steps, 700);
-  assert.equal(normalizePhase({ name: 'Uncapped' }, 0, true).steps, undefined);
+test('disabled legacy flags strip without changing finite manual phases or ordinary settings', () => {
+  const job = structuredClone(defaultJobConfig);
+  Object.assign(job.config.process[0].train, { auto_train: false, auto_learn: false, steps: 50,
+    phases: [{ name: 'Warmup', steps: 20, lr: 0.0001 }, { name: 'Detail', steps: 30, loss_type: 'mae' }] });
+  const migrated = migrateJobConfig(job);
+  assert.equal(migrated.config.process[0].train.auto_train, undefined);
+  assert.equal(migrated.config.process[0].train.auto_learn, undefined);
+  assert.deepEqual(migrated.config.process[0].train.phases.map(phase => phase.steps), [20, 30]);
+  assert.equal(migrated.config.process[0].train.steps, 50);
+  assert.deepEqual(configContractErrors(migrated), []);
+  assert.deepEqual(migrateJobConfig(structuredClone(migrated)), migrated);
+});
+
+test('manual phase validation rejects missing, nonfinite, fractional and mismatched steps', () => {
+  for (const steps of [undefined, 0, -1, 1.5, Infinity, '20']) {
+    const job = structuredClone(defaultJobConfig);
+    job.config.process[0].train.phases = [{ name: 'Repair me', steps }];
+    const migrated = migrateJobConfig(job);
+    assert.equal(migrated.config.process[0].train.phases[0].steps, steps);
+    assert.ok(configContractErrors(migrated).some(error => error.includes('positive integer')));
+  }
+  const job = structuredClone(defaultJobConfig);
+  job.config.process[0].train.phases = [{ name: 'Finite', steps: 10 }];
+  assert.ok(configContractErrors(job).some(error => error.includes('sum of manual phase steps (10)')));
 });
 
 test('effective cache status follows dataset overrides of the global default', () => {

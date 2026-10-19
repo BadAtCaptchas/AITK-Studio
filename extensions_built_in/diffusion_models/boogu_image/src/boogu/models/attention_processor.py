@@ -13,6 +13,10 @@ if is_flash_attn_available():
     from flash_attn import flash_attn_varlen_func
     from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
 else:
+    def _missing_flash_attn(*args, **kwargs):
+        raise ImportError("Flash2Varlen attention requires the optional flash_attn package")
+
+    flash_attn_varlen_func = index_first_axis = pad_input = unpad_input = _missing_flash_attn
     warnings.warn(
         "Cannot import flash_attn, install flash_attn to use Flash2Varlen attention for better performance"
     )

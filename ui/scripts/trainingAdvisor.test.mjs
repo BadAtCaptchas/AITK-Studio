@@ -366,7 +366,8 @@ test('preflight reports phase step mismatches and risky learning rates', () => {
   const ids = findingIds(result);
 
   assert.ok(ids.has('train.lr.critical'));
-  assert.ok(ids.has('phases.steps.mismatch'));
+  assert.ok(ids.has('phases.invalid.0'));
+  assert.ok(result.findings.some(finding => /sum of manual phase steps/.test(finding.message)));
 });
 
 test('preflight skips generic learning rate warning for Prodigy optimizers', () => {
@@ -396,7 +397,7 @@ test('preflight keeps generic learning rate warning for non-Prodigy optimizers',
   assert.ok(ids.has('train.lr.critical'));
 });
 
-test('preflight accepts auto training phases without fixed steps', () => {
+test('preflight rejects removed automatic phases with migration guidance', () => {
   const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
   const config = baseConfig(dataset);
   const processConfig = config.config.process[0];
@@ -409,8 +410,8 @@ test('preflight accepts auto training phases without fixed steps', () => {
   const result = analyzeTrainingAdvisor(config);
   const ids = findingIds(result);
 
-  assert.ok(!ids.has('phases.steps.mismatch'));
-  assert.equal(result.findings.length, 0);
+  assert.ok(ids.has('phases.invalid.0'));
+  assert.ok(result.findings.some(finding => /no longer supported/.test(finding.message)));
 });
 
 test('preflight reports invalid SEGA distillation configuration', () => {
@@ -484,7 +485,7 @@ test('preflight labels Klein SEGA distillation as experimental parity behavior',
   assert.ok(ids.has('train.sega_distill.teacher_cost'));
 });
 
-test('preflight reports auto training phases that cannot advance', () => {
+test('preflight rejects removed automatic training even without advancement settings', () => {
   const dataset = makeDataset({ 'one.jpg': 'image', 'one.txt': 'caption' });
   const config = baseConfig(dataset);
   const processConfig = config.config.process[0];
@@ -494,7 +495,7 @@ test('preflight reports auto training phases that cannot advance', () => {
   const result = analyzeTrainingAdvisor(config);
   const ids = findingIds(result);
 
-  assert.ok(ids.has('phases.0.auto_train.no_auto_advance'));
+  assert.ok(ids.has('phases.invalid.0'));
 });
 
 test('live advisor reports OOM, memory pressure, and plateau signals', () => {
@@ -527,7 +528,7 @@ test('live advisor reports OOM, memory pressure, and plateau signals', () => {
 
   assert.ok(ids.has('live.oom_skips'));
   assert.ok(ids.has('live.gpu_memory.high'));
-  assert.ok(ids.has('live.loss.plateau.no_auto_advance'));
+  assert.ok(ids.has('live.loss.plateau'));
 });
 
 test('clean preflight has no findings', () => {

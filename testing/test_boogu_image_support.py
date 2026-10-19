@@ -34,9 +34,8 @@ REGISTRY_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__i
 CONFIG_MODULES_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
 MEMORY_OFFLOAD_PATH = PROJECT_ROOT / "toolkit" / "memory_management" / "offload.py"
 UI_MEMORY_PATH = PROJECT_ROOT / "ui" / "src" / "utils" / "memoryProfiles.ts"
-UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
-AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
-README_PATH = PROJECT_ROOT / "README.md"
+UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "domain" / "modelOptions.ts"
+README_PATH = PROJECT_ROOT / "docs" / "supported-models.md"
 EXAMPLES = {
     "boogu_image": PROJECT_ROOT / "config" / "examples" / "train_lora_boogu_image_24gb.yaml",
     "boogu_image_edit": PROJECT_ROOT / "config" / "examples" / "train_lora_boogu_image_edit_24gb.yaml",
@@ -55,15 +54,11 @@ def ts_object_block(source: str, arch_name: str) -> str:
 
 class BooguImageSupportTest(unittest.TestCase):
     def test_backend_registry_includes_boogu_family(self):
-        source = REGISTRY_PATH.read_text(encoding="utf-8")
-
-        self.assertIn('".boogu_image"', source)
-        self.assertIn('"BooguImageModel", "boogu_image"', source)
-        self.assertIn('"BooguImageEditModel", "boogu_image_edit"', source)
-        self.assertIn('"BooguImageTurboModel", "boogu_image_turbo"', source)
-        self.assertIn("BooguImageModel,", source)
-        self.assertIn("BooguImageEditModel,", source)
-        self.assertIn("BooguImageTurboModel,", source)
+        from toolkit.model_registry import resolve_model
+        from extensions_built_in.diffusion_models.boogu_image import BooguImageModel, BooguImageEditModel, BooguImageTurboModel
+        for arch, expected in (('boogu_image', BooguImageModel), ('boogu_image_edit', BooguImageEditModel),
+                               ('boogu_image_turbo', BooguImageTurboModel)):
+            self.assertIs(resolve_model(arch), expected)
 
     def test_model_adapter_has_training_and_edit_conditioning_hooks(self):
         source = BOOGU_MODEL_PATH.read_text(encoding="utf-8")
@@ -205,14 +200,12 @@ class BooguImageSupportTest(unittest.TestCase):
         edit = ts_object_block(source, "boogu_image_edit")
         turbo = ts_object_block(source, "boogu_image_turbo")
 
-        self.assertIn("defaultAutoTrainingProfileId: 'boogu-image-balanced-lora'", base)
         self.assertIn("'config.process[0].model.name_or_path': ['Boogu/Boogu-Image-0.1-Base'", base)
         self.assertIn("'config.process[0].sample.guidance_scale': [4, 4]", base)
         self.assertIn("'config.process[0].sample.sample_steps': [50, 30]", base)
         self.assertIn("'config.process[0].network.linear': [32, defaultLinearRank]", base)
         self.assertNotIn("-fp8", base.lower())
 
-        self.assertIn("defaultAutoTrainingProfileId: 'boogu-image-edit-lora'", edit)
         self.assertIn("'config.process[0].model.name_or_path': ['Boogu/Boogu-Image-0.1-Edit'", edit)
         self.assertIn("'config.process[0].sample.guidance_scale': [5, 4]", edit)
         self.assertIn("'datasets.control_path'", edit)
@@ -222,29 +215,12 @@ class BooguImageSupportTest(unittest.TestCase):
         self.assertIn("'train.unload_text_encoder'", edit)
         self.assertNotIn("-fp8", edit.lower())
 
-        self.assertIn("defaultAutoTrainingProfileId: 'boogu-image-turbo-experimental-lora'", turbo)
         self.assertIn("'config.process[0].model.name_or_path': ['Boogu/Boogu-Image-0.1-Turbo'", turbo)
         self.assertIn("'config.process[0].sample.guidance_scale': [0, 4]", turbo)
         self.assertIn("'config.process[0].sample.sample_steps': [4, 30]", turbo)
         self.assertIn("'config.process[0].network.linear': [16, defaultLinearRank]", turbo)
         self.assertNotIn("-fp8", turbo.lower())
 
-    def test_auto_training_profiles_are_scoped(self):
-        source = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
-
-        self.assertIn("const booguImageArchs = ['boogu_image'];", source)
-        self.assertIn("const booguEditArchs = ['boogu_image_edit'];", source)
-        self.assertIn("const booguTurboArchs = ['boogu_image_turbo'];", source)
-        self.assertIn("id: 'boogu-image-balanced-lora'", source)
-        self.assertIn("id: 'boogu-image-edit-lora'", source)
-        self.assertIn("id: 'boogu-image-turbo-experimental-lora'", source)
-        self.assertIn("modelArchs: booguImageArchs", source)
-        self.assertIn("modelArchs: booguEditArchs", source)
-        self.assertIn("modelArchs: booguTurboArchs", source)
-        self.assertIn("loraNetwork(32, { transformer_only: true })", source)
-        self.assertIn("loraNetwork(16, { transformer_only: true })", source)
-        self.assertIn("unload_text_encoder: false", source)
-        self.assertIn("phase('Tiny polish', 0.000005", source)
 
     def test_example_configs(self):
         for arch, path in EXAMPLES.items():
@@ -275,16 +251,14 @@ class BooguImageSupportTest(unittest.TestCase):
         self.assertEqual(turbo["sample"]["guidance_scale"], 0)
         self.assertEqual(turbo["sample"]["sample_steps"], 4)
 
-    def test_readme_documents_supported_models_and_fp8_guidance(self):
+    def test_documentation_lists_supported_models_and_examples_exist(self):
         source = README_PATH.read_text(encoding="utf-8")
 
         self.assertIn("Boogu/Boogu-Image-0.1-Base", source)
         self.assertIn("Boogu/Boogu-Image-0.1-Edit", source)
         self.assertIn("Boogu/Boogu-Image-0.1-Turbo", source)
-        self.assertIn("The official Boogu fp8 repos are not first-class training presets", source)
-        self.assertIn("train_lora_boogu_image_24gb.yaml", source)
-        self.assertIn("train_lora_boogu_image_edit_24gb.yaml", source)
-        self.assertIn("train_lora_boogu_image_turbo_experimental_24gb.yaml", source)
+        for path in EXAMPLES.values():
+            self.assertTrue(path.is_file())
 
 
 if __name__ == "__main__":

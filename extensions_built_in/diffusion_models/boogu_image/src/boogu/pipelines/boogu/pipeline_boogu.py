@@ -207,7 +207,7 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
             mllm=mllm,
             processor=processor,
         )
-        self.prompt_embedding = None
+        self.prompt_embedding: Optional[PromptEmbedding] = None
 
         # Now it is safe to set additional attributes
         self.text_instruction_rewriter = _text_rewriter_model
@@ -1357,7 +1357,7 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
                 device=prompt_embedding_device,
                 dtype=torch.long,
             )  # [num_tokens]
-            trainable_prompt_embeds = self.prompt_embedding(
+            trainable_prompt_embeds = self.prompt_embedding.__call__(
                 token_indices,
                 1,
                 device=prompt_embedding_device,
@@ -3422,6 +3422,7 @@ class BooguImagePipeline(DiffusionPipeline, BooguImageLoraLoaderMixin):
                         ref_image_hidden_states=None,
                     )
 
+                    model_pred_drop_text_empty_instruct = model_pred_drop_text
                     if (
                         use_empty_neg_instruct_4_ref_img_pred_at_image_guide_in_double_guide
                         or use_empty_neg_instruct_4_ref_img_pred_at_text_guide_in_double_guide
@@ -3941,7 +3942,7 @@ class BooguImagePromptTuningPipeline(BooguImagePipeline):
                 device=prompt_embedding_device,
                 dtype=torch.long,
             )  # [num_tokens]
-            trainable_prompt_embeds = self.prompt_embedding(
+            trainable_prompt_embeds = self.prompt_embedding.__call__(
                 token_indices,
                 1,
                 device=prompt_embedding_device,

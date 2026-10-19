@@ -466,16 +466,6 @@ export interface EMAConfig {
 
 export type TrainLossType = 'mse' | 'mae' | 'band' | 'wavelet' | 'stepped' | 'pixelspace' | 'mean_flow' | 'pseudo_huber';
 
-export interface PhaseAutoAdvanceConfig {
-  type: 'loss_plateau';
-  metric?: string;
-  mode?: 'min' | 'max';
-  min_steps?: number;
-  window?: number;
-  patience?: number;
-  min_delta_pct?: number;
-}
-
 export type LTXStrategyConditionType = 'first_frame' | 'prefix' | 'suffix';
 
 export interface LTXStrategyCondition {
@@ -537,7 +527,6 @@ export interface TrainingPhaseConfig {
   pred_scaler?: number;
   reg_weight?: number;
   max_grad_norm?: number;
-  auto_advance?: PhaseAutoAdvanceConfig;
 }
 
 export interface ValidationItem {
@@ -556,9 +545,6 @@ export interface TrainConfig {
   batch_size: number;
   bypass_guidance_embedding?: boolean;
   steps: number;
-  auto_train?: boolean;
-  /** Legacy alias, canonicalized to auto_train when loading a job. */
-  auto_learn?: boolean;
   phases?: TrainingPhaseConfig[];
   save_on_phase_change?: boolean;
   gradient_accumulation: number;

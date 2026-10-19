@@ -418,11 +418,9 @@ class Qwen3VLTextRotaryEmbedding(nn.Module):
         """Standard RoPE inv_freq. Mirrors upstream Qwen3VL since newer
         transformers removed "default" from ROPE_INIT_FUNCTIONS."""
         rope_params = getattr(config, "rope_parameters", None)
-        base = (
-            rope_params["rope_theta"]
-            if rope_params and "rope_theta" in rope_params
-            else getattr(config, "rope_theta", 10000.0)
-        )
+        base = getattr(config, "rope_theta", 10000.0)
+        if isinstance(rope_params, dict):
+            base = dict(rope_params).get("rope_theta", base)
         dim = (
             getattr(config, "head_dim", None)
             or config.hidden_size // config.num_attention_heads

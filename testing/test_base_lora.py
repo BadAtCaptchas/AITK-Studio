@@ -128,6 +128,7 @@ class FakeBaseModel:
         self.is_vega = False
         self.use_old_lokr_format = True
         self.target_lora_modules = ["TinyRoot"]
+        self._fused_base_lora_networks = []
 
     def get_model_to_train(self):
         return self.model

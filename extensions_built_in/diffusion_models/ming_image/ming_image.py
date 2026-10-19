@@ -367,7 +367,7 @@ class MingImageDesignModel(BaseModel):
         for index, timestep in enumerate(scheduler.timesteps):
             check = getattr(self, 'sample_cancel_check', None)
             if callable(check):
-                check()
+                check.__call__()
             positive = self.get_noise_prediction(latents, timestep[None], conditional_embeds).float()
             prediction = positive
             if gen_config.guidance_scale > 0:

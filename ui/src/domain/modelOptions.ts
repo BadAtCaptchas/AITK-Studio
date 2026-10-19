@@ -83,7 +83,6 @@ export interface ModelArch {
   additionalSections?: AdditionalSections[];
   accuracyRecoveryAdapters?: { [key: string]: string };
   sampleTags?: SampleTags;
-  defaultAutoTrainingProfileId?: string;
   modelNotes?: ModelNotes;
   extensionNotes?: ReactNode;
   customSections?: (config: JobConfig, setJobConfig: (value: unknown, key: string) => void) => ReactNode;
@@ -1020,7 +1019,6 @@ const modelPresentation: ModelArch[] = [
     name: 'glm_image',
     label: 'GLM-Image',
     group: 'image',
-    defaultAutoTrainingProfileId: 'glm-image-balanced-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['zai-org/GLM-Image', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -1042,7 +1040,6 @@ const modelPresentation: ModelArch[] = [
     name: 'boogu_image',
     label: 'Boogu-Image Base',
     group: 'image',
-    defaultAutoTrainingProfileId: 'boogu-image-balanced-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['Boogu/Boogu-Image-0.1-Base', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -1072,7 +1069,6 @@ const modelPresentation: ModelArch[] = [
     name: 'boogu_image_edit',
     label: 'Boogu-Image Edit',
     group: 'instruction',
-    defaultAutoTrainingProfileId: 'boogu-image-edit-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['Boogu/Boogu-Image-0.1-Edit', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -1110,7 +1106,6 @@ const modelPresentation: ModelArch[] = [
     name: 'boogu_image_turbo',
     label: 'Boogu-Image Turbo (experimental)',
     group: 'experimental',
-    defaultAutoTrainingProfileId: 'boogu-image-turbo-experimental-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['Boogu/Boogu-Image-0.1-Turbo', defaultNameOrPath],
       'config.process[0].model.quantize': [true, false],
@@ -2101,7 +2096,6 @@ const modelPresentation: ModelArch[] = [
     name: 'ideogram4',
     label: 'Ideogram 4 NF4',
     group: 'image',
-    defaultAutoTrainingProfileId: 'ideogram4-balanced-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['ideogram-ai/ideogram-4-nf4', defaultNameOrPath],
       'config.process[0].model.extras_name_or_path': ['ideogram-ai/ideogram-4-nf4', undefined],
@@ -2138,7 +2132,6 @@ const modelPresentation: ModelArch[] = [
     label: 'Ideogram 4 FP8',
     group: 'image',
     gateUrl: 'https://huggingface.co/ideogram-ai/ideogram-4-fp8',
-    defaultAutoTrainingProfileId: 'ideogram4-balanced-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['ideogram-ai/ideogram-4-fp8', defaultNameOrPath],
       'config.process[0].model.extras_name_or_path': ['ideogram-ai/ideogram-4-fp8', undefined],
@@ -2175,7 +2168,6 @@ const modelPresentation: ModelArch[] = [
     name: 'ideogram4:nvfp4',
     label: 'Ideogram 4 Comfy NVFP4',
     group: 'image',
-    defaultAutoTrainingProfileId: 'ideogram4-balanced-lora',
     defaults: {
       'config.process[0].model.name_or_path': ['Comfy-Org/Ideogram-4', defaultNameOrPath],
       'config.process[0].model.extras_name_or_path': ['ideogram-ai/ideogram-4-fp8', undefined],

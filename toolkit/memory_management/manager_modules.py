@@ -172,7 +172,7 @@ def _is_quantized_tensor(t: Optional[torch.Tensor]) -> bool:
         return False
     # torch quantized tensors
     try:
-        if torch.is_quantized(t):  # type: ignore[attr-defined]
+        if t.is_quantized:
             return True
     except Exception:
         pass

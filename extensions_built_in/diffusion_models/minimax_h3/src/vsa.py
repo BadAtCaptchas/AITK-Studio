@@ -282,9 +282,9 @@ def vsa_attention(
             "CUDA tensors and the default scale"
         )
     if use_fv:
-        from . import vsa_kernels
+        from .vsa_kernels import block_sparse_attn
 
-        out = vsa_kernels.block_sparse_attn(
+        out = block_sparse_attn(
             qt.permute(0, 2, 1, 3),
             kt.permute(0, 2, 1, 3),
             vt.permute(0, 2, 1, 3),

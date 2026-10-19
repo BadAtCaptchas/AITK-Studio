@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 from PIL import Image
@@ -40,6 +41,13 @@ class PixelEncoder(FakeSD):
         )
 
 
+class RequiredReferenceEncoder(PixelEncoder):
+    def encode_prompt(self, caption, control_images=None, **kwargs):
+        if control_images is None:
+            raise ValueError('A reference image is required')
+        return super().encode_prompt(caption, control_images=control_images, **kwargs)
+
+
 class DatasetCacheIdentityTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -55,11 +63,15 @@ class DatasetCacheIdentityTests(unittest.TestCase):
         # Fixed-size encoding lets replacement retain the size and timestamp.
         Image.new('RGB', (64, 64), color).save(path, compress_level=0)
 
-    def reference_loader(self):
-        encoder = PixelEncoder(control=True)
-        config = DatasetConfig(
+    def reference_loader(self, encoder_class=PixelEncoder, **overrides):
+        encoder = encoder_class(control=True)
+        options = dict(
             folder_path=str(self.target.parent), control_path=str(self.reference.parent),
             resolution=64, cache_text_embeddings=True, caption_dropout_rate=0,
+        )
+        options.update(overrides)
+        config = DatasetConfig(
+            **options,
         )
         loader = get_dataloader_from_datasets([config], sd=encoder)
         return encoder, loader, loader.dataset.datasets[0].file_list[0]
@@ -114,6 +126,45 @@ class DatasetCacheIdentityTests(unittest.TestCase):
         self.assertNotEqual(reordered['control_reference_contents'][0], replaced['control_reference_contents'][0])
         self.assertEqual(reordered['control_reference_contents'][1], replaced['control_reference_contents'][1])
         self.assertNotIn('control_reference_contents', item.get_text_embedding_info_dict(text_only=True))
+
+    def test_caption_dropout_keeps_references_and_invalidates_replacements(self):
+        for encoder_class in (PixelEncoder, RequiredReferenceEncoder):
+            with self.subTest(encoder_class=encoder_class.__name__):
+                self.write_image(self.reference, (0, 0, 0))
+                _, first, first_item = self.reference_loader(
+                    encoder_class, caption_dropout_rate=1,
+                    diff_output_preservation=True, diff_output_preservation_class='person',
+                    trigger_word='subject',
+                )
+                blank_path = first_item.get_blank_text_embedding_path()
+                dop_path = first_item.get_dop_blank_text_embedding_path()
+                before = next(iter(first)).prompt_embeds.text_embeds.clone()
+                torch.testing.assert_close(before, torch.zeros_like(before))
+                self.write_image(self.reference, (255, 255, 255))
+                encoder, second, item = self.reference_loader(
+                    encoder_class, caption_dropout_rate=1,
+                    diff_output_preservation=True, diff_output_preservation_class='person',
+                    trigger_word='subject',
+                )
+                self.assertNotEqual(blank_path, item.get_blank_text_embedding_path())
+                self.assertNotEqual(dop_path, item.get_dop_blank_text_embedding_path())
+                batch = next(iter(second))
+                expected = encoder.encode_prompt('', control_images=torch.ones(1, 3, 64, 64))
+                torch.testing.assert_close(batch.prompt_embeds.text_embeds, expected.text_embeds)
+                torch.testing.assert_close(batch.dop_prompt_embeds.text_embeds, expected.text_embeds)
+
+    def test_caption_dropout_does_not_hide_encoder_failures(self):
+        self.write_image(self.reference, (0, 0, 0))
+        original = PixelEncoder.encode_prompt
+
+        def failing_dropout(encoder, caption, **kwargs):
+            if not caption:
+                raise RuntimeError('Encoder failure')
+            return original(encoder, caption, **kwargs)
+
+        with mock.patch.object(PixelEncoder, 'encode_prompt', failing_dropout):
+            with self.assertRaisesRegex(RuntimeError, 'Encoder failure'):
+                self.reference_loader(caption_dropout_rate=1)
 
     def test_standardization_changes_latents_and_reuses_the_correct_variant(self):
         plain_encoder, plain = self.latent_dataset(False)

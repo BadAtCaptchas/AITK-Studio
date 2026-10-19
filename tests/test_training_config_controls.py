@@ -31,17 +31,16 @@ class TrainingConfigControlsTests(unittest.TestCase):
         self.assertEqual(config.content_or_style_reg, "content")
         self.assertEqual(config.content_or_style, "style")
 
-    def test_legacy_auto_learning_alias_and_explicit_canonical_override(self):
-        for raw, expected in (({"auto_learn": True}, True), ({"auto_learn": False}, False),
-                              ({"auto_learn": True, "auto_train": False}, False),
-                              ({"auto_learn": False, "auto_train": True}, True)):
+    def test_retired_automatic_settings_are_rejected_and_false_aliases_ignored(self):
+        for raw in ({"auto_learn": True}, {"auto_learn": True, "auto_train": False},
+                    {"auto_learn": False, "auto_train": True}):
             with self.subTest(raw=raw):
-                self.assertEqual(TrainConfig(**raw).auto_train, expected)
+                with self.assertRaisesRegex(ValueError, "Auto Learn is no longer supported"):
+                    TrainConfig(**raw)
+        self.assertNotIn('auto_train', vars(TrainConfig(auto_train=False, auto_learn=False)))
 
-    def test_automatic_phase_step_cap_is_an_effective_training_limit(self):
-        config = TrainConfig(auto_train=True, steps=3000,
-                             phases=[{"name": "capped", "steps": 2,
-                                      "auto_advance": {"min_steps": 100, "window": 10}}])
+    def test_manual_phase_step_count_is_the_training_limit(self):
+        config = TrainConfig(steps=2, phases=[{"name": "finite", "steps": 2}])
         manager = TrainingPhaseManager(config)
         result = manager.maybe_advance_after_step(1)
         self.assertTrue(result.should_stop)

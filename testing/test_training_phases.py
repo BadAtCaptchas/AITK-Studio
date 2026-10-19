@@ -13,7 +13,6 @@ def make_train_config(**overrides):
     lr = overrides.pop("lr", 1e-4)
     values = {
         "steps": 10,
-        "auto_train": False,
         "phases": None,
         "save_on_phase_change": True,
         "lr": lr,
@@ -52,6 +51,42 @@ def make_train_config(**overrides):
 
 
 class TrainingPhaseManagerTest(unittest.TestCase):
+    def test_retired_automatic_modes_fail_early_and_false_flags_are_ignored(self):
+        from toolkit.config_modules import TrainConfig
+        for settings in (
+            {'auto_train': True}, {'auto_learn': True},
+            {'auto_train': False, 'auto_learn': True},
+            {'auto_advance': None},
+            {'steps': 10, 'phases': [{'steps': 10, 'auto_advance': {}}]},
+            {'steps': 10, 'phases': [{'steps': 10, 'auto_advance': None}]},
+        ):
+            with self.subTest(settings=settings):
+                with self.assertRaisesRegex(ValueError, 'Auto Learn is no longer supported'):
+                    TrainConfig(**settings)
+                with self.assertRaisesRegex(ValueError, 'Auto Learn is no longer supported'):
+                    TrainingPhaseManager(make_train_config(**settings))
+        config = TrainConfig(auto_train=False, auto_learn=False, steps=5, phases=[{'steps': 5}])
+        self.assertNotIn('auto_train', vars(config))
+        self.assertNotIn('auto_learn', vars(config))
+        self.assertTrue(TrainingPhaseManager(config).enabled)
+
+    def test_training_and_phase_steps_must_be_positive_finite_integers(self):
+        from toolkit.config_modules import TrainConfig
+        for value in (None, 0, -1, True, 1.5, float('inf'), float('nan'), '10'):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, 'positive finite integer'):
+                    TrainConfig(steps=value)
+                with self.assertRaisesRegex(ValueError, 'positive finite integer'):
+                    TrainConfig(phases=[{'steps': value}])
+        with self.assertRaisesRegex(ValueError, 'positive finite integer'):
+            TrainConfig(phases=[{'name': 'missing steps'}])
+
+    def test_final_manual_phase_stops_after_its_finite_steps(self):
+        manager = TrainingPhaseManager(make_train_config(steps=2, phases=[{'steps': 2}]))
+        self.assertFalse(manager.maybe_advance_after_step(0).should_stop)
+        self.assertTrue(manager.maybe_advance_after_step(1).should_stop)
+        self.assertFalse(manager.maybe_advance_after_step(2).changed)
+
     def test_legacy_config_without_phases_is_disabled(self):
         config = make_train_config(steps=25, lr=3e-4)
         manager = TrainingPhaseManager(config)
@@ -132,7 +167,7 @@ class TrainingPhaseManagerTest(unittest.TestCase):
         self.assertEqual(manager.get_phase_local_step(5), 2)
         self.assertEqual(config.lr, 5e-6)
 
-    def test_resume_with_phase_metadata_preserves_auto_advanced_start(self):
+    def test_resume_with_phase_metadata_preserves_deferred_update_boundary(self):
         config = make_train_config(
             steps=10,
             phases=[
@@ -142,115 +177,15 @@ class TrainingPhaseManagerTest(unittest.TestCase):
         )
         manager = TrainingPhaseManager(config)
 
-        manager.restore_from_training_info({"step": 5, "phase_index": 1, "phase_start_step": 4})
-        manager.apply(config, 5)
+        manager.restore_from_training_info({"step": 8, "phase_index": 1, "phase_start_step": 7})
+        manager.apply(config, 8)
 
         self.assertEqual(manager.current_index, 1)
-        self.assertEqual(manager.get_phase_local_step(5), 1)
+        self.assertEqual(manager.get_phase_local_step(8), 1)
         self.assertEqual(config.lr, 5e-6)
 
-    def test_plateau_auto_advance_waits_for_min_steps_windows_and_patience(self):
-        config = make_train_config(
-            steps=16,
-            phases=[
-                {
-                    "name": "shape",
-                    "steps": 10,
-                    "lr": 3e-5,
-                    "auto_advance": {
-                        "type": "loss_plateau",
-                        "window": 2,
-                        "patience": 2,
-                        "min_steps": 4,
-                        "min_delta_pct": 1.0,
-                    },
-                },
-                {"name": "detail", "steps": 6, "lr": 5e-6},
-            ],
-        )
-        manager = TrainingPhaseManager(config)
-        result = None
 
-        for step, loss in enumerate([1.0, 1.0, 1.005, 1.005, 1.004, 1.006]):
-            manager.observe_metrics(step, {"loss/loss": loss})
-            result = manager.maybe_advance_after_step(step)
-            if step < 5:
-                self.assertFalse(result.changed)
 
-        self.assertIsNotNone(result)
-        self.assertTrue(result.changed)
-        self.assertEqual(result.reason, "loss_plateau")
-        self.assertEqual(manager.current_index, 1)
-        self.assertEqual(manager.current_phase_start_step, 6)
-
-    def test_auto_advance_defaults(self):
-        config = make_train_config(
-            steps=10,
-            phases=[
-                {"name": "shape", "steps": 10, "auto_advance": {"type": "loss_plateau"}},
-            ],
-        )
-        manager = TrainingPhaseManager(config)
-
-        auto_advance = manager.current_phase.auto_advance
-        self.assertIsNotNone(auto_advance)
-        self.assertEqual(auto_advance.metric, "loss/loss")
-        self.assertEqual(auto_advance.mode, "min")
-        self.assertEqual(auto_advance.window, 100)
-        self.assertEqual(auto_advance.patience, 2)
-        self.assertEqual(auto_advance.min_steps, 200)
-        self.assertEqual(auto_advance.min_delta_pct, 1.0)
-
-    def test_auto_train_allows_step_less_phases_and_stops_on_final_plateau(self):
-        config = make_train_config(
-            steps=10,
-            auto_train=True,
-            phases=[
-                {
-                    "name": "shape",
-                    "lr": 3e-5,
-                    "auto_advance": {
-                        "type": "loss_plateau",
-                        "window": 2,
-                        "patience": 1,
-                        "min_steps": 4,
-                        "min_delta_pct": 1.0,
-                    },
-                },
-                {
-                    "name": "detail",
-                    "lr": 5e-6,
-                    "auto_advance": {
-                        "type": "loss_plateau",
-                        "window": 2,
-                        "patience": 1,
-                        "min_steps": 4,
-                        "min_delta_pct": 1.0,
-                    },
-                },
-            ],
-        )
-        manager = TrainingPhaseManager(config)
-
-        manager.apply(config, 0)
-        self.assertIsNone(manager.current_phase.steps)
-        self.assertEqual(config.lr, 3e-5)
-
-        for step, loss in enumerate([1.0, 1.0, 1.01, 1.01]):
-            manager.observe_metrics(step, {"loss/loss": loss})
-            result = manager.maybe_advance_after_step(step)
-
-        self.assertTrue(result.changed)
-        self.assertEqual(result.reason, "loss_plateau")
-        manager.apply(config, 4)
-        self.assertEqual(config.lr, 5e-6)
-
-        for step, loss in enumerate([0.9, 0.9, 0.91, 0.91], start=4):
-            manager.observe_metrics(step, {"loss/loss": loss})
-            result = manager.maybe_advance_after_step(step)
-
-        self.assertTrue(result.should_stop)
-        self.assertEqual(result.reason, "loss_plateau")
 
 
 if __name__ == "__main__":

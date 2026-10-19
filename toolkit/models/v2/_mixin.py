@@ -618,12 +618,14 @@ class OstrisModelMixin:
         """Queue kernel readahead for the whole file. safetensors tensors are
         mmap-backed; without this a cold cache faults pages in per-tensor
         cudaMemcpy order at a fraction of the drive's sequential bandwidth."""
-        if not hasattr(os, "posix_fadvise"):
+        advise = getattr(os, "posix_fadvise", None)
+        willneed = getattr(os, "POSIX_FADV_WILLNEED", None)
+        if not callable(advise) or willneed is None:
             return  # non-POSIX: mmap readahead heuristics only
         try:
             fd = os.open(file_path, os.O_RDONLY)
             try:
-                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_WILLNEED)
+                advise.__call__(fd, 0, 0, willneed)
             finally:
                 os.close(fd)
         except OSError:

@@ -156,6 +156,7 @@ error_margin = 1e-8
 tmp_merge_key = "TMP___MERGE"
 
 te_suffix = ''
+ldm_res_block_prefix = None
 proj_pattern_weight = None
 proj_pattern_bias = None
 text_proj_layer = None
@@ -178,7 +179,7 @@ if args.sd2:
     proj_pattern_bias = r"cond_stage_model\.model\.transformer\.resblocks\.(\d+)\.attn\.in_proj_bias"
     text_proj_layer = "cond_stage_model.model.text_projection"
 
-if args.sdxl or args.sd2 or args.ssd or args.refiner or args.vega:
+if ldm_res_block_prefix is not None:
     if "conditioner.embedders.1.model.text_projection" in ldm_dict_keys:
         # d_model = int(checkpoint[prefix + "text_projection"].shape[0]))
         d_model = int(ldm_state_dict["conditioner.embedders.1.model.text_projection"].shape[0])

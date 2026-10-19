@@ -356,6 +356,7 @@ class MelBandRoformer(Module):
         ])
 
         self.zero_dc = zero_dc
+        self._compiled_core = None
 
     def stft(self, raw_audio):
         """raw_audio (b s t) -> band-gathered real features (b t (f c)), and stft_repr (b (f s) t c)."""
@@ -383,6 +384,12 @@ class MelBandRoformer(Module):
         return x, stft_repr
 
     def core(self, x):
+        """Run the real-valued trunk, using its compiled implementation when enabled."""
+        if self._compiled_core is not None:
+            return self._compiled_core(x)
+        return self._core(x)
+
+    def _core(self, x):
         """Real-valued trunk (b t (f c)) -> masks (b n t (f c)); the torch.compile target."""
         x = self.band_split(x)
 
@@ -443,13 +450,13 @@ class MelBandRoformer(Module):
 
     def compile_core(self, **kwargs):
         """Fuse the trunk's elementwise chains; batch dim is marked dynamic so any batch size hits one graph."""
-        compiled = torch.compile(self.core, **kwargs)
+        compiled = torch.compile(self._core, **kwargs)
 
         def core(x):
             torch._dynamo.mark_dynamic(x, 0)
             return compiled(x)
 
-        self.core = core
+        self._compiled_core = core
         return self
 
     def forward(self, raw_audio):

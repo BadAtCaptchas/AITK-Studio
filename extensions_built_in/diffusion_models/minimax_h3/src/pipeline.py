@@ -26,14 +26,16 @@ import torch
 from PIL import Image
 from diffusers.utils.torch_utils import randn_tensor
 
-from . import packing
 from .text_encoder import trim_caption_tokens
 from .packing import (
     AUDIO_CHANNELS,
+    AUDIO_SAMPLE_RATE,
     AUDIO_SIGMA_SHIFT,
     FPS,
     KEYFRAME_NOISE_AUG_T,
     VIDEO_SIGMA_SHIFT,
+    align_num_frames_down,
+    audio_latent_num_frames,
     build_packed_sequence,
     build_row_timesteps,
     build_sigma_schedule,
@@ -42,6 +44,7 @@ from .packing import (
     remap_sigma,
     unpack_audio_tokens,
     unpatchify_video_tokens,
+    video_latent_num_frames,
 )
 
 
@@ -90,8 +93,8 @@ class MiniMaxH3Pipeline:
 
         is_video = num_frames > 1
         if is_video:
-            num_frames = packing.align_num_frames_down(num_frames)
-            t_lat = packing.video_latent_num_frames(num_frames)
+            num_frames = align_num_frames_down(num_frames)
+            t_lat = video_latent_num_frames(num_frames)
         else:
             # true single-frame generation (image mode, LTX-2.3 style): one
             # latent frame with keyframe-row geometry — the same layout image
@@ -100,7 +103,7 @@ class MiniMaxH3Pipeline:
             t_lat = 1
         h_lat = height // 16
         w_lat = width // 16
-        a_lat = packing.audio_latent_num_frames(num_frames)
+        a_lat = audio_latent_num_frames(num_frames)
 
         text_embeds, token_tags = trim_caption_tokens(
             conditional_embeds.text_embeds[0],
@@ -282,6 +285,6 @@ class MiniMaxH3Pipeline:
             "video": video,
             "fps": FPS,
             "audio": audio_out,
-            "audio_sample_rate": packing.AUDIO_SAMPLE_RATE,
+            "audio_sample_rate": AUDIO_SAMPLE_RATE,
             "output_path": None,
         }

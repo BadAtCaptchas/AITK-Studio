@@ -1,5 +1,5 @@
 from typing import List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 from transformers import PretrainedConfig, Qwen3Config
 
@@ -35,7 +35,7 @@ class MossMusicEncoderConfig:
     def from_dict(cls, config_dict):
         if config_dict is None:
             return cls()
-        allowed_keys = set(cls.__dataclass_fields__.keys())
+        allowed_keys = {config_field.name for config_field in fields(cls)}
         filtered = {k: v for k, v in config_dict.items() if k in allowed_keys}
         return cls(**filtered)
 

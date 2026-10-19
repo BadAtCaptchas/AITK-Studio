@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
-import { createHookHarness } from './reactHookHarness.mjs';
 
 function load(relative, dependencies = {}) {
   const code = ts.transpileModule(fs.readFileSync(new URL(relative, import.meta.url), 'utf8'), {
@@ -75,40 +74,37 @@ test('resource initializers run only when the resource identity changes', () => 
   assert.equal(reads, 2);
 });
 
-test('architecture changes reapply the same fallback profile without overwriting ordinary parent edits', () => {
-  const harness = createHookHarness();
-  const fallback = { id: 'fallback', name: 'Fallback', train: { lr: 0.001 }, phases: [] };
-  const specialized = { id: 'specialized', name: 'Specialized', modelArchs: ['A'], phases: [] };
+test('manual phase editor never rewrites saved settings on mount and synchronizes explicit edits', () => {
   const jsx = (type, props) => ({ type, props });
   const renderEditor = load('../src/app/jobs/new/TrainingPhasesEditor.tsx', {
-    react: harness.react,
     'react/jsx-runtime': { jsx, jsxs: jsx },
-    '@/hooks/useStoredString': { default: () => ['[]', () => {}] },
     '@/components/formInputs': { Checkbox: 'checkbox', NumberInput: 'number', SelectInput: 'select', TextInput: 'text' },
-    'lucide-react': { Copy: 'copy', Plus: 'plus', Save: 'save', Trash2: 'trash' },
-    './autoTrainingProfiles': {
-      builtInAutoTrainingProfiles: [fallback, specialized],
-      isAutoTrainingProfileCompatible: (profile, arch) => !profile.modelArchs || profile.modelArchs.includes(arch),
-    },
+    'lucide-react': { Copy: 'copy', Plus: 'plus', Trash2: 'trash' },
   }).default;
+  const train = { steps: 1000, optimizer: 'adamw', lr: 0.000007, loss_type: 'mae', phases: [
+    { name: 'Saved custom phase', steps: 750, lr: 0.000003 }, { name: 'Detail', steps: 250 },
+  ] };
+  const before = structuredClone(train);
   const writes = [];
-  const render = arch => harness.render(() => renderEditor({
-    train: { auto_train: true, phases: [] },
-    currentArch: arch,
-    defaultAutoTrainingProfileId: 'specialized',
-    setJobConfig: (value, key) => writes.push({ value, key }),
-  }));
-  const fallbackApplications = () => writes.filter(write => write.key === 'config.process[0].train.lr').length;
-  render('A');
-  assert.equal(fallbackApplications(), 0);
-  render('B');
-  assert.equal(fallbackApplications(), 1);
-  render('B');
-  assert.equal(fallbackApplications(), 1, 'ordinary parent renders must not reapply a profile');
-  render('A');
-  render('B');
-  assert.equal(fallbackApplications(), 2, 'the same fallback must be applied on each incompatible switch');
-  harness.cleanup();
+  const render = () => renderEditor({ train, setJobConfig: (value, key) => writes.push({ value, key }) });
+  const tree = render();
+  render();
+  assert.deepEqual(writes, []);
+  assert.deepEqual(train, before);
+  const nodes = [];
+  function visit(node) {
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (!node || typeof node !== 'object') return;
+    nodes.push(node);
+    visit(node.props?.children);
+  }
+  visit(tree);
+  const steps = nodes.filter(node => node.type === 'number' && node.props.label === 'Steps');
+  assert.equal(steps.length, 2);
+  steps[0].props.onChange(600);
+  assert.deepEqual(writes.find(write => write.key.endsWith('.phases')).value.map(phase => phase.steps), [600, 250]);
+  assert.equal(writes.find(write => write.key.endsWith('.train.steps')).value, 850);
+  assert.deepEqual(train, before);
 });
 
 const { createCaptionCache } = load('../src/components/dataset-image-studio/captionCache.ts');

@@ -469,7 +469,7 @@ class I1DiT3B(nn.Module):
         self.hw = hw
         pos = _get_interpolated_pos_embed(hidden_size, hw, image_resolution)
         self.pos_embed = nn.Parameter(
-            torch.from_numpy(pos.reshape(1, hw * hw, hidden_size))
+            torch.from_numpy(pos.reshape((1, hw * hw, hidden_size)))
         )
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.text_encoder_adapter = TextEncoderAdapterTransformer(

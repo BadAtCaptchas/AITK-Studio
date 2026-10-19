@@ -14,6 +14,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-format', default='text')
     parser.add_argument('--output', help='Write the Pylint report to this file')
+    parser.add_argument('--errors-only', action='store_true', help='Report only correctness errors and fatal errors')
     args = parser.parse_args()
     sys.path.insert(0, str(ROOT))
     if importlib.util.find_spec('pylint') is None:
@@ -37,6 +38,8 @@ def main() -> int:
     options = [f'--rcfile={ROOT / ".pylintrc"}', f'--output-format={args.output_format}']
     if args.output:
         options.append(f'--output={args.output}')
+    if args.errors_only:
+        options.append('--errors-only')
     print(f'Pylint: checking {len(files)} Python source files.', file=sys.stderr, flush=True)
     return Run(options + modules, exit=False).linter.msg_status
 

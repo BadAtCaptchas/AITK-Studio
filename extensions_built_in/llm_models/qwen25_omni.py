@@ -86,6 +86,8 @@ class Qwen25OmniLLM(BaseModel):
         self.loss_chunk = int(kw.get("loss_chunk", 512))
         self.debug = bool(kw.get("debug", False))
         self.processor = None
+        self._mel_filters = None
+        self._mel_window = None
         self.additional_loss_logs = {}
 
     @staticmethod

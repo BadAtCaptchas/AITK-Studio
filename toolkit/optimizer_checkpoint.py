@@ -7,6 +7,7 @@ import torch
 
 OPTIMIZER_CHECKPOINT_FORMAT_VERSION = 1
 RAW_ADAPTER_CHECKPOINT_FORMAT_VERSION = 2
+EMA_CHECKPOINT_FORMAT_VERSION = 3
 
 
 class OptimizerCheckpointValidationError(ValueError):
@@ -20,16 +21,28 @@ def _validate_step(step, label):
 
 
 def _checkpoint_digest(path):
-    if not path or not os.path.isfile(path):
-        raise OptimizerCheckpointValidationError("Adapter resume state requires a model checkpoint file")
+    if not path or not os.path.exists(path):
+        raise OptimizerCheckpointValidationError("Resume state requires a model checkpoint file or directory")
     digest = hashlib.sha256()
-    with open(path, "rb") as checkpoint:
-        for chunk in iter(lambda: checkpoint.read(4 * 1024 * 1024), b""):
-            digest.update(chunk)
+    if os.path.isdir(path):
+        files = sorted(os.path.join(root, name) for root, _, names in os.walk(path) for name in names)
+        if not files:
+            raise OptimizerCheckpointValidationError("Model checkpoint directory is empty")
+    else:
+        files = [path]
+    for filename in files:
+        if os.path.isdir(path):
+            digest.update(os.path.relpath(filename, path).replace(os.sep, '/').encode('utf-8'))
+            digest.update(b'\0')
+            digest.update(str(os.path.getsize(filename)).encode('ascii'))
+            digest.update(b'\0')
+        with open(filename, "rb") as checkpoint:
+            while chunk := checkpoint.read(4 * 1024 * 1024):
+                digest.update(chunk)
     return digest.hexdigest()
 
 
-def build_optimizer_checkpoint(state_dict, step, checkpoint_path=None, adapter_resume_state=None):
+def build_optimizer_checkpoint(state_dict, step, checkpoint_path=None, adapter_resume_state=None, ema_resume_state=None):
     _validate_step(step, "Optimizer checkpoint step")
     if not isinstance(state_dict, dict):
         raise OptimizerCheckpointValidationError("Optimizer state must be a dictionary")
@@ -43,6 +56,11 @@ def build_optimizer_checkpoint(state_dict, step, checkpoint_path=None, adapter_r
         payload["format_version"] = RAW_ADAPTER_CHECKPOINT_FORMAT_VERSION
         payload["adapter_resume_state"] = adapter_resume_state
         payload["model_checkpoint_sha256"] = _checkpoint_digest(checkpoint_path)
+    if ema_resume_state is not None:
+        payload["format_version"] = EMA_CHECKPOINT_FORMAT_VERSION
+        payload["ema_resume_state"] = ema_resume_state
+        if "model_checkpoint_sha256" not in payload:
+            payload["model_checkpoint_sha256"] = _checkpoint_digest(checkpoint_path)
     return payload
 
 
@@ -53,7 +71,7 @@ def invalidate_optimizer_checkpoint(path):
         return
 
 
-def atomic_save_optimizer_checkpoint(path, state_dict, step, checkpoint_path=None, adapter_resume_state=None):
+def atomic_save_optimizer_checkpoint(path, state_dict, step, checkpoint_path=None, adapter_resume_state=None, ema_resume_state=None):
     """Atomically replace optimizer state, invalidating stale state on failure."""
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
@@ -65,7 +83,7 @@ def atomic_save_optimizer_checkpoint(path, state_dict, step, checkpoint_path=Non
     os.close(file_descriptor)
 
     try:
-        payload = build_optimizer_checkpoint(state_dict, step, checkpoint_path, adapter_resume_state)
+        payload = build_optimizer_checkpoint(state_dict, step, checkpoint_path, adapter_resume_state, ema_resume_state)
         torch.save(payload, temp_path)
         os.replace(temp_path, path)
     except BaseException as error:
@@ -91,16 +109,21 @@ def parse_optimizer_checkpoint(payload, expected_step):
         raise OptimizerCheckpointValidationError("Optimizer checkpoint is not a dictionary")
     version = payload.get("format_version")
     if type(version) is not int or version not in (
-        OPTIMIZER_CHECKPOINT_FORMAT_VERSION, RAW_ADAPTER_CHECKPOINT_FORMAT_VERSION,
+        OPTIMIZER_CHECKPOINT_FORMAT_VERSION, RAW_ADAPTER_CHECKPOINT_FORMAT_VERSION, EMA_CHECKPOINT_FORMAT_VERSION,
     ):
         raise OptimizerCheckpointValidationError(
             "Optimizer checkpoint is legacy or has an unsupported format version"
         )
-    if version == RAW_ADAPTER_CHECKPOINT_FORMAT_VERSION:
+    if version == RAW_ADAPTER_CHECKPOINT_FORMAT_VERSION or payload.get("adapter_resume_state") is not None:
         raw_state = payload.get("adapter_resume_state")
-        digest = payload.get("model_checkpoint_sha256")
         if not isinstance(raw_state, dict) or raw_state.get("format_version") != 1:
             raise OptimizerCheckpointValidationError("Optimizer checkpoint has no valid raw adapter state")
+    if version == EMA_CHECKPOINT_FORMAT_VERSION:
+        ema_state = payload.get("ema_resume_state")
+        if not isinstance(ema_state, dict) or ema_state.get("format_version") != 1:
+            raise OptimizerCheckpointValidationError("Optimizer checkpoint has no valid EMA resume state")
+    if version in (RAW_ADAPTER_CHECKPOINT_FORMAT_VERSION, EMA_CHECKPOINT_FORMAT_VERSION):
+        digest = payload.get("model_checkpoint_sha256")
         if (
             not isinstance(digest, str) or len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
@@ -125,16 +148,16 @@ def parse_optimizer_checkpoint(payload, expected_step):
 def load_optimizer_checkpoint(path, expected_step):
     payload = torch.load(path, map_location="cpu", weights_only=True)
     state_dict = parse_optimizer_checkpoint(payload, expected_step)
-    if payload.get("adapter_resume_state") is not None:
+    if payload.get("adapter_resume_state") is not None or payload.get("ema_resume_state") is not None:
         raise OptimizerCheckpointValidationError(
-            "Optimizer checkpoint requires raw adapter parameters; use "
+            "Optimizer checkpoint requires live training parameters; use "
             "load_optimizer_checkpoint_for_resume"
         )
     return state_dict
 
 
-def load_optimizer_checkpoint_for_resume(path, expected_step, checkpoint_path=None):
-    """Read moments and optional raw adapter state bound to the exported file.
+def load_optimizer_checkpoint_for_resume(path, expected_step, checkpoint_path=None, *, include_ema_state=False):
+    """Read moments and optional adapter/EMA state bound to the exported model.
 
     The digest accepts renamed, identical checkpoints while rejecting a
     different adapter at the same step. Legacy payloads still load normally;
@@ -143,9 +166,14 @@ def load_optimizer_checkpoint_for_resume(path, expected_step, checkpoint_path=No
     payload = torch.load(path, map_location="cpu", weights_only=True)
     state_dict = parse_optimizer_checkpoint(payload, expected_step)
     adapter_state = payload.get("adapter_resume_state")
-    if adapter_state is not None:
+    ema_state = payload.get("ema_resume_state")
+    if adapter_state is not None or ema_state is not None:
         if payload.get("model_checkpoint_sha256") != _checkpoint_digest(checkpoint_path):
             raise OptimizerCheckpointValidationError(
-                "Raw adapter resume state does not match the loaded model checkpoint"
+                "Training resume state does not match the loaded model checkpoint"
             )
+    if include_ema_state:
+        return state_dict, adapter_state, ema_state
+    if ema_state is not None:
+        raise OptimizerCheckpointValidationError("EMA resume state requires include_ema_state=True")
     return state_dict, adapter_state

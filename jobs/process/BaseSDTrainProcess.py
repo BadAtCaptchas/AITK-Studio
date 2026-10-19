@@ -364,6 +364,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.named_lora = True
         self.snr_gos: Union[LearnableSNRGamma, None] = None
         self.ema: ExponentialMovingAverage = None
+        self._pending_ema_resume_state = None
 
         validate_configs(self.train_config, self.model_config, self.save_config, self.dataset_configs, self.network_config)
         self.phase_manager = TrainingPhaseManager(self.train_config)
@@ -788,6 +789,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         adapter_resume_state = None
         if self.optimizer is not None and self.network is not None:
             adapter_resume_state = self.network.get_optimizer_resume_state()
+        ema_resume_state = self.get_ema_resume_state()
         if self.ema is not None:
             # always save params as ema
             self.ema.eval()
@@ -912,6 +914,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         yaml.dump(self.meta, f)
                     # move it back
                     self.adapter = self.adapter.to(orig_device, dtype=orig_dtype)
+                    file_path = name_or_path
                 else:
                     direct_save = False
                     if self.adapter_config.train_only_image_encoder:
@@ -1013,6 +1016,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     step=self.step_num,
                     checkpoint_path=checkpoint_save_path,
                     adapter_resume_state=adapter_resume_state,
+                    ema_resume_state=ema_resume_state,
                 )
                 print_acc(f"Saved optimizer to {optimizer_path}")
             except Exception as error:
@@ -1051,6 +1055,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.accelerator.is_main_process:
             self.logger.start()
         self.prepare_accelerator()
+        self.setup_ema()
 
     def sample_step_hook(self, img_num, total_imgs):
         pass
@@ -1081,7 +1086,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.sd.network = self.accelerator.prepare(self.sd.network)
             self.modules_being_trained.append(self.sd.network)
         if getattr(self, "authenlora", None) is not None:
-            self.authenlora = self.accelerator.prepare(self.authenlora)
+            self.authenlora = self.accelerator.prepare_model(self.authenlora)
             self.modules_being_trained.append(self.authenlora)
         if self.adapter is not None and self.adapter_config.train:
             # todo adapters may not be a module. need to check
@@ -1107,12 +1112,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     param.requires_grad_(True)
 
     def setup_ema(self):
-        if self.train_config.ema_config.use_ema:
-            # our params are in groups. We need them as a single iterable
-            params = []
-            for group in self.optimizer.param_groups:
-                for param in group['params']:
-                    params.append(param)
+        if self.train_config.ema_config.use_ema and self.ema is None:
+            params = self._ema_parameters()
             self.ema = ExponentialMovingAverage(
                 params,
                 decay=self.train_config.ema_config.ema_decay,
@@ -1120,6 +1121,60 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 feedback_rate=self.train_config.ema_config.feedback_rate,
                 param_multiplier=self.train_config.ema_config.param_multiplier,
             )
+            pending = getattr(self, '_pending_ema_resume_state', None)
+            if pending is not None:
+                self.ema.load_state_dict(pending['ema'])
+        self._pending_ema_resume_state = None
+
+    def _ema_parameters(self):
+        return list({id(param): param for group in self.optimizer.param_groups for param in group['params']}.values())
+
+    def get_ema_resume_state(self):
+        if self.ema is None:
+            return None
+        state = self.ema.state_dict()
+        return {
+            'format_version': 1,
+            # Optimizer moments belong to these live parameters, whereas the
+            # portable model checkpoint contains the smoothed EMA parameters.
+            'parameters': [param.detach().cpu().clone() for param in self._ema_parameters()],
+            'ema': {
+                'decay': state['decay'],
+                'num_updates': state['num_updates'],
+                'shadow_params': [param.detach().cpu().clone() for param in state['shadow_params']],
+                'collected_params': None,
+            },
+        }
+
+    def _validate_ema_resume_state(self, state):
+        if state is None:
+            return
+        if not isinstance(state, dict) or state.get('format_version') != 1:
+            raise OptimizerCheckpointValidationError('Unsupported EMA resume state')
+        params = self._ema_parameters()
+        live = state.get('parameters')
+        ema = state.get('ema')
+        if not isinstance(ema, dict) or not isinstance(live, list) or len(live) != len(params):
+            raise OptimizerCheckpointValidationError('EMA resume parameter count does not match')
+        shadows = ema.get('shadow_params')
+        if not isinstance(shadows, list) or len(shadows) != len(params):
+            raise OptimizerCheckpointValidationError('EMA shadow parameter count does not match')
+        decay = ema.get('decay')
+        updates = ema.get('num_updates')
+        if (
+            isinstance(decay, bool) or not isinstance(decay, (int, float))
+            or not math.isfinite(decay) or not 0 <= decay <= 1
+            or (updates is not None and (type(updates) is not int or updates < 0))
+            or ema.get('collected_params') is not None
+        ):
+            raise OptimizerCheckpointValidationError('Invalid EMA resume metadata')
+        for expected, parameter, shadow in zip(params, live, shadows):
+            if any(
+                not torch.is_tensor(value) or value.shape != expected.shape
+                or value.dtype != expected.dtype or not torch.isfinite(value).all()
+                for value in (parameter, shadow)
+            ):
+                raise OptimizerCheckpointValidationError('EMA resume parameter shape, dtype or values do not match')
 
     def before_dataset_load(self):
         pass
@@ -1182,9 +1237,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         return metrics
 
-    def hook_train_loop(self, batch):
-        # return loss
-        return 0.0
+    def hook_train_loop(self, batch) -> dict[str, float]:
+        """Run a training step and return named loss values for logging."""
+        raise NotImplementedError("Training processes must implement hook_train_loop and return a loss dictionary")
 
     def hook_after_sd_init_before_load(self):
         pass
@@ -1766,19 +1821,18 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     timesteps = direct_timesteps.to(self.device_torch)
                 else:
                     timesteps = self.sd.noise_scheduler.timesteps[timestep_indices.long()]
-                record_metric = getattr(self, '_record_monitor_metric', None)
-                if callable(record_metric):
-                    record_metric('train/batch_size', batch_size)
-                    record_metric('train/effective_batch_size', batch_size * max(1, int(self.train_config.gradient_accumulation)))
-                    record_metric('train/timestep_index_mean', timestep_indices.float().mean())
-                    record_metric('train/timestep_index_min', timestep_indices.float().min())
-                    record_metric('train/timestep_index_max', timestep_indices.float().max())
-                    record_metric('train/timestep_mean', timesteps.float().mean())
-                    record_metric('train/timestep_min', timesteps.float().min())
-                    record_metric('train/timestep_max', timesteps.float().max())
-                    record_metric('train/sigma_mean', (timesteps.float() / 1000.0).mean())
-                    record_metric('train/sigma_min', (timesteps.float() / 1000.0).min())
-                    record_metric('train/sigma_max', (timesteps.float() / 1000.0).max())
+                if callable(getattr(self, '_record_monitor_metric', None)):
+                    self._record_monitor_metric('train/batch_size', batch_size)
+                    self._record_monitor_metric('train/effective_batch_size', batch_size * max(1, int(self.train_config.gradient_accumulation)))
+                    self._record_monitor_metric('train/timestep_index_mean', timestep_indices.float().mean())
+                    self._record_monitor_metric('train/timestep_index_min', timestep_indices.float().min())
+                    self._record_monitor_metric('train/timestep_index_max', timestep_indices.float().max())
+                    self._record_monitor_metric('train/timestep_mean', timesteps.float().mean())
+                    self._record_monitor_metric('train/timestep_min', timesteps.float().min())
+                    self._record_monitor_metric('train/timestep_max', timesteps.float().max())
+                    self._record_monitor_metric('train/sigma_mean', (timesteps.float() / 1000.0).mean())
+                    self._record_monitor_metric('train/sigma_min', (timesteps.float() / 1000.0).min())
+                    self._record_monitor_metric('train/sigma_max', (timesteps.float() / 1000.0).max())
 
             with self.timer('prepare_noise'):
                 # get noise
@@ -1869,11 +1923,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
                 noisy_latents = self.sd.add_noise(latents, noise, timesteps)
 
-                record_tensor_stats = getattr(self, '_record_tensor_stats', None)
-                if callable(record_tensor_stats):
-                    record_tensor_stats('train/latents', latents)
-                    record_tensor_stats('train/noise', noise)
-                    record_tensor_stats('train/noisy_latents', noisy_latents)
+                if callable(getattr(self, '_record_tensor_stats', None)):
+                    self._record_tensor_stats('train/latents', latents)
+                    self._record_tensor_stats('train/noise', noise)
+                    self._record_tensor_stats('train/noisy_latents', noisy_latents)
 
                 # determine scaled noise
                 # todo do we need to scale this or does it always predict full intensity
@@ -2064,6 +2117,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
             scale = float(group.get('_phase_lr_scale', 1.0))
             base_lr = float(getattr(self.train_config, lr_key, self.train_config.lr) or 0.0)
             group['lr'] = base_lr * scale
+            # A fresh phase scheduler must start from this phase's rate, not
+            # the initial_lr retained on the previous optimizer's shared groups.
+            if 'initial_lr' in group:
+                group['initial_lr'] = group['lr']
 
     def setup_optimizer(self, load_existing_state=True):
         optimizer_type = self.train_config.optimizer.lower()
@@ -2109,11 +2166,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
             else:
                 try:
                     print_acc(f"Loading optimizer state from {optimizer_state_file_path}")
-                    optimizer_state_dict, adapter_resume_state = load_optimizer_checkpoint_for_resume(
+                    optimizer_state_dict, adapter_resume_state, ema_resume_state = load_optimizer_checkpoint_for_resume(
                         optimizer_state_file_path,
                         expected_step=self._resume_checkpoint_step,
                         checkpoint_path=self._resume_checkpoint_path,
+                        include_ema_state=True,
                     )
+                    self._validate_ema_resume_state(ema_resume_state)
                     if self.network is not None:
                         self.network.restore_optimizer_resume_state(adapter_resume_state)
                     elif adapter_resume_state is not None:
@@ -2121,6 +2180,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                             "Optimizer checkpoint requires an adapter network"
                         )
                     self.optimizer.load_state_dict(optimizer_state_dict)
+                    if ema_resume_state is not None:
+                        with torch.no_grad():
+                            for parameter, saved in zip(self._ema_parameters(), ema_resume_state['parameters']):
+                                parameter.copy_(saved)
+                        self._pending_ema_resume_state = ema_resume_state
                     del optimizer_state_dict, adapter_resume_state
                     flush()
                 except OptimizerCheckpointValidationError as error:
@@ -2426,9 +2490,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         )
                     )
 
-                # Keep the metric available on every rank so phase automation
-                # observes identical inputs. _publish_validation_logs limits
-                # external logger writes to the main process.
+                # Keep the metric available on every rank.
+                # _publish_validation_logs limits external writes to the main process.
                 self.additional_logs['val/loss'] = (
                     torch.stack(losses).mean().item()
                 )
@@ -3161,8 +3224,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.sample(self.step_num)
 
         if self.accelerator.is_local_main_process:
-            progress_total = None if self.train_config.auto_train else self.train_config.steps
-            progress_iterable = None if self.train_config.auto_train else range(0, self.train_config.steps)
+            progress_total = self.train_config.steps
+            progress_iterable = range(0, self.train_config.steps)
             self.progress_bar = ToolkitProgressBar(
                 total=progress_total,
                 desc=self.job.name,
@@ -3215,7 +3278,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         did_first_flush = False
         flush_next = False
         step = start_step_num
-        while self.train_config.auto_train or step < self.train_config.steps:
+        while step < self.train_config.steps:
             if self.train_config.do_paramiter_swapping:
                 self.optimizer.optimizer.swap_paramiters()
             self.timer.start('train_loop')
@@ -3300,7 +3363,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.grad_accumulation_step = 0
 
                 # Commit a short final accumulation window instead of dropping it.
-                if not self.train_config.auto_train and step + 1 >= self.train_config.steps:
+                if step + 1 >= self.train_config.steps:
                     self.is_grad_accumulation_step = False
 
             # flush()
@@ -3405,9 +3468,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         learning_rate = self.optimizer.param_groups[0]['lr']
 
                     extra_step_metrics = OrderedDict()
-                    consume_monitor_metrics = getattr(self, 'consume_monitor_metrics', None)
-                    if callable(consume_monitor_metrics):
-                        extra_step_metrics = consume_monitor_metrics()
+                    if callable(getattr(self, 'consume_monitor_metrics', None)):
+                        extra_step_metrics = self.consume_monitor_metrics()
 
                     runtime_metrics = self._collect_runtime_monitor_metrics(
                         learning_rate=learning_rate,
@@ -3427,15 +3489,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     if self.progress_bar is not None:
                         self.progress_bar.set_postfix_str(prog_bar_string)
 
-                    phase_observed_metrics = {
-                        'learning_rate': learning_rate,
-                    }
-                    for key, value in loss_dict.items():
-                        phase_observed_metrics[f'loss/{key}'] = value
-                        phase_observed_metrics[key] = value
-                    phase_observed_metrics.update(extra_step_metrics)
-                    phase_observed_metrics.update(additional_logs)
-                    self.phase_manager.observe_metrics(self.step_num, phase_observed_metrics)
 
                 # Validation cadence is independent of the regular logging
                 # cadence, and the mandatory baseline runs at start_step.
@@ -3729,7 +3782,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if match:
                     steps, index = int(match.group(1)), int(match.group(2))
                     #Here we only care about uploading the latest samples, the match with the # of steps
-                    target_sample_step = self.step_num if self.train_config.auto_train else self.train_config.steps
+                    target_sample_step = self.train_config.steps
                     if steps == target_sample_step:
                         sample_image_paths.append((index, f"samples/{filename}"))
 

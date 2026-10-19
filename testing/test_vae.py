@@ -5,7 +5,7 @@ import torch
 from torchvision.transforms import Resize, ToTensor
 from diffusers import AutoencoderKL
 from pytorch_fid import fid_score
-from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics.simple_metrics import peak_signal_noise_ratio as psnr
 import lpips
 from tqdm import tqdm
 from torchvision import transforms

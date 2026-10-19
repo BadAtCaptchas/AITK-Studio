@@ -26,6 +26,7 @@ import { getRemoteOllamaWorker } from '../../src/server/remoteOllamaWorkers';
 import { hostnamesFromUrls,isOfflineModeEnabled,offlineChildProcessEnv } from '../../src/server/networkPolicy';
 import { isTelemetryEnabled } from '../../src/server/telemetry';
 import { telemetryChildProcessEnv } from '../../src/utils/telemetry';
+import { trainingPhaseErrors } from '../../src/utils/trainingPhases';
 import type { EncryptedDatasetStartKey } from '../../src/types';
 
 const isWindows = process.platform === 'win32';
@@ -104,6 +105,11 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
     };
 
     try {
+      const jobConfig = JSON.parse(job.job_config);
+      for (const processConfig of Array.isArray(jobConfig?.config?.process) ? jobConfig.config.process : []) {
+        const phaseErrors = trainingPhaseErrors(processConfig?.train);
+        if (phaseErrors.length) throw new Error(phaseErrors.join('\n'));
+      }
       const trainingRoot = await getJobTrainingRoot(job);
       const hfToken = await getHFToken();
       const openRouterApiKey = await getOpenRouterApiKey();
@@ -132,7 +138,6 @@ const startAndWatchJob = (job: Job, options: StartJobOptions = {}) => {
       }
 
       const dbConfig = getDatabaseConfig();
-      const jobConfig = JSON.parse(job.job_config);
       const directRemoteOllamaWorkerId = getDirectRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaWorkerId = getSecureRemoteOllamaWorkerId(jobConfig);
       const secureRemoteOllamaEnv: Record<string, string> = {};

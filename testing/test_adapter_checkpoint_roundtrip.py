@@ -367,7 +367,8 @@ class AdapterCheckpointRoundTripTest(unittest.TestCase):
         optimizer = torch.optim.AdamW(network.parameters(), lr=0.03, foreach=False)
         train_step(model, optimizer, self.inputs, self.target)
         originals = clone_parameters(network)
-        process = SimpleNamespace(
+        process = process_class.__new__(process_class)
+        process.__dict__.update(dict(
             accelerator=SimpleNamespace(is_main_process=True), network=network,
             optimizer=optimizer, ema=ema, save_root=str(self.path), step_num=1,
             job=SimpleNamespace(name="ema_adapter"), meta={}, adapter=None,
@@ -375,7 +376,7 @@ class AdapterCheckpointRoundTripTest(unittest.TestCase):
             named_lora=False, embedding=None, decorator=None, snr_gos=None,
             save_config=SimpleNamespace(dtype="float32"), update_training_metadata=lambda: None,
             clean_up_saves=lambda: None, post_save_hook=lambda path: None,
-        )
+        ))
         with mock.patch.object(process_module, "flush"):
             process_class.save(process, step=1)
         self.assert_parameters_equal(originals, network)
@@ -384,10 +385,11 @@ class AdapterCheckpointRoundTripTest(unittest.TestCase):
         reloaded.load_weights(model_path)
         self.assertFalse(torch.equal(other(self.inputs), model(self.inputs)))
         other_optimizer = torch.optim.AdamW(reloaded.parameters(), lr=0.03, foreach=False)
-        resume = SimpleNamespace(
+        resume = process_class.__new__(process_class)
+        resume.__dict__.update(dict(
             save_root=str(self.path), optimizer=other_optimizer, network=reloaded,
             _resume_checkpoint_step=1, _resume_checkpoint_path=model_path,
-        )
+        ))
         with mock.patch.object(process_module, "flush"):
             process_class.load_optimizer_state(resume)
         self.assert_parameters_equal(originals, reloaded)
@@ -409,10 +411,11 @@ class AdapterCheckpointRoundTripTest(unittest.TestCase):
         reloaded.load_weights(model_path)
         originals = clone_parameters(reloaded)
         other_optimizer = torch.optim.AdamW(reloaded.parameters(), lr=0.03, foreach=False)
-        resume = SimpleNamespace(
+        resume = process_module.BaseSDTrainProcess.__new__(process_module.BaseSDTrainProcess)
+        resume.__dict__.update(dict(
             save_root=str(self.path), optimizer=other_optimizer, network=reloaded,
             _resume_checkpoint_step=1, _resume_checkpoint_path=model_path,
-        )
+        ))
         with mock.patch.object(process_module, "print_acc") as printed:
             process_module.BaseSDTrainProcess.load_optimizer_state(resume)
         self.assertEqual(len(other_optimizer.state), 0)

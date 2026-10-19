@@ -75,7 +75,7 @@ class ControlGenerator:
             scale = math.sqrt(max_size / (w * h))
             w = int(w * scale)
             h = int(h * scale)
-            image = image.resize((w, h), Image.BICUBIC)
+            image = image.resize((w, h), Image.Resampling.BICUBIC)
         return image
 
     def control_save_path(self, img_path, control_type):
@@ -171,7 +171,7 @@ class ControlGenerator:
             out_tensor = out_tensor.clamp(0, 255)
             out_tensor = out_tensor.squeeze(0).cpu().numpy()
             img = Image.fromarray(out_tensor.astype('uint8'))
-            img = img.resize(in_size, Image.LANCZOS)
+            img = img.resize(in_size, Image.Resampling.LANCZOS)
             return img
         elif control_type == 'pose':
             self.debug_print("Generating pose control")

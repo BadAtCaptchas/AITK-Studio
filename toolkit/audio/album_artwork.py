@@ -33,13 +33,13 @@ def load_waveform(audio_path: str, num_samples: int = 512) -> np.ndarray:
         envelope = np.pad(audio, (0, num_samples - audio.size))
     else:
         envelope = np.array([chunk.max() for chunk in np.array_split(audio, num_samples)])
-    peak = envelope.max(initial=0)
+    peak = envelope.max()
     return envelope / peak if peak > 0 else envelope
 
 
 def create_artwork(waveform: np.ndarray, size: int = ARTWORK_SIZE) -> Image.Image:
     """Create album artwork with logo background and waveform overlay."""
-    bg = Image.open(BACKGROUND_PATH).convert("RGBA").resize((size, size), Image.LANCZOS)
+    bg = Image.open(BACKGROUND_PATH).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
     # draw waveform on separate overlay for alpha compositing
     wave_overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))

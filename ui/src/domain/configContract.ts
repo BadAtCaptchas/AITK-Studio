@@ -1,4 +1,5 @@
 import contract from './modelCapabilities.json';
+import { trainingPhaseErrors } from '../utils/trainingPhases';
 
 export const CAPABILITY_VERSION = contract.version;
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -64,6 +65,7 @@ export function configContractErrors(value: unknown, context: { deviceBackend?: 
     const train = process.train;
     if (train !== undefined && !record(train)) errors.push('train must be an object.');
     if (record(train)) {
+      errors.push(...trainingPhaseErrors(train));
       finite(train, 'steps', 1, 1_000_000_000, true);
       finite(train, 'batch_size', 1, 4096, true);
       finite(train, 'lr', 0, 10);

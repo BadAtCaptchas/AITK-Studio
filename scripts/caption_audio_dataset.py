@@ -81,8 +81,8 @@ def analyze_audio(audio_path):
     major_corrs = np.array([np.corrcoef(np.roll(MAJOR_PROFILE, i), chroma_avg)[0, 1] for i in range(12)])
     minor_corrs = np.array([np.corrcoef(np.roll(MINOR_PROFILE, i), chroma_avg)[0, 1] for i in range(12)])
 
-    best_major_idx = major_corrs.argmax()
-    best_minor_idx = minor_corrs.argmax()
+    best_major_idx = int(major_corrs.argmax())
+    best_minor_idx = int(minor_corrs.argmax())
     if major_corrs[best_major_idx] >= minor_corrs[best_minor_idx]:
         keyscale = f"{KEY_NAMES[best_major_idx]} major"
     else:

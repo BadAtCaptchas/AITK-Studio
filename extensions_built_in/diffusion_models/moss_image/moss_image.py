@@ -338,6 +338,7 @@ class MossImageModel(BaseModel):
             state_dict = convert_diffusers_state_dict(state_dict)
         # config sniffed from the checkpoint (small decoder)
         vae = AutoEncoder.load_from_state_dict(state_dict, self.vae_torch_dtype)
+        vae._aitk_vae_source = path
         return vae.eval().requires_grad_(False)
 
     def _park_loaded_component(self, module):

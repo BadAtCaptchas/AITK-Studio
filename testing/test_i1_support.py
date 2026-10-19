@@ -17,8 +17,7 @@ I1_INIT_PATH = I1_DIR / "__init__.py"
 I1_PIPELINE_PATH = I1_DIR / "src" / "pipeline.py"
 REGISTRY_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__init__.py"
 TRAIN_PROCESS_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
-UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
-AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
+UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "domain" / "modelOptions.ts"
 EXAMPLE_PATH = PROJECT_ROOT / "config" / "examples" / "train_lora_i1_24gb.yaml"
 
 
@@ -62,19 +61,23 @@ def load_i1_conversion_class():
 
 class I1StaticSupportTest(unittest.TestCase):
     def test_backend_registry_includes_i1_and_lazy_import_errors_are_guarded(self):
-        source = REGISTRY_PATH.read_text(encoding="utf-8")
-
-        self.assertIn('I1Model, = _optional_models(".i1"', source)
-        self.assertIn('"I1Model", "i1"', source)
-        self.assertIn("except ImportError as e:", source)
-        self.assertIn("getattr(module, class_name)", source)
+        from unittest import mock
+        from toolkit.model_registry import BY_ARCH, BrokenModelIntegration, resolve_model
+        from extensions_built_in.diffusion_models.i1 import I1Model
+        self.assertIs(resolve_model('i1'), I1Model)
+        with mock.patch('toolkit.model_registry.import_module', side_effect=ImportError('missing API')):
+            with self.assertRaisesRegex(BrokenModelIntegration, 'missing API'):
+                BY_ARCH['i1'].load()
 
     def test_i1_package_exports_are_lazy_for_light_helper_imports(self):
         source = I1_INIT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("def __getattr__(name):", source)
         self.assertIn('if name == "I1Model":', source)
-        self.assertNotIn("from .i1_model import I1Model\n\n__all__", source)
+        # TYPE_CHECKING imports are safe; only direct module-level imports would
+        # eagerly load the model while importing lightweight i1 helpers.
+        self.assertFalse(any(isinstance(node, ast.ImportFrom) and node.module == 'i1_model'
+                             for node in ast.parse(source).body))
 
     def test_ui_model_defaults(self):
         source = UI_OPTIONS_PATH.read_text(encoding="utf-8")
@@ -97,13 +100,6 @@ class I1StaticSupportTest(unittest.TestCase):
         self.assertIn("rewriter_model: 'Qwen/Qwen3-4B-Instruct-2507'", block)
         self.assertIn("rewrite_prompt: false", block)
 
-    def test_auto_training_profiles_include_i1_as_flow_image_arch(self):
-        source = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
-        start = source.index("const flowImageArchs")
-        end = source.index("];", start)
-        block = source[start:end]
-
-        self.assertIn("'i1'", block)
 
     def test_example_config_defaults(self):
         config = yaml.safe_load(EXAMPLE_PATH.read_text(encoding="utf-8"))

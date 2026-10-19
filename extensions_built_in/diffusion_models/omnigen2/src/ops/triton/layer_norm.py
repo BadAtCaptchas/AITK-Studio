@@ -523,6 +523,8 @@ def _layer_norm_bwd_kernel(
         w += 1.0
     if RECOMPUTE_OUTPUT and HAS_BIAS:
         b = tl.load(B + cols, mask=mask, other=0.0).to(tl.float32)
+    else:
+        b = 0.0
     if HAS_DY1:
         w1 = tl.load(W1 + cols, mask=mask).to(tl.float32)
         if zero_centered_weight:

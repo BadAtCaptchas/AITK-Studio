@@ -178,7 +178,7 @@ class SeptemberUpstreamTests(unittest.TestCase):
     def test_short_and_silent_audio_artwork(self):
         for values in (np.zeros(12, dtype=np.int16), np.arange(12, dtype=np.int16)):
             filename = self.root / 'short.wav'
-            with wave.open(str(filename), 'wb') as wav:
+            with wave.Wave_write(str(filename)) as wav:
                 wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000); wav.writeframes(values.tobytes())
             envelope = load_waveform(str(filename))
             self.assertEqual(envelope.shape, (512,)); self.assertTrue(np.isfinite(envelope).all())

@@ -27,18 +27,9 @@ CONFIG_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
 OFFLOAD_PATH = PROJECT_ROOT / "toolkit" / "memory_management" / "offload.py"
 PROMPT_UTILS_PATH = PROJECT_ROOT / "toolkit" / "prompt_utils.py"
 REQUIREMENTS_PATH = PROJECT_ROOT / "requirements_base.txt"
-README_PATH = PROJECT_ROOT / "README.md"
+README_PATH = PROJECT_ROOT / "docs" / "supported-models.md"
 UI_OPTIONS_PATH = (
-    PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
-)
-UI_PROFILES_PATH = (
-    PROJECT_ROOT
-    / "ui"
-    / "src"
-    / "app"
-    / "jobs"
-    / "new"
-    / "autoTrainingProfiles.ts"
+    PROJECT_ROOT / "ui" / "src" / "domain" / "modelOptions.ts"
 )
 UI_MEMORY_PATH = PROJECT_ROOT / "ui" / "src" / "utils" / "memoryProfiles.ts"
 
@@ -122,23 +113,21 @@ def load_generation_pipeline_method(factory, unwrap_model):
 
 class AnimaStaticSupportTest(unittest.TestCase):
     def test_registry_config_docs_and_dependency_pin_include_anima(self):
-        registry = REGISTRY_PATH.read_text(encoding="utf-8")
+        from toolkit.model_registry import resolve_model
+        from extensions_built_in.diffusion_models.anima import AnimaModel
         config = CONFIG_PATH.read_text(encoding="utf-8")
         offload = OFFLOAD_PATH.read_text(encoding="utf-8")
         requirements = REQUIREMENTS_PATH.read_text(encoding="utf-8")
         readme = README_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('AnimaModel, = _optional_models(".anima"', registry)
-        self.assertIn('("AnimaModel", "anima")', registry)
-        self.assertIn("AnimaModel,", registry)
+        self.assertIs(resolve_model('anima'), AnimaModel)
         self.assertIn("'anima'", config)
         self.assertIn('"anima"', offload)
         self.assertIn("c943837899b16cbae2f619b8dd4f7bb6f07dd81a", requirements)
         self.assertIn("circlestone-labs/Anima-Base-v1.0-Diffusers", readme)
 
-    def test_ui_defaults_profiles_and_memory_policy_include_anima(self):
+    def test_ui_defaults_and_memory_policy_include_anima(self):
         options = UI_OPTIONS_PATH.read_text(encoding="utf-8")
-        profiles = UI_PROFILES_PATH.read_text(encoding="utf-8")
         memory = UI_MEMORY_PATH.read_text(encoding="utf-8")
         start = options.index("name: 'anima'")
         end = options.index("disableSections", start)
@@ -150,7 +139,6 @@ class AnimaStaticSupportTest(unittest.TestCase):
         self.assertIn("'config.process[0].model.quantize_te': [false, false]", block)
         self.assertIn("'config.process[0].train.timestep_type': ['weighted', 'sigmoid']", block)
         self.assertIn("'config.process[0].sample.neg'", block)
-        self.assertIn("'anima'", profiles)
         self.assertEqual(memory.count("'anima'"), 2)
 
     def test_prompt_cache_dispatch_and_nested_progress_bar_fix_are_present(self):

@@ -20,10 +20,9 @@ REGISTRY_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__i
 CONFIG_MODULES_PATH = PROJECT_ROOT / "toolkit" / "config_modules.py"
 LORA_SPECIAL_PATH = PROJECT_ROOT / "toolkit" / "lora_special.py"
 NETWORK_MIXINS_PATH = PROJECT_ROOT / "toolkit" / "network_mixins.py"
-UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
+UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "domain" / "modelOptions.ts"
 UI_SIMPLE_JOB_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "SimpleJob.tsx"
 MEMORY_PROFILE_PATH = PROJECT_ROOT / "ui" / "src" / "utils" / "memoryProfiles.ts"
-AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
 ADVISOR_PATH = PROJECT_ROOT / "ui" / "src" / "server" / "trainingAdvisor.ts"
 SDTRAINER_PATH = PROJECT_ROOT / "extensions_built_in" / "sd_trainer" / "SDTrainer.py"
 BASE_SD_TRAIN_PATH = PROJECT_ROOT / "jobs" / "process" / "BaseSDTrainProcess.py"
@@ -147,12 +146,11 @@ COMFY_IDEOGRAM_JSON_CAPTION = {
 
 class Ideogram4StaticSupportTest(unittest.TestCase):
     def test_registry_and_model_arch_include_ideogram4(self):
-        registry_source = REGISTRY_PATH.read_text(encoding="utf-8")
+        from toolkit.model_registry import BY_ARCH
         config_source = CONFIG_MODULES_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('Ideogram4Model, = _optional_models(', registry_source)
-        self.assertIn('"Ideogram4Model", "ideogram4"', registry_source)
-        self.assertIn("Ideogram4Model,", registry_source)
+        self.assertEqual(BY_ARCH['ideogram4'].class_name, 'Ideogram4Model')
+        self.assertEqual(BY_ARCH['ideogram4'].module, 'extensions_built_in.diffusion_models.ideogram4')
         self.assertIn("'ideogram4'", config_source)
 
     def test_model_class_resolves_when_optional_dependencies_are_available(self):
@@ -699,11 +697,10 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         )
         self.assertEqual(model.sample_memory_generate_components(), ())
 
-    def test_ui_defaults_memory_profile_and_auto_profile(self):
+    def test_ui_defaults_and_memory_profile(self):
         options = UI_OPTIONS_PATH.read_text(encoding="utf-8")
         simple_job = UI_SIMPLE_JOB_PATH.read_text(encoding="utf-8")
         memory = MEMORY_PROFILE_PATH.read_text(encoding="utf-8")
-        profiles = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
         advisor = ADVISOR_PATH.read_text(encoding="utf-8")
 
         self.assertIn("name: 'ideogram4'", options)
@@ -722,8 +719,6 @@ class Ideogram4StaticSupportTest(unittest.TestCase):
         self.assertIn("model.ideogram_skip_unconditional_transformer", options)
         self.assertIn("skip_unconditional_transformer_for_training", simple_job)
         self.assertIn("'ideogram4'", memory)
-        self.assertIn("id: 'ideogram4-balanced-lora'", profiles)
-        self.assertIn("const ideogram4Archs = ['ideogram4', 'ideogram4:fp8', 'ideogram4:nvfp4']", profiles)
         self.assertIn("ideogram", advisor)
 
     def test_caption_json_prompts_document_canonical_key_order(self):
@@ -1825,44 +1820,7 @@ class Ideogram4HelperBehaviorTest(unittest.TestCase):
 
 class Qwen3VLCaptionerPatchTest(unittest.TestCase):
     def test_patch_qwen_vl_patch_embed_replaces_conv3d_with_linear(self):
-        transformers_module = types.ModuleType("transformers")
-        transformers_module.Qwen3VLForConditionalGeneration = object
-        transformers_module.Qwen3VLMoeForConditionalGeneration = object
-        transformers_module.AutoProcessor = object
-        transformers_module.logging = types.SimpleNamespace(
-            set_verbosity_error=lambda: None
-        )
-
-        optimum_module = types.ModuleType("optimum")
-        quanto_module = types.ModuleType("optimum.quanto")
-        quanto_module.freeze = lambda *_args, **_kwargs: None
-
-        base_captioner_module = types.ModuleType(
-            "extensions_built_in.captioner.BaseCaptioner"
-        )
-        base_captioner_module.BaseCaptioner = object
-        basic_module = types.ModuleType("toolkit.basic")
-        basic_module.flush = lambda *_args, **_kwargs: None
-        quantize_module = types.ModuleType("toolkit.util.quantize")
-        quantize_module.quantize = lambda *_args, **_kwargs: None
-        quantize_module.get_qtype = lambda value: value
-
-        module_name = "extensions_built_in.captioner.Qwen3VLCaptioner"
-        sys.modules.pop(module_name, None)
-        with mock.patch.dict(
-            sys.modules,
-            {
-                "transformers": transformers_module,
-                "optimum": optimum_module,
-                "optimum.quanto": quanto_module,
-                "extensions_built_in.captioner.BaseCaptioner": base_captioner_module,
-                "toolkit.basic": basic_module,
-                "toolkit.util.quantize": quantize_module,
-            },
-        ):
-            from extensions_built_in.captioner.Qwen3VLCaptioner import (
-                patch_qwen_vl_patch_embed,
-            )
+        from extensions_built_in.captioner.Qwen3VLCaptioner import patch_qwen_vl_patch_embed
 
         class PatchEmbed(torch.nn.Module):
             def __init__(self):

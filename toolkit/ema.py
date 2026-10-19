@@ -129,7 +129,10 @@ class ExponentialMovingAverage:
             )
         one_minus_decay = 1.0 - decay
         with torch.no_grad():
-            for s_param, param in zip(self.shadow_params, parameters):
+            for index, (s_param, param) in enumerate(zip(self.shadow_params, parameters)):
+                if s_param.device != param.device:
+                    s_param = s_param.to(param.device)
+                    self.shadow_params[index] = s_param
                 s_param_float = s_param.float()
                 if s_param.dtype != torch.float32:
                     s_param_float = s_param_float.to(torch.float32)

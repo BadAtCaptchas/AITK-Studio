@@ -33,6 +33,10 @@ export function getDefaultModelConfig(archName: string, availableArchs: ModelArc
   const archDefault = (key: string, fallback: unknown) => getArchDefault(archName, key, fallback, availableArchs);
   const vaePath = archDefault('config.process[0].model.vae_path', undefined);
   const vaeDtype = archDefault('config.process[0].model.vae_dtype', undefined);
+  const componentPath = (key: string): string | undefined => {
+    const value = archDefault(`config.process[0].model.${key}`, undefined);
+    return typeof value === 'string' ? value : undefined;
+  };
   return {
     name_or_path: String(archDefault('config.process[0].model.name_or_path', '')),
     arch: archName,
@@ -43,6 +47,9 @@ export function getDefaultModelConfig(archName: string, availableArchs: ModelArc
     low_vram: Boolean(archDefault('config.process[0].model.low_vram', false)),
     vae_path: typeof vaePath === 'string' ? vaePath : undefined,
     vae_dtype: typeof vaeDtype === 'string' ? vaeDtype : undefined,
+    extras_name_or_path: componentPath('extras_name_or_path'),
+    te_name_or_path: componentPath('te_name_or_path'),
+    refiner_name_or_path: componentPath('refiner_name_or_path'),
     model_kwargs:
       (archDefault('config.process[0].model.model_kwargs', {}) as Record<string, unknown>) || {},
     dtype: String(archDefault('config.process[0].train.dtype', 'bf16')),
@@ -66,6 +73,24 @@ export function getDefaultModelConfig(archName: string, availableArchs: ModelArc
 }
 export function getDefaultSampler(archName: string, availableArchs: ModelArch[] = modelArchs) {
   return String(getArchDefault(archName, 'config.process[0].sample.sampler', 'flowmatch', availableArchs));
+}
+
+export function getDefaultGenerationSettings(archName: string, availableArchs: ModelArch[] = modelArchs): {
+  sampler: string;
+  guidanceScale: number;
+  sampleSteps: number;
+  width: number;
+  height: number;
+} {
+  const numberDefault = (key: string, fallback: number) =>
+    getArchNumberDefault(archName, `config.process[0].sample.${key}`, fallback, availableArchs);
+  return {
+    sampler: getDefaultSampler(archName, availableArchs),
+    guidanceScale: numberDefault('guidance_scale', 4),
+    sampleSteps: numberDefault('sample_steps', 25),
+    width: numberDefault('width', 1024),
+    height: numberDefault('height', 1024),
+  };
 }
 
 export function getLoraModelConfig(

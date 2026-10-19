@@ -110,6 +110,7 @@ class Iris3BPipeline:
         batch = x.shape[0]
 
         cond_feats, cond_mask = self._feats(conditional_embeds, device, dtype)
+        cfg_feats, cfg_mask = cond_feats, cond_mask
         if do_cfg:
             uncond_feats, uncond_mask = self._feats(unconditional_embeds, device, dtype)
             cfg_feats = torch.cat([uncond_feats, cond_feats], dim=0)

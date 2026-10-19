@@ -254,6 +254,13 @@ if _TRITON_AVAILABLE:
             & (offsets_k[None, :] < in_features),
         )
 
+else:
+    _rpbh_prepare_forward_kernel = None
+    _fwht_stage_kernel = None
+    _rpbh_finish_inverse_kernel = None
+    _orbit4_forward_kernel = None
+    _orbit4_backward_input_kernel = None
+
 
 def _fwht_triton(x: torch.Tensor, block_size: int) -> torch.Tensor:
     if block_size < 1 or block_size & (block_size - 1):

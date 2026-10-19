@@ -1,4 +1,5 @@
 'use client';
+import { stripDisabledAutomaticTraining } from '@/utils/trainingPhases';
 import { isMac } from '@/helpers/basic';
 import { defaultSampleConfig } from '@/helpers/defaultSamples';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
@@ -103,7 +104,6 @@ export const defaultJobConfig: JobConfig = {
         train: {
           batch_size: 1,
           bypass_guidance_embedding: true,
-          auto_train: false,
           steps: 3000,
           gradient_accumulation: 1,
           train_unet: true,
@@ -308,11 +308,8 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
   }
 
   const train = jobConfig.config.process[0]?.train;
-  if (train && train.auto_train === undefined) {
-    train.auto_train = train.auto_learn ?? false;
-  }
+  stripDisabledAutomaticTraining(train);
   if (train) {
-    delete train.auto_learn;
     if (train.guidance_loss_schedule === undefined) train.guidance_loss_schedule = 'constant';
     if (train.sega_distill === undefined) train.sega_distill = false;
     if (train.sega_distill_weight === undefined) train.sega_distill_weight = 1.0;
@@ -334,14 +331,8 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
           ...phase,
           name: phase.name?.trim() || `Phase ${index + 1}`,
         };
-        if (!train.auto_train) {
-          normalized.steps = Math.max(1, Number(phase.steps) || 1);
-        }
         return normalized;
       });
-      if (!train.auto_train) {
-        train.steps = train.phases.reduce((sum, phase) => sum + Math.max(1, Number(phase.steps) || 1), 0);
-      }
       if (train.save_on_phase_change === undefined) {
         train.save_on_phase_change = true;
       }

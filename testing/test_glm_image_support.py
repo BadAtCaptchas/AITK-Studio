@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Sequence, Tuple
 
 import torch
-import yaml
 from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
 
 
@@ -20,13 +19,7 @@ GLM_MODEL_PATH = (
 )
 REGISTRY_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "__init__.py"
 HIDREAM_INIT_PATH = PROJECT_ROOT / "extensions_built_in" / "diffusion_models" / "hidream" / "__init__.py"
-UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "options.ts"
-AUTO_PROFILES_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "autoTrainingProfiles.ts"
-TRAINING_PHASES_EDITOR_PATH = (
-    PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "TrainingPhasesEditor.tsx"
-)
-SIMPLE_JOB_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "SimpleJob.tsx"
-EXAMPLE_PATH = PROJECT_ROOT / "config" / "examples" / "train_lora_glm_image_auto_24gb.yaml"
+UI_OPTIONS_PATH = PROJECT_ROOT / "ui" / "src" / "domain" / "modelOptions.ts"
 
 
 def load_glm_module():
@@ -78,38 +71,36 @@ def load_glm_module():
 
 class GlmImageStaticSupportTest(unittest.TestCase):
     def test_backend_registry_includes_glm_image(self):
-        source = REGISTRY_PATH.read_text(encoding="utf-8")
-
-        self.assertIn('GlmImageModel, = _optional_models(".glm_image"', source)
-        self.assertIn("GlmImageModel,", source)
+        from toolkit.model_registry import BY_ARCH, resolve_model
+        from extensions_built_in.diffusion_models.glm_image import GlmImageModel
+        self.assertEqual(BY_ARCH['glm_image'].class_name, 'GlmImageModel')
+        self.assertIs(resolve_model('glm_image'), GlmImageModel)
 
     def test_optional_hidream_o1_import_is_guarded(self):
-        registry_source = REGISTRY_PATH.read_text(encoding="utf-8")
+        from toolkit.model_registry import BY_ARCH, BrokenModelIntegration
+        from unittest import mock
         hidream_source = HIDREAM_INIT_PATH.read_text(encoding="utf-8")
-
-        self.assertIn("def _unavailable_model_class", registry_source)
-        self.assertIn("except ImportError as e:", registry_source)
-        self.assertIn('"HidreamO1Model", "hidream_o1"', registry_source)
+        self.assertEqual(BY_ARCH['hidream_o1'].class_name, 'HidreamO1Model')
+        with mock.patch('toolkit.model_registry.import_module', side_effect=ImportError('missing API')):
+            with self.assertRaisesRegex(BrokenModelIntegration, 'missing API'):
+                BY_ARCH['hidream_o1'].load()
         self.assertNotIn("from .hidream_o1_model import HidreamO1Model", hidream_source.split("def __getattr__")[0])
         self.assertIn('if name == "HidreamO1Model":', hidream_source)
 
     def test_optional_qwen_image_imports_are_guarded(self):
-        registry_source = REGISTRY_PATH.read_text(encoding="utf-8")
+        from toolkit.model_registry import BY_ARCH, resolve_model
+        from extensions_built_in.diffusion_models.qwen_image import QwenImageModel, QwenImageEditModel, QwenImageEditPlusModel
+        for arch, expected in (('qwen_image', QwenImageModel), ('qwen_image_edit', QwenImageEditModel),
+                               ('qwen_image_edit_plus', QwenImageEditPlusModel)):
+            self.assertEqual(BY_ARCH[arch].class_name, expected.__name__)
+            self.assertIs(resolve_model(arch), expected)
 
-        self.assertIn('".qwen_image"', registry_source)
-        self.assertIn('"QwenImageModel", "qwen_image"', registry_source)
-        self.assertIn('"QwenImageEditModel", "qwen_image_edit"', registry_source)
-        self.assertIn(
-            '"QwenImageEditPlusModel", "qwen_image_edit_plus"', registry_source
-        )
-
-    def test_ui_model_defaults_and_default_auto_profile(self):
+    def test_ui_model_defaults(self):
         source = UI_OPTIONS_PATH.read_text(encoding="utf-8")
         start = source.index("name: 'glm_image'")
         end = source.index("disableSections", start)
         block = source[start:end]
 
-        self.assertIn("defaultAutoTrainingProfileId: 'glm-image-balanced-lora'", block)
         self.assertIn("'config.process[0].model.name_or_path': ['zai-org/GLM-Image', defaultNameOrPath]", block)
         self.assertIn("'config.process[0].model.quantize': [true, false]", block)
         self.assertIn("'config.process[0].model.quantize_te': [true, false]", block)
@@ -131,55 +122,9 @@ class GlmImageStaticSupportTest(unittest.TestCase):
         self.assertIn("prior_token_ids=prior_token_ids", block)
         self.assertNotIn("prompt=gen_config.prompt", block)
 
-    def test_auto_training_profiles_are_model_scoped(self):
-        source = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("modelArchs?: string[]", source)
-        self.assertIn("id: 'glm-image-balanced-lora'", source)
-        self.assertIn("id: 'glm-image-low-vram-lora'", source)
-        self.assertEqual(source.count("modelArchs: ['glm_image']"), 2)
-        self.assertIn("loraNetwork(32, { transformer_only: true })", source)
-        self.assertIn("loraNetwork(16, { dropout: 0.05, transformer_only: true })", source)
-        self.assertIn("dropout: 0.05", source)
-        self.assertIn("gradient_accumulation: 2", source)
-        self.assertIn("phase('Polish style', 0.000015", source)
-        self.assertIn("phase('Polish style', 0.00001", source)
 
-    def test_lokr_auto_training_profiles_do_not_set_normal_dropout(self):
-        source = AUTO_PROFILES_PATH.read_text(encoding="utf-8")
 
-        for profile_id in ("anatomy-lokr", "anatomy-realism-lokr"):
-            start = source.index(f"id: '{profile_id}'")
-            end = source.find("\n  {", start + 1)
-            block = source[start:] if end == -1 else source[start:end]
-
-            self.assertIn("type: 'lokr'", block)
-            self.assertNotIn("dropout:", block)
-
-    def test_training_phase_editor_filters_profiles_by_model(self):
-        editor_source = TRAINING_PHASES_EDITOR_PATH.read_text(encoding="utf-8")
-        simple_job_source = SIMPLE_JOB_PATH.read_text(encoding="utf-8")
-
-        self.assertIn("modelArchName?: string", editor_source)
-        self.assertIn("defaultAutoTrainingProfileId?: string", editor_source)
-        self.assertIn("isAutoTrainingProfileCompatible(profile, activeArch)", editor_source)
-        self.assertIn("modelArchs: activeArch ? [activeArch] : undefined", editor_source)
-        self.assertIn("modelArchName={modelArch?.name}", simple_job_source)
-        self.assertIn("defaultAutoTrainingProfileId={modelArch?.defaultAutoTrainingProfileId}", simple_job_source)
-
-    def test_example_config_uses_auto_train_phases_without_fixed_phase_steps(self):
-        config = yaml.safe_load(EXAMPLE_PATH.read_text(encoding="utf-8"))
-        process = config["config"]["process"][0]
-
-        self.assertEqual(process["model"]["arch"], "glm_image")
-        self.assertEqual(process["model"]["name_or_path"], "zai-org/GLM-Image")
-        self.assertTrue(process["train"]["auto_train"])
-        self.assertTrue(process["train"]["save_on_phase_change"])
-        self.assertEqual(process["sample"]["guidance_scale"], 1.5)
-        self.assertEqual(process["sample"]["sample_steps"], 50)
-        for phase in process["train"]["phases"]:
-            self.assertNotIn("steps", phase)
-            self.assertIn("auto_advance", phase)
 
 
 class FakePriorEncoder:

@@ -24,6 +24,7 @@ const commandInput = loadSource('../src/server/commandInput.ts', {
   '../utils/obsoleteWorkspaceGuard': obsoleteWorkspaceGuard,
 });
 const configContract = loadSource('../src/domain/configContract.ts', {
+  '../utils/trainingPhases': loadSource('../src/utils/trainingPhases.ts'),
   './modelCapabilities.json': JSON.parse(
     fs.readFileSync(new URL('../src/domain/modelCapabilities.json', import.meta.url), 'utf8'),
   ),
@@ -141,6 +142,26 @@ for (const jobType of ['train', 'caption']) {
     });
   }
 }
+
+test('saving rejects removed automatic training before local or remote writes', async () => {
+  for (const train of [
+    { auto_train: true, steps: 20 }, { auto_learn: true, steps: 20 },
+    { steps: 20, phases: [{ steps: 20, auto_advance: {} }] },
+    { steps: 20, phases: [{ steps: 20, auto_advance: null }] },
+  ]) {
+    for (const existing of [null, { id: 'mirror', name: 'old_run', status: 'stopped', worker_id: 'worker-1', remote_job_id: 'remote-job' }]) {
+      const state = fixture(existing);
+      const body = { ...payload(), id: existing?.id, worker_id: existing?.worker_id || 'local' };
+      body.job_config.config.process[0].train = train;
+      const response = await state.post(body);
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).error, /no longer supported/);
+      assert.deepEqual(state.created, []);
+      assert.deepEqual(state.updated, []);
+      assert.deepEqual(state.remoteRequests, []);
+    }
+  }
+});
 
 test('a string id updates the existing job without creating another job', async () => {
   const state = fixture({ id: 'existing-job', name: 'old_run', status: 'stopped', worker_id: 'local' });

@@ -572,11 +572,12 @@ LossTarget = Literal['noise', 'source', 'unaugmented', 'differential_noise']
 
 class TrainConfig:
     def __init__(self, **kwargs):
+        from toolkit.training_phases import validate_finite_training_config
+        validate_finite_training_config(kwargs)
         self.noise_scheduler = kwargs.get('noise_scheduler', 'ddpm')
         self.content_or_style: ContentOrStyleType = kwargs.get('content_or_style', 'balanced')
         self.content_or_style_reg: ContentOrStyleType = kwargs.get('content_or_style_reg', self.content_or_style)
         self.steps: int = kwargs.get('steps', 1000)
-        self.auto_train: bool = bool(kwargs.get('auto_train', kwargs.get('auto_learn', False)))
         self.phases = kwargs.get('phases', None)
         self.save_on_phase_change: bool = kwargs.get('save_on_phase_change', True)
         self.lr = kwargs.get('lr', 1e-6)
@@ -1802,7 +1803,7 @@ class GenerateImageConfig:
         side = min(w, h)
         left = (w - side) // 2
         top = (h - side) // 2
-        img = img.crop((left, top, left + side, top + side)).resize((300, 300), PILImage.LANCZOS)
+        img = img.crop((left, top, left + side, top + side)).resize((300, 300), PILImage.Resampling.LANCZOS)
         if has_alpha:
             img.save(thumb_path, format='PNG', optimize=True)
             return '.png'

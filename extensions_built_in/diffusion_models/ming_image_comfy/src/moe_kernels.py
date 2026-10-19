@@ -27,6 +27,12 @@ except ImportError:  # pragma: no cover
     HAS_TRITON = False
 
 
+def _require_triton_kernel(name):
+    if not HAS_TRITON:
+        raise RuntimeError("Grouped GPU kernels require the optional triton package")
+    return globals()[name]
+
+
 if HAS_TRITON:
 
     @triton.jit
@@ -174,7 +180,7 @@ def grouped_swiglu(
     block_m = _block_m(x.shape[0], E)
     block_n = 64
     grid = (E, triton.cdiv(inter, block_n))
-    _grouped_swiglu_kernel[grid](
+    _require_triton_kernel("_grouped_swiglu_kernel")[grid](
         x,
         gate_up,
         scale if scale is not None else gate_up,
@@ -209,7 +215,7 @@ def grouped_linear(
     block_m = _block_m(x.shape[0], E)
     block_n = 64
     grid = (E, triton.cdiv(N, block_n))
-    _grouped_linear_kernel[grid](
+    _require_triton_kernel("_grouped_linear_kernel")[grid](
         x,
         w,
         scale if scale is not None else w,

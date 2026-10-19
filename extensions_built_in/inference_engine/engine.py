@@ -438,7 +438,9 @@ class Engine:
         current = self.lora_stack
         if current is not None and current.key() == wanted_key:
             return
-        if current is not None and current.mode == "hook" and mode == "hook" and current.set_strengths(specs):
+        if current is not None and current.mode == "hook" and mode == "hook" and current.set_strengths(
+            specs, source_identities=[lora.source_identity for lora in wanted.loras],
+        ):
             self.lora_stack = current
             return
 
@@ -462,11 +464,35 @@ class Engine:
         if not specs:
             return
         stack = LoRAStack(self.holder, mode).load(specs, status_fn=status)
-        touched = stack.apply(status_fn=status)
+        roots = [getattr(self.holder, "model", None)] + (
+            self.holder.text_encoder if isinstance(getattr(self.holder, "text_encoder", None), list)
+            else [getattr(self.holder, "text_encoder", None)]
+        )
+        # A newly built holder can reuse components already merged with this
+        # exact adapter content. Do not merge the same delta into them twice.
+        already_merged = {
+            id(module) for root in roots
+            if isinstance(root, torch.nn.Module) and getattr(root, "_aitk_merged_loras", None) == stack.key()
+            for module in root.modules()
+        } if mode == "merge" else set()
+        try:
+            if any(isinstance(root, torch.nn.Module)
+                   and getattr(root, "_aitk_merged_loras", None) not in (None, stack.key()) for root in roots):
+                raise ValueError("Adapter source changed while selecting pooled weights; retry the request")
+            touched = stack.apply(status_fn=status, skip_modules=already_merged)
+        except Exception:
+            # An OOM or failed quantizer writeback can leave an earlier layer
+            # merged even though the stack never finished. Never return those
+            # pooled weights as an unmodified base on the next request.
+            stack.remove()
+            affected = {id(module) for root in roots if isinstance(root, torch.nn.Module)
+                        for module in root.modules()}
+            self._drop_holder()
+            self.pool.evict_where(lambda root: any(id(module) in affected for module in root.modules()))
+            flush()
+            raise
         if mode == "merge":
-            for root in [getattr(self.holder, "model", None)] + (
-                self.holder.text_encoder if isinstance(getattr(self.holder, "text_encoder", None), list) else [getattr(self.holder, "text_encoder", None)]
-            ):
+            for root in roots:
                 if isinstance(root, torch.nn.Module) and any(id(m) in touched for m in root.modules()):
                     root._aitk_merged_loras = stack.key()
         self.lora_stack = stack

@@ -32,7 +32,7 @@ def _load_dfe6_test_class():
         node
         for node in class_node.body
         if isinstance(node, ast.FunctionDef)
-        and node.name in {"prepare_inputs", "forward"}
+        and node.name in {"prepare_inputs", "_dino_features", "forward"}
     ]
     fold_frames = next(
         node
@@ -132,9 +132,9 @@ class ConvRotCompatibilityTest(unittest.TestCase):
                 imported = convrot_quant._import_triton()
             self.assertEqual(imported, (fake_triton, fake_language, fake_libdevice))
             # Older Triton JIT resolvers look up these through fn.__globals__.
-            self.assertIs(convrot_quant.triton, fake_triton)
-            self.assertIs(convrot_quant.tl, fake_language)
-            self.assertIs(convrot_quant.libdevice, fake_libdevice)
+            self.assertIs(vars(convrot_quant)['triton'], fake_triton)
+            self.assertIs(vars(convrot_quant)['tl'], fake_language)
+            self.assertIs(vars(convrot_quant)['libdevice'], fake_libdevice)
         finally:
             for name in names:
                 if name in previous:
@@ -177,6 +177,8 @@ class DiffusionFeatureExtractionOptimizationTest(unittest.TestCase):
         dfe.losses = {}
         dfe.log_every = 100
         dfe.step = 0
+        dfe.num_prefix_tokens = 1
+        dfe.cls_weight = 0.1
         return dfe
 
     def test_prepare_inputs_reuses_cached_constants_with_same_numerics(self):
@@ -220,7 +222,9 @@ class DiffusionFeatureExtractionOptimizationTest(unittest.TestCase):
         class FakeVision:
             @staticmethod
             def __call__(pixel_values):
-                return SimpleNamespace(pooler_output=pixel_values.flatten(1))
+                patches = pixel_values.flatten(2).transpose(1, 2)
+                hidden = torch.cat([patches.mean(dim=1, keepdim=True), patches], dim=1)
+                return SimpleNamespace(last_hidden_state=hidden)
 
         dfe.vae = FakeVae()
         dfe.model = FakeVision()
@@ -230,28 +234,25 @@ class DiffusionFeatureExtractionOptimizationTest(unittest.TestCase):
         batch = SimpleNamespace(
             tensor=torch.linspace(-1.0, 1.0, 3 * 16 * 16).view(1, 3, 16, 16)
         )
-        loss = dfe.forward(
-            noise=torch.zeros_like(prediction),
-            noise_pred=prediction,
-            noisy_latents=torch.zeros_like(prediction),
-            timesteps=torch.tensor([500.0]),
-            batch=batch,
-            scheduler=None,
-            model=SimpleNamespace(x0_pred=True),
-        )
+        with mock.patch.object(torch.Tensor, 'item', side_effect=AssertionError('Premature device sync')):
+            loss = dfe.forward(
+                noise=torch.zeros_like(prediction),
+                noise_pred=prediction,
+                noisy_latents=torch.zeros_like(prediction),
+                timesteps=torch.tensor([500.0]),
+                batch=batch,
+                scheduler=None,
+                model=SimpleNamespace(x0_pred=True),
+            )
 
         self.assertTrue(torch.is_tensor(loss))
-        self.assertTrue(torch.is_tensor(dfe.losses["dinov3"]))
-        self.assertFalse(dfe.losses["dinov3"].requires_grad)
-
-        forward_node = next(
-            node
-            for node in self.dfe_ast.body
-            if isinstance(node, ast.FunctionDef) and node.name == "forward"
-        )
-        forward_source = ast.unparse(forward_node)
-        self.assertIn("dino_loss.detach()", forward_source)
-        self.assertNotIn("dino_loss.item()", forward_source)
+        for key in ('dinov3_patch', 'dinov3_cls'):
+            self.assertTrue(torch.is_tensor(dfe.losses[key]))
+            self.assertFalse(dfe.losses[key].requires_grad)
+            self.assertEqual(dfe.losses[key].device, loss.device)
+        loss.sum().backward()
+        self.assertTrue(torch.isfinite(prediction.grad).all())
+        self.assertGreater(prediction.grad.abs().sum(), 0)
 
 
 class _FakeEvent:

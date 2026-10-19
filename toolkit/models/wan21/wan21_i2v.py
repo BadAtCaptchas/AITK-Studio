@@ -424,7 +424,7 @@ class Wan21I2V(Wan21):
         width = width // 16 * 16
         
         # resize the control image
-        control_img = control_img.resize((width, height), Image.LANCZOS)
+        control_img = control_img.resize((width, height), Image.Resampling.LANCZOS)
                 
         output = pipeline(
             image=control_img,

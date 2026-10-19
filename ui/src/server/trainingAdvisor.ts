@@ -1,3 +1,4 @@
+import { trainingPhaseErrors } from '../utils/trainingPhases';
 import fs from 'fs';
 import path from 'path';
 import type {
@@ -11,7 +12,6 @@ import type {
   Job,
   JobConfig,
   ProcessConfig,
-  TrainingPhaseConfig,
 } from '../types';
 import { getFluxGuidanceBypassPolicy } from '../utils/fluxGuidancePolicy';
 
@@ -484,8 +484,7 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
   const sample = processConfig.sample;
   const save = processConfig.save;
   const logging = processConfig.logging;
-  const isAutoTrain = !!train?.auto_train;
-  const steps = isAutoTrain ? 0 : Math.max(0, Number(train?.steps ?? 0));
+  const steps = Math.max(0, Number(train?.steps ?? 0));
 
   if (gpuIds != null && String(gpuIds).trim().length === 0) {
     addFinding(
@@ -849,65 +848,13 @@ function analyzeConfig(findings: AdvisorFinding[], processConfig: ProcessConfig,
 
 function analyzePhases(findings: AdvisorFinding[], processConfig: ProcessConfig) {
   const train = processConfig.train;
-  const phases = train?.phases ?? [];
-  if (!phases.length) return;
-
-  if (train.auto_train) {
-    for (const [index, phase] of phases.entries()) {
-      if (!phase.auto_advance) {
-        addFinding(
-          findings,
-          'critical',
-          'preflight',
-          'phases',
-          `phases.${index}.auto_train.no_auto_advance`,
-          'Auto-learn phase cannot advance',
-          `Phase ${index + 1} does not have plateau detection configured.`,
-          'Enable auto-advance for every auto-learn phase.',
-          undefined,
-          [`config.process[0].train.phases[${index}].auto_advance`],
-        );
-      }
-    }
-    return;
-  }
-
-  const trainSteps = Math.max(0, Number(train.steps ?? 0));
-  const phaseSteps = phases.reduce((sum, phase) => sum + Math.max(1, Number(phase.steps) || 1), 0);
-  if (trainSteps !== phaseSteps) {
+  for (const [index, message] of trainingPhaseErrors(train).entries()) {
     addFinding(
-      findings,
-      'critical',
-      'preflight',
-      'phases',
-      'phases.steps.mismatch',
-      'Phase steps do not match total steps',
-      `Total train steps are ${trainSteps}, but phases add up to ${phaseSteps}.`,
-      'Synchronize train.steps with the sum of all phase steps before starting.',
-      undefined,
-      ['config.process[0].train.steps', 'config.process[0].train.phases'],
+      findings, 'critical', 'preflight', 'phases', `phases.invalid.${index}`,
+      'Invalid manual training phases', message,
+      'Use positive integer steps for every phase and synchronize the total before starting.',
+      undefined, ['config.process[0].train.steps', 'config.process[0].train.phases'],
     );
-  }
-
-  for (const [index, phase] of phases.entries()) {
-    const autoAdvance = phase.auto_advance;
-    if (!autoAdvance) continue;
-    const phaseStepCount = Math.max(1, Number(phase.steps) || 1);
-    const minSteps = Number(autoAdvance.min_steps ?? Math.max(200, Number(autoAdvance.window ?? 100) * 2));
-    if (minSteps >= phaseStepCount) {
-      addFinding(
-        findings,
-        'info',
-        'preflight',
-        'phases',
-        `phases.${index}.auto_advance.min_steps`,
-        'Auto-advance may never trigger',
-        `Phase ${index + 1} has ${phaseStepCount} steps, but auto-advance waits at least ${minSteps} steps.`,
-        'Lower auto-advance min steps or extend the phase if plateau detection should matter.',
-        undefined,
-        [`config.process[0].train.phases[${index}].auto_advance.min_steps`],
-      );
-    }
   }
 }
 
@@ -960,18 +907,11 @@ function analyzeLossDynamics(findings: AdvisorFinding[], processConfig: ProcessC
 
   const improvementPct = ((earlierAvg - laterAvg) / Math.abs(earlierAvg)) * 100;
   if (improvementPct < 1 && points.length >= 100) {
-    const hasAutoAdvance = (processConfig.train.phases ?? []).some((phase: TrainingPhaseConfig) => !!phase.auto_advance);
     addFinding(
-      findings,
-      'info',
-      'live',
-      hasAutoAdvance ? 'stability' : 'phases',
-      hasAutoAdvance ? 'live.loss.plateau' : 'live.loss.plateau.no_auto_advance',
-      hasAutoAdvance ? 'Loss looks plateaued' : 'Loss plateau could drive a phase change',
+      findings, 'info', 'live', 'stability', 'live.loss.plateau',
+      'Loss looks plateaued',
       `${key} improved by ${improvementPct.toFixed(1)}% across the recent window.`,
-      hasAutoAdvance
-        ? 'Inspect recent samples before spending many more steps in this phase.'
-        : 'Consider adding phase auto-advance when using staged training recipes.',
+      'Inspect recent samples before spending many more training steps.',
       [`${key}: ${earlierAvg.toFixed(4)} -> ${laterAvg.toFixed(4)}`],
     );
   }

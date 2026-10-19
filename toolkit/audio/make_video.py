@@ -44,7 +44,7 @@ def load_waveform(audio_path: str, num_samples: int = 512) -> np.ndarray:
 
 def create_artwork(waveform: np.ndarray, size: int = ARTWORK_SIZE) -> Image.Image:
     """Create album artwork with logo background and waveform overlay."""
-    bg = Image.open(BACKGROUND_PATH).convert("RGBA").resize((size, size), Image.LANCZOS)
+    bg = Image.open(BACKGROUND_PATH).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
     # draw waveform on separate overlay for alpha compositing
     wave_overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -79,7 +79,7 @@ def make_video(song_path: str, video_size: int = 512) -> str:
 
     waveform = load_waveform(song_path)
     artwork = create_artwork(waveform)
-    artwork = artwork.resize((video_size, video_size), Image.LANCZOS)
+    artwork = artwork.resize((video_size, video_size), Image.Resampling.LANCZOS)
 
     # get audio duration
     container = av.open(song_path)

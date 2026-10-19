@@ -42,19 +42,12 @@ function phaseDetailText(summary: TrainingPhaseSummary) {
   if (summary.phaseStep !== null) {
     return `Phase step ${formatPhaseValue(summary.phaseStep)}`;
   }
-  if (summary.telemetryPending) {
-    return 'Open-ended auto learn phase; waiting for telemetry';
-  }
-  if (summary.isAutoTrain) {
-    return 'Open-ended auto learn phase';
-  }
   return 'Phase step unavailable';
 }
 
 function phaseStatusText(summary: TrainingPhaseSummary) {
   const reason = usefulPhaseReason(summary.reason);
   if (reason) return `Last transition: ${reason}`;
-  if (summary.telemetryPending) return 'Telemetry pending';
   return summary.source === 'metrics' ? 'Live telemetry' : 'Estimated from config';
 }
 
@@ -72,7 +65,7 @@ function TrainingPhaseOverview({ summary }: { summary: TrainingPhaseSummary }) {
           </div>
         </div>
         <span className="rounded-full border border-gray-700 bg-gray-900 px-2.5 py-1 text-xs text-gray-300">
-          {summary.isAutoTrain ? 'Auto learn' : 'Phased'}
+          Phased
         </span>
       </div>
 

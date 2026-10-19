@@ -24,9 +24,78 @@ const catalog = loadSource('../src/domain/modelOptions.ts', {
   '@/helpers/defaultSamples': loadSource('../src/helpers/defaultSamples.ts'),
   './modelCapabilities.json': require('../src/domain/modelCapabilities.json'),
 });
-const { getDefaultModelConfig, getLoraModelConfig } = loadSource('../src/domain/generationConfig.ts', {
+const { getDefaultModelConfig, getDefaultGenerationSettings, getLoraModelConfig } = loadSource('../src/domain/generationConfig.ts', {
   './modelOptions': catalog,
   '../utils/memoryProfiles': loadSource('../src/utils/memoryProfiles.ts'),
+});
+
+function pageFunction(name, bindings) {
+  const filename = new URL('../src/app/generate/GeneratePageContent.tsx', import.meta.url);
+  const source = ts.createSourceFile(filename.pathname, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
+  let expression;
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name && node.initializer) expression = node.initializer.getText(source);
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  assert.ok(expression, `Missing page handler ${name}`);
+  const code = ts.transpileModule(`const handler = ${expression}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function(...Object.keys(bindings), `${code}; return handler;`)(...Object.values(bindings));
+}
+
+test('Generate architecture changes reset a Turbo schedule through the actual page handler', () => {
+  for (const target of ['flux', 'sdxl', 'sd15']) {
+    let model = getDefaultModelConfig('boogu_image_turbo');
+    const settings = { sampler: 'flowmatch', guidanceScale: 0, sampleSteps: 4, width: 1536, height: 768 };
+    const applyArchSampleDefaults = pageFunction('applyArchSampleDefaults', {
+      getDefaultGenerationSettings, archs: catalog.modelArchs,
+      setSampler: value => { settings.sampler = value; },
+      setGuidanceScale: value => { settings.guidanceScale = value; },
+      setSampleSteps: value => { settings.sampleSteps = value; },
+      setWidth: value => { settings.width = value; },
+      setHeight: value => { settings.height = value; },
+    });
+    const handleArchChange = pageFunction('handleArchChange', {
+      getDefaultModelConfig, archs: catalog.modelArchs, applyArchSampleDefaults,
+      setModelConfig: value => { model = value; },
+    });
+    handleArchChange(target);
+    assert.equal(model.arch, target);
+    assert.deepEqual(settings, getDefaultGenerationSettings(target));
+    assert.equal(settings.sampleSteps, 25);
+    assert.equal(settings.guidanceScale, target === 'sd15' || target === 'sdxl' ? 6 : 4);
+  }
+});
+
+test('generation defaults reset the entire schedule and resolution after a Turbo model', () => {
+  assert.deepEqual(getDefaultGenerationSettings('boogu_image_turbo'), {
+    sampler: 'flowmatch', guidanceScale: 0, sampleSteps: 4, width: 1024, height: 1024,
+  });
+  assert.deepEqual(getDefaultGenerationSettings('flux'), {
+    sampler: 'flowmatch', guidanceScale: 4, sampleSteps: 25, width: 1024, height: 1024,
+  });
+  assert.deepEqual(getDefaultGenerationSettings('sd15'), {
+    sampler: 'ddpm', guidanceScale: 6, sampleSteps: 25, width: 512, height: 512,
+  });
+  assert.equal(getDefaultGenerationSettings('sdxl').sampleSteps, 25);
+});
+
+test('generation preserves required auxiliary component repositories and VAE precision', () => {
+  for (const arch of ['zeta_chroma', 'zimage_l2p']) {
+    assert.equal(getDefaultModelConfig(arch).extras_name_or_path, 'Tongyi-MAI/Z-Image-Turbo');
+  }
+  assert.equal(getDefaultModelConfig('zimage:juggernaut_z').extras_name_or_path, 'Tongyi-MAI/Z-Image');
+  const custom = [{ name: 'custom_model', defaults: {
+    'config.process[0].model.te_name_or_path': ['custom/encoder'],
+    'config.process[0].model.refiner_name_or_path': ['custom/refiner'],
+    'config.process[0].model.vae_path': ['custom/vae'],
+    'config.process[0].model.vae_dtype': ['fp32'],
+  } }];
+  const config = getDefaultModelConfig('custom_model', custom);
+  assert.equal(config.te_name_or_path, 'custom/encoder');
+  assert.equal(config.refiner_name_or_path, 'custom/refiner');
+  assert.equal(config.vae_path, 'custom/vae');
+  assert.equal(config.vae_dtype, 'fp32');
 });
 const memoryKeys = [
   'low_vram',

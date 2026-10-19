@@ -196,7 +196,7 @@ export function validateTrainingConfig(
       });
     }
   });
-  if (!trainConfig?.auto_train && (!Number.isSafeInteger(trainConfig?.steps) || trainConfig.steps < 1)) {
+  if (!Number.isSafeInteger(trainConfig?.steps) || trainConfig.steps < 1) {
     messages.push({
       target: { step: 'job-training', label: 'Steps' },
       level: 'error',

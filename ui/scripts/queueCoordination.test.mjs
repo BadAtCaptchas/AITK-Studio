@@ -202,6 +202,7 @@ test('cron does not claim work when the queue stops during Python preflight', as
     '../../src/server/encryptedDatasetSecrets': {}, '../../src/server/secureRemoteCaptionJobs': {},
     '../../src/server/remoteOllamaWorkers': {}, '../../src/server/networkPolicy': {},
     '../../src/server/telemetry': {}, '../../src/utils/telemetry': {},
+    '../../src/utils/trainingPhases': loadSource('../src/utils/trainingPhases.ts', {}),
   });
   const launch = start.startJobNow('job', { requireRunningQueue: true });
   await preflight.promise;

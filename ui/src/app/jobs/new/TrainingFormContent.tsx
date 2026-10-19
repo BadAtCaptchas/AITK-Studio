@@ -41,15 +41,33 @@ import {
 } from '@/utils/remoteDatasetRefs';
 import { AUTHENLORA_BUILTIN_CODEC_BITS } from '@/utils/authenloraCodecs';
 import { getValidationConfigErrors } from '@/utils/validationConfig';
+import { groupModelOptions } from '@/domain/modelOptions';
+import {
+  getMigrationTargets,
+  migrateTrainingModel,
+  migrationSourceError,
+  prepareFreshTrainingConfig,
+  suggestMigrationName,
+  validateTrainingMigration,
+  type TrainingMigrationDraft,
+} from '@/domain/trainingModelMigration';
+type MigrationState =
+  | { phase: 'loading' }
+  | { phase: 'ready'; draft: TrainingMigrationDraft }
+  | { phase: 'error'; message: string };
 const isDev = process.env.NODE_ENV === 'development';
 export function TrainingFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const runId = searchParams.get('id');
-  const cloneId = searchParams.get('cloneId');
-  const draftKey = runId || (cloneId ? `clone:${cloneId}` : 'new');
+  const migrationId = searchParams.get('migrateId');
+  const runId = migrationId ? null : searchParams.get('id');
+  const cloneId = migrationId ? null : searchParams.get('cloneId');
+  const draftKey = migrationId ? `migrate:${migrationId}` : runId || (cloneId ? `clone:${cloneId}` : 'new');
   const appliedDataset = useRef<string | null>(null);
   const [restoredDraft] = useState(() => readTrainingDraft(draftKey));
+  const [migration, setMigration] = useState<MigrationState>(() =>
+    restoredDraft?.migration ? { phase: 'ready', draft: restoredDraft.migration } : { phase: 'loading' },
+  );
   const [gpuIDs, setGpuIDs] = useState<string | null>(restoredDraft?.gpuIDs ?? null);
   const [workerID, setWorkerID] = useState(restoredDraft?.workerID || 'local');
   const { settings, isSettingsLoaded, settingsStatus, settingsError, refreshSettings } = useSettings();
@@ -69,7 +87,12 @@ export function TrainingFormContent() {
   const [jobConfig, setJobConfig] = useNestedState<JobConfig>(
     restoredDraft?.config || objectCopy(migrateJobConfig(defaultJobConfig)),
   );
-  const draft = useTrainingDraft(draftKey, { config: jobConfig, workerID, gpuIDs });
+  const draft = useTrainingDraft(draftKey, {
+    config: jobConfig,
+    workerID,
+    gpuIDs,
+    ...(migrationId && migration.phase === 'ready' ? { migration: migration.draft } : {}),
+  });
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [validationMessages, setValidationMessages] = useState<ValidationMessage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +116,10 @@ export function TrainingFormContent() {
           throw new Error(
             'Config needs a training name, model, training settings, samples, and datasets with resolutions.',
           );
+        if (migrationId && parsed.config.process[0].model.arch !== jobConfig.config.process[0].model.arch)
+          throw new Error(
+            'Choose the destination architecture in the migration form before importing its configuration.',
+          );
         // Set required fields (same pattern as AdvancedJob.handleChange)
         try {
           parsed.config.process[0].sqlite_db_path = './aitk_db.db';
@@ -102,11 +129,13 @@ export function TrainingFormContent() {
         } catch (err) {
           console.warn('Could not set required fields on imported config:', err);
         }
-        migrateJobConfig(parsed);
+        if (!migrationId) migrateJobConfig(parsed);
         setJobConfig(parsed);
       } catch (err) {
         console.error('Failed to parse config file:', err);
-        reportWorkflowError('Failed to parse config file. Please check the file format.');
+        reportWorkflowError(
+          err instanceof Error ? err.message : 'Failed to parse config file. Please check the file format.',
+        );
       }
     };
     reader.readAsText(file);
@@ -165,6 +194,47 @@ export function TrainingFormContent() {
     }
   }, [datasets, settings, isSettingsLoaded, datasetFetchStatus, searchParams, runId, cloneId]);
   // clone existing job
+  useEffect(() => {
+    if (!migrationId || restoredDraft?.migration) return;
+    let canceled = false;
+    apiClient
+      .get<unknown>(`/api/jobs?id=${encodeURIComponent(migrationId)}`)
+      .then(({ data }) => {
+        if (canceled) return;
+        if (
+          !data ||
+          typeof data !== 'object' ||
+          !('job_type' in data) ||
+          data.job_type !== 'train' ||
+          !('job_config' in data) ||
+          typeof data.job_config !== 'string'
+        )
+          throw new Error('The source training job could not be loaded.');
+        const source: unknown = JSON.parse(data.job_config);
+        const sourceError = migrationSourceError(source);
+        if (sourceError || !isEditableTrainingConfig(source))
+          throw new Error(sourceError || 'Invalid source training configuration.');
+        const prepared = prepareFreshTrainingConfig(source);
+        if (prepared.config.config.process[0].type === 'ui_trainer')
+          prepared.config.config.process[0].type = 'diffusion_trainer';
+        prepared.config.config.name = suggestMigrationName(source.config.name);
+        setJobConfig(prepared.config);
+        setGpuIDs('gpu_ids' in data && typeof data.gpu_ids === 'string' ? data.gpu_ids : null);
+        setWorkerID('worker_id' in data && typeof data.worker_id === 'string' ? data.worker_id : 'local');
+        setMigration({ phase: 'ready', draft: { source, changes: prepared.changes } });
+      })
+      .catch((cause: unknown) => {
+        if (!canceled)
+          setMigration({
+            phase: 'error',
+            message: cause instanceof Error ? cause.message : 'Failed to load the source job.',
+          });
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [migrationId, restoredDraft, setJobConfig]);
+
   useEffect(() => {
     if (cloneId && !restoredDraft) {
       apiClient
@@ -340,15 +410,55 @@ export function TrainingFormContent() {
       isDatasetUnlocked: (datasetPath, name) =>
         Boolean(getRememberedEncryptedDatasetKey(datasetPath) || (name && getRememberedEncryptedDatasetKey(name))),
     });
+  const migrationFindings = (config: JobConfig): ValidationMessage[] => {
+    if (!migrationId) return [];
+    if (migration.phase !== 'ready')
+      return [
+        {
+          level: 'error',
+          message: migration.phase === 'error' ? migration.message : 'Loading the source training job...',
+          target: { step: 'job-basics', label: 'Source job' },
+        },
+      ];
+    return validateTrainingMigration(config, migration.draft.source);
+  };
+  const changeMigrationModel = (arch: string, modelPath?: string) => {
+    if (migration.phase !== 'ready') return;
+    try {
+      const result = migrateTrainingModel(jobConfig, arch, modelPath);
+      const sourceName = migration.draft.source.config.name;
+      if (
+        [
+          suggestMigrationName(sourceName),
+          suggestMigrationName(sourceName, jobConfig.config.process[0].model.arch),
+        ].includes(jobConfig.config.name)
+      ) {
+        result.config.config.name = suggestMigrationName(sourceName, arch);
+      }
+      setJobConfig(result.config);
+      setMigration({
+        phase: 'ready',
+        draft: {
+          ...migration.draft,
+          changes: [
+            ...new Map([...migration.draft.changes, ...result.changes].map(change => [change.path, change])).values(),
+          ],
+        },
+      });
+    } catch (cause) {
+      reportWorkflowError(cause instanceof Error ? cause.message : 'Could not migrate this model.');
+    }
+  };
   const saveJob = async () => {
     if (!isSettingsLoaded || settingsStatus === 'error') {
       reportWorkflowError('Load settings before saving this training run.');
       return;
     }
     if (status === 'saving' || !rawEditorValid) return;
-    const jobConfigWithSettings = applyComfyAutoInstallSetting(jobConfig);
-    const validation = validateJobBeforeSave(jobConfigWithSettings);
-    setValidationMessages([]);
+    const freshConfig = migrationId ? prepareFreshTrainingConfig(jobConfig).config : jobConfig;
+    const jobConfigWithSettings = applyComfyAutoInstallSetting(freshConfig);
+    const validation = [...validateJobBeforeSave(jobConfigWithSettings), ...migrationFindings(jobConfigWithSettings)];
+    setValidationMessages(validation);
     if (validation.some(message => message.level === 'error')) {
       setStatus('idle');
       return;
@@ -358,7 +468,7 @@ export function TrainingFormContent() {
       const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings, workerID);
       setJobConfig(preparedJobConfig);
       const res = await apiClient.post('/api/jobs', {
-        id: runId,
+        ...(migrationId ? {} : { id: runId }),
         name: preparedJobConfig.config.name,
         worker_id: workerID,
         gpu_ids: gpuIDs,
@@ -424,6 +534,7 @@ export function TrainingFormContent() {
         ]
       : []),
     ...validationMessages,
+    ...migrationFindings(jobConfig),
     ...validateJobBeforeSave(jobConfig),
     ...configContractErrors(jobConfig, { deviceBackend: gpuData ? (gpuData.isMac ? 'mps' : 'cuda') : undefined }).map(
       message => ({ level: 'error' as const, message, target: { step: 'raw', label: 'Raw configuration' } }),
@@ -483,6 +594,10 @@ export function TrainingFormContent() {
       throw new Error(
         'Config needs a training name, model, training settings, samples, and datasets with resolutions.',
       );
+    if (migrationId && parsed.config.process[0].model.arch !== jobConfig.config.process[0].model.arch)
+      throw new Error(
+        'Choose the destination model using the migration selector before editing its raw configuration.',
+      );
     try {
       parsed.config.process[0].sqlite_db_path = './aitk_db.db';
       parsed.config.process[0].training_folder = settings.TRAINING_FOLDER;
@@ -491,7 +606,7 @@ export function TrainingFormContent() {
     } catch (e) {
       console.warn(e);
     }
-    return migrateJobConfig(parsed);
+    return migrationId ? parsed : migrateJobConfig(parsed);
   };
   const renderAdvancedConfigEditor = () => (
     <AdvancedConfigEditor
@@ -533,6 +648,53 @@ export function TrainingFormContent() {
         </ul>
       </PageNotice>
     ) : null;
+  const migrationOptions =
+    migration.phase === 'ready' ? groupModelOptions(getMigrationTargets(migration.draft.source)) : [];
+  const migrationNotice = migrationId ? (
+    <div className="px-4 py-4">
+      <PageNotice tone={migration.phase === 'error' ? 'danger' : 'info'} title="Migrate to another model">
+        {migration.phase === 'loading' && <p>Loading the source training job...</p>}
+        {migration.phase === 'error' && <p role="alert">{migration.message}</p>}
+        {migration.phase === 'ready' && (
+          <>
+            <p>
+              Create a separate run from <strong>{migration.draft.source.config.name}</strong>. Training starts at step
+              0. The original run and its outputs are retained.
+            </p>
+            <p className="mt-1">
+              Choose another model architecture or model path. Shared settings are kept; required adjustments appear
+              below.
+            </p>
+            {showAdvancedView && (
+              <div className="mt-3 max-w-lg">
+                <SelectInput
+                  label="Destination model"
+                  value={jobConfig.config.process[0].model.arch}
+                  options={migrationOptions}
+                  onChange={changeMigrationModel}
+                />
+              </div>
+            )}
+            {migration.draft.changes.length > 0 && (
+              <details className="mt-3">
+                <summary className="cursor-pointer">Automatic adjustments ({migration.draft.changes.length})</summary>
+                <ul className="mt-2 space-y-2 text-sm">
+                  {migration.draft.changes.map(change => (
+                    <li key={change.path}>
+                      <code>{change.path.replace('config.process[0].', '')}</code>: {change.reason}
+                      <span className="block break-words text-gray-300">
+                        {change.before} → {change.after}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        )}
+      </PageNotice>
+    </div>
+  ) : null;
   return (
     <div className="contents" {...draft.formTracking}>
       <TopBar className="training-topbar h-16 border-gray-900 bg-gray-950 px-4">
@@ -545,7 +707,7 @@ export function TrainingFormContent() {
             <ChevronLeft className="h-5 w-5" />
           </Button>
           <h1 className="truncate text-sm font-semibold text-gray-100 sm:text-lg">
-            {runId ? 'Edit Training Job' : 'New Training Job'}
+            {migrationId ? 'Migrate Training Job' : runId ? 'Edit Training Job' : 'New Training Job'}
           </h1>
         </div>
         <div className="flex-1"></div>
@@ -618,11 +780,13 @@ export function TrainingFormContent() {
 
       {showAdvancedView ? (
         <div className="training-content absolute top-0 left-0 h-full w-full overflow-auto pt-16">
+          {migrationNotice}
           {validationSummary && <div className="px-3 pt-3 sm:px-4">{validationSummary}</div>}
           {renderAdvancedConfigEditor()}
         </div>
       ) : (
         <MainContent className="training-content bg-gray-950 px-0 pt-16 sm:px-0">
+          {migrationNotice}
           {(settingsError || gpuStatus === 'error' || datasetFetchStatus === 'error' || workerStatus === 'error') && (
             <div className="px-4 pb-4">
               <PageNotice tone="danger" title="Some setup information is unavailable">
@@ -704,6 +868,8 @@ export function TrainingFormContent() {
                 ['idle', 'loading'].includes(datasetFetchStatus)
               }
               comfyAutoInstall={settings.COMFY_AUTO_INSTALL === 'true'}
+              migrationModelOptions={migrationId ? migrationOptions : undefined}
+              onMigrationModelChange={migrationId ? changeMigrationModel : undefined}
             />
           </ErrorBoundary>
 

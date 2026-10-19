@@ -125,6 +125,8 @@ type Props = {
   onOpenRawConfig?: () => void;
   isLoading?: boolean;
   comfyAutoInstall?: boolean;
+  migrationModelOptions?: GroupedSelectOption[];
+  onMigrationModelChange?: (arch: string, modelPath?: string) => void;
 };
 const isDev = process.env.NODE_ENV === 'development';
 const segaDistillArchs = new Set(['flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'zimage']);
@@ -174,6 +176,8 @@ export default function SimpleJob({
   onOpenRawConfig,
   isLoading,
   comfyAutoInstall = false,
+  migrationModelOptions,
+  onMigrationModelChange,
 }: Props) {
   const { archs: modelArchs, groupedModelOptions, errors: modelUiErrors } = useModelArchs();
   const fieldError = (label: string, index?: number) =>
@@ -407,12 +411,14 @@ export default function SimpleJob({
   // editor receives the full defaults once, after which manual edits win.
   const orbitProfileAppliedRef = useRef(isOrbit4LowVramProfile(jobConfig));
   useEffect(() => {
+    if (onMigrationModelChange) return;
     if (orbitProfileAppliedRef.current || !isOrbit4LowVramProfile(jobConfig)) return;
     orbitProfileAppliedRef.current = true;
     setJobConfig((current: JobConfig) => applyOrbit4LowVramDefaults(current, true));
   }, [
     jobConfig,
     orbitProfileArch,
+    onMigrationModelChange,
     orbitProfileLowVram,
     orbitProfileQtype,
     orbitProfileTextEncoderQtype,
@@ -891,9 +897,10 @@ export default function SimpleJob({
                     label="Model architecture"
                     value={processConfig.model.arch}
                     onChange={value => {
-                      handleModelArchChange(processConfig.model.arch, value, jobConfig, setJobConfig, modelArchs);
+                      if (onMigrationModelChange) onMigrationModelChange(value);
+                      else handleModelArchChange(processConfig.model.arch, value, jobConfig, setJobConfig, modelArchs);
                     }}
-                    options={groupedModelOptions}
+                    options={migrationModelOptions ?? groupedModelOptions}
                   />
                   <SelectInput
                     label="Target type"
@@ -917,7 +924,8 @@ export default function SimpleJob({
                   docKey="config.process[0].model.name_or_path"
                   onChange={(value: string | null) => {
                     if (value?.trim() === '') value = null;
-                    setJobConfig(value, 'config.process[0].model.name_or_path');
+                    if (onMigrationModelChange) onMigrationModelChange(processConfig.model.arch, value ?? '');
+                    else setJobConfig(value, 'config.process[0].model.name_or_path');
                   }}
                   placeholder="ostris/Flex.1-alpha"
                   required

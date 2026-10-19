@@ -678,6 +678,16 @@ export default function JobActionBar({
               </Link>
             </MenuItem>
           )}
+          {job.job_type === 'train' && (
+            <MenuItem>
+              <Link
+                href={`/jobs/new?migrateId=${encodeURIComponent(job.id)}`}
+                className="cursor-pointer px-4 py-1 hover:bg-gray-800 rounded block"
+              >
+                Migrate to another model
+              </Link>
+            </MenuItem>
+          )}
           {job.job_type === 'train' && canStop && (
             <MenuItem disabled={isBusy}>
               <div

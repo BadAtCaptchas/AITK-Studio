@@ -4,8 +4,14 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { openConfirm } from '@/components/ConfirmModal';
 import type { JobConfig } from '@/types';
+import type { TrainingMigrationDraft } from '@/domain/trainingModelMigration';
 
-export type TrainingDraft = { config: JobConfig; gpuIDs: string | null; workerID: string };
+export type TrainingDraft = {
+  config: JobConfig;
+  gpuIDs: string | null;
+  workerID: string;
+  migration?: TrainingMigrationDraft;
+};
 type StoredDraft = { draft: TrainingDraft; baseline: string };
 const drafts = new Map<string, StoredDraft>();
 let returnPath = '/jobs/new';

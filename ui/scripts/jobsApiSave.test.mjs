@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { migration, trainingFixture } from './trainingMigrationFixture.mjs';
 
 function loadSource(relative, dependencies = {}) {
   const code = ts.transpileModule(fs.readFileSync(new URL(relative, import.meta.url), 'utf8'), {
@@ -249,4 +250,31 @@ test('remote edits omit controller runtime paths and preserve the local mirror c
   }
   assert.equal(sent.job_config.config.process[0].train.steps, 7000);
   assert.deepEqual(JSON.parse((await response.json()).job_config).config.process, body.job_config.config.process);
+});
+
+test('migrated local and remote jobs use creation without inheriting or updating the running source', async () => {
+  for (const worker_id of ['local', 'worker-1']) {
+    const source = trainingFixture();
+    source.config.process[0].name = 'original-storage';
+    source.config.process[0].train.start_step = 700;
+    source.config.process[0].network.pretrained_lora_path = 'source.safetensors';
+    const existing = { id: 'source-job', name: source.config.name, status: 'running', step: 700, worker_id, remote_job_id: 'source-remote', storage_key: 'original-storage', job_config: JSON.stringify(source) };
+    const before = structuredClone(existing);
+    const state = fixture(existing);
+    const migrated = migration.migrateTrainingModel(source, 'zimage').config;
+    migrated.config.name = 'migrated_run';
+    const response = await state.post({ name: migrated.config.name, job_config: migrated, worker_id, gpu_ids: '0' });
+    assert.equal(response.status, 200);
+    const saved = await response.json();
+    assert.equal(saved.id, 'new-job');
+    for (const key of ['step', 'status', 'storage_key', 'attempt_id', 'remote_job_id']) assert.equal(state.created[0][key], undefined, `${key} must use new-job defaults`);
+    const config = JSON.parse(saved.job_config);
+    assert.equal(config.config.process[0].train.start_step, undefined);
+    assert.equal(config.config.process[0].network.pretrained_lora_path, undefined);
+    jobIdentity.applyJobOutputIdentity(config, { name: saved.name, storage_key: 'job-new-id' });
+    assert.equal(config.config.process[0].name, 'job-new-id');
+    assert.deepEqual(state.updated, []);
+    assert.deepEqual(state.remoteRequests, []);
+    assert.deepEqual(existing, before);
+  }
 });

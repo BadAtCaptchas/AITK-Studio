@@ -7,7 +7,7 @@ from typing import Union, Literal, List, Optional
 import numpy as np
 from diffusers import T2IAdapter, AutoencoderTiny, ControlNetModel
 
-import torch.functional as F
+import torch.nn.functional as F
 from safetensors.torch import load_file
 from torch.utils.data import DataLoader, ConcatDataset
 
@@ -301,10 +301,10 @@ class SDTrainer(BaseSDTrainProcess):
                     if callable(getattr(self.sd, "load_sample_control_images", None)):
                         ctrl_img = self.sd.load_sample_control_images(gen_img_config)
                     else:
-                        video_exts = ['.mp4', '.avi', '.mov', '.webm', '.mkv', '.wmv', '.m4v', '.flv']
-
                         def _is_ctrl_video(pth):
-                            return os.path.splitext(str(pth))[1].lower() in video_exts
+                            return os.path.splitext(str(pth))[1].lower() in (
+                                '.mp4', '.avi', '.mov', '.webm', '.mkv', '.wmv', '.m4v', '.flv'
+                            )
 
                         ctrl_img_list = []
 
@@ -553,7 +553,7 @@ class SDTrainer(BaseSDTrainProcess):
                 try:
                     vae.enable_gradient_checkpointing()
                     vae.train()
-                except:
+                except Exception:
                     pass
 
 
@@ -1038,7 +1038,7 @@ class SDTrainer(BaseSDTrainProcess):
 
                 # Get the target for loss depending on the prediction type
                 if self.sd.x0_pred or self.sd.noise_scheduler.config.prediction_type == "epsilon":
-                    target = target  # we are computing loss against denoise latents
+                    pass  # Compare directly against the clean, unaugmented latents.
                 elif self.sd.noise_scheduler.config.prediction_type == "v_prediction":
                     target = self.sd.noise_scheduler.get_velocity(target, noise, timesteps)
                 else:
@@ -1241,7 +1241,7 @@ class SDTrainer(BaseSDTrainProcess):
         # multiply by our mask
         try:
             loss = loss * loss_multiplier
-        except:
+        except Exception:
             # todo handle mask with video models
             pass
         if prior_loss is not None:
@@ -2950,9 +2950,8 @@ class SDTrainer(BaseSDTrainProcess):
             # while the asynchronous D2H staging stream is still writing them.
             sync_grad_transfers()
             optimizer = getattr(self.optimizer, 'optimizer', self.optimizer)
-            prepare_gradients = getattr(optimizer, 'prepare_gradients', None)
-            if callable(prepare_gradients):
-                prepare_gradients()
+            if callable(getattr(optimizer, 'prepare_gradients', None)):
+                optimizer.prepare_gradients()
             # Older stochastic optimizers use the same private-buffer contract.
             # Materialize it before normalization/clipping, rather than inside step().
             for group in self.optimizer.param_groups:

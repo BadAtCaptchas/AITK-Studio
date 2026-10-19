@@ -124,7 +124,9 @@ jobs:
           if-no-files-found: ignore
 
   mongodb:
-    runs-on: ubuntu-latest
+    # MongoDB 8.0 refuses Linux 6.19+ (SERVER-121912). The 22.04 image
+    # currently uses 6.8; migrate before its April 2027 retirement.
+    runs-on: ubuntu-22.04
     services:
       mongo:
         image: mongo:8.0

@@ -31,6 +31,7 @@ random Qwen3.5 encoders locally; no pretrained weights are needed.
 
 The MongoDB job temporarily uses Ubuntu 22.04's 6.8 kernel because MongoDB 8.0
 refuses startup on the newer runner kernel ([SERVER-121912](https://jira.mongodb.org/browse/SERVER-121912)).
+Its SQLite native binding is rebuilt from source to match that runner's glibc.
 Move it back to a current runner once the service/kernel combination is supported,
 before [Ubuntu 22.04 runner retirement in April 2027](https://github.com/actions/runner-images/issues/14254).
 

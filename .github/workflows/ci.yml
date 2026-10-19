@@ -145,6 +145,9 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - run: npm ci
+      - name: Build SQLite binding for the runner libc
+        # The sqlite3 prebuild requires glibc 2.38; Ubuntu 22.04 has 2.35.
+        run: npm --prefix node_modules/sqlite3 run rebuild
       - run: npm run generate:prisma
       - run: node node_modules/typescript/bin/tsc -p tsconfig.worker.json
       - run: node --test scripts/mongoPersistence.test.mjs

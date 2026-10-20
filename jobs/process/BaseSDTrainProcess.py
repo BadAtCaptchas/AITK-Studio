@@ -463,24 +463,15 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 and getattr(config, "layer_offloading_backend", "block") == "legacy"
             )
 
-        sample_uses_cpu_offload = any([
-            bool(getattr(self.sd, "low_vram", False)),
-            bool(getattr(self.model_config, "low_vram", False)),
-            bool(getattr(sd_model_config, "low_vram", False)),
-            uses_legacy_layer_offloading(self.model_config),
-            uses_legacy_layer_offloading(sd_model_config),
-        ])
-
-        set_temporarily(self.sd, "low_vram", False)
-        set_temporarily(self.model_config, "low_vram", False)
-        set_temporarily(sd_model_config, "low_vram", False)
+        # Low-VRAM sampling returns above. Only legacy layer offloading is
+        # temporarily disabled here; it is independent of the Low VRAM setting.
         if uses_legacy_layer_offloading(self.model_config):
             set_temporarily(self.model_config, "layer_offloading", False)
         if uses_legacy_layer_offloading(sd_model_config):
             set_temporarily(sd_model_config, "layer_offloading", False)
 
-        if sample_uses_cpu_offload:
-            print_acc("Temporarily disabling low-VRAM/offload for sample generation")
+        if restore_attrs:
+            print_acc("Temporarily disabling legacy layer offloading for sample generation (Low VRAM is off)")
 
         try:
             self.sd.generate_images(gen_img_config_list, sampler=sampler)

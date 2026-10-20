@@ -12,6 +12,8 @@ interface SampleImageCardProps {
   onDelete?: () => void;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   selected?: boolean;
+  onSelect?: () => void;
+  selectionLabel?: string;
   /** pass your scroll container element (e.g. containerRef.current) */
   observerRoot?: Element | null;
   /** optional: tweak pre-load buffer */
@@ -27,6 +29,8 @@ const SampleImageCard: React.FC<SampleImageCardProps> = ({
   className = '',
   onClick = () => {},
   selected = false,
+  onSelect,
+  selectionLabel = 'Select sample',
   observerRoot = null,
   rootMargin = '200px 0px',
 }) => {
@@ -194,6 +198,20 @@ const SampleImageCard: React.FC<SampleImageCardProps> = ({
 
           {children && isVisible && <div className="absolute inset-0 flex items-center justify-center">{children}</div>}
         </div>
+        {onSelect && (
+          <label
+            className="absolute left-3 top-3 flex cursor-pointer items-center justify-center rounded bg-gray-950/90 p-2"
+            onClick={e => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              aria-label={selectionLabel}
+              checked={selected}
+              onChange={onSelect}
+              className="h-5 w-5 cursor-pointer accent-blue-500"
+            />
+          </label>
+        )}
       </div>
     </div>
   );

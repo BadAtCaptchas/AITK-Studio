@@ -17,7 +17,7 @@ JOB_CONFIG_PATH = PROJECT_ROOT / "ui" / "src" / "app" / "jobs" / "new" / "jobCon
 TYPES_PATH = PROJECT_ROOT / "ui" / "src" / "types.ts"
 
 
-def load_base_process_methods(method_names: set[str]):
+def load_base_process_methods(method_names: set[str], print_acc=None):
     source = BASE_SD_TRAIN_PROCESS_PATH.read_text(encoding="utf-8")
     module = ast.parse(source, filename=str(BASE_SD_TRAIN_PROCESS_PATH))
     class_node = next(
@@ -43,13 +43,71 @@ def load_base_process_methods(method_names: set[str]):
     namespace = {
         "GenerateImageConfig": object,
         "List": List,
-        "print_acc": lambda *_args, **_kwargs: None,
+        "print_acc": print_acc or (lambda *_args, **_kwargs: None),
     }
     exec(compile(test_module, str(BASE_SD_TRAIN_PROCESS_PATH), "exec"), namespace)
     return namespace["BaseSDTrainProcessSampleOffload"]
 
 
 class SampleGenerationOffloadTest(unittest.TestCase):
+    def test_disabled_memory_options_stay_disabled_without_offload_message(self):
+        messages = []
+        process = load_base_process_methods({"_generate_sample_images"}, messages.append)()
+        process.model_config = SimpleNamespace(
+            low_vram=False, layer_offloading=False, layer_offloading_backend="legacy",
+        )
+        calls = []
+
+        def generate_images(image_configs, sampler=None):
+            calls.append((image_configs, sampler))
+            self.assertFalse(process.sd.low_vram)
+            self.assertFalse(process.model_config.low_vram)
+            self.assertFalse(process.model_config.layer_offloading)
+
+        process.sd = SimpleNamespace(
+            low_vram=False, model_config=process.model_config, generate_images=generate_images,
+        )
+        process._generate_sample_images(["sample"], sampler="flowmatch")
+        self.assertEqual(calls, [(["sample"], "flowmatch")])
+        self.assertEqual(messages, [])
+
+    def test_legacy_offload_is_named_correctly_and_restored_even_on_failure(self):
+        for shared_config in (False, True):
+            for fail in (False, True):
+                with self.subTest(shared_config=shared_config, fail=fail):
+                    messages = []
+                    process = load_base_process_methods({"_generate_sample_images"}, messages.append)()
+                    process.model_config = SimpleNamespace(
+                        low_vram=False, layer_offloading=True, layer_offloading_backend="legacy",
+                    )
+                    sd_config = process.model_config if shared_config else SimpleNamespace(
+                        low_vram=False, layer_offloading=True, layer_offloading_backend="legacy",
+                    )
+
+                    def generate_images(_image_configs, sampler=None):
+                        self.assertFalse(process.sd.low_vram)
+                        for config in (process.model_config, sd_config):
+                            self.assertFalse(config.low_vram)
+                            self.assertFalse(config.layer_offloading)
+                        if fail:
+                            raise RuntimeError("sample failed")
+
+                    process.sd = SimpleNamespace(
+                        low_vram=False, model_config=sd_config, generate_images=generate_images,
+                    )
+                    if fail:
+                        with self.assertRaisesRegex(RuntimeError, "sample failed"):
+                            process._generate_sample_images(["sample"])
+                    else:
+                        process._generate_sample_images(["sample"])
+                    self.assertEqual(messages, [
+                        "Temporarily disabling legacy layer offloading for sample generation (Low VRAM is off)",
+                    ])
+                    self.assertFalse(process.sd.low_vram)
+                    for config in (process.model_config, sd_config):
+                        self.assertFalse(config.low_vram)
+                        self.assertTrue(config.layer_offloading)
+
     def test_sample_generation_keeps_low_vram_flags_enabled(self):
         process_cls = load_base_process_methods({"_generate_sample_images"})
         process = process_cls()

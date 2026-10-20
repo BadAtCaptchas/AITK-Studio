@@ -1,11 +1,10 @@
 import { deleteSample } from '@/utils/sampleActions';
-import { reportWorkflowError } from './WorkflowFeedback';
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import useSampleImages from '@/hooks/useSampleImages';
 import SampleImageCard from './SampleImageCard';
 import type { Job, JobConfig } from '@/types';
-import { LuImageOff, LuLoader, LuBan } from 'react-icons/lu';
+import { LuImageOff, LuLoader, LuBan, LuTrash2 } from 'react-icons/lu';
 import { Button, Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
 import { FaDownload } from 'react-icons/fa';
 import { apiClient } from '@/utils/api';
@@ -111,14 +110,20 @@ interface SampleImagesProps {
 }
 
 export default function SampleImages({ job, layout = 'page' }: SampleImagesProps) {
+  return <JobSampleImages key={job.id} job={job} layout={layout} />;
+}
+
+function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
   const { sampleImages, status, refreshSampleImages } = useSampleImages(job.id, 5000);
   const [selectedSamplePath, setSelectedSamplePath] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
   // multi-select for bulk delete: shift-click ranges from the anchor, ctrl/cmd-click toggles
   const [selectedSet, setSelectedSet] = useState<Set<string>>(() => new Set());
   const anchorIdxRef = useRef<number | null>(null);
   // selection as it was when the anchor was set; shift-click ranges are rebuilt on top of it, not accumulated
   const baseSetRef = useRef<Set<string>>(new Set());
   const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const scrollParentCallback = useCallback((el: HTMLDivElement | null) => setScrollParent(el), []);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -142,14 +147,31 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
     return out;
   }, [sampleImages, numSamples]);
 
+  const selectedPaths = useMemo(() => sampleImages.filter(sample => selectedSet.has(sample)), [sampleImages, selectedSet]);
+  const isSelecting = selectionMode || selectedPaths.length > 0;
+  const clearSelection = useCallback(() => {
+    setSelectedSet(new Set());
+    anchorIdxRef.current = null;
+    baseSetRef.current = new Set();
+  }, []);
+  const toggleSample = useCallback((sample: string) => {
+    setSelectedSet(previous => {
+      const next = new Set(previous);
+      if (next.has(sample)) next.delete(sample);
+      else next.add(sample);
+      return next;
+    });
+    anchorIdxRef.current = null;
+    baseSetRef.current = new Set();
+  }, []);
+
   const handleCardClick = useCallback(
     (sample: string, e: React.MouseEvent) => {
+      if (deleteProgress) return;
       const isRange = e.shiftKey;
-      const isToggle = e.ctrlKey || e.metaKey;
+      const isToggle = e.ctrlKey || e.metaKey || isSelecting;
       if (!isRange && !isToggle) {
-        setSelectedSet(new Set());
-        anchorIdxRef.current = null;
-        baseSetRef.current = new Set();
+        clearSelection();
         setSelectedSamplePath(sample);
         return;
       }
@@ -175,18 +197,18 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
         return next;
       });
     },
-    [sampleImages],
+    [sampleImages, isSelecting, deleteProgress, clearSelection],
   );
 
-  const deleteSelected = useCallback(() => {
-    const paths = Array.from(selectedSet);
-    if (paths.length === 0) return;
+  const confirmDeleteSamples = useCallback((paths: string[], all = false) => {
+    if (paths.length === 0 || deleteProgress) return;
     openConfirm({
-      title: 'Delete Samples',
-      message: `Are you sure you want to delete ${paths.length} sample${paths.length === 1 ? '' : 's'}? This action cannot be undone.`,
+      title: all ? 'Delete All Samples' : 'Delete Selected Samples',
+      message: `Delete ${all ? 'all ' : ''}${paths.length} ${all ? '' : 'selected '}sample${paths.length === 1 ? '' : 's'} from "${job.name}"? This action cannot be undone.`,
       type: 'warning',
-      confirmText: 'Delete',
+      confirmText: all ? 'Delete all' : 'Delete selected',
       onConfirm: async () => {
+        setDeleteError(null);
         setDeleteProgress({ done: 0, total: paths.length });
         // bounded concurrency so the progress counter advances and the server isn't flooded
         const CONCURRENCY = 4;
@@ -209,33 +231,37 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
         await Promise.all(Array.from({ length: Math.min(CONCURRENCY, paths.length) }, worker));
         setDeleteProgress(null);
         setSelectedSet(failed);
-        if (failed.size) reportWorkflowError(`Could not delete ${failed.size} sample(s). They remain selected so you can retry.`);
+        setSelectionMode(failed.size > 0);
+        if (failed.size) setDeleteError(`Could not delete ${failed.size} sample${failed.size === 1 ? '' : 's'}. They remain selected so you can retry.`);
         anchorIdxRef.current = null;
         baseSetRef.current = new Set();
-        refreshSampleImages();
+        await refreshSampleImages();
       },
     });
-  }, [selectedSet, refreshSampleImages]);
+  }, [deleteProgress, job.name, refreshSampleImages]);
+
+  const deleteSelected = useCallback(() => {
+    confirmDeleteSamples(selectedPaths);
+  }, [selectedPaths, confirmDeleteSamples]);
 
   // Delete/Backspace deletes the selection, Escape clears it; ignored while the viewer is open or typing in a field
   useEffect(() => {
-    if (selectedSet.size === 0) return;
+    if (!isSelecting || deleteProgress) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (selectedSamplePath) return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (target?.closest('input:not([type="checkbox"]), textarea, select, [contenteditable="true"], [role="dialog"]')) return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         deleteSelected();
       } else if (e.key === 'Escape') {
-        setSelectedSet(new Set());
-        anchorIdxRef.current = null;
-        baseSetRef.current = new Set();
+        clearSelection();
+        setSelectionMode(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedSet.size, selectedSamplePath, deleteSelected]);
+  }, [isSelecting, deleteProgress, selectedSamplePath, deleteSelected, clearSelection]);
 
   const scrollToBottom = () => {
     virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end' });
@@ -313,9 +339,78 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
       className={classNames(
         isPanelLayout
           ? 'relative h-full min-h-[520px] overflow-y-auto'
-          : 'absolute top-[80px] left-0 right-0 bottom-0 overflow-y-auto',
+          : 'absolute top-[108px] left-0 right-0 bottom-0 overflow-y-auto',
       )}
     >
+      {sampleImages.length > 0 && (
+        <div
+          role="toolbar"
+          aria-label="Sample actions"
+          className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-gray-700 bg-gray-900 px-4 py-3 text-sm"
+        >
+          <span className="mr-auto text-gray-300" role="status">
+            {isSelecting
+              ? `${selectedPaths.length} of ${sampleImages.length} selected`
+              : `${sampleImages.length} sample${sampleImages.length === 1 ? '' : 's'}`}
+          </span>
+          <Button
+            onClick={() => {
+              clearSelection();
+              setSelectionMode(!isSelecting);
+            }}
+            disabled={deleteProgress !== null}
+            className="rounded px-3 py-2 text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+          >
+            {isSelecting ? 'Cancel selection' : 'Select samples'}
+          </Button>
+          {isSelecting && (
+            <>
+              <Button
+                onClick={() => {
+                  setSelectedSet(new Set(sampleImages));
+                  anchorIdxRef.current = null;
+                  baseSetRef.current = new Set();
+                }}
+                disabled={deleteProgress !== null || selectedPaths.length === sampleImages.length}
+                className="rounded px-3 py-2 text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+              >
+                Select all
+              </Button>
+              <Button
+                onClick={clearSelection}
+                disabled={deleteProgress !== null || selectedPaths.length === 0}
+                className="rounded px-3 py-2 text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+              >
+                Clear selection
+              </Button>
+              <Button
+                onClick={deleteSelected}
+                disabled={deleteProgress !== null || selectedPaths.length === 0}
+                className="inline-flex items-center gap-2 rounded px-3 py-2 text-red-300 hover:bg-red-950 disabled:opacity-50"
+              >
+                <LuTrash2 aria-hidden="true" />
+                Delete selected
+              </Button>
+            </>
+          )}
+          <Button
+            onClick={() => confirmDeleteSamples([...sampleImages], true)}
+            disabled={deleteProgress !== null}
+            className="inline-flex items-center gap-2 rounded px-3 py-2 text-red-300 hover:bg-red-950 disabled:opacity-50"
+          >
+            <LuTrash2 aria-hidden="true" />
+            Delete all
+          </Button>
+          {deleteError && (
+            <div role="alert" className="flex w-full items-center gap-3 rounded border border-red-900 bg-red-950/40 p-3 text-red-200">
+              <span className="flex-1">{deleteError}</span>
+              <Button onClick={() => setDeleteError(null)} className="rounded px-2 py-1 hover:bg-red-900">
+                Dismiss
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
       <div className="pb-4">
         {PageInfoContent}
         {sampleImages && rows.length > 0 && scrollParent && (
@@ -339,7 +434,7 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
               return (
                 // pb-1 recreates the vertical gap between rows that the original single CSS grid provided via `gap-1`.
                 <div className="grid gap-1 pb-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
-                  {row.map(sample => (
+                  {row.map((sample, sampleIndex) => (
                     <SampleImageCard
                       key={sample}
                       imageUrl={sample}
@@ -348,6 +443,8 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
                       alt="Sample Image"
                       onClick={e => handleCardClick(sample, e)}
                       selected={selectedSet.has(sample) || selectedSamplePath === sample}
+                      onSelect={isSelecting ? () => toggleSample(sample) : undefined}
+                      selectionLabel={`Select sample ${index * numSamples + sampleIndex + 1}`}
                       observerRoot={scrollParent}
                     />
                   ))}
@@ -393,7 +490,7 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
       <div
         className={classNames(
           'z-10 w-10 h-10 rounded-full bg-gray-900 shadow-lg flex items-center justify-center text-white opacity-80 hover:opacity-100 cursor-pointer',
-          isPanelLayout ? 'absolute top-4 right-4' : 'fixed top-20 mt-4 right-6',
+          isPanelLayout ? 'absolute bottom-16 right-4' : 'fixed bottom-[72px] right-6',
         )}
         onClick={scrollToTop}
         title="Scroll to Top"

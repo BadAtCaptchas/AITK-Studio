@@ -9,7 +9,8 @@ import test from 'node:test';
 import { ensureUiDependencies, removeUnsupportedMacstats } from './install-deps.mjs';
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-ui-deps-'));
+  // Match production cleanup paths, including Windows temp aliases and casing.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-ui-deps-')));
   await fs.mkdir(path.join(root, 'node_modules'));
   await fs.writeFile(path.join(root, 'package.json'), '{"name":"fixture","dependencies":{"x":"1"}}\n');
   await fs.writeFile(path.join(root, 'package-lock.json'), '{"lockfileVersion":3,"packages":{}}\n');

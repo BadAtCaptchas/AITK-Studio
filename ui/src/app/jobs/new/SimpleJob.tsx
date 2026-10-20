@@ -99,6 +99,7 @@ type Props = {
   jobConfig: JobConfig;
   setJobConfig: (value: any, key?: string) => void;
   status: 'idle' | 'saving' | 'success' | 'error';
+  saveError?: string | null;
   handleSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   runId: string | null;
   gpuIDs: string | null;
@@ -160,6 +161,7 @@ export default function SimpleJob({
   setJobConfig,
   handleSubmit,
   status,
+  saveError,
   runId,
   gpuIDs,
   setGpuIDs,
@@ -2423,6 +2425,11 @@ export default function SimpleJob({
                 )}
               </div>
 
+              {saveError && (
+                <p role="alert" className="mt-4 border border-rose-800 bg-rose-950/25 p-3 text-sm text-rose-200">
+                  {saveError}
+                </p>
+              )}
               <button
                 type="submit"
                 disabled={status === 'saving' || readinessErrors.length > 0}

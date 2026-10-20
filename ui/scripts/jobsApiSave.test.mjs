@@ -186,6 +186,18 @@ test('an unknown string id returns 404 without creating a job', async () => {
   assert.deepEqual(state.updated, []);
 });
 
+test('new remote jobs save before their model is downloaded and without contacting the worker', async () => {
+  const state = fixture();
+  const body = { ...payload(), worker_id: 'worker-1' };
+  body.job_config.config.process[0].model = { arch: 'flux', name_or_path: 'fixture/not-downloaded-yet' };
+  body.job_config.config.process[0].datasets = [{ folder_path: 'aitk-dataset://remote/worker-1/cats', resolution: [512] }];
+  const response = await state.post(body);
+  assert.equal(response.status, 200);
+  assert.equal(state.created.length, 1);
+  assert.deepEqual(state.remoteRequests, []);
+  assert.equal(JSON.parse((await response.json()).job_config).config.process[0].model.name_or_path, 'fixture/not-downloaded-yet');
+});
+
 test('non-string, non-null ids remain invalid and cannot create or update jobs', async () => {
   for (const id of [0, 123, false, true, [], {}, ['existing-job']]) {
     const state = fixture();

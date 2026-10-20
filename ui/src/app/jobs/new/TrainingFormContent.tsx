@@ -14,6 +14,7 @@ import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobC
 import { jobTypeOptions, modelArchs } from './options';
 import type { JobConfig } from '@/types';
 import { objectCopy } from '@/utils/basic';
+import { saveTrainingJob, trainingJobSaveError } from '@/utils/trainingJobSave';
 import { useNestedState, setNestedValue } from '@/utils/hooks';
 import { SelectInput } from '@/components/formInputs';
 import useSettings from '@/hooks/useSettings';
@@ -94,6 +95,8 @@ export function TrainingFormContent() {
     ...(migrationId && migration.phase === 'ready' ? { migration: migration.draft } : {}),
   });
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const savingRef = useRef(false);
   const [validationMessages, setValidationMessages] = useState<ValidationMessage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const handleImportConfig = () => {
@@ -454,7 +457,7 @@ export function TrainingFormContent() {
       reportWorkflowError('Load settings before saving this training run.');
       return;
     }
-    if (status === 'saving' || !rawEditorValid) return;
+    if (savingRef.current || !rawEditorValid) return;
     const freshConfig = migrationId ? prepareFreshTrainingConfig(jobConfig).config : jobConfig;
     const jobConfigWithSettings = applyComfyAutoInstallSetting(freshConfig);
     const validation = [...validateJobBeforeSave(jobConfigWithSettings), ...migrationFindings(jobConfigWithSettings)];
@@ -463,11 +466,13 @@ export function TrainingFormContent() {
       setStatus('idle');
       return;
     }
+    savingRef.current = true;
+    setSaveError(null);
     setStatus('saving');
     try {
       const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings, workerID);
       setJobConfig(preparedJobConfig);
-      const res = await apiClient.post('/api/jobs', {
+      const saved = await saveTrainingJob({
         ...(migrationId ? {} : { id: runId }),
         name: preparedJobConfig.config.name,
         worker_id: workerID,
@@ -480,34 +485,23 @@ export function TrainingFormContent() {
       if (runId) {
         router.push(`/jobs/${runId}`);
       } else {
-        router.push(`/jobs/${res.data.id}`);
+        router.push(`/jobs/${encodeURIComponent(saved.id)}`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const failure = trainingJobSaveError(error);
       setStatus('error');
-      if (error.response?.status === 409) {
+      setSaveError(failure.message);
+      if (failure.conflict) {
         setValidationMessages([
           {
             level: 'error',
             target: { step: 'job-basics', label: 'Training name' },
-            message:
-              error?.response?.data?.error ||
-              'Training name already exists in this workspace. Choose a different name.',
-          },
-        ]);
-      } else {
-        setValidationMessages([
-          {
-            level: 'error',
-            target: { step: 'job-review', label: '' },
-            message: error?.response?.data?.error || 'Failed to save job. Please try again.',
+            message: failure.message,
           },
         ]);
       }
-      console.log('Error saving training:', error);
     } finally {
-      setTimeout(() => {
-        setStatus('idle');
-      }, 2000);
+      savingRef.current = false;
     }
   };
   const handleSubmit = async (e: React.FormEvent) => {
@@ -781,6 +775,13 @@ export function TrainingFormContent() {
       {showAdvancedView ? (
         <div className="training-content absolute top-0 left-0 h-full w-full overflow-auto pt-16">
           {migrationNotice}
+          {saveError && (
+            <div role="alert" className="px-4 pt-4">
+              <PageNotice tone="danger" title="Could not save job">
+                {saveError}
+              </PageNotice>
+            </div>
+          )}
           {validationSummary && <div className="px-3 pt-3 sm:px-4">{validationSummary}</div>}
           {renderAdvancedConfigEditor()}
         </div>
@@ -837,6 +838,7 @@ export function TrainingFormContent() {
               jobConfig={jobConfig}
               setJobConfig={setJobConfig}
               status={status}
+              saveError={saveError}
               handleSubmit={handleSubmit}
               runId={runId}
               gpuIDs={gpuIDs}

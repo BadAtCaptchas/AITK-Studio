@@ -48,6 +48,45 @@ async function readInstalledFingerprint(statePath) {
   }
 }
 
+export async function removeUnsupportedMacstats(uiRoot, platform = process.platform) {
+  if (platform === 'darwin') return;
+  const root = await fsp.realpath(uiRoot);
+  const modules = path.join(root, 'node_modules');
+  const target = path.join(modules, 'macstats');
+  try {
+    // Only remove this unused dependency inside the selected UI installation.
+    // Do not follow node_modules or macstats junctions into another directory.
+    if ((await fsp.lstat(modules)).isSymbolicLink() || (await fsp.lstat(target)).isSymbolicLink()) {
+      throw new Error('Refusing to clean macstats through a symbolic link or junction');
+    }
+    if ((await fsp.realpath(modules)) !== modules || (await fsp.realpath(target)) !== target) {
+      throw new Error('macstats cleanup path is outside the selected UI installation');
+    }
+    await fsp.rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    console.log('Removed unused macOS-only macstats files.');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
+
+async function tryMacstatsCleanup(uiRoot, platform) {
+  try {
+    await removeUnsupportedMacstats(uiRoot, platform);
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function warnCleanupFailure(error) {
+  if (!error) return;
+  console.warn(
+    'Could not clean unused macstats files. Close programs using ui/node_modules/macstats and run ' +
+    'npm run install_deps again. This cleanup does not block installation; macstats is only used on macOS.',
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
 function runNpmInstall(uiRoot) {
   const npmArguments = ['install', '--no-save', '--no-audit', '--no-fund'];
   const npmCli = process.env.npm_execpath;
@@ -68,10 +107,13 @@ export async function ensureUiDependencies(options = {}) {
   const lockPath = path.join(uiRoot, 'package-lock.json');
   const nodeModulesPath = path.join(uiRoot, 'node_modules');
   const fingerprint = await dependencyManifestFingerprint(uiRoot);
+  // Repair leftovers even when an earlier successful install is cached.
+  const cleanupError = await tryMacstatsCleanup(uiRoot, options.platform);
   if (
     (await readInstalledFingerprint(statePath)) === fingerprint &&
     (await fsp.stat(nodeModulesPath).then(stat => stat.isDirectory()).catch(() => false))
   ) {
+    warnCleanupFailure(cleanupError);
     console.log('UI dependencies already match package manifests.');
     return { installed: false, fingerprint };
   }
@@ -86,6 +128,8 @@ export async function ensureUiDependencies(options = {}) {
       await atomicWrite(lockPath, lockSnapshot);
       console.log('Restored repository-managed package-lock.json.');
     }
+    // npm can leave the unsupported package's children behind while pruning it.
+    warnCleanupFailure(await tryMacstatsCleanup(uiRoot, options.platform));
   }
 
   if (installStatus !== 0) {

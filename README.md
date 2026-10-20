@@ -23,6 +23,12 @@
 | :---: | :---: |
 | [![Guided training job setup](assets/readme-ui-new-job.png)](assets/readme-ui-new-job.png) | [![Image generation with a base model or LoRA](assets/readme-ui-generate.png)](assets/readme-ui-generate.png) |
 
+| Edit in Caption Studio | Compose with Ideogram Regions |
+| :---: | :---: |
+| [![Caption Studio with a demo image and editable caption](assets/readme-ui-caption-studio.png)](assets/readme-ui-caption-studio.png) | [![Ideogram region composition and selected text element](assets/readme-ui-workflow-builder.png)](assets/readme-ui-workflow-builder.png) |
+
+Screenshots show the running UI with demo data. GPU availability is simulated for setup; no training or generation was run, and external ComfyUI is disconnected.
+
 - **Prepare your data.** Organize datasets, edit captions, and combine datasets for training.
 - **Train your way.** Run LoRA, LoKr, or supported full fine-tunes, locally or on remote workers.
 - **Review and create.** Track runs, compare samples, generate images, and export jobs from one library.

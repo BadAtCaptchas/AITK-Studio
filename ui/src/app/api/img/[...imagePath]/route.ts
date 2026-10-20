@@ -54,6 +54,7 @@ function copyResponseHeaders(source: Response) {
 }
 
 function toNextResponse(request: NextRequest, resolution: FileResponseResolution) {
+  if (request.signal.aborted) return new NextResponse(null, { status: 499 });
   if (resolution.kind === 'proxy') {
     return new NextResponse('Internal Server Error', { status: 500 });
   }
@@ -69,6 +70,7 @@ function toNextResponse(request: NextRequest, resolution: FileResponseResolution
     ...(resolution.file.end !== undefined ? { end: resolution.file.end } : {}),
     highWaterMark: FILE_STREAM_BUFFER_BYTES,
   });
+  const body = Readable.toWeb(stream) as ReadableStream<Uint8Array>;
   const onAbort = () => stream.destroy();
   if (request.signal.aborted) {
     stream.destroy();
@@ -77,7 +79,7 @@ function toNextResponse(request: NextRequest, resolution: FileResponseResolution
   }
   stream.once('close', () => request.signal.removeEventListener('abort', onAbort));
 
-  return new NextResponse(Readable.toWeb(stream) as ReadableStream, {
+  return new NextResponse(body, {
     status: resolution.status,
     headers: resolution.headers,
   });

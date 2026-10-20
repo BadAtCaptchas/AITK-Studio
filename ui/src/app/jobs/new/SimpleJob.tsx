@@ -86,7 +86,6 @@ import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
 import { setNestedValue } from '@/utils/hooks';
-import { parseRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import {
   AUTHENLORA_BUILTIN_CODEC_BITS,
@@ -336,7 +335,6 @@ export default function SimpleJob({
       .map(dataset => {
         const option = datasetOptions.find(item => item.value === dataset.folder_path);
         const encrypted = option?.encrypted === true;
-        const remote = option?.source === 'remote' || !!parseRemoteDatasetRef(dataset.folder_path);
         const keyB64 = encrypted
           ? getRememberedEncryptedDatasetKey(dataset.folder_path) ||
             (option?.name ? getRememberedEncryptedDatasetKey(option.name) : null)
@@ -346,13 +344,12 @@ export default function SimpleJob({
           captionExt: dataset.caption_ext,
           defaultCaption: dataset.default_caption,
           encrypted,
-          remote,
           keyB64,
           label: option?.label || dataset.folder_path,
         };
       })
       .filter(
-        dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path && !dataset.remote,
+        dataset => dataset.folderPath && dataset.folderPath !== defaultDatasetConfig.folder_path,
       );
   }, [datasetOptions, encryptedKeyRefreshKey, jobConfig.config.process[0].datasets]);
   const accessibleRandomPromptDatasets = useMemo(

@@ -1,6 +1,37 @@
 export const RANDOM_PROMPT_CAPTION_EXTENSION_PRIORITY = ['.json', '.txt', '.caption', '.sdxl', '.md'];
 export const RANDOM_PROMPT_CAPTION_EXTENSIONS = new Set(RANDOM_PROMPT_CAPTION_EXTENSION_PRIORITY);
 
+export type DatasetPromptRequest = {
+  folderPath: string;
+  captionExt?: string;
+  defaultCaption?: string;
+};
+
+export type RandomPromptCandidate = {
+  prompt: string;
+  datasetPath: string;
+  mediaPath: string;
+  captionPath?: string;
+  source: 'caption' | 'default_caption';
+};
+
+export type RandomPromptState = {
+  selected: RandomPromptCandidate | null;
+  candidateCount: number;
+  scannedMediaCount: number;
+  skippedDatasets: string[];
+};
+
+export function considerRandomPromptCandidate(
+  state: RandomPromptState,
+  candidate: RandomPromptCandidate,
+  candidateCount = 1,
+): void {
+  state.candidateCount += candidateCount;
+  // A worker's sample represents all of its candidates, preserving uniform selection.
+  if (Math.random() < candidateCount / state.candidateCount) state.selected = candidate;
+}
+
 export function normalizeRandomPromptCaptionExt(captionExt: unknown) {
   const raw = typeof captionExt === 'string' && captionExt.trim() ? captionExt.trim() : 'txt';
   const normalized = raw.replace(/^\.+/, '').toLowerCase() || 'txt';

@@ -82,6 +82,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
   const sampleFile = await resolveJobSampleFile(job, sampleSegments[0], {
     thumbnail: request.nextUrl.searchParams.get('thumb') === '1',
   });
+  if (request.signal.aborted) return new NextResponse(null, { status: 499 });
   if (!sampleFile) {
     return new NextResponse('File not found', { status: 404 });
   }
@@ -113,6 +114,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
       start !== undefined && end !== undefined
         ? fs.createReadStream(canonicalPath, { start, end })
         : fs.createReadStream(canonicalPath);
+    // Adapt before abort cleanup: Node 22 cancels the web stream when the
+    // source is already destroyed, making it unusable as a Response body.
+    const body = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
 
     const onAbort = () => nodeStream.destroy();
     if (request.signal.aborted) {
@@ -122,7 +126,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
     }
     nodeStream.once('close', () => request.signal.removeEventListener('abort', onAbort));
 
-    return Readable.toWeb(nodeStream) as unknown as ReadableStream;
+    return body;
   };
 
   const requestedRange = parseRange(request.headers.get('range'), stat.size);
@@ -139,7 +143,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
   if (requestedRange) {
     const chunkSize = requestedRange.end - requestedRange.start + 1;
 
-    return new NextResponse(buildBody(requestedRange.start, requestedRange.end) as any, {
+    return new NextResponse(buildBody(requestedRange.start, requestedRange.end), {
       status: 206,
       headers: {
         'Content-Range': `bytes ${requestedRange.start}-${requestedRange.end}/${stat.size}`,
@@ -153,7 +157,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
     });
   }
 
-  return new NextResponse(buildBody() as any, {
+  return new NextResponse(buildBody(), {
     headers: {
       'Content-Type': contentType,
       'Content-Length': String(stat.size),

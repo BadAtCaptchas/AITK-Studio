@@ -1,5 +1,5 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
-import { readJsonCommand } from '@/server/commandInput';
+import { isRecord, readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
@@ -11,7 +11,12 @@ import {
   normalizeRandomPromptCaptionExt,
   parseRandomPromptCaptionText,
   parseRandomPromptCaptionTextAuto,
+  considerRandomPromptCandidate as considerCandidate,
+  type DatasetPromptRequest,
+  type RandomPromptCandidate,
+  type RandomPromptState,
 } from '@/server/randomPromptCaptions';
+import { scanRemoteRandomPromptDataset } from '@/server/remoteRandomPrompt';
 import {
   getKeyForRequiredDataset,
   isEncryptedDatasetFolder,
@@ -20,27 +25,6 @@ import {
   resolveEncryptedObjectPath,
 } from '@/server/encryptedDatasets';
 import type { EncryptedDatasetCatalog, EncryptedDatasetItem, EncryptedDatasetStartKey } from '@/types';
-
-type DatasetPromptRequest = {
-  folderPath?: string;
-  captionExt?: string;
-  defaultCaption?: string;
-};
-
-type RandomPromptCandidate = {
-  prompt: string;
-  datasetPath: string;
-  mediaPath: string;
-  captionPath?: string;
-  source: 'caption' | 'default_caption';
-};
-
-type RandomPromptState = {
-  selected: RandomPromptCandidate | null;
-  candidateCount: number;
-  scannedMediaCount: number;
-  skippedDatasets: string[];
-};
 
 type EncryptedPayload = {
   nonce: string;
@@ -90,13 +74,6 @@ function findCaptionForMedia(mediaPath: string, captionExt: string) {
     }
   }
   return null;
-}
-
-function considerCandidate(state: RandomPromptState, candidate: RandomPromptCandidate) {
-  state.candidateCount += 1;
-  if (Math.random() < 1 / state.candidateCount) {
-    state.selected = candidate;
-  }
 }
 
 function base64ToBytes(value: string) {
@@ -226,7 +203,17 @@ function scanDatasetFolder(
 async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
-    const datasets = Array.isArray(body?.datasets) ? (body.datasets as DatasetPromptRequest[]) : [];
+    const datasets: DatasetPromptRequest[] = [];
+    for (const dataset of Array.isArray(body.datasets) ? body.datasets : []) {
+      if (!isRecord(dataset) || typeof dataset.folderPath !== 'string') {
+        return NextResponse.json({ error: 'Invalid dataset selection.' }, { status: 400 });
+      }
+      datasets.push({
+        folderPath: dataset.folderPath,
+        captionExt: typeof dataset.captionExt === 'string' ? dataset.captionExt : undefined,
+        defaultCaption: typeof dataset.defaultCaption === 'string' ? dataset.defaultCaption : undefined,
+      });
+    }
     const encryptedDatasetKeys = Array.isArray(body?.encryptedDatasetKeys)
       ? (body.encryptedDatasetKeys as EncryptedDatasetStartKey[])
       : [];
@@ -246,6 +233,7 @@ async function postCommand(request: Request) {
     };
 
     for (const dataset of datasets) {
+      if (await scanRemoteRandomPromptDataset(dataset, state)) continue;
       const datasetPath = resolveDatasetPath(dataset.folderPath, datasetsRoot);
       if (!datasetPath || !fs.existsSync(datasetPath) || !fs.statSync(datasetPath).isDirectory()) {
         state.skippedDatasets.push(String(dataset.folderPath || ''));

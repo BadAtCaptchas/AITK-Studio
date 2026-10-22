@@ -197,10 +197,10 @@ def load_optimizer_checkpoint_for_resume(path, expected_step, checkpoint_path=No
                                     if os.path.isdir(checkpoint_path) else [checkpoint_path])
         if payload['model_checkpoint_set_sha256'] != _checkpoint_set_digest(checkpoint_paths):
             raise OptimizerCheckpointValidationError("Optimizer state does not match the complete checkpoint artifact set")
-        checkpoint_absolute = os.path.abspath(checkpoint_path) if checkpoint_path else None
+        checkpoint_absolute = os.path.normcase(os.path.realpath(checkpoint_path)) if checkpoint_path else None
         if checkpoint_absolute is None or not any(
-                os.path.abspath(member) == checkpoint_absolute or
-                (os.path.isdir(checkpoint_absolute) and os.path.commonpath([checkpoint_absolute, os.path.abspath(member)]) == checkpoint_absolute)
+                os.path.normcase(os.path.realpath(member)) == checkpoint_absolute or
+                (os.path.isdir(checkpoint_absolute) and os.path.commonpath([checkpoint_absolute, os.path.normcase(os.path.realpath(member))]) == checkpoint_absolute)
                 for member in checkpoint_paths):
             raise OptimizerCheckpointValidationError('Loaded checkpoint is not a member of the saved artifact set')
     adapter_state = payload.get("adapter_resume_state")

@@ -120,14 +120,20 @@ def run_doctor():
                 _check("torch sees gpu", False, "could not query")
 
     node_exe, node_major = nodejs.have_usable_node()
-    if node_exe:
+    if nodejs.local_node_stale():
+        _check(
+            "node",
+            False,
+            "%s does not match pinned v%s (manager sync reinstalls it)"
+            % (nodejs.local_node_exe(), nodejs.NODE_VERSION),
+        )
+    elif node_exe:
         _check("node", True, "%s (v%s)" % (node_exe, node_major))
     else:
         _check(
             "node",
             False,
-            "none >= %d found (manager sync installs a local copy)"
-            % nodejs.MIN_NODE_MAJOR,
+            "no supported Node 22.12+, 24, or 26 found (manager sync installs a local copy)",
         )
 
     if os.path.isfile(ffmpeg.ffmpeg_exe()):

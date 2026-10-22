@@ -273,6 +273,8 @@ def read_generation(directory, verify_hashes=True):
     try:
         if _is_link(directory) or _is_link(directory.parent):
             raise InvalidCheckpointError("Checkpoint generation cannot be a link")
+        # Normalize Windows short names only after rejecting linked generations.
+        directory = directory.resolve()
         with (directory / MANIFEST).open(encoding="utf-8") as handle:
             payload = json.load(handle)
         if not isinstance(payload, dict) or payload.get("version") != FORMAT_VERSION:
@@ -408,19 +410,19 @@ def prune_generations(save_root, keep, warn=print, current_generation=None):
     generations.sort(key=lambda item: (item.step, item.created_ns), reverse=True)
     retained = []
     if current_generation is not None:
-        retained.append(os.path.abspath(current_generation.directory))
+        retained.append(os.path.normcase(os.path.realpath(current_generation.directory)))
     for generation in generations:
         if len(retained) >= keep:
             break
-        if os.path.abspath(generation.directory) in retained:
+        if os.path.normcase(os.path.realpath(generation.directory)) in retained:
             continue
         try:
             read_generation(generation.directory)
-            retained.append(os.path.abspath(generation.directory))
+            retained.append(os.path.normcase(os.path.realpath(generation.directory)))
         except InvalidCheckpointError as error:
             warn(f'Ignoring invalid generation during retention: {error}')
     for generation in generations:
-        if os.path.abspath(generation.directory) in retained:
+        if os.path.normcase(os.path.realpath(generation.directory)) in retained:
             continue
         try:
             shutil.rmtree(generation.directory)

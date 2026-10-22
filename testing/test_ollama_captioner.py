@@ -1,7 +1,5 @@
 import io
 import os
-import sys
-import types
 import unittest
 import urllib.error
 from types import SimpleNamespace
@@ -10,27 +8,9 @@ from unittest import mock
 
 class OllamaCaptionerTest(unittest.TestCase):
     def import_ollama_captioner(self):
-        base_module = types.ModuleType("extensions_built_in.captioner.BaseCaptioner")
-
-        class FakeCaptionConfig:
-            def __init__(self, **kwargs):
-                self.model_name_or_path = kwargs.get("model_name_or_path", "llava")
-
-        class FakeBaseCaptioner:
-            pass
-
-        base_module.BaseCaptioner = FakeBaseCaptioner
-        base_module.CaptionConfig = FakeCaptionConfig
-        sys.modules.pop("extensions_built_in.captioner.OllamaCaptioner", None)
-        with mock.patch.dict(
-            sys.modules,
-            {"extensions_built_in.captioner.BaseCaptioner": base_module},
-        ):
-            from extensions_built_in.captioner.OllamaCaptioner import (
-                DEFAULT_OLLAMA_USER_AGENT,
-                OllamaCaptioner,
-            )
-
+        from extensions_built_in.captioner.OllamaCaptioner import (
+            DEFAULT_OLLAMA_USER_AGENT, OllamaCaptioner,
+        )
         return DEFAULT_OLLAMA_USER_AGENT, OllamaCaptioner
 
     def make_captioner(self):

@@ -1,85 +1,14 @@
-import sys
 import time
-import types
 import unittest
 from unittest import mock
 
 
 class BaseCaptionerTest(unittest.TestCase):
     def import_base_captioner(self):
-        modules = {}
-
-        torch_module = types.ModuleType("torch")
-        torch_module.device = lambda value: value
-        torch_module.no_grad = lambda: mock.MagicMock()
-        modules["torch"] = torch_module
-        modules["torchaudio"] = types.ModuleType("torchaudio")
-
-        jobs_process = types.ModuleType("jobs.process")
-
-        class FakeBaseExtensionProcess:
-            pass
-
-        jobs_process.BaseExtensionProcess = FakeBaseExtensionProcess
-        modules["jobs.process"] = jobs_process
-
-        exceptions = types.ModuleType("toolkit.exceptions")
-        exceptions.JobStopRequested = type("JobStopRequested", (Exception,), {})
-        modules["toolkit.exceptions"] = exceptions
-
-        encrypted_dataset = types.ModuleType("toolkit.encrypted_dataset")
-        encrypted_dataset.EncryptedDatasetReader = object
-        encrypted_dataset.is_encrypted_dataset_path = lambda _path: False
-        modules["toolkit.encrypted_dataset"] = encrypted_dataset
-
-        image_io = types.ModuleType("toolkit.image_io")
-        image_io.open_static_image = mock.Mock()
-        modules["toolkit.image_io"] = image_io
-
-        ideogram_caption = types.ModuleType("toolkit.ideogram_caption")
-        for name in [
-            "normalize_caption_dict",
-            "normalize_element",
-            "normalize_style",
-            "sanitize_palette",
-        ]:
-            setattr(ideogram_caption, name, lambda value, *args, **kwargs: value)
-        ideogram_caption.MAX_ELEMENT_PALETTE = 5
-        ideogram_caption.MAX_IMAGE_PALETTE = 16
-        modules["toolkit.ideogram_caption"] = ideogram_caption
-
-        train_tools = types.ModuleType("toolkit.train_tools")
-        train_tools.get_torch_dtype = lambda _value: "dtype"
-        modules["toolkit.train_tools"] = train_tools
-
-        ui_database = types.ModuleType("toolkit.ui_database")
-        ui_database.UIJobStore = object
-        modules["toolkit.ui_database"] = ui_database
-
-        class FakeTqdm:
-            def __init__(self, iterable=None, **_kwargs):
-                self.iterable = [] if iterable is None else iterable
-
-            def __iter__(self):
-                return iter(self.iterable)
-
-        tqdm_module = types.ModuleType("tqdm")
-        tqdm_module.__path__ = []
-        tqdm_module.tqdm = FakeTqdm
-        modules["tqdm"] = tqdm_module
-        tqdm_auto_module = types.ModuleType("tqdm.auto")
-        tqdm_auto_module.tqdm = FakeTqdm
-        modules["tqdm.auto"] = tqdm_auto_module
-
-        sys.modules.pop("extensions_built_in.captioner.BaseCaptioner", None)
-        with mock.patch.dict(sys.modules, modules):
-            from extensions_built_in.captioner.BaseCaptioner import (
-                BaseCaptioner,
-                is_failed_caption,
-                is_refusal_caption,
-                sanitize_caption_text,
-            )
-
+        # Exercise real runtime imports; stale framework stubs hid API drift.
+        from extensions_built_in.captioner.BaseCaptioner import (
+            BaseCaptioner, is_failed_caption, is_refusal_caption, sanitize_caption_text,
+        )
         return BaseCaptioner, is_failed_caption, is_refusal_caption, sanitize_caption_text
 
     def make_captioner(self, caption):

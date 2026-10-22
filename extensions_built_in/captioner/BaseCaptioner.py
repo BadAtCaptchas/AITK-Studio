@@ -615,9 +615,19 @@ class BaseCaptioner(BaseExtensionProcess):
         except Exception:
             return ""
 
+    def resolve_prompt(self, prompt, file_path):
+        from toolkit.caption_prompt import expand_caption_tokens
+
+        reader = None
+        if self.encrypted_reader is not None:
+            # Encrypted datasets expose one approved caption, never sibling paths.
+            reader = lambda extension: (self.get_source_caption_for_file(file_path)
+                if extension == self.caption_config.source_caption_extension else '')
+        return expand_caption_tokens(prompt, file_path, caption_reader=reader)
+
     def build_caption_prompt(self, file_path: str) -> str:
         if not self.is_ideogram_json_output():
-            return self.caption_config.caption_prompt.strip()
+            return self.resolve_prompt(self.caption_config.caption_prompt or "", file_path).strip()
 
         prompt = (self.caption_config.caption_prompt or "").strip()
         if not prompt or prompt in DEFAULT_TEXT_CAPTION_PROMPTS:
@@ -625,6 +635,7 @@ class BaseCaptioner(BaseExtensionProcess):
         elif not self._caption_prompt_has_ideogram_json_contract(prompt):
             prompt = f"{prompt}\n\n{IDEOGRAM_JSON_FORMAT_REQUIREMENTS}"
 
+        prompt = self.resolve_prompt(prompt, file_path)
         source_caption = self.get_source_caption_for_file(file_path)
         if source_caption:
             if "{existing_caption}" in prompt:

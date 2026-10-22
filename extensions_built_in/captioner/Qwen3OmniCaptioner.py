@@ -678,7 +678,7 @@ class Qwen3OmniCaptioner(BaseCaptioner):
                 "role": "user",
                 "content": [
                     media,
-                    {"type": "text", "text": self.caption_config.caption_prompt},
+                    {"type": "text", "text": self.build_caption_prompt(_file_path)},
                 ],
             }
         ]

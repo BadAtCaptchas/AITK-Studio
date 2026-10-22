@@ -17,8 +17,7 @@
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
     "testing.test_base_captioner": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_base_lora": {
       "group": "manual",
@@ -291,12 +290,10 @@
       "group": "lightweight"
     },
     "testing.test_ollama_captioner": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_openrouter_captioner": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_optimal_noise_pairing": {
       "group": "manual",
@@ -565,6 +562,15 @@
     "tests.test_upstream_sep21_27": {
       "group": "manual",
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_caption_prompt": {
+      "group": "lightweight"
+    },
+    "tests.test_manager_node": {
+      "group": "lightweight"
+    },
+    "tests.test_oct22_upstream": {
+      "group": "runtime"
     }
   }
 }

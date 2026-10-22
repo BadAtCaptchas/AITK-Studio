@@ -92,4 +92,11 @@ test('sample ZIP exports include provenance and exclude staging directories', as
     });
   });
   assert.deepEqual(names.sort(), ['samples/one.png', 'samples/one.png.metadata.json']);
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'aitk-sample-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  const moved = path.join(outside, 'job-storage');
+  await fsp.rename(path.join(root, 'job-storage'), moved);
+  await fsp.symlink(moved, path.join(root, 'job-storage'), 'junction');
+  await assert.rejects(createRequestedArchive({ zipTarget: 'samples', jobID: 'job' }), /Invalid job output path/);
+
 });

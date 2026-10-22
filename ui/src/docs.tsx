@@ -3,6 +3,15 @@ import { ConfigDoc } from '@/types';
 import { IoFlaskSharp } from 'react-icons/io5';
 
 const docs: { [key: string]: ConfigDoc } = {
+  'caption.prompt_tokens': {
+    title: 'Caption prompt files',
+    description: <>
+      Use {'<caption.txt>'} or {'<caption.json>'} to insert a media file’s sibling caption
+      into its prompt. For example, photo.png reads photo.txt. JSON is inserted as text.
+      Missing, invalid, oversized, or out-of-folder files insert blank text. Files are limited to 1 MiB.
+      Encrypted datasets use only the configured source caption extension through their encrypted reader.
+    </>,
+  },
   'config.name': {
     title: 'Training Name',
     description: (

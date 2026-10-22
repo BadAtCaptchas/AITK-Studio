@@ -329,3 +329,8 @@ python flux_train_ui.py
 This starts a UI for uploading images, captioning them, training a LoRA, and publishing the result.
 
 ![Legacy Gradio training UI](../assets/lora_ease_ui.png)
+
+The opt-in `t0_velocity_equiv_weight` and `do_fft_velocity_equiv_weight` settings
+use `1 / max(sigma, 0.01)^2`, computed in float32. This increases weighting below
+sigma 0.1 compared with older Studio versions; both settings remain disabled by
+default. Studio retains its existing clean-prediction and DFE handling.

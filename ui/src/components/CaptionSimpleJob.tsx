@@ -569,6 +569,7 @@ const CaptionSimpleJob: React.FC<Props> = ({
           )}
           <TextAreaInput
             label="Caption Prompt"
+            docKey="caption.prompt_tokens"
             value={jobConfig.config.process[0].caption.caption_prompt || ''}
             onChange={value => {
               setJobConfig(value, 'config.process[0].caption.caption_prompt');

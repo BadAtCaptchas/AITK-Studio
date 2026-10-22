@@ -104,9 +104,11 @@ async function sampleArchive(request: ArchiveRequest): Promise<ArchiveResult> {
     };
   }
 
-  const trainingRoot = await getJobTrainingRoot(job);
-  const jobRoot = path.resolve(trainingRoot, jobStorageKey(job));
-  if (!isPathInside(path.resolve(trainingRoot), jobRoot)) throw new Error('Invalid job output path');
+  const trainingRoot = await fsp.realpath(await getJobTrainingRoot(job));
+  const requestedJobRoot = path.resolve(trainingRoot, jobStorageKey(job));
+  if (!isPathInside(trainingRoot, requestedJobRoot)) throw new Error('Invalid job output path');
+  const jobRoot = await fsp.realpath(requestedJobRoot);
+  if (!isPathInside(trainingRoot, jobRoot)) throw new Error('Invalid job output path');
   const samplesRoot = await fsp.realpath(path.join(jobRoot, 'samples')).catch(() => null);
   if (!samplesRoot || !isPathInside(jobRoot, samplesRoot)) throw new Error('Samples folder not found');
   const files = await collectFiles(samplesRoot, false);
